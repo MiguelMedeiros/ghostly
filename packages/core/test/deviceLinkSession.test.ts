@@ -425,6 +425,41 @@ describe("a device link's transports in its packet (`_tr`)", () => {
       expect(heard[0]).toEqual(["iroh/1"]);
     });
 
+    it("is live again soon after the device that never dials starts again with nothing said, as a page reloading in a handoff does", async () => {
+      // The web page has the higher rendezvous key, so the Linux Desktop dials. The web page reloads (into the gate to
+      // settle, then into the active engine): its relay-only Iroh endpoint goes with nothing said, and the new page's
+      // endpoint has a new id (a device link's native seed is made for each run). Linux still holds the old session,
+      // and QUIC would notice only at its 30 s idle timeout: a Use here meanwhile said hello into it, and its 30 s
+      // wait gave up "unreachable" (Omarchy 1.1.3, m1/m3/m4). The ping that goes unanswered reads the web's packet,
+      // which names the new endpoint: Linux lets the old session go and dials the new one.
+      let d: Uint8Array, linuxKey: Signer, webKey: Signer;
+      do {
+        d = randomBytes(32); linuxKey = seedDevice(); webKey = seedDevice();
+      } while (identityFromSeedB64(deviceLinkParams(d, linuxKey.publicKey, webKey.publicKey).seedB64).pubKeyZ32
+        > identityFromSeedB64(deviceLinkParams(d, webKey.publicKey, linuxKey.publicKey).seedB64).pubKeyZ32);
+      const linux = openNative("linux", deviceLinkPairing(d, linuxKey, webKey.publicKey), []);
+      const web = openNative("web-1", deviceLinkPairing(d, webKey, linuxKey.publicKey), []);
+      const both = (a: GhostLink, b: GhostLink) => a.supportsDevice(DEVICES_CAPABILITY) && b.supportsDevice(DEVICES_CAPABILITY);
+      for (let i = 0; i < 480 && !both(linux.link, web.link); i++) await run(250);
+      expect(both(linux.link, web.link)).toBe(true);
+      await run(5_000);
+
+      // The page reloads: nothing said, nothing closed (its endpoint dies with it), and the new page starts a second later.
+      native.kill("web-1");
+      await web.link.stop(false);
+      opened.splice(opened.indexOf(web.link), 1);
+      await run(1_000);
+      const reloaded = Date.now();
+      const again = openNative("web-2", deviceLinkPairing(d, webKey, linuxKey.publicKey), []);
+      for (let i = 0; i < 240 && !both(linux.link, again.link); i++) await run(250);
+      const took = Date.now() - reloaded;
+      console.log(`DEVICE_LINK_RELOAD live again ${took / 1000} s after the page came back`);
+      expect(both(linux.link, again.link)).toBe(true);
+      // Before, the old session's idle timeout (30 s from the kill) was the first Linux knew of it.
+      expect(took).toBeLessThan(22_000);
+      expect(native.dialsBy.get("web-2") ?? 0).toBe(0);
+    });
+
     it("ignores transports a holder of D wrote in the other device's packet, dials none of them, and goes live once the device itself says its own", async () => {
       const d = randomBytes(32), desktop = seedDevice(), phone = seedDevice(), intruder = seedDevice();
       const heard: string[][] = [];

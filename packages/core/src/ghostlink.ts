@@ -232,6 +232,12 @@ export function pairedMessageFrame(id: string, ts: number, m: string, preview?: 
  * names the transport. One just read that names it with no descriptor says its endpoint is not up (WISP 03: still
  * starting, or no free listener there): the one known is not dialled meanwhile (none, `undefined`).
  */
+/** The endpoint a descriptor names (Iroh's endpoint id, HyperDHT's public key), whatever relay it is homed on. */
+function endpointId(transport: NativeTransport, descriptor: unknown): unknown {
+  const d = descriptor as { id?: unknown; publicKey?: unknown } | undefined;
+  return transport === "iroh/1" ? d?.id : d?.publicKey;
+}
+
 function recordDescriptor(transport: NativeTransport, known: unknown, record: unknown, newer: boolean, listed: boolean): unknown {
   if (!record) return newer && listed ? undefined : known;
   if (!known) return record;
@@ -674,6 +680,8 @@ export class GhostLink {
   private unansweredPings = 0;
   /** The last ping's `PONG_WAIT_MS`: running until something comes back from the contact. */
   private pongWait: ReturnType<typeof setTimeout> | null = null;
+  /** The last ping's wait ran out with nothing back, and nothing came since (`restartedRedial`). */
+  private pongLate = false;
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
   /** Set while a WebRTC attempt this side dialled is pending: the ranked transports to try if it fails. */
   private afterRtc?: { epoch: number; rest: PairedTransport[] };
@@ -1405,7 +1413,7 @@ export class GhostLink {
     // The record lists every transport the contact's app runs, started or not (WISP 03): what it lacks, it lacks.
     this.peerRecordTransports = [...transports];
     let changed = false, redescribed = false, again = false, news = false;
-    const renamed = new Set<NativeTransport>();
+    const renamed = new Set<NativeTransport>(), reidentified = new Set<NativeTransport>();
     for (const t of ["iroh/1", "hyperdht/1"] as const) {
       const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh, transports.includes(t));
       if (next === known) continue;
@@ -1423,6 +1431,7 @@ export class GhostLink {
       // counting. A contact whose record keeps going down and up again must not undo the wait between attempts.
       if (this.undescribed.delete(t)) again = true; else news = true;
       changed = true; redescribed ||= t === wanted; renamed.add(t);
+      if (known && endpointId(t, known) !== endpointId(t, next)) reidentified.add(t);
       // A new way to dial it: the attempts that failed on the old one say nothing about this one.
       this.nativeFailures.delete(t); this.demotedUntil.delete(t);
     }
@@ -1447,6 +1456,7 @@ export class GhostLink {
       this.redial();
       return;
     }
+    if (held && heldOn && reidentified.has(heldOn) && this.restartedRedial(held, heldOn)) return;
     // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
     if (this.channel || this.dialing) return;
     if (news || !again) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
@@ -3282,6 +3292,7 @@ export class GhostLink {
         this.pongWait = null;
         if (this.channel !== channel || this.stopped) return;
         traceLink(this.myPubKeyZ32, "pong-late", { unanswered: this.unansweredPings });
+        this.pongLate = true;
         this.session.pollNow();
       }, PONG_WAIT_MS);
     };
@@ -3306,7 +3317,26 @@ export class GhostLink {
   private heardFromPeer(): void {
     if (this.pongWait) clearTimeout(this.pongWait);
     this.pongWait = null;
+    this.pongLate = false;
   }
+  /**
+   * The session runs on a native transport, its last ping went unanswered, and the contact's newer packet names another
+   * endpoint for that transport: the contact's app started again (a web page reloading, as a device that takes the
+   * profile does twice), and the endpoint this session runs on went with it, with nothing said. A browser's relay-only
+   * Iroh closes nothing as a page goes, and QUIC notices only at its idle timeout (30 s): until then this side held a
+   * session nothing answered, and the contact, whose key does not dial, waited for it to dial (a Use here said hello
+   * into that session and gave up "unreachable", Omarchy 2026-10-05). The session is let go, and the new endpoint
+   * dialled now, as when the session closes.
+   */
+  private restartedRedial(channel: FrameChannel, transport: NativeTransport): boolean {
+    if (!this.pongLate || this.channel !== channel || this.paired?.state.status !== "ready") return false;
+    traceLink(this.myPubKeyZ32, "restarted-redial", { transport });
+    this.stopLiveness();
+    this.disconnect();
+    this.peerLost("restarted");
+    return true;
+  }
+
   private dropDeadSession(channel: FrameChannel): void {
     this.stopLiveness();
     if (this.channel !== channel) return;

@@ -316,6 +316,20 @@ describe("a pull with the right password", () => {
     expect(w.giverRecords.record.handoff).toBeUndefined();
   });
 
+  it("a pull right after this device released the profile to the giver: the taker counts the turn it released", async () => {
+    // B moved the profile to A a moment ago: A took turn N + 1, and B, on standby, released N + 1 but has not read the
+    // turn record since (it does on A's hint when their link is up, or every 10 minutes). Its own record still says N.
+    // Before, B asked for and signed N + 1 while A expected N + 2: A dropped `handoff-verified` as unreadable, and the
+    // move sat at "Checking" (Omarchy 1.1.3: Use here on Linux right after the move to the web).
+    const w = world();
+    w.profile.add("f1", bytesOf(500));
+    w.giverRecords.record = { ...w.giverRecords.record, turn: N + 1 };
+    w.takerRecords.record = { ...w.takerRecords.record, releasedTurn: N + 1 };
+    await fullPull(w);
+    expect(w.giverRecords.record).toMatchObject({ state: "standby", releasedTurn: N + 2 });
+    expect(w.takes[0].turn).toBe(N + 2);
+  });
+
   it("the giver's count of wrong passwords goes with the release, so a device gets no fresh tries on the new active one", async () => {
     const w = world();
     w.profile.add("f1", bytesOf(100));
