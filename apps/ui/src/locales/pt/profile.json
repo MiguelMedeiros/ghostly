@@ -127,6 +127,12 @@
   "name": "Nome",
   "nameInChats": "Nome nas conversas",
   "nameLabel": "Nome do perfil",
+  "nameStep": {
+    "placeholder": "Seu nome",
+    "save": "Continuar",
+    "skip": "Pular",
+    "title": "Como as pessoas devem chamar você?"
+  },
   "newProfile": "+ Novo perfil",
   "oneOnly": "Por enquanto, só um perfil neste app.",
   "profiles": "Perfis",

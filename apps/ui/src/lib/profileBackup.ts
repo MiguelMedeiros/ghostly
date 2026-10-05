@@ -17,6 +17,7 @@ import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
 import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
 import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
+import { NAME_STEP_SUFFIX } from "./nameStep";
 
 /** What a bundle says about the profile it holds, and the profile's local keys without its prefix. */
 interface ProfileHead {
@@ -255,6 +256,8 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
     const suffix = key.slice(prefix.length);
     // A handoff leaves the lock's count of wrong attempts behind, and what a staging namespace notes for itself.
     if (handoff && (suffix === "lock_attempts" || suffix.startsWith("handoff_"))) continue;
+    // A new profile's question for a name (NameStep) stays with it: a restored or added copy is not a new profile.
+    if (suffix === NAME_STEP_SUFFIX) continue;
     if (suffix === "app_settings" && !handoff) {
       try { const settings = JSON.parse(value) as Record<string, unknown>; delete settings.backupS3; value = JSON.stringify(settings); } catch { /* kept as it is */ }
     }

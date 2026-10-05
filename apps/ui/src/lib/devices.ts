@@ -183,9 +183,14 @@ export function isDeviceCode(code: string): boolean {
   return !reading.ok && reading.reason === "device";
 }
 
+/** Whether this page was handed a device code: it opened to add this device to a profile, never to start a new one. */
+let deviceLinkSeen = false;
+export const deviceLinkOffered = () => deviceLinkSeen;
+
 /** Hands a device code an address carried to the join host. */
 export function offerDeviceLink(code: string): void {
   pendingDeviceLink = code;
+  deviceLinkSeen = true;
   window.dispatchEvent(new Event(DEVICE_LINK_EVENT));
 }
 

@@ -8,6 +8,7 @@ import { listSessions } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
 import { baseProfileName, clearRestoredMark, createProfile, currentProfile, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
+import { askNameIn } from "../lib/nameStep";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
 import { DevicesSection } from "../components/devices/DevicesSection";
@@ -155,7 +156,7 @@ export function Profile() {
         ))}
         {!canSwitch ? <Block><Notice>{t("profile.oneOnly")}</Notice></Block> : creating ? (
           <Block>
-            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); switchProfile(entry.id, { route: "/profile" }); }); }}>
+            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); }); }}>
               <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} maxLength={32} value={newName} onChange={(e) => setNewName(e.target.value)} />
               <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>{t("profile.create")}</Button>
               <Button onClick={() => { setCreating(false); setNewName(""); }}>{t("common.cancel")}</Button>

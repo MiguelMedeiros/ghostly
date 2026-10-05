@@ -127,6 +127,12 @@
   "name": "名称",
   "nameInChats": "聊天中的名字",
   "nameLabel": "资料名称",
+  "nameStep": {
+    "placeholder": "你的名字",
+    "save": "继续",
+    "skip": "跳过",
+    "title": "别人该怎么称呼你？"
+  },
   "newProfile": "+ 新资料",
   "oneOnly": "目前此客户端只支持一个资料。",
   "profiles": "资料",

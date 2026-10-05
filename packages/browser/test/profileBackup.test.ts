@@ -92,6 +92,20 @@ it("the push subscription moves in a handoff (it names its device), and stays ou
   expect((await settingsIn(restored.id))?.wake).toBeUndefined();
 });
 
+it("a new profile's question for a name stays with it: neither a backup nor a handoff carries it", async () => {
+  storage.setItem("ghostly_app_settings", JSON.stringify({ colorTheme: "purple" }));
+  storage.setItem("ghostly_name_step", "ask");
+  await openDb();
+  const sink = memorySink();
+  await writeProfileBackup(sink, { passphrase: null, handoff: true });
+  await restoreHandoffBundle(sink.bytes(), "stagedname");
+  expect(storage.getItem("ghostly_stagedname_name_step"), "a device added to the profile is not a new profile").toBeNull();
+  expect(storage.getItem("ghostly_stagedname_app_settings")).not.toBeNull();
+  const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
+  expect(storage.getItem(`ghostly_${restored.id}_name_step`), "nor is a restored one").toBeNull();
+  expect(storage.getItem("ghostly_name_step"), "the profile itself still asks").toBe("ask");
+});
+
 it("a TURN server's credential moves in a handoff and stays out of a backup; its address and username stay", async () => {
   await openDb();
   const turn = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "turn-credential-secret" };
