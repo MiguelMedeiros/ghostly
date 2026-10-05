@@ -93,8 +93,8 @@ function topRow(p: Peer): Promise<{ id: string; y: number }> {
 async function backOn(p: Peer, left: { id: string; y: number }): Promise<void> {
   const row = chat(p).locator(`[data-message-id="${left.id}"]`);
   const y = () => row.evaluate(row => row.getBoundingClientRect().top - row.closest(".chat-wallpaper")!.getBoundingClientRect().top);
-  await expect.poll(y, { timeout: 10_000 }).toBeGreaterThan(left.y - 3);
-  expect(Math.abs(await y() - left.y)).toBeLessThanOrEqual(3);
+  // Polled both ways: before the chat has put it back, the row may be above its place or below it.
+  await expect.poll(async () => Math.abs(await y() - left.y), { timeout: 10_000 }).toBeLessThanOrEqual(3);
   await p.page.waitForTimeout(1_500);
   expect(Math.abs(await y() - left.y)).toBeLessThanOrEqual(3);
   expect(await distanceToBottom(p)).toBeGreaterThan(400);
