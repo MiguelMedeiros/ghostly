@@ -221,3 +221,34 @@ test("on a phone: a menu of sections, each on its own screen, and Back to the me
   await page.getByTestId("page-back").click();
   await expect(page.getByTestId("settings-menu")).toBeVisible();
 });
+
+test("on a wide screen: the index marks the section picked or named, the last ones too", { tag: ["@feature:settings.sections"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  const marked = page.locator("[data-testid^=settings-index-][aria-current=true]");
+  await page.goto("/#/settings");
+  // About and Data & storage end the page: it cannot scroll them to its top, and the index still marks them.
+  for (const section of ["about", "storage", "network", "about"]) {
+    await page.getByTestId(`settings-index-${section}`).click();
+    await expect(page).toHaveURL(new RegExp(`#/settings/${section}$`));
+    await expect(marked).toHaveAttribute("data-testid", `settings-index-${section}`);
+  }
+  // An address that names the last section, after a reload.
+  await page.reload();
+  await expect(page.getByTestId("settings-about-version")).toBeInViewport();
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-about");
+  // Scrolled by hand to the top and back to the end: the first section, then the last.
+  await page.getByTestId("settings-about-version").hover();
+  await page.mouse.wheel(0, -100_000);
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-profile");
+  await page.mouse.wheel(0, 100_000);
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-about");
+  // Picked Network, then scrolled up by hand while it is still in view: the section now at the top is marked.
+  await page.getByTestId("settings-index-network").click();
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-network");
+  // Once the page has scrolled there (smoothly): Network's top under the header.
+  await expect.poll(async () => (await page.locator("#settings-section-network").boundingBox())?.y ?? 1e6).toBeLessThan(120);
+  await page.getByTestId("network-relays").hover();
+  await page.mouse.wheel(0, -400);
+  await expect(page.getByTestId("network-relays")).toBeInViewport();
+  await expect(marked).not.toHaveAttribute("data-testid", "settings-index-network");
+});
