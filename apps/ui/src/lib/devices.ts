@@ -59,6 +59,12 @@ export function enrollErrorKey(error: unknown): TranslationKey | null {
   return reason ? failureKey(reason) : null;
 }
 
+/** Whether the engine refused to join because this profile is in use here: the code is good, the profile is not new. */
+export function enrollInUse(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return message.startsWith("enroll-in-use:");
+}
+
 /** The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read. */
 export function useDeviceSet(everyMs = 3_000): DeviceSetView | null {
   const [view, setView] = useState<DeviceSetView | null>(null);
