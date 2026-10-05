@@ -172,6 +172,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const [error, setError] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
+  // The review takes the amount's place after Send, and is taller: on a short screen (a phone with its keyboard up) it
+  // ran past the sheet's bottom, Approve below the fold. The sheet scrolls to the card's end, where Approve is, in full.
+  const reviewId = review?.id;
+  useEffect(() => {
+    if (reviewId) containerRef.current?.querySelector<HTMLElement>('[data-testid="payment-back"]')?.scrollIntoView?.({ block: "end" });
+  }, [reviewId]);
 
   const card = cards.find((c) => c.id === selected);
   const rail: ChatRail = card?.rail ?? rails?.[0] ?? "cashu";
