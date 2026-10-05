@@ -2,18 +2,21 @@
   "add": {
     "adding": "Ajout de {{device}}…",
     "button": "Ajouter un appareil",
-    "codeHint": "Scannez ceci avec l’appareil photo de votre téléphone. Sur un ordinateur, ouvrez Ghostly et choisissez Ajouter cet appareil à un autre profil.",
-    "confirm": "Le nouvel appareil se présente comme {{device}}. Les deux appareils affichent-ils ces chiffres ?",
+    "connecting": "Un appareil se connecte…",
     "copy": "Copier le lien",
     "done": "{{device}} ajouté. Il est en veille.",
     "finish": "Terminé",
+    "found": "{{device}} trouvé. Vérifiez qu’il affiche les mêmes chiffres.",
+    "left": "Encore {{time}}",
     "match": "Ils correspondent",
     "noMatch": "Ils ne correspondent pas",
     "notPublished": "Vos autres appareils le verront dès que cet appareil atteindra le réseau.",
     "refused": "Un autre appareil a essayé ce code. Il n’a rien reçu.",
+    "scan": "Scannez ceci avec l’appareil photo de votre téléphone.",
+    "scanInfo": "Sur un ordinateur, ouvrez Ghostly et choisissez Ajouter cet appareil à un autre profil, puis scannez ou collez le code. Il marche une fois, pendant 10 minutes.",
     "title": "Ajouter un appareil",
-    "tryAgain": "Recommencer",
-    "valid": "Valable 10 minutes"
+    "tryAgain": "Réessayer",
+    "waiting": "En attente de votre autre appareil…"
   },
   "fail": {
     "cancelled": "Arrêté. Rien n’a été ajouté.",
@@ -116,30 +119,47 @@
     "wrongPassword": "{{device}} a tenté de déplacer ce profil avec un mauvais mot de passe."
   },
   "join": {
+    "add": "Ajouter",
     "addThis": "Ajouter cet appareil à mon profil",
     "already": "J’utilise déjà Ghostly",
     "another": "Ajouter cet appareil à un autre profil",
     "anotherButton": "Ajouter cet appareil",
     "anotherInfo": "Sur l’appareil que vous utilisez, ouvrez Profil, Appareils, Ajouter un appareil. Scannez son code avec l’appareil photo de cet appareil, ou dans Ghostly ici. Les deux appareils affichent ensuite les mêmes chiffres à vérifier.",
     "anotherLead": "Utilisez cet appareil avec un profil d’un autre appareil",
-    "confirm": "Les deux appareils affichent-ils ces chiffres ?",
+    "check": "Vérifiez que votre autre appareil affiche les mêmes chiffres.",
     "confirmOn": "Confirmez sur votre autre appareil.",
     "connecting": "Connexion à votre autre appareil…",
     "continue": "Continuer",
     "done": "Cet appareil est en veille pour votre profil.",
     "finishing": "Finalisation…",
-    "go": "Continuer",
     "homeScreen": "Ajoutez d’abord Ghostly à l’écran d’accueil.",
     "homeScreenInfo": "Sur iPhone et iPad, un onglet du navigateur garde ses données à part, et le navigateur peut les effacer. L’app sur l’écran d’accueil les garde.",
-    "linkInfo": "Ce code vient d’Ajouter un appareil sur votre autre appareil. Il sert une fois, pendant 10 minutes. Les deux appareils affichent ensuite les mêmes chiffres à vérifier.",
-    "linkTitle": "Ajouter cet appareil à un autre profil ?",
+    "homeScreenWhy": "Votre profil a besoin de l’app, pas d’un onglet Safari.",
+    "homeStep1": "Touchez Partager dans Safari.",
+    "homeStep2": "Touchez Sur l’écran d’accueil.",
+    "homeStep3": "Ouvrez Ghostly depuis l’écran d’accueil et choisissez J’utilise déjà Ghostly.",
+    "homeStep3Code": "Ouvrez Ghostly depuis l’écran d’accueil et scannez à nouveau le code.",
+    "homeTitle": "Ajoutez d’abord Ghostly à l’écran d’accueil",
     "name": "Nommez cet appareil",
-    "nameHint": "Jusqu’à 16 caractères.",
-    "newHere": "Un nouveau profil s’ouvre ici pour cela. Vos profils ici restent tels quels.",
+    "newProfile": "Ghostly crée ici un nouveau profil pour cela. Votre profil d’ici reste tel quel.",
+    "newProfileInfo": "Le profil de cet appareil a des discussions, des groupes ou de l’argent : il ne peut pas devenir une copie de l’autre. Passez de l’un à l’autre dans le menu des profils.",
+    "opening": "Ouverture…",
     "otherDevice": "votre autre appareil",
     "persist": "Ce navigateur peut effacer les données de Ghostly. Gardez une copie sur {{device}}.",
+    "preparing": "Préparation…",
     "profileName": "D’un autre appareil",
     "restore": "Restaurer une sauvegarde",
+    "scanAgain": "Scanner un nouveau code",
+    "title": {
+      "computer": "Ajouter cet ordinateur à « {{profile}} »",
+      "phone": "Ajouter ce téléphone à « {{profile}} »",
+      "tablet": "Ajouter cette tablette à « {{profile}} »"
+    },
+    "titleYours": {
+      "computer": "Ajouter cet ordinateur à votre profil",
+      "phone": "Ajouter ce téléphone à votre profil",
+      "tablet": "Ajouter cette tablette à votre profil"
+    },
     "unfinished": "Pas terminé : votre autre appareil n’a pas encore inscrit celui-ci."
   },
   "limited": {
@@ -187,6 +207,7 @@
     "setTitle": "Définissez d’abord un mot de passe",
     "tooShort": "Utilisez 8 caractères ou plus.",
     "typeTitle": "Saisissez votre mot de passe de verrouillage",
+    "why": "Un profil sur plusieurs appareils est protégé par votre mot de passe de verrouillage, de 8 caractères ou plus. Vos autres appareils le demandent pour reprendre le profil.",
     "wrong": "Mot de passe incorrect."
   },
   "remove": {

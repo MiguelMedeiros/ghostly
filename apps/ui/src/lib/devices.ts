@@ -5,8 +5,9 @@ import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import type { TranslationKey } from "../contexts/I18nContext";
-import { readInviteCode } from "@ghostly/core";
-import { createProfile, currentProfile, switchProfile } from "./profiles";
+import { inviteLink, inviteQrSegments, readInviteCode } from "@ghostly/core";
+import { handOverUnlock } from "./lockHandover";
+import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
 
 /*
@@ -41,6 +42,23 @@ export function defaultDeviceName(env: { userAgent: string; platform?: string; m
   return (browser && os ? `${browser} on ${os}` : browser || os || "Browser").slice(0, 16);
 }
 
+/** "9:41": minutes and seconds left until `expires` (UNIX seconds), at `now` (milliseconds). */
+export const timeLeft = (expires: number, now: number): string => {
+  const seconds = Math.max(0, Math.ceil(expires - now / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
+/** What this device is, in the words "Add this phone": a phone, a tablet, or a computer (the desktop app, a laptop's browser). */
+export type DeviceNoun = "phone" | "tablet" | "computer";
+
+export function deviceNoun(env: { userAgent: string; platform?: string; maxTouchPoints?: number } = typeof navigator === "undefined" ? { userAgent: "" } : { userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints }): DeviceNoun {
+  const ua = env.userAgent;
+  if (/iPhone|iPod/.test(ua)) return "phone";
+  if (/iPad/.test(ua) || (env.platform === "MacIntel" && (env.maxTouchPoints ?? 0) > 1)) return "tablet";
+  if (/Android/.test(ua)) return /Mobile/.test(ua) ? "phone" : "tablet";
+  return "computer";
+}
+
 /** What the engine's `enroll-<reason>:` errors, and a failed enrollment's reason, say to the person. */
 const FAILURE_KEYS: Record<string, TranslationKey> = {
   expired: "devices.fail.expired", digits: "devices.fail.digits", used: "devices.fail.used", cancelled: "devices.fail.cancelled",
@@ -59,10 +77,19 @@ export function enrollErrorKey(error: unknown): TranslationKey | null {
   return reason ? failureKey(reason) : null;
 }
 
-/** Whether the engine refused to join because this profile is in use here: the code is good, the profile is not new. */
+/**
+ * Whether the engine refused to join because of this profile, not the code: it is in use here, or already on several
+ * devices. The code is good; a new profile takes it.
+ */
 export function enrollInUse(error: unknown): boolean {
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  return message.startsWith("enroll-in-use:");
+  return message.startsWith("enroll-in-use:") || message.startsWith("enroll-set:");
+}
+
+/** Whether the engine refused to join because this profile's wallets have not loaded yet: worth asking again soon. */
+export function enrollLoading(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return message.startsWith("enroll-loading:");
 }
 
 /** The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read. */
@@ -78,9 +105,18 @@ export function useDeviceSet(everyMs = 3_000): DeviceSetView | null {
   return view;
 }
 
-/** Starts the app again into the gate: where the engine outlives the page (the extension), it starts again too. */
-export async function reloadIntoGate(): Promise<void> {
+/** The lock password hash of a profile here, as its settings keep it: what a handover of the lock is checked against. */
+const lockHashOf = (id: string): string | null => {
+  try { return (JSON.parse(localStorage.getItem(settingsKeyFor(id)) ?? "{}") as { lockScreen?: { passwordHash?: string | null } }).lockScreen?.passwordHash ?? null; } catch { return null; }
+};
+
+/**
+ * Starts the app again into the gate: where the engine outlives the page (the extension), it starts again too.
+ * `keepUnlocked`: the lock this tab passed carries across this one reload (a device just added, `handOverUnlock`).
+ */
+export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): Promise<void> {
   try { await getBrowserHost().restartEngine?.(); } catch { /* the reload says what is wrong now */ }
+  if (options.keepUnlocked) handOverUnlock(activeProfileId(), lockHashOf(activeProfileId()));
   window.location.reload();
 }
 
@@ -116,10 +152,14 @@ export function listNames(names: readonly string[], language: string): string {
 const JOIN_REQUEST = "ghostly_join_device";
 
 /**
- * What a new profile opens on: "Add this device to my profile", at the first step, or at the device's name when the
- * person already chose to add it (`start: "name"`). `code`: the device code a link carried, used in place of asking.
+ * What "Add this device to my profile" opens on (WISP 06 § User experience):
+ * - nothing given: its first step, "Add this device to my profile" or "Restore a backup";
+ * - `start: "scan"`: the scanner, the person already chose to add it;
+ * - `code`: the one screen, "Add this phone to <profile>", with the device's name to change and one button;
+ * - `start: "go"` with `code` and `name`: straight on to the digits, in a profile made for the code after that button.
+ * `profile`: the name of the profile the code adds the device to, as its link said (shown, never trusted).
  */
-export interface JoinRequest { code?: string; start?: "name" }
+export interface JoinRequest { code?: string; start?: "scan" | "go"; name?: string; profile?: string }
 
 /**
  * A new, empty profile here, which opens on "Add this device to my profile" (WISP 06 § User experience). The profile
@@ -127,8 +167,11 @@ export interface JoinRequest { code?: string; start?: "name" }
  * the code when there is one, waits in this tab's session storage until the new profile reads it, once.
  */
 export function joinInNewProfile(name: string, request: JoinRequest = {}): void {
+  // The new profile has the lock of the one it leaves (`createProfile`), which the person passed in this tab already.
+  const hash = lockHashOf(activeProfileId());
   const entry = createProfile(name);
   try { sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: entry.id, ...request })); } catch { /* the person opens it from the chat list */ }
+  handOverUnlock(entry.id, hash);
   switchProfile(entry.id, { route: "/" });
 }
 
@@ -138,7 +181,7 @@ export function joinInNewProfile(name: string, request: JoinRequest = {}): void 
  * it leaves keeps its frozen copy untouched.
  */
 export function reenrollHere(): void {
-  joinInNewProfile(currentProfile().name);
+  joinInNewProfile(currentProfile().name, { start: "scan" });
 }
 
 /** What this page was opened to do, when it was opened to add the device to a profile. Asked once: the request is used up. */
@@ -146,16 +189,22 @@ export function takeJoinRequest(profileId: string): JoinRequest | null {
   try {
     const raw = sessionStorage.getItem(JOIN_REQUEST);
     if (raw === null) return null;
-    let stored: { id?: unknown; code?: unknown; start?: unknown } | null;
+    let stored: { id?: unknown; code?: unknown; start?: unknown; name?: unknown; profile?: unknown } | null;
     try { stored = JSON.parse(raw) as typeof stored; } catch { stored = { id: raw }; }
     if (!stored || typeof stored !== "object" || stored.id !== profileId) return null;
     sessionStorage.removeItem(JOIN_REQUEST);
-    return { ...(typeof stored.code === "string" ? { code: stored.code } : {}), ...(stored.start === "name" ? { start: "name" as const } : {}) };
+    const code = typeof stored.code === "string" ? stored.code : undefined;
+    // "name", from a build before the one screen: the scanner, or the one screen when a code came with it.
+    const start = stored.start === "go" && code ? "go" as const : stored.start === "scan" || (stored.start === "name" && !code) ? "scan" as const : undefined;
+    return {
+      ...(code ? { code } : {}), ...(start ? { start } : {}),
+      ...(typeof stored.name === "string" ? { name: stored.name } : {}), ...(typeof stored.profile === "string" ? { profile: stored.profile } : {}),
+    };
   } catch { return null; }
 }
 
-/** What the join host (`JoinHost`) is asked to open: the join dialog in this profile, or "Add this device to another profile". */
-export type JoinOpen = { kind: "join"; request: JoinRequest } | { kind: "another"; code?: string };
+/** What the join host (`JoinHost`) is asked to open: the join dialog, at the step the request names. */
+export type JoinOpen = { kind: "join"; request: JoinRequest };
 export const JOIN_OPEN_EVENT = "ghostly-open-join";
 
 /** "I already use Ghostly": the join dialog, in this profile, over whatever the app shows (the chat list on a phone). */
@@ -163,9 +212,12 @@ export function openJoinProfile(request: JoinRequest = {}): void {
   window.dispatchEvent(new CustomEvent<JoinOpen>(JOIN_OPEN_EVENT, { detail: { kind: "join", request } }));
 }
 
-/** "Add this device to another profile": asks first, then makes a new profile for it (`joinInNewProfile`). */
-export function openJoinAnother(code?: string): void {
-  window.dispatchEvent(new CustomEvent<JoinOpen>(JOIN_OPEN_EVENT, { detail: { kind: "another", ...(code ? { code } : {}) } }));
+/**
+ * "Add this device to another profile": the scanner, here. The code it reads goes to the one screen, which makes a new
+ * profile for it when this one is in use (`joinInNewProfile`), as any route to a code does.
+ */
+export function openJoinAnother(): void {
+  openJoinProfile({ start: "scan" });
 }
 
 /*
@@ -174,8 +226,51 @@ export function openJoinAnother(code?: string): void {
  * in the fragment, which no request carries. The app takes it out of the address before anything else reads it and
  * keeps it here, in memory, until the join host takes it.
  */
-let pendingDeviceLink: string | null = null;
+let pendingDeviceLink: DeviceLink | null = null;
 export const DEVICE_LINK_EVENT = "ghostly-device-link";
+
+/** A device code, and the name of the profile it adds the device to when its link says one. */
+export interface DeviceLink { code: string; profile?: string }
+
+/** The longest profile name a device link carries: enough to tell profiles apart, short enough for the QR code. */
+export const LINK_PROFILE_MAX = 32;
+
+/** A profile name as a link carries it: no `#`, at most `LINK_PROFILE_MAX` characters, escaped. Empty for none. */
+const linkProfile = (profile: string | undefined): string => {
+  const clean = Array.from((profile ?? "").trim()).filter((ch) => ch !== "#" && ch.charCodeAt(0) >= 32).slice(0, LINK_PROFILE_MAX).join("");
+  return clean ? encodeURIComponent(clean) : "";
+};
+
+/**
+ * The link of a device code (WISP 06 § Adding a device): `<origin>/#ghostly1z…`, or, naming the profile it adds the
+ * device to, `<origin>/#<profile>#ghostly1z…`. The name is only shown on the new device ("Add this phone to
+ * <profile>"); nothing checks it, and the digits are the check, as before. It goes before the code because every reader
+ * takes the code after the last `#`: an older app reads such a link as it reads a bare one.
+ */
+export function deviceLink(code: string, origin: string, profile?: string): string {
+  const name = linkProfile(profile);
+  return name ? inviteLink(`${name}#${code}`, origin) : inviteLink(code, origin);
+}
+
+/** The QR segments of `deviceLink`: the origin and the code in capitals (alphanumeric mode), the name as it is between them. */
+export function deviceLinkQr(code: string, origin: string, profile?: string): string[] {
+  const name = linkProfile(profile);
+  const segments = inviteQrSegments(code, origin);
+  return name && segments.length === 3 ? [segments[0], `#${name}#`, segments[2]] : segments;
+}
+
+/** The code, and the profile's name, in whatever was opened, pasted or scanned: a bare code or either form of the link. */
+export function readDeviceLink(input: string): DeviceLink {
+  const text = input.trim();
+  // A phone's camera may hand the second `#` over escaped.
+  const parts = text.replace(/%23/gi, "#").split("#");
+  const code = parts[parts.length - 1].trim();
+  if (parts.length < 3) return { code: parts.length === 2 ? code : text };
+  let profile = parts[parts.length - 2];
+  try { profile = decodeURIComponent(profile); } catch { /* as it is */ }
+  profile = Array.from(profile.replace(/^\//, "").trim()).slice(0, LINK_PROFILE_MAX).join("");
+  return profile ? { code, profile } : { code };
+}
 
 /** Whether this is a device code (version 2), good or not: a chat invite, or anything else, is not. */
 export function isDeviceCode(code: string): boolean {
@@ -187,18 +282,18 @@ export function isDeviceCode(code: string): boolean {
 let deviceLinkSeen = false;
 export const deviceLinkOffered = () => deviceLinkSeen;
 
-/** Hands a device code an address carried to the join host. */
-export function offerDeviceLink(code: string): void {
-  pendingDeviceLink = code;
+/** Hands a device code (bare, or its link, read by `readDeviceLink`) to the join host. */
+export function offerDeviceLink(value: string): void {
+  pendingDeviceLink = readDeviceLink(value);
   deviceLinkSeen = true;
   window.dispatchEvent(new Event(DEVICE_LINK_EVENT));
 }
 
 /** The device code a link handed over, once: it is forgotten as it is taken. */
-export function takeDeviceLink(): string | null {
-  const code = pendingDeviceLink;
+export function takeDeviceLink(): DeviceLink | null {
+  const link = pendingDeviceLink;
   pendingDeviceLink = null;
-  return code;
+  return link;
 }
 
 /**
@@ -209,10 +304,12 @@ export function takeDeviceLink(): string | null {
 export function takeDeviceLinkFromAddress(): void {
   const rest = window.location.hash.replace(/^#/, "");
   if (!rest) return;
-  const code = protocolLinkCode(rest) ?? rest.replace(/^\//, "");
+  // As a link reads after its origin: `#ghostly1z…`, or `#<profile>#ghostly1z…`.
+  const value = `#${protocolLinkCode(rest) ?? rest.replace(/^\//, "")}`;
+  const { code } = readDeviceLink(value);
   if (!/^ghostly1/i.test(code) || !isDeviceCode(code)) return;
   window.history.replaceState(null, "", "#/");
-  offerDeviceLink(code);
+  offerDeviceLink(value);
 }
 
 /** Wallets the lost device could spend from, as the checklist names them (WISP 06 § Removing a device, "Lost or stolen?"). */

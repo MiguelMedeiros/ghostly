@@ -9,6 +9,8 @@ import {
 } from "react";
 import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
+import { activeProfileId } from "../lib/profiles";
+import { takeUnlockHandover } from "../lib/lockHandover";
 
 interface LockScreenContextValue {
   isLocked: boolean;
@@ -80,9 +82,10 @@ function saveAttempts(attempts: Attempts | null): void {
 export function LockScreenProvider({ children }: { children: ReactNode }) {
   const { settings, updateLockScreen } = useSettings();
   const lockActive = settings.lockScreen.enabled && !!settings.lockScreen.passwordHash;
-  // Locked from the first render: a reload must not skip the password.
-  const [isLocked, setIsLocked] = useState(lockActive);
-  const [hasUnlocked, setHasUnlocked] = useState(!lockActive);
+  // Locked from the first render: a reload must not skip the password, unless the app handed the lock it passed across.
+  const [handed] = useState(() => lockActive && takeUnlockHandover(activeProfileId(), settings.lockScreen.passwordHash));
+  const [isLocked, setIsLocked] = useState(lockActive && !handed);
+  const [hasUnlocked, setHasUnlocked] = useState(!lockActive || handed);
   const [retryAt, setRetryAt] = useState<number | null>(() => {
     const { retryAt } = loadAttempts();
     return retryAt > Date.now() ? retryAt : null;
