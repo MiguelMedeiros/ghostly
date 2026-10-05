@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -110,19 +110,25 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
 
 /**
  * The group's link as the main thing on screen: after creating a group (`created`), and from the
- * header's Share link.
+ * header's Share link. Closed, it gives the focus back to what opened it, or to `returnFocus` when nothing did (a
+ * new group opens on it by itself) or that is gone.
  */
-export function GroupShareDialog({ group, created = false, onClose }: { group: GroupView; created?: boolean; onClose(): void }) {
+export function GroupShareDialog({ group, created = false, onClose, returnFocus }: { group: GroupView; created?: boolean; onClose(): void; returnFocus?: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
   useEffect(() => {
+    const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal();
     // Share first, not the address field (which would select itself and scroll to its end).
     element.querySelector<HTMLButtonElement>('[data-testid="group-link-share"]')?.focus();
-    return () => element.close();
-  }, []);
+    return () => {
+      element.close();
+      const back = before && before !== document.body && before.isConnected ? before : opener;
+      back?.focus();
+    };
+  }, [returnFocus]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-share-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
