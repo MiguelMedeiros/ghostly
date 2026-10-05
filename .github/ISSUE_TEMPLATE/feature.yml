@@ -11,7 +11,7 @@ body:
     id: problem
     attributes:
       label: The problem
-      description: Who is stuck, doing what, and what it costs them today. Example: "Someone with two phones cannot answer a call on the second one."
+      description: 'Who is stuck, doing what, and what it costs them today. Example: "Someone with two phones cannot answer a call on the second one."'
     validations:
       required: true
 

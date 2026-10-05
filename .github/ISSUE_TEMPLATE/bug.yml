@@ -12,7 +12,7 @@ body:
     id: summary
     attributes:
       label: What is wrong
-      description: One or two sentences, from the user's side. Example: "On Android, a voice message recorded while offline is never sent after the app reconnects."
+      description: 'One or two sentences, from the user''s side. Example: "On Android, a voice message recorded while offline is never sent after the app reconnects."'
     validations:
       required: true
 
