@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, UNPROVEN_AUTH_MS } from "../src/ghostlink";
+import { GhostLink, RACE_DIRECT_MS, UNPROVEN_AUTH_MS } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { DiscoveryBudgetError, type PkarrTransport } from "../src/transport";
@@ -434,3 +434,48 @@ describe("a restart whose answer the staying side cannot read for its relays' bu
     expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(75_000);
   }, 240_000);
 });
+
+/**
+ * An app back after a while away (its contact's app ran on, the chat not on its screen): the contact reads at the
+ * background pace (30 s on the relays), and the WebRTC offer of the app that is back waits up to that long for its
+ * answer. The headless CLI, away 5 minutes: live again 8.1 s after it started (2.4-8.5 s, n=8), on the HyperDHT that the
+ * race dialled at `RACE_DIRECT_MS` and that connected in 10 ms (2026-10-05).
+ */
+describe("back after a while away, to a contact reading in the background", () => {
+  async function awayAndBack(lost = false) {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    // The lower key goes: back, it is the side that dials anyway.
+    let goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, "webrtc+hyperdht", emptyDhtDeliveryState());
+    const stays = startApp(world, "stays", made.joiner, { side: made.inviter, name: "goes" }, "webrtc+hyperdht", emptyDhtDeliveryState());
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, goes, "graceful");
+    // Away 5 minutes and a bit: the contact's next read at the background pace is half a minute off.
+    await run(5 * 60_000 + 3_700);
+    if (lost) world.native.dialsLost.add("goes");
+    goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, "webrtc+hyperdht", goes.dhtState, true);
+    const back = Date.now(), requests = goes.requests.length + stays.requests.length;
+    const liveMs = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000);
+    return { goes, liveMs, requests: goes.requests.length + stays.requests.length - requests, back,
+      transport: (goes.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport };
+  }
+
+  it("knocks on the contact's direct transport as its offer goes out, and is live at once", async () => {
+    const { liveMs, transport, requests } = await awayAndBack();
+    // Before: 8.7 s, the race's HyperDHT dial at `RACE_DIRECT_MS` (n=8, the contact's chat in the background or not).
+    // After: 0.7 s.
+    expect(liveMs, "from the start of the app that is back to live on both sides").toBeLessThan(RACE_DIRECT_MS / 4);
+    expect(transport).toBe("hyperdht/1");
+    // No fast looks for an answer meanwhile: fewer requests to the relays, not more (before: 8).
+    expect(requests).toBeLessThanOrEqual(8);
+  }, 240_000);
+
+  it("a knock that does not reach the contact counts as no failure, and the race still dials", async () => {
+    const { goes } = await awayAndBack(true);
+    await run(RACE_DIRECT_MS);
+    // The knock as the offer went out, then the race's dial `RACE_DIRECT_MS` after: only the race's counts.
+    expect((goes.link as unknown as { nativeFailures: Map<string, number> }).nativeFailures.get("hyperdht/1")).toBe(1);
+  }, 240_000);
+});
+
