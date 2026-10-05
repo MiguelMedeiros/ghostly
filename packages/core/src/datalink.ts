@@ -155,8 +155,10 @@ export class DataLink {
         // Both sides offered at once: the lower public key keeps its offer, once it is out. One still gathering its
         // candidates has reached nobody, and the peer's is here: it is answered instead. A first pairing whose joiner
         // gathered for 5 s (its STUN servers never answered) had its inviter offer too after its grace, gather as long,
-        // and leave the joiner's offer unanswered meanwhile: live 11.3 s after the join where 7 s would do (One, 2026-10-05).
-        if (this.options.myPubKeyZ32 < this.options.peerPubKeyZ32 && this.myOfferTs) return;
+        // and leave the joiner's offer unanswered meanwhile: live 11.3 s after the join (One's e2e run, 2026-10-05).
+        // Not while it has no candidate at all (UDP blocked here): an answer could not gather one either, and the
+        // offer's stall is what sends this side on to what else it runs.
+        if (this.options.myPubKeyZ32 < this.options.peerPubKeyZ32 && (this.myOfferTs || !sdpHasCandidates(this.pc?.localDescription?.sdp))) return;
       } else if (this.state === "answering") {
         return;
       }
