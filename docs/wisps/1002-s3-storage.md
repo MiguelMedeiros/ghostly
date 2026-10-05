@@ -27,7 +27,7 @@ Any service speaking the S3 object API: AWS S3, Cloudflare R2, Backblaze B2, Was
 | `get` | `GET /<bucket>/<prefix><name>` |
 | `list` | `GET /<bucket>?list-type=2&prefix=<prefix><space>/backups/`, following `continuation-token` |
 | `remove` | `DELETE /<bucket>/<prefix><name>` |
-| `presign` | `GET /<bucket>/<prefix><name>?X-Amz-Algorithm=…&X-Amz-Credential=…&X-Amz-Date=…&X-Amz-Expires=…&X-Amz-SignedHeaders=host&X-Amz-Signature=…`, signed in the client, `UNSIGNED-PAYLOAD`, at most seven days ([4xx](4xx-store-and-forward.md)) |
+| `presign` | `GET /<bucket>/<prefix><name>?X-Amz-Algorithm=…&X-Amz-Credential=…&X-Amz-Date=…&X-Amz-Expires=…&X-Amz-SignedHeaders=host&X-Amz-Signature=…`, signed in the client, `UNSIGNED-PAYLOAD`, at most seven days ([404](404-store-and-forward.md)) |
 
 Every request is signed with AWS Signature Version 4 in the client (`x-amz-content-sha256` carries the payload hash; `UNSIGNED-PAYLOAD` is not used). No SDK, proxy or server of Ghostly's sits in between.
 

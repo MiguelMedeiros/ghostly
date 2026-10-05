@@ -6,13 +6,13 @@ import type { EventHub } from "./events";
 import type { Runtime } from "./runtime/engine";
 
 /**
- * The methods of the local control API (WISP 11xx): the daemon answers them over its socket, and a one-shot
+ * The methods of the local control API (WISP 1100): the daemon answers them over its socket, and a one-shot
  * command calls them in its own process. Parameters come from JSON: every one is checked here.
  */
 export interface ApiContext {
   runtime: Runtime;
   hub: EventHub;
-  /** Voice calls (WISP 11xx § Calls). */
+  /** Voice calls (WISP 1100 § Calls). */
   calls: CallManager;
   /** How the host runs: a daemon stays; a one-shot leaves when its command is done. */
   mode: "daemon" | "one-shot";

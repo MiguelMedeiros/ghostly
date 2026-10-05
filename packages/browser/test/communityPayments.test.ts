@@ -12,7 +12,7 @@ vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 beforeEach(() => resetDb());
 
 /**
- * Payments in a community (WISP 9xx · Group Community § Payments) on headless engines: the real `Communities`,
+ * Payments in a community (WISP 903 · Group Community § Payments) on headless engines: the real `Communities`,
  * `PaymentDesk`, `CommunityPay` and `GroupPayments` on every peer, with a fake wallet. Members have edges to hubs
  * only, so every payment frame between two members goes through at least one hub; hubs see it sealed.
  */

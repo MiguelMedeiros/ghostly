@@ -1,7 +1,7 @@
 import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /**
- * A group's name (WISP 9xx § Metadata) between three browsers that never pair: only the admin may
+ * A group's name (WISP 902 § Metadata) between three browsers that never pair: only the admin may
  * rename it; the admin sets a picture and renames the group, and a member sees the new name in the
  * chat list, the header and the members panel with the picture kept; someone who joins later by the
  * link sees the new name; removing the picture keeps the name.

@@ -6,7 +6,7 @@ import { identityFromSeed, publicKeyFromZ32, type Identity } from "./identity";
 import type { GhostRecord } from "./pkarr";
 
 /**
- * Where the members of a `group-community/1` group find each other (WISP 9xx · Group Community §
+ * Where the members of a `group-community/1` group find each other (WISP 903 · Group Community §
  * Topology): a **beacon** listing the current hubs, and a **lobby** per hub where a member asks
  * that hub for an edge. Both are Pkarr records under identities every member derives from the
  * group's rendezvous secret, sealed with a key from the same secret: relays see a key and an
@@ -98,7 +98,7 @@ function unpack(bytes: Uint8Array, withLoad: boolean, max: number): Hub[] {
 }
 
 /**
- * The hubs that take turns at the door (WISP 9xx § Admission): those that said so lately and have
+ * The hubs that take turns at the door (WISP 903 § Admission): those that said so lately and have
  * been hubs for a minute, so that every hub, having read the beacon at least once since, agrees on
  * the same set. Only when there is none (a group's first minute), the one that has been a hub longest. And when none said so lately, a hub asking (`me`)
  * that sees no other fresh hub in the beacon is the door alone, listed or not: its own entry may not have reached the
@@ -119,7 +119,7 @@ export function doorHubs(hubs: Hub[], now = Date.now(), me?: string): string[] {
 }
 
 /**
- * The newest message frame a hub holds (WISP 9xx · Group Community § Head): who sent it, in which epoch (number and
+ * The newest message frame a hub holds (WISP 903 · Group Community § Head): who sent it, in which epoch (number and
  * first 16 hex of its commit hash), its sequence and time. Hubs publish it beside the hub list, so a member's other
  * profile on the same device can tell something new was said without being online (WISP 04 § Checking other profiles).
  */

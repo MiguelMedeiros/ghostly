@@ -202,7 +202,7 @@ export interface IncomingMessage {
   reply?: WireReply | { i: string };
   /** How many times it has been forwarded (`fw`, WISP 401 § Forwards); absent for a message written in this chat. */
   forwarded?: number;
-  /** A status card (`sc`, WISP 4xx · Status Cards), already checked; the text is its fallback. Live session only. */
+  /** A status card (`sc`, WISP 405 · Status Cards), already checked; the text is its fallback. Live session only. */
   card?: StatusCard;
 }
 
@@ -213,7 +213,7 @@ export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
  * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
  * with it: the text matters, the card does not. A reply (`r`, WISP 401 § Replies) is a few hundred bytes at most
  * and always goes, and so does a forwarded message's hop count (`fw`, WISP 401 § Forwards) and a status card (`sc`,
- * WISP 4xx · Status Cards), whose 8 KiB with the text's 16 stay well inside the frame.
+ * WISP 405 · Status Cards), whose 8 KiB with the text's 16 stay well inside the frame.
  */
 export function pairedMessageFrame(id: string, ts: number, m: string, preview?: LinkPreview, reply?: WireReply, forwarded?: number, card?: StatusCard): string {
   const r = { ...(reply && { r: wireReply(reply) }), ...(readForwarded(forwarded) && { fw: forwarded }), ...(card && { sc: card }) };
@@ -479,9 +479,9 @@ export interface GhostLinkOptions {
   editSupport?: boolean;
   /** Offer `pin/1` on paired sessions: a pinned message (1:1 chats, not group edges). */
   pinSupport?: boolean;
-  /** Offer `status-card/1` on the paired session: this app shows status cards (WISP 4xx · Status Cards). */
+  /** Offer `status-card/1` on the paired session: this app shows status cards (WISP 405 · Status Cards). */
   statusCardSupport?: boolean;
-  /** Offer `buttons/1` on the paired session: this app shows and presses message buttons (WISP 4xx · Message Buttons). */
+  /** Offer `buttons/1` on the paired session: this app shows and presses message buttons (WISP 406 · Message Buttons). */
   buttonsSupport?: boolean;
   /** Offer `wake/1` on paired sessions: this app wakes a contact's closed web app with a push (1:1 chats, not group edges). */
   wakeSupport?: boolean;
@@ -555,7 +555,7 @@ export interface GhostLinkOptions {
   /**
    * A group's link (an edge, an entry session), which has no capability record: once this side runs a native endpoint on
    * it, its transports and how to dial them ride its own packet (`_tr`), and the member's are read from its packet
-   * (WISP 9xx § Transports). The owner starts endpoints only where one side has no WebRTC (`onPacketTransports`).
+   * (WISP 902 § Transports). The owner starts endpoints only where one side has no WebRTC (`onPacketTransports`).
    */
   packetTransports?: boolean;
   createPeerConnection: () => RTCPeerConnection;
@@ -2111,7 +2111,7 @@ export class GhostLink {
    * the DHT has no room for one, and the text goes without it. A `reply` (WISP 401 § Replies) goes whole on the
    * session; on the DHT only its id does, which the contact looks up in its own history. `forwarded`: the hop count
    * of a forwarded message (WISP 401 § Forwards), on both paths (the DHT drops it when the packet has no room). `card`:
-   * a status card (WISP 4xx · Status Cards), on the live session only; on the DHT the text, its fallback, goes alone.
+   * a status card (WISP 405 · Status Cards), on the live session only; on the DHT the text, its fallback, goes alone.
    */
   async sendMessage(text: string, timestamp = Date.now(), stableId?: string, preview?: LinkPreview, reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<string | null> {
     const trimmed = text.trim();
@@ -2590,7 +2590,7 @@ export class GhostLink {
     if (!this.options.params.profile) return "Edits need a current chat";
     if (this.channel && this.isDataLinkOpen) {
       if (!this.supportsEdits) return "Your contact's app does not show edits yet";
-      // Past a text's edits only an app that shows cards takes one (WISP 4xx · Status Cards); an older one would drop it.
+      // Past a text's edits only an app that shows cards takes one (WISP 405 · Status Cards); an older one would drop it.
       if (!validEditNumber(edit.e) && !(edit.sc && this.supportsStatusCards)) return "Your contact's app takes no more edits of this message";
       try { this.channel.send(editFrame(edit)); return null; } catch { return "The connection closed before sending"; }
     }

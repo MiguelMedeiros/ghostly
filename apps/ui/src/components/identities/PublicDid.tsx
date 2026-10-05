@@ -10,7 +10,7 @@ import { ProviderMark, StatusPill } from "./ProviderMark";
 import { errorText } from "../../lib/errorText";
 
 /**
- * The profile's public DID (did:dht, WISP 3xx-did-dht), in the Ghostly card's details: the identifier with
+ * The profile's public DID (did:dht, WISP 310-did-dht), in the Ghostly card's details: the identifier with
  * Copy and a QR code, whether it is published, and a switch per identity that lists it in the document for
  * everyone to see. Every switch starts off; chats never need any of this.
  */

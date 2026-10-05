@@ -43,8 +43,8 @@ Files under `packages/browser/src/engine/paymentAdapters/`.
 | Lightning: Breez (Spark) | yes (your Breez API key) | regtest | `providers/breez.ts` | [203](wisps/203-lightning.md) |
 | Ark (Arkade) | arkade.computer | Mutinynet (mutinynet.arkade.sh) | `arkade.ts`, `arkWallet.ts` | [202](wisps/202-arkade.md) |
 | Bark (Second) | ark.second.tech (#305; Second's terms apply) | signet (ark.signet.2nd.dev) | `bark.ts`, `barkWallet.ts` | [204](wisps/204-bark.md) |
-| Spark | yes (your Breez API key, asked by New) | regtest | `spark.ts`, `sparkWallet.ts` | [2xx](wisps/2xx-spark.md) |
-| Fedimint | yes: federations on Bitcoin, joined by invite code | federations on test networks, joined by invite code | `fedimint.ts`, `fedimintWallet.ts` | [2xx](wisps/2xx-fedimint.md) |
+| Spark | yes (your Breez API key, asked by New) | regtest | `spark.ts`, `sparkWallet.ts` | [206](wisps/206-spark.md) |
+| Fedimint | yes: federations on Bitcoin, joined by invite code | federations on test networks, joined by invite code | `fedimint.ts`, `fedimintWallet.ts` | [207](wisps/207-fedimint.md) |
 | Bitcoin: BDK | not offered | signet, mutinynet, regtest (Esplora) | `providers/bdk.ts` | [200](wisps/200-payments.md) |
 | Bitcoin: Bitcoin Core (Desktop only) | yes | testnet, signet, regtest | `providers/bitcoind.ts` | [200](wisps/200-payments.md) |
 | USDT | Ethereum | Sepolia test USDT | `usdt.ts`, `usdtWallet.ts` | [USDT-INTEGRATION.md](USDT-INTEGRATION.md) |

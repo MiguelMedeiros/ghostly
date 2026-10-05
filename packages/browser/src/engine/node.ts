@@ -215,7 +215,7 @@ const RELAY_RETRY_MS = 30_000;
 /** Native listeners an app may hold per transport (the Desktop's Rust Iroh allows eight, `paired_transport.rs`). */
 const NATIVE_SLOTS = 8;
 /**
- * Of those, what a group's links (edges, entry sessions) may hold where one side has no WebRTC (WISP 9xx § Transports):
+ * Of those, what a group's links (edges, entry sessions) may hold where one side has no WebRTC (WISP 902 § Transports):
  * half, so 1:1 chats keep room. It is also the group links' budget of connections on an app with no WebRTC (`peerRoom`).
  */
 export const GROUP_NATIVE_SLOTS = 4;
@@ -256,7 +256,7 @@ const DEFAULT_SETTINGS: Settings = {
 const MAX_DELETED_IDS = 500;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
-/** A second press of one message's buttons waits this long (WISP 4xx · Message Buttons). */
+/** A second press of one message's buttons waits this long (WISP 406 · Message Buttons). */
 export const BUTTON_PRESS_MS = 1_000;
 
 interface LiveLink {
@@ -285,7 +285,7 @@ interface LiveLink {
   entryDone?: boolean;
   /** A group's edge whose session in this run is kept as its `edgeLiveSince` (`noteEdgeLive`). */
   edgeSessionNoted?: boolean;
-  /** A private group's edge: its Pkarr transport, which members carry packets for (WISP 9xx § Signaling through members). */
+  /** A private group's edge: its Pkarr transport, which members carry packets for (WISP 902 § Signaling through members). */
   carried?: CarriedTransport;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
@@ -435,17 +435,17 @@ export interface NodeOptions {
    */
   turnReadAt?: number;
   /**
-   * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 9xx · Group
+   * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 902 · Group
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
   staysOnline?: boolean;
   /**
-   * Tests only: group links behave as before they could go native (WISP 9xx § Transports): WebRTC alone, no `_tr` read
+   * Tests only: group links behave as before they could go native (WISP 902 § Transports): WebRTC alone, no `_tr` read
    * or published, no native endpoint. A compatibility test runs this app as one from before against a current one.
    */
   webrtcGroupLinks?: boolean;
   /**
-   * The most WebRTC connections this app's groups and 1:1 chats hold at once (WISP 9xx · Group Mesh § Hubs, Budget):
+   * The most WebRTC connections this app's groups and 1:1 chats hold at once (WISP 902 · Group Mesh § Hubs, Budget):
    * within it, the app is a hub of a private group only while that fits, and a group opens only the edges that fit.
    * Default: none. The Desktop app on a Mac says 40: WKWebView opens about 46 in one page, and the rest stay for calls.
    */
@@ -653,7 +653,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly editQueues = new Map<string, EditQueue>();
   /** The contacts' edits of messages not here yet. */
   private readonly editBuffer = new EditBuffer();
-  /** Received status card updates, applied at most once a second per message (WISP 4xx · Status Cards). */
+  /** Received status card updates, applied at most once a second per message (WISP 405 · Status Cards). */
   private readonly cardEdits = new CardEditPacer();
   /** When each message's buttons were last pressed here (`pressButton`). */
   private readonly pressedAt = new Map<string, number>();
@@ -661,7 +661,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly wakeLimiter = new WakeLimiter();
   /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
   private readonly callWakeLimiter = new WakeLimiter(WAKE_CALL_INTERVAL_MS);
-  /** Mentions in private groups: one per member per 5 minutes, four per group per minute (WISP 9xx · Group Mesh § Wake-up push). */
+  /** Mentions in private groups: one per member per 5 minutes, four per group per minute (WISP 902 · Group Mesh § Wake-up push). */
   private readonly groupWakeLimiter = new GroupWakeLimiter();
   /** `group-wake` frames read per edge, a handful a minute. */
   private readonly groupWakeReceived = new Map<string, RateWindow>();
@@ -694,7 +694,7 @@ export class GhostlyNode implements EngineImplementation {
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
   /** Every minute, the reviews no Approve can send any more are cancelled (dropStaleReviews). */
   private staleReviewTimer?: ReturnType<typeof setInterval>;
-  /** Group links: admins read knocks, joiners knock (WISP 9xx § Entry link). */
+  /** Group links: admins read knocks, joiners knock (WISP 902 § Entry link). */
   private groupEntryTimer: ReturnType<typeof setInterval> | null = null;
   private walletView: WalletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
   /** A new profile's default Mainnet wallets, made once in the background (`NodeOptions.defaultWallets`). */
@@ -869,7 +869,7 @@ export class GhostlyNode implements EngineImplementation {
     sync: async () => { await this.sparkWallets[network].adapter?.sync(); },
   })));
 
-  /** Store-and-forward for away contacts (WISP 4xx): items sealed into this device's own storage, picked up from the contact's. */
+  /** Store-and-forward for away contacts (WISP 404): items sealed into this device's own storage, picked up from the contact's. */
   private holdStore: { key: string; store: HoldStore } | null = null;
   private readonly hold: HoldEngine = new HoldEngine({
     transport: undefined as unknown as PkarrTransport,
@@ -966,7 +966,7 @@ export class GhostlyNode implements EngineImplementation {
     resolve: async key => (await this.transport.resolve(key))?.records ?? null,
   });
 
-  /** The profile's did:dht: a key of its own, public, never tied to a chat (WISP 3xx-did-dht). */
+  /** The profile's did:dht: a key of its own, public, never tied to a chat (WISP 310-did-dht). */
   readonly did = new ProfileDid({
     online: () => this.networkOn,
     emit: () => this.emitState(),
@@ -1167,7 +1167,7 @@ export class GhostlyNode implements EngineImplementation {
   });
 
   /**
-   * Payments in community groups (WISP 9xx · Group Community § Payments): the desk pays and requests over a link
+   * Payments in community groups (WISP 903 · Group Community § Payments): the desk pays and requests over a link
    * per member that sends through the group, sealed to that member; the group request goes to everyone at once.
    */
   private readonly communityPay: CommunityPay = new CommunityPay({
@@ -1184,7 +1184,7 @@ export class GhostlyNode implements EngineImplementation {
   });
 
   /**
-   * Edits in groups (WISP 9xx § Edits): mine said to the group at the pace allowed, the members' on their messages.
+   * Edits in groups (WISP 902 § Edits): mine said to the group at the pace allowed, the members' on their messages.
    * Never a new message: no sound, no unread.
    */
   private readonly groupEdits = new GroupEdits({
@@ -1215,7 +1215,7 @@ export class GhostlyNode implements EngineImplementation {
   private paymentLink(linkId: string) { return this.outsideEdge(linkId) ? null : this.links.get(linkId)?.link ?? this.communityPay.link(linkId); }
 
   /**
-   * Payments in groups (WISP 9xx § Payments): the money goes over the edge to one member through the desk, like a
+   * Payments in groups (WISP 902 § Payments): the money goes over the edge to one member through the desk, like a
    * chat's; what the group sees of it goes to every member as a `group-pay` note.
    */
   private readonly groupPayments = new GroupPayments({
@@ -1987,7 +1987,7 @@ export class GhostlyNode implements EngineImplementation {
         ...(typeof RTCPeerConnection === "undefined" && { webrtc: false as const }),
         ...(this.directPath.blocked && { directBlocked: true as const }),
         ...(this.clock.offset !== null && { clockOffMs: this.clock.offset }),
-        // A group's link goes over WebRTC, or a native transport where one side has none (WISP 9xx § Transports).
+        // A group's link goes over WebRTC, or a native transport where one side has none (WISP 902 § Transports).
         ...(typeof RTCPeerConnection === "undefined" && !Object.keys(this.nativeFactories).length && { groupLinks: false as const }),
       },
       // Group edges are links the engine runs, not chats anyone sees.
@@ -2497,7 +2497,7 @@ export class GhostlyNode implements EngineImplementation {
     live.link.sendWake({ ...own, token });
   }
 
-  // ---------- wake-up push in private groups (WISP 9xx · Group Mesh § Wake-up push) ----------
+  // ---------- wake-up push in private groups (WISP 902 · Group Mesh § Wake-up push) ----------
 
   /** An edge of a private group: where a member shares how to wake it. A community has none between two members. */
   private meshEdge(stored: StoredLink): boolean {
@@ -2726,7 +2726,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * `card`: a bot's status card (WISP 4xx · Status Cards), checked here by the sender's rule; the text is its fallback,
+   * `card`: a bot's status card (WISP 405 · Status Cards), checked here by the sender's rule; the text is its fallback,
    * written from the card when none is given. Only the headless runtime and SDKs send one: the app never offers it.
    */
   async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string; card?: unknown; button?: string }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
@@ -2753,7 +2753,7 @@ export class GhostlyNode implements EngineImplementation {
       // A reply names a message of this chat, as both sides know it (WISP 400 § Replies); anything else is refused.
       const found = params.replyTo === undefined ? undefined : await this.replyFor(linkId, params.replyTo);
       if (typeof found === "string") return { error: found, refused: true };
-      // A button press (`pressButton`, WISP 4xx · Message Buttons) is a reply naming the button, by an id that holds.
+      // A button press (`pressButton`, WISP 406 · Message Buttons) is a reply naming the button, by an id that holds.
       if (params.button !== undefined && !(typeof params.button === "string" && BUTTON_ID.test(params.button) && found)) return { error: "No such button", refused: true };
       const reply = found && params.button !== undefined ? { ...found, button: params.button } : found;
       if (card) return this.sendChatText(live, trimmed, timestamp, undefined, reply, undefined, card);
@@ -2796,7 +2796,7 @@ export class GhostlyNode implements EngineImplementation {
     const delivery = link.isDataLinkOpen ? "stream" : link.textDelivery === "dht" ? "dht" : "unavailable";
     // Not live: the contact's app may be closed. Wake it, if it shared how; it then connects and takes this message.
     if (delivery !== "stream") this.wakePeer(live);
-    // A card rides with the row; the DHT floor and a hold carry its text alone (WISP 4xx · Status Cards).
+    // A card rides with the row; the DHT floor and a hold carry its text alone (WISP 405 · Status Cards).
     const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }), ...(card && { card }) };
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
@@ -2849,7 +2849,7 @@ export class GhostlyNode implements EngineImplementation {
     const original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
     if (!original) return message;
     const resolved: StoredMessage = { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }), ...(reply.button && { button: reply.button }) } };
-    // A press on one of my buttons (WISP 4xx · Message Buttons), when it is still open for this person.
+    // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person.
     const press = buttonPress(resolved, original, history);
     return press ? { ...resolved, press } : resolved;
   }
@@ -2869,7 +2869,7 @@ export class GhostlyNode implements EngineImplementation {
     return live?.stored.deliveryMode === "dht" || live?.link?.dhtDelivery?.peerMode === "dht";
   }
 
-  /** A status card a caller asks to send, by the sender's rule (WISP 4xx · Status Cards), or why it cannot go. */
+  /** A status card a caller asks to send, by the sender's rule (WISP 405 · Status Cards), or why it cannot go. */
   private static cardToSend(raw: unknown): StatusCard | string {
     const checked = checkStatusCard(raw);
     return "error" in checked ? `Status card: ${checked.error}` : checked.card;
@@ -2892,11 +2892,11 @@ export class GhostlyNode implements EngineImplementation {
   async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId } = params;
     const refuse = (error: string) => ({ error, refused: true });
-    // A card's update (WISP 4xx · Status Cards): the whole new card, and its fallback text unless one is given.
+    // A card's update (WISP 405 · Status Cards): the whole new card, and its fallback text unless one is given.
     const card = params.card === undefined ? undefined : GhostlyNode.cardToSend(params.card);
     if (typeof card === "string") return refuse(card);
     if (card && !(typeof params.text === "string" && params.text.trim())) params = { ...params, text: statusCardText(card) };
-    // A group's (WISP 9xx § Edits): said to its members, with the mentions the new text keeps or adds.
+    // A group's (WISP 902 § Edits): said to its members, with the mentions the new text keeps or adds.
     if (typeof linkId === "string" && linkId.startsWith("group:")) {
       const mentions = Array.isArray(params.mentions) ? params.mentions : [];
       return card ? this.groupEdits.edit(linkId.slice("group:".length), params.messageId, params.text, mentions, card) : this.groupEdits.edit(linkId.slice("group:".length), params.messageId, params.text, mentions);
@@ -2916,7 +2916,7 @@ export class GhostlyNode implements EngineImplementation {
     if (stop) return { error: stop };
     const preview = card || params.preview === undefined ? undefined : parseLinkPreview(params.preview, text);
     if (text === message.text && (preview?.u ?? "") === (message.preview?.u ?? "") && JSON.stringify(card ?? null) === JSON.stringify(message.card ?? null)) return { error: null, messageId: message.id };
-    // A message with a card takes more edits: a bot updates a long task often (WISP 4xx · Status Cards).
+    // A message with a card takes more edits: a bot updates a long task often (WISP 405 · Status Cards).
     const seq = (message.edit?.seq ?? 0) + 1, most = card ? STATUS_CARD_LIMITS.edits : MAX_EDITS_PER_MESSAGE;
     if (seq > most) return refuse(`This message was edited ${most} times, the most one takes.`);
     const edited = withEdit(message, { seq, at: Date.now(), text, preview, card, pending: true });
@@ -2967,7 +2967,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * A question of mine with buttons went on the DHT floor or into a hold, which carry its text alone (WISP 4xx · Message
+   * A question of mine with buttons went on the DHT floor or into a hold, which carry its text alone (WISP 406 · Message
    * Buttons): its buttons are due to go again live. Once: a row that had them restored already stays so.
    */
   private async buttonsWentBare(linkId: string, message: Pick<StoredMessage, "id" | "card" | "buttonsRestore">): Promise<void> {
@@ -2976,7 +2976,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * Buttons the contact may not have (WISP 4xx · Message Buttons): a question whose text went on the DHT floor or into a
+   * Buttons the contact may not have (WISP 406 · Message Buttons): a question whose text went on the DHT floor or into a
    * hold reached the contact as text alone, and a copy under the same id that comes live later is taken as the one
    * already there. Once the chat is live with an app that shows buttons (`buttons/1`) and takes edits, each such
    * question goes again as an edit of its buttons alone: the same text, so no version and no edit mark. Once per
@@ -3056,9 +3056,9 @@ export class GhostlyNode implements EngineImplementation {
     await this.outboxFor(linkId).transmit(messageId, { manual: true });
   }
 
-  /** The contact is away, and both sides chose to hold what is sent meanwhile (WISP 4xx). */
+  /** The contact is away, and both sides chose to hold what is sent meanwhile (WISP 404). */
   private holdingFor(live: LiveLink): boolean {
-    // Holding dials nobody: it works in DHT only too (WISP 4xx, revision 0.2).
+    // Holding dials nobody: it works in DHT only too (WISP 404, revision 0.2).
     return !!live.stored.profile && !!live.link && !live.link.isDataLinkOpen && this.hold.canHold(live.stored.id);
   }
 
@@ -3837,26 +3837,26 @@ export class GhostlyNode implements EngineImplementation {
     return { groupId: await this.groups.joinByLink(link) };
   }
   async sendGroupMessage({ groupId, text: given, mentions, replyTo, card: raw, button }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: unknown; button?: string }): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
-    // A bot's status card (WISP 4xx · Status Cards), its fallback text written from it unless one is given.
+    // A bot's status card (WISP 405 · Status Cards), its fallback text written from it unless one is given.
     const card = raw === undefined ? undefined : GhostlyNode.cardToSend(raw);
     if (typeof card === "string") return { error: card };
     const text = card && !(typeof given === "string" && given.trim()) ? statusCardText(card) : given;
     if (typeof text !== "string") return { error: "Nothing to send" };
-    // A reply names a message of this group, by its author's member key (WISP 9xx § Replies).
+    // A reply names a message of this group, by its author's member key (WISP 902 § Replies).
     const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);
     if (typeof reply === "string") return { error: reply };
     const named = Array.isArray(mentions) ? mentions : [];
     if (button !== undefined && !(typeof button === "string" && BUTTON_ID.test(button) && reply)) return { error: "No such button" };
     const wireReply = reply && { i: reply.id, s: reply.snippet, f: reply.member!, ...(button !== undefined && { b: button }) };
     const sent = card ? await this.groups.send(groupId, text, named, wireReply, undefined, card) : await this.groups.send(groupId, text, named, wireReply);
-    // Members it names whose apps are closed are woken (WISP 9xx · Group Mesh § Wake-up push).
+    // Members it names whose apps are closed are woken (WISP 902 · Group Mesh § Wake-up push).
     if (!sent.error) this.wakeMentioned(groupId, text, named);
     return sent;
   }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
 
   /**
-   * Presses a button of a message someone else sent to a chat or a group (`group:<id>`), WISP 4xx · Message Buttons:
+   * Presses a button of a message someone else sent to a chat or a group (`group:<id>`), WISP 406 · Message Buttons:
    * a reply to it whose text is the button's label and whose `r` names the button, so the author learns who pressed
    * what, and an app without buttons reads an ordinary reply. Refused: my own message, a button it does not have,
    * buttons the author closed, a question I already answered with a `once` button, a second press within a second.
@@ -4173,7 +4173,7 @@ export class GhostlyNode implements EngineImplementation {
     else live.link?.setTyping(false);
   }
 
-  /** WISP 9xx · Group Mesh § Typing: the same word in a private group, on its edges; a community says nothing yet. */
+  /** WISP 902 · Group Mesh § Typing: the same word in a private group, on its edges; a community says nothing yet. */
   setGroupTyping({ groupId, typing, kind, status }: { groupId: string; typing: boolean; kind?: TypingKind; status?: string }): void {
     if (typeof groupId !== "string") return;
     if (typing === true && this.settings.sendTyping !== false) this.groups.setTyping(groupId, true, typingActivity(kind, status));
@@ -4845,7 +4845,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(params.rail === "cashu" || params.rail === "lightning" ? { rail: params.rail } : {}) });
   }
 
-  /** A request any member of a group may pay, once (WISP 9xx § Payments). */
+  /** A request any member of a group may pay, once (WISP 902 § Payments). */
   requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?: WalletNetwork; card?: string }) {
     const group = this.groups.views().find(g => g.id === params.groupId);
     if (group?.status !== "active") throw new Error("You are not in this group");
@@ -5941,12 +5941,12 @@ export class GhostlyNode implements EngineImplementation {
     // one, no reaction said again, no way to wake this app.
     const member = () => entry || this.groups.isCommunityGroup(group) || this.groups.inRoster(group, peer);
     let seen = false;
-    // Native where one side has no WebRTC (WISP 9xx § Transports): an edge back after a restart resumes on a native transport both run.
+    // Native where one side has no WebRTC (WISP 902 § Transports): an edge back after a restart resumes on a native transport both run.
     const native = this.keepsGroupNative(stored);
     const resumeOn: PairedTransport | undefined = native
       ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
-    // A private group's edge signals through members that reach both ends, beside the relays (WISP 9xx § Signaling through members).
+    // A private group's edge signals through members that reach both ends, beside the relays (WISP 902 § Signaling through members).
     live.carried?.stop();
     live.carried = entry || this.groups.isCommunityGroup(group) ? undefined : new CarriedTransport(this.groupTransport, live.myPubKeyZ32, stored.peerPubKeyZ32, {
       carry: payload => this.groups.carrySignal(group, peer, payload),
@@ -5958,7 +5958,7 @@ export class GhostlyNode implements EngineImplementation {
     if (waiting) live.carried!.accept(waiting);
     live.link = new GhostLink({
       ownRecords: true,
-      // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
+      // An edge carries payments with its member (WISP 902 § Payments), as a chat does; an entry session does not.
       paymentMethods: entry ? { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false, fedimint: false, spark: false } : stored.paymentMethods,
       arkPaymentsSupport: !entry,
       usdtPaymentsSupport: !entry,
@@ -5979,7 +5979,7 @@ export class GhostlyNode implements EngineImplementation {
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
       transport: live.carried ?? this.groupTransport,
       nick: !entry && this.quietEdge(stored) ? undefined : this.sharedNick,
-      // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 9xx § Cost per member).
+      // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 902 § Cost per member).
       pollIntervals: entry || this.groups.isCommunityGroup(group) ? this.pollIntervals : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),
       autoConnect: true,
       // An entry session carries one admission and closes. The member's side always dials (the joiner's key is
@@ -6068,7 +6068,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * Whether a group's link (an edge, an entry session) runs native endpoints (WISP 9xx § Transports): where this app has
+   * Whether a group's link (an edge, an entry session) runs native endpoints (WISP 902 § Transports): where this app has
    * no WebRTC (the Linux Desktop), and where the member's has none, as its packet said. Between two apps that have
    * WebRTC it runs none, as before: a group of eight would otherwise hold seven listeners per transport for nothing.
    */
@@ -6082,7 +6082,7 @@ export class GhostlyNode implements EngineImplementation {
    * (`DirectEvidence`): a network that lets no direct connection through (a VPN, a firewall, on either side). WebRTC is
    * all an edge between two apps that have it runs, and there is no TURN server unless someone set one, so the edge
    * never went live, and the member stayed unreachable for as long as that network lasted. The edge starts again as on an
-   * app with no WebRTC (WISP 9xx § Transports): it runs its native endpoints and says so in its packet (`_tr`, with no
+   * app with no WebRTC (WISP 902 § Transports): it runs its native endpoints and says so in its packet (`_tr`, with no
    * `webrtc/1`), the member's app starts its own for it as it does for a Linux Desktop, and the two meet over Iroh
    * through its relay. For this run of the app only.
    */
@@ -6664,7 +6664,7 @@ export class GhostlyNode implements EngineImplementation {
       // only for the selected chat, never an established native connection.
       const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
       // A group's links take at most half of them, and never one a chat holds: 1:1 chats keep what they had
-      // before group links went native (WISP 9xx § Transports). One that finds none waits for a slot.
+      // before group links went native (WISP 902 § Transports). One that finds none waits for a slot.
       if (group && (owners.length >= NATIVE_SLOTS || owners.filter(other => other.stored.group).length >= GROUP_NATIVE_SLOTS)) return true;
       if (owners.length >= NATIVE_SLOTS) {
         const now = Date.now();

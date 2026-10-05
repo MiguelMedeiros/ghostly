@@ -80,7 +80,7 @@ export interface AgentTurn extends GhostlyEvent {
   messageId: string;
   timestamp: number;
   /**
-   * The message pressed a button of a question this profile sent (WISP 4xx · Message Buttons), as this side's engine
+   * The message pressed a button of a question this profile sent (WISP 406 · Message Buttons), as this side's engine
    * matched it: the question's id, the button's id and its label, all this profile's own words.
    */
   press?: { messageId: string; button: string; label: string; inferred?: true };
@@ -113,7 +113,7 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
   };
 }
 
-/** Only loopback: events carry message text, and a webhook is a local bridge (WISP 11xx § Security). */
+/** Only loopback: events carry message text, and a webhook is a local bridge (WISP 1100 § Security). */
 export function checkWebhook(url: string): URL {
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new CliError("usage", `Not a URL: ${url}`); }

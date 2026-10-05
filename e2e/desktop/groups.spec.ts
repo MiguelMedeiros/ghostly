@@ -6,7 +6,7 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
 
 /**
  * Two Desktop apps on Linux, whose WebView has no WebRTC, in one community: one makes it, the other joins by its link,
- * and they read each other (WISP 9xx § Transports). A group's links (the entry session, then the edge) go over Iroh or
+ * and they read each other (WISP 902 § Transports). A group's links (the entry session, then the edge) go over Iroh or
  * HyperDHT here, told in each link's own packet (`_tr`). Before, group links were WebRTC only: New group was off on
  * Linux, and a link made elsewhere never let a Linux app in.
  *

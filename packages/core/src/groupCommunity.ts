@@ -21,7 +21,7 @@ import {
 } from "./groupMeta";
 
 /**
- * `group-community/1` (WISP 9xx · Group Community): a group whose link is the way in, for hundreds
+ * `group-community/1` (WISP 903 · Group Community): a group whose link is the way in, for hundreds
  * of members, where the admin need not be online for anyone to join.
  *
  * What differs from `group-mesh/1`:
@@ -367,7 +367,7 @@ const frameKey = (f: { e: number; h: string; n: number }) => `${f.e}:${f.h}:${f.
 /** Frames of mine remembered as not heard by anyone yet. */
 const UNHEARD_KEPT = 64;
 /**
- * Where a frame said again under a newer commit was first said (`o`, WISP 9xx § Messages and catch-up): its commit's
+ * Where a frame said again under a newer commit was first said (`o`, WISP 903 § Messages and catch-up): its commit's
  * epoch and short hash and its number there. Never the frame's own place, nor a later epoch than its own.
  */
 function readOriginal(o: unknown, frame: { e: number; h: string }): { e: number; h: string; n: number } | null {
@@ -385,7 +385,7 @@ function seenIn(seen: CommunityState["seen"], f: { s: string; e: number; h: stri
   return f.n === entry.high || entry.window.includes(f.n);
 }
 /**
- * Whether a stored community state holds the frame a beacon's head names (WISP 9xx § Head), read without running
+ * Whether a stored community state holds the frame a beacon's head names (WISP 903 § Head), read without running
  * the group: its own frame, one it took, or one of an epoch so far behind its own that it would not be taken now.
  */
 export function communityHasFrame(state: Pick<CommunityState, "seen" | "seedB64" | "chain">, f: { s: string; e: number; h: string; n: number }): boolean {
@@ -517,7 +517,7 @@ export class CommunitySession {
   // -- views ---------------------------------------------------------------------------------------
 
   get id(): string { return this.state.id; }
-  /** The name the admin gave the group, else the one it had when I got in (WISP 9xx § Metadata). */
+  /** The name the admin gave the group, else the one it had when I got in (WISP 903 § Metadata). */
   get name(): string { return groupDisplayName(this.state.meta, this.state.name); }
   get myKey(): string { return this.identity.pubKeyZ32; }
   get top(): CommunityCommit { return this.state.chain[this.state.chain.length - 1]; }
@@ -550,7 +550,7 @@ export class CommunitySession {
     return -1;
   }
   /**
-   * What someone the chain took out is told when it comes back (WISP 9xx § Leaving and removal): the commits from where
+   * What someone the chain took out is told when it comes back (WISP 903 § Leaving and removal): the commits from where
    * it says it is (`sync`: its tip, or its locator) up to the one that took it out, and nothing after. Later commits
    * are not its business (a `link` commit names the new entry key); no secret, no stored frame, no seed goes with them.
    * Empty when it is a member, was never one, or already holds that commit.
@@ -1026,8 +1026,8 @@ export class CommunitySession {
   /**
    * `mentions`: places of the text that name members, sealed with it (`m`). Never everyone in a community. They
    * count against the text's 16 KiB, so the box stays within what older apps accept. `reply`: the message it
-   * answers (`r`), counted the same way. `forwarded`: a forwarded text's hop count (`fw`, WISP 9xx § Forwards). `card`:
-   * a status card, checked by the caller (`sc`, WISP 4xx · Status Cards), counted the same way; the text is its fallback.
+   * answers (`r`), counted the same way. `forwarded`: a forwarded text's hop count (`fw`, WISP 903 § Forwards). `card`:
+   * a status card, checked by the caller (`sc`, WISP 405 · Status Cards), counted the same way; the text is its fallback.
    */
   sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
@@ -1064,7 +1064,7 @@ export class CommunitySession {
   }
 
   /**
-   * An edit of one of my messages (WISP 9xx · Group Community § Edits): an application frame like `sendApp`'s, sealed
+   * An edit of one of my messages (WISP 903 · Group Community § Edits): an application frame like `sendApp`'s, sealed
    * to the current epoch, but with a text's room rather than an application frame's, since it carries a whole text.
    * The nick is left out when the text leaves no room for it.
    */
@@ -1521,7 +1521,7 @@ export class CommunitySession {
     });
   }
 
-  // -- metadata (WISP 9xx § Metadata) ------------------------------------------------------------
+  // -- metadata (WISP 903 § Metadata) ------------------------------------------------------------
 
   /** Sets (or, with null, removes) the group's picture: only the admin, signed under the current commit. */
   setPicture(picture: string | null, now = Date.now()): Promise<void> {

@@ -61,7 +61,7 @@ const TRANSPORT_NAMES: Record<string, PairedTransport | "auto" | "dht"> = {
 
 // ---------- mentions ----------
 
-/** Code points before `index` (UTF-16) in `text`: mentions count code points (WISP 9xx § Mentions). */
+/** Code points before `index` (UTF-16) in `text`: mentions count code points (WISP 902 § Mentions). */
 const codePoints = (text: string, index: number) => [...text.slice(0, index)].length;
 
 /**
@@ -197,7 +197,7 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
     const replyTo = str(params, "reply");
-    // Buttons under the text (WISP 4xx · Message Buttons): the text is the question, and what older apps show.
+    // Buttons under the text (WISP 406 · Message Buttons): the text is the question, and what older apps show.
     const card = buttonsCard(params);
     // A kept `typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { linkId: link.id }, false);
@@ -434,7 +434,7 @@ const METHODS: Record<string, Method> = {
     return { group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
-   * WISP 9xx § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
+   * WISP 902 § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
    * (a private group's over the edges that are up, the others when theirs open; a community's through the group).
    * `mentions`: members the new text names beyond those the message named. `sent`: no longer waiting for the pace.
    */
@@ -466,7 +466,7 @@ const METHODS: Record<string, Method> = {
     return { group: group.id, ...(await react(ctx, `group:${group.id}`, params)) };
   },
   /**
-   * WISP 9xx · Group Mesh § Typing: `chat.typing` in a private group, said on the edges that are open (`reached`: to
+   * WISP 902 · Group Mesh § Typing: `chat.typing` in a private group, said on the edges that are open (`reached`: to
    * how many members), with the same kinds, status rules, 6 s hold and `for`. A community does not carry typing yet.
    */
   async "group.typing"(ctx, params) {
@@ -527,7 +527,7 @@ const METHODS: Record<string, Method> = {
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
     let args = raw as Params | undefined;
-    // Real money moves only on an explicit confirmation of this call (WISP 11xx § Mainnet).
+    // Real money moves only on an explicit confirmation of this call (WISP 1100 § Mainnet).
     if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
       throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
     }

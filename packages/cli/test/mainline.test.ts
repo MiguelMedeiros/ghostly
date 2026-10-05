@@ -8,7 +8,7 @@ import { error, ghostly, home, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.groups, core.relay-client
 
 /**
- * Pkarr over the Mainline DHT on Node (WISP 11xx § Runtime): a headless Ghostly keeps finding its contacts while the
+ * Pkarr over the Mainline DHT on Node (WISP 1100 § Runtime): a headless Ghostly keeps finding its contacts while the
  * relays fail. A DHT testnet of this process's own nodes on loopback, relays that answer 500 (or work), and two group
  * edges (paired links pinned to member keys, as the engine builds them) with WebRTC stood in for.
  */

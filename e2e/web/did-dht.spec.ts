@@ -4,7 +4,7 @@ import { expect, test } from "../support/fixtures";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 
 /**
- * Every profile has a did:dht (WISP 3xx-did-dht), shown in the Ghostly card's details. The app publishes it to
+ * Every profile has a did:dht (WISP 310-did-dht), shown in the Ghostly card's details. The app publishes it to
  * the Pkarr relay (the suite's, support/relay.ts), and an independent resolver, TBD's @web5/dids, reads it
  * there: the identity key alone at first, then with the Nostr identity the person lists, then without it again.
  */

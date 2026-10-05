@@ -9,7 +9,7 @@ import type { LinkParams } from "./invite";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 
 /**
- * Store-and-forward for an away contact (WISP 4xx draft, `hold/1`).
+ * Store-and-forward for an away contact (WISP 404 draft, `hold/1`).
  *
  * What a person sends while the contact is away is sealed into a *bundle* (signed by the sender's
  * participation key, then encrypted to a key only the two of them can derive), put in the sender's

@@ -116,7 +116,7 @@ function irohWasmBytes(): Buffer {
 export interface RuntimeOptions { deferGroups?: boolean }
 
 /**
- * Starts the app's engine on this profile (WISP 11xx § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
+ * Starts the app's engine on this profile (WISP 1100 § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
  * HyperDHT native in this process, Iroh's wasm build (relay only, as the web app), Pkarr through the relays in the
  * settings and the Mainline DHT directly (read when the relays fail, written always).
  * The caller holds the profile's lock.
@@ -155,7 +155,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     rmSync(restored, { force: true });
   }
   const webrtc = await installWebRtc();
-  // Voice calls (WISP 11xx § Calls): offered to contacts (calls/1) only where their media can run.
+  // Voice calls (WISP 1100 § Calls): offered to contacts (calls/1) only where their media can run.
   const stack = webrtc ? await loadCallStack() : "Calls need WebRTC, which is off on this headless Ghostly";
   const callsUnavailable = typeof stack === "string" ? stack : null;
   installFileFetch();
@@ -186,13 +186,13 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     // A CLI profile is one device's (WISP 06): no device state is kept for it.
     singleDevice: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
-    // No wallet starts by itself: a bot has the wallets it made (WISP 11xx § Wallet SDKs on Node).
+    // No wallet starts by itself: a bot has the wallets it made (WISP 1100 § Wallet SDKs on Node).
     automaticWallets: false,
     // Fedimint's client databases are files of the profile, each in a worker thread (./fedimint.ts).
     fedimintSdk: nodeFedimintSdk(join(paths.dir, "fedimint")),
     // Local web apps may be shared with a contact, reached on loopback only (src/services.ts).
     servicesSupport: true,
-    // A daemon stays online: a hub of the large private groups it is in (WISP 9xx · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
+    // A daemon stays online: a hub of the large private groups it is in (WISP 902 · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
     staysOnline: process.env.GHOSTLY_HUB !== "0",
     localFetch: nodeLocalFetch,
     // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.

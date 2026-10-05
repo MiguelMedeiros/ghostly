@@ -8,7 +8,7 @@ import { CardEditPacer, EditBuffer } from "./edits";
 import { RESEND_POLICY } from "./outbox";
 
 /*
- * Edits in groups (WISP 9xx § Edits, both profiles), as the engine keeps them: on the message's row, the highest edit
+ * Edits in groups (WISP 902 § Edits, both profiles), as the engine keeps them: on the message's row, the highest edit
  * number winning, the versions it replaces in its history, as in a 1:1 chat (WISP 400 § Edits). How an edit travels is
  * the group's (`send`): a private group's `group-edit` frames over the edges, a community's application frame.
  *
@@ -45,7 +45,7 @@ const chatOf = (groupId: string) => `group:${groupId}`;
 export class GroupEdits {
   private readonly now: () => number;
   private readonly buffer: EditBuffer<GroupEdit & { sender: string }>;
-  /** Members' status card updates, applied at most once a second per message (WISP 4xx · Status Cards). */
+  /** Members' status card updates, applied at most once a second per message (WISP 405 · Status Cards). */
   private readonly cards: CardEditPacer;
   private readonly sendPace = new Map<string, RateWindow>();
   private readonly receivePace = new Map<string, RateWindow>();
@@ -62,7 +62,7 @@ export class GroupEdits {
   /**
    * Edits a text of mine in a group: the new text here at once, and to the group as soon as the pace allows. Mentions
    * the message had stay where their words still are; `added` are those picked while editing. `card`: the status card
-   * of the new version, already checked (WISP 4xx · Status Cards); a card message then takes `STATUS_CARD_LIMITS.edits`.
+   * of the new version, already checked (WISP 405 · Status Cards); a card message then takes `STATUS_CARD_LIMITS.edits`.
    */
   async edit(groupId: string, messageId: string, raw: string, added: readonly GroupMention[] = [], card?: StatusCard): Promise<GroupEditResult> {
     const refuse = (error: string) => ({ error, refused: true });

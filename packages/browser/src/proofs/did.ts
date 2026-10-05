@@ -9,7 +9,7 @@ import { assertPublicHost, chosenResolver, DomainCheckError, type DohResolverId 
  * Network side of DID proofs: resolving a DID to the keys its document lists, under the same limits as the
  * other providers. did:key and did:jwk need no network. did:web is one HTTPS GET of its did.json (bounded,
  * no redirect, after checking that the domain's addresses are public, like the domain proof). did:dht is a
- * signed Pkarr record read from a relay (`resolveDidDht`, WISP 3xx-did-dht).
+ * signed Pkarr record read from a relay (`resolveDidDht`, WISP 310-did-dht).
  *
  * What a check reveals, and to whom:
  *  - did:web: the DNS-over-HTTPS resolver learns the domain; the domain's web server, run by the person

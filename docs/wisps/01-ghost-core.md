@@ -16,7 +16,7 @@
 
 ## The DHT as rendezvous and floor (revision 0.2)
 
-Ghost is layer 0 of every 1:1 chat ([400](400-chat.md)). It is always the **rendezvous**: where the invite's keys meet, where the first contact and handshake happen ([403](403-dht-text.md#first-contact)), where each side publishes its presence, its capability record ([03](03-capabilities.md#layer-0-capability-record)) and the signaling or descriptors a peer-to-peer transport needs ([100](100-transports.md)). It is also the **floor**: when no peer-to-peer transport connects, or the one in use drops, short text and its receipts travel in bounded records ([403](403-dht-text.md)), and a pointer can say where held items wait ([4xx](4xx-store-and-forward.md)). Everything larger leaves the DHT: it goes over layer 1, or into the sender's own storage.
+Ghost is layer 0 of every 1:1 chat ([400](400-chat.md)). It is always the **rendezvous**: where the invite's keys meet, where the first contact and handshake happen ([403](403-dht-text.md#first-contact)), where each side publishes its presence, its capability record ([03](03-capabilities.md#layer-0-capability-record)) and the signaling or descriptors a peer-to-peer transport needs ([100](100-transports.md)). It is also the **floor**: when no peer-to-peer transport connects, or the one in use drops, short text and its receipts travel in bounded records ([403](403-dht-text.md)), and a pointer can say where held items wait ([404](404-store-and-forward.md)). Everything larger leaves the DHT: it goes over layer 1, or into the sender's own storage.
 
 What Ghost records may carry, per chat and per direction:
 
@@ -25,7 +25,7 @@ What Ghost records may carry, per chat and per direction:
 | Presence and signaling (the link's own key) | Online marker, `_rtc` WebRTC signaling, service advertisement | [PROTOCOL.md](../PROTOCOL.md), [101](101-webrtc.md) |
 | DHT mailbox (`_dm`, `_dmk`) | One signed envelope: delivery mode, at most one text of 256 bytes, a receipt | [403](403-dht-text.md) |
 | Capability record (`_caps`) | Transports, capabilities, minimal native descriptors, shared name | [03](03-capabilities.md#layer-0-capability-record) |
-| Hold pointer (`_hold`) | Where the sender's held items are, what it received | [4xx](4xx-store-and-forward.md) |
+| Hold pointer (`_hold`) | Where the sender's held items are, what it received | [404](404-store-and-forward.md) |
 | Compatibility `_msgs` | Timestamp text batches of v0.4 chats | [402](402-legacy-chat.md) |
 
 ## Purpose and current behavior

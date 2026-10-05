@@ -4,7 +4,7 @@ import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.catch-up, groups.link.join
 
 /**
- * A line written in a private group while its author was behind on the chain (WISP 9xx § Catch-up, "Frames said
+ * A line written in a private group while its author was behind on the chain (WISP 902 § Catch-up, "Frames said
  * again"): the author's app was closed while someone was let in, and it writes the moment it opens again, before any
  * edge is up. Sealed under the epoch it last knew, the line could never reach the member let in meanwhile; found by
  * the 1.1 release-gate bug hunt (CLI daemons, a mesh of six: X never got it in 240 s). On headless engines

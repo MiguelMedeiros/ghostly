@@ -27,7 +27,7 @@ export function canEdit(message: Pick<StoredMessage, "sender" | "linkId" | "wire
 /** A group message's id: `<sender>:<epoch>:<seq>` in a private group, `<sender>:<epoch>:<commit>:<seq>` in a community. */
 const GROUP_MESSAGE_ID = /^[a-z0-9]{52}:\d+:(?:[0-9a-f]{16}:)?\d+$/;
 
-/** A text of mine in a group (WISP 9xx § Edits): one the group carried under its id, not a payment, a note or an event line. */
+/** A text of mine in a group (WISP 902 § Edits): one the group carried under its id, not a payment, a note or an event line. */
 export function canEditInGroup(message: Pick<StoredMessage, "sender" | "linkId" | "id" | "file" | "paymentId" | "event" | "groupPay">): boolean {
   return message.sender === "me" && message.linkId.startsWith("group:") && GROUP_MESSAGE_ID.test(message.id) && !message.file && !message.paymentId
     && !message.event && !message.groupPay;
@@ -45,9 +45,9 @@ export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "
 /**
  * The message after edit `seq`, made at `at`: the new text (and the preview and the status card that came with it, or
  * none: each belongs to its version), the version it replaces kept in the history. A text that did not change adds no
- * version. A status card's update adds none either (WISP 4xx · Status Cards): it replaces the card in place, and its
+ * version. A status card's update adds none either (WISP 405 · Status Cards): it replaces the card in place, and its
  * text is only the card's fallback, so a bot's thousands of updates keep one card and no trail of versions. Buttons
- * (WISP 4xx · Message Buttons) are the exception: their text is the question people answer, so a new one keeps the
+ * (WISP 406 · Message Buttons) are the exception: their text is the question people answer, so a new one keeps the
  * version it replaces, and only a change of the buttons alone (the answer marked, closed) adds none.
  */
 export function withEdit(message: StoredMessage, edit: { seq: number; at: number; text: string; preview?: LinkPreview; card?: StatusCard; pending?: boolean }): StoredMessage {

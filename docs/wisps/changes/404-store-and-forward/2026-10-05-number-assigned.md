@@ -1,0 +1,1 @@
+The number is assigned now that the feature ships in the app: this draft is WISP 404 (it was 4xx, file 4xx-store-and-forward.md). The old file and its website address forward here. Wire identifiers and behavior are unchanged.

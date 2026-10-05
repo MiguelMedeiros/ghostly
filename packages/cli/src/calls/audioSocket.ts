@@ -6,7 +6,7 @@ import { privateFolder } from "../privateFolder";
 import { bytesToMs, type CallRate } from "./pcm";
 
 /**
- * A call's audio socket (WISP 11xx § Calls): `<profile>/calls/<call>.sock`, 0600, in a folder only the owner may
+ * A call's audio socket (WISP 1100 § Calls): `<profile>/calls/<call>.sock`, 0600, in a folder only the owner may
  * open. When that path is too long for a Unix socket: `/tmp/ghostly-calls-<hash of the profile>/<call>.sock`, in a
  * folder of the owner's, 0700, checked as such before use. A named pipe on Windows.
  */

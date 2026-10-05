@@ -1,7 +1,7 @@
 import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /**
- * Typing in a private group (WISP 9xx · Group Mesh § Typing): the members see who is writing in the header, in place
+ * Typing in a private group (WISP 902 · Group Mesh § Typing): the members see who is writing in the header, in place
  * of the member count; two at once are both named; a message ends its writer's line, and a member who stops typing
  * is gone from it a few seconds later. Nothing of it is stored: the history holds only the messages.
  */

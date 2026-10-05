@@ -55,7 +55,7 @@ export const holdFetchTimeoutMs = (max: number): number => HOLD_FETCH_MS + Math.
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
- * Store-and-forward for away contacts (WISP 4xx, `hold/1`), on both ends of every chat that turned it
+ * Store-and-forward for away contacts (WISP 404, `hold/1`), on both ends of every chat that turned it
  * on: what this device sends while the contact is away is sealed and put in this device's own storage,
  * named in a manifest, and pointed at from a small record on the DHT; what the contact held for this
  * device is picked up from its pointer, checked and stored in order, and acknowledged on this device's

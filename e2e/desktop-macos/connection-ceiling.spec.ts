@@ -7,7 +7,7 @@ import { HeadlessBot } from "../support/headless";
 import { LocalRelay } from "../support/relay";
 
 /**
- * A measurement (WISP 9xx · Group Mesh § Hubs, Budget): the Desktop app on a Mac opens only so many `RTCPeerConnection`s
+ * A measurement (WISP 902 · Group Mesh § Hubs, Budget): the Desktop app on a Mac opens only so many `RTCPeerConnection`s
  * at once in its page, about 46 to 49 (#402). What happens to a 1:1 chat and a call while it sits there?
  *
  * The app pairs a 1:1 chat with a headless bot, then its page is filled with loopback edges (two connections each,

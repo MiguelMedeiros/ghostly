@@ -23,28 +23,28 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 203 | Payments | [Lightning](203-lightning.md) | Adapter | Draft | Available |
 | 204 | Payments | [Ark payments via Bark](204-bark.md) | Adapter | Draft | Available |
 | 205 | Payments | [Lightning Addresses and LNURL-pay](205-lnurl.md) | Adapter | Draft | Available |
-| 2xx | Payments | [Spark payments](2xx-spark.md) | Adapter | Draft | Available |
-| 2xx | Payments | [Fedimint ecash and Lightning through a federation](2xx-fedimint.md) | Adapter | Draft | Available |
+| 206 | Payments | [Spark payments](206-spark.md) | Adapter | Draft | Available |
+| 207 | Payments | [Fedimint ecash and Lightning through a federation](207-fedimint.md) | Adapter | Draft | Available |
 | 300 | Identity | [Identity Proofs](300-peer-proofs.md) | Contract | Draft | Available |
 | 301 | Identity | [Nostr](301-nostr.md) | Adapter | Draft | Available |
 | 3xx | Identity | [Pubky identity (approved in Pubky Ring or Pubky Passport)](302-pubky.md) | Adapter | Draft | Available |
 | 3xx | Identity | [Keet](303-keet.md) | Adapter | Draft | Research |
-| 3xx | Identity | [Domain Proofs](3xx-domain.md) | Adapter | Draft | Available |
-| 3xx | Identity | [OpenPGP](3xx-openpgp.md) | Adapter | Draft | Available |
-| 3xx | Identity | [Bitcoin Address Proof](3xx-bitcoin.md) | Adapter | Draft | Available |
-| 3xx | Identity | [SSH keys](3xx-ssh.md) | Adapter | Draft | Available |
+| 304 | Identity | [Domain Proofs](304-domain.md) | Adapter | Draft | Available |
+| 305 | Identity | [OpenPGP](305-openpgp.md) | Adapter | Draft | Available |
+| 306 | Identity | [Bitcoin Address Proof](306-bitcoin.md) | Adapter | Draft | Available |
+| 307 | Identity | [SSH keys](307-ssh.md) | Adapter | Draft | Available |
 | 3xx | Identity | [Provider-attested identity (OpenID Connect)](3xx-oidc-proofs.md) | Adapter | Draft | Planned |
-| 3xx | Identity | [Nostr social layer](3xx-nostr-social.md) | Adapter | Draft | Available |
-| 3xx | Identity | [Profile DID (did:dht)](3xx-did-dht.md) | Contract | Draft | Available |
-| 3xx | Identity | [Decentralized identifiers (DIDs)](3xx-did.md) | Adapter | Draft | Available |
-| 3xx | Identity | [AT Protocol identity (Bluesky)](3xx-atproto.md) | Adapter | Draft | Available |
+| 309 | Identity | [Nostr social layer](309-nostr-social.md) | Adapter | Draft | Available |
+| 310 | Identity | [Profile DID (did:dht)](310-did-dht.md) | Contract | Draft | Available |
+| 311 | Identity | [Decentralized identifiers (DIDs)](311-did.md) | Adapter | Draft | Available |
+| 312 | Identity | [AT Protocol identity (Bluesky)](312-atproto.md) | Adapter | Draft | Available |
 | 400 | Chat | [Chat Messaging](400-chat.md) | Contract | Draft | Available |
 | 401 | Chat | [Chat Session](401-paired-chat.md) | Profile | Draft | Available |
 | 402 | Chat | [Compatibility Chat (v0.4 Timestamp Profile)](402-legacy-chat.md) | Profile | Draft | Available |
 | 403 | Chat | [DHT Text](403-dht-text.md) | Profile | Draft | Available |
-| 4xx | Chat | [Store-and-Forward for an Away Contact](4xx-store-and-forward.md) | Profile | Draft | Available |
-| 4xx | Chat | [Status Cards for Bots](4xx-status-cards.md) | Profile | Draft | Available |
-| 4xx | Chat | [Message Buttons for Bots](4xx-message-buttons.md) | Profile | Draft | Available |
+| 404 | Chat | [Store-and-Forward for an Away Contact](404-store-and-forward.md) | Profile | Draft | Available |
+| 405 | Chat | [Status Cards for Bots](405-status-cards.md) | Profile | Draft | Available |
+| 406 | Chat | [Message Buttons for Bots](406-message-buttons.md) | Profile | Draft | Available |
 | 500 | Files | [File Transfer](500-files.md) | Contract | Draft | Available |
 | 501 | Files | [Chat Files](501-paired-files.md) | Profile | Draft | Available |
 | 502 | Files | [Compatibility File Frames](502-legacy-files.md) | Profile | Draft | Available |
@@ -56,12 +56,12 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 801 | Invites | [Implemented Invitation Profiles](801-invitation-profiles.md) | Profile | Draft | Available |
 | 900 | Groups | [Group Session Negotiation](900-group-sessions.md) | Contract | Draft | Available |
 | 9xx | Groups | [GossipSub Transport](901-gossipsub.md) | Adapter | Draft | Planned |
-| 9xx | Groups | [Group Mesh Distribution Profile](9xx-group-mesh.md) | Profile | Draft | Available |
-| 9xx | Groups | [Group Community Distribution Profile](9xx-group-community.md) | Profile | Draft | Available |
+| 902 | Groups | [Group Mesh Distribution Profile](902-group-mesh.md) | Profile | Draft | Available |
+| 903 | Groups | [Group Community Distribution Profile](903-group-community.md) | Profile | Draft | Available |
 | 1000 | Storage | [Storage Contract](1000-storage.md) | Contract | Draft | Available |
 | 1001 | Storage | [Local File Storage](1001-local-storage.md) | Adapter | Draft | Available |
 | 1002 | Storage | [S3-Compatible Storage](1002-s3-storage.md) | Adapter | Draft | Available |
-| 11xx | Headless | [Headless Runtime and Local Control API](11xx-headless.md) | Contract | Draft | Available |
+| 1100 | Headless | [Headless Runtime and Local Control API](1100-headless.md) | Contract | Draft | Available |
 | 12xx | Apps and plugins | [Apps and Plugins: Packages, Stores and Apps Sent in a Chat](12xx-marketplace.md) | Contract | Draft | Planned |
 
 <!-- wisp-index:end -->

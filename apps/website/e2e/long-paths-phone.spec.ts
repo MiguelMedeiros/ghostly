@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
  * A long source path (packages/browser/src/proofs/...) has nowhere to break, and on a 375 px phone it pushed the WISP
  * summary card and a roadmap candidate past the screen's edge. The page clips sideways scroll, so the text was cut off.
  */
-for (const path of ["/wisps/3xx-bitcoin", "/roadmap"]) {
+for (const path of ["/wisps/306-bitcoin", "/roadmap"]) {
   test(`${path}: long paths wrap inside a 375 px phone`, async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(path);

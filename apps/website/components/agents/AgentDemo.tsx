@@ -47,7 +47,7 @@ const fill = (text: string, values: Record<string, string | number>) => text.rep
 
 /**
  * A Ghostly chat with an agent, as a picture that plays by itself: you ask, Casper thinks with a status line, posts a
- * task card that goes from queued to running to done with its pull request, asks "Merge it?" with two buttons (WISP 4xx ·
+ * task card that goes from queued to running to done with its pull request, asks "Merge it?" with two buttons (WISP 406 ·
  * Message Buttons, drawn as the app's MessageButtons.tsx), you tap Merge, and the bot closes the question; then a
  * routine card. Every piece is
  * always laid out (`data-on` shows it), so nothing in or around the frame moves when one arrives. It plays only while

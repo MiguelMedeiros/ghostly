@@ -5,7 +5,7 @@ import type { GhostlyEvent } from "./events";
 import { ownSocket } from "./privateFolder";
 
 /**
- * A connection to a profile's daemon over its socket (WISP 11xx § Local control API). `null` from `connectDaemon`
+ * A connection to a profile's daemon over its socket (WISP 1100 § Local control API). `null` from `connectDaemon`
  * means no daemon answers there: a one-shot command runs the profile itself.
  */
 export class DaemonClient {

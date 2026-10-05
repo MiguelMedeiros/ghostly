@@ -1,7 +1,7 @@
 import { chat, expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
 
 /**
- * Mentions in a group (WISP 9xx § Mentions) between three browsers that never pair. Alice picks Bob from the
+ * Mentions in a group (WISP 902 § Mentions) between three browsers that never pair. Alice picks Bob from the
  * composer's @ list; the message names him by key. Bob and Carol both muted the group: Bob still hears the
  * mention and gets its notification (his "Still notify me when I'm mentioned" is on, the default), and his list
  * shows an @; Carol, not named, hears nothing. Once Bob turns that option off, a mention stays quiet too.

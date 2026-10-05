@@ -14,7 +14,7 @@ import type { Settings, StoredGroup, StoredLink } from "../shared/types";
  * - it reads the records that profile's chats would read first, over the same read path, and publishes nothing;
  * - a DHT text is opened only to tell it from a keep-alive envelope: what is kept is its id, never its words;
  * - a held item is known from the sender's pointer alone; its bundle is not fetched;
- * - a community group is known from its beacon's head (WISP 9xx § Head): the newest frame a hub holds, by its identity
+ * - a community group is known from its beacon's head (WISP 903 § Head): the newest frame a hub holds, by its identity
  *   alone. Mesh groups publish nothing of the kind: their frames wait on members' devices, so they are not covered.
  *
  * Each profile has its own small budget of reads, so one with many chats cannot spend the requests the running
@@ -157,7 +157,7 @@ export class ProfilePeek {
   }
 
   /**
-   * A community group: its beacon, which hubs republish every 30 s with the newest frame they hold (WISP 9xx § Head).
+   * A community group: its beacon, which hubs republish every 30 s with the newest frame they hold (WISP 903 § Head).
    * New when this profile has not taken that frame. Nothing is opened but the head.
    */
   private async community(group: StoredGroup, transport: Pick<PkarrTransport, "resolve">): Promise<PeekChat> {

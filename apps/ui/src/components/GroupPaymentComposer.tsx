@@ -16,7 +16,7 @@ const EVERYONE = "*";
 const GROUP_RAILS: readonly ChatRail[] = ["cashu", "lightning"];
 
 /**
- * ⚡ in a group (WISP 9xx § Payments): first whom — one member, or the whole group for a request anyone may pay
+ * ⚡ in a group (WISP 902 § Payments): first whom — one member, or the whole group for a request anyone may pay
  * once — then the chat's own cards, review and approval. With one member everything goes over the edge to them,
  * exactly as in a chat; in a community, through the group, sealed to them (hubs pass it on unread, and a member who
  * is away gets it on return). The group sees what happens as a note.

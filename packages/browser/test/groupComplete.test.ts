@@ -10,7 +10,7 @@ import type { StoredMessage } from "../src/shared/types";
 
 /*
  * A private group's message first stored from a copy another member handed on without its author's whole signature
- * (WISP 9xx · Group Mesh § Catch-up): the whole copy, when it comes, adds what the first lacked to the stored row.
+ * (WISP 902 · Group Mesh § Catch-up): the whole copy, when it comes, adds what the first lacked to the stored row.
  */
 
 beforeEach(async () => {

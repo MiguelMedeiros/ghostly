@@ -8,7 +8,7 @@ import { errorText } from "../lib/errorText";
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1)} MB`;
 
 /**
- * Store-and-forward for one chat (WISP 4xx): whether what is sent while the contact is away waits in
+ * Store-and-forward for one chat (WISP 404): whether what is sent while the contact is away waits in
  * this device's own storage, sealed for them, and whether this device picks up what they held for it.
  * One switch covers both directions; a way works only when both sides allow it, like payments.
  */

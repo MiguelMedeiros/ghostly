@@ -9,7 +9,7 @@ import type { PrChecks } from "@ghostly/core";
 import { MemberFace, type MemberFaceOf } from "../chat/SenderAvatar";
 
 /*
- * A task on the Tasks board (WISP 4xx · Status Cards § The Tasks board): two lines. Its title on one line (whole in its
+ * A task on the Tasks board (WISP 405 · Status Cards § The Tasks board): two lines. Its title on one line (whole in its
  * tooltip, and unfolded while the keys are on it) with how long ago it last changed; then at most three chips: who sent
  * it, where, and its pull request. A thin bar along its foot is its progress. The rest is behind Details. The card is a
  * button that opens its chat on its message; it changes nothing: the bot that owns a task changes its status.

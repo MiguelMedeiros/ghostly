@@ -3,7 +3,7 @@ import { chat, expect, say, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
- * A bot on the headless Ghostly (packages/cli, WISP 11xx) and a person on the web app, in one chat: the same engine on
+ * A bot on the headless Ghostly (packages/cli, WISP 1100) and a person on the web app, in one chat: the same engine on
  * both sides, meeting through the test's Pkarr relay and going live over WebRTC (Chromium and libdatachannel).
  */
 test.describe.configure({ timeout: 4 * 60_000 });

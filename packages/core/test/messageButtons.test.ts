@@ -10,7 +10,7 @@ import { STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, readStatusCard, 
 // covers: chat.buttons.wire
 
 /*
- * Message buttons (WISP 4xx · Message Buttons): a card of kind `buttons` beside a bot's text, bounded and read by the
+ * Message buttons (WISP 406 · Message Buttons): a card of kind `buttons` beside a bot's text, bounded and read by the
  * reader's rule; a press as a reply naming the button (`r.b`), which an older reader takes as an ordinary reply; both on
  * every wire that carries a card or a reply.
  */

@@ -4,7 +4,7 @@ import type { GroupPayFrame, GroupPayNote, PaymentView, StoredMessage } from "..
 // covers: groups.payments.member, groups.payments.group-request, groups.payments.notes
 
 /**
- * What a group sees of payments between its members (WISP 9xx § Payments): `group-pay` notes, believed only from
+ * What a group sees of payments between its members (WISP 902 § Payments): `group-pay` notes, believed only from
  * the member they are about, merged forward only, and said by each device about its own part.
  */
 

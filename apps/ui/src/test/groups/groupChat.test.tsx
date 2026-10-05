@@ -104,7 +104,7 @@ describe("GroupChat: joining through a link", () => {
   });
 
   it("an app with no WebRTC but native transports is told it is in in a moment, as any", () => {
-    // Ghostly Desktop on Linux: Iroh or HyperDHT carry the entry session (WISP 9xx § Transports).
+    // Ghostly Desktop on Linux: Iroh or HyperDHT carry the entry session (WISP 902 § Transports).
     fakeEngine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false } });
     openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
     expect(screen.getByTestId("group-joining")).not.toHaveTextContent("Groups can't connect from this app yet");

@@ -3,7 +3,7 @@ import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
 
 /**
- * Payments in a community group (WISP 9xx · Group Community § Payments), three browsers that never pair and a real
+ * Payments in a community group (WISP 903 · Group Community § Payments), three browsers that never pair and a real
  * Cashu mint (the test mint, or `E2E_MINT_URL`, see support/mint.ts). Members have no edge to each other: the request
  * and the ecash go through the hubs, sealed to the two members. Alice asks Bob while Bob's app is closed; back, Bob
  * gets it from whoever is there and pays; Carol sees the request and then sees it paid. Then Alice asks the whole

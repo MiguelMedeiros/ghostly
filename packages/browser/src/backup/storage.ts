@@ -10,7 +10,7 @@ export interface BackupStore {
 export interface StoredBackup { name: string; size?: number; modified?: number; created: number }
 
 /**
- * A place that can also hold items for an away contact (WISP 4xx store-and-forward): it hands out
+ * A place that can also hold items for an away contact (WISP 404 store-and-forward): it hands out
  * addresses that read one object for a while without any credential, which is what the contact gets.
  */
 export interface HoldStore extends BackupStore {

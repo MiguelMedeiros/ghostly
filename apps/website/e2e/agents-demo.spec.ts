@@ -79,8 +79,8 @@ test("the app's screens load, and Connect your agent has three steps with Copy o
   await expect(steps.nth(0)).toContainText("npm install -g @ghostlytools/cli");
   await expect(steps.nth(2)).toContainText("ghostly task send owner");
   expect(await page.getByTestId("agent-connect").locator(".cl-copy").count()).toBe(6);
-  await expect(page.locator('a[href="/wisps/4xx-status-cards"]').first()).toBeAttached();
-  await expect(page.locator('a[href="/wisps/4xx-message-buttons"]').first()).toBeAttached();
+  await expect(page.locator('a[href="/wisps/405-status-cards"]').first()).toBeAttached();
+  await expect(page.locator('a[href="/wisps/406-message-buttons"]').first()).toBeAttached();
 });
 
 test("What your agent can show has buttons, with the CLI's flags", async ({ page }) => {

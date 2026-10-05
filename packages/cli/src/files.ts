@@ -13,7 +13,7 @@ import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
 
 /**
- * Files and voice notes in a chat (WISP 11xx, phase 3), as the app's composer sends them (packages/browser
+ * Files and voice notes in a chat (WISP 1100, phase 3), as the app's composer sends them (packages/browser
  * platform/services.ts `sendFile`): the bytes go into the profile's file store first, then the engine offers them.
  * Large files follow files/3: the receiving side's person (here, a command) accepts or declines each offer.
  */

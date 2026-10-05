@@ -8,7 +8,7 @@
 //
 // GHOSTLY_SOCKET names the daemon's socket (`ghostly daemon status` prints it; left out, the bot asks). The call's
 // audio is raw PCM on a socket of its own: s16le, mono, at the call's rate, 20 ms frames from the call, any amount to
-// it (WISP 11xx § Calls).
+// it (WISP 1100 § Calls).
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { connect } from "node:net";

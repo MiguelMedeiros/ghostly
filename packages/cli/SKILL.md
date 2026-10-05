@@ -360,4 +360,4 @@ Every call of the app's engine is reachable: `ghostly engine --list`, then `ghos
 Not on the CLI yet: Bark wallets, OpenID Connect proofs, and video in calls (voice only). More:
 [AI agents on Ghostly](https://ghostly.tools/developers/agents), the
 [CLI guide](https://github.com/MiguelMedeiros/ghostly/blob/main/docs/CLI.md), the
-[package README](https://github.com/MiguelMedeiros/ghostly/blob/main/packages/cli/README.md) and WISP 11xx.
+[package README](https://github.com/MiguelMedeiros/ghostly/blob/main/packages/cli/README.md) and WISP 1100.

@@ -254,7 +254,7 @@ test("a call to a closed web app wakes it with \"Incoming call\", and rings once
 });
 
 /**
- * A private group (WISP 9xx · Group Mesh § Wake-up push): Bo shares his subscription with Ana on their edge, and a
+ * A private group (WISP 902 · Group Mesh § Wake-up push): Bo shares his subscription with Ana on their edge, and a
  * message of Ana's that names him wakes his closed app; one that does not name him posts nothing. Muting the group
  * tells Ana's app to forget it.
  */

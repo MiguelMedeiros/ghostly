@@ -27,7 +27,7 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`packages/browser`](../packages/browser) | The Ghostly peer (`GhostlyNode`): engine, wallets, identities, IndexedDB and file storage, and the platform stand-ins the shared UI is built with. Runs in the web app, the extension and Desktop |
 | [`packages/react`](../packages/react) | React hooks shared by the apps (`useWebRTC`) |
 | [`packages/sdk`](../packages/sdk) | `@ghostlytools/sdk`: adapter contracts, fakes, contract suites, the plugin registry and the protocol library. See [SDK.md](SDK.md) |
-| [`packages/cli`](../packages/cli) | `ghostly`, the engine on Node without a screen, for bots: a daemon, a local socket API and a JSON event stream. See [WISP 11xx](wisps/11xx-headless.md) |
+| [`packages/cli`](../packages/cli) | `ghostly`, the engine on Node without a screen, for bots: a daemon, a local socket API and a JSON event stream. See [WISP 1100](wisps/1100-headless.md) |
 | [`packages/iroh-web`](../packages/iroh-web) | Iroh compiled to wasm (`@ghostly/iroh-web`), built from `native/transports/iroh-web` |
 | [`apps/ui`](../apps/ui) | The UI every app builds (React). `apps/ui/src/desktop` holds Desktop's host |
 | [`apps/desktop`](../apps/desktop) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications, stored media streamed to the player, web push posts, and on Linux the calls' media (webrtc-rs and GStreamer, as WebKitGTK has no WebRTC) |
@@ -59,12 +59,12 @@ Every 1:1 chat is the same kind of chat ([WISP 400](wisps/400-chat.md)):
 1. **Invite.** One `ghostly1…` bech32m code, or the link `https://ghostly.tools/#ghostly1…` ([WISP 801](wisps/801-invitation-profiles.md)).
 2. **Rendezvous on the DHT.** Both sides publish and read signed Pkarr records. First contact runs on the DHT and on a stream at once; whichever verifies first pins the contact's participation key.
 3. **Upgrade.** The apps rank the transports they share and dial: WebRTC, Iroh or HyperDHT. The first authenticated session makes the chat `live`.
-4. **DHT floor.** With no stream, the chat is `on-dht`: text up to 256 bytes goes over the DHT ([WISP 403](wisps/403-dht-text.md)), longer items wait or are held ([WISP 4xx](wisps/4xx-store-and-forward.md)), and the stream is retried in the background for as long as the app runs.
+4. **DHT floor.** With no stream, the chat is `on-dht`: text up to 256 bytes goes over the DHT ([WISP 403](wisps/403-dht-text.md)), longer items wait or are held ([WISP 404](wisps/404-store-and-forward.md)), and the stream is retried in the background for as long as the app runs.
 5. **DHT only.** Either side can choose it per chat in the connection panel. Both then stay off streams.
 
 Chats made by Ghostly 0.4 are **compatibility chats** ([WISP 402](wisps/402-legacy-chat.md)): they keep their original record profile and offer "Continue in a new chat".
 
-Groups run on top of 1:1 sessions: private groups up to 32 members, carried by hubs past 16 ([group mesh](wisps/9xx-group-mesh.md)) and communities up to 256 ([group community](wisps/9xx-group-community.md)).
+Groups run on top of 1:1 sessions: private groups up to 32 members, carried by hubs past 16 ([group mesh](wisps/902-group-mesh.md)) and communities up to 256 ([group community](wisps/903-group-community.md)).
 
 ## Where state lives
 
@@ -73,7 +73,7 @@ Groups run on top of 1:1 sessions: private groups up to 32 members, carried by h
 | Chats, keys, messages, settings | The device: IndexedDB (web, extension) or the WebView's storage (Desktop). Never published |
 | Files | Origin-private file system in browsers, real files on Desktop |
 | Presence, signals, capability records, DHT text | Pkarr records, short-lived, republished while the app runs |
-| Held items (optional) | The sender's own S3-compatible storage ([WISP 4xx](wisps/4xx-store-and-forward.md)) |
+| Held items (optional) | The sender's own S3-compatible storage ([WISP 404](wisps/404-store-and-forward.md)) |
 | Wake-up push subscription (optional, web app) | The browser's push service; each paired contact keeps a copy to wake the app. Never in a backup ([WISP 401](wisps/401-paired-chat.md#wake-up-push)) |
 
 There is no Ghostly server in the message path. The DHT is not a durable history store.

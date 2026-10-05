@@ -11,7 +11,7 @@ import { renderApp } from "../render";
 
 // covers: chat.tasks-board
 
-/** The Tasks board (WISP 4xx · Status Cards § The Tasks board): the page, a card, the phone's tabs, the keys. */
+/** The Tasks board (WISP 405 · Status Cards § The Tasks board): the page, a card, the phone's tabs, the keys. */
 
 const NOW = Date.now();
 const PEER = "peerkeycoordinator";

@@ -13,7 +13,7 @@ export interface MeshHubsStore {
 }
 
 /**
- * How often a private group's hubs are looked for and said (WISP 9xx · Group Mesh § Hubs). Every read and write here
+ * How often a private group's hubs are looked for and said (WISP 902 · Group Mesh § Hubs). Every read and write here
  * is a background request: on public relays they spend part of the 20 background requests a minute an app allows
  * itself, and little of it. A member reads the beacon once a minute; a hub republishes its entry every 30 s (a read
  * and a write), as a community hub does, since an entry is stale after 90 s.
@@ -111,7 +111,7 @@ interface HubLive {
 }
 
 /**
- * The hubs of the private groups this device is in (WISP 9xx · Group Mesh § Hubs): whether a group runs on hubs, who
+ * The hubs of the private groups this device is in (WISP 902 · Group Mesh § Hubs): whether a group runs on hubs, who
  * they are (the community's sealed beacon and lobbies, under the epoch's rendezvous secret), whether I am one, which
  * edges that asks for, and passing frames on as a hub. `Groups` owns the sessions and the edges; this decides.
  */
@@ -148,7 +148,7 @@ export class MeshHubs {
   forget(groupId: string): void { this.live.delete(groupId); }
 
   /**
-   * The edges this app may keep in a group, within its budget of connections (WISP 9xx · Group Mesh § Hubs, Budget):
+   * The edges this app may keep in a group, within its budget of connections (WISP 902 · Group Mesh § Hubs, Budget):
    * what the other groups' links do not hold, less what the groups I am a hub of still have to open. Undefined for an
    * app without a budget. What this group holds itself does not count: a hub that stepped down would fit again at once.
    */
@@ -518,7 +518,7 @@ export class MeshHubs {
 
   /**
    * As a hub, what the session took for the first time goes on to every other edge that is up: not back where it came
-   * from, nor to its author. Everyone else takes it as a frame handed on (WISP 9xx § Catch-up).
+   * from, nor to its author. Everyone else takes it as a frame handed on (WISP 902 § Catch-up).
    */
   passOn(groupId: string, session: GroupSession, from: string, frames: GroupEdgeFrame[]): number {
     const live = this.live.get(groupId);
