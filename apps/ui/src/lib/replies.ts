@@ -3,8 +3,10 @@ import { replyRef, replyTo, type ReplyTarget } from "@ghostly/browser/shared/rep
 import type { MessageReply } from "@ghostly/browser/shared/types";
 import { revealMessage } from "../hooks/useRowWindow";
 import { reducedMotion } from "./motion";
+import { filePreview } from "./chatList";
 import { cardLine, showsCard } from "./statusCards";
-import type { ChatMessage } from "./types";
+import type { ChatFile, ChatMessage } from "./types";
+import { englishT, type Translate } from "../locales/translate";
 
 /*
  * Replies in the chat's view (WISP 400 § Replies): which message a reply's quote stands for, and how it reads.
@@ -33,11 +35,15 @@ export interface QuoteView {
 }
 
 /** What a quote needs of a message: the UI's copy of a paired chat's, or a group's row as the engine keeps it. */
-export type Quotable = ReplyTarget & { sender: string; text: string; member?: string; card?: StatusCard };
+export type Quotable = ReplyTarget & { sender: string; text: string; member?: string; card?: StatusCard; file?: ChatFile };
 
-/** A message's line where it is quoted or pinned: its text's, or a bot's card's title (the text is only its fallback). */
-export function messageSnippet(message: { text: string; card?: StatusCard }): string {
-  return showsCard(message.card) ? replySnippet(cardLine(message.card)) : replySnippet(message.text);
+/**
+ * A message's line where it is quoted or pinned: its text's, a bot's card's title (the text is only its fallback), or
+ * a voice message's or a video's line in the reader's language (its text is kept in English, `fileMessageText`).
+ */
+export function messageSnippet(message: { text: string; card?: StatusCard; file?: ChatFile }, t: Translate = englishT): string {
+  if (showsCard(message.card)) return replySnippet(cardLine(message.card));
+  return replySnippet(filePreview(message.file, t) ?? message.text);
 }
 
 /** A chat's messages by their id here and by the id a reply names (`replyRef`). */
@@ -72,13 +78,13 @@ export function sentReply(original: Quotable, group = false): MessageReply | und
 export type NameOf = (from: "me" | "peer" | undefined, member?: string) => string | undefined;
 
 /** The quote a reply shows. The original found here wins over what the wire said about it. */
-export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf): QuoteView {
+export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf, t: Translate = englishT): QuoteView {
   const original = (reply.messageId ? index.byId.get(reply.messageId) : undefined) ?? index.byRef.get(reply.id);
   if (original) {
     const from = original.sender === "me" ? "me" : "peer";
     const member = from === "peer" ? original.member ?? reply.member : undefined;
     // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 406 · Message Buttons).
-    const snippet = reply.button && reply.snippet ? reply.snippet : messageSnippet(original);
+    const snippet = reply.button && reply.snippet ? reply.snippet : messageSnippet(original, t);
     return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;

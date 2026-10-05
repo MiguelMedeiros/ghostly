@@ -529,7 +529,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const pinMessage = (messageId: string | undefined, remove = false) => {
     if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
   };
-  const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo),
+  const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
@@ -811,7 +811,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
                 onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
                 onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}
-                quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
+                quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf, t) : undefined}
                 // A press is a reply: only a paired chat carries one.
                 buttons={paired ? buttonsOf.get(row.message.id) : undefined}
                 compactPress={paired && presses.has(row.message.id)}

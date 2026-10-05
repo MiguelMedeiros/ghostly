@@ -29,7 +29,7 @@ export function PinnedBar({ pin, index, onUnpin }: { pin?: PinView; index: Reply
           <span className="shrink-0 text-accent"><PinIcon active size={15} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[11px] font-medium text-accent">{t("chat.pinned.bar")}</span>
-            <span data-testid="pinned-snippet" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original) : t("chat.pinned.notHere")}</span>
+            <span data-testid="pinned-snippet" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original, t) : t("chat.pinned.notHere")}</span>
           </span>
         </button>
         <button type="button" data-testid="pinned-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}
