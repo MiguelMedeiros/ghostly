@@ -823,7 +823,7 @@ describe("Try again on the active device after a move that stopped", () => {
 });
 
 describe("refusals before a byte is copied", () => {
-  it.each(["wallet", "payment", "call", "loading"] as const)("the giver is busy (%s): the taker is told only that it is busy, and no try is used", async (why) => {
+  it.each(["wallet", "payment", "loading"] as const)("the giver is busy (%s): the taker is told only that it is busy, and no try is used", async (why) => {
     const w = world();
     w.busy.why = why;
     await w.taker.pull(PASSWORD);
@@ -831,6 +831,18 @@ describe("refusals before a byte is copied", () => {
     expect(w.taker.view()!.failure).toBe("busy");
     expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["handoff"]);
     // The taker sends the first message with its request; the giver answers none.
+    expect(w.link.count("handoff-pake", A)).toBe(0);
+    expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
+  });
+
+  it("a call on the giver: the taker is told a call is on there (WISP 06 handoff-busy \"call\"), the giver says it on its own screen, and no try is used", async () => {
+    const w = world();
+    w.busy.why = "call";
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["call"]);
+    expect(w.taker.view()!.failure).toBe("call-there");
+    expect(w.giver.view()).toMatchObject({ role: "giver", step: "failed", failure: "call" });
     expect(w.link.count("handoff-pake", A)).toBe(0);
     expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
   });

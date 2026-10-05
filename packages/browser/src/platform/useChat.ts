@@ -229,7 +229,11 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const addSystemMessage = useCallback(
     (message: ChatMessage) => {
       const updated = addMessage(sessionId, message);
-      if (updated) setMessages([...updated.messages]);
+      if (!updated) return;
+      setMessages([...updated.messages]);
+      // The chat list keeps its own copy of the last message: a call line, a file or a payment of this page's own
+      // moves it now, not on the list's 3 s tick. Same task as the line above, so this chat renders once.
+      notifySessionsChanged();
     },
     [sessionId],
   );
