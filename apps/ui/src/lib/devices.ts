@@ -5,7 +5,7 @@ import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import type { TranslationKey } from "../contexts/I18nContext";
-import { inviteLink, inviteQrSegments, readInviteCode } from "@ghostly/core";
+import { DEVICE_INVITE_LIFETIME_S, inviteLink, inviteQrSegments, readInviteCode } from "@ghostly/core";
 import { handOverUnlock } from "./lockHandover";
 import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
@@ -44,7 +44,8 @@ export function defaultDeviceName(env: { userAgent: string; platform?: string; m
 
 /** "9:41": minutes and seconds left until `expires` (UNIX seconds), at `now` (milliseconds). */
 export const timeLeft = (expires: number, now: number): string => {
-  const seconds = Math.max(0, Math.ceil(expires - now / 1000));
+  // Never more than a code's ten minutes, whatever the two clocks say.
+  const seconds = Math.min(DEVICE_INVITE_LIFETIME_S, Math.max(0, Math.ceil(expires - now / 1000)));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 };
 

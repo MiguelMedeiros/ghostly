@@ -158,7 +158,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         {/* The code's link on the web app, in the QR code and in Copy and Share: a phone's own camera, or a tap on the
             link sent to it, opens Ghostly with the code, on the one screen that names this profile. Join and "Add this
             device to another profile" read the link too. */}
-        <div data-testid="device-add-code" data-code={view.code}>
+        <div data-testid="device-add-code" data-code={view.code} data-link={deviceLink(view.code, appLinkOrigin(), profileName)}>
           <QRCodeDisplay value={deviceLink(view.code, appLinkOrigin(), profileName)} qr={deviceLinkQr(view.code, appLinkOrigin(), profileName)} copyLabel={t("devices.add.copy")} />
         </div>
         <Status testId="device-add-status" step={view.seen ? "connecting" : "waiting"}>{view.seen ? t("devices.add.connecting") : t("devices.add.waiting")}</Status>

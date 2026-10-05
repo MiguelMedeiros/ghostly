@@ -25,20 +25,34 @@ export async function enrollDevice(active: Peer, joiner: Peer, options: { name?:
   const shown = add.getByTestId("device-add-code");
   await expect(shown).toBeVisible();
   const code = (await shown.getAttribute("data-code"))!;
+  // I already use Ghostly, Add this device to my profile: the code, then the one screen with the device's name.
   await joiner.page.getByTestId("home-already").click();
   await joiner.page.getByTestId("device-join-add").click();
+  await pasteInvite(joiner.page, code);
   await joiner.page.getByTestId("device-join-name").fill(options.name ?? "Phone");
   await joiner.page.getByTestId("device-join-next").click();
-  await pasteInvite(joiner.page, code);
   await expect(add.getByTestId("device-add-digits")).toBeVisible();
   await add.getByTestId("device-add-match").click();
   await expect(add.getByTestId("device-add-done")).toBeVisible();
-  await expect(joiner.page.getByTestId("device-join-done")).toHaveAttribute("data-step", "done");
-  await joiner.page.getByTestId("device-join-continue").click();
-  await expect(joiner.page.getByTestId("device-standby")).toHaveAttribute("data-state", "standby");
+  await finishJoin(joiner.page);
   // The first link is to the active device (slot 0); with more devices in the set the others follow it.
   await expect(joiner.page.getByTestId("device-standby-link").first()).toHaveAttribute("data-status", "live", { timeout: 90_000 });
   await add.getByRole("button", { name: "Done" }).click();
+}
+
+/**
+ * The new device after the person confirmed the digits: on to the standby screen. It opens by itself once done; where
+ * the browser keeps no data for sure (a headless one), the warning waits for Continue.
+ */
+export async function finishJoin(page: Page): Promise<void> {
+  const standby = page.getByTestId("device-standby");
+  await expect.poll(async () => {
+    if (await standby.isVisible().catch(() => false)) return true;
+    const next = page.getByTestId("device-join-continue");
+    if (await next.isVisible().catch(() => false)) await next.click().catch(() => {});
+    return false;
+  }, { timeout: 90_000, intervals: [500] }).toBe(true);
+  await expect(standby).toHaveAttribute("data-state", "standby");
 }
 
 /**

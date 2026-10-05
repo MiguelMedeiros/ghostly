@@ -454,6 +454,7 @@ describe("the lock handed across one reload the app makes", () => {
 describe("the time left on the code", () => {
   it("reads as minutes and seconds, never below zero", () => {
     expect(timeLeft(600, 0)).toBe("10:00");
+    expect(timeLeft(600.4, 0)).toBe("10:00");
     expect(timeLeft(600, 18_500)).toBe("9:42");
     expect(timeLeft(600, 700_000)).toBe("0:00");
   });

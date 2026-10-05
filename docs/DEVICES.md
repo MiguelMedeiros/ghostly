@@ -6,15 +6,14 @@ It works in the web app (installed on a phone too), the browser extension and th
 
 ## Add a device
 
-1. On the device you use now: **Profile → Devices → Add a device**. A profile on several devices needs a lock password of 8 characters or more; Ghostly asks you to set one, or to make yours longer, first.
-2. It shows a QR code, good for 10 minutes and for one device. It is a link to the web app with the code after the `#`, which no browser sends to a server.
-3. On a phone, scan it with the phone's own camera. The link opens Ghostly (the installed app on Android, the browser otherwise) straight into adding the device. A phone that already has a profile asks first, and adds itself to a new profile: the profiles it has stay as they are.
-   Or, on the new device, open Ghostly and choose **Add this device to another profile** (in the profile menu, the profile list, or **Profile → Devices**), or **I already use Ghostly** on a new profile's chat list. Then scan the code in Ghostly, or paste it.
-4. Name this device. Both devices show the same six digits. Check them, then tap **They match** on the device you use now.
+1. On the device you use now: **Profile → Devices → Add a device**. A profile on several devices needs a lock password of 8 characters or more; Ghostly asks you to type it, set one, or make yours longer, in the same window.
+2. It shows a QR code, good for 10 minutes and for one device, and under it each step as it happens: waiting, a device connecting, the digits, added. If something stops it, it says why, and **Try again** makes a new code. The QR code is a link to the web app with your profile's name and the code after the `#`, which no browser sends to a server.
+3. On a phone, scan it with the phone's own camera, or with **Join** or **I already use Ghostly** in Ghostly, or paste the link. Whatever you use, the phone shows one screen: **Add this phone to <your profile>**, with its name filled in (change it if you like) and one button, **Add**. If the phone already uses its profile (chats, groups or money), Ghostly says so and makes a new profile for this by itself; the profile you had stays as it is, and you are not asked for your lock password again.
+4. Both devices show the same six digits. Check them, then tap **They match** on the device you use now. The phone opens its standby screen by itself.
 
 The new device is now on standby, and it offers to bring the profile over at once. Up to 4 devices per profile.
 
-On iPhone and iPad, add Ghostly to the Home Screen first: a browser tab keeps its own storage, which the browser may clear. The camera opens the link in Safari, never in the app on the Home Screen, so there Ghostly says to add it to the Home Screen first; then open it from the Home Screen and scan the code in Ghostly. Elsewhere, Ghostly asks the browser to keep its data and says so when it does not.
+On iPhone and iPad, add Ghostly to the Home Screen first: a browser tab keeps its own storage, which the browser may clear. The camera opens the link in Safari, never in the app on the Home Screen, so there Ghostly shows the three steps (Share, **Add to Home Screen**, open Ghostly from the Home Screen); then scan the code again in the app. Elsewhere, Ghostly asks the browser to keep its data and says so when it does not.
 
 ## Move the profile
 

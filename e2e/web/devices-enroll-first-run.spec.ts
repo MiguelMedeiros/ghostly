@@ -1,18 +1,15 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test, walletCard } from "../support/fixtures";
 import { pasteInvite } from "../support/clipboard";
-import { DEVICE_SET_PASSWORD } from "../support/devices";
+import { DEVICE_SET_PASSWORD, finishJoin } from "../support/devices";
 import { mockEthereum } from "../support/ethereum";
 import { mockMainnetMints } from "../support/mint";
 
 /**
- * A phone adds itself to the desktop's profile once its new profile made its first-run Mainnet wallets, as every new
- * profile of the installed web app does: Cashu, which brings the Cashu mints' Lightning card, and USDT. Those hold
- * nothing, so the profile is not in use. Under test the apps never make them by themselves (an automated browser):
- * this spec turns the setup on with its test switch, and answers the mints and the Ethereum RPC itself.
- *
- * The phone is in use (a chat, a lock password), so it goes through "Add this device to another profile": the new
- * profile starts locked like the one it came from, gets its own first-run wallets, and then joins.
+ * A phone adds itself to the desktop's profile with first-run Mainnet wallets on, as every new profile of the installed
+ * web app makes them: Cashu, which brings the Cashu mints' Lightning card, and USDT. Those hold nothing, so they never
+ * make a profile "in use". Under test the apps never make them by themselves (an automated browser): this spec turns
+ * the setup on with its test switch, and answers the mints and the Ethereum RPC itself. Phone width throughout.
  */
 
 const setupOn = (context: BrowserContext) => context.addInitScript(() => { try { localStorage.setItem("ghostly-test-wallet-setup", "on"); } catch { /* opaque origin */ } });
@@ -26,12 +23,23 @@ async function setLock(page: Page, password: string): Promise<void> {
   await expect(page.getByText("Password set successfully")).toBeVisible();
 }
 
-test("a phone in use adds itself in another profile after that profile made its first-run wallets", { tag: ["@feature:devices.enroll", "@feature:wallet.instances.first-run"] }, async ({ peer }) => {
-  const [desktop, phone] = await Promise.all([
-    peer("desktop"),
-    peer("phone", { mobile: true, beforeOpen: async (context) => { await mockMainnetMints(context); await mockEthereum(context); await setupOn(context); } }),
-  ]);
-  const page = phone.page;
+/** The desktop's Add a device, up to the QR code: its link, as the phone's camera reads it. */
+async function showCode(page: Page) {
+  await page.goto("/#/profile");
+  await page.getByTestId("device-add-open").click();
+  const add = page.getByTestId("device-add");
+  await add.getByTestId("device-add-password").fill(DEVICE_SET_PASSWORD);
+  await add.getByTestId("device-add-password-again").fill(DEVICE_SET_PASSWORD);
+  await add.getByTestId("device-add-next").click();
+  const link = (await add.getByTestId("device-add-code").getAttribute("data-link"))!;
+  return { add, link };
+}
+
+const phoneOptions = { mobile: true, beforeOpen: async (context: BrowserContext) => { await mockMainnetMints(context); await mockEthereum(context); await setupOn(context); } };
+
+test("a locked phone in use opens the code's link: one password, one button, and the new profile joins with its first-run wallets on", { tag: ["@feature:devices.enroll", "@feature:wallet.instances.first-run"] }, async ({ peer }) => {
+  const [desktop, phone] = await Promise.all([peer("desktop"), peer("phone", phoneOptions)]);
+  let page = phone.page;
 
   // The phone is in use: a chat, and a lock password. The app opens a new chat once it is made, so the chat is made
   // before the test goes on: on a busy machine it opened over Settings and took the lock's form away.
@@ -41,37 +49,54 @@ test("a phone in use adds itself in another profile after that profile made its 
   await expect(page.getByTestId("chat-row")).toHaveCount(1);
   await setLock(page, DEVICE_SET_PASSWORD);
 
-  // Add this device to another profile: the new profile opens behind the same lock, at the device's name.
-  await page.goto("/#/profile");
-  await page.getByTestId("profile-join-another").click();
-  await page.getByTestId("device-join-another-go").click();
+  const { add, link } = await showCode(desktop.page);
+
+  // The camera opens the link: the phone's own lock first (it is the phone's), then the one screen.
+  const origin = new URL(page.url()).origin;
+  await page.close();
+  page = await phone.context.newPage();
+  await page.goto(link.replace(/^https?:\/\/[^/]+/, origin));
   await expect(page.getByText("Ghostly is locked")).toBeVisible();
   await page.getByPlaceholder("Password").fill(DEVICE_SET_PASSWORD);
   await page.getByRole("button", { name: "Unlock" }).click();
-  await expect(page.getByTestId("device-join-name-form")).toBeVisible();
+  const form = page.getByTestId("device-join-confirm");
+  await expect(form).toHaveAttribute("data-place", "new");
+  await page.getByTestId("device-join-name").fill("Phone");
+  await page.getByTestId("device-join-next").click();
 
-  // Before it joins, the new profile has made its first-run wallets, as it does on a phone left open for a moment.
-  await page.keyboard.press("Escape");
+  // The new profile has the same lock, passed a moment ago in this tab: it is not asked again. It starts, makes its
+  // first-run wallets, and goes on to the digits by itself.
+  const desktopDigits = add.getByTestId("device-add-digits");
+  await expect(desktopDigits).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText("Ghostly is locked")).toHaveCount(0);
+  await expect(page.getByTestId("device-join-digits")).toHaveAttribute("data-digits", (await desktopDigits.getAttribute("data-digits"))!);
+  await add.getByTestId("device-add-match").click();
+  await expect(add.getByTestId("device-add-done")).toHaveText("Phone added. It is on standby.");
+  await expect(page.getByTestId("device-join-done")).toHaveAttribute("data-step", "done");
+  // And on to the standby screen, still without the password a second time.
+  await finishJoin(page);
+  await expect(page.getByText("Ghostly is locked")).toHaveCount(0);
+});
+
+test("a new profile that already made its first-run wallets joins in place: the one screen sees it is not in use", { tag: ["@feature:devices.enroll", "@feature:wallet.instances.first-run"] }, async ({ peer }) => {
+  const [desktop, phone] = await Promise.all([peer("desktop"), peer("phone", phoneOptions)]);
+  const page = phone.page;
+
+  // A new profile, left open for a moment: it makes its first-run wallets.
   await page.goto("/#/wallet");
   await expect(walletCard(page, "cashu-mainnet")).toBeVisible({ timeout: 60_000 });
   await expect(walletCard(page, "usdt-mainnet")).toBeVisible({ timeout: 60_000 });
 
-  await desktop.page.goto("/#/profile");
-  await desktop.page.getByTestId("device-add-open").click();
-  const add = desktop.page.getByTestId("device-add");
-  await add.getByTestId("device-add-password").fill(DEVICE_SET_PASSWORD);
-  await add.getByTestId("device-add-password-again").fill(DEVICE_SET_PASSWORD);
-  await add.getByTestId("device-add-next").click();
-  const code = (await add.getByTestId("device-add-code").getAttribute("data-code"))!;
+  const { add, link } = await showCode(desktop.page);
 
-  // I already use Ghostly, on the new profile's empty chat list: the wallets it made by itself do not stop it.
+  // I already use Ghostly, on its empty chat list; the code pasted as the scanner reads it.
   await page.goto("/#/");
   await page.getByTestId("sidebar-already").click();
   await page.getByTestId("device-join-add").click();
+  await pasteInvite(page, link);
+  await expect(page.getByTestId("device-join-confirm")).toHaveAttribute("data-place", "here");
   await page.getByTestId("device-join-name").fill("Phone");
   await page.getByTestId("device-join-next").click();
-  await pasteInvite(page, code);
-  await expect(page.getByTestId("device-join-another")).toHaveCount(0);
 
   const desktopDigits = add.getByTestId("device-add-digits");
   await expect(desktopDigits).toBeVisible();
