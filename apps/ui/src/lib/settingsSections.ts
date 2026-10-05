@@ -62,6 +62,8 @@ export interface SettingEntry {
   /** Other words for it, in the language shown ("dark, light, theme" for Mode): found, never shown. */
   words?: TranslationKey;
   needs?: SettingNeeds;
+  /** What finding it opens besides its section: the lock's password form, even with no password set (no row then). */
+  opens?: "passwordForm";
 }
 
 /** Every option's label, in the order of its section's page. */
@@ -89,7 +91,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "privacy", label: "settings.sendTyping" },
   { section: "privacy", label: "settings.publicProfiles", words: "settings.searchWords.publicProfiles" },
   { section: "privacy", label: "settings.lockScreen", words: "settings.searchWords.lock" },
-  { section: "privacy", label: "settings.password" },
+  { section: "privacy", label: "settings.password", opens: "passwordForm" },
   { section: "network", label: "network.relays", words: "settings.searchWords.relays" },
   { section: "network", label: "network.iroh" },
   { section: "network", label: "network.hyperdht" },
