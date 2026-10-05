@@ -16,6 +16,7 @@ import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, 
 const LIVE_WITHIN_MS = 5_000;
 
 beforeEach(useFakeWorld);
+const stagesOf = (side: { progress: { stage: string }[] }) => side.progress.map(p => p.stage).filter((stage, i, all) => stage !== all[i - 1]);
 afterEach(closeWorld);
 
 describe("a first pairing, at desktop pace", () => {
@@ -94,6 +95,42 @@ describe("a first pairing, at desktop pace", () => {
     // offer waits for it, live at 10.7 s.
     expect(took, "live after the join").toBeLessThanOrEqual(PAIRING_ATTEMPT_MS + PAIRING_RETRY_MS + 6_000);
     expect(joiner.progress.at(-1)).toMatchObject({ stage: "live", attempt: 2 });
+  }, 60_000);
+
+  /**
+   * On the public relays a read takes 0.25 to 0.8 s (the joiner's first look at the inviter: 0.73 and 0.8 s, 2026-10-05)
+   * and an offer's gathering 0.2 s and more. The joiner made its offer only once that look was done; it gathers it
+   * meanwhile now, and sends it once the look finds the inviter.
+   */
+  it.each(["desktop", "web"] as const)("the joiner gathers its offer while it first looks for the inviter · %s pace", async pace => {
+    // A STUN server that answers in 1.5 s (One's e2e runs: 9 offers of 89 between 1.3 and 3 s).
+    rtc.srflxAfterMs = 1_500;
+    const pkarr = new MemoryPkarr({ publishMs: 700, visibleAfterMs: 300, readMs: 750 });
+    const made = invitationWhere("joiner");
+    const intervals = pace === "web" ? RELAY_POLL_INTERVALS : undefined;
+    const inviter = open(made.inviter, pkarr, { pollIntervals: intervals });
+    await run(10_000);
+    const reads = pkarr.reads, publishes = pkarr.publishes;
+    const joiner = open(made.joiner, pkarr, { pollIntervals: intervals });
+    const took = await untilLive(inviter, joiner, 60_000);
+    // Before: 5.35 s (desktop) and 6.75 s (web). After: 4.4 s and 4.85 s.
+    expect(took, "live after the join").toBeLessThanOrEqual(pace === "web" ? 5_000 : 4_500);
+    expect(stagesOf(joiner)).toEqual(["resolving", "knocking", "connecting", "live"]);
+    // No request more: the offer still goes in the joiner's first packet.
+    expect(pkarr.publishes - publishes).toBeLessThanOrEqual(4);
+    expect(pkarr.reads - reads).toBeLessThanOrEqual(pace === "web" ? 6 : 8);
+  }, 60_000);
+
+  it("a joiner whose first look finds no inviter drops the offer it gathered, says nothing of it, and dials once the inviter shows", async () => {
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere("joiner");
+    const joiner = open(made.joiner, pkarr);
+    await run(5_000);
+    expect(joiner.link.liveAttempt, "no failed attempt").toBeUndefined();
+    expect(stagesOf(joiner)).not.toContain("knocking");
+    const inviter = open(made.inviter, pkarr);
+    expect(await untilLive(inviter, joiner, 60_000)).toBeLessThan(Infinity);
+    expect(joiner.progress.at(-1)).toMatchObject({ stage: "live", attempt: 1 });
   }, 60_000);
 
   it("polls the contact's key in the foreground while pairing, and in the background once connected", async () => {

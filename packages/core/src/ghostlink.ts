@@ -597,6 +597,9 @@ export class GhostLink {
   private endpoints = new Map<PairedTransport, NativeEndpoint>();
   private activeBinding?: NativeBinding;
   private dialing = false;
+  /** A joiner's dial made as the link starts (`dialEarly`): its offer goes once the first look finds the inviter. */
+  private dialGate?: Promise<boolean>;
+  private firstLookDone?: (online: boolean) => void;
   private dhtPinGrace: ReturnType<typeof setTimeout> | null = null;
   /** Native attempts that failed in a row, and transports demoted until when (WISP 100, demotion). */
   private nativeFailures = new Map<PairedTransport, number>();
@@ -841,7 +844,13 @@ export class GhostLink {
       firstPublish: options.firstPublish ?? ((this.tracker && options.pairingProgress?.role === "joiner") || this.resuming ? "after-first-poll" : "at-start"),
       events: {
         // The first look decided nothing to dial: say we are here now (a dial says it with its offer).
-        onFirstPoll: () => { if (!this.dialing) this.session.ensureAdvertised(); },
+        onFirstPoll: () => {
+          const online = this.session.peerPresence.online, early = this.firstLookDone;
+          this.firstLookDone = undefined;
+          early?.(online);
+          // Nothing to dial: say we are here now (a dial says it with its offer).
+          if (!this.dialing || (early && !online)) this.session.ensureAdvertised();
+        },
         onMessages: (messages, batch) => {
           if (options.params.profile) return;
           for (const m of messages) events.onMessage?.({ ...m, via: "pkarr", batch });
@@ -1292,8 +1301,23 @@ export class GhostLink {
     }
     // A joiner has just opened the invite: the inviter is there, and its first-contact envelope is worth reading
     // at the signaling pace now (an inviter speeds up when the joiner's fresh packet shows).
-    if (this.tracker && !this.tracker.done && this.options.pairingProgress?.role === "joiner") this.dht?.expect();
+    if (this.tracker && !this.tracker.done && this.options.pairingProgress?.role === "joiner") { this.dht?.expect(); this.dialEarly(); }
     void this.dht?.start();
+  }
+
+  /**
+   * A joiner's offer is gathered as the link starts, while its first look at the inviter's record is under way, and goes
+   * once that look finds the inviter (`dialGate`): the two used to come one after the other, the read (0.15 to 0.8 s)
+   * then the gathering (0.2 s to 2 s).
+   */
+  private dialEarly(): void {
+    if (!this.options.params.profile || !this.options.autoConnect || this.deliveryMode === "dht" || this.streamBlocked || this.dialing || this.channel) return;
+    this.dialGate = new Promise<boolean>(resolve => { this.firstLookDone = resolve; });
+    traceLink(this.myPubKeyZ32, "dial", { early: true });
+    void this.dial().catch(error => {
+      this.tracker?.failed("transport", true);
+      this.dialFailed(error instanceof Error ? error.message : String(error));
+    });
   }
 
   async stop(announce = true): Promise<void> {
@@ -1939,7 +1963,13 @@ export class GhostLink {
           this.afterRtc = fallback && rest.length ? { epoch, rest } : undefined;
           const offeredAt = Date.now();
           this.offered = fallback ? { epoch, at: offeredAt, ...(resume && { resume }) } : undefined;
-          await this.dataLink.connect();
+          const gate = this.dialGate;
+          this.dialGate = undefined;
+          if (await this.dataLink.connect(gate) === "held") {
+            // Made early, and the first look did not find the contact: the dial is dropped, as if never made.
+            traceLink(this.myPubKeyZ32, "dial-held", {});
+            this.afterRtc = undefined; this.offered = undefined; return;
+          }
           if (this.dataLink.state !== "idle" || epoch !== this.connectionEpoch) { this.scheduleRace(epoch, offeredAt); return; }
           // WebRTC gave up while starting (no candidate at all, no connection to be made): tried last for a while.
           this.rtcUnstarted();
@@ -1961,6 +1991,7 @@ export class GhostLink {
       if (epoch === this.connectionEpoch) this.attemptEnded(error instanceof Error ? error.message : String(error));
       throw error;
     } finally {
+      this.dialGate = undefined;
       if (epoch === this.connectionEpoch) {
         this.dialing = false;
         // A WebRTC attempt that already ended, with nothing ranked after it to go on to.
