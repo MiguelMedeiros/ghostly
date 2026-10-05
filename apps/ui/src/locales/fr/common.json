@@ -20,6 +20,12 @@
   "loading": "Chargement...",
   "moreInfo": "Plus d'infos",
   "save": "Enregistrer",
+  "size": {
+    "b": "{{n}} o",
+    "gb": "{{n}} Go",
+    "kb": "{{n}} Ko",
+    "mb": "{{n}} Mo"
+  },
   "success": "Succès",
   "unnamedContact": "Contact · {{key}}",
   "unnamedContactShort": "Contact",

@@ -5,7 +5,7 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { useAnchorHome, useAppNavigation } from "../../hooks/useAppNavigation";
 import { HOME, anchorTarget, plan, readNav, stackOf } from "../../lib/navigation";
-import { SETTINGS_INDEX, searchSettings, settingsSection } from "../../lib/settingsSections";
+import { SETTINGS_INDEX, searchSettings, sectionInView, settingsSection } from "../../lib/settingsSections";
 import { Settings } from "../../pages/Settings";
 import { renderApp } from "../render";
 import { windowIs } from "../viewport";
@@ -177,6 +177,27 @@ describe("settings sections", () => {
     expect(settingsSection("advanced")).toBe("network");
     expect(settingsSection("nope")).toBeNull();
     expect(settingsSection(undefined)).toBeNull();
+  });
+
+  it("the wide index marks the section picked while it is in view, else the one at the page's top, and the last at its end", () => {
+    // The last three sections at the page's end: Network's top passed the line (148), Data & storage and About are below it.
+    const boxes = [
+      { section: "privacy", top: -600, bottom: -100 },
+      { section: "network", top: -90, bottom: 400 },
+      { section: "storage", top: 410, bottom: 640 },
+      { section: "about", top: 650, bottom: 800 },
+    ] as const;
+    expect(sectionInView(boxes, 148, 800, true, "about")).toBe("about");
+    expect(sectionInView(boxes, 148, 800, true, "storage")).toBe("storage");
+    // Picked, and the page has since grown under it (options still loading): still the one picked.
+    expect(sectionInView(boxes, 148, 800, false, "about")).toBe("about");
+    // Nothing picked, or scrolled by hand since: the one at the top, and the last at the end.
+    expect(sectionInView(boxes, 148, 800, false, null)).toBe("network");
+    expect(sectionInView(boxes, 148, 800, true, null)).toBe("about");
+    // Picked, but out of view: the same rules.
+    expect(sectionInView(boxes, 148, 800, false, "privacy")).toBe("network");
+    // Above the first section: the first.
+    expect(sectionInView([{ section: "profile", top: 200, bottom: 400 }], 148, 800, false, null)).toBe("profile");
   });
 
   it("every option the search knows has an English label, and search ignores case and accents", () => {

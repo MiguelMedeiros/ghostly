@@ -4,8 +4,10 @@ import type { PeerLinkState } from "../lib/platform";
 import { Switch } from "./wallet/ui";
 import { useI18n } from "../contexts/I18nContext";
 import { errorText } from "../lib/errorText";
+import { sizeIn } from "../lib/sizeText";
+import type { Translate } from "../locales/translate";
 
-const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1)} MB`;
+const mb = (bytes: number, t: Translate) => sizeIn(bytes / 1024 / 1024, "mb", t, bytes < 1024 * 1024 ? 2 : 1, true);
 
 /**
  * Store-and-forward for one chat (WISP 404): whether what is sent while the contact is away waits in
@@ -42,7 +44,7 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
           <div className="px-4 py-3 space-y-1">
             <p className="text-[11px] text-text-secondary" data-testid="chat-hold-storage">{hold?.storage ? t("chat.hold.storage") : t("chat.hold.noStorage")}</p>
             <p className="text-[11px] text-text-secondary" data-testid="chat-hold-quota">
-              {hold ? t("chat.hold.quota", { name, count: hold.outstanding, max: hold.maxItems, bytes: mb(hold.bytes), maxBytes: mb(hold.maxBytes) }) : t("chat.hold.nothing")}
+              {hold ? t("chat.hold.quota", { name, count: hold.outstanding, max: hold.maxItems, bytes: mb(hold.bytes, t), maxBytes: mb(hold.maxBytes, t) }) : t("chat.hold.nothing")}
             </p>
             {hold?.refused ? <p className="text-[11px] text-danger" data-testid="chat-hold-refused">{hold.refused === 1 ? t("chat.hold.refusedOne", { name }) : t("chat.hold.refusedMany", { count: hold.refused, name })}</p> : null}
             {hold?.error && <p className="text-[11px] text-danger" data-testid="chat-hold-error">{hold.error}</p>}

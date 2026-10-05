@@ -1,4 +1,6 @@
 import { getStorageProfile } from "./storage";
+import { sizeIn } from "./sizeText";
+import type { Translate } from "../locales/translate";
 
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
@@ -138,12 +140,11 @@ export function getStorageUsage(): { used: number; keys: number } {
   return { used: totalSize * 2, keys: keyCount };
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+/** A size in the app's language, up to two decimals: "144 KB", "1.46 MB"; "1,46 Mo" in French (`t`). */
+export function formatBytes(bytes: number, t?: Translate): string {
+  const units = ["b", "kb", "mb", "gb"] as const;
+  const i = bytes > 0 ? Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024))) : 0;
+  return sizeIn(bytes / Math.pow(1024, i), units[i], t, 2);
 }
 
 export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";

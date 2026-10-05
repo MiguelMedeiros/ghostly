@@ -32,9 +32,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@arkade-os/sdk": "0.4.76",
+    "@arkade-os/sdk": "0.4.78",
     "@atproto/jwk-webcrypto": "^0.3.4",
-    "@atproto/oauth-client": "^0.8.7",
+    "@atproto/oauth-client": "^0.8.8",
     "@bitcoindevkit/bdk-wallet-web": "0.3.0",
     "@bitcoinerlab/descriptors-scure": "^3.2.0",
     "@cashu/cashu-ts": "^4.11.0",
@@ -70,9 +70,9 @@
     "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "@ghostly/iroh-web": "*",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.4",
     "typescript": "^5.9.3",
-    "vite": "^8.3.1",
-    "vitest": "^5.0.2"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   }
 }

@@ -20,6 +20,12 @@
   "loading": "加载中...",
   "moreInfo": "更多信息",
   "save": "保存",
+  "size": {
+    "b": "{{n}} B",
+    "gb": "{{n}} GB",
+    "kb": "{{n}} KB",
+    "mb": "{{n}} MB"
+  },
   "success": "成功",
   "unnamedContact": "联系人 · {{key}}",
   "unnamedContactShort": "联系人",
