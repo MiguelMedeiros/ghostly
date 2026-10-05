@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useRef, type ReactNode } from "react";
+import { useState, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
@@ -181,6 +181,14 @@ export function Settings() {
   const passwordId = useId();
   const passwordInputs = { current: useRef<HTMLInputElement>(null), new: useRef<HTMLInputElement>(null), confirm: useRef<HTMLInputElement>(null) };
   const [showPasswordForm, setShowPasswordForm] = useState(false);
+  // The form opened by the person (the lock switch, Change password): its first field takes the focus, and the keyboard comes up.
+  const focusPasswordForm = useRef(false);
+  const openPasswordForm = () => { focusPasswordForm.current = true; setShowPasswordForm(true); };
+  useLayoutEffect(() => {
+    if (!showPasswordForm || !focusPasswordForm.current) return;
+    focusPasswordForm.current = false;
+    (passwordInputs.current.current ?? passwordInputs.new.current)?.focus();
+  }, [showPasswordForm]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it opens
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
@@ -249,7 +257,7 @@ export function Settings() {
 
   const handleLockToggle = async () => {
     if (!lockEnabled && !hasPassword) {
-      setShowPasswordForm(true);
+      openPasswordForm();
       return;
     }
 
@@ -590,7 +598,7 @@ export function Settings() {
         )}
         {hasPassword && (
           <Row label={t("settings.password")}>
-            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : setShowPasswordForm(true))}>
+            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
               {showPasswordForm ? t("common.close") : t("settings.passwordEdit")}
             </Button>
           </Row>
