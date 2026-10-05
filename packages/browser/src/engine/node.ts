@@ -2735,6 +2735,9 @@ export class GhostlyNode implements EngineImplementation {
     if (typeof card === "string") return { error: card, refused: true };
     const text = card && !(typeof params.text === "string" && params.text.trim()) ? statusCardText(card) : params.text;
     if (typeof text !== "string") return { error: "Nothing to send", refused: true };
+    // A chat still being saved is in the state already, so the app may send to it by its id: the send waits for the
+    // chat to start, rather than say "You are offline" for that moment (a chat opened right after a reload).
+    await this.linksAdding.get(linkId)?.catch(() => {});
     const live = this.links.get(linkId);
     const trimmed = text.trim();
     // What a compatibility chat's DHT cannot carry is refused before it is kept: it must not show as sent. Whatever
