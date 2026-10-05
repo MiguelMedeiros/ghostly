@@ -160,6 +160,18 @@ describe("file transfer", () => {
     expect(sanitizeFileName("😀".repeat(300))).toBe("😀".repeat(200));
   });
 
+  it("shortens a long name before its extension, so it keeps its type", () => {
+    expect(sanitizeFileName(`${"r".repeat(230)}.pdf`)).toBe(`${"r".repeat(196)}.pdf`);
+    expect(sanitizeFileName(`${"Quarterly report ".repeat(15)}final.tar.gz`)).toMatch(/^Quarterly report .*\.gz$/);
+    expect([...sanitizeFileName(`${"名前".repeat(150)}.docx`)]).toHaveLength(200);
+    expect(sanitizeFileName(`${"名前".repeat(150)}.docx`).endsWith(".docx")).toBe(true);
+    // A space the cut leaves before the dot goes; an ending too long to be an extension is cut like the rest.
+    expect(sanitizeFileName(`${"a".repeat(195)}    b.txt`)).toBe(`${"a".repeat(195)}.txt`);
+    expect(sanitizeFileName(`${"a".repeat(195)}.${"b".repeat(40)}`)).toBe(`${"a".repeat(195)}.${"b".repeat(4)}`);
+    // Names that fit are left as they are.
+    expect(sanitizeFileName(`${"r".repeat(196)}.pdf`)).toBe(`${"r".repeat(196)}.pdf`);
+  });
+
   it("renames a Windows device name, in any case and with any extension", () => {
     for (const name of ["CON", "con.txt", "Nul .txt", "aux", "PRN.tar.gz", "COM1", "com9.log", "LPT1.txt", "lpt9", "COM¹.txt", "CONIN$", "conout$.txt"]) {
       expect(sanitizeFileName(name)).toBe("_" + name);

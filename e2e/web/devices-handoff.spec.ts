@@ -124,12 +124,16 @@ test("a push: Move to on the active device, Use here on the other; and a wrong p
   await expect(chat(contact).getByText("pushed here")).toBeVisible({ timeout: 180_000 });
 });
 
-test("moved there and back: the device that has the profile again talks to the contact at once", { tag: ["@feature:devices.handoff"] }, async ({ peer }) => {
+test("moved there and back: the device that has the profile again talks to the contact at once, and keeps its files", { tag: ["@feature:devices.handoff"] }, async ({ peer }) => {
   test.setTimeout(12 * 60_000);
   const [desktop, phone, contact] = await Promise.all([peer("desktop"), peer("phone"), peer("contact", traced)]);
   const lines = traceLines(contact);
   await link(desktop, contact);
   await connect(desktop, contact);
+  // A small file (kept whole on its record, as a photo is): the desktop's frozen copy holds it when the profile comes
+  // back, so it is copied there from that copy, not sent again. That copy failed, and the move back ended "damaged".
+  const photo = randomBytes(200_000);
+  await sendFile(desktop, contact, "photo.bin", photo);
   await enrollDevice(desktop, phone);
   /** Move to `to` from the active device `from`, and wait until `to` runs the profile. */
   const move = async (from: Peer, to: Peer) => {
@@ -149,6 +153,7 @@ test("moved there and back: the device that has the profile again talks to the c
   // And back: the desktop takes the profile again, and its first message reaches the contact.
   await move(phone, desktop);
   const back = Date.now();
+  expect(Object.values(await profileFileDigests(desktop.page)).map((f) => f.sha256)).toEqual([sha(photo)]);
   await desktop.page.goto("/#/");
   await untilShown(desktop.page, desktop.page.getByTestId("sidebar").getByTestId("chat-row").first());
   await openTheChat(desktop);

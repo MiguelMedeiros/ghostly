@@ -20,6 +20,12 @@
   "loading": "読み込み中...",
   "moreInfo": "詳細",
   "save": "保存",
+  "size": {
+    "b": "{{n}} B",
+    "gb": "{{n}} GB",
+    "kb": "{{n}} KB",
+    "mb": "{{n}} MB"
+  },
   "success": "成功",
   "unnamedContact": "連絡先 · {{key}}",
   "unnamedContactShort": "連絡先",
