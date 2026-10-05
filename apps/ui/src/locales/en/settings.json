@@ -76,6 +76,8 @@
     "missing": "{{name}} is not connected. Using the default.",
     "names": "Device names",
     "namesHint": "Allow the microphone and camera to see them",
+    "none": "No microphone or camera found",
+    "noneInfo": "This browser shows Ghostly no microphone, camera or speaker here, so there is nothing to choose. A browser shows them only on a secure address (https or localhost).",
     "preview": "Preview",
     "previewLabel": "Camera preview",
     "speaker": "Speaker",

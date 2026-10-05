@@ -76,8 +76,18 @@ interface SectionView { phone: boolean; section: SettingsSection | null }
  * heading is left to screen readers there.
  */
 function SettingsGroup({ id, view, children }: { id: SettingsSection; view: SectionView; children: ReactNode }) {
+  const { t } = useI18n();
   if (view.phone && view.section !== id) return null;
-  if (id === "media" && !hasMediaDevices()) return null; // no devices to pick here: no empty space for them either
+  if (id === "media" && !hasMediaDevices()) {
+    // No devices to pick here: no empty space for them on the whole page, and one line on the section's own screen
+    // (opened by its address), not an empty screen.
+    if (!view.phone) return null;
+    return (
+      <Section title={t("settings.media.title")} testId="settings-media-none">
+        <Row label={t("settings.media.none")} info={t("settings.media.noneInfo")} />
+      </Section>
+    );
+  }
   return (
     <div id={`settings-section-${id}`} data-settings-section={id} className={`space-y-6 scroll-mt-2 ${view.phone ? "[&>section:first-child>h2]:sr-only" : ""}`}>
       {children}

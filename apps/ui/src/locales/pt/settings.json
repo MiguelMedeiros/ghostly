@@ -76,6 +76,8 @@
     "missing": "{{name}} não está conectado. Usando o padrão.",
     "names": "Nomes dos dispositivos",
     "namesHint": "Permita o microfone e a câmera para vê-los",
+    "none": "Nenhum microfone ou câmera encontrado",
+    "noneInfo": "Este navegador não mostra ao Ghostly nenhum microfone, câmera ou alto-falante aqui, então não há nada a escolher. Um navegador só os mostra num endereço seguro (https ou localhost).",
     "preview": "Ver",
     "previewLabel": "Prévia da câmera",
     "speaker": "Alto-falante",
