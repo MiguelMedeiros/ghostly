@@ -298,10 +298,13 @@ export const walletCard = (page: Page, card: WalletCardName): Locator =>
 
 /**
  * The Wallets page's tab of one network (Mainnet | Testnet): only that network's deck is on the page. Nothing to do
- * when it is chosen already, or when the page has no tabs (a profile with no wallet yet).
+ * when it is chosen already, or when the page has no tabs (a profile with no wallet yet). The page reads its wallets
+ * after it opens (after a reload, slowly on a busy machine) and has no tabs until then: this waits for the tabs or the
+ * first-wallet page before it decides there are none.
  */
 export async function showNetwork(page: Page, network: WalletNetwork): Promise<void> {
   const tab = page.getByTestId(`wallet-network-${network}`);
+  await expect(page.getByTestId("wallet-networks").or(page.getByTestId("wallet-first")).first()).toBeVisible();
   if (!await tab.count() || await tab.getAttribute("aria-selected") === "true") return;
   await tab.click();
   await expect(tab).toHaveAttribute("aria-selected", "true");
@@ -309,18 +312,26 @@ export async function showNetwork(page: Page, network: WalletNetwork): Promise<v
 
 /**
  * The wallet is a page beside the chat list, like Settings: opening it puts the chat away. A card named with its
- * network is chosen on that network's tab; a kind alone, on whichever tab has one.
+ * network is chosen on that network's tab; a kind alone, on whichever tab has one. The bar's Wallets button goes
+ * back home from the Wallets page, so it is pressed only away from it (by the route, which a reload keeps before the
+ * page is drawn). Until the page has read its wallets it has no tabs, then shows the tab this device showed last
+ * (kept across reloads): the tab is chosen again until the card is on the page.
  */
 export async function openWallet(peer: Peer, card?: WalletCardName): Promise<void> {
   const page = peer.page;
-  if (!await page.getByTestId("wallet").isVisible()) await page.getByTestId("wallet-chip").click();
+  const chip = page.getByTestId("wallet-chip");
+  if (await chip.getAttribute("aria-current") !== "page") await chip.click();
+  await expect(page.getByTestId("wallet")).toBeVisible();
   if (!card) return;
   const network = card.split("-")[1] as WalletNetwork | undefined;
-  if (network) await showNetwork(page, network);
-  else if (!await walletCard(page, card).count()) {
-    const other = await page.getByTestId("wallet-network-panel").getAttribute("data-network") === "mainnet" ? "testnet" : "mainnet";
-    await showNetwork(page, other);
-  }
+  await expect(async () => {
+    if (network) await showNetwork(page, network);
+    else if (!await walletCard(page, card).count()) {
+      const other = await page.getByTestId("wallet-network-panel").getAttribute("data-network") === "mainnet" ? "testnet" : "mainnet";
+      await showNetwork(page, other);
+    }
+    await expect(walletCard(page, card)).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 60_000 });
   await walletCard(page, card).click();
 }
 
