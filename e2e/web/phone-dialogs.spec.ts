@@ -148,3 +148,41 @@ test("on an iPhone: a message's quick bar opened while typing puts the keyboard 
   await expect(page.getByTestId("reaction-bar")).toBeVisible();
   await expect(input).not.toBeFocused();
 });
+
+test("an iPhone on its side with the keyboard up: the floating card is never over the field it is about", { tag: ["@feature:app.mobile-layout", "@feature:settings.lock.password"] }, async ({ peer }) => {
+  // About 200px are left above the keyboard: the card at the page's bottom covered the refocused password field and
+  // the error line under it (r9e, iPhone Air Simulator).
+  const SIDE = { width: 874, height: 402 }, KEYS = 200;
+  const { page } = await peer("lock-side", { mobile: true, viewport: SIDE });
+  await iosKeyboard(page);
+  await page.goto("/#/settings/privacy");
+  await page.getByRole("switch", { name: "Lock Screen" }).click();
+  const field = page.getByTestId("settings-password-new");
+  await field.fill("boo");
+  await page.getByTestId("settings-password-confirm").fill("boo");
+  await field.focus();
+  await keyboard(page, KEYS);
+  await page.getByRole("button", { name: "Set password" }).click();
+  const card = page.getByTestId("settings-notice");
+  await expect(card).toContainText("Password not set");
+  await expect(field).toBeFocused();
+  const error = page.getByTestId("settings-password-new-error");
+  await expect(error).toBeVisible();
+
+  const clear = async (visible: number) => {
+    const [c, f, e] = await Promise.all([card, field, error].map((at) => at.boundingBox({ timeout: 500 }).catch(() => null)));
+    if (!c || !f || !e) return "not drawn";
+    const over = (b: typeof c) => c.x < b.x + b.width && b.x < c.x + c.width && c.y < b.y + b.height && b.y < c.y + c.height;
+    if (over(f)) return "over the field";
+    if (over(e)) return "over its error";
+    if (c.y < 0 || c.y + c.height > visible + 1) return "out of the visible area";
+    return "clear";
+  };
+  // Within the card's five seconds.
+  await expect.poll(() => clear(SIDE.height - KEYS), { timeout: 4_000 }).toBe("clear");
+  // With the keyboard down, refused again: a new card, clear of the field too.
+  await keyboard(page, 0);
+  await page.getByRole("button", { name: "Set password" }).click();
+  await expect(field).toBeFocused();
+  await expect.poll(() => clear(SIDE.height), { timeout: 4_000 }).toBe("clear");
+});

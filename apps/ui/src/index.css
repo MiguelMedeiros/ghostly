@@ -779,6 +779,30 @@ html[data-standalone="true"] {
   }
 }
 
+/* A touch screen two panes wide (a phone on its side, a tablet) with the keyboard up: iOS leaves the window its
+   height, so a card over the whole window stands on what the keyboard leaves, as on a phone held upright. */
+@media (pointer: coarse) and (min-width: 768px) {
+  html[data-keyboard="true"] .toast-place {
+    bottom: calc(100% - var(--app-height, 100%) + 0.75rem);
+  }
+
+  html[data-keyboard="true"] .toast-place.toast-place-page {
+    bottom: 1.5rem;
+  }
+}
+
+/* Where the card would cover the field it is about (a short screen with the keyboard up: a phone on its side shows
+   about 200px), it goes to the top instead (Toast.tsx measures both). After the rules above, as specific as they are. */
+html .toast-place[data-at="top"] {
+  bottom: auto;
+  top: calc(env(safe-area-inset-top) + 0.75rem);
+}
+
+html .toast-place.toast-place-page[data-at="top"] {
+  bottom: auto;
+  top: 0.75rem;
+}
+
 .animate-pulse-dot {
   animation: pulse-dot 1.5s ease-in-out infinite;
 }
