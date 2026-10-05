@@ -289,7 +289,7 @@ export interface GroupView {
   /** Private groups: its members were told not to wake this side while the group is muted (`setWakeMuted`). */
   wakeMuted?: boolean;
   /**
-   * Private groups: the names of authors no longer in the roster (removed, left, or back with a new member key), by
+   * The names of authors no longer in the roster (removed, left, or back with a new member key), by
    * member key, so their earlier messages still say who wrote them. Absent when there are none.
    */
   formerNames?: Record<string, string>;

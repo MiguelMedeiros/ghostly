@@ -140,9 +140,9 @@ function writtenEvent(event: StoredMessage["event"], text: string, t: Translate)
 function eventText(message: StoredMessage, group: GroupView, t: Translate): string {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
   const text = message.text;
-  // A member who has left since: a private group still knows the name they had (`formerNames`), so their lines are
-  // said in the interface's language too. A community keeps no former names: its stored line stays as it is.
-  const former = !member && !!message.member && group.profile !== "community" && FORMER_EVENTS.has(message.event);
+  // A member who has left since: the group still knows the name they had (`formerNames`), so their lines are said in
+  // the interface's language too. A community knows only the names it heard: for anyone else its stored line stays.
+  const former = !member && !!message.member && FORMER_EVENTS.has(message.event) && (group.profile !== "community" || !!group.formerNames?.[message.member]);
   if (!member && !former) {
     if (message.event === "created" && text.startsWith("Group created. ")) return `${t("group.event.created")} ${readNote(group, t)}`;
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;

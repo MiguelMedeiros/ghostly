@@ -37,7 +37,7 @@ export function BackupProgress({ job, onCancel }: { job: BackupJob; onCancel: ()
       </div>
       <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-text-muted min-h-4">
         <span data-testid="backup-progress-files">{job.filesTotal > 0 ? t("profile.backups.progress.files", { done: fileNow, total: job.filesTotal }) : ""}</span>
-        <span data-testid="backup-progress-bytes">{job.bytesTotal > 0 ? t("profile.backups.progress.bytes", { done: byteSize(job.bytes), total: byteSize(job.bytesTotal) }) : ""}</span>
+        <span data-testid="backup-progress-bytes">{job.bytesTotal > 0 ? t("profile.backups.progress.bytes", { done: byteSize(job.bytes, t), total: byteSize(job.bytesTotal, t) }) : ""}</span>
       </div>
       <div className="flex justify-end min-h-10">
         {job.stage !== "saving" && <Button data-testid="backup-progress-cancel" onClick={onCancel}>{t("common.cancel")}</Button>}

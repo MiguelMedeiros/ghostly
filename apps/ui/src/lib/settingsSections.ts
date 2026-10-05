@@ -34,6 +34,24 @@ export function settingsSection(name: string | undefined): SettingsSection | nul
 /** Whether `name` is an old section's address (it is replaced by the new one's). */
 export const isOldSection = (name: string | undefined) => !!name && name in OLD_SECTIONS;
 
+/** Where a section's options are on the screen, for the index's mark (top and bottom, in the window's pixels). */
+export interface SectionBox { section: SettingsSection; top: number; bottom: number }
+
+/**
+ * The section a wide screen's index marks: the one picked in the index or named by the address (`wanted`) while it is
+ * in view, since the page cannot scroll the last sections up to its top, and the page may still grow around it as
+ * its options load. Otherwise the last one whose top has reached `line`, just under the page's top, and at the page's
+ * end (`atEnd`) the last section.
+ */
+export function sectionInView(boxes: readonly SectionBox[], line: number, viewBottom: number, atEnd: boolean, wanted: SettingsSection | null): SettingsSection {
+  const target = wanted ? boxes.find((box) => box.section === wanted) : undefined;
+  if (target && target.top < viewBottom && target.bottom > line) return target.section;
+  if (atEnd && boxes.length) return boxes[boxes.length - 1].section;
+  let current: SettingsSection | null = null;
+  for (const box of boxes) if (box.top <= line) current = box.section;
+  return current ?? SETTINGS_SECTIONS[0];
+}
+
 /** What a setting needs to be there at all: several profiles, an updater, wake-up push, calls' devices. */
 export type SettingNeeds = "profiles" | "updates" | "wake" | "media";
 

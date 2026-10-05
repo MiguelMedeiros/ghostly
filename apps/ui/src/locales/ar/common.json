@@ -20,6 +20,12 @@
   "loading": "جاري التحميل...",
   "moreInfo": "مزيد من المعلومات",
   "save": "حفظ",
+  "size": {
+    "b": "{{n}} بايت",
+    "gb": "{{n}} غ.ب",
+    "kb": "{{n}} ك.ب",
+    "mb": "{{n}} م.ب"
+  },
   "success": "نجاح",
   "unnamedContact": "جهة اتصال · {{key}}",
   "unnamedContactShort": "جهة اتصال",

@@ -98,6 +98,11 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
     links, records, self: () => handoffSelf(host),
   };
   const reload = () => options.show({ state: "standby", reload: true });
+  /** Whether the link to the device the record names active is live now. */
+  const activeLive = (now: DeviceRecord) => {
+    const key = now.activeSlot === undefined ? undefined : now.deviceSet[now.activeSlot]?.key;
+    return !!key && options.links.handoffLive(key);
+  };
   // The standby screen follows the record: a device that released is on standby now, not moving.
   let shown = record.state;
   const follow = () => void readDeviceRecord(options.profile).then((now) => { if (now && now.state !== shown) { shown = now.state; options.show(viewOf(now)); } }).catch(() => {});
@@ -174,6 +179,17 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
           return (async () => {
             const now = await readDeviceRecord(options.profile).catch(() => null);
             if (now?.state === "superseded") await options.links.checkTurn(false).catch(() => null);
+            // A standby with no live link to the device it believes active reads the turn first: it may have been removed
+            // meanwhile (the active device closed its link), and the screen then says so, not "can't reach" that device.
+            else if (now?.state === "standby" && !activeLive(now)) {
+              await options.links.checkTurn(false).catch(() => null);
+              const after = await readDeviceRecord(options.profile).catch(() => null);
+              if (after && (after.state !== now.state || after.activeSlot !== now.activeSlot || after.d !== now.d)) {
+                options.show(viewOf(after));
+                // Removed, or moving to a new set: nothing to pull, and the screen already says why.
+                if (after.state !== "standby") return taker.view();
+              }
+            }
             return taker.pull(p.password as string, later);
           })();
         case "deviceHandoffAccept": return taker.accept(later);

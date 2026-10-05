@@ -175,11 +175,19 @@ test("a request paid over Lightning when the tab closes before anything left is 
   await expect(request().getByTestId("payment-pay")).toBeEnabled();
 
   // The wallet asks the mint about the quote before it writes the payment down: held there, nothing has left yet.
-  let held = true;
-  await alice.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/melt\/quote\/bolt11\/.+/, (route) => held && route.request().method() === "GET" ? new Promise<void>(() => {}) : route.fallback());
+  let held = true, asked = 0;
+  await alice.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/melt\/quote\/bolt11\/.+/, (route) => {
+    if (!held || route.request().method() !== "GET") return route.fallback();
+    asked++;
+    return new Promise<void>(() => {});
+  });
   await request().getByTestId("payment-pay").click();
   await request().getByTestId("payment-lightning-approve").click();
   await expect(request().getByTestId("payment-state")).toHaveText(/Lightning payment pending/);
+  // The bubble says pending before the wallet asks: the tab goes only once that question is held. Let go earlier, it
+  // reached the mint, the wallet went on to split its coins, and the reload cut that swap off: its 512 sats stayed set
+  // aside (as they should, until no request of it can still arrive) and the balance below was short (One, 2026-10-05).
+  await expect.poll(() => asked).toBeGreaterThan(0);
   // The tab goes with that question still unanswered; the mint answers the app that opens next.
   held = false;
   await alice.page.reload();

@@ -58,7 +58,7 @@ import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 import { errorText } from "../lib/errorText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
-import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, settingsPath, settingsSection, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
+import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
 import { SettingsIndex, SettingsMenu } from "../components/settings/SettingsMenu";
 
 /** The fields of the lock password form, each with its own error line. */
@@ -125,8 +125,11 @@ export function Settings() {
   const content = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState<SettingsSection>(section ?? SETTINGS_SECTIONS[0]);
   const picked = useRef<SettingsSection | null>(null);
+  // The section picked in the index or named by the address: marked while in view, until the page is scrolled by hand.
+  const wanted = useRef<SettingsSection | null>(section);
   useEffect(() => {
     if (isMobile || !section) return;
+    wanted.current = section;
     if (picked.current === section) { picked.current = null; return; } // picked in the index: already on its way there
     document.getElementById(`settings-section-${section}`)?.scrollIntoView({ block: "start" });
     setInView(section);
@@ -135,17 +138,26 @@ export function Settings() {
     const body = content.current?.closest<HTMLElement>("[data-page-body]");
     if (isMobile || !body) return;
     const onScroll = () => {
-      const top = body.getBoundingClientRect().top + 48;
-      let current: SettingsSection | null = null;
-      for (const group of body.querySelectorAll<HTMLElement>("[data-settings-section]")) {
-        if (group.getBoundingClientRect().top <= top) current = group.dataset.settingsSection as SettingsSection;
-      }
-      setInView(current ?? SETTINGS_SECTIONS[0]);
+      const view = body.getBoundingClientRect();
+      const boxes = [...body.querySelectorAll<HTMLElement>("[data-settings-section]")].map((group) => {
+        const box = group.getBoundingClientRect();
+        return { section: group.dataset.settingsSection as SettingsSection, top: box.top, bottom: box.bottom };
+      });
+      const atEnd = body.scrollTop > 0 && body.scrollTop + body.clientHeight >= body.scrollHeight - 2;
+      setInView(sectionInView(boxes, view.top + 48, view.bottom, atEnd, wanted.current));
     };
+    // Scrolled by hand (wheel, touch, keys, the scroll bar): the section at the top is marked again.
+    const byHand = (event: Event) => { if (event.type !== "pointerdown" || event.target === body) wanted.current = null; };
+    const hands = ["wheel", "touchmove", "keydown", "pointerdown"] as const;
     body.addEventListener("scroll", onScroll, { passive: true });
-    return () => body.removeEventListener("scroll", onScroll);
+    for (const type of hands) body.addEventListener(type, byHand, { passive: true });
+    return () => {
+      body.removeEventListener("scroll", onScroll);
+      for (const type of hands) body.removeEventListener(type, byHand);
+    };
   }, [isMobile]);
   const pick = (to: SettingsSection) => {
+    wanted.current = to;
     document.getElementById(`settings-section-${to}`)?.scrollIntoView({ block: "start", behavior: settings.reduceMotion ? "auto" : "smooth" });
     setInView(to);
     // The page stays where it is; its address names the section, so a reload comes back to it.
@@ -402,7 +414,7 @@ export function Settings() {
       media: t("settings.mediaHint"),
       privacy: t("settings.privacyHint"),
       network: t("settings.networkHint"),
-      storage: desktopUsed ? formatBytes(desktopUsed.total) : formatBytes(estimate?.used ?? storageInfo.used),
+      storage: desktopUsed ? formatBytes(desktopUsed.total, t) : formatBytes(estimate?.used ?? storageInfo.used, t),
       about: update.update ? t("updates.available", { version: update.update.version }) : `${t("settings.version")} ${appVersion}`,
     };
     return (
@@ -611,9 +623,9 @@ export function Settings() {
       <SettingsGroup id="storage" view={view}>
       <Section title={t("settings.data")}>
         <Row label={t("settings.storageUsed")} testId="settings-storage-used"
-          value={desktopUsed ? formatBytes(desktopUsed.total) : estimate ? t("settings.storageOf", { used: formatBytes(estimate.used), quota: formatBytes(estimate.quota) }) : formatBytes(storageInfo.used)}
+          value={desktopUsed ? formatBytes(desktopUsed.total, t) : estimate ? t("settings.storageOf", { used: formatBytes(estimate.used, t), quota: formatBytes(estimate.quota, t) }) : formatBytes(storageInfo.used, t)}
           info={desktopUsed ? <span data-testid="settings-storage-parts">
-            {desktopUsed.parts.map((part) => <span key={part.key} className="block">{t(`settings.storageParts.${part.key}`, { size: formatBytes(part.bytes), count: part.count ?? 0 })}</span>)}
+            {desktopUsed.parts.map((part) => <span key={part.key} className="block">{t(`settings.storageParts.${part.key}`, { size: formatBytes(part.bytes, t), count: part.count ?? 0 })}</span>)}
             <span className="block mt-1">{t("settings.storagePartsNote")}</span>
           </span> : undefined} />
         {protection && (
