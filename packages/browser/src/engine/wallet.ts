@@ -849,7 +849,7 @@ export class CashuWallet {
     kind: WalletTxKind = "ecash-in",
     note?: string,
     { addTestMint = true, payment }: { addTestMint?: boolean; payment?: (amount: number, mint: string) => StoredPayment } = {},
-  ): Promise<{ amount: number; mint: string }> {
+  ): Promise<{ amount: number; mint: string; fee: number }> {
     let mint: string;
     let faceValue: number;
     try {
@@ -870,7 +870,7 @@ export class CashuWallet {
       // A redeem of this very token that is still written down is finished as it was made: never a second swap for it.
       let swap = (await this.swapsAt(mint)).find((s) => s.kind === "receive" && s.token === token);
       // Already in the wallet, with only its chat still to be told: nothing to redeem again.
-      if (swap?.finished) return { amount: swap.tx?.amount ?? 0, mint };
+      if (swap?.finished) return { amount: swap.tx?.amount ?? 0, mint, fee: swap.tx?.fee ?? 0 };
       if (!swap) {
         const preview = await (await this.wallet(mint)).prepareSwapToReceive(token);
         // The outputs are for what is left after the mint's fee, so the records are known before the mint is asked.
@@ -883,7 +883,8 @@ export class CashuWallet {
       if (swap.tx && credited !== swap.tx.amount) swap = { ...swap, ...records(credited), tx: { ...records(credited).tx, id: swap.tx.id, timestamp: swap.tx.timestamp } };
       await this.finishSwap(swap, keep, [], false);
       this.events.onChange();
-      return { amount: credited, mint };
+      // `fee`: what the mint kept of the token's face value for taking it in.
+      return { amount: credited, mint, fee: Math.max(0, faceValue - credited) };
     });
   }
 

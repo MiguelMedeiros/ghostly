@@ -297,7 +297,7 @@ describe("a reviewed Cashu payment taken back, through the engine", () => {
     await intentRepository.put({ review, prepared: { mint: TEST_MINT, swap: {}, token: "cashuBtoken" } as unknown as CashuPrepared });
     const sent: StoredPayment = { id: review.id, linkId: "chat", kind: "payment", direction: "out", amount: 10, unit: "sat", state: "pending", createdAt: 1, token: "cashuBtoken", mint: TEST_MINT, requestId: "request-1", target: review };
     node["desk"]["payments"].set(sent.id, sent);
-    const redeem = vi.spyOn(node["wallet"], "receiveToken").mockResolvedValue({ amount: 9, mint: TEST_MINT });
+    const redeem = vi.spyOn(node["wallet"], "receiveToken").mockResolvedValue({ amount: 9, mint: TEST_MINT, fee: 0 });
     await node.reclaimPayment({ paymentId: sent.id });
     expect(redeem).toHaveBeenCalledWith("cashuBtoken", "reclaimed", undefined, { payment: expect.any(Function) });
     expect(node["desk"].payment(sent.id)).toMatchObject({ state: "reclaimed" });
@@ -382,11 +382,24 @@ describe("sending, requesting and asking", () => {
     const { node } = track(engine());
     const submitted = savedReview({ state: "submitted" }), settled = savedReview({ state: "settled" });
     for (const review of [submitted, settled]) await intentRepository.put({ review, prepared: {} });
-    const host = node["desk"]["host"] as { onReviewedPaymentRefused(id: string, reason: string): Promise<void> };
+    const host = node["desk"]["host"] as { onReviewedPaymentRefused(id: string, reason: string, back?: { amount: number; fee: number }): Promise<void> };
     await host.onReviewedPaymentRefused(submitted.id, "unknown mint");
     await host.onReviewedPaymentRefused(settled.id, "unknown mint");
     expect((await intentRepository.get(submitted.id))?.review).toMatchObject({ state: "failed", error: "Refused: unknown mint. The sats came back." });
     expect((await intentRepository.get(settled.id))?.review.state).toBe("settled");
+  });
+
+  it("a refused reviewed payment says exactly what came back, and what the mint kept for taking it back", async () => {
+    const { node } = track(engine());
+    const lessFee = savedReview({ state: "submitted" }), whole = savedReview({ state: "submitted" });
+    for (const review of [lessFee, whole]) await intentRepository.put({ review, prepared: {} });
+    const host = node["desk"]["host"] as { onReviewedPaymentRefused(id: string, reason: string, back?: { amount: number; fee: number }): Promise<void> };
+    await host.onReviewedPaymentRefused(lessFee.id, "Already paid by another member of the group", { amount: 98, fee: 2 });
+    await host.onReviewedPaymentRefused(whole.id, "Already paid by another member of the group", { amount: 100, fee: 0 });
+    expect((await intentRepository.get(lessFee.id))?.review).toMatchObject({
+      state: "failed", error: "Refused: Already paid by another member of the group. 98 sats came back; the mint kept 2 as its fee.", returned: { amount: 98, fee: 2 },
+    });
+    expect((await intentRepository.get(whole.id))?.review).toMatchObject({ state: "failed", error: "Refused: Already paid by another member of the group. All 100 sats came back.", returned: { amount: 100, fee: 0 } });
   });
 });
 

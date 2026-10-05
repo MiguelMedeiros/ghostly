@@ -325,6 +325,7 @@
     },
     "payee": "Recebedor",
     "provider": "Provedor",
+    "returnedInfo": "Pegar ecash de volta é uma troca no mint, e o mint fica com uma pequena taxa por troca: {{fee}} {{unit}} desta vez. O resto voltou para a sua carteira.",
     "states": {
       "cancelled": "cancelado",
       "confirmed": "confirmado",

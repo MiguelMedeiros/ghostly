@@ -200,7 +200,7 @@ import { TransportLog, resumeHere } from "./transportLog";
 import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
-import { PaymentDesk } from "./payments";
+import { PaymentDesk, refusedLine } from "./payments";
 import { CashuWallet, TEST_COINS_NOTE, normalizeMintUrl } from "./wallet";
 import { identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
 import { CLOCK_SAMPLES, messageAttention, writtenAt } from "./attention";
@@ -820,9 +820,9 @@ export class GhostlyNode implements EngineImplementation {
   private readonly bitcoins: PerNetwork<BitcoinService> = perNetwork((network) => new BitcoinService(network, () => this.providers().onchain, () => this.providerHost(network), () => { void this.refreshWallet(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); }));
   private readonly desk: PaymentDesk = new PaymentDesk(this.wallet, {
     onReviewedPaymentResult:async(id)=>{await this.reconcilePayment({id});},
-    onReviewedPaymentRefused:async(id,reason)=>{
+    onReviewedPaymentRefused:async(id,reason,back)=>{
       const intent=await intentRepository.get(id);
-      if(intent && ["submitted","unknown"].includes(intent.review.state))await intentRepository.put({...intent,review:{...intent.review,state:"failed",error:`Refused: ${reason}. The sats came back.`}});
+      if(intent && ["submitted","unknown"].includes(intent.review.state))await intentRepository.put({...intent,review:{...intent.review,state:"failed",error:refusedLine(reason,back),...(back?{returned:back}:{})}});
       this.emitState();
     },
     getLink: (linkId) => this.paymentLink(linkId),

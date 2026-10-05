@@ -104,6 +104,12 @@ const RULES: readonly Rule[] = [
   exact("This request is no longer open", "errors.pay.requestClosed"),
   exact("A Lightning payment for this request is still pending", "errors.pay.lightningPending"),
   exact("You already paid this request", "errors.pay.alreadyPaid"),
+  exact("Already paid by another member of the group", "errors.pay.paidByOther"),
+  exact("The payment was refused", "errors.pay.refused"),
+  // A refused send whose ecash came back (payments.ts refusedLine): why, and what came back, less the mint's fee.
+  { match: /^Refused: (?<reason>[\s\S]+?)\. (?<amount>\d+) sats? came back; the mint kept (?<fee>\d+) as its fee\.$/, key: "errors.pay.refusedLessFee", params: ({ reason, amount, fee }, t) => ({ reason: errorText(reason, t).replace(/\.$/, ""), amount: formatAmount(Number(amount), t.language ?? "en"), fee: formatAmount(Number(fee), t.language ?? "en") }) },
+  { match: /^Refused: (?<reason>[\s\S]+?)\. All (?<amount>\d+) sats? came back\.$/, key: "errors.pay.refusedAllBack", params: ({ reason, amount }, t) => ({ reason: errorText(reason, t).replace(/\.$/, ""), amount: formatAmount(Number(amount), t.language ?? "en") }) },
+  { match: /^Refused: (?<reason>[\s\S]+?)\. The sats came back\.$/, key: "errors.pay.refusedBack", params: ({ reason }, t) => ({ reason: errorText(reason, t).replace(/\.$/, "") }) },
   exact("This request cannot be paid over Lightning in this chat", "errors.pay.noLightningHere"),
   exact("No way of paying this request is allowed in this chat", "errors.pay.noWayHere"),
   exact("The invoice does not match the requested amount", "errors.pay.invoiceMismatch"),
