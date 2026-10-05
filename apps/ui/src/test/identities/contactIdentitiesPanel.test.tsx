@@ -127,7 +127,10 @@ describe("ContactIdentitiesPanel", () => {
       for (const i of [1, 2]) {
         await user.click(screen.getByTestId("chat-identity-cards"));
         await vi.waitFor(() => expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument());
-        expect(within(await turnOver(user, i)).queryByTestId("chat-identity-recheck")).not.toBeInTheDocument();
+        const card = await turnOver(user, i);
+        expect(within(card).queryByTestId("chat-identity-recheck")).not.toBeInTheDocument();
+        // Nor a word about a Check again that is not there.
+        expect(card).not.toHaveTextContent("Check again");
       }
     });
 
