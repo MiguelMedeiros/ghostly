@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
-import { ONCHAIN_FEE_CAP, spendable } from "./walletCardData";
+import { ONCHAIN_FEE_CAP, holdsLess } from "./walletCardData";
 import { LightningPayWith, lightningPayer as payerOf } from "./LightningPayWith";
 import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
@@ -126,9 +126,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const feeInput=feeCap??(tokenPayment?'0.001':payment.target?.method==='bitcoin'?String(ONCHAIN_FEE_CAP):viaLightning?String(Math.max(10,Math.ceil(payment.amount*0.03))):'10');
   // What the paying card holds, when it says (read live: it can change while the review is open). More than that is never
   // approved: the node would only refuse it afterwards. A card that does not say is left to its node, as before.
-  const payerState = viaLightning ? payer.getState() : null;
-  const lnHolds = payerState ? spendable("lightning", payerState) : undefined;
-  const lnOver = lnHolds !== undefined && payment.amount > lnHolds;
+  const lnHolds = viaLightning ? holdsLess("lightning", payer.getState(), payment.amount) : undefined;
+  const lnOver = lnHolds !== undefined;
   const payLightning = (confirmedReal: boolean) => run(async () => {
     await payer.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput), ...(confirmedReal ? { confirmedReal } : {}) });
     setLnReview(null); setLnConfirming(false);

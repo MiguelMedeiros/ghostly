@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { LightningAddressInfo, WalletPlatform } from "../../lib/platform";
-import { CASHU_MINT_SOURCE } from "../walletCardData";
+import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
@@ -76,6 +76,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   }
 
   if (quote && invoice) {
+    // More than the paying card holds is never approved: the node or the mint would only refuse it afterwards.
+    const over = holdsLess(via === "cashu" ? "cashu" : "lightning", wallet.getState(), quote.amount);
     const pay = (confirmedReal: boolean) => void run(async () => {
       const paid = await wallet.payQuote(quote.quote, quote.mint, invoice.note, confirmedReal);
       setOutcome(paid ? "paid" : "pending");
@@ -87,9 +89,10 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
           fees: <span className="opacity-70"> {t("wallet.lightning.feesThrough", { fee: formatAmount(quote.feeReserve, t.language), source: sourceName(quote.source) })}</span>,
         })}</p>
         {info.description && <p className={muted}>{info.description}</p>}
-        {confirming ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
+        {over !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} data-testid="lnurl-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
+        {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={primary} disabled={busy} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</button>
+            <button type="button" className={primary} disabled={busy || over !== undefined} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</button>
             <button type="button" className={quiet} disabled={busy} onClick={() => { setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
           </div>
         )}
