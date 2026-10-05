@@ -4,6 +4,24 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.1.2
+
+Ghostly 1.1.2 makes Settings easier to find your way around on a phone, and fixes a lock password being refused right after the app opens. Settings now comes in sections: on a phone it opens as a menu with search, each section on its own screen.
+
+Known issues, for the next release: on iPhone the camera opens Safari, not the app on the Home Screen; moving a profile needs both devices online at the same time.
+
+### Fixed
+
+**Everywhere**
+
+- Setting, removing or turning off the lock password right after the app opens: a profile on one device is no longer held to the 8 character rule of a profile on several devices, or told it is on several, while the app is still starting. Settings now asks before judging the password.
+
+### For users
+
+**Everywhere**
+
+- Settings comes in sections: Profile, Appearance, Notifications, Audio & video, Privacy & security, Network, Data & storage and About. On a phone it opens as a menu with a search field, and each section opens on its own screen with Back to the menu. On a wider screen the sections stay on one page, with an index and search beside them. Settings → Advanced is now Network, and old links to it still work.
+
 ## 1.1.1
 
 Ghostly 1.1.1 makes adding your phone to a profile easy to find, and shows password errors where you are looking. In 1.1.0 a phone that already had a profile could not reach "Add this device to my profile"; it is now in the profile switcher, in Profile, Devices, and on a new profile's chat list, and scanning the Add a device QR code with the phone's camera opens Ghostly with the code filled in.
