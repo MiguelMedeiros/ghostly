@@ -18,6 +18,7 @@ import { LockScreenProvider, useLockScreen } from "./contexts/LockScreenContext"
 import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
 import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
+import { PreUnlockRing } from "./components/PreUnlockRing";
 import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -171,8 +172,8 @@ function HomeAnchor() {
 const ChatRoute = () => null;
 
 /**
- * Nothing of the app exists until the password has been entered once. When it
- * locks again later the app stays mounted (a call keeps going) but can be
+ * Nothing of the app exists until the password has been entered once, but a chat whose call rings meanwhile
+ * (`PreUnlockRing`, hidden and inert). When it locks again later the app stays mounted (a call keeps going) but can be
  * neither reached nor read by assistive technology under the lock screen.
  */
 function LockGate({ children }: { children: ReactNode }) {
@@ -219,6 +220,8 @@ export function Root() {
               <JoinNotice />
               <GroupLinkIntake />
               <HomeAnchor />
+              {/* A call that rings before the first unlock: shown on the lock screen (WISP 601 § Locked). */}
+              <PreUnlockRing />
               <LockGate>
                 {/* Asking for updates says this device runs Ghostly: not before the password. */}
                 <UpdateProvider>

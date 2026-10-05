@@ -62,6 +62,14 @@ class EngineClient {
     return offer;
   }
 
+  /**
+   * Puts an offer back for this link, to be taken again: a chat that rang while the app was locked since it started
+   * hands its call to the chat the app opens once unlocked (apps/ui/src/lib/lockedRing.ts).
+   */
+  keepCallOffer(linkId: string, signal: string): void {
+    this.offers.set(linkId, signal);
+  }
+
   onCallSignal(listener: (linkId: string, signal: string) => void): () => void {
     this.callListeners.add(listener);
     return () => this.callListeners.delete(listener);
