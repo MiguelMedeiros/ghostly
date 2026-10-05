@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import type { ToastMessage } from "../../hooks/useToast";
@@ -13,11 +13,15 @@ import type { ToastMessage } from "../../hooks/useToast";
  * - `page`: as a Page's `overlay`, centred over that column (not over the chat list beside it on a desktop) and
  *   above the tab bar and the keyboard on a phone, since the column ends there;
  * - `dialog`: inside a modal `<dialog>`, where everything outside it is inert and under its backdrop.
+ *
+ * It never covers the field it is about: where the card at the bottom would be over the focused field or the error
+ * line under it (a short screen with the keyboard up, a phone on its side), it goes to the top (`useClearOfField`).
  */
 export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: { toast: ToastMessage | null; onDismiss(): void; place?: "screen" | "page" | "dialog"; testId?: string }) {
   const { t } = useI18n();
+  const region = useClearOfField(toast);
   const card: ReactNode = (
-    <div role="status" aria-live="polite" aria-atomic="true" className={place === "page" ? "toast-place toast-place-page" : "toast-place"} data-testid={`${testId}-region`}>
+    <div ref={region} role="status" aria-live="polite" aria-atomic="true" className={place === "page" ? "toast-place toast-place-page" : "toast-place"} data-testid={`${testId}-region`}>
       {toast && (
         <div key={toast.id} data-testid={testId} data-tone={toast.tone}
           className="toast-card pointer-events-auto flex items-start gap-2.5 w-full max-w-sm rounded-xl border border-border bg-sidebar-bg px-4 py-3 shadow-2xl animate-fade-in">
@@ -45,4 +49,66 @@ export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: 
     </div>
   );
   return place === "screen" ? createPortal(card, document.body) : card;
+}
+
+/** The focused field and the lines that describe it (its error), where the card must not be; null when none has the focus. */
+function fieldBoxes(): DOMRect[] | null {
+  const field = document.activeElement;
+  if (!(field instanceof HTMLElement) || !field.matches("input, textarea, select, [contenteditable=true]")) return null;
+  const described = (field.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean)
+    .map((id) => document.getElementById(id)).filter((el): el is HTMLElement => !!el);
+  return [field, ...described].map((el) => el.getBoundingClientRect()).filter((box) => box.width > 0 && box.height > 0);
+}
+
+/** How many pixels of `boxes` the card's box covers. */
+function covered(card: DOMRect, boxes: readonly DOMRect[]): number {
+  let area = 0;
+  for (const box of boxes) {
+    const w = Math.min(card.right, box.right) - Math.max(card.left, box.left);
+    const h = Math.min(card.bottom, box.bottom) - Math.max(card.top, box.top);
+    if (w > 0 && h > 0) area += w * h;
+  }
+  return area;
+}
+
+/**
+ * Puts the card at the top of its place (`data-at="top"`) while at the bottom it would cover the focused field or its
+ * error, and back at the bottom otherwise: where it covers less when both would. Measured when it shows, when the
+ * focus moves, and when the visible area changes (the keyboard, a scroll, the phone turning).
+ */
+function useClearOfField(toast: ToastMessage | null): RefObject<HTMLDivElement | null> {
+  const region = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = region.current;
+    if (!toast || !el) return;
+    const place = () => {
+      const card = el.firstElementChild;
+      const boxes = fieldBoxes();
+      el.removeAttribute("data-at");
+      if (!card || !boxes?.length) return;
+      const atBottom = covered(card.getBoundingClientRect(), boxes);
+      if (!atBottom) return;
+      el.dataset.at = "top";
+      if (covered(card.getBoundingClientRect(), boxes) >= atBottom) el.removeAttribute("data-at");
+    };
+    place();
+    let frame = 0;
+    const later = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
+    const viewport = window.visualViewport;
+    document.addEventListener("focusin", later);
+    document.addEventListener("focusout", later);
+    document.addEventListener("scroll", later, { capture: true, passive: true });
+    window.addEventListener("resize", later);
+    viewport?.addEventListener("resize", later);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("focusin", later);
+      document.removeEventListener("focusout", later);
+      document.removeEventListener("scroll", later, { capture: true });
+      window.removeEventListener("resize", later);
+      viewport?.removeEventListener("resize", later);
+      el.removeAttribute("data-at");
+    };
+  }, [toast]);
+  return region;
 }
