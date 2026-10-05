@@ -5,7 +5,11 @@
   "missingIndexedDB": "IndexedDB est désactivé ou bloqué : les discussions et les clés ne peuvent pas être enregistrées.",
   "missingLocks": "Web Locks est absent : Ghostly ne peut pas s'assurer de ne tourner qu'une fois.",
   "missingStorage": "Les données du site sont bloquées : rien ne peut être enregistré.",
+  "otherTab": "Ghostly est déjà ouvert dans un autre onglet.",
+  "otherTabHint": "Fermez-le et cet onglet prend le relais.",
   "reload": "Recharger",
+  "shared": "Envoyé à Ghostly dans votre autre onglet.",
+  "sharedHint": "Choisissez la discussion là-bas. Vous pouvez fermer celui-ci.",
   "title": "Ghostly ne peut pas fonctionner dans ce navigateur",
   "tryOther": "Quittez la navigation privée et autorisez les données du site, mettez le navigateur à jour, ou ouvrez Ghostly dans un autre.",
   "trySecure": "Ouvrez Ghostly à son adresse https://."

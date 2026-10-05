@@ -5,7 +5,11 @@
   "missingIndexedDB": "O IndexedDB está desligado ou bloqueado, então conversas e chaves não podem ser salvas.",
   "missingLocks": "Falta o Web Locks, então o Ghostly não consegue garantir que roda uma vez só.",
   "missingStorage": "Os dados do site estão bloqueados, então nada pode ser salvo.",
+  "otherTab": "O Ghostly já está aberto em outra aba.",
+  "otherTabHint": "Feche-a e esta aba assume.",
   "reload": "Recarregar",
+  "shared": "Enviado ao Ghostly na sua outra aba.",
+  "sharedHint": "Escolha a conversa lá. Pode fechar esta.",
   "title": "O Ghostly não roda neste navegador",
   "tryOther": "Saia do modo privado e permita dados do site, atualize o navegador, ou abra o Ghostly em outro.",
   "trySecure": "Abra o Ghostly pelo endereço https://."

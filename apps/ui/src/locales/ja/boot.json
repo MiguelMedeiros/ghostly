@@ -5,7 +5,11 @@
   "missingIndexedDB": "IndexedDB がオフかブロックされているため、チャットと鍵を保存できません。",
   "missingLocks": "Web Locks がないため、Ghostly が一つだけ動いていることを確かめられません。",
   "missingStorage": "サイトデータがブロックされているため、何も保存できません。",
+  "otherTab": "Ghostly はすでに別のタブで開いています。",
+  "otherTabHint": "そのタブを閉じると、このタブに切り替わります。",
   "reload": "再読み込み",
+  "shared": "別のタブの Ghostly に送りました。",
+  "sharedHint": "そちらでチャットを選んでください。このタブは閉じてかまいません。",
   "title": "このブラウザでは Ghostly を実行できません",
   "tryOther": "プライベートモードを終了してサイトデータを許可するか、ブラウザを更新するか、別のブラウザで Ghostly を開いてください。",
   "trySecure": "https:// のアドレスで Ghostly を開いてください。"
