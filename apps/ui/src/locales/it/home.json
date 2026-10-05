@@ -1,10 +1,10 @@
 {
   "createChat": "Crea Nuova Chat",
-  "description": "Messaggi privati ed effimeri.",
+  "description": "Messaggistica privata, peer-to-peer.",
   "features": {
     "decentralized": "Nessun server centrale",
     "encrypted": "Crittografia end-to-end",
-    "ephemeral": "I messaggi scompaiono"
+    "onDevice": "I tuoi messaggi restano sui tuoi dispositivi"
   },
   "linkFailed": "Impossibile aprire il link.",
   "unpublishedVersion": "Versione locale — vedi le versioni pubblicate",
