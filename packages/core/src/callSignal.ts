@@ -588,7 +588,7 @@ export function sdpHasCandidates(sdp: string | undefined | null): boolean {
   return /^a=candidate:/m.test(sdp ?? "");
 }
 
-/** How long to keep collecting after the candidate we were waiting for showed up. */
+/** How long to keep collecting after the candidate we were waiting for showed up (a call's; a chat's data link sets its own). */
 const ICE_SETTLE_MS = 400;
 
 /** IPv4 ranges that are not reachable from the internet: this network, private, shared (CGNAT), loopback, link-local, the documentation ones, benchmarking, multicast and up. */
@@ -638,7 +638,14 @@ export function waitForIceGathering(
      * the last round's, so it only counts once the description has a candidate of this round.
      */
     fresh = false,
-  }: { stallMs?: number; fresh?: boolean } = {},
+    /** How long to keep collecting after the candidate waited for showed up (`ICE_SETTLE_MS` by default). */
+    settleMs = ICE_SETTLE_MS,
+    /**
+     * Give up waiting for that candidate after this long once the connection has any candidate (a host one comes in
+     * milliseconds): what was gathered by then goes. Unset: up to `timeoutMs`.
+     */
+    hostBoundMs,
+  }: { stallMs?: number; fresh?: boolean; settleMs?: number; hostBoundMs?: number } = {},
 ): Promise<void> {
   return new Promise((resolve) => {
     if (pc.iceGatheringState === "complete" && (!fresh || sdpHasCandidates(pc.localDescription?.sdp))) {
@@ -656,6 +663,7 @@ export function waitForIceGathering(
     const finish = () => {
       clearTimeout(timeout);
       if (stalled) clearTimeout(stalled);
+      if (bounded) clearTimeout(bounded);
       if (settle) clearTimeout(settle);
       pc.removeEventListener("icegatheringstatechange", onState);
       pc.removeEventListener("icecandidate", onCandidate);
@@ -665,6 +673,9 @@ export function waitForIceGathering(
     const stalled = stallMs === undefined ? null : setTimeout(() => {
       if (!found && !sdpHasCandidates(pc.localDescription?.sdp)) finish();
     }, stallMs);
+    const bounded = hostBoundMs === undefined ? null : setTimeout(() => {
+      if (found || sdpHasCandidates(pc.localDescription?.sdp)) finish();
+    }, hostBoundMs);
 
     const onState = () => {
       if (pc.iceGatheringState === "complete" && (!fresh || sdpHasCandidates(pc.localDescription?.sdp))) finish();
@@ -672,7 +683,7 @@ export function waitForIceGathering(
     const onCandidate = (event: RTCPeerConnectionIceEvent) => {
       if (event.candidate) found = true;
       const line = event.candidate?.candidate;
-      if (!settle && line && (line.includes(wanted) || (!usesTurn && isGlobalIpv4Host(line)))) settle = setTimeout(finish, ICE_SETTLE_MS);
+      if (!settle && line && (line.includes(wanted) || (!usesTurn && isGlobalIpv4Host(line)))) settle = setTimeout(finish, settleMs);
     };
 
     pc.addEventListener("icegatheringstatechange", onState);

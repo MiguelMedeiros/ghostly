@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INVITER_DIAL_GRACE_MS, PAIRING_ATTEMPT_MS, PAIRING_RETRY_MS } from "../src/ghostlink";
 import { RELAY_POLL_INTERVALS } from "../src/link";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, run, untilLive, useFakeWorld, type NetworkModel } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, rtc, run, untilLive, useFakeWorld, type NetworkModel } from "./support/pairingWorld";
 
 // covers: chat.paired.pair-timing, chat.paired.progress, chat.paired.pair
 
@@ -57,6 +57,44 @@ describe("a first pairing, at desktop pace", () => {
     expect(took).toBeLessThanOrEqual(LIVE_WITHIN_MS + INVITER_DIAL_GRACE_MS);
     expect(inviter.progress.map(p => p.stage)).toEqual(["waiting", "waiting", "knocking", "connecting", "live"]);
   }, 30_000);
+
+  /**
+   * Where the STUN servers never answer, an offer waited for them until its gathering gave up (5 s): One's e2e runs had
+   * 13 offers of 89 at 5 s, and their pairings live 5.5 to 11 s after the join (2026-10-05). It goes after 2 s now,
+   * with its host candidates (`OFFER_HOST_GATHER_MS`).
+   */
+  it.each(["inviter", "joiner"] as const)("an offer whose STUN servers never answer goes after 2 s · the %s's key is lower", async lower => {
+    rtc.srflxAfterMs = Infinity;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere(lower);
+    const inviter = open(made.inviter, pkarr);
+    await run(10_000);
+    const joiner = open(made.joiner, pkarr);
+    const took = await untilLive(inviter, joiner, 60_000);
+    // Before: 6.5 s with the joiner's key lower (its offer's 5 s, then the answer), 11.9 s with the inviter's (it offered
+    // too after its grace, and kept its own). After: 3.7 s either way.
+    expect(took, "live after the join").toBeLessThanOrEqual(4_500);
+    for (const side of [inviter, joiner]) expect(side.progress.at(-1)).toMatchObject({ stage: "live", attempt: 1 });
+  }, 60_000);
+
+  /**
+   * The cost: an offer that went without its server reflexive candidate (STUN answered after 3 s) to a contact behind a
+   * NAT that lets nothing through without one. The attempt fails, and the next offer waits for STUN as long as it takes.
+   */
+  it("an offer without its STUN candidate to a contact that needs one: the attempt fails, the next offer waits for it and connects", async () => {
+    rtc.srflxAfterMs = 3_000;
+    rtc.needsSrflx = true;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere("joiner");
+    const inviter = open(made.inviter, pkarr);
+    await run(10_000);
+    const joiner = open(made.joiner, pkarr);
+    const took = await untilLive(inviter, joiner, 60_000);
+    // Before: 4.45 s, the first offer waited the 3 s for its STUN candidate. After: the first attempt fails, the second
+    // offer waits for it, live at 10.6 s.
+    expect(took, "live after the join").toBeLessThanOrEqual(PAIRING_ATTEMPT_MS + PAIRING_RETRY_MS + 6_000);
+    expect(joiner.progress.at(-1)).toMatchObject({ stage: "live", attempt: 2 });
+  }, 60_000);
 
   it("polls the contact's key in the foreground while pairing, and in the background once connected", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK);

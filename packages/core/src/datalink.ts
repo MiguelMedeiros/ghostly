@@ -73,6 +73,17 @@ const PUBLIC_CANDIDATE = /^a=candidate:.* typ (srflx|relay|prflx)\b/m;
 export const CONNECT_TIMEOUT_MS = 90_000;
 const ICE_GATHERING_TIMEOUT_MS = 5_000;
 /**
+ * An offer with its host candidates waits this long at most for a server reflexive one (STUN answered), not
+ * `ICE_GATHERING_TIMEOUT_MS`. Where the STUN servers answer, they do in some 50 ms (0.44 s an offer took here, with the
+ * settle); where they do not, every offer of a first pairing waited the full 5 s, twice when the inviter offered too
+ * (One's e2e runs: 13 offers of 89 at 5 s, 9 more at 1.3-3 s, 2026-10-05). An offer without one still connects to most
+ * contacts (their checks learn this side's address from its own); behind a restricted NAT on the contact's side it may
+ * not, and the next offer of the chat then waits as long as it takes (`fullGather`).
+ */
+export const OFFER_HOST_GATHER_MS = 2_000;
+/** The data link keeps collecting this long after the candidate it waited for came (a call keeps 400 ms). */
+export const DATA_SETTLE_MS = 150;
+/**
  * A connection with no candidate at all by then has stalled: Chromium, rarely and under load, gathers none, and an
  * offer or answer without one can never connect. It is made again in its place, up to `GATHER_ATTEMPTS` in all.
  */
@@ -95,6 +106,11 @@ export class DataLink {
   state: DataLinkState = "idle";
   private pc: RTCPeerConnection | null = null;
   private myOfferTs = 0;
+  /**
+   * An offer of this side's that went without a public candidate came to nothing (it was answered, and no path
+   * connected): the next one waits for its STUN servers as long as it takes (`ICE_GATHERING_TIMEOUT_MS`).
+   */
+  private fullGather = false;
   private lastSignalTs = 0;
   /** The peer's description as this connection was given it: Chrome shows it as `remoteDescription` only once applied. */
   private remoteSdp: string | null = null;
@@ -201,9 +217,15 @@ export class DataLink {
   close(): void {
     // Given up for another transport that went live while this one had long had both descriptions: evidence all the same.
     const evidence = Date.now() - this.connectingSince >= STALLED_EVIDENCE_MS ? this.directEvidence() : null;
+    this.noteNoPublic(evidence);
     this.answered = null;
     this.reset();
     if (evidence) this.options.onDirect?.(evidence);
+  }
+
+  /** This side's offer had no public candidate and its attempt came to nothing: the next offer gathers for as long as it takes. */
+  private noteNoPublic(evidence: DirectEvidence | null): void {
+    if (evidence === "no-public" && this.myOfferTs) this.fullGather = true;
   }
 
   /**
@@ -227,6 +249,7 @@ export class DataLink {
     // How long the offerer's attempt still runs, counted on this clock from when its offer was taken (its `ts` is its clock's).
     const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.at) : 0;
     const evidence = this.directEvidence();
+    this.noteNoPublic(evidence);
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
       traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
@@ -276,7 +299,8 @@ export class DataLink {
       await describe(pc);
       if (this.pc !== pc) return null;
       const gathering = Date.now();
-      await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS, { stallMs: GATHER_STALL_MS });
+      await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS,
+        { stallMs: GATHER_STALL_MS, settleMs: DATA_SETTLE_MS, ...(offer && !this.fullGather ? { hostBoundMs: OFFER_HOST_GATHER_MS } : {}) });
       if (this.pc !== pc) return null;
       const ms = Date.now() - gathering;
       if (sdpHasCandidates(pc.localDescription?.sdp)) {
@@ -299,6 +323,7 @@ export class DataLink {
       if (this.pc !== pc) return;
       this.clearTimers();
       this.answered = null;
+      this.fullGather = false;
       this.setState("open");
       this.options.setFastPoll(false);
       this.options.publishSignal(null);
