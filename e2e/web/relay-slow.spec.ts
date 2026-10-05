@@ -13,13 +13,25 @@ import { pair } from "../support/paired";
 const SLOW_MS = Number(process.env.E2E_SLOW_RELAY_MS ?? 8_000);
 /**
  * Measured on 2026-10-03, four runs each: both relays fast, live in 4.0 to 4.2 s; one relay 8 s slow, 5.5 to 5.8 s with
- * hedged reads, 11.7 to 11.9 s when reads asked the next relay only once the first had answered.
+ * hedged reads, 11.7 to 11.9 s when reads asked the next relay only once the first had answered. Again on 2026-10-05:
+ * fast 3.9 to 4.3 s, slow 5.1 to 6.7 s.
+ *
+ * The bound is over the same pairing with both relays fast, made in the same test: a busy machine (the e2e loop on One,
+ * two workers on four cores) slows both, and a fixed 9 s failed there with nothing wrong. A pairing that waits for the
+ * slow relay costs about `SLOW_MS` more than that; hedged reads cost a second or two. Half of `SLOW_MS` lies between.
  */
-const BOUND_MS = Number(process.env.E2E_SLOW_RELAY_BOUND_MS ?? 9_000);
+const MARGIN_MS = Number(process.env.E2E_SLOW_RELAY_MARGIN_MS ?? SLOW_MS / 2);
 
 test("a slow relay does not slow a pairing down: reads take the other relay's answer", {
   tag: ["@feature:core.relay-client"],
 }, async ({ peer }) => {
+  // Both relays fast first: what a pairing takes on this machine, now.
+  const [fastAlice, fastBob] = await Promise.all([peer("fast-alice"), peer("fast-bob")]);
+  const fastStarted = Date.now();
+  await pair(fastAlice, fastBob);
+  const fastMs = Date.now() - fastStarted;
+  await Promise.all([fastAlice.context.close(), fastBob.context.close()]);
+
   const [alice, bob] = await Promise.all([peer("slow-alice"), peer("slow-bob")]);
   let slowed = 0;
   if (SLOW_MS > 0) for (const p of [alice, bob]) {
@@ -33,8 +45,9 @@ test("a slow relay does not slow a pairing down: reads take the other relay's an
   const started = Date.now();
   await pair(alice, bob);
   const tookMs = Date.now() - started;
-  console.log(`[relay-slow] slow relay ${SLOW_MS} ms: paired in ${tookMs} ms (${slowed} requests to the slow relay)`);
-  expect(tookMs).toBeLessThan(BOUND_MS);
+  console.log(`[relay-slow] slow relay ${SLOW_MS} ms: paired in ${tookMs} ms (${slowed} requests to the slow relay); both fast: ${fastMs} ms`);
+  expect(slowed).toBeGreaterThan(0);
+  expect(tookMs).toBeLessThan(fastMs + MARGIN_MS);
 
   await say(alice, "past the slow relay");
   await expect(chat(bob).getByText("past the slow relay")).toBeVisible({ timeout: 20_000 });

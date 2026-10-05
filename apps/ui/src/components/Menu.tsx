@@ -108,6 +108,18 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
     if (open && focusFirst) usable(ref.current)[0]?.focus({ preventScroll: true });
   }, [open, focusFirst, phone]);
 
+  // A menu button's way: a menu that closes with the focus in it (Escape, a row chosen) gives the focus back to what
+  // had it as the menu opened, its button. A row that moved the focus elsewhere keeps it there, and a field is left
+  // alone (on a phone the keyboard would come back up). In the layout phase, as the menu leaves: a dialog a row opens
+  // then finds the button focused, and gives the focus back there when it closes. Before, it all went to the page.
+  useLayoutEffect(() => {
+    const opener = document.activeElement, menu = ref.current;
+    return () => {
+      if (!(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected || opener.matches(TYPED)) return;
+      if (menu?.contains(document.activeElement)) opener.focus({ preventScroll: true });
+    };
+  }, []);
+
   if (!open) return null;
 
   const keys = (e: KeyboardEvent<HTMLDivElement>) => {
