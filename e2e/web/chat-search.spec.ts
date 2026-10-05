@@ -111,3 +111,36 @@ test("search a group from its ⋮", { tag: ["@feature:groups.search"] }, async (
   await expect(rowOf(page, "Pão de queijo?")).toBeInViewport();
   await expect(group.locator("[data-search-match]")).toHaveText(["Pão", "PÃO"]);
 });
+
+test("a Portuguese profile finds a voice message by \"voz\", though its file is named in English", { tag: ["@feature:chat.search"] }, async ({ peer }) => {
+  test.setTimeout(2 * 60_000);
+  const alice = await peer("search-voice-alice");
+  const page = alice.page;
+  const mine = createLink().mine;
+  await page.evaluate(({ mine }) => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "pt" }));
+    const id = crypto.randomUUID().replaceAll("-", "");
+    const start = Date.now() - 3_600_000;
+    const messages = [
+      { id: "voice", sender: "peer", timestamp: start, text: "🎤 Voice message (0:04)",
+        file: { id: "voice-file", name: "Voice message 2026-10-05 10-00-00.webm", size: 4096, mime: "audio/webm", voice: { duration: 4000, peaks: [10, 80, 160, 80, 10] } } },
+      ...Array.from({ length: 40 }, (_, i) => ({ id: `m${i}`, sender: i % 2 ? "peer" : "me", timestamp: start + (i + 1) * 60_000, text: `Mensagem ${i}` })),
+    ];
+    localStorage.setItem(`ghostly_${id}`, JSON.stringify({ id, mySeedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, messages, createdAt: start }));
+    localStorage.setItem(`ghostly_join_${id}`, "true");
+    location.hash = `/chat/${id}`;
+  }, { mine });
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("lang", /^pt/);
+  await expect(row(page, "m39")).toBeInViewport();
+
+  await chat(alice).click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("ControlOrMeta+f");
+  await field(page).fill("voz");
+  await expect(count(page)).toHaveText("1 de 1");
+  await expect(row(page, "voice")).toBeInViewport();
+  // English always: the same message by its English words.
+  await field(page).fill("voice message");
+  await expect(count(page)).toHaveText("1 de 1");
+});
