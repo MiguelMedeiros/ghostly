@@ -22,6 +22,12 @@ const faucet = new Interface(['function mint(address token,address to,uint256 am
 const erc20 = new Interface(['function decimals() view returns(uint8)', 'function balanceOf(address) view returns(uint256)', 'function transfer(address,uint256) returns(bool)', 'event Transfer(address indexed from,address indexed to,uint256 value)']);
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const CONFIRMATIONS = 2;
+/** The JSON-RPC methods that only read: asked again once when they fail (see `UsdtAdapter.rpc`). */
+const RETRIED_READS = new Set(['eth_chainId', 'eth_getCode', 'eth_call', 'eth_getBalance', 'eth_blockNumber', 'eth_getLogs', 'eth_getTransactionCount', 'eth_estimateGas', 'eth_getBlockByNumber', 'eth_maxPriorityFeePerGas', 'eth_gasPrice', 'eth_feeHistory', 'eth_getTransactionByHash', 'eth_getTransactionReceipt']);
+const RETRY_AFTER_MS = 1000;
+/** Failures that would fail the same way again at once: not retried. */
+const FINAL = new WeakSet<object>();
+const timedOut = (error: unknown) => error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 
 /**
  * The `provider` a request carries to the contact. Which RPC pays is the payer's own choice, so it names none of
@@ -68,12 +74,31 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
     adapter.account = await adapter.manager.getAccount(0);
     return adapter;
   }
+  /**
+   * A read that fails is asked again, once, a moment later: a public RPC drops a request now and then, and a chain that
+   * just made a block can refuse a read of "latest" it no longer holds. Without it a network switch, a restore or New
+   * gave up on the first such answer. Never a broadcast or anything else that writes, nor a request that did not answer
+   * in time (the person would wait twice as long), nor one the server refused as such (4xx).
+   */
   async rpc<T>(method: string, params: unknown[] = []): Promise<T> {
+    try { return await this.ask<T>(method, params); }
+    catch (error) {
+      if (!RETRIED_READS.has(method) || FINAL.has(error as object)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, RETRY_AFTER_MS));
+      return this.ask<T>(method, params);
+    }
+  }
+  private async ask<T>(method: string, params: unknown[]): Promise<T> {
     let response: Response;
     // The browser's words for a request that got no answer ("Fetch is aborted") say nothing: the RPC's host does.
     try { response = await fetch(this.config.provider, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({jsonrpc:'2.0',id:++this.nextId,method,params}), signal:AbortSignal.timeout(15000)}); }
-    catch (error) { const reason = networkReason(error, rpcHost(this.config.provider)); throw reason ? Object.assign(new Error(reason), {cause: error}) : error; }
-    if (!response.ok) throw engineError('usdtRpcUnavailable');
+    catch (error) {
+      const reason = networkReason(error, rpcHost(this.config.provider));
+      const thrown = reason ? Object.assign(new Error(reason), {cause: error}) : error;
+      if (timedOut(error) && thrown && typeof thrown === 'object') FINAL.add(thrown);
+      throw thrown;
+    }
+    if (!response.ok) { const error = engineError('usdtRpcUnavailable'); if (response.status !== 429 && response.status < 500) FINAL.add(error); throw error; }
     const result = await response.json();
     if (result.error || !Object.prototype.hasOwnProperty.call(result, 'result')) throw new Error('USDT RPC rejected the operation');
     return result.result as T;
