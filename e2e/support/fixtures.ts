@@ -314,14 +314,16 @@ export async function showNetwork(page: Page, network: WalletNetwork): Promise<v
  * The wallet is a page beside the chat list, like Settings: opening it puts the chat away. A card named with its
  * network is chosen on that network's tab; a kind alone, on whichever tab has one. The bar's Wallets button goes
  * back home from the Wallets page, so it is pressed only away from it (by the route, which a reload keeps before the
- * page is drawn). Until the page has read its wallets it has no tabs, then shows the tab this device showed last
- * (kept across reloads): the tab is chosen again until the card is on the page.
+ * page is drawn). A phone has no such button: there the test has opened the page already. Until the page has read its
+ * wallets it has no tabs, then shows the tab this device showed last (kept across reloads): the tab is chosen again
+ * until the card is on the page.
  */
 export async function openWallet(peer: Peer, card?: WalletCardName): Promise<void> {
   const page = peer.page;
-  const chip = page.getByTestId("wallet-chip");
-  if (await chip.getAttribute("aria-current") !== "page") await chip.click();
-  await expect(page.getByTestId("wallet")).toBeVisible();
+  const chip = page.getByTestId("wallet-chip"), wallet = page.getByTestId("wallet");
+  await expect(chip.or(wallet).first()).toBeVisible();
+  if (!await wallet.isVisible() && await chip.getAttribute("aria-current") !== "page") await chip.click();
+  await expect(wallet).toBeVisible();
   if (!card) return;
   const network = card.split("-")[1] as WalletNetwork | undefined;
   await expect(async () => {
