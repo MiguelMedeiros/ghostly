@@ -1,4 +1,6 @@
 {
+  "answer": "応答",
+  "answerPassword": "パスワードを入力して応答",
   "enterPassword": "パスワードを入力してロック解除",
   "incorrectPassword": "パスワードが正しくありません。もう一度お試しください",
   "title": "Ghostlyはロックされています",

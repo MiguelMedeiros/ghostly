@@ -1,4 +1,6 @@
 {
+  "answer": "Answer",
+  "answerPassword": "Enter your password to answer",
   "enterPassword": "Enter your password to unlock",
   "incorrectPassword": "Incorrect password, try again",
   "title": "Ghostly is locked",
