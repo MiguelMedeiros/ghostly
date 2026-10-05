@@ -70,12 +70,23 @@ const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
  */
 const WINDOWS_DEVICE = /^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])\s*(\.|$)/i;
 
+/**
+ * At most `MAX_NAME_LENGTH` characters. A longer name loses the end of its stem, not its extension (up to 15
+ * characters after the last dot): "…report.pdf" stays a PDF to the system it is saved on.
+ */
+function shorten(name: string): string {
+  const chars = [...name];
+  if (chars.length <= MAX_NAME_LENGTH) return name;
+  const extension = [.../\.[^.\s]{1,15}$/u.exec(name)?.[0] ?? ""];
+  return chars.slice(0, MAX_NAME_LENGTH - extension.length).join("").trimEnd() + extension.join("");
+}
+
 /** A file name is display text and a download suggestion, never a path. */
 export function sanitizeFileName(name: string): string {
   const visible = name.replace(INVISIBLE, "").replace(/[/\\:]/g, "");
   // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
-  const clean = [...visible.replace(/^[\s.]+/, "")].slice(0, MAX_NAME_LENGTH).join("").trim();
-  if (WINDOWS_DEVICE.test(clean)) return [..."_" + clean].slice(0, MAX_NAME_LENGTH).join("");
+  const clean = shorten(visible.replace(/^[\s.]+/, "").trim());
+  if (WINDOWS_DEVICE.test(clean)) return shorten("_" + clean);
   return clean || "file";
 }
 
