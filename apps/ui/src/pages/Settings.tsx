@@ -56,6 +56,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 import { errorText } from "../lib/errorText";
+import { listText } from "../lib/listText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
 import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
@@ -409,7 +410,7 @@ export function Settings() {
     const language = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native;
     const summary: Partial<Record<SettingsSection, ReactNode>> = {
       profile: settings.defaultNickname || undefined,
-      appearance: [scheme, language].filter(Boolean).join(", "),
+      appearance: listText([scheme, language].filter((item): item is string => !!item), t),
       notifications: t("settings.notificationsHint"),
       media: t("settings.mediaHint"),
       privacy: t("settings.privacyHint"),

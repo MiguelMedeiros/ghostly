@@ -57,6 +57,18 @@ describe("Settings on a phone", () => {
     expect(screen.queryByTestId("settings-lock")).not.toBeInTheDocument();
   });
 
+  it("a section's line lists what it holds the way the app's language lists things", () => {
+    windowIs(true);
+    // Dark mode and the language's own name, joined as each language joins a list: not with an English comma.
+    const lines = { en: "Dark, English", zh: "深色、中文", ja: "ダーク、日本語", ar: "داكن والعربية" } as const;
+    for (const [language, line] of Object.entries(lines)) {
+      const { unmount } = renderApp(<LockScreenProvider><UpdateProvider><Harness /></UpdateProvider></LockScreenProvider>, { route: "/settings", language: language as keyof typeof lines });
+      expect(screen.getByTestId("settings-open-appearance"), language).toHaveTextContent(line);
+      unmount();
+      localStorage.clear();
+    }
+  });
+
   it("opens a section on its own screen; its Back and the browser's return to the menu", async () => {
     windowIs(true);
     const { user } = renderSettings();
