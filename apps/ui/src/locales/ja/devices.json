@@ -136,7 +136,7 @@
     "homeScreenInfo": "iPhone と iPad では、ブラウザのタブは別の保存領域を使い、ブラウザに消されることがあります。ホーム画面のアプリなら保たれます。",
     "homeScreenWhy": "プロフィールには Safari のタブではなくアプリが必要です。",
     "homeStep1": "Safari で共有をタップします（新しい iPhone では ⋯ メニューの中）。",
-    "homeStep2": "「ホーム画面に追加」をタップします。",
+    "homeStep2": "「ホーム画面に追加」をタップします（見当たらなければ「その他」の中）。",
     "homeStep3": "ホーム画面から Ghostly を開き、「すでに Ghostly を使っている」を選びます。",
     "homeStep3Code": "ホーム画面から Ghostly を開き、もう一度コードをスキャンします。",
     "homeTitle": "まず Ghostly をホーム画面に追加してください",

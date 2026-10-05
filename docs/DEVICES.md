@@ -13,7 +13,7 @@ It works in the web app (installed on a phone too), the browser extension and th
 
 The new device is now on standby, and it offers to bring the profile over at once. Up to 4 devices per profile.
 
-On iPhone and iPad, add Ghostly to the Home Screen first: a browser tab keeps its own storage, which the browser may clear. The camera opens the link in Safari, never in the app on the Home Screen, so there Ghostly shows the three steps (Share, **Add to Home Screen**, open Ghostly from the Home Screen); then scan the code again in the app. Elsewhere, Ghostly asks the browser to keep its data and says so when it does not.
+On iPhone and iPad, add Ghostly to the Home Screen first: a browser tab keeps its own storage, which the browser may clear. The camera opens the link in Safari, never in the app on the Home Screen, so there Ghostly shows the three steps (Share, which newer iPhones keep in the **⋯** menu; **Add to Home Screen**, under **More** if you don't see it; open Ghostly from the Home Screen); then scan the code again in the app. The app on the Home Screen starts fresh, so the code you opened in Safari does not go with it. Elsewhere, Ghostly asks the browser to keep its data and says so when it does not.
 
 ## Move the profile
 

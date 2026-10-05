@@ -178,7 +178,7 @@ describe("I already use Ghostly", () => {
     const { unmount } = renderApp(<JoinProfileDialog onClose={() => {}} onRestore={() => {}} />);
     const steps = screen.getByTestId("device-join-home-screen");
     expect(steps).toHaveTextContent("Tap Share in Safari (in the ⋯ menu on newer iPhones).");
-    expect(steps).toHaveTextContent("Tap Add to Home Screen.");
+    expect(steps).toHaveTextContent("Tap Add to Home Screen (under More if you don't see it).");
     expect(steps).toHaveTextContent("Open Ghostly from your Home Screen and choose I already use Ghostly.");
     expect(screen.queryByTestId("device-join-add")).toBeNull();
     unmount();
