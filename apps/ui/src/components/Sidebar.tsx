@@ -8,6 +8,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupRouteId } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useLabelsFit } from "../hooks/useLabelsFit";
 import { Menu, MenuItem } from "./Menu";
 import { useLocation, useNavigate } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
@@ -68,6 +69,9 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t, language } = useI18n();
+  // New and Join keep their words while they fit beside the logo, in this language (French needs more room).
+  const headerRef = useRef<HTMLDivElement>(null), brandRef = useRef<HTMLDivElement>(null), actionsRef = useRef<HTMLDivElement>(null);
+  const labelsFit = useLabelsFit(headerRef, brandRef, actionsRef, language);
   const isMobile = useIsMobile();
   const density = useSettings().settings.chatListDensity;
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -196,9 +200,9 @@ export function Sidebar() {
       style={isMobile ? undefined : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
       {/* Header */}
-      <div className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
-        <AppBrand onHome={() => nav.home()} />
-        <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
+      <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
+        <div ref={brandRef} className="flex shrink-0"><AppBrand onHome={() => nav.home()} /></div>
+        <div ref={actionsRef} className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
             <button onClick={() => void createPairedChat().then(id => nav.conversation(chatPath(id)))} aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
