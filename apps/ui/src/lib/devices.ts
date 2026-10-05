@@ -237,8 +237,18 @@ export interface DeviceLink { code: string; profile?: string }
 export const LINK_PROFILE_MAX = 32;
 
 /** A profile name as a link carries it: no `#`, at most `LINK_PROFILE_MAX` characters, escaped. Empty for none. */
+/**
+ * A profile's name as a link may carry it, made and read alike: no `#`, no control character, no invisible mark that
+ * reorders or hides text (bidirectional overrides, zero-width marks), at most `LINK_PROFILE_MAX` characters.
+ */
+const cleanProfileName = (name: string): string =>
+  Array.from(name.trim()).filter((ch) => {
+    const code = ch.codePointAt(0)!;
+    return ch !== "#" && code >= 32 && !(code >= 0x7f && code <= 0x9f) && !(code >= 0x200b && code <= 0x200f) && !(code >= 0x202a && code <= 0x202e) && !(code >= 0x2066 && code <= 0x2069);
+  }).slice(0, LINK_PROFILE_MAX).join("").trim();
+
 const linkProfile = (profile: string | undefined): string => {
-  const clean = Array.from((profile ?? "").trim()).filter((ch) => ch !== "#" && ch.charCodeAt(0) >= 32).slice(0, LINK_PROFILE_MAX).join("");
+  const clean = cleanProfileName(profile ?? "");
   return clean ? encodeURIComponent(clean) : "";
 };
 
@@ -269,7 +279,8 @@ export function readDeviceLink(input: string): DeviceLink {
   if (parts.length < 3) return { code: parts.length === 2 ? code : text };
   let profile = parts[parts.length - 2];
   try { profile = decodeURIComponent(profile); } catch { /* as it is */ }
-  profile = Array.from(profile.replace(/^\//, "").trim()).slice(0, LINK_PROFILE_MAX).join("");
+  // From whatever made the link: shown and used as a name, so cleaned as a link is made.
+  profile = cleanProfileName(profile.replace(/^\//, ""));
   return profile ? { code, profile } : { code };
 }
 

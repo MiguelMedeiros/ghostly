@@ -356,6 +356,9 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     expect(readDeviceLink(deviceLink(device, origin, "A#B"))).toEqual({ code: device, profile: "AB" });
     expect(readDeviceLink(deviceLink(device, origin, "x".repeat(80))).profile).toHaveLength(32);
     expect(readDeviceLink(deviceLink(device, origin, "ミゲル 👻"))).toEqual({ code: device, profile: "ミゲル 👻" });
+    // A crafted link: control and invisible reordering marks are dropped from the name it shows.
+    expect(readDeviceLink(`${origin}/#A%0AB%E2%80%AEC%E2%80%8B#${device}`)).toEqual({ code: device, profile: "ABC" });
+    expect(readDeviceLink(`${origin}/#%E2%80%AE#${device}`)).toEqual({ code: device });
     expect(readDeviceLink(device)).toEqual({ code: device });
     expect(readDeviceLink(`${origin}/#${device}`)).toEqual({ code: device });
     // From the desktop app, which has no address another device opens: the public web app.
