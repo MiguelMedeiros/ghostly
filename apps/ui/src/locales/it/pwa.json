@@ -13,7 +13,7 @@
   "iosHint": "In Safari, tocca Condividi, poi Aggiungi alla schermata Home.",
   "iosLabel": "Aggiungi alla schermata Home",
   "iosStep1": "Tocca Condividi {{icon}} (sotto ⋯ se non lo vedi).",
-  "iosStep2": "Scegli Aggiungi alla schermata Home.",
+  "iosStep2": "Scegli Aggiungi alla schermata Home (sotto Altro se non lo vedi).",
   "iosTitle": "Aggiungi Ghostly alla schermata Home",
   "notNow": "Non ora",
   "offline": "Offline",
