@@ -172,6 +172,46 @@ describe("checking the token and RPC before a wallet is used", () => {
       await expect(adapter.rpc("eth_blockNumber")).rejects.toThrow(said);
     }
   });
+  it("a read that fails once is asked again, so a network switch does not give up on one bad answer", async () => {
+    // Anvil's "block height is N but requested was N-1" when a block overtook a read of "latest", once, then fine.
+    const real = fetch;
+    const failOnce = (method: string, answer: () => Response) => {
+      let failed = false;
+      vi.stubGlobal("fetch", async (url: string, init: { body: string }) => {
+        if (!failed && JSON.parse(init.body).method === method) { failed = true; return answer(); }
+        return real(url, init as RequestInit);
+      });
+    };
+    failOnce("eth_call", () => Response.json({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "BlockOutOfRangeError" } }));
+    await expect(UsdtAdapter.inspect({ network: "evm-local", provider: RPC, chainId: 31337, token: TOKEN })).resolves.toEqual(config({ token: getAddress(TOKEN) }));
+    failOnce("eth_getCode", () => new Response("", { status: 502 }));
+    await expect(UsdtAdapter.connect(config(), MNEMONIC)).resolves.toBeInstanceOf(UsdtAdapter);
+    let thrown = false;
+    vi.stubGlobal("fetch", async (url: string, init: { body: string }) => {
+      if (!thrown && JSON.parse(init.body).method === "eth_chainId") { thrown = true; throw new TypeError("Failed to fetch"); }
+      return real(url, init as RequestInit);
+    });
+    await expect(UsdtAdapter.inspect({ network: "evm-local", provider: RPC, chainId: 31337, token: TOKEN })).resolves.toMatchObject({ decimals: 6 });
+  });
+  it("a broadcast, a timeout or a refused request is never asked again", async () => {
+    const { adapter } = await wallet();
+    chain.mode = "drop";
+    await expect(adapter.rpc("eth_sendRawTransaction", ["0x00"])).rejects.toThrow("rejected the operation");
+    expect(chain.sent).toHaveLength(1);
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => { calls++; throw Object.assign(new Error("signal timed out"), { name: "TimeoutError" }); });
+    await expect(adapter.rpc("eth_blockNumber")).rejects.toThrow("did not answer in time");
+    expect(calls).toBe(1);
+    calls = 0;
+    vi.stubGlobal("fetch", async () => { calls++; return new Response("", { status: 401 }); });
+    await expect(adapter.rpc("eth_blockNumber")).rejects.toThrow("RPC unavailable");
+    expect(calls).toBe(1);
+    // Down for good: asked twice, then the same error as before.
+    calls = 0;
+    vi.stubGlobal("fetch", async () => { calls++; return new Response("", { status: 503 }); });
+    await expect(adapter.rpc("eth_blockNumber")).rejects.toThrow("RPC unavailable");
+    expect(calls).toBe(2);
+  });
   it("will not open a wallet whose saved token metadata no longer matches the chain", async () => {
     chain.code = "0x6001";
     await expect(UsdtAdapter.connect(config(), MNEMONIC)).rejects.toThrow("Token metadata changed");
