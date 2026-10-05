@@ -709,6 +709,8 @@ export class GhostLink {
   private autoConnectFailures = 0;
   /** Native transports a record just read listed with no way to dial them (`record-undescribed`), until one describes them again. */
   private readonly undescribed = new Set<NativeTransport>();
+  /** The native dial under way (`dialNative`): its attempt, its transport and the endpoint it went to (`redescribedDial`). */
+  private nativeDial: { epoch: number; transport: NativeTransport; endpoint: unknown } | null = null;
   /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
   private offerAwaitedFor = 0;
   /** Whether the stream was blocked (DHT-only on either side) when last looked at. */
@@ -1463,6 +1465,7 @@ export class GhostLink {
       return;
     }
     if (held && heldOn && reidentified.has(heldOn) && this.restartedRedial(held, heldOn)) return;
+    if (this.redescribedDial()) return;
     // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
     if (this.channel || this.dialing) return;
     if (news || !again) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
@@ -1977,6 +1980,7 @@ export class GhostLink {
     const descriptor = this.peerDescriptors[transport as NativeEndpoint["transport"]];
     if (!endpoint || !descriptor) return new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
     const started = Date.now();
+    const dialed = this.nativeDial = { epoch, transport: transport as NativeTransport, endpoint: endpointId(transport as NativeTransport, descriptor) };
     try {
       const { channel, binding } = await endpoint.connect(descriptor);
       this.nativeFailures.delete(transport); this.demotedUntil.delete(transport);
@@ -1991,7 +1995,31 @@ export class GhostLink {
       if (failures >= DEMOTE_AFTER_FAILURES) { this.nativeFailures.delete(transport); this.demotedUntil.set(transport, Date.now() + DEMOTE_MS); traceLink(this.myPubKeyZ32, "demote", { transport }); }
       else this.nativeFailures.set(transport, failures);
       return error instanceof Error ? error : new Error(String(error));
-    }
+    } finally { if (this.nativeDial === dialed) this.nativeDial = null; }
+  }
+
+  /**
+   * The native dial under way went to an endpoint the contact's newer packet no longer names for that transport: its
+   * app started again (a page reloading, as both devices of a handoff do), and the endpoint dialled went with the old
+   * one. That dial would end only at its connect timeout (Iroh: 20 s, then the next attempt's wait): it is let go, and
+   * the endpoint the packet names dialled now. Not while a WebRTC offer of this attempt stands: the race that follows
+   * it keeps its own order.
+   */
+  private redescribedDial(): boolean {
+    const dial = this.nativeDial;
+    if (!dial || dial.epoch !== this.connectionEpoch || !this.dialing || this.channel || this.dataLink.state !== "idle") return false;
+    const now = this.peerDescriptors[dial.transport];
+    if (!now || endpointId(dial.transport, now) === dial.endpoint) return false;
+    traceLink(this.myPubKeyZ32, "redescribed-dial", { transport: dial.transport });
+    this.nativeDial = null;
+    this.connectionEpoch++;
+    this.dialing = false;
+    this.clearRace();
+    this.afterRtc = undefined;
+    // The dial let go is no failure: the one that follows waits no longer for it.
+    this.autoConnectFailures = Math.max(0, this.autoConnectFailures - 1);
+    this.redial();
+    return true;
   }
 
   /** A WebRTC attempt this side dialled ended without opening: the next ranked transports, in order. */
