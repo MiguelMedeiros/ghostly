@@ -66,7 +66,7 @@ function setup(stored: StoredPayment[] = []) {
     onReviewedPaymentRefused: vi.fn(async () => {}),
   };
   const wallet = {
-    receiveToken: vi.fn(async (): Promise<{ amount: number; mint: string }> => ({ amount: 100, mint: MINT })),
+    receiveToken: vi.fn(async (): Promise<{ amount: number; mint: string; fee: number }> => ({ amount: 100, mint: MINT, fee: 0 })),
     createToken: vi.fn(async (_amount: number, _mints: string[], _memo: string | undefined, outbox: (token: string, mint: string) => StoredPayment) => { outbox("cashuBtoken", MINT); return { token: "cashuBtoken", mint: MINT }; }),
     view: vi.fn(async () => ({ mints: [{ url: MINT }] })),
   };
@@ -427,7 +427,7 @@ describe("what the contact answers about our payments", () => {
     expect(state("rv")).toMatchObject({ state: "pending", error: "No thanks" });
     expect(host.onReviewedPaymentRefused).not.toHaveBeenCalled();
     await desk.onPaymentResult("l", { id: "rv2", ok: false });
-    expect(host.onReviewedPaymentRefused).toHaveBeenCalledWith("rv2", "The payment was refused");
+    expect(host.onReviewedPaymentRefused).toHaveBeenCalledWith("rv2", "The payment was refused", { amount: 100, fee: 0 });
     await desk.onPaymentResult("x", { id: "rv", ok: true });
     expect(host.onReviewedPaymentResult, "another chat cannot confirm it").not.toHaveBeenCalled();
   });

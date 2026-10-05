@@ -325,6 +325,7 @@
     },
     "payee": "收款人",
     "provider": "提供方",
+    "returnedInfo": "取回 ecash 是在铸币厂进行的一次兑换,铸币厂每次兑换都会扣留一小笔手续费:这次是 {{fee}} {{unit}}。其余的已回到你的钱包。",
     "states": {
       "cancelled": "已取消",
       "confirmed": "已确认",

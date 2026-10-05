@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useId,useState} from 'react';
 import {walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform} from '../lib/platform';
 import {useI18n} from '../contexts/I18nContext';
@@ -8,6 +8,7 @@ import {ConfirmRealMoney} from './ConfirmRealMoney';
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { paymentStateLabel, railLine } from "./paymentWords";
 import { errorText } from "../lib/errorText";
+import { InfoButton } from "./layout/Section";
 
 
 /**
@@ -19,7 +20,8 @@ import { errorText } from "../lib/errorText";
  */
 export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void}) {
  const {t}=useI18n();
- const [saved,setReview]=useState(initial),[busy,setBusy]=useState(false),[error,setError]=useState(''),[confirming,setConfirming]=useState(false);
+ const [saved,setReview]=useState(initial),[busy,setBusy]=useState(false),[error,setError]=useState(''),[confirming,setConfirming]=useState(false),[feeWhy,setFeeWhy]=useState(false);
+ const feeWhyId=useId();
  const review=wallet.getState()?.intents?.find(i=>i.id===saved.id)??saved;
  const token=review.method==='usdt';
  const network=walletNetworkOf(review.network),real=network==='mainnet',unit=token?review.asset:satsIn(t,network);
@@ -49,7 +51,9 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
   {review.method==='bitcoin'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.bitcoin')}</p>}
   {review.method==='fedimint'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.fedimint')}</p>}
   {review.method==='cashu'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.cashu')}</p>}
-  {review.error&&<p className="text-xs text-danger">{errorText(review.error,t)}</p>}{error&&<p role="alert" className="text-xs text-danger">{error}</p>}
+  {/* A refusal says what came back, short; why the mint kept some of it is behind the ⓘ. */}
+  {review.error&&<div className="flex items-start gap-1.5"><p className="text-xs text-danger min-w-0 break-words" data-testid="review-error">{errorText(review.error,t)}</p>{!!review.returned?.fee&&<InfoButton open={feeWhy} onToggle={()=>setFeeWhy(!feeWhy)} controls={feeWhyId} testId="review-returned-info" className="-mt-0.5"/>}</div>}
+  {feeWhy&&!!review.returned?.fee&&<p id={feeWhyId} className="text-xs text-text-secondary" data-testid="review-returned-text">{t('payments.review.returnedInfo',{fee:formatAmount(review.returned.fee,t.language),unit})}</p>}{error&&<p role="alert" className="text-xs text-danger">{error}</p>}
   {review.state==='pending'&&confirming&&<ConfirmRealMoney what={`${shown} ${unit}`} busy={busy} onSend={approve} onBack={()=>setConfirming(false)}/>}
   <div className="flex gap-2 flex-wrap">{review.state==='pending'?<>{!confirming&&<button className={`${button} !bg-accent !text-on-accent`} data-testid="review-approve" disabled={busy} onClick={()=>real?setConfirming(true):approve()}>{t('payments.review.approve')}</button>}<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.cancelPayment(review.id))}>{t('common.cancel')}</button></>:<>{['submitted','unknown'].includes(review.state)&&<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.reconcilePayment(review.id))}>{t('payments.review.check')}</button>}<button className={button} onClick={onClose}>{t('common.close')}</button></>}</div>
  </section>;
