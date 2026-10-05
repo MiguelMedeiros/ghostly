@@ -39,8 +39,14 @@ export function defaultDeviceName(env: { userAgent: string; platform?: string; m
   const os = /Mac OS X|Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux|X11|CrOS/.test(ua) ? "Linux" : "";
   if (env.desktop) return os ? `${os} app` : "Desktop";
   const browser = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
-  return (browser && os ? `${browser} on ${os}` : browser || os || "Browser").slice(0, 16);
+  // The longest of these that fits the 16 characters a name has, never one cut in the middle of a word:
+  // "Chrome on Mac", "Chrome, Windows", then the system alone.
+  const names = browser && os ? [`${browser} on ${os}`, `${browser}, ${os}`, os, browser] : [browser || os || "Browser"];
+  return names.find((name) => name.length <= DEVICE_NAME_MAX) ?? "Browser";
 }
+
+/** The longest name a device has in its set (`turnName` keeps 16 characters too). */
+export const DEVICE_NAME_MAX = 16;
 
 /** "9:41": minutes and seconds left until `expires` (UNIX seconds), at `now` (milliseconds). */
 export const timeLeft = (expires: number, now: number): string => {

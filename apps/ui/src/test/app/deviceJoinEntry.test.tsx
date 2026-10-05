@@ -253,6 +253,16 @@ describe("every route lands on the one screen", () => {
     expect(screen.queryByTestId("device-join-another-row")).toBeNull();
   });
 
+  it("with four devices, Add a device is off and one line says why, the rest behind ⓘ", async () => {
+    fakeEngine.on("deviceSet", () => set(["MacBook", "iPhone", "iPad", "Linux"].map((name, slot) => ({ key: String(slot).repeat(43), name, slot, self: slot === 0, active: slot === 0, status: "live" })) as DeviceSetView["devices"]));
+    const { user } = renderApp(<DevicesSection />);
+    const row = await screen.findByTestId("device-add-full");
+    expect(row).toHaveTextContent("This profile has 4 devices, the most it can have.");
+    expect(within(row).getByTestId("device-add-open")).toBeDisabled();
+    await user.click(within(row).getByRole("button", { name: "More info" }));
+    expect(row).toHaveTextContent("To add another, remove one first: open its menu below and choose Remove.");
+  });
+
   it("is not offered where an app has one profile only", async () => {
     fakeEngine.features = { ...fakeEngine.features, profiles: false };
     fakeEngine.on("deviceSet", () => set([]));

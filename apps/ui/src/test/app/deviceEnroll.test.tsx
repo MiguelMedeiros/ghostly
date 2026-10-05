@@ -195,5 +195,10 @@ describe("I already use Ghostly", () => {
     expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", desktop: true })).toBe("Mac app");
     expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36 Chrome/131.0" })).toBe("Phone");
     for (const ua of ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0"]) expect(defaultDeviceName({ userAgent: ua }).length).toBeLessThanOrEqual(16);
+    // Never a word cut short: a shorter form, not "Chrome on Window" or "Firefox on Windo".
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" })).toBe("Chrome, Windows");
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0" })).toBe("Firefox, Windows");
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0" })).toBe("Edge on Windows");
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" })).toBe("Chrome on Linux");
   });
 });

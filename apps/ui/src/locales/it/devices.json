@@ -256,6 +256,8 @@
     "checking": "Verifica…",
     "connecting": "Non connesso",
     "foreign": "Qualcos’altro ha chiuso il tuo vecchio insieme di dispositivi.",
+    "full": "Questo profilo ha 4 dispositivi, il massimo possibile.",
+    "fullInfo": "Per aggiungerne un altro, prima rimuovine uno: apri il suo menu qui sotto e scegli Rimuovi.",
     "info": "Solo il dispositivo attivo invia, riceve e paga, così i tuoi messaggi e i tuoi soldi non sono mai in due posti. Sposta il profilo quando vuoi.",
     "keepAwake": "Tieni sveglio questo computer",
     "keepAwakeHint": "Così il tuo telefono può subentrare mentre sei fuori.",

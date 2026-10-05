@@ -256,6 +256,8 @@
     "checking": "Checking…",
     "connecting": "Not connected",
     "foreign": "Something else closed your old device set.",
+    "full": "This profile has 4 devices, the most it can have.",
+    "fullInfo": "To add another, remove one first: open its menu below and choose Remove.",
     "info": "Only the active device sends, receives and pays, so your messages and money are never in two places. Move the profile whenever you like.",
     "keepAwake": "Keep this computer awake",
     "keepAwakeHint": "So your phone can take over while you are out.",

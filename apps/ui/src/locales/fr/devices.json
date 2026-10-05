@@ -256,6 +256,8 @@
     "checking": "Vérification…",
     "connecting": "Non connecté",
     "foreign": "Autre chose a fermé votre ancien ensemble d’appareils.",
+    "full": "Ce profil a 4 appareils, le maximum possible.",
+    "fullInfo": "Pour en ajouter un autre, retirez-en un d’abord : ouvrez son menu ci-dessous et choisissez Retirer.",
     "info": "Seul l’appareil actif envoie, reçoit et paie, ainsi vos messages et votre argent ne sont jamais à deux endroits. Déplacez le profil quand vous voulez.",
     "keepAwake": "Garder cet ordinateur éveillé",
     "keepAwakeHint": "Pour que votre téléphone puisse prendre le relais quand vous êtes sorti.",
