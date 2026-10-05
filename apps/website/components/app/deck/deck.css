@@ -20,7 +20,8 @@
 [data-deck=face]::after{content:"";position:absolute;inset:-1px;z-index:2;border-radius:inherit;pointer-events:none;background:#000;opacity:var(--dim,0);transition:opacity .45s var(--deck-ease)}
 .deck-card[data-active=true] [data-deck=face]{border-color:rgba(var(--card-rgb),.75)}
 .deck-card:focus-visible{outline:none}
-.deck-card:focus-visible [data-deck=face]{outline:2px solid #fff;outline-offset:4px}
+/* The ring sits on the page, outside the card: the page's own ink, so it shows on a light page as on a dark one. */
+.deck-card:focus-visible [data-deck=face]{outline:2px solid var(--color-text-primary);outline-offset:4px}
 /* The light that crosses a card as it comes up, in its ink (motion.ts moves it; at rest it is transparent). Plain alpha,
    never a blend mode: Chrome drew a screen-blended sheen crossing a card that swings (a rotate) against a shifted copy
    of the card, a second card edge with square corners inside it on the side the light came in from. Over these dark
