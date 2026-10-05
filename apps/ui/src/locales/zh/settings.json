@@ -76,6 +76,8 @@
     "missing": "{{name}} 未连接。正在使用默认设备。",
     "names": "设备名称",
     "namesHint": "允许使用麦克风和摄像头即可看到",
+    "none": "未找到麦克风或摄像头",
+    "noneInfo": "此浏览器在这里没有向 Ghostly 显示任何麦克风、摄像头或扬声器，因此没有可选择的内容。浏览器只在安全地址（https 或 localhost）上显示它们。",
     "preview": "预览",
     "previewLabel": "摄像头预览",
     "speaker": "扬声器",

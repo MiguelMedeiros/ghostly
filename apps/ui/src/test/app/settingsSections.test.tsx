@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -99,6 +99,26 @@ describe("Settings on a phone", () => {
     await reach("network", "network-relays-field");
     await reach("storage", "clear-all-data");
     await reach("about", "settings-about-version");
+  });
+
+  it("Audio & video opened by its address on a device with no microphone or camera says so, not an empty screen", async () => {
+    windowIs(true);
+    const had = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
+    try {
+      const { user } = renderSettings("/settings/media");
+      expect(screen.getByRole("heading", { level: 1, name: "Audio & video" })).toBeInTheDocument();
+      const none = screen.getByTestId("settings-media-none");
+      expect(none).toHaveTextContent("No microphone or camera found");
+      await user.click(within(none).getByRole("button", { name: "More info" }));
+      expect(within(none).getByTestId("row-info-text")).toHaveTextContent("secure address");
+      // Not a line in the menu, nor on the whole page of a wider screen.
+      await user.click(screen.getByTestId("page-back"));
+      expect(screen.queryByTestId("settings-open-media")).not.toBeInTheDocument();
+    } finally {
+      if (had) Object.defineProperty(navigator, "mediaDevices", had);
+      else delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+    }
   });
 
   it("an old address opens its new place, with Back to the menu", async () => {
