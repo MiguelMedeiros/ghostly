@@ -89,8 +89,13 @@ test("a member removed and invited again: the history kept on removal, the names
   await say(alice, "while carol is out");
   await sees(bob, "while carol is out");
 
-  // Invited again over the same chat: back with a new member key.
+  // Invited again over the same chat: back with a new member key. Before she accepts, what she kept still names who
+  // wrote it (it read "Member xxxx" until she was in again).
   await invite(alice, "Carol");
+  const invitation = carol.page.getByTestId("group-row").filter({ hasText: "Ghosts" });
+  await expect(invitation.getByTestId("group-accept")).toBeVisible({ timeout: 60_000 });
+  await invitation.click();
+  await namedBy(carol, "bob before", "Bob");
   await accept(carol, "Ghosts");
   for (const p of [alice, bob, carol]) await reachable(p, 2, 2);
   await say(carol, "carol again");

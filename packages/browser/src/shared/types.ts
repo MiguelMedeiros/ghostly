@@ -149,6 +149,12 @@ export interface StoredGroup {
    */
   large?: string[];
   /**
+   * Removed, then invited again over a contact chat: the names my app knew members by (member key → name). The history
+   * stays while the invitation waits, and still names who wrote it; once in again, the names of members who are gone
+   * since go on naming what they wrote.
+   */
+  formerNames?: Record<string, string>;
+  /**
    * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
    */

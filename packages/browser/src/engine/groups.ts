@@ -463,7 +463,7 @@ export class Groups {
         memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
       if (!session) {
         const invitation = group.invitation!;
-        return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false,
+        return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
           invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: invitation.n, accepted: !!invitation.seedB64,
             ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
       }
@@ -1111,8 +1111,11 @@ export class Groups {
         if (existing?.state && existing.state.status === "active") return;
         if (existing?.invitation?.seedB64) return; // already accepting one
         if ([...this.stored.values()].filter(x => x.invitation).length >= 32) return;
+        // Removed and invited again: the history stays, and the names it was written under with it.
+        const known = { ...existing?.formerNames, ...existing?.state?.nicks };
         const invitation: StoredGroup = { id: g, createdAt: Date.now(), invitation: { name: groupName(frame.name) ?? "Group", admin: frame.admin, linkId,
-          e: Number.isSafeInteger(frame.e) ? frame.e as number : 0, n: Number.isSafeInteger(frame.n) ? frame.n as number : 1, pieces: [] } };
+          e: Number.isSafeInteger(frame.e) ? frame.e as number : 0, n: Number.isSafeInteger(frame.n) ? frame.n as number : 1, pieces: [] },
+          ...(Object.keys(known).length ? { formerNames: known } : {}) };
         if (existing) { this.sessions.delete(g); for (const edge of this.host.edges(g).values()) await this.host.closeEdge(edge); }
         this.stored.set(g, invitation);
         await this.store.putGroup(invitation);
@@ -1185,6 +1188,9 @@ export class Groups {
         if (viaLink) this.lingering.set(g, { linkId, admin: group.invitation.admin, until: this.now() + ENTRY_LINGER_MS });
         await this.store.putGroup(member);
         if (!viaLink) await this.sessions.get(g)!.setNick(group.invitation.admin, this.host.contactName(linkId));
+        // Back after a removal: who wrote the history I kept stays named, those gone since included.
+        const session = this.sessions.get(g)!;
+        for (const [key, nick] of Object.entries(group.formerNames ?? {})) if (!session.state.nicks[key]) await session.setNick(key, nick);
         await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
         if (viaLink) {
