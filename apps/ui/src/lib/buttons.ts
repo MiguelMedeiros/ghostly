@@ -3,7 +3,7 @@ import { buttonsState, sameLabel } from "@ghostly/browser/shared/buttons";
 import type { MessageReply, StoredMessage } from "@ghostly/browser/shared/types";
 
 /*
- * Message buttons (WISP 4xx · Message Buttons) as a chat shows them: which one was chosen, and whether this side may
+ * Message buttons (WISP 406 · Message Buttons) as a chat shows them: which one was chosen, and whether this side may
  * still press one. The engine's own rule (`buttonsState`), over the chat's rows as the page holds them.
  */
 

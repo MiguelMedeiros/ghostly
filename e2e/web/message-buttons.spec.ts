@@ -4,7 +4,7 @@ import { chat, expect, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
- * A bot's buttons (WISP 4xx · Message Buttons): a headless bot asks "Want the $30 one?" with Yes and No; the person on
+ * A bot's buttons (WISP 406 · Message Buttons): a headless bot asks "Want the $30 one?" with Yes and No; the person on
  * the web app taps Yes; the bot hears `button.pressed`, answers, and closes the question, which then shows Yes chosen
  * and every button disabled. In a group, the bot learns which member pressed.
  */

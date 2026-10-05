@@ -1,6 +1,6 @@
 import { bool, list, str, type Method } from "../apiKit";
 
-/** Voice calls (WISP 11xx § Calls): the API methods. The audio itself goes over each call's own socket. */
+/** Voice calls (WISP 1100 § Calls): the API methods. The audio itself goes over each call's own socket. */
 export const CALL_METHODS: Record<string, Method> = {
   async "call.start"(ctx, params) {
     return ctx.calls.start(str(params, "chat", true), { rate: params.rate });

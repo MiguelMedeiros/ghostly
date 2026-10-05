@@ -47,7 +47,7 @@ export interface PaymentDeskHost {
   storeMessage(message: StoredMessage): Promise<void>;
   onChange(): void;
   /**
-   * Store-and-forward (WISP 4xx): the ways of paying a request may name while the contact is away and
+   * Store-and-forward (WISP 404): the ways of paying a request may name while the contact is away and
    * this device can hold it for them (null when it cannot), and holding the request itself.
    */
   heldPaymentMethods?(linkId: string): PaymentMethodName[] | null;
@@ -58,7 +58,7 @@ export interface PaymentDeskHost {
   waitingPaymentMethods?(linkId: string): PaymentMethodName[] | null;
   holdRequest?(linkId: string, request: PaymentRequest, messageId: string): Promise<void>;
   onReviewedPaymentResult?(id:string):Promise<void>;
-  /** The group an edge link belongs to (WISP 9xx), for requests to a whole group. */
+  /** The group an edge link belongs to (WISP 902), for requests to a whole group. */
   groupOf?(linkId: string): string | undefined;
   /** The edge links of a group, to its other members, that exist. */
   groupLinks?(groupId: string): string[];
@@ -384,7 +384,7 @@ export class PaymentDesk {
   }
 
   /**
-   * A request to a whole group (WISP 9xx § Payments): one request, on one rail, sent to every member over their
+   * A request to a whole group (WISP 902 § Payments): one request, on one rail, sent to every member over their
    * edge; the first payment that settles it wins. One rail only, because each enforces "once" by itself: a
    * Lightning invoice can be paid once, and ecash is checked here before it is redeemed (a later token is refused
    * unredeemed, so its payer takes it back). Two rails at once would let an invoice and a token both pay it.
@@ -622,7 +622,7 @@ export class PaymentDesk {
       endpoints: [...(payment.invoice ? [[ENDPOINT.bolt11, payment.invoice] as [string, string]] : []), ...(payment.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(payment.mints)] as [string, string]] : [])] };
   }
 
-  /** `held`: picked up from the contact's storage while it was away (WISP 4xx): only what this device allows counts, and only Cashu or Lightning. */
+  /** `held`: picked up from the contact's storage while it was away (WISP 404): only what this device allows counts, and only Cashu or Lightning. */
   async onPaymentRequest(linkId: string, request: PaymentRequest, held = false): Promise<void> {
     // Already here from this contact (sent again, or held and live both): once. Another chat's id is not this one.
     if (this.find(linkId, request.id)?.linkId === linkId) return;

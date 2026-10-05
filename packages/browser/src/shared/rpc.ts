@@ -148,7 +148,7 @@ export interface EngineApi {
   /**
    * Edits a text of mine (WISP 400 § Edits): the new text here at once, and to the contact once both sides offer edit/1
    * on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit. In a group
-   * (`group:<id>`, WISP 9xx § Edits) it goes to the members; `mentions`: members named by the new text beyond those the
+   * (`group:<id>`, WISP 902 § Edits) it goes to the members; `mentions`: members named by the new text beyond those the
    * message already named.
    */
   editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: StatusCard }): { error: string | null; refused?: boolean; messageId?: string };
@@ -185,7 +185,7 @@ export interface EngineApi {
   /** One chat's connection from its menu: a transport both sides can use, `auto` for the app's rule, or `dht` for DHT only. */
   setChatTransport(params: { linkId: string; transport: PairedTransport | "auto" | "dht" }): void;
   setChatPaymentMethods(params: { linkId: string; methods: Partial<Record<import("@ghostly/core").PaymentMethodName, boolean>>; networks?: Partial<Record<import("@ghostly/core").PaymentMethodName, WalletNetwork[]>> }): void;
-  /** Store-and-forward in one chat (WISP 4xx): accept held items from this contact, and hold items for it while it is away. */
+  /** Store-and-forward in one chat (WISP 404): accept held items from this contact, and hold items for it while it is away. */
   setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;
   walletAddMint(params: { url: string; primary?: boolean; network?: WalletNetwork }): { url: string; name: string };
@@ -254,7 +254,7 @@ export interface EngineApi {
   /** `confirmedReal`: required on Mainnet (real money), refused without it. */
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork; confirmedReal?: true }): { paymentId: string };
   requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork; card?: string }): { paymentId: string };
-  /** A request any member of a group may pay, once (WISP 9xx § Payments). */
+  /** A request any member of a group may pay, once (WISP 902 § Payments). */
   requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?:WalletNetwork; card?: string }): { paymentId: string };
   /** The payment composer opened on a member of a community group: their app is asked what ways of paying it takes. */
   groupPaymentHello(params: { groupId: string; member: string }): void;
@@ -298,7 +298,7 @@ export interface EngineApi {
   /**
    * A chat muted here (#250) is not woken: its contact is told to forget this side's subscription until it is unmuted,
    * so no push for it reaches the browser at all (a push that shows nothing counts against the app with some browsers).
-   * A private group's `group:<id>` does the same for every member of it (WISP 9xx · Group Mesh § Wake-up push).
+   * A private group's `group:<id>` does the same for every member of it (WISP 902 · Group Mesh § Wake-up push).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
@@ -317,11 +317,11 @@ export interface EngineApi {
   disableGroupLink(params: { groupId: string }): void;
   /** Joins through a group's link (`group1/…`, or an address carrying it); resolves at once, admission follows. */
   joinGroupByLink(params: { link: string }): { groupId: string };
-  /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
-  /** `replyTo`: the id of a message of this group the text answers (WISP 9xx § Replies). */
+  /** `mentions`: places of the text that name members (WISP 902 § Mentions); the session keeps only what holds. */
+  /** `replyTo`: the id of a message of this group the text answers (WISP 902 § Replies). */
   /** `refused`: not a member of the group (removed from it, say), so nothing was sent and trying again will not help. */
   sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string; refused?: boolean };
-  /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 4xx · Message Buttons. */
+  /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 406 · Message Buttons. */
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
   /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
   groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
@@ -332,7 +332,7 @@ export interface EngineApi {
    */
   messagePage(params: { linkId: string; limit?: number; before?: string | number }): MessagePage;
   /**
-   * Every task and routine card of this profile, from all its chats and groups, oldest first (WISP 4xx · Status Cards
+   * Every task and routine card of this profile, from all its chats and groups, oldest first (WISP 405 · Status Cards
    * § The Tasks board): one row per message with a card. Read from the store's card index, never from the histories.
    */
   statusCardIndex(): CardIndexRow[];

@@ -6,7 +6,7 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
-| Implementation | 1:1 transfer in every chat: `files/3` (any size) and `files/2` on the chat session ([501](501-paired-files.md)), held files while not live ([4xx](4xx-store-and-forward.md)), [502](502-legacy-files.md) frames in compatibility chats |
+| Implementation | 1:1 transfer in every chat: `files/3` (any size) and `files/2` on the chat session ([501](501-paired-files.md)), held files while not live ([404](404-store-and-forward.md)), [502](502-legacy-files.md) frames in compatibility chats |
 | Summary | Send a file straight to a contact, checked and acknowledged on arrival. |
 | Availability | Available |
 | Notes | Any size, with both people online; above 25 MB the receiver accepts first, and a transfer resumes where it stopped. Chats with 0.4 contacts: up to 100 MiB. |
@@ -16,7 +16,7 @@
 
 ## Files in the one chat (revision 0.2)
 
-In the one chat of [400](400-chat.md), a file (a voice message included) travels over layer 1 with [501](501-paired-files.md), or, while the chat is not `live`, in a hold ([4xx](4xx-store-and-forward.md), at most 8 MiB) when both sides allow it. It never travels in DHT records, split or whole: the floor of [403](403-dht-text.md) carries text only. With neither available, the file waits in the sender's outbox with a cancel ("Sends when live") and goes when layer 1 is back. Queued files count against the sender's own storage, not the contact's quota.
+In the one chat of [400](400-chat.md), a file (a voice message included) travels over layer 1 with [501](501-paired-files.md), or, while the chat is not `live`, in a hold ([404](404-store-and-forward.md), at most 8 MiB) when both sides allow it. It never travels in DHT records, split or whole: the floor of [403](403-dht-text.md) carries text only. With neither available, the file waits in the sender's outbox with a cancel ("Sends when live") and goes when layer 1 is back. Queued files count against the sender's own storage, not the contact's quota.
 
 [502](502-legacy-files.md) is kept for compatibility chats only.
 

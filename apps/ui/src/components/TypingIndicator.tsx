@@ -54,7 +54,7 @@ function withNames(text: string, name: GroupTyper, other?: GroupTyper) {
 }
 
 /**
- * Who is typing in a group (WISP 9xx · Group Mesh § Typing): "Ana is typing…", "Ana and Bo are typing…", "3 people are
+ * Who is typing in a group (WISP 902 · Group Mesh § Typing): "Ana is typing…", "Ana and Bo are typing…", "3 people are
  * typing…", and the same for recording and thinking when everyone does the same (plain typing otherwise). One member
  * with a status line shows it after their name, isolated as in a 1:1 chat.
  */

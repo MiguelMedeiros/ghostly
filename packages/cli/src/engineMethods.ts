@@ -1,5 +1,5 @@
 /**
- * The engine's calls the daemon passes through as `engine.<method>` (WISP 11xx § Local control API): exactly the
+ * The engine's calls the daemon passes through as `engine.<method>` (WISP 1100 § Local control API): exactly the
  * app's `EngineApi` (packages/browser/src/shared/rpc.ts; `engineMethods.test.ts` keeps the two equal), plus two
  * reads every host has. Nothing else on the engine object is reachable.
  */

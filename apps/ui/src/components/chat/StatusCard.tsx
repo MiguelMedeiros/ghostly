@@ -9,7 +9,7 @@ import { STATUS_TONE, durationIn, isFinished, taskElapsed, type ShownCard } from
 import { RoutineView } from "./RoutineCard";
 
 /*
- * A bot's status card in the chat (WISP 4xx · Status Cards), shown instead of the message's text, which is only its
+ * A bot's status card in the chat (WISP 405 · Status Cards), shown instead of the message's text, which is only its
  * fallback. Compact: the title, a thin bar, the status, the pull request's size; a tap, a click or Enter opens it in
  * place with the rest. Display only: nothing here acts, and a link shows its host. Every string is the card's as the
  * reader kept it (one line, cleaned), drawn as plain text, never through the message renderer.

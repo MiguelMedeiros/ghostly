@@ -9,7 +9,7 @@ import { LocalRelay } from "../support/relay";
 
 /**
  * The Desktop app on a Mac (the system WKWebView, WebKit's WebRTC) and a bot on the headless Ghostly (packages/cli,
- * WISP 11xx § Calls: libdatachannel and Opus in WebAssembly) call each other. The app calls, the bot answers by
+ * WISP 1100 § Calls: libdatachannel and Opus in WebAssembly) call each other. The app calls, the bot answers by
  * itself; then the bot calls, and the app answers. The bot's "program" is this test, on the call's audio socket (raw
  * s16le mono PCM): it hears the app's microphone (a 440 Hz tone) and writes a 660 Hz tone the app must receive.
  *

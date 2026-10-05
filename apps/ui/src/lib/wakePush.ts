@@ -156,7 +156,7 @@ export function useWakeTableSync(text: WakeWords): void {
           if (!link.wakeToken) continue;
           entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }) });
         }
-        // Private groups (WISP 9xx · Group Mesh § Wake-up push): a token per member, all opening the group; muted, none.
+        // Private groups (WISP 902 · Group Mesh § Wake-up push): a token per member, all opening the group; muted, none.
         for (const group of groups ?? []) {
           if (group.profile !== "mesh") continue;
           const until = mutedUntil(groupChat(group.id));

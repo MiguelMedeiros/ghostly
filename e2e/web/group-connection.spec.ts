@@ -1,7 +1,7 @@
 import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /**
- * The group header's connection control (WISP 9xx § Mesh): an icon summing up the edges, and a popover
+ * The group header's connection control (WISP 902 § Mesh): an icon summing up the edges, and a popover
  * listing each member's — reachable over WebRTC, or not, and since when. It follows a member who goes
  * away, comes back, and leaves.
  */

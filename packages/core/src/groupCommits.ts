@@ -48,7 +48,7 @@ export const MAX_GROUP_MEMBERS = 32;
 export const LEGACY_GROUP_MEMBERS = 8;
 /**
  * The cap the chain rules and the engine apply: `MAX_GROUP_MEMBERS`, always, in the apps. Only the scale harness raises
- * it, to measure what hubs would cost past 32 (WISP 9xx · Group Mesh § Cost per member); an app never does.
+ * it, to measure what hubs would cost past 32 (WISP 902 · Group Mesh § Cost per member); an app never does.
  */
 export const GROUP_MEMBER_CAP = { max: MAX_GROUP_MEMBERS as number };
 /** The `paired-groups` version an app announces when it takes mesh rosters of up to `MAX_GROUP_MEMBERS`. */
@@ -159,7 +159,7 @@ export function verifyChain(raw: unknown, groupId?: string): { chain: GroupCommi
 export const OWN_FRAME_LIMIT = 2 ** 32 - 2 ** 23;
 
 /**
- * Frames said again (WISP 9xx, both profiles): a member's own frames that no edge took when it said them are
+ * Frames said again (WISP 902, both profiles): a member's own frames that no edge took when it said them are
  * remembered (`kept`, the latest) and, once the chain it follows is newer than such a frame's and has not moved for
  * `settledMs`, looked at once for saying again where the members let in while it was behind can read them. A catch-up
  * brings commits one by one, and a frame said again at the first of them would still miss those let in by the next.

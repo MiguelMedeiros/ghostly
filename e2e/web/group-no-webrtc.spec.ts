@@ -4,7 +4,7 @@ import { pair } from "../support/paired";
 
 // A group of three where one member's app has no WebRTC at all, as Ghostly Desktop on Linux (WebKitGTK has none): its
 // page runs without `RTCPeerConnection`, and Iroh through the e2e infra's relay. Group links (entry sessions, edges) go
-// over Iroh with it, told in each link's own packet (`_tr`, WISP 9xx § Transports), and over WebRTC between the other
+// over Iroh with it, told in each link's own packet (`_tr`, WISP 902 § Transports), and over WebRTC between the other
 // two, as before. It makes a community, lets people in, joins one, and everyone reads everyone.
 test.skip(!process.env.GHOSTLY_IROH_RELAY_URL, "Needs the e2e infra's Iroh relay (npm run e2e:infra:use)");
 

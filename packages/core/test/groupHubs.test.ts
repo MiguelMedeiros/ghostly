@@ -9,7 +9,7 @@ import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.hubs, groups.leave, groups.remove-member
 
 /*
- * Hubs of a private group (WISP 9xx · Group Mesh § Hubs), in core: the epoch's rendezvous secret, the admin's policy in
+ * Hubs of a private group (WISP 902 · Group Mesh § Hubs), in core: the epoch's rendezvous secret, the admin's policy in
  * the metadata, how a member picks its hubs, and what a session hands a hub to pass on.
  */
 

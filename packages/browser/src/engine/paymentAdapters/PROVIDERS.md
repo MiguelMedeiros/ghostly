@@ -239,7 +239,7 @@ asking for it, and the Fedimint card's **Use for Lightning** adds it as a Lightn
 federation's ecash through its gateway; paying funds a contract the gateway claims, for the fee it advertises
 (estimated before paying and held to the reviewed maximum; the client passes no limit of its own). Refused before a
 contract is funded is `NothingSpentError`; after, `pending` until the client's operation says paid (a preimage) or
-refunded. An invoice of the same federation is swapped inside it, without a gateway. See [WISP 2xx](../../../../../docs/wisps/2xx-fedimint.md).
+refunded. An invoice of the same federation is swapped inside it, without a gateway. See [WISP 207](../../../../../docs/wisps/207-fedimint.md).
 
 ## Paying from another wallet
 

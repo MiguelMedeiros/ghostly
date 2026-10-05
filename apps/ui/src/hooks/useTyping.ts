@@ -3,7 +3,7 @@ import type { TypingActivity, TypingKind } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 
 /*
- * The typing indicator of a 1:1 chat (WISP 401 § Typing) and of a private group (WISP 9xx · Group Mesh § Typing). The
+ * The typing indicator of a 1:1 chat (WISP 401 § Typing) and of a private group (WISP 902 · Group Mesh § Typing). The
  * engine says it on the live session (a group's edges) only, throttled, and shows the other side's with a timeout;
  * these hooks read it and tell the engine when this side types or records.
  */
@@ -51,7 +51,7 @@ export function useTypingSender(linkId: string | undefined, active = true): (typ
   return useSender(linkId ? say : undefined, active);
 }
 
-/** The same for a private group (WISP 9xx · Group Mesh § Typing): the engine says it on the group's edges. */
+/** The same for a private group (WISP 902 · Group Mesh § Typing): the engine says it on the group's edges. */
 export function useGroupTypingSender(groupId: string | undefined, active = true): (typing: boolean, kind?: TypingKind) => void {
   const say = useCallback((typing: boolean, kind: TypingKind) => {
     if (groupId) void engine.call("setGroupTyping", { groupId, typing, ...(typing && kind !== "typing" ? { kind } : {}) }).catch(() => {});

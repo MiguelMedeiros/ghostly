@@ -83,7 +83,7 @@ export const BLOCKS: Block[] = [
   b("compat", "talk", "Compatibility chats", ["402-legacy-chat", "502-legacy-files"], "Chats with Ghostly 0.4 contacts and the older Rust CLI keep their older wire: DHT text and, on a live link, files and calls. Never created for a new chat."),
   b("onechat", "talk", "DHT fallback and upgrade", ["400-chat", "403-dht-text", "100-transports"], "A first pairing with no direct path starts on the DHT, and every chat moves to a live link by itself when one connects."),
   b("callsall", "talk", "Calls in every chat", ["600-media", "401-paired-chat"], "Voice, video and screen sharing in the chat session while it is live, not only with Ghostly 0.4 contacts."),
-  b("hold", "talk", "Held messages", ["4xx-store-and-forward"], "Text, a file up to 8 MiB or a Cashu/Lightning request, held for an away contact in your own S3 bucket and found through a DHT pointer. Opt-in per chat; up to seven days after you were last online."),
+  b("hold", "talk", "Held messages", ["404-store-and-forward"], "Text, a file up to 8 MiB or a Cashu/Lightning request, held for an away contact in your own S3 bucket and found through a DHT pointer. Opt-in per chat; up to seven days after you were last online."),
   b("files", "talk", "Files", ["500-files", "501-paired-files"], "Verified transfers of any size while both peers are online, picked up where they stopped; above 25 MB the receiver accepts first. A voice message is a file too."),
   b("media", "talk", "Voice & video", ["600-media", "601-webrtc-media"], "One-to-one calls and screen sharing over WebRTC media, in every chat while it is live. Linux desktops, whose webview has no WebRTC, call with their own media, without screen sharing yet."),
   b("rich", "talk", "Rich messages", [], "Rich text, @mentions in groups, link previews made by the sender, cards for invites, keys and payment codes, and a question before a secret like a seed is sent.", undefined, "candidate-text-presence-and-typing"),
@@ -97,20 +97,20 @@ export const BLOCKS: Block[] = [
   b("onchain", "pay", `On-chain${D}BDK${D}Bitcoin Core`, [], "Plain bitcoin in a chat, through a BDK wallet (test networks) or your own Bitcoin Core node (desktop).", ["adapter-roadmap"], "candidate-bitcoin-on-chain"),
   b("arkade", "pay", `Ark${D}Arkade`, ["202-arkade"], "Exact Ark payments through a pinned operator: Arkade on Mainnet, mutinynet on Testnet. Experimental: payments were tested on regtest only, and there is no unilateral exit yet."),
   b("bark", "pay", `Ark${D}Bark`, ["204-bark"], "A second Ark provider (Second's Bark): on Mainnet through Second's server, signet on Testnet, with no unilateral exit yet. Its own method and capability, not interchangeable with Arkade."),
-  b("spark", "pay", "Spark", ["2xx-spark"], "Spark to Spark, wallet to wallet, on the same seed as the Breez Lightning source. Mainnet with your own Breez API key; Testnet on regtest."),
-  b("fedimint", "pay", "Fedimint", ["2xx-fedimint"], "Ecash from a federation you join by invite code, in a chat and as a Lightning source through its gateway, on Mainnet and Testnet."),
+  b("spark", "pay", "Spark", ["206-spark"], "Spark to Spark, wallet to wallet, on the same seed as the Breez Lightning source. Mainnet with your own Breez API key; Testnet on regtest."),
+  b("fedimint", "pay", "Fedimint", ["207-fedimint"], "Ecash from a federation you join by invite code, in a chat and as a Lightning source through its gateway, on Mainnet and Testnet."),
   b("usdt", "pay", `USDT${D}WDK`, [], "USDT on Ethereum through Tether WDK, signed locally. Experimental; no WISP number.", ["usdt-integration"], "candidate-usdt-through-tether-wdk"),
   b("testnet", "pay", "Wallets per network", ["200-payments"], "A wallet per network, Mainnet and Testnet side by side; test coins come from Get test coins. Real money is always confirmed first, and a wallet with money still on its way is not removed by accident."),
 
   // Identity proofs & social
   b("proofs", "identity", "Identity proofs", ["300-peer-proofs"], "Optionally prove to one contact that you control an outside identity: made once, shared per chat, revocable."),
   b("nostr", "identity", "Nostr", ["301-nostr"], "A Nostr proof through a NIP-07 extension or a NIP-46 signer: a proof, not a transport."),
-  b("proofkinds", "identity", `Domain${D}OpenPGP${D}SSH${D}Bitcoin`, ["3xx-domain", "3xx-openpgp", "3xx-ssh", "3xx-bitcoin"], "Self-custodied proofs made once with your own tools: a DNS record, gpg, ssh-keygen, a wallet's BIP-322 signature."),
+  b("proofkinds", "identity", `Domain${D}OpenPGP${D}SSH${D}Bitcoin`, ["304-domain", "305-openpgp", "307-ssh", "306-bitcoin"], "Self-custodied proofs made once with your own tools: a DNS record, gpg, ssh-keygen, a wallet's BIP-322 signature."),
   b("oidc", "identity", "OpenID accounts", ["3xx-oidc-proofs"], "An account at Google, Microsoft, Apple, GitLab or Twitch, attested by that provider. Built, and offered once Ghostly's OAuth clients are registered."),
-  b("atproto", "identity", "Bluesky / AT Protocol", ["3xx-atproto"], "A Bluesky (or any AT Protocol) account: approved once on your own server, published as one record in your repository, checked by contacts without logging in."),
-  b("social", "identity", "Nostr social", ["3xx-nostr-social"], "Behind a verified Nostr proof: a contact's profile, follows and notes, loaded when you ask. Publishing is off until you turn it on, and each post is confirmed."),
+  b("atproto", "identity", "Bluesky / AT Protocol", ["312-atproto"], "A Bluesky (or any AT Protocol) account: approved once on your own server, published as one record in your repository, checked by contacts without logging in."),
+  b("social", "identity", "Nostr social", ["309-nostr-social"], "Behind a verified Nostr proof: a contact's profile, follows and notes, loaded when you ask. Publishing is off until you turn it on, and each post is confirmed."),
   b("pubprofiles", "identity", "Public profiles", [], "A verified Nostr, Pubky or Bluesky identity shows its public name, picture and bio on its card, and a contact can be shown by it.", ["public-profiles"], "candidate-profile"),
-  b("did", "identity", "DIDs", ["3xx-did-dht", "3xx-did"], "Every profile has a did:dht of its own, listing an identity only if you switch it on; and a DID you control (did:key, did:jwk, did:dht, did:web) is proven like any identity."),
+  b("did", "identity", "DIDs", ["310-did-dht", "311-did"], "Every profile has a did:dht of its own, listing an identity only if you switch it on; and a DID you control (did:key, did:jwk, did:dht, did:web) is proven like any identity."),
   b("pubky", "identity", "Pubky", ["302-pubky"], "A Pubky key, approved once in Pubky Ring or Pubky Passport: the proof is a small file on its homeserver, which contacts read through the key's own records."),
   b("keet", "identity", "Keet", ["303-keet"], "A Keet relationship; blocked on a signer API for existing accounts."),
 
@@ -124,19 +124,19 @@ export const BLOCKS: Block[] = [
   b("storage", "keep", `Storage: file${D}S3`, ["1000-storage", "1001-local-storage", "1002-s3-storage"], "Where sealed bundles wait: a file you keep or an S3-compatible bucket, which also holds messages for an away contact."),
 
   // Groups
-  b("groups", "groups", "Groups", ["900-group-sessions", "9xx-group-mesh", "9xx-group-community"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture and payments between members; no files or calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension and desktop."),
+  b("groups", "groups", "Groups", ["900-group-sessions", "902-group-mesh", "903-group-community"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture and payments between members; no files or calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension and desktop."),
   b("gossipsub", "groups", "GossipSub", ["901-gossipsub"], "A candidate distribution layer for larger groups, off the DHT."),
   b("mls", "groups", "MLS", [], "Group encryption by the MLS standard, for groups larger than the mesh or members who renew their own keys. Being considered, not planned.", ["adapter-roadmap"], "candidate-mls-group-encryption"),
 
   // SDK, apps & catalogs
   b("sdk", "ecosystem", "@ghostlytools/sdk", [], "Write a wallet source or an identity proof outside the app, test it with the contract suites, and it joins the pickers as a plugin: no registry line. From the repository, not on npm.", ["sdk"], "candidate-sdk-and-manifests"),
-  b("headless", "ecosystem", "Headless CLI", ["11xx-headless"], "`ghostly`: the app's own engine on Node for bots, driven through a daemon, a local socket and a JSON event stream. Spending real money needs --confirm-real. npm install -g @ghostlytools/cli."),
+  b("headless", "ecosystem", "Headless CLI", ["1100-headless"], "`ghostly`: the app's own engine on Node for bots, driven through a daemon, a local socket and a JSON event stream. Spending real money needs --confirm-real. npm install -g @ghostlytools/cli."),
   b("sandbox", "ecosystem", "Plugin sandbox", [], "A plugin host that gives each plugin only the permissions you grant it. Being considered, not planned.", ["adapter-roadmap"], "candidate-plugin-sandbox"),
   b("apps", "ecosystem", "Apps & catalogs", ["12xx-marketplace"], "Mini-apps and games from stores you add by pasting a URL, or sent to you in a chat. Each is checked against its publisher's signature and runs in a sandbox with no internet access. Planned after 1.1."),
   b("os", "ecosystem", "Self-hosted runtime", [], "An always-on personal node, even a Raspberry Pi, running your Ghostly.", ["adapter-roadmap"], "candidate-self-hosted-24h"),
 ];
 
-/** What the headless `ghostly` CLI runs (docs/wisps/11xx-headless.md, "Parity with the app"). */
+/** What the headless `ghostly` CLI runs (docs/wisps/1100-headless.md, "Parity with the app"). */
 const CLI_BLOCKS = [
   "core", "keys", "invite", "ghostly1", "caps", "webrtc", "iroh", "hyperdht", "dhttext", "chat", "paired", "onechat", "files",
   "cashu", "lightning", "lnurl", "onchain", "arkade", "spark", "fedimint", "usdt", "testnet",

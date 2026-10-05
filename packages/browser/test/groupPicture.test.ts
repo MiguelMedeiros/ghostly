@@ -4,7 +4,7 @@ import { Groups, type GroupsHost } from "../src/engine/groups";
 // covers: groups.picture.set, groups.picture.late-joiner
 
 /**
- * A group's picture (WISP 9xx § Metadata) through the real community engine on headless peers:
+ * A group's picture (WISP 903 § Metadata) through the real community engine on headless peers:
  * the admin sets it, members get it through the hubs, someone let in by a member while the admin is
  * away gets it at their first sync, it changes and goes for everyone, and each change leaves a line.
  * The mesh profile's engine path is in `groups.test.ts`.

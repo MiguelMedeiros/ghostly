@@ -2,7 +2,7 @@ import { MEMBER_KEY } from "./groupCommits";
 import { utf8Encode } from "./bytes";
 
 /*
- * Mentions in a group message (WISP 9xx Group Mesh § Mentions, Group Community § Mentions): which members a
+ * Mentions in a group message (WISP 902 Group Mesh § Mentions, Group Community § Mentions): which members a
  * message names, bound to their member keys rather than to the names they go by, since names can collide and
  * change. The text keeps a readable "@Name" at each place, so an app without mentions shows the message as it
  * was typed; the list says which member each place is.

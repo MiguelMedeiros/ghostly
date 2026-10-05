@@ -28,7 +28,7 @@ export interface ChatFile {
 }
 
 export interface ChatMessage {
-  /** `held`: waiting in this device's storage for the contact to come back (WISP 4xx). */
+  /** `held`: waiting in this device's storage for the contact to come back (WISP 404). */
   /** `waiting`: not sent yet, goes by itself when the chat can carry it ("Sends when live"). */
   delivery?: "sending" | "sent" | "queued" | "waiting" | "held" | "delivered" | "failed";
   deliveryError?: string;
@@ -58,7 +58,7 @@ export interface ChatMessage {
   edit?: import("@ghostly/browser/shared/types").MessageEdit;
   /** A forwarded message (WISP 400 § Forwards): how many times it has been forwarded. */
   forwarded?: number;
-  /** A bot's task or routine (WISP 4xx · Status Cards), shown instead of `text`, its fallback. */
+  /** A bot's task or routine (WISP 405 · Status Cards), shown instead of `text`, its fallback. */
   card?: import("@ghostly/core").StatusCard;
   systemEvent?: {
     type: SystemEventType;

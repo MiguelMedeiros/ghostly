@@ -1,5 +1,5 @@
 /**
- * A group's picture (WISP 9xx § Metadata), or the group glyph when it has none. The picture is the
+ * A group's picture (WISP 902 § Metadata), or the group glyph when it has none. The picture is the
  * data URL the engine kept after checking it (`sanitizeAvatar`): it is drawn, never fetched.
  */
 export function GroupAvatar({ picture, size, glyph = Math.round(size * 0.46), className = "", testId }: { picture?: string; size: number; glyph?: number; className?: string; testId?: string }) {

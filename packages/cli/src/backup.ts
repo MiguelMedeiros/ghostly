@@ -13,7 +13,7 @@ import { RESTORED_MARK, profileExists, profilePaths, type ProfilePaths } from ".
  * A headless profile's backup: the WISP 05 envelope around the profile itself, its store and its files, written and
  * read a piece at a time (envelope version 2), so a profile with large files never has to fit in memory. It restores
  * into a new headless profile; the app's own backups are made from its page's storage and are not this format
- * (WISP 11xx § Parity). A backup an older CLI made (version 1: everything in one sealed JSON document) still restores.
+ * (WISP 1100 § Parity). A backup an older CLI made (version 1: everything in one sealed JSON document) still restores.
  */
 const FORMAT = "ghostly-cli-profile/2";
 const FORMAT_1 = "ghostly-cli-profile/1";

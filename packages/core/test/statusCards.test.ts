@@ -11,7 +11,7 @@ import {
 // covers: chat.status-cards.wire
 
 /*
- * Status cards (WISP 4xx · Status Cards): what a reader keeps of a card and what a sender may send, each bound, and the
+ * Status cards (WISP 405 · Status Cards): what a reader keeps of a card and what a sender may send, each bound, and the
  * card beside its fallback text on every wire that carries one.
  */
 

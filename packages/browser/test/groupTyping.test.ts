@@ -4,7 +4,7 @@ import { CommunityWorld } from "./communityWorld";
 // covers: groups.typing
 
 /**
- * Typing in a private group (WISP 9xx · Group Mesh § Typing) on headless peers running the real group engine: the word
+ * Typing in a private group (WISP 902 · Group Mesh § Typing) on headless peers running the real group engine: the word
  * goes sealed on the edges, each member sees who is typing, a message ends it, and nobody outside the group is heard.
  */
 describe("group typing on headless peers", { timeout: 120_000 }, () => {

@@ -8,7 +8,7 @@ import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.catch-up, groups.remove-member, groups.protocol.mentions
 
 /*
- * Revision 0.9 of the mesh profile (WISP 9xx § Catch-up): any member hands on what another missed, not only its
+ * Revision 0.9 of the mesh profile (WISP 902 § Catch-up): any member hands on what another missed, not only its
  * author, when asked (`ask` in the sync); the author's `xs` vouches for the mention and reply boxes of a frame handed
  * on; someone out of the roster is neither handed on nor taken from a third member; rosters of up to 32.
  */

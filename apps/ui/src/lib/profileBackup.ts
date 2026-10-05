@@ -207,7 +207,7 @@ export async function profileBackupSizes(): Promise<BackupSizes> {
 
 /**
  * The engine's settings as a backup keeps them (a handoff keeps them whole). Left out: the peer's copy of the storage
- * credentials (for held messages, WISP 4xx) like the page's; the push subscription (WISP 401 § Wake-up push), which
+ * credentials (for held messages, WISP 404) like the page's; the push subscription (WISP 401 § Wake-up push), which
  * belongs to this browser and whose key pair signs wake-ups; and the credential of each TURN server, a secret of a
  * service the person signed up for, as the storage ones are. The TURN server's address and username stay, so Settings
  * shows what to fill in again after a restore; until then calls leave that server out.

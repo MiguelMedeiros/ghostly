@@ -53,7 +53,7 @@ export const GROUP_LIMITS = {
    */
   relay: 256,
   relayBytes: 256 * 1024,
-  /** Other members' edits kept to hand on, the latest per message (WISP 9xx § Edits): count and ciphertext bytes. */
+  /** Other members' edits kept to hand on, the latest per message (WISP 902 § Edits): count and ciphertext bytes. */
   relayEdits: 64,
   relayEditBytes: 512 * 1024,
   /** Edits of one member handed on for one sync that asks for them: fewer than a receiver takes in a window. */
@@ -89,17 +89,17 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
  * `xs`: the author's signature over the whole frame, the boxes of `m` and `r` included (revision 0.9), and `f` when
  * there is one. A frame handed on by another member keeps its boxes only with it: the edge it arrives on is not the
  * author's and vouches for nothing.
- * `f`: a forwarded text's hop count (WISP 9xx § Forwards), in the clear like the header: every member reads it anyway.
- * `sc`: a status card (WISP 4xx · Status Cards) as JSON, sealed like the reply in a box of its own, so an older app
+ * `f`: a forwarded text's hop count (WISP 902 § Forwards), in the clear like the header: every member reads it anyway.
+ * `sc`: a status card (WISP 405 · Status Cards) as JSON, sealed like the reply in a box of its own, so an older app
  * reads the text, its fallback; `xs` covers it after the rest, only when there is one.
- * `o`: where a message said again under a later epoch was first said (WISP 9xx § Catch-up, "Frames said again"): that
+ * `o`: where a message said again under a later epoch was first said (WISP 902 § Catch-up, "Frames said again"): that
  * frame's epoch and sequence, in the clear like the header. `xs` covers it last, only when there is one.
  */
 export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; sc?: { n: string; c: string }; o?: { e: number; n: number }; xs?: string }
 /**
- * An edit of message `<s>:<e>:<n>` by its author (WISP 9xx § Edits): edit number `v`, the new text (and its mentions)
+ * An edit of message `<s>:<e>:<n>` by its author (WISP 902 § Edits): edit number `v`, the new text (and its mentions)
  * as JSON `{ text, m?, sc? }` sealed under the key of the message's epoch `e`, signed by the author. `sc`: the status card
- * of this version (WISP 4xx · Status Cards); with one, `v` may go up to `STATUS_CARD_LIMITS.edits`.
+ * of this version (WISP 405 · Status Cards); with one, `v` may go up to `STATUS_CARD_LIMITS.edits`.
  */
 export interface GroupEditFrame { t: "group-edit"; g: string; e: number; s: string; n: number; v: number; ts: number; nn: string; c: string; sig: string }
 export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupCommit; secret?: SealedSecret }
@@ -118,7 +118,7 @@ export interface GroupChainFrame { t: "group-chain"; g: string; commits: GroupCo
 export interface GroupWelcomeFrame { t: "group-welcome"; g: string; name: string; commits: GroupCommit[]; secrets: { e: number; s: SealedSecret }[] }
 export interface GroupRemovedFrame { t: "group-removed"; g: string }
 /**
- * A member's leave, signed by its member key (WISP 9xx · Group Mesh § Hubs): unlike `group-leave`, which the admin
+ * A member's leave, signed by its member key (WISP 902 · Group Mesh § Hubs): unlike `group-leave`, which the admin
  * believes from the edge it comes on, hubs can carry it to an admin the member has no edge with. Apps from before drop it.
  */
 export interface GroupByeFrame { t: "group-bye"; g: string; k: string; e: number; ts: number; sig: string }
@@ -178,7 +178,7 @@ export interface GroupSessionHooks {
   send(to: string, frame: GroupEdgeFrame): boolean | void;
   /** Store before it resolves: replay state advances only afterwards. */
   message(message: GroupIncomingMessage): Promise<void> | void;
-  /** An edit of a member's message, authenticated as its author (WISP 9xx § Edits). Apps without edits leave it out. */
+  /** An edit of a member's message, authenticated as its author (WISP 902 § Edits). Apps without edits leave it out. */
   edit?(edit: GroupIncomingEdit): Promise<void> | void;
   /** Roster, epoch or status changed. */
   changed(): void;
@@ -241,7 +241,7 @@ export const groupMessageId = (sender: string, epoch: number, seq: number) => `$
 const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + STATUS_CARD_LIMITS.bytes + 64;
 const MAX_EDIT_BOX = Math.ceil((MAX_EDIT_PLAIN + 16) * 4 / 3) + 4;
 const editAad = (f: Pick<GroupEditFrame, "g" | "e" | "s" | "n" | "v" | "ts">) => JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts]);
-/** What a member signs of its reaction, so that a hub can pass it on (WISP 9xx · Group Mesh § Hubs). */
+/** What a member signs of its reaction, so that a hub can pass it on (WISP 902 · Group Mesh § Hubs). */
 const reactionSigned = (g: string, r: WireReaction) => utf8Encode(JSON.stringify(["ghostly-group/1 react", g, r.id, r.e, r.n]));
 /**
  * A member's reaction as a hub passes it on: signed by the member (`k`), unlike `group-react`, which the edge it comes
@@ -249,7 +249,7 @@ const reactionSigned = (g: string, r: WireReaction) => utf8Encode(JSON.stringify
  */
 export const GROUP_REACTED_FRAME = "group-reacted";
 export interface GroupReactedFrame extends WireReaction { t: typeof GROUP_REACTED_FRAME; g: string; k: string; sig: string }
-/** What a member signs of its pin: any member passes it on as it is (WISP 9xx · Group Mesh § Pinned message). */
+/** What a member signs of its pin: any member passes it on as it is (WISP 902 · Group Mesh § Pinned message). */
 const pinSigned = (g: string, p: WirePin) => utf8Encode(JSON.stringify(["ghostly-group/1 pin", g, p.id, p.n]));
 export interface GroupPinFrame extends WirePin { t: typeof GROUP_PIN_FRAME; g: string; k: string; sig: string }
 const byeSigned = (f: Omit<GroupByeFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 bye", f.g, f.k, f.e, f.ts]));
@@ -426,7 +426,7 @@ export class GroupSession {
   }
 
   get id(): string { return this.state.id; }
-  /** The name the admin gave the group, else the one it had when I got in (WISP 9xx § Metadata). */
+  /** The name the admin gave the group, else the one it had when I got in (WISP 902 § Metadata). */
   get name(): string { return groupDisplayName(this.state.meta, this.state.name); }
   get myKey(): string { return this.identity.pubKeyZ32; }
   get epoch(): number { return this.state.chain[this.state.chain.length - 1].e; }
@@ -440,7 +440,7 @@ export class GroupSession {
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
   get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
-  /** Whom the admin pinned as hubs and excluded (WISP 9xx · Group Mesh § Hubs), from the group's metadata. */
+  /** Whom the admin pinned as hubs and excluded (WISP 902 · Group Mesh § Hubs), from the group's metadata. */
   get hubPolicy(): MeshHubPolicy {
     // Parsed once per statement: the body may hold a picture of 40,000 characters, and views ask for this per member.
     const meta = this.state.meta;
@@ -573,7 +573,7 @@ export class GroupSession {
     return { secret };
   }
 
-  /** Someone out of the roster is not handed on any more, whatever they sent while in it (WISP 9xx § Catch-up). */
+  /** Someone out of the roster is not handed on any more, whatever they sent while in it (WISP 902 § Catch-up). */
   private pruneRelay(): void {
     if (this.state.relay?.length) this.state.relay = this.state.relay.filter(f => rosterHas(this.roster, f.s));
     if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s));
@@ -642,8 +642,8 @@ export class GroupSession {
    * Encrypts and signs a text, keeps it for catch-up and sends it to every other member. `mentions`: places of the
    * text that name members (everyone: the admin only); what does not hold is left out. `reply`: the message it
    * answers, sealed apart from the text (`r`) like the mentions, so an older app still reads the text. `forwarded`: the
-   * hop count of a forwarded text (`f`, WISP 9xx § Forwards). `card`: a status card, checked by the caller, sealed in a
-   * box of its own (`sc`, WISP 4xx · Status Cards); the text is its fallback.
+   * hop count of a forwarded text (`f`, WISP 902 § Forwards). `card`: a status card, checked by the caller, sealed in a
+   * box of its own (`sc`, WISP 405 · Status Cards); the text is its fallback.
    */
   sendText(text: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
@@ -792,7 +792,7 @@ export class GroupSession {
   }
 
   /**
-   * Says an edit of one of my messages (WISP 9xx § Edits): edit `v`, the whole new text and its mentions, sealed under
+   * Says an edit of one of my messages (WISP 902 § Edits): edit `v`, the whole new text and its mentions, sealed under
    * the key of the message's epoch and signed, to every member of that epoch still in the group, or to `to` alone (an
    * edge that just opened). Someone admitted after the message cannot open it and is not sent it. The message's
    * epoch key must still be here: past `GROUP_LIMITS.secrets` epochs a message cannot be edited.
@@ -869,7 +869,7 @@ export class GroupSession {
 
   /**
    * A frame from an authenticated member over the pairwise edge. Anything malformed or unauthorized is dropped.
-   * Resolves to what it took that a hub passes on to its other edges (WISP 9xx · Group Mesh § Hubs): each message,
+   * Resolves to what it took that a hub passes on to its other edges (WISP 902 · Group Mesh § Hubs): each message,
    * edit, commit (without the secret sealed for me), metadata statement and signed leave, the first time only, so a
    * flood among hubs stops at every member that already has it. Only what its author still in the roster signed.
    */
@@ -1278,7 +1278,7 @@ export class GroupSession {
     return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent));
   }
 
-  // -- metadata (WISP 9xx § Metadata) ---------------------------------------
+  // -- metadata (WISP 902 § Metadata) ---------------------------------------
 
   /** Sets (or, with null, removes) the group's picture: only the admin, signed under the current commit. */
   setPicture(picture: string | null, now = Date.now()): Promise<void> {
@@ -1301,7 +1301,7 @@ export class GroupSession {
 
   /**
    * Pins a member as a hub, excludes one from being a hub, or leaves it to the member's app (`null`): only the admin,
-   * in the group's metadata beside the picture (WISP 9xx · Group Mesh § Hubs).
+   * in the group's metadata beside the picture (WISP 902 · Group Mesh § Hubs).
    */
   setHub(key: string, role: "pin" | "exclude" | null, now = Date.now()): Promise<void> {
     return this.serialize(async () => {

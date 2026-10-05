@@ -2,7 +2,7 @@ import { MENTION_EVERYONE, MENTION_LIMITS, type GroupMention } from "@ghostly/co
 import type { Atom, Detector } from "./types";
 
 /*
- * Mentions in a group's composer and bubbles (WISP 9xx § Mentions). The composer keeps which member each "@Name"
+ * Mentions in a group's composer and bubbles (WISP 902 § Mentions). The composer keeps which member each "@Name"
  * it inserted stands for; on send, every place the text still has that token becomes a mention bound to the
  * member's key. A bubble then shows each mention with the member's name as it is now.
  */

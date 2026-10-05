@@ -6,7 +6,7 @@ import { Worker } from "node:worker_threads";
 import { fedimintSdkOn, type FedimintSdk } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 
 /**
- * The Fedimint client on Node (WISP 11xx § Wallet SDKs on Node): the app's own SDK and WebAssembly, each database in
+ * The Fedimint client on Node (WISP 1100 § Wallet SDKs on Node): the app's own SDK and WebAssembly, each database in
  * a `worker_threads` worker (fedimintWorker.mjs) and a file of the profile's `fedimint/` folder, where the browser has
  * a module worker and the origin-private file system. Only the platform differs: the client and what the engine does
  * with it are the app's.

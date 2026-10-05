@@ -78,7 +78,7 @@ describe("GroupConnection: the header sums up the mesh", () => {
     // An app with no transport for a group's links (no WebRTC, no native transport). Not "Connecting…" forever.
     ["an app with no transport for group links", [me, alice({ state: "connecting" }), bob({ state: "waiting" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } }, { kind: "failure", label: "Groups can't connect from this app yet", dot: "bg-danger" }],
     ["an app with no transport for group links, alone in the group", [me], { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } }, { kind: "waiting", label: "Only you so far", dot: "bg-text-muted" }],
-    // Ghostly Desktop on Linux: no WebRTC, but Iroh and HyperDHT carry its group links (WISP 9xx § Transports).
+    // Ghostly Desktop on Linux: no WebRTC, but Iroh and HyperDHT carry its group links (WISP 902 § Transports).
     ["an app with no WebRTC but native transports", [me, alice({ state: "connecting" }), bob({ state: "waiting" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "waiting", label: "Connecting to members…", dot: "bg-text-muted" }],
     // A group past 16 members runs on hubs: a member reached through one is reachable, as the header line counts it.
     ["a member reached through a hub", [me, alice(), member({ key: BOB, nick: "Bob", online: true, viaHub: true, edge: edge({ linkId: "edge-b", state: "waiting", lastSeenAt: 0 }) })], {}, { kind: "connected", label: "2 of 2 reachable", dot: "bg-accent" }],

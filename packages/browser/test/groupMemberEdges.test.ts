@@ -10,7 +10,7 @@ import type { StoredLink } from "../src/shared/types";
 // covers: groups.remove-member, groups.payments.group-request, groups.payments.notes, groups.protocol.reactions, groups.protocol.pins
 
 /**
- * What a private group says goes to its members as the roster has them now, and to nobody else (WISP 9xx · Group Mesh
+ * What a private group says goes to its members as the roster has them now, and to nobody else (WISP 902 · Group Mesh
  * § Admission and departure). A real engine (`GhostlyNode`, with its group engine, payment desk, group payments,
  * reactions, pins and wake-ups) is the admin; each member is the engine's own edge to it, whose connection the test
  * stands in for: it says when the edge is open and what the member's app announces, and writes down every call that

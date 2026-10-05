@@ -1,6 +1,6 @@
 /**
  * Errors that reach a bot: a stable `code` to branch on, a message for people, and the exit status the CLI
- * leaves with (WISP 11xx § Exit codes). The daemon sends `{code, message}` over the socket; the CLI prints
+ * leaves with (WISP 1100 § Exit codes). The daemon sends `{code, message}` over the socket; the CLI prints
  * `{"error": {code, message}}` on stdout and exits with `exit`.
  */
 export type ErrorCode =

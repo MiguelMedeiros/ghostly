@@ -8,14 +8,14 @@ import { CommunityWorld, RELAY_NETWORK, type NetworkModel, type Peer } from "./c
  * A private (mesh) group past eight members on headless engines (the real `Groups` and `GroupSession`, no UI, no
  * WebRTC; Pkarr and links in memory, simulated clock), the harness the community load test uses. What it checks:
  * everyone joins through the admin's link, a message reaches every member, a member who was away gets what an author
- * sent while the author is gone too (from a third member, WISP 9xx § Catch-up), and someone removed gets nothing
+ * sent while the author is gone too (from a third member, WISP 902 § Catch-up), and someone removed gets nothing
  * after. With `RELAY_NETWORK`, links cost what they cost on public relays, and the report says what a member spends.
  *
  * In `npm test`: 20 members, the network free. Measured, for the PR and the WISP:
  *
  *   MESH_SCALE=8,16,32 MESH_SCALE_OUT=/tmp/mesh.jsonl npx vitest run packages/browser/test/meshScale.test.ts
  *
- * With hubs (WISP 9xx · Group Mesh § Hubs): `MESH_HUBS=2` makes the first two members after the admin apps that stay
+ * With hubs (WISP 902 · Group Mesh § Hubs): `MESH_HUBS=2` makes the first two members after the admin apps that stay
  * online (the Desktop app or the CLI; their Pkarr requests are counted, not held to the relays' budget, since they read
  * the DHT). `MESH_HUBS=0,2` measures both. Past 32 (`MESH_SCALE=64,128`) the harness raises the member cap: what hubs
  * would cost, not what the apps allow.

@@ -5,7 +5,7 @@ import { validEditNumber } from "./pairedEdits";
 import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
 
 /**
- * Editing a sent text in a group (WISP 9xx § Edits, both profiles). As in a 1:1 chat (WISP 401 § Edits), the author says
+ * Editing a sent text in a group (WISP 902 § Edits, both profiles). As in a 1:1 chat (WISP 401 § Edits), the author says
  * the whole new text of one of its own messages with an edit number of its own per message, and the highest number
  * wins whatever order edits arrive in. A group has no receipts: the author says an edit to every member it can, and
  * again later (a private group: when an edge opens; a community: its members catch up from each other).
@@ -17,7 +17,7 @@ import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
  *
  *       { "x": { "t": "edit", "id": <message id>, "v": 3, "ts": 1790000000000, "text": "Done: 12 of 12", "m"?: [mentions], "sc"?: {card} } }
  *
- * `sc` is the status card of this version (WISP 4xx · Status Cards); an edit with one may be numbered up to
+ * `sc` is the status card of this version (WISP 405 · Status Cards); an edit with one may be numbered up to
  * `STATUS_CARD_LIMITS.edits`, one without only up to `MAX_EDITS_PER_MESSAGE`.
  *
  * Older apps drop both: a mesh session ignores a `t` it does not know, a community app the `x` frames it does not know.
@@ -36,7 +36,7 @@ export interface GroupEdit {
   m: string;
   /** Places of the new text that name members. */
   k?: GroupMention[];
-  /** The status card of this version (WISP 4xx · Status Cards). */
+  /** The status card of this version (WISP 405 · Status Cards). */
   sc?: StatusCard;
 }
 

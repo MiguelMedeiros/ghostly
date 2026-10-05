@@ -9,7 +9,7 @@ What a chat is, what its header, menus and composer hold, and how messages rende
 - **Layer 1, a peer-to-peer stream** (WebRTC, Iroh or HyperDHT) for everything else ([WISP 401 Chat Session](wisps/401-paired-chat.md)).
 - A chat upgrades to live by itself and falls back to the DHT. Each chat can be set to DHT only.
 - Chats made by v0.4 apps open as a **compatibility chat** ([WISP 402](wisps/402-legacy-chat.md)), tagged "Compatibility chat · older Ghostly", with "Continue in a new chat" in the ⋮.
-- **Hold messages** ([WISP 4xx Store-and-Forward](wisps/4xx-store-and-forward.md), experimental): what is sent while the contact is away waits sealed for them. One switch per chat, and both sides must allow it.
+- **Hold messages** ([WISP 404 Store-and-Forward](wisps/404-store-and-forward.md), experimental): what is sent while the contact is away waits sealed for them. One switch per chat, and both sides must allow it.
 
 ## Invites
 
@@ -25,7 +25,7 @@ Left to right (`apps/ui/src/pages/Chat.tsx`): avatar (click to see the picture l
 
 Under the name, the contact's key, or **typing…** with three dots while the contact writes (`apps/ui/src/components/TypingIndicator.tsx`); **recording audio…** while the contact records a voice note (from the moment the mic opens, held or hands-free, until it is sent or thrown away); **thinking…**, or a bot's own short status such as "Transcribing your audio…", shown as plain text. The chat list row shows the same in its preview line, in the accent. It is presence, not connection, so it never goes in the icon. In paired 1:1 chats over the live session (`typing/1`, [WISP 401](wisps/401-paired-chat.md#typing)), and in private groups (below): it goes with the message, a cleared composer, 5 seconds without a keystroke, or, if the stop is lost, 6 seconds after the contact's last word. Settings → Security → **Send typing indicator** (per profile, on by default) stops telling contacts and groups; theirs still shows.
 
-A private group's header says who is writing, recording or thinking, in place of its subtitle: "Ana is typing…", "Ana and Bo are typing…", "3 people are typing…" (#442, [WISP 9xx Group Mesh](wisps/9xx-group-mesh.md)). It is never stored, and a message ends it. Communities do not show it yet.
+A private group's header says who is writing, recording or thinking, in place of its subtitle: "Ana is typing…", "Ana and Bo are typing…", "3 people are typing…" (#442, [WISP 902 Group Mesh](wisps/902-group-mesh.md)). It is never stored, and a message ends it. Communities do not show it yet.
 
 ### Connection icon and panel
 
@@ -183,7 +183,7 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 | Shape | every member linked to every other; past 16, members whose apps stay online are hubs and the others link to two of them | online members elected as hubs relay |
 | Admin | one, signs every change | one; keeps remove, role, rotate and link. Any member can let people in |
 | Link | `group1/…`, works while the admin's app is open | `group2/…`, works while the admin is away |
-| Spec | [WISP 9xx Group Mesh](wisps/9xx-group-mesh.md) | [WISP 9xx Group Community](wisps/9xx-group-community.md) |
+| Spec | [WISP 902 Group Mesh](wisps/902-group-mesh.md) | [WISP 903 Group Community](wisps/903-group-community.md) |
 
 - New group offers Community (default) or Private (`apps/ui/src/components/NewGroupDialog.tsx`). Negotiation: [WISP 900](wisps/900-group-sessions.md).
 - The admin renames the group in Members… (Rename) or with `ghostly group rename` (#438); every member sees the new name, and apps from before keep the old one. The group link can be replaced or turned off by the admin. Leaving deletes the group and its history from the device; an admin hands the role on first.

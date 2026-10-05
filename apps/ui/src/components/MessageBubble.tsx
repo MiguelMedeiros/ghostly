@@ -93,7 +93,7 @@ interface MessageBubbleProps {
   /** Opens what the chat knows of `author` (the group's members, theirs marked): a tap on their name or picture. */
   onOpenAuthor?: () => void;
   /**
-   * A bot's buttons under the message (WISP 4xx · Message Buttons), as the chat's history has them (`buttonsViews`).
+   * A bot's buttons under the message (WISP 406 · Message Buttons), as the chat's history has them (`buttonsViews`).
    * Left out, a message with buttons shows them, and none of them answers.
    */
   buttons?: ButtonsView;
@@ -698,7 +698,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         : "animate-bubble-in-left"
       : "",
   );
-  // A button press (WISP 4xx · Message Buttons) reads "↩ Yes": its label is never a sum, a picture or a quote.
+  // A button press (WISP 406 · Message Buttons) reads "↩ Yes": its label is never a sum, a picture or a quote.
   const pressed = !!compactPress && isButtonPress(message);
   const money = useMemo(() => (message.paymentId || message.file || pressed || showsCard(message.card) ? null : findMoney(message.text)), [message.paymentId, message.file, pressed, message.card, message.text]);
   const [details, setDetails] = useState(false);
@@ -859,7 +859,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   );
 
   if (showsCard(message.card)) {
-    // A bot's task or routine (WISP 4xx · Status Cards): not a bubble but a card of its own, standing for the text
+    // A bot's task or routine (WISP 405 · Status Cards): not a bubble but a card of its own, standing for the text
     // (its fallback). Updates are its normal life, so no "edited": when it last changed, in the card.
     const card = message.card;
     const time = <CardTime sent={shownTime(message)} changed={message.edit?.at} />;

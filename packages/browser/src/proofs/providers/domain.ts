@@ -5,7 +5,7 @@ import { extensionSigner, withNostrSigner } from "../nostr";
 import { nostr, nostrProofTemplate, type NostrEvent } from "./nostr";
 
 /**
- * A domain the person controls (draft WISP 3xx, docs/wisps/3xx-domain.md).
+ * A domain the person controls (draft WISP 304, docs/wisps/304-domain.md).
  *
  * The statement ("I control domain:example.com and authorize the Ghostly key K …") is vouched for by
  * publishing, once, under the domain: a TXT record at `_ghostly.<domain>` or the file

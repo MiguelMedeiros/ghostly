@@ -3,7 +3,7 @@ import { pair } from "../support/paired";
 
 /**
  * A private group's member removed and then invited again (bug hunt r4b, r6a). A removal keeps the history on the removed
- * member's device (WISP 9xx mesh: only leaving drops it), and what that member wrote before keeps its name for everyone
+ * member's device (WISP 902 mesh: only leaving drops it), and what that member wrote before keeps its name for everyone
  * (#677: its old member key is in no roster any more). Back with a new key, the member reads nothing said while it was
  * out, and what it says is named as before.
  */

@@ -11,8 +11,8 @@ One chat, one invite (chat family revision 0.2, decided 2026-09-25) is implement
 - Calls, shared apps, files of any size and payments run on the live session ([401](401-paired-chat.md), #207, #233). Desktop on Linux calls with its own media ([601](601-webrtc-media.md#desktop-on-linux), #331).
 - Chats with Ghostly 0.4 contacts keep working as compatibility chats ([402](402-legacy-chat.md)).
 - Chats carry replies, edits, emoji reactions, forwards and a typing indicator; message text shows lists, quotes, headings and links ([400](400-chat.md), [401](401-paired-chat.md), #344, #347, #351, #354, #370, #404).
-- A contact's own app can wake a closed web app with a push that carries no content (`wake/1`, [401](401-paired-chat.md), #394). Private groups past 16 members run on hubs, members whose apps stay online ([Group Mesh](9xx-group-mesh.md), #402).
-- Bots run the app's own engine without a screen: the `ghostly` CLI, its daemon and its event stream, voice calls included ([11xx](11xx-headless.md), #323 to #327, #350).
+- A contact's own app can wake a closed web app with a push that carries no content (`wake/1`, [401](401-paired-chat.md), #394). Private groups past 16 members run on hubs, members whose apps stay online ([Group Mesh](902-group-mesh.md), #402).
+- Bots run the app's own engine without a screen: the `ghostly` CLI, its daemon and its event stream, voice calls included ([1100](1100-headless.md), #323 to #327, #350).
 - Identity proofs are back, rebuilt (2026-09-23, [WISP 300](300-peer-proofs.md#implementation-2026-09-23-identity-proofs)): made once per profile, shared per contact by choice, through one provider contract ([PROOFS.md](../../packages/browser/src/proofs/PROOFS.md)). Identity cards of a verified Nostr, Pubky or Bluesky identity show its public profile ([PUBLIC-PROFILES.md](PUBLIC-PROFILES.md), #292).
 
 Start at [400](400-chat.md); the invite is in [801](801-invitation-profiles.md).
@@ -41,7 +41,7 @@ What `dev` runs on each client today. This table and the evidence per WISP below
 | Wallets (per network) | Yes; WebLN web only | Yes | Yes; Bitcoin Core RPC Desktop only | #276, #277, #314, #317 |
 | Identity proofs | Yes | Yes | Yes | [300](300-peer-proofs.md) |
 | Groups (mesh, community) | Yes | Yes | Yes | [900](900-group-sessions.md) |
-| Headless CLI (`ghostly`) | The app's engine on Node, for bots: `ghostly1` invites, one chat, groups, wallets (not Bark), files, identity proofs, shared apps; DHT through relays only | | | [11xx](11xx-headless.md), #323 to #327 |
+| Headless CLI (`ghostly`) | The app's engine on Node, for bots: `ghostly1` invites, one chat, groups, wallets (not Bark), files, identity proofs, shared apps; DHT through relays only | | | [1100](1100-headless.md), #323 to #327 |
 
 
 ## Evidence per WISP (2026-09-28)
@@ -66,26 +66,26 @@ Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull req
 | [203](203-lightning.md) | Lightning | Draft | Several Lightning cards per network, one the default for receiving (#314, #317): the mints, NWC, LND, Core Lightning, WebLN, Breez, a Fedimint federation |
 | [204](204-bark.md) | Ark via Bark | Draft | Experimental: Mainnet on Second's server (#305) and Testnet; regtest verified; not compatible with Arkade; exits pending |
 | [205](205-lnurl.md) | Lightning Addresses and LNURL-pay | Draft | Paying an address or LNURL through a Lightning card; strict checks; no receiving |
-| [Fedimint · 2xx planned](2xx-fedimint.md) | Fedimint ecash and Lightning through a federation | Draft | Experimental, Mainnet and Testnet (#192, #341); web SDK canary; regtest verified (ecash in chats, Lightning through the gateway); not yet tried with real funds |
-| [Spark · 2xx planned](2xx-spark.md) | Spark payments | Draft | Experimental (#188): Spark to Spark (addresses and invoices) through the Breez SDK; Testnet on Breez's regtest; Mainnet with the person's Breez API key (#341) |
+| [Fedimint · 207](207-fedimint.md) | Fedimint ecash and Lightning through a federation | Draft | Experimental, Mainnet and Testnet (#192, #341); web SDK canary; regtest verified (ecash in chats, Lightning through the gateway); not yet tried with real funds |
+| [Spark · 206](206-spark.md) | Spark payments | Draft | Experimental (#188): Spark to Spark (addresses and invoices) through the Breez SDK; Testnet on Breez's regtest; Mainnet with the person's Breez API key (#341) |
 | [300](300-peer-proofs.md) | Identity Proofs | Draft | Experimental provider contract (2026-09-23): made once per profile, shared per contact; the providers below |
 | [301](301-nostr.md) | Nostr | Draft | Experimental provider `nostr` (NIP-07, NIP-46) |
-| [Nostr social · 3xx planned](3xx-nostr-social.md) | Nostr social layer | Draft | Experimental: profile, follows, notes on request; publication through the person's signer, off by default |
-| [Profile DID · 3xx planned](3xx-did-dht.md) | Profile DID (did:dht) | Draft | Experimental (#247): every profile's did:dht of its own key, the key alone unless the person lists identities; published by web, extension and Desktop (#299); @web5/dids interop |
+| [Nostr social · 309](309-nostr-social.md) | Nostr social layer | Draft | Experimental: profile, follows, notes on request; publication through the person's signer, off by default |
+| [Profile DID · 310](310-did-dht.md) | Profile DID (did:dht) | Draft | Experimental (#247): every profile's did:dht of its own key, the key alone unless the person lists identities; published by web, extension and Desktop (#299); @web5/dids interop |
 | [Pubky · 3xx planned](302-pubky.md) | Pubky | Draft | Experimental provider `pubky` (#246): approved in Pubky Ring or Pubky Passport, proof file on the homeserver |
 | [Keet · Research](303-keet.md) | Keet | Draft | **Research** (#511): blocked until Keet offers a supported signing API; the 2026-09-20 compatible import is off |
-| [Domain · 3xx planned](3xx-domain.md) | Domain Proofs | Draft | Experimental provider `domain`: DNS TXT, /.well-known/ghostly.json, NIP-05 |
-| [OpenPGP · 3xx planned](3xx-openpgp.md) | OpenPGP | Draft | Experimental provider `openpgp`; gpg-made vectors, contract suite and e2e |
-| [Bitcoin address · 3xx planned](3xx-bitcoin.md) | Bitcoin Address Proof | Draft | Experimental provider `bitcoin`: BIP-322 2.0.0 and legacy P2PKH, verified locally |
-| [SSH · 3xx planned](3xx-ssh.md) | SSH keys | Draft | Experimental `ssh`, `ssh-github`, `ssh-gitlab` providers |
+| [Domain · 304](304-domain.md) | Domain Proofs | Draft | Experimental provider `domain`: DNS TXT, /.well-known/ghostly.json, NIP-05 |
+| [OpenPGP · 305](305-openpgp.md) | OpenPGP | Draft | Experimental provider `openpgp`; gpg-made vectors, contract suite and e2e |
+| [Bitcoin address · 306](306-bitcoin.md) | Bitcoin Address Proof | Draft | Experimental provider `bitcoin`: BIP-322 2.0.0 and legacy P2PKH, verified locally |
+| [SSH · 307](307-ssh.md) | SSH keys | Draft | Experimental `ssh`, `ssh-github`, `ssh-gitlab` providers |
 | [OpenID Connect · 3xx planned](3xx-oidc-proofs.md) | Provider-attested identity (OpenID Connect) | Draft | Built and tested against a test issuer (#92); blocked on Ghostly's OAuth client registrations, so no provider is offered |
-| [AT Protocol · 3xx planned](3xx-atproto.md) | AT Protocol identity (Bluesky) | Draft | Provider `atproto` (#248), e2e against a local PDS; its client-metadata file is live on ghostly.tools |
-| [DID · 3xx planned](3xx-did.md) | Decentralized identifiers (did:key, did:jwk, did:dht, did:web) | Draft | Experimental provider `did` (#249), under Advanced in the picker |
+| [AT Protocol · 312](312-atproto.md) | AT Protocol identity (Bluesky) | Draft | Provider `atproto` (#248), e2e against a local PDS; its client-metadata file is live on ghostly.tools |
+| [DID · 311](311-did.md) | Decentralized identifiers (did:key, did:jwk, did:dht, did:web) | Draft | Experimental provider `did` (#249), under Advanced in the picker |
 | [400](400-chat.md) | Chat Messaging | Draft | One chat on two layers in every new chat: DHT first contact and floor, live link, self-upgrade, DHT only per chat (#209, #229); replies (#347), reactions (#354), edits (#351), lists, quotes, headings and links in the text (#370), forwards to other chats and groups (#404) |
 | [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared apps (`services/1`) while live; typing, recording or a bot's status (`typing/1`, #344, #361), reactions (`react/1`, #354), edits (`edit/1`, #351), replies on texts and files (#347, #359), forwards (`fw`, #404), a goodbye on the way out (`paired-bye`, #369), a wake-up push for a closed web app (`wake/1`, #394) |
 | [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 apps and the Rust compatibility CLI; existing chats and v0.4 codes only; "Continue in a new chat" |
 | [403](403-dht-text.md) | DHT Text (formerly Bounded DHT Text) | Draft | First contact and floor of every chat, fallback after a drop, DHT only per chat; pinned mailboxes (#302); a reply's id, an edit, reactions and a forward's hop count ride in the envelope (#347, #351, #354, #404); one TTL and one packet size for every envelope (#399) |
-| [Store-and-forward · 4xx planned](4xx-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1` (#108), opt-in: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests; held replies (#347, #359), forwards (#404) and a picture's size (#420) |
+| [Store-and-forward · 404](404-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1` (#108), opt-in: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests; held replies (#347, #359), forwards (#404) and a picture's size (#420) |
 | [500](500-files.md) | File Transfer | Draft | 1:1 files of any size, with consent, resume and a digest check (#228, #233) |
 | [501](501-paired-files.md) | Chat Files (formerly Paired Files) | Draft | `files/2` (100 MiB) and `files/3` (any size) on every chat's live link; Send again and Ask again for a stuck transfer, backpressure on native links (#348, #352); a file can answer a message (#359); a video's length, size and poster on its offer (#371); a picture's size on its offer (#420); forwarded files carry `fw` (#404) |
 | [502](502-legacy-files.md) | Compatibility File Frames | Draft; retained for compatibility | Compatibility chats only; both peers online |
@@ -96,22 +96,22 @@ Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull req
 | [800](800-invite-join.md) | Invite and Join | Draft | Bearer `ghostly1` invite that pins the inviter's participation key (#210); a copy cannot stop a paired chat (#302); admission protocol proposed |
 | [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Every new chat makes a `ghostly1…` code (#210); `pair1/`, `pair2d/` and v0.4 codes still read |
 | [900](900-group-sessions.md) | Group Session Negotiation | Draft | Two profiles implemented: text, @mentions (#279), a group picture and payments between members; admin changes final in a community (#300) |
-| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its link `group-entry/1`: up to 32 members, any member hands on what another missed (#373), hubs past 16 members (`paired-groups` version 4, #402); core, engine and UI; unit and four-browser e2e; web, extension and desktop; replies, reactions, edits and forwards (#347, #354, #378, #404) |
-| [Group Community · 9xx planned](9xx-group-community.md) | Group Community Distribution Profile | Draft | `group-community/1` (#153): a link anyone can open, admission by any member, elected hubs, up to 256 members; unit, six-browser e2e and a headless load test; replies, reactions, edits and forwards (#347, #354, #378, #404) |
+| [Group Mesh · 902](902-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its link `group-entry/1`: up to 32 members, any member hands on what another missed (#373), hubs past 16 members (`paired-groups` version 4, #402); core, engine and UI; unit and four-browser e2e; web, extension and desktop; replies, reactions, edits and forwards (#347, #354, #378, #404) |
+| [Group Community · 903](903-group-community.md) | Group Community Distribution Profile | Draft | `group-community/1` (#153): a link anyone can open, admission by any member, elected hubs, up to 256 members; unit, six-browser e2e and a headless load test; replies, reactions, edits and forwards (#347, #354, #378, #404) |
 | [GossipSub · 9xx planned](901-gossipsub.md) | GossipSub Transport | Draft | Proposed; no adapter |
 | [1000](1000-storage.md) | Storage Contract | Draft | Experimental: object contract, naming and adapter rules |
 | [1001](1001-local-storage.md) | Local File Storage | Draft | Experimental adapter |
 | [1002](1002-s3-storage.md) | S3-Compatible Storage | Draft | Experimental adapter; local S3 server end-to-end |
-| [Headless · 11xx planned](11xx-headless.md) | Headless Runtime and Local Control API | Draft | Experimental: the app's engine on Node for bots: a per-profile daemon, the `ghostly` CLI and its event stream; chats, groups, wallets, files, proofs and shared apps (#323 to #327); voice calls with the audio on a Unix socket (#350, #362); typing, replies, edits, reactions and forwards (#344, #347, #351, #354, #404); Pkarr over the Mainline DHT beside the relays (#392); agent turns and an allowlist on `listen` (#431); npm package not published |
+| [Headless · 1100](1100-headless.md) | Headless Runtime and Local Control API | Draft | Experimental: the app's engine on Node for bots: a per-profile daemon, the `ghostly` CLI and its event stream; chats, groups, wallets, files, proofs and shared apps (#323 to #327); voice calls with the audio on a Unix socket (#350, #362); typing, replies, edits, reactions and forwards (#344, #347, #351, #354, #404); Pkarr over the Mainline DHT beside the relays (#392); agent turns and an allowlist on `listen` (#431); npm package not published |
 
-Dependencies in headers describe the candidate modular design. Conditional dependencies are stated in the body (for example, existing media requires WebRTC). A document can refer to another without making its entire capability mandatory. In particular, 100 does not require a particular transport, 300 does not require an external identity, and 900 does not require GossipSub; the group mesh (9xx) is the first profile of 900 and 901 an optional later one. Group chat uses 400, group file sharing uses 500, and neither implies group payments or localhost permissions.
+Dependencies in headers describe the candidate modular design. Conditional dependencies are stated in the body (for example, existing media requires WebRTC). A document can refer to another without making its entire capability mandatory. In particular, 100 does not require a particular transport, 300 does not require an external identity, and 900 does not require GossipSub; the group mesh (902) is the first profile of 900 and 901 an optional later one. Group chat uses 400, group file sharing uses 500, and neither implies group payments or localhost permissions.
 
 ## Proposed milestones and exit evidence
 
 1. **00-03, 100-101:** review process/Core/key lifecycle, then capability/transport agreement and the WebRTC binding. Exit: exact profiles and two independent implementations with downgrade, invite and reconnect tests.
 2. **102-103:** demonstrate interchangeable data adapters using the same application capability. Exit: measured supported platforms, endpoint authentication and policy-respecting failure/fallback; not just sockets connecting.
 3. **300-302:** demonstrate optional external proofs and no-proof sessions. Exit: independent verification, replay/rotation tests and explicit correlation tradeoffs. Keet remains gated by API feasibility in 303.
-4. **Groups:** 800 and 901 remain review drafts. 900 has two implemented profiles: the [group mesh](9xx-group-mesh.md) (up to 32 members, hubs past 16) and the [group community](9xx-group-community.md) (up to 256), each with text, a picture and payments between members. Files and calls in groups, more than one admin and channels need their own scope decision.
+4. **Groups:** 800 and 901 remain review drafts. 900 has two implemented profiles: the [group mesh](902-group-mesh.md) (up to 32 members, hubs past 16) and the [group community](903-group-community.md) (up to 256), each with text, a picture and payments between members. Files and calls in groups, more than one admin and channels need their own scope decision.
 
 400, 500, 600, 700 and 200/201/203 document existing application capabilities and their modular evolution. These milestones do not promise implementation dates or claim that all adapters exist. Group security, topology and abuse limits must be validated before release claims.
 
@@ -141,26 +141,26 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 | 203 Lightning | Stable 1.0 | Default through the mints; own sources plug in |
 | 204 Bark | Experimental | No exit yet; Mainnet since 2026-09-26 |
 | 205 LNURL-pay | Stable 1.0 | Paying only, strict checks, no wire format |
-| 2xx Fedimint | Experimental | Mainnet and Testnet, canary SDK |
-| 2xx Spark | Experimental | Mainnet (your Breez API key) and Testnet |
+| 206 Spark | Experimental | Mainnet (your Breez API key) and Testnet |
+| 207 Fedimint | Experimental | Mainnet and Testnet, canary SDK |
 | 300 Identity Proofs | Experimental | Contract rebuilt 2026-09-23 |
 | 301 Nostr | Experimental | Provider on the young contract |
-| 3xx Nostr social | Experimental | Read on request, publication off by default |
-| 3xx Profile DID (did:dht) | Experimental | Public links opt-in, new |
+| 309 Nostr social | Experimental | Read on request, publication off by default |
+| 310 Profile DID (did:dht) | Experimental | Public links opt-in, new |
 | 3xx Pubky | Experimental | Merged 2026-09-25 |
 | Keet | Research | Blocked until Keet offers a supported signing API |
-| 3xx Domain | Experimental | Identity provider |
-| 3xx OpenPGP | Experimental | Identity provider |
-| 3xx Bitcoin address | Experimental | Identity provider |
-| 3xx SSH | Experimental | Identity provider |
+| 304 Domain | Experimental | Identity provider |
+| 305 OpenPGP | Experimental | Identity provider |
+| 306 Bitcoin address | Experimental | Identity provider |
+| 307 SSH | Experimental | Identity provider |
 | 3xx OpenID Connect | Experimental | Blocked on OAuth client registrations |
-| 3xx AT Protocol | Experimental | Identity provider; client metadata live on ghostly.tools |
-| 3xx DID | Experimental | Advanced provider |
+| 312 AT Protocol | Experimental | Identity provider; client metadata live on ghostly.tools |
+| 311 DID | Experimental | Advanced provider |
 | 400 Chat Messaging | Stable 1.0 | The one chat |
 | 401 Chat Session | Stable 1.0 | Layer 1 of every chat |
 | 402 Compatibility Chat | Stable 1.0, compatibility only | v0.4 contacts; candidate to drop later |
 | 403 DHT Text | Stable 1.0 | First contact and floor of every chat |
-| 4xx Store-and-forward | Experimental | Opt-in, needs the sender's own S3 |
+| 404 Store-and-forward | Experimental | Opt-in, needs the sender's own S3 |
 | 500 File Transfer | Stable 1.0 | Files in every chat |
 | 501 Chat Files | Stable 1.0 | `files/2` and `files/3` on the live link |
 | 502 Compatibility File Frames | Stable 1.0, compatibility only | v0.4 contacts; candidate to drop later |
@@ -171,8 +171,8 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 | 800 Invite and Join | Stable 1.0 | The `ghostly1` bearer invite; admission protocol still proposed |
 | 801 Invitation Profiles | Stable 1.0 | One invite format |
 | 900 Group Sessions | Experimental | Groups merged from 2026-09-24, still changing (#300 on 2026-09-26) |
-| 9xx Group Mesh | Experimental | Up to 32, one admin |
-| 9xx Group Community | Experimental | Cap measured by a load test, hubs new |
+| 902 Group Mesh | Experimental | Up to 32, one admin |
+| 903 Group Community | Experimental | Cap measured by a load test, hubs new |
 | 9xx GossipSub | Experimental | No code; stays a Draft proposal |
 | 1000 Storage Contract | Experimental | Used by backups and held items only |
 | 1001 Local File Storage | Experimental | Adapter of 1000 |

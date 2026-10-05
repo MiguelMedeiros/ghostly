@@ -13,7 +13,7 @@ import { FakeNativeNet } from "./helpers/fakeNative";
 // covers: chat.buttons.wire
 
 /**
- * Message buttons in the engine (WISP 4xx · Message Buttons): a real node and its contact's link over a stand-in for
+ * Message buttons in the engine (WISP 406 · Message Buttons): a real node and its contact's link over a stand-in for
  * Iroh. The bot's buttons go as a card beside its question; a press is a reply naming the button, which the author's
  * engine takes as a press only for its own open buttons; the presser's engine refuses what cannot be pressed.
  */
@@ -29,7 +29,7 @@ type Keys = { invitation: ReturnType<typeof createLink>; mine: string; theirs: s
  * A node and its contact, live. `keys`: the same chat again (a restart of both apps); `rows`: kept in the chat before the
  * node starts; `contactButtons`: false for a contact's app without buttons (1.0.0 has none); `confirmEdits`: false for a
  * contact that confirms no edit (its message is not there yet); `slowOutbox`: the node's outbox for the chat flushes only
- * once this settles (a busy device, as on a slow CI runner); `hold`: both sides hold for each other (WISP 4xx · Store and
+ * once this settles (a busy device, as on a slow CI runner); `hold`: both sides hold for each other (WISP 404 · Store and
  * Forward), the node reading the contact's pointer and storage through these.
  */
 async function setup({ keys, rows = [], contactButtons = true, confirmEdits = true, slowOutbox, hold }: { keys?: Keys; rows?: StoredMessage[]; contactButtons?: boolean; confirmEdits?: boolean;

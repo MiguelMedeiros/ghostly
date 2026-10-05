@@ -5,7 +5,7 @@
 | Candidate number | 12xx; a new family (1200-1299), number to be defined; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
-| Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [04](04-profiles.md), [05](05-backups.md), [06](06-devices.md), [200](200-payments.md), [300](300-peer-proofs.md), [3xx did:dht](3xx-did-dht.md), [3xx SSH](3xx-ssh.md), [400](400-chat.md), [401](401-paired-chat.md), [4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md), [500](500-files.md), [501](501-paired-files.md), [700](700-local-services.md), [701](701-http-services.md), [800](800-invite-join.md), [11xx](11xx-headless.md) |
+| Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [04](04-profiles.md), [05](05-backups.md), [06](06-devices.md), [200](200-payments.md), [300](300-peer-proofs.md), [310 did:dht](310-did-dht.md), [307 SSH](307-ssh.md), [400](400-chat.md), [401](401-paired-chat.md), [405 status cards](405-status-cards.md), [406 message buttons](406-message-buttons.md), [500](500-files.md), [501](501-paired-files.md), [700](700-local-services.md), [701](701-http-services.md), [800](800-invite-join.md), [1100](1100-headless.md) |
 | Implementation | None. A proposal: nothing of it is on `dev` or in a release. Code starts after release 1.1 |
 | Summary | Install apps and games by others from a store, a pasted Git URL or a chat. Each is checked against its publisher's signature and runs in a sandbox. |
 | Availability | Planned |
@@ -68,11 +68,11 @@ Each fact was checked against the file it names on `dev` on 2026-10-02, or measu
 | The extension is Manifest V3 with no `sandbox` pages and holds the `debugger` permission; the engine runs in an offscreen document | `apps/extension/public/manifest.json`, `apps/extension/src/background.ts` |
 | Desktop updates are signed: the Tauri updater checks a minisign signature against a public key in the configuration | `apps/desktop/tauri.conf.json` (`plugins.updater`) |
 | Cards under a message (invite, group, Nostr, identity) come from a parser of the text; at most 3 per message. Sender-made link previews ride with the message so the receiver fetches nothing to show them | `apps/ui/src/lib/parse/entities.ts`, `apps/ui/src/components/chat/EntityCards.tsx`, `apps/ui/src/lib/parse/linkPreview.ts`, [401](401-paired-chat.md) |
-| A structured card (`sc`, at most 8 KiB, text as fallback) rides beside the text on every text path; today only bots send them | [4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md), `packages/core/src/statusCards.ts` |
+| A structured card (`sc`, at most 8 KiB, text as fallback) rides beside the text on every text path; today only bots send them | [405 status cards](405-status-cards.md), [406 message buttons](406-message-buttons.md), `packages/core/src/statusCards.ts` |
 | `files/3` carries a file of any size with consent and resume; the receiver takes up to 25 MiB by itself and checks the SHA-256 of what it stored | [501](501-paired-files.md#files3-files-of-any-size-revision-03), `packages/browser/src/shared/fileBytes.ts` |
 | A `ghostly1` invite pairs exactly one chat: after the first pin another key is ignored | [800](800-invite-join.md#baseline-and-purpose) |
-| The only profile-wide key is the DID key (did:dht), an Ed25519 key made from the DID seed. No chat uses it; it travels in backups. WISP 06 derives the first device-set secret from the same seed | [3xx did:dht](3xx-did-dht.md), `packages/browser/src/engine/did.ts`, [06](06-devices.md#terms) |
-| The GitHub SSH proof checks a key against `api.github.com/users/<login>/keys` | `packages/browser/src/proofs/sshForges.ts`, [3xx SSH](3xx-ssh.md) |
+| The only profile-wide key is the DID key (did:dht), an Ed25519 key made from the DID seed. No chat uses it; it travels in backups. WISP 06 derives the first device-set secret from the same seed | [310 did:dht](310-did-dht.md), `packages/browser/src/engine/did.ts`, [06](06-devices.md#terms) |
+| The GitHub SSH proof checks a key against `api.github.com/users/<login>/keys` | `packages/browser/src/proofs/sshForges.ts`, [307 SSH](307-ssh.md) |
 | Payments in a chat: `pay-req`, `pay`, `pay-res` frames; Testnet has a faucet button; any Mainnet spend needs `confirmedReal` | [200](200-payments.md), `packages/core/src/frames.ts`, `packages/browser/src/engine/paymentAdapters/testCoins.ts`, `walletInstances.ts` (`assertConfirmedReal`) |
 | The headless CLI is on npm as `@ghostlytools/cli`; small self-hosted services live in `infra/services/` | `packages/cli`, `.github/workflows/npm-publish.yml`, `infra/services/` |
 | Nothing in the code is a store, a package or a mini-app. They exist only as roadmap rows | [ADAPTER-ROADMAP.md](ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos) |
@@ -133,7 +133,7 @@ Read on 2026-10-02. Each line names the page it rests on.
 |---|---|---|---|---|
 | **Mini-app** | A static web app in one self-contained HTML file (scripts, styles, images and WebAssembly inline). Alone, or in a chat with the same app on the contact's side | In the runner's sandbox, talking to the client only through the broker | **Yes** | It needs no key, no wallet and no engine object, and the browser's sandbox can hold it, with the fixes below |
 | **Theme** | Colours and design tokens as data | Read by the client | No: phase 2 | Publishing themes is a public promise about the app's design tokens, which still change. When it comes, a theme is typed values only (colours, sizes), never raw CSS, since a CSS `url()` would reach the hosts in the main page's `img-src` |
-| **Bot** | A program for the headless CLI ([11xx](11xx-headless.md)) | As a process on a server | No: phase 3 | Native code needs an operating-system sandbox |
+| **Bot** | A program for the headless CLI ([1100](1100-headless.md)) | As a process on a server | No: phase 3 | Native code needs an operating-system sandbox |
 | **Adapter plugin** | A wallet source or an identity proof built with the SDK | In the engine, with every key | No: research | It has the app's privileges. Stays a build-time choice until a permissioned plugin host exists |
 | **Transport** | A new way to connect | In the engine | Never a store item | A transport is a WISP and an app change |
 
@@ -337,7 +337,7 @@ A mini-app with the `chat` permission can talk to the same app on the contact's 
 
 ### A bot on the other side, and the agent console
 
-The other side of `apps/1` can be a bot on the headless CLI ([11xx](11xx-headless.md)) instead of a person's app. The bot runs no app code: it speaks the app's messages.
+The other side of `apps/1` can be a bot on the headless CLI ([1100](1100-headless.md)) instead of a person's app. The bot runs no app code: it speaks the app's messages.
 
 - **Declaring.** The bot lists the app references it serves (`ghostly app serve <ref>`, kept in the profile's settings). Its daemon then offers `apps/1` and computes the chat app ids for those references only.
 - **Receiving.** When the person opens the app in the chat with the bot, the daemon emits `app.opened {chat, app}`, then `app.message {chat, app, data}` for each frame, `data` being the app's JSON. For an agent ([AI-AGENTS.md](../AI-AGENTS.md)) it arrives as the contact's untrusted data, never as instructions.
@@ -345,7 +345,7 @@ The other side of `apps/1` can be a bot on the headless CLI ([11xx](11xx-headles
 - **Limits.** The daemon enforces the receiver's limits as an app does.
 - **Granting.** The person installs the app and grants its permissions as for any app; the card says "Opens with <bot>".
 
-**The agent console**, a surface for talking to AI agents and bots with their status, thinking indicators, buttons and task and routine cards ([4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md)): **chosen as a built-in screen, not an app.** Its data is the chat itself (the cards, the messages, the Tasks board), and an app that reads a chat's content would need the broadest permission this design could grant to third-party code. The pieces it shows are already built in, and a built-in screen needs no store, no permission and no sandbox. It belongs to the Tasks board's work, not to this WISP. What this WISP adds for bots is the path above: a bot can ship **its own specialised app** (a dashboard for one agent, a form, a game master), and such an app may ask for a narrow `cards` permission (phase 2): read the task and routine cards that this contact sent in this chat, nothing else.
+**The agent console**, a surface for talking to AI agents and bots with their status, thinking indicators, buttons and task and routine cards ([405 status cards](405-status-cards.md), [406 message buttons](406-message-buttons.md)): **chosen as a built-in screen, not an app.** Its data is the chat itself (the cards, the messages, the Tasks board), and an app that reads a chat's content would need the broadest permission this design could grant to third-party code. The pieces it shows are already built in, and a built-in screen needs no store, no permission and no sandbox. It belongs to the Tasks board's work, not to this WISP. What this WISP adds for bots is the path above: a bot can ship **its own specialised app** (a dashboard for one agent, a form, a game master), and such an app may ask for a narrow `cards` permission (phase 2): read the task and routine cards that this contact sent in this chat, nothing else.
 
 Phases: the bot side of `apps/1` (`serve`, the events, `app send`) and the `cards` permission are phase 2. Phase 1 has person-to-person apps only.
 
@@ -424,7 +424,7 @@ A chat is a source like any other, so installing never depends on one store.
 
 **Two forms, one file:**
 
-- **A pointer card.** The person shares an app (Apps page, "Share", or a pasted URL that holds an app). The sender's client attaches a card in the message's `sc` field ([4xx status cards](4xx-status-cards.md)), with the URL as the text: `{"kind": "app", "ref", "title", "version", "sequence", "digest", "url"}`. An older app shows the link.
+- **A pointer card.** The person shares an app (Apps page, "Share", or a pasted URL that holds an app). The sender's client attaches a card in the message's `sc` field ([405 status cards](405-status-cards.md)), with the URL as the text: `{"kind": "app", "ref", "title", "version", "sequence", "digest", "url"}`. An older app shows the link.
 - **The bundle as a file**, with `files/3` ([501](501-paired-files.md)). The receiver's client recognizes the bundle by its first bytes and shows the same card on the file bubble. The files' consent rules hold: arriving is not installing.
 
 **The card is shown from its own data, and nothing is fetched to show it.** A pointer card's fields are the sender's, unsigned, so the card says so: title and version from the card, a generic icon, the publisher fingerprint from `ref`, and "Not checked yet". **The client fetches the bundle only when the person presses Install**, then checks it and shows the real install screen (icon, proof, permissions) before anything is stored. In phase 1 a card's `url` must be on `raw.githubusercontent.com` or `cdn.jsdelivr.net`; any other host is refused on a card (it still works pasted in the Apps page, where the person chose it). Later, a card may name another host, and the client then names that host and waits for the person before any request (the owner's decision). A bundle sent as a file is checked as soon as it arrives, since it is already on the device, and its card shows the checked data.
@@ -458,7 +458,7 @@ The owner chose free apps only for now. This section keeps the design so the for
 
 **Rails.** Chat payments ([200](200-payments.md)): Cashu first (every client, a test mint, the faucet button), then Lightning cards. Testnet first; every Mainnet purchase passes the `confirmedReal` gate.
 
-**A purchase.** `price` is `{"amount", "unit": "sat", "seller": "<HTTPS URL>"}`. The seller is a **sales bot**, the publisher's headless CLI ([11xx](11xx-headless.md)). A `ghostly1` code pairs exactly one chat ([800](800-invite-join.md#baseline-and-purpose)), so the `seller` URL answers each request with a fresh invite the bot made. "Buy" opens that chat; the bot sends a `pay-req`, the person pays in the sheet they know, and the bot answers with a licence and message buttons ([4xx](4xx-message-buttons.md)) for support or refunds.
+**A purchase.** `price` is `{"amount", "unit": "sat", "seller": "<HTTPS URL>"}`. The seller is a **sales bot**, the publisher's headless CLI ([1100](1100-headless.md)). A `ghostly1` code pairs exactly one chat ([800](800-invite-join.md#baseline-and-purpose)), so the `seller` URL answers each request with a fresh invite the bot made. "Buy" opens that chat; the bot sends a `pay-req`, the person pays in the sheet they know, and the bot answers with a licence and message buttons ([406](406-message-buttons.md)) for support or refunds.
 
 **The licence.** `{"ghostlyLicence": 1, "app", "holder", "versions", "issued", "payment"}`, signed `ghostly-licence/1`. The holder key is HKDF-SHA-256 with the DID seed as input, salt `ghostly-licence/1` and the publisher key as info: per profile (it follows backups and [06](06-devices.md) handoffs; a licence per device would break at every handoff) and per publisher (publishers cannot link one buyer's purchases). Limits, said plainly: a device removed under [06](06-devices.md) keeps the DID seed and so every licence key; and a review that showed "Bought it" would expose a holder key, so reviews never show it.
 
@@ -468,7 +468,7 @@ The owner chose free apps only for now. This section keeps the design so the for
 
 | Key | Derivation | Where |
 |---|---|---|
-| DID key | The seed itself, as an Ed25519 seed | [3xx did:dht](3xx-did-dht.md), `packages/browser/src/engine/did.ts` |
+| DID key | The seed itself, as an Ed25519 seed | [310 did:dht](310-did-dht.md), `packages/browser/src/engine/did.ts` |
 | First device-set secret `D0` | HKDF-SHA-256, salt `ghostly-devices/1`, info `device-set` | [06](06-devices.md#terms) |
 | Licence holder key | HKDF-SHA-256, salt `ghostly-licence/1`, info = publisher key | This WISP, phase 2 |
 | Reviewer key | HKDF-SHA-256, salt `ghostly-review/1`, info `reviewer` | This WISP, phase 2 |
@@ -600,7 +600,7 @@ A client that implements this WISP MUST:
 
 ## References
 
-[SDK](../SDK.md), [browser boundaries](../BROWSER.md), [roadmap](ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos), [local services](700-local-services.md), [HTTP services](701-http-services.md), [chat session](401-paired-chat.md), [chat files](501-paired-files.md), [status cards](4xx-status-cards.md), [message buttons](4xx-message-buttons.md), [payments](200-payments.md), [identity proofs](300-peer-proofs.md), [SSH proofs](3xx-ssh.md), [invites](800-invite-join.md), [devices](06-devices.md), [headless](11xx-headless.md). Outside sources are in [What the outside world allows](#what-the-outside-world-allows-sources); also [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) (JSON canonicalization) and [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) (HKDF).
+[SDK](../SDK.md), [browser boundaries](../BROWSER.md), [roadmap](ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos), [local services](700-local-services.md), [HTTP services](701-http-services.md), [chat session](401-paired-chat.md), [chat files](501-paired-files.md), [status cards](405-status-cards.md), [message buttons](406-message-buttons.md), [payments](200-payments.md), [identity proofs](300-peer-proofs.md), [SSH proofs](307-ssh.md), [invites](800-invite-join.md), [devices](06-devices.md), [headless](1100-headless.md). Outside sources are in [What the outside world allows](#what-the-outside-world-allows-sources); also [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) (JSON canonicalization) and [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) (HKDF).
 
 ## Revision log
 

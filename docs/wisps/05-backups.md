@@ -6,7 +6,7 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [200](200-payments.md), [1000](1000-storage.md) |
-| Implementation | Experimental: web, desktop and browser extension clients; the headless CLI seals its own profile folder in the same envelope, restored only by the CLI ([11xx](11xx-headless.md)) |
+| Implementation | Experimental: web, desktop and browser extension clients; the headless CLI seals its own profile folder in the same envelope, restored only by the CLI ([1100](1100-headless.md)) |
 | Summary | Bring a whole profile back from one bundle, sealed with a passphrase unless the person chooses otherwise. |
 | Availability | Available |
 | Notes | Web, desktop and extension; the CLI backs up its own profiles to a file. A light backup leaves the larger files out. A restore always creates a new profile; nothing is overwritten. A profile used on several devices is not started from a backup while another device is active: the app offers to add this device or take over instead. |
@@ -53,7 +53,7 @@ A frame is `kind` (1 byte), `length` (4 bytes, big endian), then `length` bytes 
 
 - A client MUST make one only on an explicit choice, after saying plainly that the file holds the profile's keys, chats and wallet secrets in the clear and that anyone who gets the file gets everything in it, including any money in its wallets. When the profile has Mainnet wallets that have held money, it says that specifically. This client asks for a second confirmation, and does not send such a bundle to remote storage ([1002](1002-s3-storage.md)).
 - A restore reads the header, asks for no passphrase, and shows that the file was not protected.
-- The headless CLI makes one only with `--no-passphrase`; given neither that nor a passphrase it makes nothing, and given both it refuses ([11xx](11xx-headless.md)).
+- The headless CLI makes one only with `--no-passphrase`; given neither that nor a passphrase it makes nothing, and given both it refuses ([1100](1100-headless.md)).
 
 ## Payload
 
@@ -95,7 +95,7 @@ A light backup is everything above but the bytes of the profile's larger files: 
 - **On restore,** a file marked `leftOut` is shown as not in this backup, never as a file to save or open. Its sender is not asked for it again: files/3 ([500](500-files.md)) asks again only for a transfer still under way, and a sender ignores a request for a transfer that ended. A client from before light backups restores such a bundle too; its files left out show there as no longer available.
 - Before making one, a client shows what each choice would hold of the files' bytes, from its own file store, so the person sees what a light backup saves.
 - A backup of a profile restored from a light one keeps the marks: a file left out stays left out.
-- The headless CLI makes one with `--light`, with the same cut. Its bundle names the files it left out in its first record (`light.ids`), and the restored profile marks their records the first time it starts ([11xx](11xx-headless.md)).
+- The headless CLI makes one with `--light`, with the same cut. Its bundle names the files it left out in its first record (`light.ids`), and the restored profile marks their records the first time it starts ([1100](1100-headless.md)).
 
 ### What a bundle does not hold
 
@@ -133,14 +133,14 @@ Bundles made before version 2 are one UTF-8 JSON document, and are still restore
 - Every store, file and key is written before the profile is registered, so an interrupted restore leaves no half-made profile in the list. What a restore stopped with no chance to take it back (a closed tab, a crash) wrote is noted before it is written, and removed at the next start of the client once no other window is still running that restore.
 - A restore that fails, is cancelled, or meets a frame that does not pass its check takes back everything it wrote: its databases, the files in the new profile's space and its local keys. Nothing of a refused bundle stays on the device.
 - A client shows what a backup or a restore is doing (reading, writing, checking; files and bytes done of the total) and offers Cancel. A cancelled backup leaves no file, whole or partial.
-- Every Ark wallet record gets a fresh wallet id, with or without a database to copy, so a restored profile never shares an Ark database with the profile it came from. So does every Bark wallet record ([204](204-bark.md)), current or retired: its databases are never in the bundle, and under the new id the wallet starts an empty one that the server's recovery scan fills from the phrase; its record is also marked to look once on-chain for what the phrase received before (`scan`, [204](204-bark.md)). A Spark wallet or Breez Lightning card needs no rewrite: its Breez database is named per profile ([2xx Spark](2xx-spark.md)), so a copy on the same device opens its own. A backup of a wallet whose database exists but cannot be read fails instead of leaving it out.
+- Every Ark wallet record gets a fresh wallet id, with or without a database to copy, so a restored profile never shares an Ark database with the profile it came from. So does every Bark wallet record ([204](204-bark.md)), current or retired: its databases are never in the bundle, and under the new id the wallet starts an empty one that the server's recovery scan fills from the phrase; its record is also marked to look once on-chain for what the phrase received before (`scan`, [204](204-bark.md)). A Spark wallet or Breez Lightning card needs no rewrite: its Breez database is named per profile ([206 Spark](206-spark.md)), so a copy on the same device opens its own. A backup of a wallet whose database exists but cannot be read fails instead of leaving it out.
 - Payment attempts that were `pending`, `submitted` or `unknown` in the bundle are marked `unknown`: an older backup cannot prove an attempt was never sent, and nothing restored may authorize a new send ([200](200-payments.md)).
 - Every Cashu proof restored that no payment holds is marked as a copy to check. When its wallet starts, it asks each mint once which of those proofs are still unspent (NUT-07, [201](201-cashu.md)) and drops the ones the mint reads spent, so the balance is what the mints still hold and not what the bundle held. A mint that cannot be asked is asked again later; until it answers, its proofs count as before.
 - After restore the client switches to the new profile ([04](04-profiles.md)).
 
 ### Restoring on the same device
 
-A restored copy keeps the chat keys of the profile it was made from (and its DID key, [3xx](3xx-did-dht.md)). When that profile is still on the device, both would answer the same contacts as one person (see Two live copies). So before writing anything, the client opens the bundle and compares it with every profile of the device, locked ones included: a profile matches when it shares a chat's participation key (or, for a chat from before them, its chat key) or the DID key with the bundle. Only the matching profiles' names are shown. With a match, the client says both would act as the same person to contacts, suggests replacing the original or not running both, and offers:
+A restored copy keeps the chat keys of the profile it was made from (and its DID key, [310](310-did-dht.md)). When that profile is still on the device, both would answer the same contacts as one person (see Two live copies). So before writing anything, the client opens the bundle and compares it with every profile of the device, locked ones included: a profile matches when it shares a chat's participation key (or, for a chat from before them, its chat key) or the DID key with the bundle. Only the matching profiles' names are shown. With a match, the client says both would act as the same person to contacts, suggests replacing the original or not running both, and offers:
 
 - **Replace the original**: the bundle is restored as a new profile and the client switches to it, then opens the original's removal ([04](04-profiles.md) § Remove) with its usual checks (what it holds, a backup first, its name, its lock password). The original is never removed without them: it may hold newer wallet state than the bundle. Not offered for the first profile, which cannot be removed; the client says to clear its data instead. Not offered where the client cannot switch profiles.
 - **Restore as a copy anyway**: restored as without a match.

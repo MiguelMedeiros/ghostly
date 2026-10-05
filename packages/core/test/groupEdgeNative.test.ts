@@ -14,7 +14,7 @@ import { NativeWorld } from "./support/nativeWorld";
 // covers: groups.native-links, groups.send
 
 /**
- * A group's edge where one app has no WebRTC (Ghostly Desktop on Linux: WebKitGTK has none), WISP 9xx § Transports. An
+ * A group's edge where one app has no WebRTC (Ghostly Desktop on Linux: WebKitGTK has none), WISP 902 § Transports. An
  * edge has no capability record, so the app with no WebRTC says in its own packet (`_tr`) which transports it runs and
  * how to dial its native ones; the member's app, reading that it has no WebRTC, starts its own native endpoint and says
  * the same back. The edge then goes live over Iroh (or HyperDHT), and group frames cross it. Two apps that both have

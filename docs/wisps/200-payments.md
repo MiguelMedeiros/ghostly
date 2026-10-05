@@ -90,7 +90,7 @@ Disjoint methods, malformed decimal amounts, mismatched request/payee, expired r
 
 ## References
 
-[Payment vocabulary](../../packages/core/src/payments.ts), [frames](../../packages/core/src/frames.ts), [application payment coordinator](../../packages/browser/src/engine/payments.ts), [Cashu](201-cashu.md), [Lightning](203-lightning.md), [Lightning addresses](205-lnurl.md), [Arkade](202-arkade.md), [Bark](204-bark.md), [Spark](2xx-spark.md), [Fedimint](2xx-fedimint.md), [USDT](../USDT-INTEGRATION.md), [payment URIs](../../packages/core/src/paymentUri.ts), [wallet providers](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md).
+[Payment vocabulary](../../packages/core/src/payments.ts), [frames](../../packages/core/src/frames.ts), [application payment coordinator](../../packages/browser/src/engine/payments.ts), [Cashu](201-cashu.md), [Lightning](203-lightning.md), [Lightning addresses](205-lnurl.md), [Arkade](202-arkade.md), [Bark](204-bark.md), [Spark](206-spark.md), [Fedimint](207-fedimint.md), [USDT](../USDT-INTEGRATION.md), [payment URIs](../../packages/core/src/paymentUri.ts), [wallet providers](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md).
 
 ## Revision log
 

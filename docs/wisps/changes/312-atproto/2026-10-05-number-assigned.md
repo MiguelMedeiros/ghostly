@@ -1,0 +1,1 @@
+The number is assigned now that the feature ships in the app: this draft is WISP 312 (it was 3xx, file 3xx-atproto.md). The old file and its website address forward here. Wire identifiers and behavior are unchanged.

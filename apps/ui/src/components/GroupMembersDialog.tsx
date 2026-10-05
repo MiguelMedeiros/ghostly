@@ -21,7 +21,7 @@ import { errorText } from "../lib/errorText";
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 
-/** What the admin says about a member as a hub (WISP 9xx · Group Mesh § Hubs): up to their app, always, or never. */
+/** What the admin says about a member as a hub (WISP 902 · Group Mesh § Hubs): up to their app, always, or never. */
 const HUB_ROLES = ["auto", "pin", "exclude"] as const;
 
 

@@ -6,7 +6,7 @@ import type { ButtonsView } from "../../lib/buttons";
 import { jumpToQuoted } from "../../lib/replies";
 
 /*
- * A bot's buttons under its message (WISP 4xx · Message Buttons). A tap sends a reply whose text is the button's
+ * A bot's buttons under its message (WISP 406 · Message Buttons). A tap sends a reply whose text is the button's
  * label (the engine's `pressButton`); the one chosen (the bot's word, else my last press) is marked with ✓. Closed, or
  * answered with a `once` button, or my own message: they are shown, and none of them answers.
  */
