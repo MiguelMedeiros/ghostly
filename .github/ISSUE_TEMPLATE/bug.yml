@@ -1,0 +1,134 @@
+name: Bug report
+description: Something in Ghostly does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Short and exact beats long. People and AI agents are both welcome to file this: fill every required field, and leave out what you did not check rather than guessing.
+        **Never paste** seeds, private keys, nsec, tokens, invite or group links, device codes, or anything that moves money. A security flaw goes to a [private advisory](https://github.com/MiguelMedeiros/ghostly/security/advisories/new), not here.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What is wrong
+      description: 'One or two sentences, from the user''s side. Example: "On Android, a voice message recorded while offline is never sent after the app reconnects."'
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Ghostly version
+      description: Settings → About, or `ghostly --version` for the CLI. If you built from source, the commit.
+      placeholder: "1.1.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Web app (browser)
+        - Web app installed on a phone, Android
+        - Web app installed on a phone, iPhone
+        - Desktop, macOS
+        - Desktop, Windows
+        - Desktop, Linux
+        - Browser extension
+        - Command line (CLI)
+        - SDK or adapter
+        - Website or docs
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: System and browser
+      description: OS and version, browser and version, and anything unusual (VPN, strict privacy settings, GrapheneOS, an ad blocker).
+      placeholder: "macOS 15.6, Safari 19; or Android 16, Chrome 141"
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Chats and messages
+        - Files, voice and video messages
+        - Calls
+        - Groups and communities
+        - Wallets and payments
+        - Identities and proofs
+        - Profiles, devices and backups
+        - Connections (pairing, relays, transports)
+        - Settings and appearance
+        - Install and updates
+        - Other
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered, from a known starting point (a new profile is best). Say how many devices or peers are involved and which test network, if any.
+      placeholder: |
+        1. On device A, a new profile; on device B, a new profile.
+        2. A pairs with B through an invite link.
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Exact text of any error or toast, in quotes.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often
+      options:
+        - Every time
+        - Often (more than half the tries)
+        - Sometimes
+        - Once so far
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or console output
+      description: The relevant lines only, with secrets removed. Browser console, Desktop log, or the CLI with `--pretty`.
+      render: text
+
+  - type: textarea
+    id: analysis
+    attributes:
+      label: What you checked (optional)
+      description: |
+        If you looked into it: the suspected cause, with file paths and line numbers (`packages/browser/src/engine/node.ts:2745`), what you ruled out, a failing test you wrote, or a branch with a fix. Mark guesses as guesses.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: I searched the open and closed issues, and this is not a duplicate.
+          required: true
+        - label: Nothing secret is in this issue (keys, seeds, tokens, invite or group links, device codes).
+          required: true
+        - label: This is not a security flaw (those go to a private advisory).
+          required: true
