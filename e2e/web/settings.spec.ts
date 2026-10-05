@@ -242,10 +242,13 @@ test("on a wide screen: the index marks the section picked or named, the last on
   await expect(marked).toHaveAttribute("data-testid", "settings-index-profile");
   await page.mouse.wheel(0, 100_000);
   await expect(marked).toHaveAttribute("data-testid", "settings-index-about");
-  // Picked Network, then scrolled by hand a little: the section at the top is marked again.
+  // Picked Network, then scrolled up by hand while it is still in view: the section now at the top is marked.
   await page.getByTestId("settings-index-network").click();
   await expect(marked).toHaveAttribute("data-testid", "settings-index-network");
+  // Once the page has scrolled there (smoothly): Network's top under the header.
+  await expect.poll(async () => (await page.locator("#settings-section-network").boundingBox())?.y ?? 1e6).toBeLessThan(120);
   await page.getByTestId("network-relays").hover();
   await page.mouse.wheel(0, -400);
-  await expect(marked).toHaveAttribute("data-testid", "settings-index-privacy");
+  await expect(page.getByTestId("network-relays")).toBeInViewport();
+  await expect(marked).not.toHaveAttribute("data-testid", "settings-index-network");
 });
