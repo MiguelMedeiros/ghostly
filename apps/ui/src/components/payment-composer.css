@@ -61,3 +61,5 @@
 .payment-network-new{display:inline-flex;align-items:center;gap:6px;justify-self:start;padding:0;border:0;background:none;color:var(--theme-link);font-size:13px;font-weight:600;cursor:pointer}
 .payment-network-new:hover{text-decoration:underline}
 .payment-network-new:focus-visible{outline:2px solid var(--theme-accent);outline-offset:2px;border-radius:4px}
+/* Arabic is joined writing: a monospace font draws its letters apart. The line under a card keeps the app's font there. */
+:lang(ar) .payment-back-meta{font-family:inherit;letter-spacing:0}
