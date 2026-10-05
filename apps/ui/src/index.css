@@ -1162,6 +1162,11 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   .sidebar-new-split > .sidebar-header-action { width: auto; }
   [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
 }
+/* Wherever the words do not fit beside the logo in this language (hooks/useLabelsFit.ts): the same. */
+.sidebar-header[data-labels="off"] .sidebar-action-label { display: none; }
+.sidebar-header[data-labels="off"] .sidebar-header-action { width: 40px; gap: 0; }
+.sidebar-header[data-labels="off"] .sidebar-new-split > .sidebar-header-action { width: auto; }
+.sidebar-header[data-labels="off"] [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
 
 /* Which money: "Test money" or "Real money", wherever money moves. Words first; the colour only echoes them. */
 .network-tag{display:inline-block;padding:0 6px;border:1px solid currentColor;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;line-height:1.7;text-transform:uppercase;vertical-align:middle;white-space:nowrap}
