@@ -375,6 +375,8 @@ export interface EngineApi {
   deviceEnrollView(): import("../devices/enroll").EnrollView | null;
   /** The new device's side: joins the profile of the code, as a standby, in place of the new profile it runs. */
   deviceEnrollJoin(params: { code: string; name: string; kind?: import("@ghostly/core").DeviceKind; app?: string }): import("../devices/enroll").EnrollView;
+  /** Whether a device code may be used in this profile now, or why not (`set`, `in-use`, `loading`): asked before Add. */
+  deviceEnrollReady(): "ready" | "set" | "in-use" | "loading";
   /** A standby whose enrollment did not finish looks for the record that lists it again. */
   deviceEnrollFinish(): { finished: boolean };
   /** A standby whose enrollment did not finish takes the device set off this device ("Not finished", Remove). */

@@ -115,7 +115,8 @@ describe("enroll/1 over a one-time paired session", () => {
     const web = ghostLinkEnrollChannel({ transport: pkarr.transport(), createPeerConnection: () => fakePeerConnection("web"), pollIntervals: RELAY_POLL_INTERVALS });
     const linux = ghostLinkEnrollChannel({ transport: pkarr.transport(), pollIntervals: RELAY_POLL_INTERVALS });
     const timing = { proofMs: 30_000 };
-    const a = new EnrollInviter({ profile: A, network, open: web, didSeed: async () => randomBytes(32), name: "Web", forceSeed: true, timing });
+    const seen: boolean[] = [];
+    const a = new EnrollInviter({ profile: A, network, open: web, didSeed: async () => randomBytes(32), name: "Web", forceSeed: true, timing, onChange: (view) => { if (view.step === "waiting") seen.push(!!view.seen); } });
     const b = new EnrollJoiner({ profile: B, network, open: linux, about: { name: "Linux", kind: "desktop", app: "1.1.0" }, forceSeed: true, install: null, timing });
     const waiting = await settled(a.start());
     if (waiting.step !== "waiting") throw new Error("no code");
@@ -124,6 +125,8 @@ describe("enroll/1 over a one-time paired session", () => {
     expect(await until(() => a.ended && b.ended, 90_000)).toBe(true);
     expect(a.current()).toEqual({ role: "inviter", step: "failed", reason: "unreached" });
     expect(b.current()).toEqual({ role: "joiner", step: "failed", reason: "unreached" });
+    // Meanwhile the inviter's screen said a device was connecting, rather than showing the code as if nobody came.
+    expect(seen).toContain(true);
     expect(await settled(readDeviceRecord(B))).toBeNull();
   });
 

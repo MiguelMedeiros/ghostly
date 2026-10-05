@@ -31,7 +31,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "sendGroupMessage", "pressButton", "groupMessages", "messagePage", "statusCardIndex", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
   "setGroupPicture", "renameGroup", "setGroupTyping", "forgetGroup", "setGroupManage",
   // One profile on several devices (WISP 06): a CLI profile is always on one device, so these answer `single` or refuse.
-  "deviceEnrollInvite", "deviceEnrollConfirm", "deviceEnrollCancel", "deviceEnrollView", "deviceEnrollJoin", "deviceEnrollFinish",
+  "deviceEnrollInvite", "deviceEnrollConfirm", "deviceEnrollCancel", "deviceEnrollView", "deviceEnrollJoin", "deviceEnrollReady", "deviceEnrollFinish",
   "deviceEnrollRemove", "deviceSet", "devicePing", "deviceHandoffVerifier", "deviceHandoffPush", "deviceHandoffPull", "deviceHandoffAccept",
   "deviceHandoffSettle", "deviceHandoffCancel", "deviceHandoffView", "deviceHandoffAllow", "deviceTakeoverInfo", "deviceTakeover", "deviceTurnPeek", "deviceForkDiscard", "deviceRestoreStartOwn",
   "deviceRemove", "deviceNewSecret", "deviceSecretOfferDismiss", "deviceSetNoticeSeen", "deviceTurnCheck", "devicePushState", "devicePushSet",
