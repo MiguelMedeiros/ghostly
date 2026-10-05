@@ -59,7 +59,7 @@ import { errorText } from "../lib/errorText";
 import { listText } from "../lib/listText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
-import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
+import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingEntry, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
 import { SettingsIndex, SettingsMenu, SettingsSearch } from "../components/settings/SettingsMenu";
 
 /** The fields of the lock password form, each with its own error line. */
@@ -197,9 +197,12 @@ export function Settings() {
   const openPasswordForm = () => { focusPasswordForm.current = true; setShowPasswordForm(true); };
   useLayoutEffect(() => {
     if (!showPasswordForm || !focusPasswordForm.current) return;
+    // Not drawn yet (a phone still on the menu, about to open the section): once it is.
+    const first = passwordInputs.current.current ?? passwordInputs.new.current;
+    if (!first) return;
     focusPasswordForm.current = false;
-    (passwordInputs.current.current ?? passwordInputs.new.current)?.focus();
-  }, [showPasswordForm]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it opens
+    first.focus();
+  }, [showPasswordForm, section, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it is drawn
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
@@ -423,6 +426,8 @@ export function Settings() {
   const has = (needs: SettingNeeds) => needs === "profiles" ? canSwitch : needs === "updates" ? update.supported
     : needs === "wake" ? canWake : hasMediaDevices();
   const shown = (id: SettingsSection) => id !== "media" || hasMediaDevices();
+  // "Password" found by the search opens the lock's password form: to set one when there is none (no row of its own then).
+  const found = (entry: SettingEntry) => { if (entry.opens === "passwordForm" && !showPasswordForm) openPasswordForm(); };
 
   if (isMobile && !section) {
     // A phone: the menu of sections, each opened on a screen of its own, under the profile's own line.
@@ -441,7 +446,7 @@ export function Settings() {
     return (
       <Page title={t("settings.title")} width="md" testId="settings-page" overlay={overlay}>
         {installApp}
-        <SettingsMenu summary={summary} shown={shown} has={has} onOpen={(id) => nav.open(settingsPath(id))} top={
+        <SettingsMenu summary={summary} shown={shown} has={has} onFound={found} onOpen={(id) => nav.open(settingsPath(id))} top={
           <div className="bg-surface rounded-xl divide-y divide-border">
             {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
             <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
@@ -763,12 +768,12 @@ export function Settings() {
     <Page title={t("settings.title")} width="xl" testId="settings-page" overlay={overlay}>
       <div className="@3xl/page:grid @3xl/page:grid-cols-[12rem_minmax(0,42rem)] @3xl/page:justify-center @3xl/page:gap-8">
         <aside className="hidden @3xl/page:block sticky top-0 self-start">
-          <SettingsIndex active={inView} shown={shown} has={has} onPick={pick} />
+          <SettingsIndex active={inView} shown={shown} has={has} onFound={found} onPick={pick} />
         </aside>
         <div ref={content} className="max-w-2xl mx-auto w-full min-w-0 space-y-6">
           {/* Too narrow for the index: its search, above the page. */}
           <div className="@3xl/page:hidden">
-            <SettingsSearch has={has} onPick={pick} />
+            <SettingsSearch has={has} onFound={found} onPick={pick} />
           </div>
           {installApp}
           {groups}

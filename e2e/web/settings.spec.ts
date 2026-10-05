@@ -245,8 +245,18 @@ test("on a wide screen: the index marks the section picked or named, the last on
   // Picked Network, then scrolled up by hand while it is still in view: the section now at the top is marked.
   await page.getByTestId("settings-index-network").click();
   await expect(marked).toHaveAttribute("data-testid", "settings-index-network");
-  // Once the page has scrolled there (smoothly): Network's top under the header.
-  await expect.poll(async () => (await page.locator("#settings-section-network").boundingBox())?.y ?? 1e6).toBeLessThan(120);
+  // Once the page has scrolled there (smoothly) and stopped: Network's top under the header. Coming up from About,
+  // Network is above the page (y < 0) until the scroll ends; a wheel turned while the smooth scroll still ran left
+  // the page far above it (r9j: 1 run in 3).
+  await expect.poll(async () => {
+    const y = (await page.locator("#settings-section-network").boundingBox())?.y ?? -1;
+    return y >= 0 && y < 120;
+  }).toBe(true);
+  await page.locator("[data-page-body]").evaluate((body) => new Promise<void>((done) => {
+    let last = -1, still = 0;
+    const tick = () => { still = body.scrollTop === last ? still + 1 : 0; last = body.scrollTop; if (still >= 5) done(); else requestAnimationFrame(tick); };
+    tick();
+  }));
   await page.getByTestId("network-relays").hover();
   await page.mouse.wheel(0, -400);
   await expect(page.getByTestId("network-relays")).toBeInViewport();
