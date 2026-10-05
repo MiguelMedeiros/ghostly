@@ -33,6 +33,11 @@ export class EngineServer implements PeerServer {
    * it too: the extension's peer runs with no tab open, and a tab opened during the ring used to show no call.
    */
   private readonly offers = new Map<string, string>();
+  /**
+   * The clients a call is on in (`setCallOn`): the engine hears whether any is, so a handoff waits for every page's
+   * call (WISP 06 § States and events). A client that goes away (a tab closed mid-call) is taken out with it.
+   */
+  private readonly onCall = new Set<EngineClientSink>();
 
   constructor(options: NodeOptions = {}) {
     this.node = new GhostlyNode(
@@ -92,6 +97,7 @@ export class EngineServer implements PeerServer {
     this.clients.delete(client);
     this.histories.delete(client);
     if (this.clients.size === 0) this.node.setActiveLink({ linkId: null });
+    if (this.onCall.delete(client)) this.node.setCallOn({ on: this.onCall.size > 0 });
   }
 
   async handle(client: EngineClientSink, request: RpcRequest): Promise<void> {
@@ -99,13 +105,20 @@ export class EngineServer implements PeerServer {
     const response: RpcResponse = { kind: "response", id: request.id };
     // This app answered, declined or called in that chat: the contact's offer is not one to ring for any more.
     if (request.method === "setCallSignal") this.offers.delete((request.params as { linkId?: string } | undefined)?.linkId ?? "");
+    let params: unknown = request.params;
+    // One page's call: the engine is told whether a call is on in any of them.
+    if (request.method === "setCallOn") {
+      if ((request.params as { on?: unknown } | undefined)?.on === true) this.onCall.add(client);
+      else this.onCall.delete(client);
+      params = { on: this.onCall.size > 0 };
+    }
     try {
       await this.ready;
       const method = this.node[request.method] as (params: unknown) => unknown;
       if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
       // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
       if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
-      response.result = await method.call(this.node, request.params);
+      response.result = await method.call(this.node, params);
     } catch (error) {
       response.error = error instanceof Error ? error.message : String(error);
     }
