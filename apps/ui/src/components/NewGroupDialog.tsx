@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS } from "@ghostly/core";
 import { useBackdropDismiss } from "../hooks/useDismiss";
@@ -15,8 +15,12 @@ const kinds = (t: Translate): { kind: Kind; title: string; body: string }[] => [
   { kind: "mesh", title: t("group.create.private"), body: t("group.create.privateHint") },
 ];
 
-/** Names a new group and says which kind. It opens on its link, the way people come in. */
-export function NewGroupDialog({ onClose, onCreated }: { onClose(): void; onCreated(groupId: string): void }) {
+/**
+ * Names a new group and says which kind. It opens on its link, the way people come in. Closed without a group
+ * (Cancel, Escape, the backdrop), it gives the focus back to what opened it, or to `returnFocus` when that is gone
+ * (New ▾'s Group row goes with its menu); a group made opens on its own page instead.
+ */
+export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose(): void; onCreated(groupId: string): void; returnFocus?: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), input = useRef<HTMLInputElement>(null);
@@ -28,10 +32,17 @@ export function NewGroupDialog({ onClose, onCreated }: { onClose(): void; onCrea
   // An app with no transport for a group's links (no WebRTC, no native transport) could make the group and show its
   // link, but never let anyone in, nor reach a member (GroupConnection says the same once in). It says so here instead.
   const noLinks = useSyncExternalStore(subscribe, snapshot)?.transport.groupLinks === false;
+  const created = useRef(false);
   useEffect(() => {
+    const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal(); input.current?.focus();
-    return () => element.close();
-  }, []);
+    return () => {
+      element.close();
+      if (created.current) return;
+      const back = before && before !== document.body && before.isConnected ? before : opener;
+      back?.focus();
+    };
+  }, [returnFocus]);
   const submit = async () => {
     if (!name.trim() || busy || noLinks) return;
     setBusy(true); setError("");
@@ -39,6 +50,7 @@ export function NewGroupDialog({ onClose, onCreated }: { onClose(): void; onCrea
       const { groupId } = await engine.call("createGroup", { name: name.trim(), profile: kind });
       // The link is what a group is for: it is on from the start, and the group opens on it.
       await engine.call("enableGroupLink", { groupId }).catch(() => {});
+      created.current = true;
       onCreated(groupId);
     }
     catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.create.failed")); setBusy(false); }
