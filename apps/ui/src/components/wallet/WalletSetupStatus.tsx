@@ -26,7 +26,7 @@ export function WalletSetupStatus({ wallet, setup, showProgress }: { wallet: Wal
       {setup.failed.length > 0 && <p className="text-sm font-medium text-text-primary">{t("wallet.setup.title")}</p>}
       {setup.failed.map((f) => (
         <div key={f.type} className="space-y-2" data-testid={`wallet-setup-failed-${f.type}`}>
-          <Notice tone="error" testId={`wallet-setup-error-${f.type}`}>{t("wallet.setup.failed", { wallet: walletLabel(f.type, f.network), reason: failedBecause(f.reason) })}</Notice>
+          <Notice tone="error" testId={`wallet-setup-error-${f.type}`}>{t("wallet.setup.failed", { wallet: walletLabel(f.type, f.network), reason: failedBecause(f.reason, t) })}</Notice>
           <div className="flex flex-wrap gap-2">
             <Button data-testid={`wallet-setup-retry-${f.type}`} disabled={!!busy || setup.running} onClick={() => void act(f.type, () => wallet.setupRetry(f.type))}>
               {busy === f.type || setup.running ? t("wallet.first.creating") : t("wallet.setup.retry", { wallet: walletLabel(f.type, f.network) })}

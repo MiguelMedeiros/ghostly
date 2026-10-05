@@ -30,6 +30,14 @@ const railName = (rail: string, t: Translate) =>
 /** An amount of sats as the engine wrote it (digits, maybe with its own separators), written the app's way. */
 const sats = (value: string, t: Translate) => formatAmount(Number(value.replace(/\D/g, "")), t.language ?? "en");
 
+/** The words a "Could not read the …" line lists (arkWallet.ts, barkWallet.ts, sparkWallet.ts): each said in the language when known. */
+const PARTS: Record<string, TranslationKey> = {
+  address: "errors.wallet.part.address", balance: "errors.wallet.part.balance", "boarding address": "errors.wallet.part.boardingAddress",
+  "coin expiry": "errors.wallet.part.coinExpiry", history: "errors.wallet.part.history", incoming: "errors.wallet.part.incoming",
+  recoverable: "errors.wallet.part.recoverable", sync: "errors.wallet.part.sync",
+};
+const readParts = (parts: string, t: Translate) => parts.split(", ").map((part) => (PARTS[part] ? t(PARTS[part]) : part)).join(", ");
+
 const NETWORK = "(?<network>Mainnet|Testnet)";
 const HOST = "(?<host>[^\\s:/]+(?::\\d+)?)";
 
@@ -129,7 +137,7 @@ const RULES: readonly Rule[] = [
   exact("This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", "errors.pay.wrongNetworkMainnet"),
   exact("This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", "errors.pay.wrongNetworkTestnet"),
   { match: /^This pays with real money: confirm it with Send real money first\. Nothing was sent\.$/, key: "errors.pay.confirmRealFirst", params: (_, t) => ({ button: t("payments.confirmReal.send") }) },
-  { match: /^Could not create the (?<label>.+?) wallet: (?<reason>[\s\S]+)\. Nothing was saved; try again\.$/, key: "errors.pay.createFailed", params: ({ label, reason }, t) => ({ label: railName(label, t), reason: errorText(reason, t).replace(/\.$/, "") }) },
+  { match: /^Could not create the (?<label>.+?) wallet: (?<reason>[\s\S]+)\. Nothing was saved; try again\.$/, key: "errors.pay.createFailed", params: ({ label, reason }, t) => ({ label: railName(label, t), reason: nestedError(reason, t).replace(/\.$/, "") }) },
 
   // What a Lightning source, another rail or a Lightning address answered when a payment failed (paymentAdapters/**, core/lnurl.ts), and what a chat payment was refused or closed with.
   exact("No route to the recipient within the fee limit", "errors.lightning.noRoute"),
@@ -257,6 +265,40 @@ const RULES: readonly Rule[] = [
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
 
+  // Making a wallet, connecting its source and reading it (engine/node.ts, paymentAdapters/**): why a kind could not be made or offered, and what a card says while it connects.
+  { match: /^(?:You already have a|There is already a) (?<network>Mainnet|Testnet) (?<kind>Cashu|Lightning|Ark|Bark|Spark|Bitcoin|Fedimint|USDT) wallet$/, key: "errors.wallet.alreadyHave" },
+  { match: /^The (?<label>.+?) wallet did not come up\. Nothing was lost: try again\.$/, key: "errors.wallet.didNotComeUp" },
+  exact("It did not answer in time", "errors.wallet.didNotAnswer"),
+  exact("No mint answered", "errors.wallet.noMintAnswered"),
+  exact("Paste the federation's invite code (fed11…)", "errors.wallet.pasteInvite"),
+  { match: /^Choose a (?<kind>Lightning|Bitcoin) source that runs on (?<network>Mainnet|Testnet)$/, key: "errors.wallet.chooseSource" },
+  exact("This wallet cannot be made here", "errors.wallet.cannotBeMade"),
+  { match: /^No Lightning source runs on (?<network>Mainnet|Testnet) here yet$/, key: "errors.wallet.noLightningSource" },
+  { match: /^No on-chain wallet runs on (?<network>Mainnet|Testnet) here yet$/, key: "errors.wallet.noOnchain" },
+  exact("The Bark server is not answering", "errors.wallet.barkSilent"),
+  exact("Could not join the federation: its guardians did not answer, or the invite code is not valid", "errors.wallet.joinFederation"),
+  { match: /^That Ark provider runs on (?<actual>\S+), not (?<expected>\S+)$/, key: "errors.wallet.arkProviderNetwork" },
+  { match: /^That Bark server does not run on (?<network>\S+)$/, key: "errors.wallet.barkServerNetwork" },
+  { match: /^(?<chain>\S+) is a (?<network>Mainnet|Testnet) network: this is the (?<wallet>Mainnet|Testnet) (?<kind>Ark|Bark|Spark|USDT) wallet$/, key: "errors.wallet.wrongChain" },
+  { match: /^Could not connect to (?<label>[^:]+): (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotConnect", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^Could not read the balance: (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotReadBalance", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^(?<id>\S+) is not available in this version of Ghostly$/, key: "errors.wallet.notInThisVersion" },
+  { match: /^the Esplora server at (?<host>\S+) did not answer in (?<seconds>\d+) s$/, key: "errors.wallet.esploraSlow" },
+  { match: /^the Esplora server at (?<host>\S+) did not answer \((?<reason>[\s\S]+)\)$/, key: "errors.wallet.esploraSilent" },
+  { match: /^nothing answers at (?<host>\S+): the local Esplora server is not running$/, key: "errors.wallet.esploraLocal" },
+  { match: /^the Esplora server at (?<host>\S+) answered (?<status>\d+): it is down or busy$/, key: "errors.wallet.esploraBusy" },
+  { match: /^no public (?<network>\S+) Esplora server answered \((?<hosts>[^)]*)\): (?<reason>[\s\S]+)$/, key: "errors.wallet.esploraNonePublic", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^wrong network: the Esplora server at (?<host>\S+) is on (?<actual>.+), not (?<network>\S+)$/, key: "errors.wallet.esploraWrongNetwork" },
+  { match: /^Connecting to (?<what>Ark|Bark|Spark|Ethereum)…$/, key: "errors.wallet.connecting" },
+  { match: /^Connecting to (?<what>Ark|Bark|Spark|Ethereum)… (?<reason>[\s\S]+)$/, key: "errors.wallet.connectingBecause", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^Could not read the (?<parts>.+) from the Ark provider\. Last values may be stale\.$/, key: "errors.wallet.readFailedArk", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  { match: /^Could not read the (?<parts>.+) from the Bark server\. Last values may be stale\.$/, key: "errors.wallet.readFailedBark", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  { match: /^Could not read the (?<parts>.+) from Spark\. Last values may be stale\.$/, key: "errors.wallet.readFailedSpark", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  exact("RPC unavailable. Balance may be stale.", "errors.wallet.rpcStale"),
+  exact("Rate limited: the faucet is busy. Try again in a minute.", "errors.wallet.faucetBusy"),
+  { match: /^The faucet did not answer: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetSilent", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^The faucet did not pay: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetDidNotPay", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+
   // Profiles, backups and pictures (apps/ui/src/lib).
   exact("Give the profile a name", "errors.profile.giveName"),
   exact("That profile already exists", "errors.profile.exists"),
@@ -368,6 +410,18 @@ export function errorText(cause: unknown, t: Translate = english): string {
     return t(key, Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value])));
   }
   return raw;
+}
+
+/**
+ * A reason nested in another message, said in `t`'s language when known. The message around it may have taken the
+ * reason's final period (createFailure: "Could not create the … wallet: <reason>. Nothing was saved"), so a reason
+ * known only with its period ("Could not reach x. Check the address: it should be a Cashu mint.") is found too.
+ */
+export function nestedError(reason: string, t: Translate = english): string {
+  const said = errorText(reason, t);
+  if (said !== reason || reason.endsWith(".")) return said;
+  const dotted = errorText(`${reason}.`, t);
+  return dotted !== `${reason}.` ? dotted : said;
 }
 
 /** Every rule's pattern, for the test that each still matches what its source throws. */

@@ -262,6 +262,38 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This device cannot decode the recording", "apps/ui/src/lib/voiceMp3.ts"],
   ["That update is no longer available", "apps/ui/src/desktop/updates.ts"],
   ["The video took too long", "apps/ui/src/lib/videoPoster.ts"],
+  ["You already have a Testnet Cashu wallet", `${BROWSER}/engine/node.ts`, "You already have a "],
+  ["The Testnet Ark wallet did not come up. Nothing was lost: try again.", `${BROWSER}/engine/node.ts`, " wallet did not come up. Nothing was lost: try again."],
+  ["It did not answer in time", `${BROWSER}/engine/node.ts`],
+  ["No mint answered", `${BROWSER}/engine/node.ts`],
+  ["Paste the federation's invite code (fed11…)", `${BROWSER}/engine/node.ts`],
+  ["Choose a Lightning source that runs on Testnet", `${BROWSER}/engine/node.ts`, " source that runs on "],
+  ["This wallet cannot be made here", `${BROWSER}/engine/node.ts`],
+  ["No Lightning source runs on Mainnet here yet", `${BROWSER}/engine/node.ts`, "No Lightning source runs on "],
+  ["No on-chain wallet runs on Mainnet here yet", `${BROWSER}/engine/node.ts`, "No on-chain wallet runs on "],
+  ["The Bark server is not answering", `${BROWSER}/engine/paymentAdapters/bark.ts`],
+  ["Could not join the federation: its guardians did not answer, or the invite code is not valid", `${BROWSER}/engine/paymentAdapters/fedimintSdk.ts`],
+  ["That Ark provider runs on bitcoin, not mutinynet", `${BROWSER}/engine/paymentAdapters/arkWallet.ts`, "That Ark provider runs on "],
+  ["That Bark server does not run on signet", `${BROWSER}/engine/paymentAdapters/barkWallet.ts`, "That Bark server does not run on "],
+  ["bitcoin is a Mainnet network: this is the Testnet Ark wallet", `${BROWSER}/engine/paymentAdapters/arkWallet.ts`, " network: this is the "],
+  ["Could not connect to LND: The node did not answer in time", `${BROWSER}/engine/paymentAdapters/providers/sources.ts`, "Could not connect to ${"],
+  ["Could not read the balance: The node did not answer in time", `${BROWSER}/engine/paymentAdapters/providers/sources.ts`, "Could not read the balance: "],
+  ["cln is not available in this version of Ghostly", `${BROWSER}/engine/paymentAdapters/providers/sources.ts`, " is not available in this version of Ghostly"],
+  ["the Esplora server at mempool.space did not answer in 10 s", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, " did not answer in ${"],
+  ["the Esplora server at mempool.space did not answer (Failed to fetch)", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, " did not answer (${"],
+  ["nothing answers at localhost:3002: the local Esplora server is not running", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, ": the local Esplora server is not running"],
+  ["the Esplora server at mempool.space answered 503: it is down or busy", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, ": it is down or busy"],
+  ["no public signet Esplora server answered (mempool.space): Failed to fetch", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, " Esplora server answered (${"],
+  ["wrong network: the Esplora server at mempool.space is on bitcoin, not signet", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, "wrong network: the Esplora server at "],
+  ["Connecting to Ark…", `${BROWSER}/engine/paymentAdapters/arkWallet.ts`, "Connecting to Ark… ${"],
+  ["Connecting to Bark… The Bark server is not answering", `${BROWSER}/engine/paymentAdapters/barkWallet.ts`, "Connecting to Bark… ${"],
+  ["Could not read the balance, history from the Ark provider. Last values may be stale.", `${BROWSER}/engine/paymentAdapters/arkWallet.ts`, " from the Ark provider. Last values may be stale."],
+  ["Could not read the balance from the Bark server. Last values may be stale.", `${BROWSER}/engine/paymentAdapters/barkWallet.ts`, " from the Bark server. Last values may be stale."],
+  ["Could not read the address, sync from Spark. Last values may be stale.", `${BROWSER}/engine/paymentAdapters/sparkWallet.ts`, " from Spark. Last values may be stale."],
+  ["RPC unavailable. Balance may be stale.", `${BROWSER}/engine/paymentAdapters/usdtWallet.ts`],
+  ["Rate limited: the faucet is busy. Try again in a minute.", `${BROWSER}/engine/paymentAdapters/testCoins.ts`],
+  ["The faucet did not answer: Failed to fetch", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not answer: "],
+  ["The faucet did not pay: empty", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not pay: "],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -276,6 +308,17 @@ describe("errors in the app's language", () => {
   it.each(LANGUAGES.filter((l) => l !== "en"))("every known error reads in %s, not in English", (language) => {
     const same = SAMPLES.map(([text]) => text).filter((text) => errorText(text, translators[language]) === errorText(text, english));
     expect(same).toEqual([]);
+  });
+
+  it.each(LANGUAGES)("no known error leaves a value unfilled in %s", (language) => {
+    expect(SAMPLES.map(([text]) => errorText(text, translators[language])).filter((said) => said.includes("{{"))).toEqual([]);
+  });
+
+  it("a reason nested in a wallet that could not be made is said in the language, also without its final period", () => {
+    const pt = translators.pt;
+    expect(errorText("Could not create the Mainnet Cashu wallet: Could not reach mint.example. Check the address: it should be a Cashu mint. Nothing was saved; try again.", pt))
+      .toBe("Não foi possível criar a carteira Mainnet Cashu: Não foi possível acessar mint.example. Confira o endereço: deve ser um mint Cashu. Nada foi salvo; tente de novo.");
+    expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK: o servidor Esplora em esplora.example não respondeu em 10 s");
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {
