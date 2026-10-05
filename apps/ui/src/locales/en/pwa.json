@@ -13,7 +13,7 @@
   "iosHint": "In Safari, tap Share, then Add to Home Screen.",
   "iosLabel": "Add to Home Screen",
   "iosStep1": "Tap Share {{icon}} (under ⋯ if you don't see it).",
-  "iosStep2": "Choose Add to Home Screen.",
+  "iosStep2": "Choose Add to Home Screen (under More if you don't see it).",
   "iosTitle": "Add Ghostly to your Home Screen",
   "notNow": "Not now",
   "offline": "Offline",

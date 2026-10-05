@@ -13,7 +13,7 @@
   "iosHint": "Dans Safari, touchez Partager, puis Sur l'écran d'accueil.",
   "iosLabel": "Sur l'écran d'accueil",
   "iosStep1": "Touchez Partager {{icon}} (sous ⋯ si vous ne le voyez pas).",
-  "iosStep2": "Choisissez Sur l'écran d'accueil.",
+  "iosStep2": "Choisissez Sur l'écran d'accueil (sous Plus si vous ne le voyez pas).",
   "iosTitle": "Ajouter Ghostly à l'écran d'accueil",
   "notNow": "Plus tard",
   "offline": "Hors ligne",

@@ -247,7 +247,8 @@ test.describe("installing the app", () => {
     await expect(steps).toHaveAttribute("data-kind", "ios");
     await expect(steps).toContainText("Add Ghostly to your Home Screen");
     await expect(steps.getByTestId("install-share-glyph")).toBeVisible();
-    await expect(steps).toContainText("Choose Add to Home Screen.");
+    // iOS 26 keeps Add to Home Screen under More in the Share sheet.
+    await expect(steps).toContainText("Choose Add to Home Screen (under More if you don't see it).");
     await steps.getByTestId("install-steps-done").click();
     await expect(steps).toBeHidden();
     // Shown once: Safari never says the app was added, so having seen the steps is enough.

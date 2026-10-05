@@ -13,7 +13,7 @@
   "iosHint": "En Safari, toca Compartir y luego Añadir a pantalla de inicio.",
   "iosLabel": "Añadir a pantalla de inicio",
   "iosStep1": "Toca Compartir {{icon}} (en ⋯ si no lo ves).",
-  "iosStep2": "Elige Añadir a pantalla de inicio.",
+  "iosStep2": "Elige Añadir a pantalla de inicio (en Más si no lo ves).",
   "iosTitle": "Añadir Ghostly a la pantalla de inicio",
   "notNow": "Ahora no",
   "offline": "Sin conexión",
