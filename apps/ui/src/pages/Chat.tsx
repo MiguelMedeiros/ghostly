@@ -474,7 +474,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
   const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible, window: rowWindow });
-  const search = useChatSearch({ messages, chat: sessionId, active: visible });
+  const search = useChatSearch({ messages, chat: sessionId, active: visible, t });
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
   const sceneOn = pairing.scene;
