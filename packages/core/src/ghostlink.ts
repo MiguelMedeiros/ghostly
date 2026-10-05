@@ -2030,17 +2030,25 @@ export class GhostLink {
     // (a chat in the background, 30 s on the relays), so the offer waits about that long for its answer. The direct
     // transports ranked after WebRTC are knocked on as it goes out rather than `RACE_DIRECT_MS` later: the first live
     // wins, as in the race. A knock that does not connect counts as no failure, and its transport keeps its place in it.
-    if (this.offered?.resume && this.offered.epoch === epoch && this.knockedEarly !== epoch && this.contactQuiet()) {
-      const direct = next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
-      if (direct.length) { this.knockedEarly = epoch; setTimeout(() => void this.knockEarly(epoch, direct), 0); }
-    }
+    // Looked at once the dial that made the offer is over: a transport that joins while it still gathers comes here first.
+    if (this.offered?.resume && this.knockedEarly !== epoch) setTimeout(() => this.maybeKnockEarly(epoch), 0);
     this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, Math.max(0, Math.min(...at) - now));
   }
   /** The contact's newest packet is older than `EXPECT_PEER_MS`: it is not signalling, and reads at a slow pace. */
   private contactQuiet(): boolean {
     return Date.now() - presenceSeenAt(this.session.peerPresence) >= EXPECT_PEER_MS;
   }
-  /** The direct transports of an attempt that resumes, knocked on one after the other while its offer stands (`scheduleRace`). */
+  /** The direct transports of an attempt that resumes to a quiet contact, knocked on while its offer stands (`scheduleRace`). */
+  private maybeKnockEarly(epoch: number): void {
+    const next = this.afterRtc;
+    if (!this.offered?.resume || this.offered.epoch !== epoch || this.knockedEarly === epoch || next?.epoch !== epoch || epoch !== this.connectionEpoch) return;
+    if (this.dialing || this.channel || this.stopped || !this.offerOut || !this.contactQuiet()) return;
+    const relayed = this.relayedTransports;
+    const direct = next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
+    if (!direct.length) return;
+    this.knockedEarly = epoch;
+    void this.knockEarly(epoch, direct);
+  }
   private async knockEarly(epoch: number, transports: PairedTransport[]): Promise<void> {
     this.knockingEarly = true;
     try {

@@ -442,7 +442,11 @@ describe("a restart whose answer the staying side cannot read for its relays' bu
  * race dialled at `RACE_DIRECT_MS` and that connected in 10 ms (2026-10-05).
  */
 describe("back after a while away, to a contact reading in the background", () => {
-  async function awayAndBack(lost = false) {
+  /**
+   * `cli`: as the headless CLI comes back, its HyperDHT endpoint up a moment after the dial began and its offer's STUN
+   * answer in 70 ms: the transport joins the race while the dial is still under way.
+   */
+  async function awayAndBack({ lost = false, cli = false } = {}) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     const made = invitationWhere("inviter");
     // The lower key goes: back, it is the side that dials anyway.
@@ -454,15 +458,16 @@ describe("back after a while away, to a contact reading in the background", () =
     // Away 5 minutes and a bit: the contact's next read at the background pace is half a minute off.
     await run(5 * 60_000 + 3_700);
     if (lost) world.native.dialsLost.add("goes");
-    goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, "webrtc+hyperdht", goes.dhtState, true);
+    if (cli) rtc.srflxAfterMs = 70;
+    goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, "webrtc+hyperdht", goes.dhtState, true, cli ? 30 : undefined);
     const back = Date.now(), requests = goes.requests.length + stays.requests.length;
     const liveMs = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000);
     return { goes, liveMs, requests: goes.requests.length + stays.requests.length - requests, back,
       transport: (goes.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport };
   }
 
-  it("knocks on the contact's direct transport as its offer goes out, and is live at once", async () => {
-    const { liveMs, transport, requests } = await awayAndBack();
+  it.each([false, true])("knocks on the contact's direct transport as its offer goes out, and is live at once (CLI start: %s)", async cli => {
+    const { liveMs, transport, requests } = await awayAndBack({ cli });
     // Before: 8.7 s, the race's HyperDHT dial at `RACE_DIRECT_MS` (n=8, the contact's chat in the background or not).
     // After: 0.7 s.
     expect(liveMs, "from the start of the app that is back to live on both sides").toBeLessThan(RACE_DIRECT_MS / 4);
@@ -472,7 +477,7 @@ describe("back after a while away, to a contact reading in the background", () =
   }, 240_000);
 
   it("a knock that does not reach the contact counts as no failure, and the race still dials", async () => {
-    const { goes } = await awayAndBack(true);
+    const { goes } = await awayAndBack({ lost: true });
     await run(RACE_DIRECT_MS);
     // The knock as the offer went out, then the race's dial `RACE_DIRECT_MS` after: only the race's counts.
     expect((goes.link as unknown as { nativeFailures: Map<string, number> }).nativeFailures.get("hyperdht/1")).toBe(1);
