@@ -33,9 +33,12 @@ test("a phone in use adds itself in another profile after that profile made its 
   ]);
   const page = phone.page;
 
-  // The phone is in use: a chat, and a lock password.
+  // The phone is in use: a chat, and a lock password. The app opens a new chat once it is made, so the chat is made
+  // before the test goes on: on a busy machine it opened over Settings and took the lock's form away.
   await page.getByTitle("New Chat").click();
+  await expect(page.getByTestId("invite-card")).toBeVisible();
   await page.goto("/#/");
+  await expect(page.getByTestId("chat-row")).toHaveCount(1);
   await setLock(page, DEVICE_SET_PASSWORD);
 
   // Add this device to another profile: the new profile opens behind the same lock, at the device's name.
