@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -153,6 +153,81 @@ describe("Menu: one line per row", () => {
     await user.click(screen.getByRole("button", { name: "Options" }));
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
+  });
+});
+
+/** A menu whose rows open a dialog, focus a field, or do nothing more; the dialog keeps what had the focus before it. */
+function Opener() {
+  const [open, setOpen] = useState(false);
+  const [dialog, setDialog] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null), field = useRef<HTMLInputElement>(null);
+  return <div ref={anchor}>
+    <button onClick={() => setOpen(o => !o)}>Options</button>
+    <input ref={field} aria-label="Field" />
+    <Menu testId="menu" open={open} onClose={() => setOpen(false)} anchorRef={anchor}>
+      <MenuItem testId="dialog" onClick={() => { setOpen(false); setDialog(true); }}>Show QR code</MenuItem>
+      <MenuItem testId="field" onClick={() => { field.current?.focus(); setOpen(false); }}>Search</MenuItem>
+      <MenuItem testId="plain" onClick={() => setOpen(false)}>Pin</MenuItem>
+    </Menu>
+    {dialog && <Dialog onClose={() => setDialog(false)} />}
+  </div>;
+}
+
+function Dialog({ onClose }: { onClose(): void }) {
+  const done = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    done.current?.focus();
+    return () => { if (before?.isConnected) before.focus(); };
+  }, []);
+  return <div role="dialog" aria-label="QR code"><button ref={done} onClick={onClose}>Done</button></div>;
+}
+
+describe("Menu: the focus goes back to its button", () => {
+  it("after a row is chosen with the keys, and after the dialog that row opened closes", async () => {
+    const { user } = renderApp(<Opener />);
+    const options = screen.getByRole("button", { name: "Options" });
+    await user.click(options);
+    screen.getByTestId("plain").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(options);
+
+    await user.click(options);
+    screen.getByTestId("dialog").focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Done" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(document.activeElement).toBe(options);
+  });
+
+  it("after Escape on a row", async () => {
+    const { user } = renderApp(<Opener />);
+    const options = screen.getByRole("button", { name: "Options" });
+    await user.click(options);
+    screen.getByTestId("plain").focus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(options);
+  });
+
+  it("not when a row moved the focus elsewhere, nor to a field the menu opened from", async () => {
+    const { user } = renderApp(<Opener />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    screen.getByTestId("field").focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Field" }));
+
+    // Opened while typing (a long press on a phone): closing does not focus the field again, which would bring the
+    // keyboard back up.
+    const field = screen.getByRole("textbox", { name: "Field" });
+    field.focus();
+    fireEvent.click(screen.getByRole("button", { name: "Options" }));
+    expect(document.activeElement).toBe(field);
+    screen.getByTestId("plain").focus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
+    expect(document.activeElement).not.toBe(field);
   });
 });
 
