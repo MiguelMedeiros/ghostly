@@ -609,7 +609,7 @@ export class GhostLink {
   private candidate: { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; plan?: SwitchPlan; reject(error: Error): void } | null = null;
   private candidateEpoch = 0;
   /** Channels a switch replaced, closed after `SWITCH_RETIRE_MS` (or at once on disconnect). */
-  private retiring = new Map<FrameChannel, { timer: ReturnType<typeof setTimeout>; close(): void }>();
+  private retiring = new Map<FrameChannel, { timer: ReturnType<typeof setTimeout>; close(): void; rtc: boolean; closed: Promise<void> }>();
   private rtcCandidateWaiter: { resolve(): void; reject(error: Error): void } | null = null;
   private transitionTarget?: PairedTransport;
   private transitionError?: string;
@@ -1330,10 +1330,19 @@ export class GhostLink {
   }
 
   /** Closes what a switch replaced once the contact has had time to move too. */
-  private retire(old: FrameChannel, also: () => void): void {
+  private retire(old: FrameChannel, also: () => void, rtc = false): void {
     if (this.retiring.has(old)) return;
-    const close = () => { this.retiring.delete(old); old.close(); also(); };
-    this.retiring.set(old, { close, timer: setTimeout(close, SWITCH_RETIRE_MS) });
+    let closed = () => {};
+    const done = new Promise<void>(resolve => { closed = resolve; });
+    const close = () => { this.retiring.delete(old); old.close(); also(); closed(); };
+    this.retiring.set(old, { close, timer: setTimeout(close, SWITCH_RETIRE_MS), rtc, closed: done });
+  }
+  /**
+   * The WebRTC session a switch moved off is still retiring (`SWITCH_RETIRE_MS`): its data link is open, and a new offer
+   * cannot go until it closes. Resolves once it has (at once when none is).
+   */
+  private rtcRetired(): Promise<void> {
+    return Promise.all([...this.retiring.values()].filter(entry => entry.rtc).map(entry => entry.closed)).then(() => {});
   }
   private closeRetired(): void {
     for (const { timer, close } of [...this.retiring.values()]) { clearTimeout(timer); close(); }
@@ -2758,7 +2767,10 @@ export class GhostLink {
           const done = { resolve: () => { active = false; clearTimeout(timer); resolve(); }, reject: (error: Error) => { active = false; clearTimeout(timer); reject(error); } };
           if (transport === "webrtc/1") {
             this.rtcCandidateWaiter = done;
-            void this.dataLink.connect().catch(done.reject);
+            // Back to WebRTC a moment after leaving it: the session left behind still holds the data link, and an offer
+            // goes once it has closed. Before, nothing was offered: the plan gave up after its 8 s and waited for the
+            // 20 s retry (28 s on two CLIs, bug hunt r9g).
+            void this.rtcRetired().then(() => { if (active) return this.dataLink.connect(); }).catch(done.reject);
           } else {
             const endpoint = this.endpoints.get(transport), descriptor = plan.remote.descriptors[transport];
             if (!endpoint || !descriptor) { done.reject(new Error("Peer native address unavailable")); return; }
@@ -2945,7 +2957,7 @@ export class GhostLink {
             this.channel = channel; this.paired = paired; this.activeBinding = binding; this.channelSince = Date.now();
             oldPaired?.stop();
             // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then.
-            if (oldChannel) this.retire(oldChannel, () => { if (!oldBinding && this.activeBinding) this.dataLink.close(); });
+            if (oldChannel) this.retire(oldChannel, () => { if (!oldBinding && this.activeBinding) this.dataLink.close(); }, !oldBinding);
             this.session.setDataLinkOpen(true);
             if (migration.plan) switched = { from, to: paired.state.transport! };
             else { replaced = true; traceLink(this.myPubKeyZ32, "replaced", { from, to: paired.state.transport }); }
