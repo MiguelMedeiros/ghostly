@@ -68,6 +68,27 @@ describe("I already use Ghostly", () => {
     expect(screen.getByTestId("device-join-add")).toHaveTextContent("Add this device to my profile");
   });
 
+  it("a code read in it while the profile is in use goes on to a new profile with the code kept, not to an error", async () => {
+    const reload = catchReload();
+    const device = code();
+    fakeEngine.on("deviceEnrollJoin", () => { throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there."); });
+    fakeEngine.readClipboardText = vi.fn(async () => `${appLinkOrigin()}/#${device.toUpperCase()}`);
+    const { user } = renderApp(<Providers><Home /><JoinHost /></Providers>);
+    await user.click(screen.getByTestId("home-already"));
+    await user.click(screen.getByTestId("device-join-add"));
+    await user.click(screen.getByTestId("device-join-next"));
+    await user.click(await screen.findByRole("button", { name: "Paste from clipboard" }));
+    const ask = await screen.findByTestId("device-join-another");
+    expect(ask).toHaveTextContent("Add this device to another profile?");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.click(within(ask).getByTestId("device-join-another-go"));
+    const added = listProfiles().find((entry) => entry.name === "From another device")!;
+    const request = JSON.parse(sessionStorage.getItem(JOIN_REQUEST)!) as { id: string; code: string; start: string };
+    expect(request).toMatchObject({ id: added.id, start: "name" });
+    expect(request.code.toLowerCase()).toContain(device);
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+  });
+
   it("on a wide screen the chat list leaves it to the home pane, which opens the same dialog", async () => {
     const { user } = renderApp(<Providers><Sidebar /><Home /><JoinHost /></Providers>);
     expect(screen.queryByTestId("sidebar-already")).toBeNull();
@@ -211,6 +232,34 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     await user.click(screen.getByTestId("device-join-next"));
     expect(await screen.findByTestId("device-join-error")).toHaveTextContent("Another device used this code first. Make a new one.");
     expect(screen.getByTestId("device-join-name-form")).not.toHaveAttribute("data-code-given");
+  });
+
+  it("on a profile in use with no chat to show (a group, money): the engine's refusal hands the code on to a new profile, asked first", async () => {
+    const reload = catchReload();
+    const device = code();
+    offerDeviceLink(device);
+    fakeEngine.on("deviceEnrollJoin", () => { throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there."); });
+    const { user } = renderApp(<JoinHost />);
+    await screen.findByTestId("device-join-name-form");
+    await user.click(screen.getByTestId("device-join-next"));
+    const ask = await screen.findByTestId("device-join-another");
+    expect(ask).toHaveTextContent("Add this device to another profile?");
+    expect(screen.queryByTestId("device-join-error")).toBeNull();
+    await user.click(within(ask).getByTestId("device-join-another-go"));
+    const added = listProfiles().find((entry) => entry.name === "From another device")!;
+    expect(JSON.parse(sessionStorage.getItem(JOIN_REQUEST)!)).toEqual({ id: added.id, code: device, start: "name" });
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+  });
+
+  it("an app with one profile only keeps saying the profile is in use: there is nowhere else to put the code", async () => {
+    fakeEngine.features = { ...fakeEngine.features, profiles: false };
+    offerDeviceLink(code());
+    fakeEngine.on("deviceEnrollJoin", () => { throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there."); });
+    const { user } = renderApp(<JoinHost />);
+    await screen.findByTestId("device-join-name-form");
+    await user.click(screen.getByTestId("device-join-next"));
+    expect(await screen.findByTestId("device-join-error")).toHaveTextContent("This profile is in use here.");
+    expect(screen.queryByTestId("device-join-another")).toBeNull();
   });
 
   it("an expired code is said over the app, and nothing opens", async () => {

@@ -5,7 +5,7 @@ import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import { askPersistentStorage, isIosBrowserTab } from "@ghostly/browser/devices/install";
 import { useI18n } from "../../contexts/I18nContext";
 import { readDeviceInvite } from "@ghostly/core";
-import { defaultDeviceName, enrollErrorKey, failureKey, reloadIntoGate } from "../../lib/devices";
+import { defaultDeviceName, enrollErrorKey, enrollInUse, failureKey, reloadIntoGate } from "../../lib/devices";
 import { errorText } from "../../lib/errorText";
 import { isDesktopApp } from "../../lib/externalLink";
 import { JoinDialog } from "../JoinDialog";
@@ -18,8 +18,12 @@ import { DeviceDialog, Digits, field, primaryButton, quietButton } from "./Devic
  * digits once the other device proved itself, and ends on the standby screen. On an iPhone or iPad tab it only says to
  * add Ghostly to the Home Screen first. `start: "name"` opens at the name (the person chose to add it already); `code`, a
  * device code a link carried, opens there too and is used in place of the scanner.
+ *
+ * `onInUse`: the engine refused the code because this profile is in use here (a chat, a group, an identity or money the
+ * chat list does not show). The code is good, so it is handed over, kept, to "Add this device to another profile",
+ * which makes a new profile for it, rather than ending on an error the person can do nothing with here.
  */
-export function JoinProfileDialog({ onClose, onRestore, code, start }: { onClose(): void; onRestore(): void; code?: string; start?: "name" }) {
+export function JoinProfileDialog({ onClose, onRestore, onInUse, code, start }: { onClose(): void; onRestore(): void; onInUse?(code: string): void; code?: string; start?: "name" }) {
   const { t } = useI18n();
   const tab = isIosBrowserTab();
   // A tab on an iPhone stays on the first step, which says to add Ghostly to the Home Screen: whatever opened it.
@@ -48,7 +52,12 @@ export function JoinProfileDialog({ onClose, onRestore, code, start }: { onClose
   const join = async (code: string) => {
     // Asked for now, where the person acted; refused, it is a warning and nothing more.
     setKept(await askPersistentStorage());
-    const first = await engine.call("deviceEnrollJoin", { code, name: name.trim(), app: getBrowserHost().version });
+    let first: EnrollView;
+    try { first = await engine.call("deviceEnrollJoin", { code, name: name.trim(), app: getBrowserHost().version }); }
+    catch (cause) {
+      if (onInUse && enrollInUse(cause)) { onInUse(code); return; }
+      throw cause;
+    }
     ended.current = false;
     setView(first); setStep("enroll");
   };
