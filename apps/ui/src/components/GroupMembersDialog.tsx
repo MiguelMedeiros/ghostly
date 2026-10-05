@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -27,7 +27,8 @@ const HUB_ROLES = ["auto", "pin", "exclude"] as const;
 
 /** Who is in a group, with what role; what the admin can do about it; whom to invite; and who can read what. */
 /** `focusKey`: the member the chat opened this for (their name or picture above a message), shown and marked in the list. */
-export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupView; onClose(): void; focusKey?: string }) {
+/** Closed, it gives the focus back to what opened it, or to `returnFocus` (the group's ⋮, whose row went with its menu). */
+export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { group: GroupView; onClose(): void; focusKey?: string; returnFocus?: RefObject<HTMLElement | null> }) {
   const id = useId();
   const { t, language } = useI18n();
   const contactName = (link: LinkView) => link.label || link.peerNick || t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
@@ -41,7 +42,15 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
   const [error, setError] = useState("");
   /** The member whose Remove was pressed, asked about before anything happens. */
   const [removing, setRemoving] = useState<GroupMemberView | null>(null);
-  useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
+    const element = dialog.current!; element.showModal();
+    return () => {
+      element.close();
+      const back = before && before !== document.body && before.isConnected ? before : opener;
+      if (back?.isConnected) back.focus();
+    };
+  }, [returnFocus]);
   const live = state?.groups.find(g => g.id === group.id) ?? group;
   const run = async (key: string, action: () => Promise<unknown>) => {
     setBusy(key); setError("");

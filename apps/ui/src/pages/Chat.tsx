@@ -13,7 +13,7 @@ import { shownContactName, useChosenProfile, useContactFace } from "../component
 import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { PinIcon } from "../components/PinIcon";
-import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
+import { Menu, MenuItem, MenuSeparator, openOnArrow } from "../components/Menu";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
@@ -387,7 +387,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [showMute, setShowMute] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
   const labelInputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (sessionId) {
@@ -479,7 +479,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
   const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible, window: rowWindow });
-  const search = useChatSearch({ messages, chat: sessionId, active: visible, t });
+  const search = useChatSearch({ messages, chat: sessionId, active: visible, t, returnFocus: optionsRef });
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
   const sceneOn = pairing.scene;
@@ -691,7 +691,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button
+              ref={optionsRef}
               onClick={() => setMenuOpen(!menuOpen)}
+              onKeyDown={openOnArrow(() => setMenuOpen(true))}
               className="p-2 max-md:px-1.5 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
               title={t("chat.options")}
               aria-haspopup="true"
@@ -713,7 +715,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 <circle cx="12" cy="19" r="1" />
               </svg>
             </button>
-            <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
+            <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
               <MenuItem testId="chat-pin-toggle" onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
