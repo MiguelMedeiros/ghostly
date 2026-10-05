@@ -200,8 +200,8 @@ describe("removing a proof and its revocation", () => {
     // Found on the first try: the later tries do not run.
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(resolved).toHaveLength(1);
-    // One stop line in the chat, not one for the withdrawal and another for the revocation.
-    expect(ledgers.b.timeline?.filter(e => e.kind === "stopped")).toHaveLength(1);
+    // One stop line in the chat, not one for the withdrawal and another for the revocation: it now says revoked.
+    expect(ledgers.b.timeline?.filter(e => e.kind === "stopped")).toEqual([expect.objectContaining({ reason: "revoked" })]);
     engines.b.stop();
   });
 

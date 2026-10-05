@@ -50,7 +50,7 @@ const lastOf = (timeline: readonly IdentityTimelineEntry[], side: IdentityTimeli
 /**
  * The timeline after one step. A share already on it is updated in place, never repeated: a request sent again at
  * a reconnect, a second share of a proof the contact already verified. A new attempt after a failure or a stop is
- * a new entry. A stop is written once.
+ * a new entry. A stop is written once; a withdrawal later found revoked becomes a revocation in place.
  */
 export function applyIdentityEvent(timeline: readonly IdentityTimelineEntry[], event: IdentityTimelineEvent, at: number): IdentityTimelineEntry[] {
   const out = [...timeline];
@@ -80,7 +80,8 @@ export function applyIdentityEvent(timeline: readonly IdentityTimelineEntry[], e
       break;
     }
     case "stopped":
-      if (last?.kind === "stopped") break;
+      // A revocation found after the withdrawal (a removal is both, WISP 300) says what the stop was: the same entry.
+      if (last?.kind === "stopped") { if (last.reason === "withdrawn" && event.reason === "revoked") out[i] = { ...last, reason: "revoked" }; break; }
       add({ proof: event.proof, side: event.side, kind: "stopped", provider: event.provider, subject: event.subject ?? last?.subject, reason: event.reason });
       break;
     case "unsent":

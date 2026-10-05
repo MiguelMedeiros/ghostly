@@ -172,17 +172,22 @@ test("removing a proof while the contact is live: it is withdrawn there at once,
   await alice.page.getByTestId("identity-proof-remove").click();
   await alice.page.getByTestId("identity-proof-remove-confirm").click();
   await expect(alice.page.getByTestId("identity-proof")).toHaveCount(0);
-  const badge = carol.page.getByTestId("chat-identity-badges").getByTestId("chat-identity-badge");
-  await expect(badge).toHaveAttribute("data-state", "withdrawn");
+  // The share's card in Carol's chat says so at once: withdrawn (already revoked when a check ran first).
+  const card = carol.page.getByTestId("identity-share").and(carol.page.locator("[data-kind=shared]"));
+  await expect(card).toHaveAttribute("data-state", /withdrawn|revoked/);
   await expect.poll(() => [...relay.packets.values()].some(packet => packet.includes("_ghostly-revoked"))).toBe(true);
-  // Before, it stayed "No longer shared" for good (a withdrawn card was never looked up), while the CLI's
-  // `identity recheck` said revoked. Now Carol's app looks it up by itself, 20 s after the notice.
-  await expect(badge).toHaveAttribute("data-state", "revoked", { timeout: 60_000 });
+  // Before, it stayed "No longer shared" for good, with no mark in the header (a withdrawn card was never looked up),
+  // while the CLI's `identity recheck` said revoked. Now Carol's app looks it up by itself, 20 s after the notice at
+  // the latest, and the header shows the mark struck through as revoked.
+  await expect(card).toHaveAttribute("data-state", "revoked", { timeout: 60_000 });
+  await expect(carol.page.getByTestId("chat-identity-badges").getByTestId("chat-identity-badge")).toHaveAttribute("data-state", "revoked");
   await openIdentities(carol);
   const back = await turnTheirs(carol);
   await expect(back).toHaveAttribute("data-status", "revoked");
   await expect(back.getByTestId("chat-identity-received-status")).toHaveText("Revoked: its owner removed it and published a revocation");
   await closeIdentities(carol);
-  // One stop line in the chat, not a second one for the revocation.
-  await expect(carol.page.getByTestId("identity-share").and(carol.page.locator("[data-kind=stopped]"))).toHaveCount(1);
+  // One stop line in the chat, not a second one for the revocation: the same line, now saying revoked.
+  const stop = carol.page.getByTestId("identity-share").and(carol.page.locator("[data-kind=stopped]"));
+  await expect(stop).toHaveCount(1);
+  await expect(stop.getByTestId("identity-share-text")).toHaveText(/Nostr · npub1.* was revoked$/);
 });
