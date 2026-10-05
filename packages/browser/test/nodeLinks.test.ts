@@ -818,7 +818,7 @@ describe("text in a chat", () => {
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ text: "later", via: "hold", delivery: "sending" });
     expect(hold).toHaveBeenCalledWith(chat.id, expect.objectContaining({ kind: "text", timestamp: 3 }));
     expect(node.getState().links[0]).toMatchObject({ textDelivery: "hold", canSendText: true });
-    expect(() => node.sendPayment({ linkId: chat.id, amount: 1, timestamp: 1 })).toThrow("not held");
+    await expect(node.sendPayment({ linkId: chat.id, amount: 1, timestamp: 1 })).rejects.toThrow("not held");
   });
 });
 
