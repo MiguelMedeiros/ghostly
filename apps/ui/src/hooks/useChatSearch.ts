@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { searchable, searchMessages } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
+import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
 import { revealMessage } from "./useRowWindow";
 
@@ -18,7 +19,7 @@ function jump(id: string) {
  * screen), Escape in its field closes it, another chat closes it. The newest match comes first; `older` and `newer`
  * go through the rest, round, each one scrolled to and marked.
  */
-export function useChatSearch({ messages, chat, active }: { messages: readonly ChatMessage[]; chat: string; active: boolean }) {
+export function useChatSearch({ messages, chat, active, t }: { messages: readonly ChatMessage[]; chat: string; active: boolean; t?: Translate }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
@@ -51,8 +52,9 @@ export function useChatSearch({ messages, chat, active }: { messages: readonly C
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Folded once while the search is open, not on each key; a closed search costs nothing.
-  const items = useMemo(() => (open ? searchable(messages) : []), [open, messages]);
+  // Folded once while the search is open, not on each key; a closed search costs nothing. `t`: a voice message, a video
+  // or a picture is found by its kind in the profile's language too.
+  const items = useMemo(() => (open ? searchable(messages, t) : []), [open, messages, t]);
   const results = useMemo(() => searchMessages(items, term), [items, term]);
   const found = useMemo(() => new Set(results), [results]);
   const latest = useRef(results);
