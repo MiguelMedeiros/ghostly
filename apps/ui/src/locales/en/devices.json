@@ -135,7 +135,7 @@
     "homeScreen": "Add Ghostly to your Home Screen first.",
     "homeScreenInfo": "On iPhone and iPad a browser tab keeps its own storage, which the browser may clear. The app on the Home Screen keeps it.",
     "homeScreenWhy": "Your profile needs the app, not a Safari tab.",
-    "homeStep1": "Tap Share in Safari.",
+    "homeStep1": "Tap Share in Safari (in the ⋯ menu on newer iPhones).",
     "homeStep2": "Tap Add to Home Screen.",
     "homeStep3": "Open Ghostly from your Home Screen and choose I already use Ghostly.",
     "homeStep3Code": "Open Ghostly from your Home Screen and scan the code again.",

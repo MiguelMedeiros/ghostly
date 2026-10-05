@@ -177,7 +177,7 @@ describe("I already use Ghostly", () => {
     Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1" });
     const { unmount } = renderApp(<JoinProfileDialog onClose={() => {}} onRestore={() => {}} />);
     const steps = screen.getByTestId("device-join-home-screen");
-    expect(steps).toHaveTextContent("Tap Share in Safari.");
+    expect(steps).toHaveTextContent("Tap Share in Safari (in the ⋯ menu on newer iPhones).");
     expect(steps).toHaveTextContent("Tap Add to Home Screen.");
     expect(steps).toHaveTextContent("Open Ghostly from your Home Screen and choose I already use Ghostly.");
     expect(screen.queryByTestId("device-join-add")).toBeNull();

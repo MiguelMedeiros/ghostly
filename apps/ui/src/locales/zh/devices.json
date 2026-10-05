@@ -135,7 +135,7 @@
     "homeScreen": "请先将 Ghostly 添加到主屏幕。",
     "homeScreenInfo": "在 iPhone 和 iPad 上，浏览器标签页使用单独的存储，浏览器可能会清除它。主屏幕上的应用会保留它。",
     "homeScreenWhy": "你的个人资料需要应用，而不是 Safari 标签页。",
-    "homeStep1": "在 Safari 中轻点“分享”。",
+    "homeStep1": "在 Safari 中轻点“分享”（较新的 iPhone 在 ⋯ 菜单中）。",
     "homeStep2": "轻点“添加到主屏幕”。",
     "homeStep3": "从主屏幕打开 Ghostly，然后选择“我已在使用 Ghostly”。",
     "homeStep3Code": "从主屏幕打开 Ghostly，然后再次扫描代码。",

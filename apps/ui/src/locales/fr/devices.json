@@ -135,7 +135,7 @@
     "homeScreen": "Ajoutez d’abord Ghostly à l’écran d’accueil.",
     "homeScreenInfo": "Sur iPhone et iPad, un onglet du navigateur garde ses données à part, et le navigateur peut les effacer. L’app sur l’écran d’accueil les garde.",
     "homeScreenWhy": "Votre profil a besoin de l’app, pas d’un onglet Safari.",
-    "homeStep1": "Touchez Partager dans Safari.",
+    "homeStep1": "Touchez Partager dans Safari (dans le menu ⋯ sur les iPhone récents).",
     "homeStep2": "Touchez Sur l’écran d’accueil.",
     "homeStep3": "Ouvrez Ghostly depuis l’écran d’accueil et choisissez J’utilise déjà Ghostly.",
     "homeStep3Code": "Ouvrez Ghostly depuis l’écran d’accueil et scannez à nouveau le code.",
