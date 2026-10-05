@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INVITER_DIAL_GRACE_MS, PAIRING_ATTEMPT_MS, PAIRING_RETRY_MS } from "../src/ghostlink";
 import { RELAY_POLL_INTERVALS } from "../src/link";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, run, untilLive, useFakeWorld, type NetworkModel } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, rtc, run, untilLive, useFakeWorld, type NetworkModel } from "./support/pairingWorld";
 
 // covers: chat.paired.pair-timing, chat.paired.progress, chat.paired.pair
 
@@ -57,6 +57,26 @@ describe("a first pairing, at desktop pace", () => {
     expect(took).toBeLessThanOrEqual(LIVE_WITHIN_MS + INVITER_DIAL_GRACE_MS);
     expect(inviter.progress.map(p => p.stage)).toEqual(["waiting", "waiting", "knocking", "connecting", "live"]);
   }, 30_000);
+
+  /**
+   * Where the STUN servers do not answer, an offer gathers until `waitForIceGathering` gives up (5 s) and an answer in a
+   * few milliseconds. The joiner's first packet goes without its offer (`FIRST_PUBLISH_MAX_MS`), the inviter offers too
+   * after its grace and gathers as long. One's e2e run on dev b95b8cae0: the joiner's offer was out at 6.1 s and read at
+   * 6.6 s by an inviter with the lower key, still gathering its own, which it kept: live 11.3 s after the join.
+   */
+  it.each(["inviter", "joiner"] as const)("offers that gather for 5 s: an offer still gathering yields to the contact's · the %s's key is lower", async lower => {
+    rtc.offerGatherMs = 5_000;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere(lower);
+    const inviter = open(made.inviter, pkarr);
+    await run(10_000);
+    const joiner = open(made.joiner, pkarr);
+    const took = await untilLive(inviter, joiner, 60_000);
+    // Before: 11.9 s with the inviter's key lower (its own offer, out after its 5 s gather, carried the chat). After:
+    // 6.5 s, the joiner's offer answered as soon as the inviter read it. With the joiner's key lower: 6.5 s either way.
+    expect(took, "live after the join").toBeLessThanOrEqual(8_000);
+    for (const side of [inviter, joiner]) expect(side.progress.at(-1)).toMatchObject({ stage: "live", attempt: 1 });
+  }, 60_000);
 
   it("polls the contact's key in the foreground while pairing, and in the background once connected", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK);

@@ -116,8 +116,10 @@ export const CONNECT_MS = 600;
  * ICE does once every check went unanswered; unset, it waits for its attempt timeout.
  * `noCandidates`: the apps (by `owner`) whose connections gather no candidate at all, as a browser's under
  * `disable_non_proxied_udp` (a VPN's extension, a network with no UDP).
+ * `offerGatherMs`: how long an offer's gathering takes. Where the STUN servers do not answer, an offer waits for them
+ * until `waitForIceGathering`'s timeout (5 s); an answer is out in some 40 ms (One's e2e runs, 2026-10-05).
  */
-export const rtc: { blocked: boolean; answerFailsAfterMs?: number; blockedFailsAfterMs?: number; noCandidates: Set<string> } = { blocked: false, noCandidates: new Set() };
+export const rtc: { blocked: boolean; answerFailsAfterMs?: number; blockedFailsAfterMs?: number; noCandidates: Set<string>; offerGatherMs?: number } = { blocked: false, noCandidates: new Set() };
 
 class FakePeerConnection extends EventTarget {
   /** The app this connection belongs to, for `killRtc`. */
@@ -135,6 +137,10 @@ class FakePeerConnection extends EventTarget {
   private made(setup: string) { const made = sdp(setup, !rtc.noCandidates.has(this.owner ?? "")); byFingerprint.set(made.fingerprint, this); return made.sdp; }
   async setLocalDescription(description: RTCSessionDescriptionInit) {
     this.localDescription = description;
+    if (description.type === "offer" && rtc.offerGatherMs && !rtc.noCandidates.has(this.owner ?? "")) {
+      this.iceGatheringState = "gathering";
+      setTimeout(() => { this.iceGatheringState = "complete"; this.dispatchEvent(new Event("icegatheringstatechange")); }, rtc.offerGatherMs);
+    }
     const failAfter = rtc.answerFailsAfterMs;
     if (description.type === "answer" && failAfter !== undefined) setTimeout(() => {
       if (this.closed || this.connectionState === "connected") return;
@@ -301,5 +307,6 @@ export async function closeWorld(): Promise<void> {
   rtc.answerFailsAfterMs = undefined;
   rtc.blockedFailsAfterMs = undefined;
   rtc.noCandidates.clear();
+  rtc.offerGatherMs = undefined;
   vi.useRealTimers();
 }
