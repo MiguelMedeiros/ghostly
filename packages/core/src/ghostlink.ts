@@ -86,6 +86,8 @@ export const CROSSED_WAIT_MS = 3_000;
  * takes over.
  */
 export const CROSSED_FRESH_MS = 10_000;
+/** A joiner gathers its offer while it first looks for the inviter (`dialEarly`) only this soon after the join. */
+export const EARLY_DIAL_JOIN_MS = 60_000;
 /** What a joiner is told when someone else used the invite first (`DhtDeliveryView.inviteTaken`). */
 export const INVITE_TAKEN = "Someone else joined with this invite first. Ask your contact for a new one.";
 /**
@@ -1312,6 +1314,9 @@ export class GhostLink {
    */
   private dialEarly(): void {
     if (!this.options.params.profile || !this.options.autoConnect || this.deliveryMode === "dht" || this.streamBlocked || this.dialing || this.channel) return;
+    // Only as the person joins: a joined chat whose inviter never came, started again later, gathers nothing until it shows.
+    const startedAt = this.options.pairingProgress?.startedAt ?? 0;
+    if (Date.now() - startedAt > EARLY_DIAL_JOIN_MS) return;
     this.dialGate = new Promise<boolean>(resolve => { this.firstLookDone = resolve; });
     traceLink(this.myPubKeyZ32, "dial", { early: true });
     void this.dial().catch(error => {
