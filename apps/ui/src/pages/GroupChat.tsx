@@ -321,7 +321,7 @@ export function GroupChat() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
   const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
-  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink });
+  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink, t });
   useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
