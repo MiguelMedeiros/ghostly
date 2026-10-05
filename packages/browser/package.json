@@ -29,7 +29,7 @@
     "@secondts/bark": "0.25.0",
     "@serenity-kit/opaque": "1.1.0",
     "@synonymdev/pubky": "0.14.0",
-    "@tetherto/wdk-wallet-evm": "1.0.0-beta.19",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.20",
     "ethers": "6.17.0",
     "nostr-tools": "2.25.2",
     "openpgp": "6.3.2",
