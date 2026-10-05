@@ -4,7 +4,7 @@ import { ghostly, home, localRelay, ok, Running } from "./support/cli";
 // covers: groups.protocol.signals, groups.link.join
 
 /**
- * Edge signaling through members (WISP 9xx · Group Mesh § Signaling through members), with real daemons: a member let
+ * Edge signaling through members (WISP 902 · Group Mesh § Signaling through members), with real daemons: a member let
  * in through the group's link has an edge with every member within moments of its welcome, however slow the relays
  * are. The entry session carries the edge with the admin, and the admin carries the one with the other member. Over
  * the relays alone, each edge is a presence, an offer and an answer, each a request out and a read at the other end:

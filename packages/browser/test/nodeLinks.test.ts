@@ -995,7 +995,7 @@ describe("private groups through the engine", () => {
   });
 
   // covers: groups.native-links
-  describe("native transports on a group's links (WISP 9xx § Transports)", () => {
+  describe("native transports on a group's links (WISP 902 § Transports)", () => {
     const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
       connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null });
     /** An engine running Iroh as the Desktop does (the host's own adapter). */

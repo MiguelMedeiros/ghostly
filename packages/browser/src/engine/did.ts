@@ -8,7 +8,7 @@ import { newDeviceKey, sealSeed, unsealSeed } from "./paymentAdapters/persistenc
 import type { SealedProofKey } from "./identities";
 
 /**
- * The profile's did:dht (WISP 3xx-did-dht). Ghostly has no profile-wide key (every chat has its own), so
+ * The profile's did:dht (WISP 310-did-dht). Ghostly has no profile-wide key (every chat has its own), so
  * the DID has a key of its own, made once per profile, kept like a proof key and used for nothing else:
  * the DID never links chats. Its packet holds the DID document alone: the identity key and, only for
  * identities the person lists, `alsoKnownAs`. Published while online, re-put as is every hour so the

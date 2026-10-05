@@ -13,7 +13,7 @@ import { RESULT_TONE, sortRoutines, untilIn } from "../lib/statusCards";
 import { COLUMN_PAGE, boardModel, boardMove, type BoardColumn, type BoardEntry, type BoardGroup, type BoardGrouping, type BoardRoutine } from "../lib/taskBoard";
 
 /*
- * The Tasks board (WISP 4xx · Status Cards § The Tasks board): every task card of this profile, from all its chats and
+ * The Tasks board (WISP 405 · Status Cards § The Tasks board): every task card of this profile, from all its chats and
  * groups, in one place. Columns by status (Queued, Running, Blocked, Done, Stopped: failed and cancelled together), or
  * a column per bot or per chat; a text filter; routines on their own tab, a line each. A phone shows one column at a
  * time, under tabs with each column's count, and a swipe moves between them. Cards are display only: nothing here

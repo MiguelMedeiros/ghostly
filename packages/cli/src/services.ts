@@ -9,7 +9,7 @@ import { CliError } from "./errors";
 import { isLive } from "./views";
 
 /**
- * Shared services (WISP 700/701, WISP 11xx phase 3b): a web app on this machine a contact may open over the chat's live
+ * Shared services (WISP 700/701, WISP 1100 phase 3b): a web app on this machine a contact may open over the chat's live
  * link, and a contact's app opened here on a loopback port. As on the Desktop: only loopback is reached, redirects are
  * handed back rather than followed, and a service is shared with each contact by name, never by default.
  */

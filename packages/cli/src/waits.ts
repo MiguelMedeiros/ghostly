@@ -4,7 +4,7 @@ import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 
 /*
- * Waiting on what a command sent (WISP 11xx): a message's delivery, an edit's confirmation, a group frame taken by an
+ * Waiting on what a command sent (WISP 1100): a message's delivery, an edit's confirmation, a group frame taken by an
  * edge. Shared by the chat, group and status card methods.
  */
 
@@ -23,7 +23,7 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
 }
 
 /**
- * Waits until an edge took my group message, or its edit number `edit` (WISP 9xx: a group has no receipts, so this is
+ * Waits until an edge took my group message, or its edit number `edit` (WISP 902: a group has no receipts, so this is
  * as far as the author sees): a member's edge in a private group, an edge to one of my hubs in a community.
  */
 export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | undefined, ms: number): Promise<number> {

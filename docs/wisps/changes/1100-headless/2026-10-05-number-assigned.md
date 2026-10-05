@@ -1,0 +1,1 @@
+The number is assigned now that the feature ships in the app: this draft is WISP 1100 (it was 11xx, file 11xx-headless.md). The old file and its website address forward here. Wire identifiers and behavior are unchanged.

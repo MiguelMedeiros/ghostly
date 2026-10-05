@@ -4,7 +4,7 @@ import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.community.remove, groups.community.join, groups.community.send, groups.protocol.community-topology
 
 /**
- * A member removed from a community while its app is closed (WISP 9xx · Group Community § Leaving and removal): when
+ * A member removed from a community while its app is closed (WISP 903 · Group Community § Leaving and removal): when
  * it comes back it is told, by the commit that took it out and nothing after; it is no hub and gets no edge but the
  * one that tells it; what it sends is refused; and the group's link lets it in again.
  */

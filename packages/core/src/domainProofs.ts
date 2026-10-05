@@ -1,7 +1,7 @@
 import { concatBytes, fromZ32, toZ32, utf8Decode, utf8Encode } from './bytes';
 
 /**
- * Domain identity proofs (draft WISP 3xx, docs/wisps/3xx-domain.md), the pure half.
+ * Domain identity proofs (draft WISP 304, docs/wisps/304-domain.md), the pure half.
  *
  * Under WISP 300 a proof authorizes a fresh Ed25519 *proof key* that only this
  * profile holds, through a statement the external identity vouches for. A

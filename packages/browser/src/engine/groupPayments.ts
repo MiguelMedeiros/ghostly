@@ -4,7 +4,7 @@ import { paymentWireId } from "../shared/paymentIds";
 import type { GroupPayFrame, GroupPayNote, GroupPayRail, PaymentView, StoredMessage } from "../shared/types";
 
 /**
- * Payments in a group (WISP 9xx § Payments). The money, the invoice and the receipts travel only on the edge
+ * Payments in a group (WISP 902 § Payments). The money, the invoice and the receipts travel only on the edge
  * between the two members, as they would on a 1:1 chat (the PaymentDesk does that part, with the edge's link as
  * the chat). What the rest of the group learns is a `group-pay` note, sent by each side about its own part over
  * every edge: who pays whom, how much, over what, and how it stands. A note is believed only from the member it

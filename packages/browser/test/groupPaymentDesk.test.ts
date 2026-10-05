@@ -10,7 +10,7 @@ vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 beforeEach(() => resetDb());
 
 /**
- * Payments in a group at the desk (WISP 9xx § Payments): a member's payment goes over the edge to that member
+ * Payments in a group at the desk (WISP 902 § Payments): a member's payment goes over the edge to that member
  * and nowhere else, and a request to the whole group is paid once — the first valid payment settles it, a later
  * token is refused before anything is redeemed (its payer takes it back), and every member's copy closes.
  */

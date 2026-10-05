@@ -2,7 +2,7 @@ import type { GroupView, LinkView, MessageFile, StoredMessage } from "@ghostly/b
 import type { StatusCard } from "@ghostly/core";
 
 /**
- * The JSON shapes the CLI and the daemon answer with. They are the contract bots code against (WISP 11xx), kept
+ * The JSON shapes the CLI and the daemon answer with. They are the contract bots code against (WISP 1100), kept
  * apart from the engine's views: those change with the app, these only by adding fields.
  */
 
@@ -126,10 +126,10 @@ export interface MessageJson {
   editPending?: boolean;
   /** A forwarded message (WISP 400 § Forwards): how many times it has been forwarded. Never who wrote it first. */
   forwarded?: number;
-  /** A bot's task or routine (WISP 4xx · Status Cards), as its version says it; `text` is its fallback. Or its buttons. */
+  /** A bot's task or routine (WISP 405 · Status Cards), as its version says it; `text` is its fallback. Or its buttons. */
   card?: StatusCard;
   /**
-   * A reply that pressed a button of a message of mine (WISP 4xx · Message Buttons), as this side's engine took it:
+   * A reply that pressed a button of a message of mine (WISP 406 · Message Buttons), as this side's engine took it:
    * `messageId` the question here, `button` its id, `label`, `inferred` when only the text named it.
    */
   press?: { messageId: string; button: string; label: string; inferred?: true };
@@ -222,7 +222,7 @@ export function groupJson(group: GroupView, showSecret = false) {
     canSend: group.canSend,
     link: group.entryLink ? (showSecret ? group.entryLink : "<hidden>") : null,
     lastMessageAt: group.lastMessageAt,
-    // Past 16 members with hubs (WISP 9xx · Group Mesh § Hubs): who is one, who is reached through them, what the admin chose.
+    // Past 16 members with hubs (WISP 902 · Group Mesh § Hubs): who is one, who is reached through them, what the admin chose.
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online,
       ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),
     ...(group.hubs ? { hubs: group.hubs } : {}),

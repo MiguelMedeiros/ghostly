@@ -11,7 +11,7 @@ import { renderApp } from "../render";
 
 // covers: chat.status-cards
 
-/** Status cards in the chat (WISP 4xx · Status Cards): the card instead of its text, opened in place; the Tasks button. */
+/** Status cards in the chat (WISP 405 · Status Cards): the card instead of its text, opened in place; the Tasks button. */
 
 const NOW = Date.now();
 const card = (extra: Record<string, unknown> = {}): StatusCard => readStatusCard({ kind: "task", id: "relay", title: "Fix relay rotation", status: "running", ...extra })!;

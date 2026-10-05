@@ -6,7 +6,7 @@
 | Status | Draft |
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
-| Implementation | Compatibility chats (`_call`) and the chat session of every new chat (`calls/1`); capture varies by platform. Desktop on Linux runs WebRTC in Rust and media in GStreamer (#331), with no screen sharing yet. The headless CLI calls with voice only (node-datachannel, the audio on a Unix socket, [11xx](11xx-headless.md#calls)). |
+| Implementation | Compatibility chats (`_call`) and the chat session of every new chat (`calls/1`); capture varies by platform. Desktop on Linux runs WebRTC in Rust and media in GStreamer (#331), with no screen sharing yet. The headless CLI calls with voice only (node-datachannel, the audio on a Unix socket, [1100](1100-headless.md#calls)). |
 | Summary | One-to-one calls over WebRTC media, with compact call signaling. |
 | Availability | Available |
 | Notes | Screen sharing needs a computer; phone browsers can't share a screen. |
@@ -57,7 +57,7 @@ Permissions are the same choices: capture starts only when the person places or 
 
 ## Headless Ghostly
 
-The headless CLI ([11xx](11xx-headless.md#calls)) calls and answers in the chat session too, voice only, with its media in libdatachannel and Opus in WebAssembly, and hands the audio to a program. Nothing on the wire changes. Its offers have an audio section alone; it answers a contact's video section and drops what comes on it. Its signals carry up to eight candidates, every IPv4 host first (a server often has several interfaces), which a receiver already accepts. It does not reconnect a call whose path is lost: libdatachannel (0.24.5) refuses a remote offer with new ICE credentials on a connection that has started and cannot make one, so the CLI never says `x`, drops a restart offer, and its calls end on a lost path as before.
+The headless CLI ([1100](1100-headless.md#calls)) calls and answers in the chat session too, voice only, with its media in libdatachannel and Opus in WebAssembly, and hands the audio to a program. Nothing on the wire changes. Its offers have an audio section alone; it answers a contact's video section and drops what comes on it. Its signals carry up to eight candidates, every IPv4 host first (a server often has several interfaces), which a receiver already accepts. It does not reconnect a call whose path is lost: libdatachannel (0.24.5) refuses a remote offer with new ICE credentials on a connection that has started and cannot make one, so the CLI never says `x`, drops a restart offer, and its calls end on a lost path as before.
 
 ## Scope and evidence
 

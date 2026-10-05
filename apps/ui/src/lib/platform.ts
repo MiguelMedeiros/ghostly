@@ -37,7 +37,7 @@ export interface SharedService {
 export interface PeerLinkState {
   id?: string;
   deliveryMode?: "stream" | "dht";
-  /** `hold`: the contact is away and what is sent now waits in this device's storage for it (WISP 4xx). */
+  /** `hold`: the contact is away and what is sent now waits in this device's storage for it (WISP 404). */
   textDelivery?: "stream" | "dht" | "hold" | "unavailable";
   canSendText?: boolean;
   /** Store-and-forward in this chat: the switch, what the contact said, storage and what is waiting. */
@@ -69,7 +69,7 @@ export interface PeerLinkState {
   services: ServiceAd[] | null;
 }
 
-/** What a chat shows of store-and-forward (WISP 4xx). */
+/** What a chat shows of store-and-forward (WISP 404). */
 export interface PeerHoldState {
   enabled: boolean;
   peerAllows?: boolean;

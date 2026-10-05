@@ -244,7 +244,7 @@ export const developers = {
         links: [
           { label: "CLI guide", href: "/cli" },
           { label: "AI agents", href: "/developers/agents" },
-          { label: "WISP 11xx · Headless", href: "/wisps/11xx-headless" },
+          { label: "WISP 1100 · Headless", href: "/wisps/1100-headless" },
           { label: "packages/cli", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/cli" },
         ],
       },
@@ -293,7 +293,7 @@ export const developers = {
     ] as { name: string; cells: (Level | null)[] }[],
     notes: [
       "One chat (WISPs 400 and 801): a chat with no direct path starts on the DHT and goes live by itself; one ghostly1… invite code with a ghostly.tools link. A copy of an invite cannot stop a chat that is already paired.",
-      "CLI: the headless ghostly CLI, the app's engine on Node for bots (WISP 11xx): a daemon, a local socket and JSON events; spending real money needs --confirm-real; npm install -g @ghostlytools/cli. The older Rust CLI, no longer shipped from 1.0, speaks only the 0.4 DHT text and does not read ghostly1 codes.",
+      "CLI: the headless ghostly CLI, the app's engine on Node for bots (WISP 1100): a daemon, a local socket and JSON events; spending real money needs --confirm-real; npm install -g @ghostlytools/cli. The older Rust CLI, no longer shipped from 1.0, speaks only the 0.4 DHT text and does not read ghostly1 codes.",
       "Calls: in every chat while it is live, not in groups. The CLI places and answers voice calls and hands the audio to your program over a Unix socket. Groups: text, a picture and payments; no files or calls. Desktop on Linux: its webview has no WebRTC, so its calls run their own WebRTC and media in the app (no screen sharing yet), and its chats go live over Iroh or HyperDHT.",
       "WebLN is web-only, Bitcoin Core desktop-only. BDK runs on test networks only; Breez and Spark on Mainnet with your own Breez API key. Arkade and Bark run on Mainnet with no unilateral exit yet. OpenID waits for OAuth clients.",
       "Also contacted: Pkarr relays, the Mainline DHT (desktop), Google STUN, mints, n0's Iroh relays, HyperDHT bootstrap nodes, Ark and Spark operators, Fedimint guardians, Esplora servers, Nostr relays, a public Ethereum RPC, DNS over HTTPS (Quad9 by default), public profile hosts, the pages you link (for previews), archive.org for GIFs, and any service you add. No TURN by default: you can set your own.",

@@ -20,7 +20,7 @@ import { assertPublicServer, resolveAtprotoDid, verifiedAtprotoHandle, type Atpr
  *
  * The subject is the DID (it outlives handles). Evidence is empty: everything is fetched from the
  * account's own repository, so deleting the record (removing the proof here does) makes re-checks fail.
- * See docs/wisps/3xx-atproto.md and docs/lexicons/tools.ghostly.proof.json.
+ * See docs/wisps/312-atproto.md and docs/lexicons/tools.ghostly.proof.json.
  */
 export type AtprotoEvidence = Record<string, never>;
 

@@ -8,7 +8,7 @@ import type { StoredMessage } from "../src/shared/types";
 // covers: chat.tasks-board
 
 /**
- * The card index (WISP 4xx · Status Cards § The Tasks board): the messages store indexes the rows that carry a card,
+ * The card index (WISP 405 · Status Cards § The Tasks board): the messages store indexes the rows that carry a card,
  * so the Tasks board reads every task and routine of the profile, from its 1:1 chats, private groups and communities,
  * without reading a chat's history. The index follows the rows: an edit, a deleted message, a deleted chat or group.
  */

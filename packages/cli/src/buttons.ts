@@ -7,7 +7,7 @@ import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
- * Message buttons (WISP 4xx · Message Buttons), the bot's side: a message whose text is the question, with up to six
+ * Message buttons (WISP 406 · Message Buttons), the bot's side: a message whose text is the question, with up to six
  * buttons under it (`send --button yes:Yes`). A press comes back as a reply whose text is the button's label; the
  * engine marks it (`press`) and `listen` says `button.pressed`. `button update` then shows the answer (`chosen`) and
  * closes the buttons, by editing the message with the same buttons.
@@ -157,8 +157,8 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
 }
 
 export const BUTTON_METHODS: Record<string, Method> = {
-  /** WISP 4xx · Message Buttons: a press on a button of someone else's message, as the app's tap. */
+  /** WISP 406 · Message Buttons: a press on a button of someone else's message, as the app's tap. */
   "button.press": pressButton,
-  /** WISP 4xx · Message Buttons: the answer chosen on a question of mine, its buttons closed, or its text changed. */
+  /** WISP 406 · Message Buttons: the answer chosen on a question of mine, its buttons closed, or its text changed. */
   "button.update": updateButtons,
 };

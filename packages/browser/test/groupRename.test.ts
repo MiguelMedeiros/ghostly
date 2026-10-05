@@ -4,7 +4,7 @@ import { Groups, type GroupsHost } from "../src/engine/groups";
 // covers: groups.rename
 
 /**
- * A group's name (WISP 9xx § Metadata) through the real community engine on headless peers: the admin
+ * A group's name (WISP 903 § Metadata) through the real community engine on headless peers: the admin
  * renames it beside the picture, members get it through the hubs, someone let in by a member while the
  * admin is away is told it by the welcome and gets the statement at their first sync, and each rename
  * leaves a line. The mesh profile's engine path is in `groups.test.ts`.

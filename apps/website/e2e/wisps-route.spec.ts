@@ -97,6 +97,12 @@ for (const [from, to] of [
   ["/docs/anything", "/wisps"],
   ["/wisps/readme", "/wisps"],
   ["/developers/wisps/readme", "/wisps"],
+  // A WISP whose number was "xx" lands on its number (numbering.json, next.config.ts).
+  ["/wisps/4xx-status-cards", "/wisps/405-status-cards"],
+  ["/wisps/3xx-did", "/wisps/311-did"],
+  ["/wisps/3xx-did-dht", "/wisps/310-did-dht"],
+  ["/wisps/11xx-headless", "/wisps/1100-headless"],
+  ["/developers/wisps/9xx-group-mesh", "/wisps/902-group-mesh"],
 ]) {
   test(`${from} redirects permanently to ${to}`, async ({ request }) => {
     const res = await request.get(from, { maxRedirects: 0 });

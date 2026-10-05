@@ -7,7 +7,7 @@ import { CliError } from "./errors";
 import { groupJson } from "./views";
 
 /**
- * Group administration and pictures (WISP 11xx, phase 3): what the app's group menu and profile screen do. The
+ * Group administration and pictures (WISP 1100, phase 3): what the app's group menu and profile screen do. The
  * engine enforces who may do what (the admin); these check the arguments and name members.
  */
 

@@ -41,13 +41,13 @@ export const PIN_CAPABILITY = "pin/1";
 
 /**
  * Status cards: this app shows a message's card (`sc`) and takes a card message's edits past the text's 100, which an
- * older app would drop (WISP 4xx · Status Cards, `statusCards.ts`). A card itself needs nothing: older apps show its text.
+ * older app would drop (WISP 405 · Status Cards, `statusCards.ts`). A card itself needs nothing: older apps show its text.
  */
 export const STATUS_CARD_CAPABILITY = "status-card/1";
 
 /**
  * Message buttons: this app shows a message's buttons (a card of kind `buttons`) and presses them with a reply naming
- * the button (WISP 4xx · Message Buttons). Nothing is gated on it: an older app shows the text and sends replies, and
+ * the button (WISP 406 · Message Buttons). Nothing is gated on it: an older app shows the text and sends replies, and
  * a press reads as an ordinary reply there. It tells a bot whether its contact can press at all.
  */
 export const BUTTONS_CAPABILITY = "buttons/1";

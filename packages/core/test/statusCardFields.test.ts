@@ -4,7 +4,7 @@ import * as shipped from "./fixtures/statusCards-1.0.1";
 // covers: chat.status-cards.wire
 
 /*
- * The task card's optional fields (WISP 4xx · Status Cards § A task): a pull request's state and checks, tags and a
+ * The task card's optional fields (WISP 405 · Status Cards § A task): a pull request's state and checks, tags and a
  * parent. Each bound, the sender's rule, the fallback text, and what an app from before them does with such a card:
  * the reader Ghostly 1.0.1 shipped (frozen in fixtures/) shows the card exactly as it always did.
  */

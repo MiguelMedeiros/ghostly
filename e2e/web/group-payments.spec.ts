@@ -3,7 +3,7 @@ import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
 
 /**
- * Payments in a group (WISP 9xx § Payments), three browsers and a real Cashu mint (the test mint, or `E2E_MINT_URL`,
+ * Payments in a group (WISP 902 § Payments), three browsers and a real Cashu mint (the test mint, or `E2E_MINT_URL`,
  * see support/mint.ts). Alice asks Bob; Carol sees the request and then sees it paid, though the ecash went only
  * between the two. Then Alice asks the whole group: Carol pays it, once, and everyone sees who did.
  */
@@ -65,7 +65,7 @@ test.describe("group payments", () => {
     await alice.page.getByTestId("sidebar-new-more").click();
     await alice.page.getByTestId("new-group").click();
     await alice.page.getByTestId("new-group-name").fill("Lunch");
-    // A private group (group-mesh/1): payments exist only there (WISP 9xx § Payments).
+    // A private group (group-mesh/1): payments exist only there (WISP 902 § Payments).
     await alice.page.getByTestId("new-group-kind-mesh").click();
     await alice.page.getByTestId("new-group-create").click();
     const url = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();

@@ -3,7 +3,7 @@ import { MESSAGE_CLOCK_SKEW_MS } from "./messageTime";
 import { sanitizeDisplayText } from "./text";
 
 /*
- * Status cards (WISP 4xx · Status Cards): a bot's task or routine, shown as a small card instead of a text. A card rides
+ * Status cards (WISP 405 · Status Cards): a bot's task or routine, shown as a small card instead of a text. A card rides
  * as `sc` beside the text of a message on every path that carries text with fields of its own (the live session's
  * `paired-message` and `paired-edit`, a private group's sealed box, a community's payload and its edit frame), and the
  * text is its fallback: what an app without cards, the DHT floor and a held item show. The bot keeps a card current by
@@ -43,7 +43,7 @@ export const STATUS_CARD_LIMITS = {
   /** Labels on a task, and a label's length in characters. */
   tags: 3,
   tag: 24,
-  /** Buttons on a message (WISP 4xx · Message Buttons). */
+  /** Buttons on a message (WISP 406 · Message Buttons). */
   buttons: 6,
   /** A button's id: what a press names. */
   buttonId: 32,
@@ -122,13 +122,13 @@ export interface RoutineCard {
 }
 
 /**
- * A button under a bot's message (WISP 4xx · Message Buttons). `once`: a press on it answers the question for that
+ * A button under a bot's message (WISP 406 · Message Buttons). `once`: a press on it answers the question for that
  * person, and their app offers none of the buttons again; a button without it may be pressed again.
  */
 export interface CardButton { id: string; label: string; style?: ButtonStyle; once?: true }
 
 /**
- * Buttons under a bot's message (WISP 4xx · Message Buttons): unlike a task or a routine, the message's text shows
+ * Buttons under a bot's message (WISP 406 · Message Buttons): unlike a task or a routine, the message's text shows
  * with them, and is also what an app without buttons shows (so it should say how to answer in words). `chosen` is the
  * answer the bot took, marked for everyone; `closed`: no button takes a press any more.
  */
@@ -149,7 +149,7 @@ export const BUTTON_ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,31}$/;
 const CRON = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
 
 /**
- * Whether a typed answer is a button's label or id (WISP 4xx · Message Buttons): ignoring case and spaces at the ends.
+ * Whether a typed answer is a button's label or id (WISP 406 · Message Buttons): ignoring case and spaces at the ends.
  * Not the device's locale's case: the presser's and the author's apps must agree ("I" is not "ı" anywhere).
  */
 export const sameButtonText = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();

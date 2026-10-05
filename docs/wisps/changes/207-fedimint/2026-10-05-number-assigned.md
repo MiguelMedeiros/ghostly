@@ -1,0 +1,1 @@
+The number is assigned now that the feature ships in the app: this draft is WISP 207 (it was 2xx, file 2xx-fedimint.md). The old file and its website address forward here. Wire identifiers and behavior are unchanged.

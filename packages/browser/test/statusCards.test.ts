@@ -7,7 +7,7 @@ import { FakeNativeNet } from "./helpers/fakeNative";
 // covers: chat.status-cards.wire
 
 /**
- * Status cards in the engine (WISP 4xx · Status Cards): a real node and its contact's link over a stand-in for Iroh. A
+ * Status cards in the engine (WISP 405 · Status Cards): a real node and its contact's link over a stand-in for Iroh. A
  * card goes beside its fallback text, an update is an edit carrying the card of its version, and past a text's hundred
  * edits a card's update goes only to a contact whose app shows cards.
  */

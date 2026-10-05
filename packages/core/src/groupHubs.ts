@@ -5,7 +5,7 @@ import { COMMUNITY_TOPOLOGY, freshHubs, rankHubs, type Hub } from "./communityRe
 import { MEMBER_KEY } from "./groupCommits";
 
 /**
- * Hubs in a private (mesh) group (WISP 9xx · Group Mesh § Hubs). Up to `threshold` members a group is a full mesh, as
+ * Hubs in a private (mesh) group (WISP 902 · Group Mesh § Hubs). Up to `threshold` members a group is a full mesh, as
  * before. Past it, members that stay online (the Desktop app and the CLI, or members the admin pins) become **hubs**:
  * they keep edges with every other hub and with the members that ask them, and pass on every frame they take. The
  * other members keep edges with `hubsPerMember` hubs only. Frames are author-signed and sealed under the epoch key, and

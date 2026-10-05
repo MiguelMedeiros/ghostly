@@ -24,7 +24,7 @@ export function metaLines(name: string, change: GroupMetaChange, group: string):
 }
 
 /**
- * Community groups (`group-community/1`, WISP 9xx · Group Community): a link anyone can open, any
+ * Community groups (`group-community/1`, WISP 903 · Group Community): a link anyone can open, any
  * member lets people in, and online members elect a few hubs through a sealed Pkarr beacon. A hub
  * keeps edges with other hubs and with the members that asked it in its lobby, and relays; a
  * member keeps edges with one or two hubs. Membership, keys and catch-up are `CommunitySession`'s;
@@ -184,7 +184,7 @@ interface Live {
   beacon: Hub[];
   /** Each hub's clock as its entry showed it. */
   hubClocks: HubClocks;
-  /** The newest message frame the beacon names (WISP 9xx § Head), as last read or written. */
+  /** The newest message frame the beacon names (WISP 903 § Head), as last read or written. */
   head: CommunityHead | null;
   lastBeaconRead: number;
   /** When the beacon was last read or written for good (`lastBeaconRead` also counts a reading that failed). */
@@ -443,7 +443,7 @@ export class Communities {
     return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
   }
 
-  /** An application frame to everyone in the group (WISP 9xx · Group Community § Payments). */
+  /** An application frame to everyone in the group (WISP 903 · Group Community § Payments). */
   async sendApp(groupId: string, frame: Record<string, unknown>): Promise<void> {
     const live = this.live.get(groupId);
     if (!live) throw new Error("You are not in this group yet");
@@ -451,7 +451,7 @@ export class Communities {
     if ("error" in result) throw new Error(result.error);
   }
 
-  /** An edit of my message, through the group like any frame (WISP 9xx · Group Community § Edits). An error when it cannot go now. */
+  /** An edit of my message, through the group like any frame (WISP 903 · Group Community § Edits). An error when it cannot go now. */
   async sendEdit(groupId: string, edit: GroupEdit): Promise<string | null> {
     const live = this.live.get(groupId);
     if (!live) return "You are not in this group yet";
@@ -890,7 +890,7 @@ export class Communities {
 
   /**
    * The members this hub may keep edges with: `hubCapacity`, or on an app with a budget of connections (a Mac, WISP
-   * 9xx · Group Mesh § Hubs, Budget) what its other groups and 1:1 chats leave (`peerRoom`), less its edges to the
+   * 902 · Group Mesh § Hubs, Budget) what its other groups and 1:1 chats leave (`peerRoom`), less its edges to the
    * other hubs and, for taking someone new (`entries`), its entry sessions.
    */
   private capacity(groupId: string, live: Live, now: number, entries = true): number {
@@ -933,7 +933,7 @@ export class Communities {
   }
 
   /**
-   * The newest message frame I hold, for the beacon's head (WISP 9xx § Head): what a member's other profile on the
+   * The newest message frame I hold, for the beacon's head (WISP 903 § Head): what a member's other profile on the
    * same device compares with what it took, to show that something new was said while it was not running.
    */
   private newestFrame(live: Live): CommunityHead | null {

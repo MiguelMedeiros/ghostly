@@ -77,7 +77,7 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf)
   if (original) {
     const from = original.sender === "me" ? "me" : "peer";
     const member = from === "peer" ? original.member ?? reply.member : undefined;
-    // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 4xx · Message Buttons).
+    // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 406 · Message Buttons).
     const snippet = reply.button && reply.snippet ? reply.snippet : messageSnippet(original);
     return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }

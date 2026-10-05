@@ -4,7 +4,7 @@ import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.hubs, groups.hubs.budget, groups.send, groups.catch-up, groups.remove-member, groups.leave
 
 /**
- * Hubs in a private group past 16 members (WISP 9xx · Group Mesh § Hubs), on headless engines (the real `Groups`,
+ * Hubs in a private group past 16 members (WISP 902 · Group Mesh § Hubs), on headless engines (the real `Groups`,
  * `MeshHubs` and `GroupSession`; Pkarr and links in memory, simulated clock). Members whose apps stay online (Desktop,
  * CLI: `staysOnline`) become hubs; the others keep edges with two of them; hubs pass every frame on.
  */
@@ -251,7 +251,7 @@ describe("hubs in a private group past 16 members", () => {
 });
 
 /**
- * A Mac's budget of connections (WISP 9xx · Group Mesh § Hubs, Budget): WKWebView opens only about 46 in one page, and
+ * A Mac's budget of connections (WISP 902 · Group Mesh § Hubs, Budget): WKWebView opens only about 46 in one page, and
  * past that a call does not connect, so the Desktop app on a Mac gives its groups 40 (`peerBudget`). Being a hub of a
  * group of 20 takes 19 edges; `heldElsewhere` stands for groups outside this world (31: the hub of a group of 32).
  */

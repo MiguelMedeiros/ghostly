@@ -7,7 +7,7 @@ identity proofs, shared web apps and voice calls. Every command prints JSON, and
 as one JSON event per line. `ghostly help <command>` (or `<command> --help`) prints a command's usage and options.
 
 - Every command, event and socket method: [packages/cli/README.md](../packages/cli/README.md).
-- The contract (runtime, local API, event stream, parity with the app): [WISP 11xx](wisps/11xx-headless.md).
+- The contract (runtime, local API, event stream, parity with the app): [WISP 1100](wisps/1100-headless.md).
 - For AI agents: [packages/cli/SKILL.md](../packages/cli/SKILL.md), installed as in [AI-AGENTS.md](AI-AGENTS.md).
 
 Status: available since 1.0. On npm as `@ghostlytools/cli`.
@@ -213,7 +213,7 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   bar and the pull request's size, which opens on a tap; apps without cards read a short text. `--pr-state open
   --pr-checks passing`, `--tag core` and `--parent <task>` say more for the Tasks board (a Review column, a checks mark,
   tag chips, parts stacked under their task); older apps ignore them. Updates merge, at
-  most one per card every 2.5 s ([WISP 4xx · Status Cards](wisps/4xx-status-cards.md)). A routine the same way:
+  most one per card every 2.5 s ([WISP 405 · Status Cards](wisps/405-status-cards.md)). A routine the same way:
   `ghostly routine send <chat|group> --name "…" --schedule "every day 01:00" --next <date>`, then
   `ghostly routine update <chat|group> <routine> --run ok` after each run.
 - Buttons: `ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --once` puts
@@ -221,7 +221,7 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
   takes no more. Someone else's question is answered with `ghostly button press <chat> <message> <button>`, as a
   tap in the app. The text is what apps without buttons show, so it says how to answer in words
-  ([WISP 4xx · Message Buttons](wisps/4xx-message-buttons.md)). A typed answer is matched by label or id, ignoring
+  ([WISP 406 · Message Buttons](wisps/406-message-buttons.md)). A typed answer is matched by label or id, ignoring
   case, so two labels alike (`Yes` and `yes`) or a label that is another button's id are refused (exit 2).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
@@ -273,7 +273,7 @@ so without the variable, set `relays` before the first `daemon`
 ## Hubs of large private groups
 
 A daemon stays online, so in a private group past 16 members it offers to be a hub, as the Desktop app does: the
-members connect to it and it passes the group's messages on ([WISP 9xx · Group Mesh § Hubs](wisps/9xx-group-mesh.md#hubs)).
+members connect to it and it passes the group's messages on ([WISP 902 · Group Mesh § Hubs](wisps/902-group-mesh.md#hubs)).
 `GHOSTLY_HUB=0` keeps a daemon a plain member (on a laptop that sleeps, say). The admin decides over both with
 `ghostly group hub <group> <member> --pin | --exclude | --auto`.
 

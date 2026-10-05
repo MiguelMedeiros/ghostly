@@ -153,22 +153,22 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "2xx-spark",
     "id": "206",
     "oldFile": "2xx-spark.md",
-    "file": "2xx-spark.md",
+    "file": "206-spark.md",
     "kind": "Adapter",
-    "displayNumber": "2xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "206",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "2xx-fedimint",
     "id": "207",
     "oldFile": "2xx-fedimint.md",
-    "file": "2xx-fedimint.md",
+    "file": "207-fedimint.md",
     "kind": "Adapter",
-    "displayNumber": "2xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "207",
+    "numberAssignment": "defined"
   },
   {
     "oldId": "09",
@@ -207,40 +207,40 @@
     "numberAssignment": "unassigned"
   },
   {
-    "oldId": "none",
+    "oldId": "3xx-domain",
     "id": "304",
     "oldFile": "3xx-domain.md",
-    "file": "3xx-domain.md",
+    "file": "304-domain.md",
     "kind": "Adapter",
-    "displayNumber": "3xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "304",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "3xx-openpgp",
     "id": "305",
     "oldFile": "3xx-openpgp.md",
-    "file": "3xx-openpgp.md",
+    "file": "305-openpgp.md",
     "kind": "Adapter",
-    "displayNumber": "3xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "305",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "3xx-bitcoin",
     "id": "306",
     "oldFile": "3xx-bitcoin.md",
-    "file": "3xx-bitcoin.md",
+    "file": "306-bitcoin.md",
     "kind": "Adapter",
-    "displayNumber": "3xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "306",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "3xx-ssh",
     "id": "307",
     "oldFile": "3xx-ssh.md",
-    "file": "3xx-ssh.md",
+    "file": "307-ssh.md",
     "kind": "Adapter",
-    "displayNumber": "3xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "307",
+    "numberAssignment": "defined"
   },
   {
     "oldId": "none",
@@ -252,40 +252,40 @@
     "numberAssignment": "unassigned"
   },
   {
-    "oldId": "none",
+    "oldId": "3xx-nostr-social",
     "id": "309",
     "oldFile": "3xx-nostr-social.md",
-    "file": "3xx-nostr-social.md",
+    "file": "309-nostr-social.md",
     "kind": "Adapter",
-    "displayNumber": "3xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "309",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "3xx-did-dht",
     "id": "310",
     "oldFile": "3xx-did-dht.md",
-    "file": "3xx-did-dht.md",
+    "file": "310-did-dht.md",
     "kind": "Contract",
-    "displayNumber": "3xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "310",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "3xx-did",
     "id": "311",
     "oldFile": "3xx-did.md",
-    "file": "3xx-did.md",
+    "file": "311-did.md",
     "kind": "Adapter",
-    "displayNumber": "3xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "311",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "3xx-atproto",
     "id": "312",
     "oldFile": "3xx-atproto.md",
-    "file": "3xx-atproto.md",
+    "file": "312-atproto.md",
     "kind": "Adapter",
-    "displayNumber": "3xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "312",
+    "numberAssignment": "defined"
   },
   {
     "oldId": "13",
@@ -324,31 +324,31 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "4xx-store-and-forward",
     "id": "404",
     "oldFile": "4xx-store-and-forward.md",
-    "file": "4xx-store-and-forward.md",
+    "file": "404-store-and-forward.md",
     "kind": "Profile",
-    "displayNumber": "4xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "404",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "4xx-status-cards",
     "id": "405",
     "oldFile": "4xx-status-cards.md",
-    "file": "4xx-status-cards.md",
+    "file": "405-status-cards.md",
     "kind": "Profile",
-    "displayNumber": "4xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "405",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "4xx-message-buttons",
     "id": "406",
     "oldFile": "4xx-message-buttons.md",
-    "file": "4xx-message-buttons.md",
+    "file": "406-message-buttons.md",
     "kind": "Profile",
-    "displayNumber": "4xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "406",
+    "numberAssignment": "defined"
   },
   {
     "oldId": "14",
@@ -441,22 +441,22 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "9xx-group-mesh",
     "id": "902",
     "oldFile": "9xx-group-mesh.md",
-    "file": "9xx-group-mesh.md",
+    "file": "902-group-mesh.md",
     "kind": "Profile",
-    "displayNumber": "9xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "902",
+    "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "9xx-group-community",
     "id": "903",
     "oldFile": "9xx-group-community.md",
-    "file": "9xx-group-community.md",
+    "file": "903-group-community.md",
     "kind": "Profile",
-    "displayNumber": "9xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "903",
+    "numberAssignment": "defined"
   },
   {
     "oldId": "22",
@@ -495,13 +495,13 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "11xx-headless",
     "id": "1100",
     "oldFile": "11xx-headless.md",
-    "file": "11xx-headless.md",
+    "file": "1100-headless.md",
     "kind": "Contract",
-    "displayNumber": "11xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "1100",
+    "numberAssignment": "defined"
   },
   {
     "oldId": "none",

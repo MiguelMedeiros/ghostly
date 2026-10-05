@@ -3,8 +3,8 @@ import { HubClocks } from "../src/engine/hubClocks";
 // covers: groups.hubs, groups.protocol.community-topology
 
 /**
- * How a reader learns a hub's clock from the beacon (WISP 9xx · Group Community § Topology, Clocks that differ; WISP
- * 9xx · Group Mesh § Hubs): the private group's hubs and the community's share it. `t`: my clock; a hub two minutes
+ * How a reader learns a hub's clock from the beacon (WISP 903 · Group Community § Topology, Clocks that differ; WISP
+ * 902 · Group Mesh § Hubs): the private group's hubs and the community's share it. `t`: my clock; a hub two minutes
  * ahead dates its entries `t + 120 s`.
  */
 const AHEAD = 120_000;

@@ -7,7 +7,7 @@ import {
 
 /**
  * OpenPGP keys, signed with the person's own gpg — a YubiKey or another OpenPGP card works unchanged,
- * since gpg drives it. The subject is the primary key's fingerprint. See docs/wisps/3xx-openpgp.md.
+ * since gpg drives it. The subject is the primary key's fingerprint. See docs/wisps/305-openpgp.md.
  */
 
 /** A v4 (40 hex) or v6 (64 hex) fingerprint, as gpg prints it or not: spaces and 0x are dropped. */

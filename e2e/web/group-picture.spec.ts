@@ -1,7 +1,7 @@
 import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /**
- * A group's picture (WISP 9xx § Metadata) between three browsers that never pair: the admin sets it
+ * A group's picture (WISP 902 § Metadata) between three browsers that never pair: the admin sets it
  * and a member sees it everywhere the group is shown; someone who joins later by the link sees it
  * without the admin doing anything; the admin changes it, then removes it, and everyone follows.
  */

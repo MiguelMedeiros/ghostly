@@ -2,7 +2,7 @@ import { MENTION_EVERYONE, validMentions, wireMentions, type GroupMention } from
 import { WAKE_INTERVAL_MS, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 
 /**
- * Wake-up push in a private group (WISP 9xx · Group Mesh § Wake-up push): a member whose web app is closed is woken
+ * Wake-up push in a private group (WISP 902 · Group Mesh § Wake-up push): a member whose web app is closed is woken
  * when a message names it. `wake/1` as a 1:1 chat has it (WISP 401 § Wake-up push), carried on the group's edges: each
  * member shares its subscription with each other member on their own edge, under a token of that edge alone, and
  * only in a group it has not muted:

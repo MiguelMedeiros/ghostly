@@ -6,7 +6,7 @@ import type { GroupTypingView } from "../shared/types";
 import type { GroupsHost } from "./groups";
 
 /**
- * Typing in private groups (WISP 9xx · Group Mesh § Typing): this side's word goes sealed on every open edge to a
+ * Typing in private groups (WISP 902 · Group Mesh § Typing): this side's word goes sealed on every open edge to a
  * member, and each member's word is shown until its `stop`, its message, or 6 s without a new `start`. Never stored.
  * Community groups do not carry it yet (their frames are all stored messages).
  */

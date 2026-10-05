@@ -7,7 +7,7 @@ import { BITCOIN_PROOF_LIMITS, BITCOIN_WALLET_GUIDES, guidesFor, type BitcoinWal
  * wallet, and pastes the signature. BIP-322 (simple or full) or, for a legacy P2PKH address only, the
  * legacy `signmessage` format; checked on this device by `verifyBitcoinMessage` (@ghostly/core, pinned to
  * BIP-322 2.0.0). No blockchain lookup: the proof says nothing about coins. See
- * docs/wisps/3xx-bitcoin.md.
+ * docs/wisps/306-bitcoin.md.
  *
  * The address's own prefix says its network: a proof for a test-network address (tb1…, bcrt1…, m…, n…, 2…)
  * is verified as such and labelled "test network" wherever it is shown.

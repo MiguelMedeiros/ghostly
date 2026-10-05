@@ -1,7 +1,7 @@
 import type { Level } from "@/lib/status";
 
 /**
- * /cli: the headless `ghostly` (@ghostlytools/cli, packages/cli, WISP 11xx). Short on
+ * /cli: the headless `ghostly` (@ghostlytools/cli, packages/cli, WISP 1100). Short on
  * purpose: a pitch, the install line, four commands, a bot and links. The long
  * version is docs/CLI.md. Checked against packages/cli on `main`.
  */
@@ -114,7 +114,7 @@ export const cli = {
     guide: "Guide",
     reference: "Every command and event",
     agents: "AI agents",
-    wisp: "WISP 11xx: the contract",
+    wisp: "WISP 1100: the contract",
   },
   legacy: {
     title: "Looking for ghostly-cli?",

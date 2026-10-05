@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 const headlessEnv = (): NodeJS.ProcessEnv => ({ GHOSTLY_DHT: "0", ...process.env });
 
 /**
- * The headless Ghostly (`packages/cli`, WISP 11xx) in a test: built once per run before the workers start
+ * The headless Ghostly (`packages/cli`, WISP 1100) in a test: built once per run before the workers start
  * (support/headlessBuild.ts, the configs' globalSetup), one profile per bot in a folder of its own, pointed at the
  * test's Pkarr relay. Its commands answer JSON; `listen` streams events.
  */

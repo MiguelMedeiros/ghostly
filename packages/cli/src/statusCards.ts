@@ -5,7 +5,7 @@ import { CliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
- * Status cards (WISP 4xx · Status Cards): a bot's task or routine, sent as a message with a card and kept current by
+ * Status cards (WISP 405 · Status Cards): a bot's task or routine, sent as a message with a card and kept current by
  * editing it. A routine's run (`run`) becomes its last run and the newest of its recent runs.
  * The engine checks every card by the sender's rule and writes its fallback text; this is the bot's side of it: a card
  * built from flags or JSON, found again by its id, merged with an update, and paced, one update per card every
@@ -94,7 +94,7 @@ function answer(target: Target, kind: Kind, id: string, messageId: string, extra
 }
 
 /**
- * A task's parent is another task of mine in the same chat or group (WISP 4xx · Status Cards § A task): one that is
+ * A task's parent is another task of mine in the same chat or group (WISP 405 · Status Cards § A task): one that is
  * not there is refused here, with its name, rather than sent to stand alone on every board (a reader keeps the field
  * and shows the task ungrouped). Send the parent first.
  */
@@ -150,7 +150,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   const id = str(params, kind, true);
   const patch = fieldsOf(params);
   const message = await cardMessage(ctx, target, kind, id);
-  // A card message takes `STATUS_CARD_LIMITS.edits` updates (WISP 4xx · Status Cards); past them, a new card goes on.
+  // A card message takes `STATUS_CARD_LIMITS.edits` updates (WISP 405 · Status Cards); past them, a new card goes on.
   if ((message.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits)
     throw new CliError("refused", `This ${kind}'s message took ${STATUS_CARD_LIMITS.edits} updates, the most one takes: start a new card with ghostly ${kind} send (a new --id, or the same one: the newest card of an id stands for it)`, { messageId: message.id, edits: message.edit!.seq });
   const pace = paceOf(ctx, `${target.linkId}\n${message.id}`);
@@ -206,7 +206,7 @@ export async function flushCardUpdates(ctx: ApiContext): Promise<void> {
 }
 
 export const STATUS_CARD_METHODS: Record<string, Method> = {
-  /** WISP 4xx · Status Cards: a task card in a chat or a group; the answer names the task's id and its message. */
+  /** WISP 405 · Status Cards: a task card in a chat or a group; the answer names the task's id and its message. */
   "task.send": (ctx, params) => sendCard(ctx, params, "task"),
   /** A task's update: the fields given, merged over its latest state, paced one per `CARD_UPDATE_GAP_MS`. */
   "task.update": (ctx, params) => updateCard(ctx, params, "task"),

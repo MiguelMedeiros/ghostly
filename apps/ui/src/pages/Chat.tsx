@@ -107,7 +107,7 @@ interface ChatProps {
 
 /**
  * A text of mine this chat can edit (WISP 400 § Edits): one the engine sent under its wire id, not a file, a payment or a
- * notice, nor a status card, which only its bot updates (WISP 4xx · Status Cards).
+ * notice, nor a status card, which only its bot updates (WISP 405 · Status Cards).
  */
 function editableText(message: ChatMessage): boolean {
   return message.sender === "me" && !!message.ref && message.id === `me_${message.ref}` && !message.file && !message.paymentId && !message.systemEvent && !message.callEvent && !message.card;
@@ -375,7 +375,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
   const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
-  // A bot's buttons (WISP 4xx · Message Buttons): which one was chosen, and whether I may still press, from my replies.
+  // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -460,7 +460,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [pinNote, announcePinMove] = usePinMoveNote();
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
-  // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards). Found over the whole timeline, so a
+  // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards). Found over the whole timeline, so a
   // run is the same whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(timeline, r => r.kind === "message" ? r.message : undefined), [timeline]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
@@ -658,7 +658,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined} />
           <CallButtons blocked={webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
             onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
-          {/* Only while a bot's card is here (WISP 4xx · Status Cards). */}
+          {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={messages} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>

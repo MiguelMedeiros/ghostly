@@ -5,7 +5,7 @@ import { expect, link, openProfilePage, test, type Peer } from "../support/fixtu
 // A private group of three browsers where one member's network lets no direct connection through (a VPN's NAT, a
 // firewall): its WebRTC gathers candidates, exchanges them, and nothing connects. Every app here has WebRTC, so the
 // group's links ran nothing else and that member stayed unreachable. Now a link whose WebRTC connects nothing goes on
-// over Iroh through its relay (WISP 9xx § Transports), and everyone reads everyone. The relay is the e2e infra's.
+// over Iroh through its relay (WISP 902 § Transports), and everyone reads everyone. The relay is the e2e infra's.
 test.skip(!process.env.GHOSTLY_IROH_RELAY_URL, "Needs the e2e infra's Iroh relay (npm run e2e:infra:use)");
 
 const groupChat = (peer: Peer) => peer.page.getByTestId("group-chat");

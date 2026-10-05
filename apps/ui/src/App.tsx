@@ -68,7 +68,7 @@ function useWakeOnReturn() {
 }
 
 /**
- * The peer holds items for away contacts in this profile's S3 storage (WISP 4xx), the one set up under
+ * The peer holds items for away contacts in this profile's S3 storage (WISP 404), the one set up under
  * Profile → Backups: whenever that changes, the peer is told, credentials and space alike, and told when
  * it goes. The space is chosen here once, as a backup would choose it.
  */

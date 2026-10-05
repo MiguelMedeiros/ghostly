@@ -6,7 +6,7 @@ import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./suppo
 
 /**
  * A community made by this CLI, joined by an older one, and the other way round: both keep the wire of before group
- * links could go native (WISP 9xx § Transports). Two apps that have WebRTC (the CLI has it, through libdatachannel)
+ * links could go native (WISP 902 § Transports). Two apps that have WebRTC (the CLI has it, through libdatachannel)
  * never publish `_tr`, so an app from before that knows nothing of it reaches this one over WebRTC as it always did.
  *
  * `GHOSTLY_OLD_CLI=<path to ghostly.mjs>` runs the older side as that build (the 1.0.0 package); without it, the older

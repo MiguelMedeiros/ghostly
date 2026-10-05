@@ -6,7 +6,7 @@ import { CallAudio, type OpusCodec } from "./audio";
 import type { CallRate, PlaybackQueue } from "./pcm";
 
 /**
- * A call's media on Node (WISP 601, WISP 11xx § Calls): libdatachannel (node-datachannel, the same native module
+ * A call's media on Node (WISP 601, WISP 1100 § Calls): libdatachannel (node-datachannel, the same native module
  * the CLI's chats use) runs ICE, DTLS-SRTP and RTP; Opus is libopus built to WebAssembly (opusscript). Audio only:
  * a call's video section is answered and nothing is sent or read on it.
  */

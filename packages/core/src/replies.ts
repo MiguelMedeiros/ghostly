@@ -12,7 +12,7 @@ import { sanitizeDisplayText } from "./text";
 /**
  * On the wire (`r`): `i` the original's id in this chat, `s` a line of it, `f` who wrote it. In a paired chat `f` is
  * `"sender"` (the reply's author wrote the original) or `"recipient"` (the reader did); in a group, a member key.
- * `b`: a button press (WISP 4xx · Message Buttons), the id of the original's button this reply presses; its text is
+ * `b`: a button press (WISP 406 · Message Buttons), the id of the original's button this reply presses; its text is
  * the button's label. An app from before buttons drops `b` and shows an ordinary reply.
  */
 export interface WireReply { i: string; s: string; f: string; b?: string }

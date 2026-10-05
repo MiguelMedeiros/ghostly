@@ -65,7 +65,7 @@ export function history(count: number, start: number, lean = false) {
       base.file = { id: `picture-${i}`, name: `moon-${i}.jpg`, size: 120_000, mime: "image/jpeg", image: { width: 800, height: 600 } };
     } else if (kind === 5) text = i % 20 === 5 ? (lean ? `${line(i, 8)}\n${line(i + 1, 6)}` : `${line(i, 30)}\n${line(i + 1, 25)}\n${line(i + 2, 12)}`) : line(i, 6);
     else if (i % 60 === 28) {
-      // A bot's task card (WISP 4xx · Status Cards), its text the fallback.
+      // A bot's task card (WISP 405 · Status Cards), its text the fallback.
       const status = (["running", "done", "failed", "blocked"] as const)[(i / 60 | 0) % 4];
       base.card = {
         kind: "task", id: `task-${i}`, title: `Task ${i}: ${line(i, 4)}`, status, progress: (i * 7) % 100, step: line(i + 1, 5),

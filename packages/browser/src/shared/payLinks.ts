@@ -1,5 +1,5 @@
 /**
- * The desk's links to members of a community group (WISP 9xx · Group Community § Payments): payments with a member
+ * The desk's links to members of a community group (WISP 903 · Group Community § Payments): payments with a member
  * go through the group, sealed to them, over `cpay:<group>:<member>`; a request to everyone over `cpay:<group>`.
  */
 export const pairLinkId = (groupId: string, member: string) => `cpay:${groupId}:${member}`;

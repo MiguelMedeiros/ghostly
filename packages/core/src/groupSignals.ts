@@ -5,7 +5,7 @@ import { createRelayPayload, newerPacket, parseRelayPayload, RELAY_PAYLOAD_MAX_B
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /**
- * Edge signaling through members (WISP 9xx · Group Mesh § Signaling through members). An edge of a private group is a
+ * Edge signaling through members (WISP 902 · Group Mesh § Signaling through members). An edge of a private group is a
  * paired link, and its presence, offer and answer are Pkarr packets: each costs relay requests, of which an app allows
  * itself 30 a minute per relay, and each is seen at the other end's next poll. A member that joins a group of eight
  * opens seven edges at once, and the admin reads the link's knocks meanwhile: the minute was spent before the edges

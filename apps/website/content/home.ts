@@ -327,7 +327,7 @@ export const home = {
       },
       {
         id: "domain",
-        wisp: "3xx-domain",
+        wisp: "304-domain",
         name: "Domain",
         kind: "your domain",
         body: "Proves you control a domain, with a DNS record or a small file on its website.",
@@ -335,7 +335,7 @@ export const home = {
       },
       {
         id: "openpgp",
-        wisp: "3xx-openpgp",
+        wisp: "305-openpgp",
         name: "OpenPGP",
         kind: "PGP key",
         body: "Proves you hold an OpenPGP key: sign once with your own gpg, and a YubiKey works too.",
@@ -343,7 +343,7 @@ export const home = {
       },
       {
         id: "bitcoin",
-        wisp: "3xx-bitcoin",
+        wisp: "306-bitcoin",
         name: "Bitcoin",
         kind: "Bitcoin address",
         body: "Proves you can sign with the key behind a Bitcoin address, with one message signature from your wallet.",
@@ -351,7 +351,7 @@ export const home = {
       },
       {
         id: "ssh",
-        wisp: "3xx-ssh",
+        wisp: "307-ssh",
         name: "SSH",
         kind: "SSH key",
         body: "Proves you hold an SSH key, security keys included: sign once with ssh-keygen.",
@@ -359,7 +359,7 @@ export const home = {
       },
       {
         id: "ssh-github",
-        wisp: "3xx-ssh",
+        wisp: "307-ssh",
         name: "GitHub",
         kind: "SSH key on GitHub",
         body: "Proves an SSH key your GitHub account lists is yours, with no GitHub login.",
@@ -367,7 +367,7 @@ export const home = {
       },
       {
         id: "ssh-gitlab",
-        wisp: "3xx-ssh",
+        wisp: "307-ssh",
         name: "GitLab",
         kind: "SSH key on GitLab",
         body: "Proves an SSH key your GitLab account lists is yours, with no GitLab login.",
@@ -375,7 +375,7 @@ export const home = {
       },
       {
         id: "did",
-        wisp: "3xx-did",
+        wisp: "311-did",
         name: "DID",
         kind: "decentralized ID",
         body: "Proves you control a decentralized identifier: did:key, did:jwk, did:dht or did:web.",
@@ -383,7 +383,7 @@ export const home = {
       },
       {
         id: "atproto",
-        wisp: "3xx-atproto",
+        wisp: "312-atproto",
         name: "Bluesky",
         kind: "AT Protocol account",
         body: "Proves you control a Bluesky (AT Protocol) account, with one record in its own repository.",

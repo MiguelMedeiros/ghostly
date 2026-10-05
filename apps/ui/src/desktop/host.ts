@@ -218,7 +218,7 @@ function serveServiceWindows(server: EngineServer): void {
 }
 
 /**
- * WKWebView opens about 46 WebRTC connections in one page, and no more (WISP 9xx · Group Mesh § Cost per member): on a
+ * WKWebView opens about 46 WebRTC connections in one page, and no more (WISP 902 · Group Mesh § Cost per member): on a
  * Mac, groups and 1:1 chats over WebRTC hold at most 40, and the rest stay for calls. WebKitGTK (Linux) has no WebRTC in the page,
  * and WebView2 (Windows) no limit this low.
  */

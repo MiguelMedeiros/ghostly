@@ -2,7 +2,7 @@ import { TYPING_REFRESH_MS, type TypingKind } from "@ghostly/core";
 import { node, type ApiContext } from "./apiKit";
 
 /**
- * `typing --for` and `group typing --for`: a `start` holds 6 s on the other side (WISP 401 § Typing, WISP 9xx · Group
+ * `typing --for` and `group typing --for`: a `start` holds 6 s on the other side (WISP 401 § Typing, WISP 902 · Group
  * Mesh § Typing), so the daemon says it again until the time is up, a message goes to that chat or group, or a
  * `--stop`. The engine sends a `start` at most once per refresh, counted from when the last one went: asking every half
  * refresh missed the tick at 3 s by a millisecond about half the time, so a start went every 4.5 s, 1.5 s inside the

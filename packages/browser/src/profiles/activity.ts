@@ -123,7 +123,7 @@ export function nostrPost(note: NostrNote): PublicPost {
 
 /**
  * Nostr: kind-1 notes and the kind-3 follow list of exactly the proven key, from the relays in the person's settings
- * (never relays named in events, hints or NIP-65 lists: docs/wisps/3xx-nostr-social.md). Replies are left out; a page
+ * (never relays named in events, hints or NIP-65 lists: docs/wisps/309-nostr-social.md). Replies are left out; a page
  * reads twice as many notes to find ten that are not. Followers cannot be listed without trusting a counting service.
  */
 export const nostrActivity: ActivityReader = {

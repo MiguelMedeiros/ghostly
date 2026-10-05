@@ -6,7 +6,7 @@ import { chatJson, chatMessageJson, groupJson, groupMessageJson } from "./views"
 import { paymentJson } from "./wallets";
 
 /**
- * The event stream (WISP 11xx § Event stream): what happened, derived from the engine's own events, one JSON object
+ * The event stream (WISP 1100 § Event stream): what happened, derived from the engine's own events, one JSON object
  * each, with a `seq` that grows across restarts and an `id` stable for the fact it reports.
  */
 export interface GhostlyEvent { seq: number; id: string; type: string; at: number; [field: string]: unknown }
@@ -162,7 +162,7 @@ export class EventHub {
       case "messages": this.messages(message.linkId, message.messages); break;
       // Only what changed: the same events as the whole history would give, and a deletion is named, not missing.
       case "message-changes": this.messages(message.linkId, message.messages, message.deleted); break;
-      // Calls (WISP 11xx § Calls): the call manager reports them (call.incoming, call.connected, call.ended).
+      // Calls (WISP 1100 § Calls): the call manager reports them (call.incoming, call.connected, call.ended).
       case "call-signal":
         for (const listener of this.callListeners) {
           try { listener(message.linkId, message.signal); } catch (error) { process.stderr.write(`ghostly: call error: ${error instanceof Error ? error.stack : String(error)}\n`); }
@@ -217,7 +217,7 @@ export class EventHub {
       const left = before.members.filter((key) => !shape.members.includes(key));
       if (joined.length || left.length) this.emit("group.members", `group.members:${id}:${this.now()}`, { group: id, joined, left });
       this.pinned("group", id, before.pin, shape.pin);
-      // A member started or stopped writing in a private group (WISP 9xx · Group Mesh § Typing), as `typing.*` in a chat.
+      // A member started or stopped writing in a private group (WISP 902 · Group Mesh § Typing), as `typing.*` in a chat.
       for (const [member, word] of Object.entries(shape.typing)) {
         const was = before.typing[member];
         if (was && was.kind === word.kind && was.status === word.status) continue;
@@ -356,21 +356,21 @@ export class EventHub {
         continue;
       }
       // A press the engine learned after the reply was first seen here: a group reply first held from a copy a member
-      // handed on without its reply box, which its author's whole copy completes (WISP 9xx · Group Mesh § Catch-up).
+      // handed on without its reply box, which its author's whole copy completes (WISP 902 · Group Mesh § Catch-up).
       if (message.sender === "peer" && message.press && !pressedIn(before)) this.pressed(chat, group, message, json);
       // A mention of me learned after the message was reported: a group message first held from a copy a member handed
-      // on without its author's whole signature, which the whole copy completes (WISP 9xx · Group Mesh § Catch-up), or
+      // on without its author's whole signature, which the whole copy completes (WISP 902 · Group Mesh § Catch-up), or
       // an edit that names me. Its `group.message` said no mention; this says it, once.
       if (group && mentionedIn(state) && !mentionedIn(before) && this.mentionsNoted)
         this.emit("group.mentioned", `group.mentioned:${group}:${message.id}`, { group, messageId: message.id, message: json });
       if (group) {
-        // A new text in a group (WISP 9xx § Edits): mine as made here, a member's as it came. Once per edit number.
+        // A new text in a group (WISP 902 § Edits): mine as made here, a member's as it came. Once per edit number.
         const [, edits] = splitState(state), [, edited] = splitState(before);
         if (edits > edited) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edits}`, { group, messageId: message.id, edits, message: json });
       } else {
         const [delivery, edits] = splitState(state), [was, edited] = splitState(before);
         // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number. The engine's
-        // own edit that sends a question's buttons again (WISP 4xx · Message Buttons) is none: same text, nobody's edit.
+        // own edit that sends a question's buttons again (WISP 406 · Message Buttons) is none: same text, nobody's edit.
         if (edits > edited && !(message.sender === "me" && message.edit?.restore)) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json });
         if (message.sender === "me" && delivery !== was)
           this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
@@ -388,7 +388,7 @@ export class EventHub {
   }
 
   /**
-   * A press on a button of a message of mine (WISP 4xx · Message Buttons), after the reply's own event: the question
+   * A press on a button of a message of mine (WISP 406 · Message Buttons), after the reply's own event: the question
    * (`messageId`), the button, its label, who pressed (`by`: the chat, or a group member's key), `name` (the chat's name
    * here, as `chat list` gives it: its label, else the contact's own name; a group member's roster name) and the reply
    * (`replyId`). `untrusted.name` is the name the person gave themselves, as an agent turn's: theirs to choose, so

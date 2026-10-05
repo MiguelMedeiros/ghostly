@@ -5,7 +5,7 @@ import agentPrompt from "@/lib/agent-prompt.json";
  * /developers/agents: what a bot can do in a Ghostly chat, how to connect one, and the prompt that does it for you
  * (docs/AI-AGENTS.md, #426 and #431). The prompt is written once, in docs/AI-AGENTS.md (scripts/agent-prompt.mjs cuts
  * it out). Every command here is one `ghostly help` lists (packages/cli/test/agentDocs.test.ts checks them); what a
- * card holds is WISP 4xx · Status Cards, linked, never restated.
+ * card holds is WISP 405 · Status Cards, linked, never restated.
  */
 
 const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/main";
@@ -34,8 +34,8 @@ export const LINKS = {
   readme: `${DOCS}/packages/cli/README.md`,
   turns: `${DOCS}/docs/CLI.md#agent-turns`,
   claude: `${DOCS}/packages/cli/examples/claude-code-agent.sh`,
-  cards: "/wisps/4xx-status-cards",
-  buttons: "/wisps/4xx-message-buttons",
+  cards: "/wisps/405-status-cards",
+  buttons: "/wisps/406-message-buttons",
 } as const;
 
 /** What works on dev, and what is planned (docs/wisps/ADAPTER-ROADMAP.md, "Agent connector"). */
@@ -161,8 +161,8 @@ export const agents = {
     copy: "Copy",
     copied: "Copied",
     note: "Cards and buttons come with ghostly {n}. ghostly help task and ghostly help send say whether yours has them.",
-    cards: "What a card holds: WISP 4xx · Status Cards",
-    buttons: "Buttons: WISP 4xx · Message Buttons",
+    cards: "What a card holds: WISP 405 · Status Cards",
+    buttons: "Buttons: WISP 406 · Message Buttons",
   },
   prompt: {
     eyebrow: "The prompt",
@@ -236,13 +236,13 @@ export const agents = {
     title: "Read more",
     skill: "Agent skill (SKILL.md)",
     guide: "Agents guide",
-    cards: "WISP 4xx · Status Cards",
-    buttons: "WISP 4xx · Message Buttons",
+    cards: "WISP 405 · Status Cards",
+    buttons: "WISP 406 · Message Buttons",
     cliGuide: "CLI guide",
     readme: "Every command (CLI README)",
     claude: "Claude Code example",
     cli: "The CLI",
-    wisp: "WISP 11xx: the contract",
+    wisp: "WISP 1100: the contract",
   },
 };
 

@@ -5,7 +5,7 @@ import { Mesh, clone } from "./support/groupMesh";
 // covers: groups.catch-up
 
 /*
- * Frames said again in a private group (WISP 9xx · Group Mesh § Catch-up): a member whose app was closed while someone
+ * Frames said again in a private group (WISP 902 · Group Mesh § Catch-up): a member whose app was closed while someone
  * was let in writes the moment it opens, under the epoch it last knew. The member let in meanwhile could never open
  * that frame (found by the 1.1 release-gate bug hunt: never delivered in 240 s). Once the writer has caught up and its
  * chain has settled, it seals the same text again, with `o` naming the first frame, under the newest epoch before any

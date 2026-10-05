@@ -4,7 +4,7 @@ import { MESH_GOSSIP_MS } from "../src/engine/groups";
 // covers: groups.catch-up, groups.link.join
 
 /**
- * The engine's side of "any member catches up the others" in a private group (WISP 9xx § Catch-up): whom it asks,
+ * The engine's side of "any member catches up the others" in a private group (WISP 902 § Catch-up): whom it asks,
  * how often, and the `group-here` hint, on headless engines (`CommunityWorld`, simulated clock).
  */
 

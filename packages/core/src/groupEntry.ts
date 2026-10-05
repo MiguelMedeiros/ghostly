@@ -10,7 +10,7 @@ import type { LinkParams } from "./invite";
 import type { GhostRecord } from "./pkarr";
 
 /**
- * A group's public entry link (`group-entry/1`, WISP 9xx § Entry link): one
+ * A group's public entry link (`group-entry/1`, WISP 902 § Entry link): one
  * address the admin can hand to anyone, so people who are not their contacts
  * can join, without a contact chat and without saying who they are.
  *

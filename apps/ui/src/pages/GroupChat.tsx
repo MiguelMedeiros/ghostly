@@ -189,7 +189,7 @@ const joinSteps = (community: boolean, t: Translate): { stage: JoinStep; label: 
 const JUST_JOINED_MS = 5 * 60_000;
 /**
  * A knock nobody answered for this long: the link may have been replaced since it was shared (a replaced link reaches
- * nobody, and nothing tells the joiner so: WISP 9xx), or every app that could answer is closed. The joiner is told both.
+ * nobody, and nothing tells the joiner so: WISP 902), or every app that could answer is closed. The joiner is told both.
  */
 const LONG_KNOCK_MS = 2 * 60_000;
 const NO_MESSAGES: StoredMessage[] = [];
@@ -239,7 +239,7 @@ export function GroupChat() {
   // group was left). Until this group's own list comes, what the engine last sent for it.
   const [loaded, setLoaded] = useState<{ groupId: string; list: StoredMessage[] }>({ groupId: "", list: NO_MESSAGES });
   const messages = loaded.groupId === groupId ? loaded.list : engine.messages.get(`group:${groupId}`) ?? NO_MESSAGES;
-  /** The message the composer answers (WISP 9xx § Replies). */
+  /** The message the composer answers (WISP 902 § Replies). */
   const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
   /**
    * The reply as it is when a message goes, not as a render's closure saw it: the composer sends what was queued one
@@ -247,11 +247,11 @@ export function GroupChat() {
    */
   const replyingRef = useRef(replyingTo);
   replyingRef.current = replyingTo;
-  /** The message of mine the composer edits (WISP 9xx § Edits). */
+  /** The message of mine the composer edits (WISP 902 § Edits). */
   const [editing, setEditing] = useState<StoredMessage | null>(null);
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
   const quoteIndex = useMemo(() => replyIndex(messages, true), [messages]);
-  // A bot's buttons (WISP 4xx · Message Buttons): which one was chosen, and whether I may still press, from my replies.
+  // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => replyRef(m, true)), [messages]);
   const presses = useMemo(() => compactPresses(messages, m => replyRef(m, true)), [messages]);
   const [showMembers, setShowMembers] = useState(false);
@@ -310,7 +310,7 @@ export function GroupChat() {
   }, [groupId]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(!!group, id => messages.some(m => m.id === id));
-  // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards), whichever of its rows are in the page.
+  // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
   // A long group has a window of its rows in the page, never the whole history (useRowWindow, see Chat.tsx).
@@ -338,14 +338,14 @@ export function GroupChat() {
     catch (e) { return e instanceof Error ? errorText(e, t) : t("group.chat.sendFailed"); }
   }, [groupId, t]);
 
-  // Typing (WISP 9xx · Group Mesh § Typing): private groups only; a community does not carry it yet.
+  // Typing (WISP 902 · Group Mesh § Typing): private groups only; a community does not carry it yet.
   const onTyping = useGroupTypingSender(rosterGroup?.profile === "mesh" && rosterGroup.status === "active" ? groupId : undefined);
   const typers = useMemo(() => (group?.typing ?? []).map(({ key, kind, status }): GroupTyper => {
     const member = group!.members.find(m => m.key === key);
     return { key, name: member ? memberName(member, t) : t("group.member.unnamed", { key: key.slice(0, 8) }), ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
   }), [group, t]);
 
-  // "@everyone": a private group's admin only; a community has no everyone (WISP 9xx § Mentions).
+  // "@everyone": a private group's admin only; a community has no everyone (WISP 902 § Mentions).
   const mentions = useMemo(() => group ? { candidates: mentionCandidates(group, t), everyone: group.profile === "mesh" && group.isAdmin } : undefined, [group, t]);
 
   // Still knocking through a link after a while: the link may have been replaced (said under the steps).
@@ -355,7 +355,7 @@ export function GroupChat() {
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm text-text-muted">{t("group.chat.gone")}</div>;
   const nameOf = replyNames(group, t("chat.reply.you"), t);
   const quoteOf = (m: StoredMessage): QuoteView | undefined => m.replyTo && quoteFor(m.replyTo, quoteIndex, nameOf);
-  // Reactions (WISP 9xx § Reactions): one per member per message, named by the roster.
+  // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
   const react = (messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); };
   const reactionName = (by: string) => nameOf("peer", by) ?? by.slice(0, 8);
   // The pinned message (WISP 400 § Pinned message): any member of a private group pins, only the admin of a community.
@@ -395,7 +395,7 @@ export function GroupChat() {
       <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} {...authorProps(m, inStack)} />
       {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
     </div>
-    // No `peerAck`: a group has no receipts (WISP 9xx), so a message of mine is sent, one tick, never "Delivered".
+    // No `peerAck`: a group has no receipts (WISP 902), so a message of mine is sent, one tick, never "Delivered".
     : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)}
       onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
@@ -469,7 +469,7 @@ export function GroupChat() {
         </div>
         <div className="flex items-center gap-1">
           {group.status === "active" && <GroupConnection group={group} />}
-          {/* Only while a bot's card is here (WISP 4xx · Status Cards). */}
+          {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={messages} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && <button onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
@@ -558,7 +558,7 @@ export function GroupChat() {
         onTyping={group.profile === "mesh" ? onTyping : undefined}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: messageSnippet(replyingTo),
           mine: replyingTo.sender === "me", ...(replyingTo.sender === "peer" && replyingTo.member && { member: replyingTo.member }), onCancel: () => setReplyingTo(null) } : undefined}
-        // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.
+        // Editing one of mine (WISP 902 § Edits): the new text shows here at once and goes to the members; @ names more.
         edit={editing ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
             .then(result => ({ error: result.error && errorText(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("group.chat.editFailed") }))).error } : undefined}
