@@ -124,3 +124,5 @@
  .id-card-field{padding-right:0}
  .id-card-provider{font-size:16px}
 }
+/* Arabic is joined writing: Safari pulls its letters apart under wide letter-spacing, so the issuer line keeps none there. */
+:lang(ar) .id-card-issuer{letter-spacing:0}

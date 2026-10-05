@@ -1,5 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
-import { chat, connect, expect, link, say, test } from "../support/fixtures";
+import { chat, connect, expect, link, say, test, walletCard } from "../support/fixtures";
+import { mockEthereum } from "../support/ethereum";
+import { mockMainnetMints } from "../support/mint";
 
 /**
  * What people write reads in its own direction, whatever the app's language: an English message in the Arabic app
@@ -48,4 +50,23 @@ test("on a phone: an English message reads left to right in the Arabic app, an A
   const preview = alice.page.getByTestId("chat-row-preview").filter({ hasText: "It goes on and on." });
   await expect(preview).toBeVisible();
   expect(await direction(preview)).toBe("ltr");
+});
+
+test("in Arabic the words on a wallet card keep the app's font, so their letters stay joined", { tag: ["@feature:app.i18n", "@feature:wallet.instances.first-run"] }, async ({ peer }) => {
+  // A new profile's first-run wallets (as the installed app makes them), with the mints and the Ethereum RPC answered here.
+  const { page } = await peer("ar-cards", { mobile: true, beforeOpen: async (context) => {
+    await mockMainnetMints(context);
+    await mockEthereum(context);
+    await context.addInitScript(() => { try { localStorage.setItem("ghostly-test-wallet-setup", "on"); } catch { /* opaque origin */ } });
+  } });
+  await useLanguage(page, "ar");
+  await page.getByTestId("mobile-tab-wallet").click();
+  const card = walletCard(page, "cashu-mainnet");
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  // A monospace font draws Arabic letters apart ("ج ا ه ز ة" for Ready); the amount keeps it.
+  for (const part of [".wallet-deck-card-status", ".wallet-deck-card-detail"]) {
+    const font = await card.locator(part).evaluate((element) => getComputedStyle(element).fontFamily);
+    expect(font, part).not.toMatch(/mono/i);
+  }
+  expect(await card.locator(".wallet-deck-card-balance").evaluate((element) => getComputedStyle(element).fontFamily)).toMatch(/mono/i);
 });
