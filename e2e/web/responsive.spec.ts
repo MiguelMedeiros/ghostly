@@ -243,7 +243,7 @@ test("the account bar keeps its five places at the list's narrowest", { tag: ["@
   await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identidades");
   expect(await navProblems(page)).toEqual([]);
-  // "Configurações" does not fit in a fifth of 280px: the labels step aside together, the icons stay. The bar's own
+  // "Identidades" does not fit in a fifth of 280px: the labels step aside together, the icons stay. The bar's own
   // name is in Portuguese too.
   await expect(accountNav(page)).toHaveAccessibleName("Conta");
   await expect(accountNav(page)).toHaveAttribute("data-compact", "true");
@@ -292,9 +292,9 @@ test("the account bar names its places whenever the names fit, however long the 
   await page.getByTestId("account-settings").click();
   await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identidades");
-  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: [long, "Carteiras", "Identidades", "Serviços", "Configurações"] });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: [long, "Carteiras", "Identidades", "Serviços", "Ajustes"] });
 
-  // At the list's narrowest (280px), "Configurações" would be cut: all the labels step aside, and come back with the width.
+  // At the list's narrowest (280px), "Identidades" would be cut: all the labels step aside, and come back with the width.
   const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;
   await page.mouse.move(handle.x + 1, handle.y + 100);
   await page.mouse.down();

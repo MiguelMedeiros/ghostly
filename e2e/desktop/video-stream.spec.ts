@@ -35,7 +35,7 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
     : await openDesktop({ home: home.dir, env: { GHOSTLY_STREAM_LOG: log } });
   let server: Server | null = null;
   try {
-    await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+    await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
     const h264 = await app.execute<string>(`return document.createElement("video").canPlayType('video/mp4; codecs="avc1.42E01E"');`);
     const video = makeBigVideo(`${DIR}/big.mp4`, { codec: h264 ? "h264" : "vp9" });
     const piecesPort = await freePort();
@@ -78,7 +78,7 @@ test("a video goes full screen, the window with it, and comes back", { tag: ["@f
   const home = desktopHome("fullscreen");
   const { app, stop } = DRIVEN ? await openDriven() : await openDesktop({ home: home.dir });
   try {
-    await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+    await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
     if (process.platform === "linux") {
       const report = await windowFullscreenInPage(app);
       test.info().annotations.push({ type: "fullscreen", description: JSON.stringify(report) });

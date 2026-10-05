@@ -47,12 +47,13 @@ test("the language changes the interface", { tag: ["@feature:app.i18n"] }, async
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   await choose(page.getByTestId("settings-language"), "pt");
-  await expect(page.getByTitle("Nova Conversa")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Configurações" })).toBeVisible();
+  await expect(page.getByTitle("Nova conversa", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ajustes" })).toBeVisible();
   await page.reload();
-  await expect(page.getByTitle("Nova Conversa")).toBeVisible();
+  await expect(page.getByTitle("Nova conversa")).toBeVisible();
   await choose(page.getByTestId("settings-language"), "en");
-  await expect(page.getByTitle("New Chat")).toBeVisible();
+  // Sentence case, as every label (Settings is "Ajustes" in Portuguese, on every bar).
+  await expect(page.getByTitle("New chat", { exact: true })).toBeVisible();
 });
 
 test("<html lang> and <html dir> follow the language, from the first paint", { tag: ["@feature:app.i18n"] }, async ({ peer }) => {
@@ -210,7 +211,7 @@ test("on a phone: a menu of sections, each on its own screen, and Back to the me
   await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByRole("heading", { level: 1, name: "Aparência" })).toBeVisible();
   await page.getByTestId("page-back").click();
-  await expect(page.getByRole("heading", { level: 1, name: "Configurações" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Ajustes" })).toBeVisible();
 
   // An address from before the sections opens its new place, with Back to the menu, after a reload too.
   await page.goto("/#/settings/advanced");

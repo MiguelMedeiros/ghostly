@@ -61,7 +61,7 @@ describe("<html lang> and <html dir>", () => {
     await user.click(screen.getByRole("button", { name: "pt" }));
     expect(html.lang).toBe("pt-BR");
     expect(html.dir).toBe("ltr");
-    expect(screen.getByRole("heading", { name: "Configurações" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ajustes" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "zh" }));
     expect(html.lang).toBe("zh-CN");

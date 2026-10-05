@@ -38,7 +38,7 @@ describe("a new profile's language", () => {
   it("opens the app in the browser's language on the first run, and keeps it as the setting", () => {
     browserSpeaks("pt-BR", "en");
     renderApp(<Title />);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Configurações");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ajustes");
     expect(document.documentElement.lang).toBe("pt-BR");
     expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).language).toBe("pt");
   });

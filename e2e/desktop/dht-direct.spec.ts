@@ -52,7 +52,7 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
     const a = await open("ana");
     const b = await open("bia");
 
-    await a.press("New Chat");
+    await a.press("New chat");
     const invite = await a.copyInvite();
     await b.join(invite);
     for (const p of [a, b]) {

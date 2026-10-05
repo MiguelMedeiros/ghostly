@@ -113,7 +113,7 @@ for (const offerer of ["linux", "chromium"] as const) {
     const id = `interop-${offerer}`;
     let passed = false;
     try {
-      await expect.poll(() => app.text('[title="New Chat"]'), { timeout: 90_000 }).not.toBeNull();
+      await expect.poll(() => app.text('[title="New chat"]'), { timeout: 90_000 }).not.toBeNull();
       await page.goto(origin);
       if (offerer === "linux") {
         const offer = await startNative(app, id);

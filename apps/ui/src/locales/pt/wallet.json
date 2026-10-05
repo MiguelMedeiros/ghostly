@@ -159,7 +159,7 @@
     },
     "status": {
       "away": "Em outro lugar",
-      "checkSettings": "Verifique as configurações",
+      "checkSettings": "Verifique os ajustes",
       "connecting": "Conectando…",
       "experimental": "Experimental",
       "ready": "Pronta",
@@ -224,7 +224,7 @@
     "removeMintQuestion": "Remover {{name}}?",
     "setAside": "{{amount}} {{unit}} reservados",
     "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder.",
-    "settings": "Configurações",
+    "settings": "Ajustes",
     "testBalance": "{{amount}} sats de teste (sem valor)",
     "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então esta só conta quando um contato a pagar em um chat. Para ter sats de teste agora, use Obter moedas de teste acima.",
     "tokenHint": "Recebeu um token ecash? Cole-o em Enviar.",
@@ -321,7 +321,7 @@
     "restoreFailed": "{{count}} restauradas; não foi possível restaurar: {{failed}}",
     "restoreNote": "As federações devolvem o ecash a partir dos backups que guardam para esta frase. Pagamentos ainda em andamento voltam como desconhecidos.",
     "restorePhrase": "Restaurar da frase",
-    "sendAbout": "Notas são ecash ao portador: quem tiver o texto pode resgatá-lo, uma vez. Se ninguém resgatar, pegue-as de volta (elas também voltam sozinhas depois de uma semana). Numa conversa, pague com o cartão Fedimint. Para pagar uma fatura, faça desta federação a fonte Lightning (Configurações abaixo) e use o cartão Lightning.",
+    "sendAbout": "Notas são ecash ao portador: quem tiver o texto pode resgatá-lo, uma vez. Se ninguém resgatar, pegue-as de volta (elas também voltam sozinhas depois de uma semana). Numa conversa, pague com o cartão Fedimint. Para pagar uma fatura, faça desta federação a fonte Lightning (Ajustes abaixo) e use o cartão Lightning.",
     "show": "Mostrar",
     "state": {
       "done": "concluído",
@@ -369,7 +369,7 @@
       "title": "Cartão"
     },
     "cashuMints": "os mints Cashu",
-    "cashuSettings": "Configurações do Cashu",
+    "cashuSettings": "Ajustes do Cashu",
     "commentFor": "Um comentário para {{to}} (opcional)",
     "confirmWhat": "{{amount}} sats (mais uma taxa de até {{fee}})",
     "connecting": "Conectando à fonte…",
@@ -511,7 +511,7 @@
     "recipient": "Endereço {{wallet}} do destinatário",
     "recipientPlaceholder": "Endereço {{wallet}} do destinatário",
     "review": "Revisar pagamento",
-    "settings": "Configurações",
+    "settings": "Ajustes",
     "testCoins": "{{network}} · moedas de teste, sem valor",
     "testNetworks": "Redes de teste usam moedas sem valor.",
     "unlock": {
@@ -559,7 +559,7 @@
       "test": "Ela tem {{amount}} na {{network}}, moedas de teste sem valor.",
       "unknown": "O Ghostly não consegue ler o saldo agora (ela não está conectada): pode haver dinheiro nela."
     },
-    "hintDevice": "As chaves e configurações dela saem deste dispositivo. As outras carteiras continuam como estão.",
+    "hintDevice": "As chaves e os ajustes dela saem deste dispositivo. As outras carteiras continuam como estão.",
     "hintElsewhere": "O Ghostly esquece como alcançá-la; o dinheiro fica onde está.",
     "item": {
       "invoice": "Uma fatura de {{amount}}, ainda não paga",

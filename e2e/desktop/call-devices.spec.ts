@@ -205,7 +205,7 @@ test("a Linux Desktop call uses the devices chosen in Settings, and switches the
     await a.press("Stop");
     await a.go("#/");
 
-    await a.press("New Chat");
+    await a.press("New chat");
     await b.join(await a.copyInvite());
     for (const p of [a, b]) {
       await expect.poll(() => p.canWrite(), { timeout: 120_000, message: `${p.name}'s chat is open` }).toBe(true);
