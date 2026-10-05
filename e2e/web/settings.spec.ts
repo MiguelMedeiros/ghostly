@@ -252,3 +252,29 @@ test("on a wide screen: the index marks the section picked or named, the last on
   await expect(page.getByTestId("network-relays")).toBeInViewport();
   await expect(marked).not.toHaveAttribute("data-testid", "settings-index-network");
 });
+
+for (const screen of [{ name: "a tablet held upright", width: 820, height: 1180, mobile: true }, { name: "a phone on its side", width: 874, height: 402, mobile: true }, { name: "a narrow window", width: 1024, height: 768, mobile: false }]) {
+  test(`${screen.name}: the search is there with no room for the index beside the page`, { tag: ["@feature:settings.sections", "@feature:app.responsive"] }, async ({ peer }) => {
+    // From 768px Settings is one page, and its index (with the search) waits for room beside it: in between there was
+    // neither the phone's menu search nor the index's.
+    const { page } = await peer("alice", { mobile: screen.mobile, viewport: { width: screen.width, height: screen.height } });
+    await page.goto("/#/settings");
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+    await expect(page.getByTestId("settings-index")).toBeHidden();
+    const search = page.getByTestId("settings-page-search-field");
+    await expect(search).toBeVisible();
+    await search.fill("chat list");
+    await page.getByTestId("settings-search-result").click();
+    await expect(page).toHaveURL(/#\/settings\/appearance$/);
+    await expect(page.getByTestId("chat-list-density")).toBeInViewport();
+    await expect(search).toHaveValue("");
+    await expect(page.getByTestId("settings-search-result")).toHaveCount(0);
+  });
+}
+
+test("a wide window: the index's search beside the page, no second one above it", { tag: ["@feature:settings.sections"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  await page.goto("/#/settings");
+  await expect(page.getByTestId("settings-index-search")).toBeVisible();
+  await expect(page.getByTestId("settings-page-search-field")).toBeHidden();
+});

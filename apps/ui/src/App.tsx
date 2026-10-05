@@ -21,6 +21,7 @@ import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake } from "./lib/keepAwake";
+import { useCallOnSync } from "./hooks/useCallOnSync";
 import { useI18n } from "./contexts/I18nContext";
 
 /** The browser's status bar follows the header of whichever theme is active. */
@@ -103,6 +104,8 @@ function useLoadedChats() {
   const [callSessions, setCallSessions] = useState<readonly string[]>([]);
   // A call keeps the screen on (Screen Wake Lock, where there is one).
   useWakeLock(callSessions.length > 0);
+  // And the profile on this device: a handoff waits for the call to end.
+  useCallOnSync();
   // The call window hangs here instead of inside its chat, which may be off
   // screen. Still within `LockGate`, so the lock reaches it like the rest.
   const [callLayer, setCallLayer] = useState<HTMLElement | null>(null);

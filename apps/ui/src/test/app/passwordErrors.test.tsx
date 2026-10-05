@@ -208,3 +208,17 @@ describe("the floating card", () => {
     expect(screen.queryByTestId("toast")).toBeNull();
   });
 });
+
+describe("the lock password's fields and password managers", () => {
+  it("New and Confirm are not marked new-password, so Safari does not offer a generated one; Current still reads a saved one", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    expect(screen.getByTestId("settings-password-current")).toHaveAttribute("autocomplete", "current-password");
+    for (const which of ["new", "confirm"]) {
+      const field = screen.getByTestId(`settings-password-${which}`);
+      expect(field).toHaveAttribute("type", "password");
+      expect(field).toHaveAttribute("autocomplete", "off");
+    }
+  });
+});

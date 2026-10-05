@@ -43,6 +43,11 @@ export function endOtherCalls(key: symbol): number {
   return ended;
 }
 
+/** Whether any call is on in this app. */
+export function anyCallOn(): boolean {
+  return calls.size > 0;
+}
+
 export function subscribeCalls(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
