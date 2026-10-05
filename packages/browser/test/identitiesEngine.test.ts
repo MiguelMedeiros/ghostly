@@ -161,19 +161,64 @@ describe("removing a proof and its revocation", () => {
     again.stop();
   });
 
-  it("revocations are looked up only online, and only for proofs still standing", async () => {
+  it("revocations are looked up only online, for proofs standing or withdrawn, never for one revoked or expired", async () => {
     const { engines, ledgers, state, resolved, id } = await shared();
+    const setStatus = (status: "verified" | "withdrawn" | "revoked") =>
+      (ledgers.b = { ...ledgers.b, received: ledgers.b.received.map(r => r.id === id ? { ...r, status } : r) });
     state.online = false;
     resolved.length = 0;
     await engines.b.checkRevocations();
     expect(resolved).toEqual([]);
     state.online = true;
-    ledgers.b = { ...ledgers.b, received: ledgers.b.received.map(r => r.id === id ? { ...r, status: "withdrawn" } : r) };
-    await engines.b.checkRevocations();
-    expect(resolved).toEqual([]);
-    ledgers.b = { ...ledgers.b, received: ledgers.b.received.map(r => r.id === id ? { ...r, status: "verified" } : r) };
+    // Withdrawn: a removal also revokes it (WISP 300), so it is looked up too.
+    setStatus("withdrawn");
     await engines.b.checkRevocations();
     expect(resolved).toHaveLength(1);
+    setStatus("verified");
+    await engines.b.checkRevocations();
+    expect(resolved).toHaveLength(2);
+    setStatus("revoked");
+    await engines.b.checkRevocations();
+    expect(resolved).toHaveLength(2);
+    // Past its expiry its owner no longer publishes a revocation: nothing to find.
+    setStatus("withdrawn");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31 * 86_400_000);
+    await engines.b.checkRevocations();
+    expect(resolved).toHaveLength(2);
+  });
+
+  it("a proof removed while the contact is live: the contact sees it withdrawn at once, then revoked, as a recheck says", async () => {
+    const { engines, ledgers, resolved, id } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    resolved.length = 0;
+    await engines.a.remove({ id });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn"));
+    expect(resolved, "not looked up before the owner had time to publish").toEqual([]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked"));
+    // Found on the first try: the later tries do not run.
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(resolved).toHaveLength(1);
+    // One stop line in the chat, not one for the withdrawal and another for the revocation.
+    expect(ledgers.b.timeline?.filter(e => e.kind === "stopped")).toHaveLength(1);
+    engines.b.stop();
+  });
+
+  it("a proof only withdrawn from this chat (still in the owner's profile) stays withdrawn, after a few lookups that back off", async () => {
+    const { engines, resolved, id } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    resolved.length = 0;
+    await engines.a.withdraw({ linkId: "chat", id });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn"));
+    const at: number[] = [];
+    for (const step of [20_000, 60_000, 180_000, 600_000]) {
+      await vi.advanceTimersByTimeAsync(step);
+      at.push(resolved.length);
+    }
+    expect(at, "after 20 s, 1 min more, 3 min more, then none").toEqual([1, 2, 3, 3]);
+    expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
+    engines.b.stop();
   });
 });
 
