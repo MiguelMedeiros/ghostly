@@ -89,11 +89,27 @@ const DEFAULT_SETTINGS: AppSettings = {
   linkPreviews: true,
 };
 
+const LANGUAGES: readonly Language[] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
+
+/**
+ * The language a new profile starts in: the first of the browser's languages the app speaks ("pt-BR" is Portuguese,
+ * "zh-TW" Chinese), or English. Settings → Language changes it afterwards.
+ */
+export function browserLanguage(languages: readonly string[] | undefined = typeof navigator === "undefined" ? undefined
+  : navigator.languages?.length ? navigator.languages : [navigator.language]): Language {
+  for (const tag of languages ?? []) {
+    const base = tag?.toLowerCase().split("-")[0] as Language;
+    if (LANGUAGES.includes(base)) return base;
+  }
+  return "en";
+}
+
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(settingsKey());
     if (!raw) {
-      const initialSettings = { ...DEFAULT_SETTINGS };
+      // A new profile: in the browser's language, kept from now on as its setting.
+      const initialSettings = { ...DEFAULT_SETTINGS, language: browserLanguage() };
       localStorage.setItem(settingsKey(), JSON.stringify(initialSettings));
       return initialSettings;
     }
@@ -122,7 +138,7 @@ export function loadSettings(): AppSettings {
       linkPreviews: parsed.linkPreviews !== false,
     };
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, language: browserLanguage() };
   }
 }
 
