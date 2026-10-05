@@ -231,7 +231,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           {t("payments.bubble.takeBack")}
         </button>
       )}
-      {error && <p className="text-danger-ink text-[11px] m-0 mt-1">{error}</p>}
+      {/* What went wrong with an attempt here: gone once the request is paid, however it was paid. */}
+      {error && payment.state !== "settled" && <p className="text-danger-ink text-[11px] m-0 mt-1">{error}</p>}
     </div>
   );
 }
