@@ -92,6 +92,18 @@ describe("what the bubble says", () => {
     expect(status()).toHaveTextContent("Failed · Mint unreachable");
   });
 
+  it.each([
+    ["No route to the recipient within the fee limit", "Nenhuma rota até o destinatário dentro do limite de taxa"],
+    ["The wallet refused the payment: Not enough sats in your wallet", "A carteira recusou o pagamento: Sats insuficientes na sua carteira"],
+    ["Insufficient token balance", "Saldo de tokens insuficiente"],
+    ["The mint did not confirm the ecash", "O mint não confirmou o ecash"],
+  ])("says why a payment failed in the app's language: %s", (reason, said) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(REAL_MINT, 0)] }, payments: { "pay-1": paymentView({ kind: "payment", direction: "out", state: "failed", error: reason }) } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language: "pt" });
+    expect(status()).toHaveTextContent(said);
+    expect(status()).not.toHaveTextContent(reason);
+  });
+
   it("drops an old error once the payment settled", () => {
     show({ kind: "payment", direction: "in", state: "settled", error: "Mint unreachable" });
     expect(status()).toHaveTextContent(/^Received$/);
