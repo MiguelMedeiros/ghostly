@@ -59,7 +59,7 @@ describe("reclaim", () => {
   it("redeems once when two reclaims race, and ends up reclaimed", async () => {
     const { desk, wallet, state } = await setup([sentPayment]);
     let redeem!: () => void;
-    wallet.receiveToken.mockImplementationOnce(() => new Promise<void>((resolve) => (redeem = resolve)));
+    wallet.receiveToken.mockImplementationOnce(() => new Promise((resolve) => (redeem = () => resolve({ amount: 40, mint: MINT, fee: 0 }))));
     wallet.receiveToken.mockRejectedValue(new Error("Token already spent"));
 
     const first = desk.reclaim("p1");
@@ -199,11 +199,12 @@ describe("a contact refusing ecash", () => {
   it("takes a refused reviewed send back instead of offering the token again", async () => {
     const reviewed: StoredPayment = { ...sentPayment, id: "rv1", target: { method: "cashu", network: "cashu-test", provider: MINT, asset: "BTC", unit: "sat", address: "peer", expiresAt: Date.now() + 60000 } };
     const { desk, wallet, host, state } = await setup([reviewed]);
-    wallet.receiveToken.mockResolvedValue({ amount: 40, mint: MINT });
+    // Taking it back is a swap: the mint keeps its fee, and the review is told exactly what came back.
+    wallet.receiveToken.mockResolvedValue({ amount: 38, mint: MINT, fee: 2 });
     await desk.onPaymentResult("l1", { id: "rv1", ok: false, error: "Ecash from mint.example is not accepted" });
     expect(wallet.receiveToken).toHaveBeenCalledWith("cashuBtoken", "reclaimed", undefined, { payment: expect.any(Function) });
     expect(state("rv1")?.state).toBe("reclaimed");
-    expect(host.onReviewedPaymentRefused).toHaveBeenCalledWith("rv1", "Ecash from mint.example is not accepted");
+    expect(host.onReviewedPaymentRefused).toHaveBeenCalledWith("rv1", "Ecash from mint.example is not accepted", { amount: 38, fee: 2 });
     expect(host.onReviewedPaymentResult, "no reconcile, which would publish the same token again").not.toHaveBeenCalled();
   });
   it("says in the chat when it cannot receive ecash", async () => {

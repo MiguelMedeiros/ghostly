@@ -42,6 +42,20 @@ const UNIT = "sat";
 export type PaymentLink = Pick<GhostLink, "isDataLinkOpen" | "paymentEnabled" | "allowsPayment" | "supportsPayments" | "supportsArkPayments" | "supportsUsdtPayments"
   | "supportsBarkPayments" | "supportsBitcoinPayments" | "supportsFedimintPayments" | "supportsSparkPayments" | "requirePaymentSupport" | "sendPaymentRequest" | "sendPaymentAsk" | "sendPayment" | "sendPaymentResult">;
 
+/** What came back to the wallet of ecash taken back, and what the mint kept of it for taking it in. */
+export interface Reclaimed { amount: number; fee: number }
+const satsWord = (n: number) => `${n} sat${n === 1 ? "" : "s"}`;
+/**
+ * A refused send's review, once its ecash came back: why, and exactly what came back. Taking ecash back is a swap at
+ * the mint, which can keep a fee: "The sats came back" said nothing of it. Without `back` (Fedimint, or not known),
+ * the plain sentence.
+ */
+export const refusedLine = (reason: string, back?: Reclaimed): string => {
+  const why = `Refused: ${reason.replace(/\.+$/, "")}.`;
+  if (!back) return `${why} The sats came back.`;
+  return back.fee > 0 ? `${why} ${satsWord(back.amount)} came back; the mint kept ${back.fee} as its fee.` : `${why} All ${satsWord(back.amount)} came back.`;
+};
+
 export interface PaymentDeskHost {
   getLink(linkId: string): PaymentLink | null;
   storeMessage(message: StoredMessage): Promise<void>;
@@ -62,8 +76,11 @@ export interface PaymentDeskHost {
   groupOf?(linkId: string): string | undefined;
   /** The edge links of a group, to its other members, that exist. */
   groupLinks?(groupId: string): string[];
-  /** A reviewed send the contact refused, whose ecash came back: its review is closed as failed. */
-  onReviewedPaymentRefused?(id:string,reason:string):Promise<void>;
+  /**
+   * A reviewed send the contact refused, whose ecash came back: its review is closed as failed. `back`: what came back
+   * to the wallet and what the mint kept for taking it in, when the wallet knows (Cashu).
+   */
+  onReviewedPaymentRefused?(id:string,reason:string,back?:Reclaimed):Promise<void>;
   /** The network of a request or a send that names none (a caller from before wallets had their own). Default: Mainnet. */
   defaultNetwork?(): WalletNetwork;
   /** This chat takes this way of paying on this network (its Accept side). Absent: every network. */
@@ -151,7 +168,7 @@ export class PaymentDesk {
   private readonly payments = new Map<string, StoredPayment>();
   private readonly paying = new Map<string, Promise<void>>();
   private readonly receiving = new Map<string, Promise<void>>();
-  private readonly reclaims = new Map<string, Promise<void>>();
+  private readonly reclaims = new Map<string, Promise<Reclaimed | undefined>>();
   private checkingArk=false;
   private checkingUsdt=false;
   private checkingBark=false;
@@ -522,8 +539,11 @@ export class PaymentDesk {
     void this.sendTo(link, { id: newId(), timestamp: Date.now(), requestId: request.id, amount: { value: String(request.amount), asset: UNIT }, endpoint: [ENDPOINT.bolt11, request.invoice] }).catch(() => {});
   }
 
-  /** Takes back ecash the peer never redeemed. If they did redeem it, the mint says so and the payment is settled. */
-  reclaim(paymentId: string): Promise<void> {
+  /**
+   * Takes back ecash the peer never redeemed. If they did redeem it, the mint says so and the payment is settled.
+   * Resolves to what came back of Cashu ecash (and the mint's fee for it); undefined when nothing did, or not Cashu.
+   */
+  reclaim(paymentId: string): Promise<Reclaimed | undefined> {
     // One at a time per payment: a second redeem of the same token fails "spent" and would call it settled.
     let running = this.reclaims.get(paymentId);
     if (!running) {
@@ -533,7 +553,7 @@ export class PaymentDesk {
     return running;
   }
 
-  private async reclaimOnce(paymentId: string): Promise<void> {
+  private async reclaimOnce(paymentId: string): Promise<Reclaimed | undefined> {
     const payment = this.payments.get(paymentId);
     if (payment?.target?.method === "fedimint" && payment.direction === "out" && payment.kind === "payment") {
       const fedimint = this.fedimintOf(payment.federation);
@@ -544,19 +564,21 @@ export class PaymentDesk {
       if (state === "canceled") await this.save({ ...current, state: "reclaimed", token: undefined });
       // Redeemed by someone: the contact took it. Only a payment still waiting on them becomes settled.
       else if (current.state === "pending") await this.save({ ...current, state: "settled", token: undefined });
-      return;
+      return undefined;
     }
     if (!payment?.token || payment.direction !== "out") throw new Error("Nothing to reclaim");
     try {
       // The record goes in with the ecash, in one transaction: ecash that is back is never a payment still waiting.
-      await this.wallet.receiveToken(payment.token, "reclaimed", payment.memo, { payment: () => ({ ...this.current(payment), state: "reclaimed", token: undefined }) });
+      const { amount, fee } = await this.wallet.receiveToken(payment.token, "reclaimed", payment.memo, { payment: () => ({ ...this.current(payment), state: "reclaimed", token: undefined }) });
       await this.save({ ...this.current(payment), state: "reclaimed", token: undefined });
+      return { amount, fee };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!/spent/i.test(message)) throw error;
       // Spent by someone else: the contact took it. Only a payment still waiting on them becomes settled.
       const current = this.current(payment);
       if (current.state === "pending") await this.save({ ...current, state: "settled", token: undefined });
+      return undefined;
     }
   }
 
@@ -864,8 +886,8 @@ export class PaymentDesk {
       if(!result.ok && payment.state==="pending"){
         // Refused: take the token back instead of offering it again, which would be refused again.
         await this.save({...payment,error:result.error ?? "The payment was refused"});
-        await this.reclaim(payment.id).catch(()=>{});
-        if(this.current(payment).state==="reclaimed")await this.host.onReviewedPaymentRefused?.(payment.id,result.error ?? "The payment was refused");
+        const back=await this.reclaim(payment.id).catch(()=>undefined);
+        if(this.current(payment).state==="reclaimed")await this.host.onReviewedPaymentRefused?.(payment.id,result.error ?? "The payment was refused",back);
         return;
       }
       // Not awaited: this runs in the chat's inbound queue, and reconciling can wait on the approval that

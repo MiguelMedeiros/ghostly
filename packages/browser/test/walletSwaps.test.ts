@@ -126,7 +126,7 @@ describe("redeeming a token", () => {
       return receiveAnswer();
     });
     const { wallet, events } = setup();
-    await expect(wallet.receiveToken(TOKEN, "ecash-in", "rent", { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT });
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", "rent", { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
     expect(await balance()).toBe(72 + 62);
     expect(await all<WalletTx>(STORES.walletTx)).toMatchObject([{ kind: "ecash-in", amount: 62, fee: 2 }]);
     expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", amount: 62 }]);
@@ -138,7 +138,7 @@ describe("redeeming a token", () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockImplementation(async () => signed((await swaps())[0]));
     const { wallet } = setup();
-    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT });
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
     expect(await balance()).toBe(72 + 62);
     expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", amount: 62, state: "settled" }]);
     expect(await all<WalletTx>(STORES.walletTx)).toHaveLength(1);
@@ -202,7 +202,7 @@ describe("redeeming a token", () => {
     // The second try reaches a mint that already made the swap: it refuses the inputs, and has the signatures.
     mintApi.completeSwap.mockRejectedValueOnce(new MintOperationError(11001, "Token already spent"));
     mintApi.restore.mockResolvedValue(signed(kept));
-    await expect(wallet.receiveToken(TOKEN)).resolves.toEqual({ amount: 62, mint: MINT });
+    await expect(wallet.receiveToken(TOKEN)).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
     expect(mintApi.prepareReceive, "one set of outputs for one token").toHaveBeenCalledOnce();
     const sent = mintApi.completeSwap.mock.calls.map(([preview]) => (preview as SwapPreview).keepOutputs?.map((o) => o.blindedMessage.B_));
     expect(sent[1]).toEqual(sent[0]);

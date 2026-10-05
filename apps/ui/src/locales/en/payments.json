@@ -325,6 +325,7 @@
     },
     "payee": "Payee",
     "provider": "Provider",
+    "returnedInfo": "Taking ecash back is a swap at the mint, and the mint keeps a small fee for each swap: {{fee}} {{unit}} this time. The rest is back in your wallet.",
     "states": {
       "cancelled": "cancelled",
       "confirmed": "confirmed",
