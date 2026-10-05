@@ -1,4 +1,6 @@
 {
+  "answer": "رد",
+  "answerPassword": "أدخل كلمة المرور للرد",
   "enterPassword": "أدخل كلمة المرور لإلغاء القفل",
   "incorrectPassword": "كلمة المرور غير صحيحة، حاول مرة أخرى",
   "title": "Ghostly مقفل",

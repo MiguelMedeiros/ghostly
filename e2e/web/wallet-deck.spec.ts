@@ -204,6 +204,40 @@ test("real money and test money are two tabs, one deck at a time: the arrows mov
   await expect(deck(page, "mainnet").getByRole("tab")).toHaveCount(MAINNET.length);
 });
 
+/** The keyboard focus's ring around a card's face, and the page behind it: their contrast (WCAG's formula). */
+const ringContrast = (page: Page, id: string) => card(page, id).evaluate((el) => {
+  const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 4).map(Number);
+  const lum = ([r, g, b]: number[]) => [r, g, b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const face = el.querySelector<HTMLElement>("[data-deck=face]")!;
+  const ring = getComputedStyle(face);
+  let behind = el.parentElement, bg = [0, 0, 0, 0];
+  while (behind && (bg = rgb(getComputedStyle(behind).backgroundColor)).length === 4 && bg[3] === 0) behind = behind.parentElement;
+  const [a, b] = [lum(rgb(ring.outlineColor)), lum(behind ? bg : rgb(getComputedStyle(document.body).backgroundColor))];
+  return ring.outlineStyle === "none" ? 0 : (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+});
+
+test("a card with the keyboard focus is ringed in a colour that shows on the page, in the light and the dark theme", { tag: ["@feature:wallet.deck", "@feature:app.keyboard", "@feature:app.theme"] }, async ({ peer }) => {
+  const alice = await peer("alice", { viewport: { width: 1280, height: 900 } });
+  await mockMainnetMints(alice.context);
+  await createWallet(alice, "cashu", "mainnet");
+  const page = alice.page;
+  for (const scheme of ["light", "dark"] as const) {
+    await page.evaluate((scheme) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, colorScheme: scheme, theme: scheme }));
+    }, scheme);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", scheme);
+    await chosen(page, "cashu-mainnet");
+    // From its tab, with the keys: the way a keyboard reaches the deck.
+    await tab(page, "mainnet").focus();
+    await page.keyboard.press("Tab");
+    await expect(card(page, "cashu-mainnet")).toBeFocused();
+    // 3:1, what WCAG asks of a focus indicator against what is next to it. A white ring all but vanished on a light page.
+    expect(await ringContrast(page, "cashu-mainnet"), scheme).toBeGreaterThanOrEqual(3);
+  }
+});
+
 test("on a phone the cards are a snapping track: a swipe chooses the card that comes to rest in the centre", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
   const alice = await peer("alice", { mobile: true });
   const { page, context } = alice;
