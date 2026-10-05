@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
-import { ONCHAIN_FEE_CAP } from "./walletCardData";
+import { ONCHAIN_FEE_CAP, spendable } from "./walletCardData";
 import { LightningPayWith, lightningPayer as payerOf } from "./LightningPayWith";
 import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
@@ -124,6 +124,11 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const viaLightning = !payment.target && !!payment.invoice && allowed?.lightning !== false && (!sharedMints.length || allowed?.cashu === false);
   // Lightning's default ceiling is the one the engine pays requests under.
   const feeInput=feeCap??(tokenPayment?'0.001':payment.target?.method==='bitcoin'?String(ONCHAIN_FEE_CAP):viaLightning?String(Math.max(10,Math.ceil(payment.amount*0.03))):'10');
+  // What the paying card holds, when it says (read live: it can change while the review is open). More than that is never
+  // approved: the node would only refuse it afterwards. A card that does not say is left to its node, as before.
+  const payerState = viaLightning ? payer.getState() : null;
+  const lnHolds = payerState ? spendable("lightning", payerState) : undefined;
+  const lnOver = lnHolds !== undefined && payment.amount > lnHolds;
   const payLightning = (confirmedReal: boolean) => run(async () => {
     await payer.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput), ...(confirmedReal ? { confirmedReal } : {}) });
     setLnReview(null); setLnConfirming(false);
@@ -189,9 +194,10 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
               <p className="m-0 flex items-center gap-2">{t("payments.bubble.payOverLightning", { amount: formatAmount(payment.amount, t.language), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>
               <p className="m-0 text-text-primary/75">{t("payments.bubble.through", { source: lnReview.source, fee: formatAmount(lnReview.fee, t.language), unit: sats })}</p>
-              {lnConfirming ? <ConfirmRealMoney what={t("payments.bubble.amountSats", { amount: formatAmount(payment.amount, t.language) })} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
+              {lnOver && <p className="m-0 text-danger-ink" data-testid="payment-lightning-over">{t("payments.composer.tooMuch", { amount: formatAmount(lnHolds!, t.language), unit: sats })}</p>}
+              {lnConfirming && !lnOver ? <ConfirmRealMoney what={t("payments.bubble.amountSats", { amount: formatAmount(payment.amount, t.language) })} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
                 <div className="flex gap-2">
-                  <button className={button} data-testid="payment-lightning-approve" disabled={busy} onClick={() => network === "mainnet" ? setLnConfirming(true) : payLightning(false)}>{t("payments.bubble.approve")}</button>
+                  <button className={button} data-testid="payment-lightning-approve" disabled={busy || lnOver} onClick={() => network === "mainnet" ? setLnConfirming(true) : payLightning(false)}>{t("payments.bubble.approve")}</button>
                   <button className={quiet} disabled={busy} onClick={() => setLnReview(null)}>{t("common.cancel")}</button>
                 </div>
               )}

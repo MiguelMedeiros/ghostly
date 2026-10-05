@@ -143,6 +143,18 @@ describe("what it lets through", () => {
     "",
   ])("%s", (text) => expect(findSecret(text)).toBeNull());
 
+  it("one word said over and over, however its checksum falls (Linux Desktop hunt: \"long line word word … end\")", () => {
+    // "word" twelve times passes a 12-word checksum (one run in 16 does): a repeated word is never a seed.
+    expect(findSecret(`long line ${"word ".repeat(80)}end`)).toBeNull();
+    for (const times of [12, 15, 18, 21, 24, 30]) {
+      expect(findSecret("word ".repeat(times).trim())).toBeNull();
+      expect(findSecret(`x ${"word ".repeat(times)}y`)).toBeNull();
+    }
+    // A seed of mostly one word still counts on its own, after a label or among other seed words.
+    expect(findSecret(`seed ${ABANDON}`)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`zoo ${ABANDON} zoo`)).toEqual({ kind: "mnemonic" });
+  });
+
   it("a run of seed words whose checksum fails, inside other text", () => {
     // A 12-word checksum is 4 bits: a random run of seed words passes one time in 16. Prose never makes such runs
     // ("the", "a", "is", "to", "and", "of" are not on the list); a list of seed words that fails is let through.
