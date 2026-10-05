@@ -13,11 +13,11 @@
     "test:group-load": "vitest run test/communityLoad.test.ts --reporter=verbose"
   },
   "dependencies": {
-    "@arkade-os/sdk": "0.4.76",
+    "@arkade-os/sdk": "0.4.78",
     "@atproto/jwk-webcrypto": "^0.3.4",
-    "@atproto/oauth-client": "^0.8.7",
+    "@atproto/oauth-client": "^0.8.8",
     "@bitcoindevkit/bdk-wallet-web": "0.3.0",
-    "@breeztech/breez-sdk-spark": "0.26.0",
+    "@breeztech/breez-sdk-spark": "0.26.1",
     "@cashu/cashu-ts": "^4.11.0",
     "@fedimint/core": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
     "@fedimint/fedimint-client-wasm-bundler": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
@@ -40,12 +40,12 @@
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "fake-indexeddb": "^6.2.5",
     "hyperdht": "6.34.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.1",
-    "vitest": "^5.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3",
     "ws": "8.22.0"
   }
 }
