@@ -29,7 +29,7 @@ describe("a Lightning invoice in a message", () => {
   };
 
   it("paid with a Mainnet wallet: Pay opens the real-money step; Back pays nothing, Send real money pays", async () => {
-    const { user, engine } = show({ mints: [mint(REAL_MINT, 5_000)] });
+    const { user, engine } = show({ mints: [mint(REAL_MINT, 5_000)], balance: 5_000 });
     const card = screen.getByTestId("invoice-bubble");
     expect(within(card).getByTestId("invoice-network")).toHaveTextContent("Real money");
     await user.click(within(card).getByTestId("invoice-pay"));
@@ -46,7 +46,7 @@ describe("a Lightning invoice in a message", () => {
   });
 
   it("paid with test sats (only a Testnet wallet): Pay pays at once, with no second step", async () => {
-    const { user, engine } = show({ mints: [mint(TEST_MINT, 5_000)] });
+    const { user, engine } = show({ mints: [mint(TEST_MINT, 5_000)], balance: 5_000 });
     const card = screen.getByTestId("invoice-bubble");
     await user.click(within(card).getByTestId("invoice-pay"));
     await user.click(await within(card).findByTestId("invoice-confirm"));
