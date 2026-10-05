@@ -91,7 +91,7 @@ describe("a first pairing, at desktop pace", () => {
     const joiner = open(made.joiner, pkarr);
     const took = await untilLive(inviter, joiner, 60_000);
     // Before: 4.45 s, the first offer waited the 3 s for its STUN candidate. After: the first attempt fails, the second
-    // offer waits for it, live at 10.6 s.
+    // offer waits for it, live at 10.7 s.
     expect(took, "live after the join").toBeLessThanOrEqual(PAIRING_ATTEMPT_MS + PAIRING_RETRY_MS + 6_000);
     expect(joiner.progress.at(-1)).toMatchObject({ stage: "live", attempt: 2 });
   }, 60_000);

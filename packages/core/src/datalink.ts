@@ -111,6 +111,8 @@ export class DataLink {
    * connected): the next one waits for its STUN servers as long as it takes (`ICE_GATHERING_TIMEOUT_MS`).
    */
   private fullGather = false;
+  /** The offer out has no public candidate (as it went: the connection's description gains any that come later). */
+  private offerLacksPublic = false;
   private lastSignalTs = 0;
   /** The peer's description as this connection was given it: Chrome shows it as `remoteDescription` only once applied. */
   private remoteSdp: string | null = null;
@@ -134,6 +136,7 @@ export class DataLink {
       if (!pc) return;
 
       this.myOfferTs = Date.now();
+      this.offerLacksPublic = !PUBLIC_CANDIDATE.test(pc.localDescription?.sdp ?? "");
       const signal: RtcSignal = { t: "o", ts: this.myOfferTs, ...extractRtcParams(pc.localDescription!.sdp) };
       this.options.publishSignal(JSON.stringify(signal));
     } catch {
@@ -216,16 +219,17 @@ export class DataLink {
 
   close(): void {
     // Given up for another transport that went live while this one had long had both descriptions: evidence all the same.
-    const evidence = Date.now() - this.connectingSince >= STALLED_EVIDENCE_MS ? this.directEvidence() : null;
-    this.noteNoPublic(evidence);
+    const stalled = Date.now() - this.connectingSince >= STALLED_EVIDENCE_MS;
+    const evidence = stalled ? this.directEvidence() : null;
+    this.noteNoPublic(stalled);
     this.answered = null;
     this.reset();
     if (evidence) this.options.onDirect?.(evidence);
   }
 
-  /** This side's offer had no public candidate and its attempt came to nothing: the next offer gathers for as long as it takes. */
-  private noteNoPublic(evidence: DirectEvidence | null): void {
-    if (evidence === "no-public" && this.myOfferTs) this.fullGather = true;
+  /** This side's offer went with no public candidate, was answered, and came to nothing: the next offer gathers for as long as it takes. */
+  private noteNoPublic(ended: boolean): void {
+    if (ended && this.myOfferTs && this.offerLacksPublic && this.state === "connecting") this.fullGather = true;
   }
 
   /**
@@ -249,7 +253,7 @@ export class DataLink {
     // How long the offerer's attempt still runs, counted on this clock from when its offer was taken (its `ts` is its clock's).
     const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.at) : 0;
     const evidence = this.directEvidence();
-    this.noteNoPublic(evidence);
+    this.noteNoPublic(true);
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
       traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
