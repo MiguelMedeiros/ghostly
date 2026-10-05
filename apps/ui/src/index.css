@@ -506,6 +506,29 @@ html[data-standalone="true"] {
   height: 17px;
 }
 
+/* With Share screen the small window's row has five buttons: 230 px with these sizes, wider than the window at its
+   narrowest (190 px, where a phone-wide window opens it and where a pulled corner stops), so flex squeezed them into
+   ovals against both edges. Five are smaller and closer there (180 px), and none shrinks. The row sits a little
+   higher, so the end buttons' middles stay clear of the corner grips (26 px) above them. */
+.call-mini .call-controls > * {
+  flex-shrink: 0;
+}
+
+.call-mini .call-controls:has(> :nth-child(5)) {
+  bottom: 16px;
+  gap: 5px;
+}
+
+.call-mini .call-controls:has(> :nth-child(5)) button {
+  width: 32px;
+  height: 32px;
+}
+
+.call-mini .call-controls:has(> :nth-child(5)) svg {
+  width: 15px;
+  height: 15px;
+}
+
 /*
  * A narrow screen's row keeps its buttons round, with less room between them. A phone's video call has four
  * (microphone, camera, devices, hang up: 264 px), which the 32 px gaps pushed to 360 px, past a 320 px screen: the
