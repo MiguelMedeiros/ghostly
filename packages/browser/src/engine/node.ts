@@ -2735,10 +2735,7 @@ export class GhostlyNode implements EngineImplementation {
     if (typeof card === "string") return { error: card, refused: true };
     const text = card && !(typeof params.text === "string" && params.text.trim()) ? statusCardText(card) : params.text;
     if (typeof text !== "string") return { error: "Nothing to send", refused: true };
-    // A chat still being saved is in the state already, so the app may send to it by its id: the send waits for the
-    // chat to start, rather than say "You are offline" for that moment (a chat opened right after a reload).
-    await this.linksAdding.get(linkId)?.catch(() => {});
-    const live = this.links.get(linkId);
+    const live = await this.linkWhenAdded(linkId);
     const trimmed = text.trim();
     // What a compatibility chat's DHT cannot carry is refused before it is kept: it must not show as sent. Whatever
     // the link's state: one that has not started yet (a chat just added) has no data link either.
@@ -3306,7 +3303,8 @@ export class GhostlyNode implements EngineImplementation {
     const forwarded = readForwarded(hops);
     const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }) };
     const wire = reply && pairedWireReply(reply);
-    const live = this.links.get(linkId);
+    // Only a chat still being added is waited for: otherwise nothing is awaited here, as said above.
+    const live = this.linksAdding.has(linkId) ? await this.linkWhenAdded(linkId) : this.links.get(linkId);
     const fail = (error: string) => {
       const transfer = { state: "failed" as const, transferred: 0, size: file.size, error };
       this.transfers.set(file.id, transfer);
@@ -3917,7 +3915,7 @@ export class GhostlyNode implements EngineImplementation {
       results.push(result);
       const note = (error: string) => { result.error ??= error; };
       const groupId = to.startsWith("group:") ? to.slice("group:".length) : undefined;
-      const live = groupId ? undefined : this.links.get(to);
+      const live = groupId ? undefined : await this.linkWhenAdded(to);
       if (groupId ? !this.membership(groupId) : !live || live.stored.group !== undefined) { note(groupId ? "You are not in this group" : "Chat not found"); continue; }
       for (const message of messages) {
         const hops = forwardedAgain(message.forwarded);
@@ -4741,6 +4739,7 @@ export class GhostlyNode implements EngineImplementation {
     const paying = params.target.method === "cashu" ? mintNetwork(params.target.provider) : walletNetworkOf(params.target.network);
     if (params.network && params.network !== paying) throw new Error(crossNetwork(params.network, paying));
     if (params.linkId) {
+      await this.linkWhenAdded(params.linkId);
       const link=this.paymentLink(params.linkId); if(!link)throw new Error("The peer is offline");
       // Whom the link pays: the chat's contact, or the community member it names.
       const payee=this.links.get(params.linkId)?.stored.peerPubKeyZ32 ?? parsePayLink(params.linkId)?.member ?? "";
@@ -4831,8 +4830,8 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** `network`: the Cashu card of that network sends (its mints). `confirmedReal`: required on Mainnet. */
-  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork; confirmedReal?: boolean }) {
-    const live = this.links.get(params.linkId);
+  async sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork; confirmedReal?: boolean }) {
+    const live = await this.linkWhenAdded(params.linkId);
     // Ecash is a bearer token: it is never held for an away contact, only a request for it is.
     if (live && this.holdingFor(live)) throw new Error("Ecash is not held for an away contact. Send a request instead, or wait until they are back.");
     return this.desk.send({ ...params, network: this.net(params.network) });
@@ -4840,7 +4839,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /** `network`: the card's network; the request is paid only by a wallet of that network. */
   /** `card`: the Lightning card the request's invoice comes from; absent, the network's default for receiving. */
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?: WalletNetwork; card?: string }) {
+  async requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?: WalletNetwork; card?: string }) {
+    await this.linkWhenAdded(params.linkId);
     return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method, network: this.net(params.network), card: params.card,
       ...(params.rail === "cashu" || params.rail === "lightning" ? { rail: params.rail } : {}) });
   }
@@ -4854,8 +4854,9 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Paying on a card without a request (Ark, Bark, Spark, USDT, on-chain): the contact's app answers with one, on this card's network. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint"; memo?: string; timestamp: number; network?: WalletNetwork }) {
+  async askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint"; memo?: string; timestamp: number; network?: WalletNetwork }) {
     if (params.method !== "arkade" && params.method !== "usdt" && params.method !== "bark" && params.method !== "bitcoin" && params.method !== "fedimint" && params.method !== "spark") throw new Error("Only Ark, Bark, Spark, USDT, on-chain Bitcoin and Fedimint are paid this way");
+    await this.linkWhenAdded(params.linkId);
     return this.desk.ask({ ...params, network: this.net(params.network) });
   }
 
@@ -5747,6 +5748,15 @@ export class GhostlyNode implements EngineImplementation {
   private linksAdding = new Map<string, Promise<string>>();
   private async existingLink(id: string): Promise<string> {
     return (await this.linksAdding.get(id)) ?? id;
+  }
+  /**
+   * The chat by its id, once it has started if it is still being added: the app may send to it by that id (a message,
+   * a file, a forward, a payment) right after a reload, and that send waits for the chat rather than say "You are
+   * offline" for that moment. A chat not being added is returned at once, offline or not; one whose adding failed is gone.
+   */
+  private async linkWhenAdded(linkId: string): Promise<LiveLink | undefined> {
+    await this.linksAdding.get(linkId)?.catch(() => {});
+    return this.links.get(linkId);
   }
 
   private addLink(params: LinkParams, inviteCode?: string): Promise<string> {
