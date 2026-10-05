@@ -4,6 +4,29 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.1.3
+
+Ghostly 1.1.3 makes adding a phone or another browser to your profile work again. Since 1.1.0, a profile that had been open for a minute was judged "in use" because of the empty wallets every new profile makes by itself, so the new device was refused. Messages, files and payments sent in the first seconds after the app opens also no longer fail with "You are offline".
+
+Known issues, for the next release: on iPhone the camera opens Safari, not the app on the Home Screen; moving a profile needs both devices online at the same time; adding a device can fail with "could not connect" when the direct connection between the two devices is blocked (for example a phone on mobile data).
+
+### Fixed
+
+**Everywhere**
+
+- Adding a phone or another browser to your profile works again on a new profile. It no longer says "This profile is in use here" once the new profile has made its own empty Cashu and USDT wallets, which every new profile does by itself a moment after it opens.
+- Adding a phone to your profile no longer stops at "This profile is in use here" when the phone reads the code inside a profile it already uses (one with a group, an identity or money but no chat). It now asks to add the device in a new profile, keeps the code, and goes on to the digits.
+
+**Chat**
+
+- A message, a file or voice message, a forward or a payment sent in the first seconds after the app opens no longer fails with "You are offline" while the chat is still being set up: it waits for the chat to start, then goes.
+
+### For developers
+
+**WISPs**
+
+- Sixteen WISPs whose features already ship got their numbers: Spark 206, Fedimint 207, domain 304, OpenPGP 305, Bitcoin address 306, SSH 307, Nostr social 309, profile DID 310, DIDs 311, AT Protocol 312, store-and-forward 404, status cards 405, message buttons 406, group mesh 902, group community 903 and the headless runtime 1100. Old links and website addresses forward to the new ones.
+
 ## 1.1.2
 
 Ghostly 1.1.2 makes Settings easier to find your way around on a phone, and fixes a lock password being refused right after the app opens. Settings now comes in sections: on a phone it opens as a menu with search, each section on its own screen.
