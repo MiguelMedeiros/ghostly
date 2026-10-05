@@ -13,7 +13,8 @@ import { shownContactName, useChosenProfile, useContactFace } from "../component
 import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { PinIcon } from "../components/PinIcon";
-import { Menu, MenuItem, MenuSeparator, openOnArrow } from "../components/Menu";
+import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
+import { openOnArrow } from "../lib/menuButton";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";

@@ -43,7 +43,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
    * Closed by the person (Escape, ✕): the focus goes back where it was, so the keys go on from there. Before, it fell to
    * the page. Focus that went somewhere else meanwhile (a click in the chat) stays there.
    */
-  const dismiss = useCallback(() => {
+  const dismiss = () => {
     const at = document.activeElement;
     const inside = !at || at === document.body || !!inputRef.current?.closest("[data-testid=chat-search]")?.contains(at);
     close();
@@ -51,7 +51,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
     const back = before.current?.isConnected ? before.current : returnFocus?.current;
     before.current = null;
     back?.focus({ preventScroll: true });
-  }, [close, returnFocus]);
+  };
 
   // Another chat: closed, the focus left alone (the chat that opens decides).
   useEffect(() => close, [chat, close]);

@@ -24,7 +24,7 @@ const members: GroupMemberView[] = [
 function openChat() {
   saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
   const utils = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
-  utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined);
+  utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
   utils.engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
   return utils;
 }
@@ -71,7 +71,7 @@ describe("a group's dialogs give the focus back as they close", () => {
     for (const how of ["escape", "close"] as const) {
       options.focus();
       await user.keyboard("{Enter}");
-      screen.getByRole("button", { name: "Members" }).focus();
+      screen.getByRole("button", { name: "Members…" }).focus();
       await user.keyboard("{Enter}");
       const dialog = screen.getByTestId("group-members-dialog");
       if (how === "escape") cancel("group-members-dialog");

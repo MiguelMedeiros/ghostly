@@ -157,18 +157,6 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
   );
 }
 
-/**
- * A menu button's arrow keys (WAI-ARIA's menu button): ↓ or ↑ on the closed button opens its menu, which then takes the
- * focus (`focusFirst`), as Enter and Space do.
- */
-export function openOnArrow(open: () => void) {
-  return (e: KeyboardEvent<HTMLElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    open();
-  };
-}
-
 /** The window, or the part of it the opener's `within` ancestor covers. */
 function bounds(anchor: HTMLElement, within?: string) {
   const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
