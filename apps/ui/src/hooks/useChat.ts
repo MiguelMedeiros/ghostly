@@ -557,9 +557,10 @@ export function useChat(params: ChatParams | null) {
 
   const addSystemMessage = useCallback((msg: ChatMessage) => {
     const updated = addMessage(sessionIdRef.current, msg);
-    if (updated) {
-      setMessages([...updated.messages]);
-    }
+    if (!updated) return;
+    setMessages([...updated.messages]);
+    // The chat list keeps its own copy of the last message: a call line, a file or a payment moves it now.
+    window.dispatchEvent(new Event("session-updated"));
   }, []);
 
   const deleteMessage = useCallback((messageId: string) => {

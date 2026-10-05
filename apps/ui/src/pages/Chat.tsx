@@ -291,7 +291,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         // This side's copy quotes it at once, as the engine keeps it: the engine's own row of a file is not copied here.
         addSystemMessage({ id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, file, ...(reply && { replyTo: reply }) });
         if (answering) replied(answering);
-        window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
         return errorText(e, t);
@@ -326,7 +325,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         const sats = network === "testnet" ? "test sats" : "sats";
         const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} ${sats}` : `⚡ Requested ${amount.toLocaleString()} ${sats}`;
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
-        window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
         return errorText(e, t);

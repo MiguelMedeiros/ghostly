@@ -53,6 +53,7 @@
     "fail": {
       "busy": "{{device}} can't hand over the profile now. Try again later.",
       "call": "A call is on. Try again after it.",
+      "callThere": "A call is on there. Try again after it.",
       "cancelled": "Stopped. Nothing changed.",
       "damaged": "The copy was damaged. Nothing changed.",
       "dropped": "The connection dropped. Nothing changed.",

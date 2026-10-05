@@ -55,6 +55,8 @@ const NO_ANSWER: unique symbol = Symbol("no answer");
 /** Why a handoff did not happen, as the screens say it. */
 export type HandoffFailure =
   | "unreachable" | "password" | "locked-out" | "refused" | "payment" | "call" | "busy" | "older" | "room" | "damaged" | "dropped"
+  /** The taker's words for the giver's `call`: the call is on the other device. */
+  | "call-there"
   | "wallet" | "loading" | "mainnet" | "expiry" | "cancelled" | "turn" | "offline" | "version" | "failed" | "woken"
   /** The copy stopped: nothing came from the other device for `HANDOFF_TIMINGS.stuckMs`. */
   | "stalled"
@@ -172,6 +174,11 @@ export type LocalBusy = "wallet" | "payment" | "call" | "loading" | "mainnet" | 
 export interface BusyReport { why: LocalBusy; wallet?: string; expiresAt?: number }
 
 const reportOf = (busy: LocalBusy | BusyReport | null): BusyReport | null => (busy === null ? null : typeof busy === "string" ? { why: busy } : busy);
+/**
+ * What `handoff-busy` tells the taker of a local reason (WISP 06: the requesting device "Shows why"). A call is said as
+ * itself, so the person waits for it to end; the rest stay "handoff": which wallet keeps the profile is said on this device.
+ */
+const wireWhy = (report: BusyReport): HandoffBusyReason => (report.why === "call" ? "call" : "handoff");
 
 /** What a device says about itself in `handoff-hello`, but its key for this session. */
 export type HandoffSelf = Omit<HandoffHello, "v" | "e" | "id" | "later">;
@@ -667,12 +674,12 @@ export class HandoffGiver {
     if (this.phase !== "idle" && this.phase !== "failed" && !pushed) return busy("handoff");
     const session = this.sessionFor(from);
     if (!session?.peer) return busy("handoff", 5);
-    // Why is this device's own business (money, a call): the other device is told it is busy, nothing more.
+    // Why is said on this device; the other one is told it is busy, and that a call is on when one is (`wireWhy`).
     const local = reportOf(await this.ports.busy(this.takerFacts(from)));
     if (local) {
       // Said on this device, which a pull may find unattended: the screen there names what keeps the profile here.
       if (!pushed) { this.peer = from; this.deviceName = name(record, from); this.failure = this.failWith(local); this.changed(); }
-      return busy("handoff");
+      return busy(wireWhy(local));
     }
     const self = await this.ownSelf();
     const versions = handoffVersions(self, session.peer);
@@ -819,8 +826,8 @@ export class HandoffGiver {
       const deadline = this.now() + HANDOFF_TIMINGS.paymentMs;
       while (this.now() < deadline && reportOf(await this.ports.busy(taker))?.why === "payment") await new Promise((resolve) => setTimeout(resolve, 1_000));
       const still = reportOf(await this.ports.busy(taker));
-      if (still) { this.out(handoffBusyFrame("handoff", 30)); this.reset(still.why === "payment" ? "payment" : this.failWith(still)); return; }
-    } else if (why) { this.out(handoffBusyFrame("handoff", 30)); this.reset(this.failWith(why)); return; }
+      if (still) { this.out(handoffBusyFrame(wireWhy(still), 30)); this.reset(still.why === "payment" ? "payment" : this.failWith(still)); return; }
+    } else if (why) { this.out(handoffBusyFrame(wireWhy(why), 30)); this.reset(this.failWith(why)); return; }
     this.phase = "quiescing";
     this.changed();
     await this.ports.quiesce({
@@ -1163,7 +1170,7 @@ export class HandoffTaker {
         const busy = readHandoffBusy(frame);
         if (!busy || from !== this.peer || (this.phase !== "connecting" && this.phase !== "authorizing" && this.phase !== "receiving")) return;
         this.retry = busy.retry || undefined;
-        const failure: HandoffFailure = busy.why === "handoff" ? "busy" : busy.why;
+        const failure: HandoffFailure = busy.why === "handoff" ? "busy" : busy.why === "call" ? "call-there" : busy.why;
         await this.giveUp(failure);
         return;
       }
