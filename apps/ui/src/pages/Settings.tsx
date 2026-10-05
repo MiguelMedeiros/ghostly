@@ -60,7 +60,7 @@ import { listText } from "../lib/listText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
 import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
-import { SettingsIndex, SettingsMenu } from "../components/settings/SettingsMenu";
+import { SettingsIndex, SettingsMenu, SettingsSearch } from "../components/settings/SettingsMenu";
 
 /** The fields of the lock password form, each with its own error line. */
 type PasswordField = "current" | "new" | "confirm";
@@ -378,7 +378,9 @@ export function Settings() {
         <label className="block text-sm text-text-secondary">
           {label}
           <input ref={passwordInputs[which]} type="password" value={value} data-testid={`settings-password-${which}`}
-            autoComplete={which === "current" ? "current-password" : "new-password"}
+            // Not "new-password": that is what makes Safari offer "Use Strong Password?", a generated password nobody
+            // remembers for a lock typed by hand on every unlock. The current one may still come from a password manager.
+            autoComplete={which === "current" ? "current-password" : "off"}
             aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}
             onChange={(e) => { change(e.target.value); if (passwordError?.field === which) setPasswordError(null); }}
             className={`${field} mt-1 aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
@@ -755,7 +757,8 @@ export function Settings() {
     );
   }
 
-  // A wider screen: every section on one page, and the index beside it once the column has room for both.
+  // A wider screen: every section on one page, and the index beside it once the column has room for both (its search
+  // above the page until then).
   return (
     <Page title={t("settings.title")} width="xl" testId="settings-page" overlay={overlay}>
       <div className="@3xl/page:grid @3xl/page:grid-cols-[12rem_minmax(0,42rem)] @3xl/page:justify-center @3xl/page:gap-8">
@@ -763,6 +766,10 @@ export function Settings() {
           <SettingsIndex active={inView} shown={shown} has={has} onPick={pick} />
         </aside>
         <div ref={content} className="max-w-2xl mx-auto w-full min-w-0 space-y-6">
+          {/* Too narrow for the index: its search, above the page. */}
+          <div className="@3xl/page:hidden">
+            <SettingsSearch has={has} onPick={pick} />
+          </div>
           {installApp}
           {groups}
         </div>

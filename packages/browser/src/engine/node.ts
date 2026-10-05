@@ -5508,6 +5508,13 @@ export class GhostlyNode implements EngineImplementation {
   /** The giver of this active device: answers a pull, makes a push, runs pass 1 while this engine goes on. */
   private handoffGiver: HandoffGiver | null = null;
 
+  /** A call is on in one of the pages (`setCallOn`, told by the host for all of them): a handoff waits for it to end. */
+  private callOn = false;
+
+  setCallOn({ on }: { on: boolean }): void {
+    this.callOn = on === true;
+  }
+
   private async startHandoff(): Promise<void> {
     const host = handoffProfileHost(), links = this.deviceLinks;
     if (!host || !links || this.handoffGiver || this.options.singleDevice) return;
@@ -5583,6 +5590,8 @@ export class GhostlyNode implements EngineImplementation {
    * or anything this build cannot judge. Null: the wallets move or stay home by their plan.
    */
   private async handoffBusy(taker?: HandoffTakerFacts): Promise<BusyReport | null> {
+    // A call is on here: moving the profile would cut it (WISP 06 § States and events, "A request while a call is on").
+    if (this.callOn) return { why: "call" };
     // Limited mode opened no wallet, and wallets not started yet say nothing: what they hold is not known.
     if (this.limitedMode || !this.walletsStarted) return { why: "loading" };
     // Read now, not the view of the last change: a wallet that changed since is counted as it is.

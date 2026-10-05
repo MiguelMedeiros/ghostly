@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { expect, test, chat, connect, link, say, type Peer } from "../support/fixtures";
 import { DEVICE_SET_PASSWORD, enrollDevice, profileFileDigests, untilShown } from "../support/devices";
+import { pair } from "../support/paired";
 
 /**
  * Moving a profile between devices (WISP 06 § The handoff, part 5). Two browser contexts are the person's two devices
@@ -218,4 +219,47 @@ test("five wrong passwords in an hour lock the standby out", { tag: ["@feature:d
   await phone.page.getByTestId("handoff-start").click();
   await expect(phone.page.getByTestId("handoff-progress")).toHaveAttribute("data-failure", "locked-out", { timeout: 60_000 });
   await expect(phone.page.getByTestId("handoff-line")).toContainText("Too many tries.");
+});
+
+test("a call on the active device keeps the profile there: Use here and Move to wait until it ends, and the call goes on", { tag: ["@feature:devices.handoff", "@feature:calls.paired"] }, async ({ peer }) => {
+  test.setTimeout(10 * 60_000);
+  const [desktop, phone, contact] = await Promise.all([peer("desktop"), peer("phone"), peer("contact")]);
+  await pair(desktop, contact);
+  await enrollDevice(desktop, phone);
+  await openTheChat(desktop);
+
+  // The desktop is on a call with the contact.
+  await desktop.page.getByTestId("call-audio").click();
+  await contact.page.getByTitle("Accept audio call").click();
+  for (const p of [desktop, contact]) await expect(p.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+  // Use here on the phone: the desktop answers that it cannot hand over now, and says why on its own screen.
+  await phone.page.getByTestId("handoff-use-here").click();
+  await phone.page.getByTestId("handoff-password").fill(DEVICE_SET_PASSWORD);
+  await phone.page.getByTestId("handoff-start").click();
+  const progress = phone.page.getByTestId("handoff-progress");
+  await expect(progress).toHaveAttribute("data-step", "failed", { timeout: 120_000 });
+  await expect(progress).toHaveAttribute("data-failure", "busy");
+  await desktop.page.evaluate(() => { location.hash = "#/profile"; });
+  await expect(desktop.page.getByTestId("handoff-wallet-refusal")).toContainText("A call is on. Try again after it.");
+  // Move to, from the desktop: the same.
+  const row = desktop.page.getByTestId("device-row").filter({ hasText: "Phone" });
+  await row.getByTestId("device-move").click();
+  await expect(desktop.page.getByTestId("handoff-move-error")).toHaveText("A call is on. Try again after it.");
+  await desktop.page.keyboard.press("Escape");
+  // The call was not cut: before, the desktop froze and reloaded, and the contact sat on "Reconnecting..." until it ended.
+  for (const p of [desktop, contact]) await expect(p.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+  await expect(desktop.page.getByTitle("New Chat")).toBeVisible();
+
+  // Once the call is over, Use here moves the profile.
+  await desktop.page.getByTitle("End call").click();
+  await expect(contact.page.getByTitle("End call")).toHaveCount(0);
+  await phone.page.getByTestId("handoff-use-here").click();
+  await phone.page.getByTestId("handoff-password").fill(DEVICE_SET_PASSWORD);
+  await phone.page.getByTestId("handoff-start").click();
+  await untilShown(phone.page, phone.page.getByTitle("New Chat"), { timeout: 300_000 });
+  await untilShown(desktop.page, desktop.page.getByTestId("device-standby").and(desktop.page.locator("[data-state=standby]")));
+  // The call's end line moved with the history.
+  await openTheChat(phone);
+  await expect(chat(phone).getByText("Audio call ended")).toBeVisible();
 });
