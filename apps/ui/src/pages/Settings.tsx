@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useRef, type ReactNode } from "react";
+import { useState, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
@@ -56,6 +56,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 import { errorText } from "../lib/errorText";
+import { listText } from "../lib/listText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
 import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
@@ -75,8 +76,18 @@ interface SectionView { phone: boolean; section: SettingsSection | null }
  * heading is left to screen readers there.
  */
 function SettingsGroup({ id, view, children }: { id: SettingsSection; view: SectionView; children: ReactNode }) {
+  const { t } = useI18n();
   if (view.phone && view.section !== id) return null;
-  if (id === "media" && !hasMediaDevices()) return null; // no devices to pick here: no empty space for them either
+  if (id === "media" && !hasMediaDevices()) {
+    // No devices to pick here: no empty space for them on the whole page, and one line on the section's own screen
+    // (opened by its address), not an empty screen.
+    if (!view.phone) return null;
+    return (
+      <Section title={t("settings.media.title")} testId="settings-media-none">
+        <Row label={t("settings.media.none")} info={t("settings.media.noneInfo")} />
+      </Section>
+    );
+  }
   return (
     <div id={`settings-section-${id}`} data-settings-section={id} className={`space-y-6 scroll-mt-2 ${view.phone ? "[&>section:first-child>h2]:sr-only" : ""}`}>
       {children}
@@ -181,6 +192,14 @@ export function Settings() {
   const passwordId = useId();
   const passwordInputs = { current: useRef<HTMLInputElement>(null), new: useRef<HTMLInputElement>(null), confirm: useRef<HTMLInputElement>(null) };
   const [showPasswordForm, setShowPasswordForm] = useState(false);
+  // The form opened by the person (the lock switch, Change password): its first field takes the focus, and the keyboard comes up.
+  const focusPasswordForm = useRef(false);
+  const openPasswordForm = () => { focusPasswordForm.current = true; setShowPasswordForm(true); };
+  useLayoutEffect(() => {
+    if (!showPasswordForm || !focusPasswordForm.current) return;
+    focusPasswordForm.current = false;
+    (passwordInputs.current.current ?? passwordInputs.new.current)?.focus();
+  }, [showPasswordForm]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it opens
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
@@ -249,7 +268,7 @@ export function Settings() {
 
   const handleLockToggle = async () => {
     if (!lockEnabled && !hasPassword) {
-      setShowPasswordForm(true);
+      openPasswordForm();
       return;
     }
 
@@ -409,7 +428,7 @@ export function Settings() {
     const language = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native;
     const summary: Partial<Record<SettingsSection, ReactNode>> = {
       profile: settings.defaultNickname || undefined,
-      appearance: [scheme, language].filter(Boolean).join(", "),
+      appearance: listText([scheme, language].filter((item): item is string => !!item), t),
       notifications: t("settings.notificationsHint"),
       media: t("settings.mediaHint"),
       privacy: t("settings.privacyHint"),
@@ -590,7 +609,7 @@ export function Settings() {
         )}
         {hasPassword && (
           <Row label={t("settings.password")}>
-            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : setShowPasswordForm(true))}>
+            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
               {showPasswordForm ? t("common.close") : t("settings.passwordEdit")}
             </Button>
           </Row>
