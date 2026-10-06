@@ -25,6 +25,7 @@ test("a new profile asks once what people should call it, and keeps the name", {
   await expect(input, "the field is empty: a placeholder, not a value").toHaveValue("");
   await expect(input).toHaveAttribute("placeholder", "Your name");
   await expect(page.getByTestId("name-step-save")).toBeDisabled();
+  await expect(input, "the field has the focus, ready to type").toBeFocused();
   await shot(page, "desktop");
   await input.fill("Casper");
   await page.getByTestId("name-step-save").click();
