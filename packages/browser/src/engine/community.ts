@@ -133,6 +133,14 @@ const HUB_GRACE_MS = 3 * 60_000;
 const CUT_OFF_STEP_UP_MS = 15_000;
 /** A lobby request this recent is from a member still looking fast for my side of the edge: mine opens expecting it. */
 const LOBBY_EXPECT_MS = 30_000;
+/**
+ * A lobby is one record every member asking a hub writes, each reading it and writing it back with its own request: two
+ * members writing at once (both cut off by the same leave, in the same second) each write what they read, and the later
+ * write drops the earlier request. So a member reads the lobby back this long after its write (plus up to `LOBBY_CHECK_JITTER_MS`, so
+ * the members who wrote together do not read and write together again) and asks again at once if its request is gone.
+ */
+const LOBBY_CHECK_MS = 2_000;
+const LOBBY_CHECK_JITTER_MS = 3_000;
 const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_LINGER_MS = 20_000;
 const RELAYED_KEPT = 4096;
@@ -206,6 +214,8 @@ interface Live {
   /** As a member: the hubs I want, and when I last wrote in each one's lobby. */
   myHubs: string[];
   lobbyWrites: Map<string, number>;
+  /** As a member: the lobby requests to read back (`LOBBY_CHECK_MS`): hub → when, and the time my request said. */
+  lobbyChecks?: Map<string, { at: number; ts: number }>;
   lastKnockPoll: number;
   /** Joiners with an entry session open: key → since; knocks first seen: key → when, and with which hubs at the door. */
   pendingEntries: Map<string, number>;
@@ -787,7 +797,13 @@ export class Communities {
       live.forceHub = !kept.length && others.length < COMMUNITY_TOPOLOGY.maxHubs;
       for (const hub of kept) {
         const id = edges.get(hub);
-        if (id && this.host.linkReady(id, 2)) continue;
+        if (id && this.host.linkReady(id, 2)) { live.lobbyChecks?.delete(hub); continue; }
+        // My request may have been written over by another member's, written at the same moment: asked again now.
+        const check = live.lobbyChecks?.get(hub);
+        if (check && now >= check.at) {
+          live.lobbyChecks!.delete(hub);
+          if (await this.lobbyLost(groupId, live, hub, check.ts)) live.lobbyWrites.delete(hub);
+        }
         // A request the relays held back (the budget, while a link of mine signals) goes again in a moment, not at the
         // next refresh: the hub cannot open an edge for a member it never saw ask (a member cut off by a hub that left
         // waited 20 s more for each refused write, CLI daemons on local relays, 2026-10-03).
@@ -1062,7 +1078,24 @@ export class Communities {
     // Dated by the hub's clock, where mine differs: the hub reads its lobby by its own, and so do the members that write there.
     const theirs = now - live.hubClocks.ahead(hub);
     await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: theirs }, theirs)), true, true);
+    // The lobby keeps whole seconds: my request reads back as the second it was written in.
+    (live.lobbyChecks ??= new Map()).set(hub, { at: now + LOBBY_CHECK_MS + Math.floor(this.random() * LOBBY_CHECK_JITTER_MS), ts: Math.floor(theirs / 1000) * 1000 });
     traceJoin(groupId, "lobby.written");
+  }
+
+  /**
+   * My request is not in the hub's lobby any more, and the lobby has room for it: another member's write, made from a
+   * reading from before mine, dropped it (`LOBBY_CHECK_MS`). A full lobby that pushed it out is left as it is: asking
+   * again there would push out someone else. A read that fails says nothing, and the usual refresh asks again.
+   */
+  private async lobbyLost(groupId: string, live: Live, hub: string, ts: number): Promise<boolean> {
+    const keys = lobbyKeys(live.session.state.rv, groupId, hub);
+    const records = await this.host.resolve(keys.identity.pubKeyZ32, true, true).catch(() => undefined);
+    if (records === undefined) return false;
+    const entries = readLobby(keys, records ?? []);
+    const lost = !entries.some(e => e.key === live.session.myKey && e.ts >= ts) && entries.length < COMMUNITY_TOPOLOGY.lobbyEntries;
+    if (lost) traceJoin(groupId, "lobby.lost");
+    return lost;
   }
 
   private async pollLobby(groupId: string, live: Live, now: number): Promise<void> {

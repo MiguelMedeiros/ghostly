@@ -108,6 +108,12 @@ export class CommunityWorld {
   holdEdge: ((a: Peer, b: Peer) => boolean) | null = null;
   /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
   failRead: ((peer: Peer, key: string) => boolean) | null = null;
+  /**
+   * Reads of these keys answer what the record held at the start of the step: what apps that read and write in the same
+   * second see (each read is done before any of their writes lands). Writes land at once, as before.
+   */
+  readsFromStepStart: ((key: string) => boolean) | null = null;
+  private stepStart = new Map<string, GhostRecord[]>();
   /** An edge that was up and dropped looks "seen" from its side alone, as the engine's does while it dials again. */
   redialSeen = false;
   /** Loses frames on the way (a test says which): the network is not perfect. */
@@ -204,7 +210,8 @@ export class CommunityWorld {
         this.onPkarr?.(peer, "resolve", key, !!background, !!door);
         if (this.failRead?.(peer, key)) throw new Error("No Pkarr relay reachable");
         if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
-        return peer.online ? structuredClone(this.pkarr.get(key) ?? null) : null;
+        const store = this.readsFromStepStart?.(key) ? this.stepStart : this.pkarr;
+        return peer.online ? structuredClone(store.get(key) ?? null) : null;
       },
       storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
       emit: () => {},
@@ -344,6 +351,7 @@ export class CommunityWorld {
   async run(ms: number, stepMs = 1000): Promise<void> {
     for (let t = 0; t < ms; t += stepMs) {
       this.now += stepMs;
+      if (this.readsFromStepStart) this.stepStart = new Map(this.pkarr);
       for (const peer of this.peers.values()) if (peer.online) await peer.groups.tick(this.now + (peer.clock ?? 0));
       this.signal();
       await this.settle();

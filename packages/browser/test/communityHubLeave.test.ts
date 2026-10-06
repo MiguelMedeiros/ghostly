@@ -48,6 +48,34 @@ describe("a hub that leaves", { timeout: 120_000 }, () => {
 });
 
 /**
+ * A hub's lobby is one record: each member asking that hub reads it and writes it back with its own request. The members
+ * a leave cuts off all hear it in the same second, and ask the hub left in the same second: each wrote what it read, the
+ * later write dropped the earlier request, and that member waited 20 s to ask again. Web members whose admin (the only
+ * hub) left: the one whose request was dropped had its edge 27 s after the leave, the other 9 s (r10c, 2026-10-06).
+ */
+describe("members a leave cuts off, asking one hub in the same second", { timeout: 120_000 }, () => {
+  it("each read its request back and ask again at once when another's write dropped it", async () => {
+    const world = new CommunityWorld();
+    const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin", "frank", "grace"]);
+    const [admin, ...rest] = peers;
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const edgesOf = (p: Peer) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id).map(e => e.peer);
+    const orphans = rest.filter(p => !p.groups.communities.isHub(id) && edgesOf(p).every(k => k === keyOf(admin)));
+    expect(orphans.length, "members only the admin carries").toBeGreaterThanOrEqual(2);
+    // Lobby reads in a step see the lobby as it was when the step began: requests written in the same second race.
+    const rv = rest[0].groups.communities.session(id)!.state.rv;
+    const lobbies = new Set(peers.map(p => lobbyKeys(rv, id, keyOf(p)).identity.pubKeyZ32));
+    world.readsFromStepStart = key => lobbies.has(key);
+    await admin.groups.leave(id);
+    for (const p of rest) await p.groups.send(id, `line ${p.name}`);
+    const heard = await world.until(() => rest.every(p => rest.every(q => q === p || world.texts(p, id).includes(`line ${q.name}`))), 3 * 60_000);
+    // A request written over waited for the next refresh, 20 s on, and raced again there: 69-107 s here (n=10). Read back
+    // 2-5 s on and asked again at once: 9-18 s (n=20).
+    expect(heard).toBeLessThanOrEqual(30_000);
+  });
+});
+
+/**
  * A hub whose app is killed says nothing: no leave request, no goodbye. Its members wait for it as for an app that
  * restarts, then ask a hub left. That hub read its lobby every half minute, and the member's side of the new edge looked
  * for it at the background pace, every half minute too: the group was cut in two for 54 s (2026-10-03).
