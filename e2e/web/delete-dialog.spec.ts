@@ -4,9 +4,9 @@ test.setTimeout(30000);
 test("delete dialog cancels safely and keeps its target through a reorder",{ tag: ["@feature:chats.list.delete", "@feature:app.popovers"] },async({peer})=>{
   const {page}=await peer("delete-dialog");
   // New chat opens the chat once its keys are made (#201): read the address after that.
-  await page.getByRole("button",{name:"New chat",exact:true}).click();await expect(page).toHaveURL(/#\/chat\/\w+$/);
+  await page.getByTestId("sidebar-new-chat").click();await expect(page).toHaveURL(/#\/chat\/\w+$/);
   const first=page.url().split('/').at(-1)!;
-  await page.getByRole("button",{name:"New chat",exact:true}).click();await expect(page).toHaveURL(new RegExp(`#/chat/(?!${first}$)\\w+$`));
+  await page.getByTestId("sidebar-new-chat").click();await expect(page).toHaveURL(new RegExp(`#/chat/(?!${first}$)\\w+$`));
   const selected=page.url();
   const trash=page.getByRole("button",{name:"Delete chat",exact:true}).nth(1);
   await trash.focus();await trash.click();
@@ -50,7 +50,7 @@ for(const mobile of [false,true]) test(`popup outside gestures close safely (mob
 
 test("the connection panel opens by keyboard, has both keys, and dismisses without changing the chat", { tag: ["@feature:chat.paired.status", "@feature:app.popovers"] }, async ({peer}) => {
   const {page} = await peer("connection-details");
-  await page.getByRole("button", {name:"New chat", exact:true}).click();
+  await page.getByTestId("sidebar-new-chat").click();
   // The new chat's address, once the app has gone there.
   await expect(page).toHaveURL(/#\/chat\//);
   const route = page.url();

@@ -195,9 +195,13 @@ export function shareIdCard(entry: IdentityTimelineEntry, state: ShareState, { p
 export const idCardTone = (card: { provider: string; subject: string; attested?: boolean }) =>
   `id-card-${(providerIcon(card.provider, card.subject)?.key ?? (card.attested ? "attested" : "key")).replace(":", "-")}`;
 
-/** The machine-readable line along the bottom of an ID: the provider and the identity, in its alphabet. Decoration. */
+/**
+ * The machine-readable line along the bottom of an ID: the provider and the identity, in its alphabet. Decoration.
+ * Accented letters lose their marks first, as a passport writes them ("João" is JOAO, not JO<O).
+ */
 export const machineLine = (label: string, subject: string) =>
-  `ID<GHOSTLY<<${label}<<${subject}`.toUpperCase().replace(/[^A-Z0-9<]+/g, "<").padEnd(44, "<").slice(0, 44);
+  `ID<GHOSTLY<<${label}<<${subject}`.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase()
+    .replace(/[^A-Z0-9<]+/g, "<").padEnd(44, "<").slice(0, 44);
 
 /** The id, provider and tone key of the Ghostly card: the profile's own identity, the first card of every deck. */
 export const GHOSTLY = "ghostly";

@@ -3,10 +3,16 @@
  * (`useWebRTC`), so a second call could ring in another chat while one is on; answering it ends this one first, so
  * there are never two calls at once. A call is on from the moment it is placed or answered (ringing out, answering,
  * connecting, connected) until it ends; a call that only rings here is not on.
+ *
+ * A call ringing in still holds the device for a handoff (WISP 06 § States and events): moving the profile then would
+ * lose it without a word, the caller ringing on to its timeout. So the chats ringing in are kept apart from the calls on,
+ * and only `callHoldsDevice` counts them.
  */
 
 /** Each call on, by the chat's own key, with what ends it as its person's hang-up would. */
 const calls = new Map<symbol, () => void>();
+/** The chats a call rings in, not answered yet. */
+const ringing = new Set<symbol>();
 const listeners = new Set<() => void>();
 
 function changed(): void {
@@ -46,6 +52,19 @@ export function endOtherCalls(key: symbol): number {
 /** Whether any call is on in this app. */
 export function anyCallOn(): boolean {
   return calls.size > 0;
+}
+
+/** A call rings in this chat (true), or no longer: declined, answered, rung out, the caller gave up, the chat went away. */
+export function setRingingIn(key: symbol, on: boolean): void {
+  if (on ? ringing.has(key) : !ringing.has(key)) return;
+  if (on) ringing.add(key);
+  else ringing.delete(key);
+  changed();
+}
+
+/** Whether a call is on or rings in this app: a handoff waits for it to end. */
+export function callHoldsDevice(): boolean {
+  return calls.size > 0 || ringing.size > 0;
 }
 
 export function subscribeCalls(listener: () => void): () => void {
