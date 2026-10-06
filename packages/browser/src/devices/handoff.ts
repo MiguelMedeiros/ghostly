@@ -595,6 +595,26 @@ export class HandoffGiver {
     return this.exclusive(() => this.handle(from, frame)).catch(() => {});
   }
 
+  /**
+   * A turn read on this standby found the record of `key` at `turn`: the device it released to took the turn, which is
+   * what the `handoff-done` would have said. That frame goes once, as the taker reloads, and can be lost; without this
+   * the screen said "Moving to …" for good, with no Use here, until that device offered the profile back.
+   */
+  turnTaken(key: string, turn: number): Promise<void> {
+    return this.exclusive(async () => {
+      if (this.stopped || this.phase !== "released" || key !== this.peer || turn <= this.turn) return;
+      await this.taken();
+    }).catch(() => {});
+  }
+
+  /** The release was taken: the handoff note goes, and this device is a plain standby. */
+  private async taken(): Promise<void> {
+    await this.dropBreez();
+    await this.ports.records.amend({ handoff: undefined });
+    this.phase = "idle"; this.peer = null;
+    this.changed();
+  }
+
   private async handle(from: string, frame: DeviceFrame): Promise<void> {
     if (this.stopped) return;
     // Only this handoff's own frames count as the taker being there.
@@ -616,10 +636,7 @@ export class HandoffGiver {
         // (it is sent just before that device reloads). The same as the done.
         if (from !== this.peer || this.phase !== "released") return;
         if (frame.t === HANDOFF_DONE ? readHandoffDone(frame) === null : readHandoffTurnFrame(frame) === null) return;
-        await this.dropBreez();
-        await this.ports.records.amend({ handoff: undefined });
-        this.phase = "idle"; this.peer = null;
-        this.changed();
+        await this.taken();
         return;
       }
       case HANDOFF_CANCEL: {
