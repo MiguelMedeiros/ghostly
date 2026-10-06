@@ -1111,7 +1111,7 @@
     "packages/core/src/version.ts": ["core.version","app.updates.*","app.version"],
     "packages/core/src/video.ts": ["files.video.*"],
     "packages/core/src/voice.ts": ["files.voice.*","files.video.*","files.audio.*","files.download"],
-    "packages/core/src/{appBundle,appStatements,appStore,appUpdates,canonicalJson}.ts": ["apps.*"],
+    "packages/core/src/{appBundle,appStatements,appStore,appUpdates,canonicalJson}.ts": ["apps.bundle","apps.store","apps.updates"],
     "packages/core/src/{bip322,bitcoinMessage,bitcoinScript}.ts": ["proofs.bitcoin"],
     "packages/core/src/{bytes,crypto,identity,invite,link,records,pkarr,relay,relayBreaker,dns,transport,frames,datalink,signal,ghostlink,pairedSession,pairedSignal,pairedTransports}.ts": ["*"],
     "packages/core/src/{deviceInvite,enroll}.ts": ["devices.enroll","devices.enroll.*"],
