@@ -38,6 +38,7 @@ import { chatPath } from "../lib/url";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useRowReorder } from "../hooks/useRowReorder";
+import { usePageShown } from "../hooks/usePageShown";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
@@ -149,9 +150,11 @@ export function Sidebar() {
     };
   }, [refreshSessions]);
 
+  // The open chat is read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  const pageShown = usePageShown();
   useEffect(() => {
-    if (activeSessionId) markSessionAsRead(activeSessionId);
-  }, [activeSessionId, sessions]);
+    if (activeSessionId && pageShown) markSessionAsRead(activeSessionId);
+  }, [activeSessionId, pageShown, sessions]);
 
   // The installed app's shortcuts (manifest.json): `#/new` starts a chat, `#/scan` opens Join with the camera on.
   // Each address is acted on once (StrictMode runs effects twice), and leaves the history at once (an intake, Root.tsx).

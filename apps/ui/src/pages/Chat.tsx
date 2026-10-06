@@ -92,6 +92,7 @@ import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
 import { usePinMoveNote } from "../hooks/usePinMoveNote";
+import { usePageShown } from "../hooks/usePageShown";
 import { errorText } from "../lib/errorText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
@@ -488,10 +489,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (sceneOn && messages.length === 0) document.getElementById(pairingSceneId)?.scrollIntoView({ block: "nearest" });
   }, [sceneOn, messages.length, pairingSceneId]);
 
-  // Only what is on screen has been read; a chat kept alive by a call has not.
+  // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown).
+  const pageShown = usePageShown();
   useEffect(() => {
-    if (visible) markSessionAsRead(sessionId);
-  }, [visible, sessionId, messages.length]);
+    if (visible && pageShown) markSessionAsRead(sessionId);
+  }, [visible, pageShown, sessionId, messages.length]);
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop;

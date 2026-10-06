@@ -44,6 +44,7 @@ import { messageSnippet, quoteFor, replyIndex, replyTarget, type NameOf, type Qu
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
+import { usePageShown } from "../hooks/usePageShown";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
@@ -323,7 +324,9 @@ export function GroupChat() {
   const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
   const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink, t, returnFocus: optionsRef });
-  useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
+  // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  const pageShown = usePageShown();
+  useEffect(() => { if (group && pageShown) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group, pageShown]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
     const answering = replyingRef.current;
