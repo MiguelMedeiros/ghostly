@@ -78,11 +78,33 @@ async function installWebRtc(): Promise<boolean> {
     for (const name of ["RTCPeerConnection", "RTCSessionDescription", "RTCIceCandidate", "RTCDataChannel", "RTCDataChannelEvent", "RTCPeerConnectionIceEvent", "RTCCertificate"] as const) {
       scope[name] ??= (polyfill as unknown as Record<string, unknown>)[name];
     }
+    refuseDataAnswers(scope);
     return true;
   } catch (error) {
     process.stderr.write(`ghostly: WebRTC is unavailable (${error instanceof Error ? error.message : String(error)}); chats use HyperDHT, Iroh or the DHT\n`);
     return false;
   }
+}
+
+/**
+ * For tests: `GHOSTLY_TEST_REFUSE_DATA_ANSWERS=<n>` refuses one in every n answers this process applies to its offers
+ * (the first, the n+1st, and so on), as libdatachannel 0.24.5 refuses one in its race (`ANSWER_REFUSED_REDIALS` in
+ * packages/core/src/datalink.ts): the connection closes, and setRemoteDescription throws.
+ */
+function refuseDataAnswers(scope: Record<string, unknown>): void {
+  const every = Number(process.env.GHOSTLY_TEST_REFUSE_DATA_ANSWERS) || 0;
+  if (every <= 0) return;
+  let answers = 0;
+  const Base = scope.RTCPeerConnection as typeof RTCPeerConnection;
+  scope.RTCPeerConnection = class extends Base {
+    override async setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void> {
+      if (description.type === "answer" && answers++ % every === 0) {
+        this.close();
+        throw new Error("libdatachannel error while adding remote description: Got a remote candidate without ICE transport (GHOSTLY_TEST_REFUSE_DATA_ANSWERS)");
+      }
+      return super.setRemoteDescription(description);
+    }
+  };
 }
 
 /** Server-sent events, which browsers have and Node does not: Arkade follows its server with them. */
