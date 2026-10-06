@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readAppBundle, type AppManifest } from "@ghostly/core";
+import { appRevocationFor, readAppBundle, readAppRevocations, type AppManifest } from "@ghostly/core";
 import { verifyApp } from "../src/apps";
 import { CliError } from "../src/errors";
 import { error, ghostly, ok } from "./support/cli";
@@ -114,7 +114,7 @@ describe("app publish", () => {
     const body = /-----BEGIN PRIVATE KEY-----\n([^-]+)-----END/.exec(pem)![1].replace(/\s/g, "");
     expect(result.stdout + result.stderr).not.toContain("PRIVATE KEY");
     expect(result.stdout + result.stderr).not.toContain(body.slice(-20));
-    expect(result.stderr).toContain("Back it up");
+    expect(result.stderr).toContain(`new publisher key written to ${key}; back it up`);
   }, 60_000);
 
   it("refuses a key file others may read, and a store key", async () => {
@@ -147,6 +147,50 @@ describe("app publish", () => {
     const dotted = appFolder(manifest, files);
     writeFileSync(join(dotted, ".DS_Store"), "x");
     expect(ok(await ghostly(["app", "publish", dotted, "--key", key]))).toMatchObject({ files: ["index.html"], skipped: [".DS_Store"] });
+  }, 60_000);
+});
+
+describe("app publish --sequence", () => {
+  it("sets the sequence, refused unless higher than the bundle at the output", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "5"]))).toMatchObject({ sequence: 5, previous: null });
+    expect((error(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "5"]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("equivocation");
+    expect((error(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "4"]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("rollback");
+    error(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "0"]), "usage", 2);
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key]))).toMatchObject({ sequence: 6, previous: 5 });
+  }, 60_000);
+});
+
+describe("app revoke", () => {
+  it("adds signed revocations a client reads to ghostly-revoke.json, by the app's own key only", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const keys = tmp();
+    const key = vectorKey(keys, "publisher");
+    const first = ok(await ghostly(["app", "publish", dir, "--key", key]));
+    const byDigest = ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", first.digest as string, "--reason", "Leaked a test move list"]));
+    expect(byDigest).toMatchObject({ app: `${manifest.publisher}/chess`, digests: [first.digest], current: true, added: true, revocations: 1 });
+    // The same statement again adds nothing; up to a sequence adds a second one.
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", first.digest as string, "--reason", "Leaked a test move list"]))).toMatchObject({ added: false, revocations: 1 });
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1"]))).toMatchObject({ upTo: 1, current: true, added: true, revocations: 2 });
+
+    const read = readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))));
+    expect(read.ok).toBe(true);
+    const version = { ref: `${manifest.publisher}/chess`, sequence: 1, digest: first.digest as string };
+    expect(appRevocationFor(version, read.ok ? read.revocations : [])).not.toBeNull();
+    // The list is never bundled: the next version leaves it out.
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key]))).toMatchObject({ files: ["index.html"], sequence: 2 });
+
+    const other = error(await ghostly(["app", "revoke", dir, "--key", vectorKey(keys, "other publisher"), "--up-to", "1"]), "refused", 1) as { details?: { reason?: string } };
+    expect(other.details?.reason).toBe("signature-key");
+    error(await ghostly(["app", "revoke", dir, "--key", join(keys, "missing.pem"), "--up-to", "1"]), "not_found", 3);
+    expect(existsSync(join(keys, "missing.pem"))).toBe(false);
+    error(await ghostly(["app", "revoke", dir, "--key", key]), "usage", 2);
+    error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--digest", first.digest as string]), "usage", 2);
+    expect((error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-revocation");
+    expect(readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))))).toMatchObject({ ok: true, revocations: { length: 2 } });
   }, 60_000);
 });
 

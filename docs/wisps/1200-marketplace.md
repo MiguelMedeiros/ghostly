@@ -400,7 +400,7 @@ A publisher needs four steps, about as many as Umbrel's template repository, two
 3. `ghostly app publish` makes the publisher key on first run (kept by the CLI, with a reminder to back it up), raises `sequence`, bundles, signs, writes the GitHub SSH proof into `proofs` (once publisher proofs exist, after phase 1), and writes **`app.ghostlyapp` at the repository root** (or on a `ghostly` branch). Committing the built bundle is required: a page cannot read GitHub release assets (no CORS).
 4. Optional: `ghostly catalog submit <store repository>` writes the listing and opens the pull request to a store.
 
-In release 1.2 the CLI has `ghostly app publish`, `ghostly app verify` (checks a bundle as a client would) and `ghostly store sign` (signs a store index with the store key). `ghostly app init`, the SDK's template with the commit-reveal helper, and `ghostly catalog submit` come later; until then a publisher builds the single-file app with its own tools and writes the listing by hand.
+In release 1.2 the CLI has `ghostly app publish`, `ghostly app verify` (checks a bundle as a client would), `ghostly app revoke` (signs a `ghostly-revoke/1` statement with the app's publisher key and adds it to `ghostly-revoke.json` beside the bundle, [Revocation](#publisher-keys-no-rotation-in-phase-1)) and `ghostly store sign` (signs a store index with the store key). `ghostly app init`, the SDK's template with the commit-reveal helper, and `ghostly catalog submit` come later; until then a publisher builds the single-file app with its own tools and writes the listing by hand.
 
 ### Paste a URL
 
@@ -582,7 +582,7 @@ All additive. An older app sees an app card as its text (a link: [405](405-statu
 
 **Free mini-apps, turn-based games and light real-time versus games (Tetris, Snake) included, played live in a 1:1 chat, on the web app and Desktop, installed from a pasted URL, a store or a card in a chat. No network access for apps. The default store is a signed file in a repository of its own, signed with the owner's offline key; custom stores are HTTPS URLs. Behind a feature flag on `dev` until the web chess e2e passes.** In pieces that can each be a pull request:
 
-1. **Format and publisher tools.** Bundle, canonical manifest, digest, signatures with their prefixes, revocation, with the [test vectors](#test-vectors), in `packages/core`. `ghostly app publish`, `ghostly app verify` and `ghostly store sign` in the CLI.
+1. **Format and publisher tools.** Bundle, canonical manifest, digest, signatures with their prefixes, revocation, with the [test vectors](#test-vectors), in `packages/core`. `ghostly app publish`, `ghostly app verify`, `ghostly app revoke` and `ghostly store sign` in the CLI.
 2. **The package store.** Verified bundles kept per profile, with `sequence`, permissions and per-app, per-chat storage. Install, update, uninstall with export.
 3. **The runner and the broker.** `/app-frame.html` and its nginx location on web; the `ghostly-app` scheme, `app-*` windows and `app_broker` on Desktop, after a Desktop spike that measures them. The port, the teardown, the WebRTC deletion, `frame-src 'self'`. The malicious mini-app suite.
 4. **The Apps page.** Installed apps, paste, Stores, permissions with the IP line, updates, the removal screen.

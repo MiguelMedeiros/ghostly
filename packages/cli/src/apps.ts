@@ -2,9 +2,10 @@ import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
-  APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appStoreDecision, assembleAppBundle, canonicalJsonBytes,
-  checkAppManifest, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle, readAppStore, seedSigner, signAppObject,
-  signAppStore, toBase64Url, toZ32, type AppBundle, type AppManifest, type AppStoreIndex, type Signer,
+  APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
+  APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
+  readAppRevocations, readAppStore, seedSigner, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
+  type AppManifest, type AppRevokeStatement, type AppStoreIndex, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { CliError } from "./errors";
 
@@ -88,8 +89,8 @@ function makeKey(path: string, kind: KeyKind): LoadedKey {
 /** What the person is told on stderr when a key was made: where, which, and to back it up. Never the key. */
 function madeKeyNote(path: string, kind: KeyKind, key: string): string {
   return kind === "publisher"
-    ? `made a new publisher key in ${path} (${appFingerprint(key)}). Back it up: an app is updated only with the key that signed it, and phase 1 has no recovery`
-    : `made a new store key in ${path} (${appFingerprint(key)}). Keep it offline and back it up: a store is its key`;
+    ? `new publisher key written to ${path}; back it up (${appFingerprint(key)}: an app is updated only with the key that signed it, and phase 1 has no recovery)`
+    : `new store key written to ${path}; back it up and keep it offline (${appFingerprint(key)}: a store is its key)`;
 }
 
 // ---------- reading bundles ----------
@@ -234,10 +235,12 @@ function writeWhole(path: string, bytes: Uint8Array): void {
 /**
  * `app publish <dir> --key <file> [--out <file>]`: `<dir>/ghostly-app.json` (the manifest without `publisher`,
  * `sequence` and `files`) and every other file in `<dir>` become one signed bundle, by default `<dir>/app.ghostlyapp`.
- * The sequence is one more than the bundle already at `--out`'s (or the source's `sequence`, if higher, else 1). The
+ * The sequence is `--sequence` (higher than the bundle already at `--out`'s), else one more than that bundle's (or
+ * the source's `sequence`, if higher, else 1). The
  * key file is made when it is missing and no earlier bundle is there to update.
  */
-export async function publishApp(dirArg: string, keyArg: string, outArg?: string): Promise<Record<string, unknown>> {
+export async function publishApp(dirArg: string, keyArg: string, outArg?: string, sequenceArg?: number): Promise<Record<string, unknown>> {
+  if (sequenceArg !== undefined && !(Number.isSafeInteger(sequenceArg) && sequenceArg >= 1)) throw new CliError("usage", `--sequence takes a whole number from 1, not ${sequenceArg}`);
   const dir = resolve(dirArg);
   if (!statSync(dir).isDirectory()) throw new CliError("bad_request", `${dir} is not a folder`);
   const keyPath = resolve(keyArg);
@@ -266,7 +269,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     throw refused(`${out} is the app ${JSON.stringify(previous.name)}, not ${JSON.stringify(draft.name)}: name another --out for another app`, { reason: "other-app" });
   }
 
-  const sequence = Math.max(previous ? previous.sequence + 1 : 1, (draft.sequence as number | undefined) ?? 1);
+  if (sequenceArg !== undefined && previous && sequenceArg <= previous.sequence) {
+    throw refused(`--sequence ${sequenceArg} is not higher than the ${previous.sequence} of ${out}: every client refuses a lower one, and the same one with other content is equivocation`, { reason: sequenceArg < previous.sequence ? "rollback" : "equivocation" }, { previous: previous.sequence });
+  }
+  const sequence = sequenceArg ?? Math.max(previous ? previous.sequence + 1 : 1, (draft.sequence as number | undefined) ?? 1);
   const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_REVOKE_FILE)]));
   const contents = files.map((f) => ({ path: f.path, bytes: new Uint8Array(readFileSync(f.full)) }));
   const manifest = {
@@ -296,6 +302,65 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     keyCreated: key.created,
     ...(key.created ? { warning: madeKeyNote(keyPath, "publisher", key.key) } : {}),
   };
+}
+
+// ---------- revocations ----------
+
+/**
+ * `app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>]`: a
+ * `ghostly-revoke/1` statement (WISP 1200 · Publisher keys, Revocation) for the app whose bundle is `<dir>/app.ghostlyapp`
+ * (or `--bundle`), signed by that app's publisher key and added to `<dir>/ghostly-revoke.json`, which stays canonical.
+ * The key is never made here: only the key that signed the app may revoke its versions.
+ */
+export async function revokeApp(dirArg: string, keyArg: string, what: { digests?: string[]; upTo?: number; reason?: string; bundle?: string }): Promise<Record<string, unknown>> {
+  const dir = resolve(dirArg);
+  const bundlePath = resolve(what.bundle ?? join(dir, APP_BUNDLE_FILE));
+  const listPath = join(dir, APP_REVOKE_FILE);
+  const usage = "ghostly app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>]";
+  const digests = what.digests ?? [];
+  if ((digests.length > 0) === (what.upTo !== undefined)) throw new CliError("usage", `Give --digest (again for each) or --up-to, one of the two: ${usage}`);
+  if (what.upTo !== undefined && !(Number.isSafeInteger(what.upTo) && what.upTo >= 1)) throw new CliError("usage", `--up-to takes a sequence, a whole number from 1, not ${what.upTo}`);
+
+  if (!existsSync(bundlePath)) throw new CliError("not_found", `No bundle ${bundlePath}: a revocation names the app of the bundle in <dir> (or --bundle)`);
+  const read = readAppBundle(readBundleFile(bundlePath));
+  if (!read.ok) throw refused(`${bundlePath} is not a valid bundle`, read);
+  const manifest = read.bundle.manifest;
+  const ref = appRef(manifest.publisher, manifest.name);
+
+  const keyPath = resolve(keyArg);
+  if (!existsSync(keyPath)) throw new CliError("not_found", `No key file ${keyPath}: only the key that signed ${ref} (${appFingerprint(manifest.publisher)}) revokes its versions`);
+  const key = readKey(keyPath, "publisher");
+  if (key.key !== manifest.publisher) {
+    throw refused(`${keyPath} is not the publisher key of ${ref} (${appFingerprint(manifest.publisher)}): a revocation by any other key is refused by every client`, { reason: "signature-key" });
+  }
+
+  const statement = (digests.length
+    ? { ghostlyRevoke: 1, app: ref, digests }
+    : { ghostlyRevoke: 1, app: ref, upTo: what.upTo }) as AppRevokeStatement;
+  if (what.reason !== undefined) statement.reason = what.reason;
+  const problem = checkAppRevokeStatement(statement);
+  if (problem) throw refused("Not a revocation a client reads", { reason: "bad-revocation", detail: problem });
+
+  let list: SignedAppRevocation[] = [];
+  if (existsSync(listPath)) {
+    const held = readAppRevocations(new Uint8Array(readFileSync(listPath)));
+    if (!held.ok) throw refused(`${listPath} is there and is not a valid ghostly-revoke.json: fix or move it first`, held);
+    list = held.revocations;
+  }
+  const signed = await signAppRevocation(statement, key.signer);
+  const same = list.some((r) => canonicalJson(r.statement) === canonicalJson(signed.statement));
+  if (!same) {
+    if (list.length >= APP_STATEMENT_LIMITS.revocations) throw refused(`${listPath} holds ${list.length} revocations already`, { reason: "bad-revocation", detail: `at most ${APP_STATEMENT_LIMITS.revocations}` });
+    list = [...list, signed];
+    const bytes = canonicalJsonBytes(list);
+    const check = readAppRevocations(bytes);
+    if (!check.ok) throw refused("The revocation list made is not valid", check);
+    writeWhole(listPath, bytes);
+  }
+  const covers = digests.length
+    ? { digests, current: digests.includes(read.bundle.digest) }
+    : { upTo: what.upTo, current: manifest.sequence <= what.upTo! };
+  return { app: ref, ...covers, ...(what.reason !== undefined ? { reason: what.reason } : {}), added: !same, revocations: list.length, file: listPath };
 }
 
 // ---------- store indexes ----------
