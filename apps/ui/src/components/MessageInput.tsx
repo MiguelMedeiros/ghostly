@@ -14,7 +14,7 @@ import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { ExpressionPanel } from "./composer/ExpressionPanel";
 import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
-import { CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon } from "./composer/icons";
+import { AppsGlyph, CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon } from "./composer/icons";
 import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
 import type { GroupMention } from "@ghostly/core";
@@ -79,6 +79,8 @@ interface MessageInputProps {
   identities?: { peerKey: string; contact: string; open?: { id: string; at: number } };
   /** A 1:1 chat's shared services, from the + menu: which of yours the contact can open, and theirs (`composerServices`). */
   services?: ComposerServices;
+  /** A 1:1 chat's mini-apps (WISP 1200), from the + menu where Apps shows: one to open with this contact. */
+  apps?: { onOpen: () => void; hint?: string };
   /** Who reads what is sent here, for the secret guard's Cashu question (a group's name); the contact otherwise. */
   recipient?: string;
   /** A group's members: "@" opens a picker of them, and a choice names the member by key. */
@@ -128,6 +130,7 @@ export function MessageInput({
   paymentComposer,
   identities,
   services,
+  apps,
   mentions,
   fileUnavailable,
   paymentsUnavailable,
@@ -562,6 +565,8 @@ export function MessageInput({
   if (identities) actions.push({ id: "identity", label: t("composer.identity"), icon: <IdentityGlyph />, testId: "composer-identities-button",
     hint: sharedIdentities ? t("composer.identityShared", { count: String(sharedIdentities) }) : undefined, data: { "data-count": sharedIdentities },
     onSelect: () => setShowIdentities(true) });
+  if (apps) actions.push({ id: "apps", label: t("apps.composer.label"), icon: <AppsGlyph />, testId: "composer-apps", hint: apps.hint, oneLine: true,
+    onSelect: () => { plusRef.current?.focus({ preventScroll: true }); apps.onOpen(); } });
   if (services) actions.push({ id: "services", label: t("composer.services"), icon: <ServicesGlyph />, testId: "composer-services",
     unavailable: services.unavailable, hint: services.hint, oneLine: true,
     // The chat's dialog gives the focus back to what had it when it opened: the +, as Escape from the menu does.

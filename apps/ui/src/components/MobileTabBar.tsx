@@ -11,6 +11,8 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { unseenSatsLabel, useUnseenSats } from "../hooks/useUnseenSats";
 import { UnseenSatsDot } from "./UnseenSatsDot";
 import { useBackupDue } from "../hooks/useBackupDue";
+import { useAppsAvailable } from "../lib/apps/flag";
+import { AppGlyph } from "./apps/AppIcon";
 
 const icon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -61,6 +63,9 @@ const TABS = [
   },
 ] as const;
 
+/** Apps (WISP 1200), where it shows: in Services' place, as five tabs is what a phone holds. */
+const APPS_TAB = { path: "/apps", label: "apps.title", icon: <AppGlyph size={24} /> } as const;
+
 /**
  * Phone navigation: the places the sidebar's account bar holds on a wide screen, five at most (a 320px phone
  * gives each 64px). Identities is one: it is where a proof about to expire is noticed, and its dot must be
@@ -80,11 +85,14 @@ export function MobileTabBar() {
   const myAvatar = useMyAvatar();
   const unseen = useUnseenSats();
   const backupDue = useBackupDue().length > 0;
+  // Services is still reached from Profile and from a chat's Shared services.
+  const appsOn = useAppsAvailable();
+  const tabs = appsOn ? TABS.map((tab) => (tab.path === "/services" ? APPS_TAB : tab)) : TABS;
 
   return (
     <>
       <nav className="mobile-tabs shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`);
           const dot = tab.path === "/identities" && identityAttention;
           const account = tab.path === "/settings" && canSwitch;
