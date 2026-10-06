@@ -1,5 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatConnection } from "../../components/ChatConnection";
 import { linkView, type StatePatch } from "../fakeEngine";
@@ -73,6 +73,31 @@ describe("ChatConnection: what the header says", () => {
     expect(view.tooltip).toBe(want.label + (want.failure ?? ""));
     if (want.failure) expect(screen.getByRole("alert")).toHaveTextContent(want.failure);
     else expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  // The web app started from its cache with no network (r10a): the relays fail, the DHT read fails, and the banner says
+  // Offline. The header said "Connection issue" in red, with the relays' raw English, until the network came back.
+  it.each<[string, Partial<LinkView>]>([
+    ["no relay reachable", { textDelivery: "dht", dataLink: "idle", pairing: ready(), dhtDelivery: { error: "Could not read DHT delivery: No Pkarr relay reachable" } as LinkView["dhtDelivery"] }],
+    ["discovery that could not be published", { dataLink: "idle", discoveryError: "Could not publish discovery: Publish failed on every relay: Error: Discovery relay is cooling down; retry shortly" }],
+    ["a live session the network has not dropped yet", { pairing: ready() }],
+  ])("says Offline when the device has no network, whatever the relays answer: %s", (_, link) => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    banner(link);
+    expect(header()).toMatchObject({ kind: "offline", name: "Offline", popover: "Offline", tooltip: "Offline", dot: null });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Pkarr|relay/)).not.toBeInTheDocument();
+    // Ghostly's own switch is on: the transport stays a choice to make for when the network is back.
+    expect(screen.getByRole("radio", { name: "Automatic" })).toBeEnabled();
+  });
+
+  it("is back to what the connection says once the device is online again", () => {
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    banner({ pairing: ready() });
+    expect(header()).toMatchObject({ kind: "offline", name: "Offline" });
+    onLine.mockReturnValue(true);
+    act(() => { window.dispatchEvent(new Event("online")); });
+    expect(header()).toMatchObject({ kind: "connected", name: "Connected · WebRTC" });
   });
 
   it("ignores a discovery error once the chat is connected", () => {

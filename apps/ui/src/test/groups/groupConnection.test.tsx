@@ -1,5 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GroupEdgeView, GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { GroupConnection } from "../../components/GroupConnection";
 import { edgeLabel } from "../../lib/groups";
@@ -87,6 +87,14 @@ describe("GroupConnection: the header sums up the mesh", () => {
   ])("%s", async (_, members, state, want) => {
     await open(active(members), state);
     expect(header()).toEqual({ kind: want.kind, name: want.label, popover: want.label, tooltip: want.label, dot: want.dot });
+  });
+});
+
+describe("GroupConnection: a device with no network", () => {
+  it("says Offline, not that nobody is reachable", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    await open(active([me, alice({ state: "error", error: "ICE failed" }), bob({ state: "waiting" })]));
+    expect(header()).toEqual({ kind: "offline", name: "Offline", popover: "Offline", tooltip: "Offline", dot: null });
   });
 });
 

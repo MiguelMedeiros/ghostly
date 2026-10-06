@@ -64,6 +64,41 @@ test.describe("service worker", () => {
     await expect(ana.page.getByTestId("offline-banner")).toBeHidden();
   });
 
+  test("a chat opened offline says Offline in its header, not a connection issue with the relays' errors", { tag: ["@feature:app.pwa.offline"] }, async ({ peer }) => {
+    const ana = await peer("Ana", { serviceWorkers: "allow" });
+    const bo = await peer("Bo");
+    await link(ana, bo);
+    await controlled(ana.page);
+    await expect(ana.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /);
+    const chat = ana.page.url();
+
+    // No network: Playwright's offline mode leaves routed requests alone, and the test relay is one, so it goes too.
+    let offline = false;
+    await ana.context.route(/^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org)\//, (r) => (offline ? r.abort("internetdisconnected") : r.fallback()));
+    await ana.page.goto("about:blank");
+    offline = true;
+    await ana.context.setOffline(true);
+    try {
+      await ana.page.goto(chat);
+      await expect(ana.page.getByTestId("offline-banner")).toBeVisible();
+      const header = ana.page.getByTestId("connection-options");
+      await expect(header).toHaveAccessibleName("Connection options: Offline");
+      // Meanwhile the relays fail and the DHT cannot be read: still Offline, and none of their errors.
+      const seen = new Set<string>();
+      for (let i = 0; i < 16; i++) { seen.add(await header.getAttribute("aria-label") ?? ""); await ana.page.waitForTimeout(500); }
+      expect([...seen]).toEqual(["Connection options: Offline"]);
+      await header.click();
+      await expect(ana.page.getByTestId("connection-state")).toHaveText("Offline");
+      await expect(ana.page.getByText(/Pkarr|relay is cooling|Publish failed|DHT delivery/)).toHaveCount(0);
+      await ana.page.keyboard.press("Escape");
+    } finally {
+      offline = false;
+      await ana.context.setOffline(false);
+    }
+    await expect(ana.page.getByTestId("offline-banner")).toBeHidden();
+    await expect(ana.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
+  });
+
   test("text, a link and a file shared from another app open the chat's composer", { tag: ["@feature:app.pwa.share-target"] }, async ({ peer }) => {
     const ana = await peer("Ana", { serviceWorkers: "allow" });
     const bo = await peer("Bo");
