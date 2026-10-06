@@ -6,6 +6,7 @@ import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
 import { byteSize } from "../../lib/backupFile";
 import { formatBytes } from "../../lib/settings";
+import { sizeText } from "../../lib/handoff";
 import { translateWith } from "../../locales/translate";
 import { LOCALES } from "./locales";
 import { renderApp } from "../render";
@@ -27,6 +28,9 @@ describe("sizes in the app's language", () => {
     expect(byteSize(12.4 * 1024 * 1024)).toBe("12.4 MB");
     expect(byteSize(20 * 1024 * 1024)).toBe("20.0 MB");
     expect(byteSize(1.3 * 1024 ** 3)).toBe("1.3 GB");
+    expect(sizeText(300)).toBe("1 KB");
+    expect(sizeText(480 * 1024 * 1024)).toBe("480 MB");
+    expect(sizeText(1.2 * 1024 ** 3)).toBe("1.2 GB");
   });
 
   it("takes the language's decimal mark and unit names, in Latin digits", () => {
@@ -36,6 +40,10 @@ describe("sizes in the app's language", () => {
     // Arabic: an Arabic unit, so the number is read first (a Latin "KB" came before it: "KB 144").
     expect(formatBytes(144 * 1024, inAr)).toBe("144 ك.ب");
     expect(byteSize(1.3 * 1024 ** 3, inAr)).toBe("1.3 غ.ب");
+    // A move between devices (Handoff): the bytes copied, what is left for later, what a push offers.
+    expect(sizeText(1.2 * 1024 ** 3, inFr)).toBe("1,2 Go");
+    expect(sizeText(480 * 1024 * 1024, inPt)).toBe("480 MB");
+    expect(sizeText(144 * 1024, inAr)).toBe("144 ك.ب");
   });
 
   it("Settings says the storage used in the app's language", async () => {

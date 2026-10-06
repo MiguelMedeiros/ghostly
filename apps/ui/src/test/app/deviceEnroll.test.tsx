@@ -11,12 +11,13 @@ import { defaultDeviceName, lockPasswordMin, lockPasswordProblem } from "../../l
 import { hashPassword } from "../../lib/settings";
 import { Home } from "../../pages/Home";
 import { renderApp } from "../render";
+import type { EnrollView } from "@ghostly/browser/devices/enroll";
 // covers: devices.enroll
 
 /** happy-dom has no <dialog> modal; the dialog only needs to open. */
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
 
-const waiting = { role: "inviter" as const, step: "waiting" as const, code: "ghostly1zexample", expires: 1 };
+const waiting = { role: "inviter" as const, step: "waiting" as const, code: "ghostly1zexample", expires: Math.floor(Date.now() / 1000) + 600 };
 
 afterEach(() => { vi.unstubAllGlobals(); Reflect.deleteProperty(navigator, "userAgent"); });
 
@@ -36,7 +37,11 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     engine.on("deviceEnrollInvite", () => waiting);
     // The password proof's verifier is made as the password is typed (part 5).
     engine.on("deviceHandoffVerifier", () => undefined);
+    // One dialog, "Add a device", asks for it inline; why is behind ⓘ.
+    expect(screen.getByTestId("device-add")).toHaveTextContent("Add a device");
     expect(screen.getByText("Set a password first")).toBeInTheDocument();
+    expect(screen.queryByText("Without a password, anyone holding one of your devices can take this profile.")).toBeNull();
+    await user.click(screen.getByTestId("device-add-password-ask-info"));
     expect(screen.getByText("Without a password, anyone holding one of your devices can take this profile.")).toBeInTheDocument();
     await user.type(screen.getByTestId("device-add-password"), "short1");
     await user.type(screen.getByTestId("device-add-password-again"), "short1");
@@ -49,7 +54,9 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await user.click(screen.getByTestId("device-add-next"));
     await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(1));
     expect(await screen.findByTestId("device-add-code")).toHaveAttribute("data-code", "ghostly1zexample");
-    expect(screen.getByText("Valid for 10 minutes")).toBeInTheDocument();
+    // Under the code, where it stands and the time left on it.
+    expect(screen.getByTestId("device-add-status")).toHaveTextContent("Waiting for your other device…");
+    expect(screen.getByTestId("device-add-left")).toHaveTextContent(/^(10:00|9:5\d) left$/);
     // The lock is on, with the new password.
     expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true });
   });
@@ -119,10 +126,29 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await user.click(screen.getByTestId("device-add-next"));
     expect(await screen.findByTestId("device-add-digits", {}, { timeout: 3_000 })).toHaveTextContent("482 913");
     // The name is the new device's own claim; the digits are the check.
-    expect(screen.getByTestId("device-add")).toHaveTextContent("The new device calls itself Phone. Do both devices show these digits?");
+    expect(screen.getByTestId("device-add-status")).toHaveTextContent("Found Phone. Check that it shows the same digits.");
     expect(screen.getByTestId("device-add-refused")).toHaveTextContent("Another device tried to use this code. It got nothing.");
     await user.click(screen.getByTestId("device-add-match"));
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
+  }, 20_000);
+
+  it("says a device is connecting once one read the code, and Try again after a failure makes a new code", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    let view: EnrollView = { ...waiting, seen: true };
+    engine.on("deviceEnrollView", () => view);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    const status = await screen.findByTestId("device-add-status");
+    await waitFor(() => expect(status).toHaveTextContent("A device is connecting…"), { timeout: 3_000 });
+    view = { role: "inviter", step: "failed", reason: "expired" };
+    expect(await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 })).toHaveTextContent("This code ran out of time. Make a new one.");
+    view = waiting;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(2));
+    expect(await screen.findByTestId("device-add-code")).toBeInTheDocument();
   }, 20_000);
 
   it("says the two devices could not connect, in place of the code, when the engine ends it so", async () => {
@@ -147,11 +173,20 @@ describe("I already use Ghostly", () => {
     expect(screen.getByTestId("device-join-restore")).toHaveTextContent("Restore a backup");
   });
 
-  it("on an iPhone in a browser tab it only says to add Ghostly to the Home Screen first", () => {
+  it("on an iPhone in a browser tab it says to add Ghostly to the Home Screen first, in three steps", () => {
     Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1" });
-    renderApp(<JoinProfileDialog onClose={() => {}} onRestore={() => {}} />);
-    expect(screen.getByTestId("device-join-home-screen")).toHaveTextContent("Add Ghostly to your Home Screen first.");
+    const { unmount } = renderApp(<JoinProfileDialog onClose={() => {}} onRestore={() => {}} />);
+    const steps = screen.getByTestId("device-join-home-screen");
+    expect(steps).toHaveTextContent("Tap Share in Safari (in the ⋯ menu on newer iPhones).");
+    expect(steps).toHaveTextContent("Tap Add to Home Screen (under More if you don't see it).");
+    expect(steps).toHaveTextContent("Open Ghostly from your Home Screen and choose I already use Ghostly.");
     expect(screen.queryByTestId("device-join-add")).toBeNull();
+    unmount();
+    // A code the camera opened in Safari: the same steps, and it is scanned again in the app.
+    renderApp(<JoinProfileDialog request={{ code: "ghostly1zexample" }} onClose={() => {}} onRestore={() => {}} />);
+    expect(screen.getByTestId("device-join")).toHaveTextContent("Add Ghostly to your Home Screen first");
+    expect(screen.getByTestId("device-join-home-screen")).toHaveTextContent("Open Ghostly from your Home Screen and scan the code again.");
+    expect(screen.queryByTestId("device-join-confirm")).toBeNull();
   });
 
   it("names the device from what it is, at most 16 characters", () => {
@@ -160,5 +195,10 @@ describe("I already use Ghostly", () => {
     expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", desktop: true })).toBe("Mac app");
     expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36 Chrome/131.0" })).toBe("Phone");
     for (const ua of ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0"]) expect(defaultDeviceName({ userAgent: ua }).length).toBeLessThanOrEqual(16);
+    // Never a word cut short: a shorter form, not "Chrome on Window" or "Firefox on Windo".
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" })).toBe("Chrome, Windows");
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0" })).toBe("Firefox, Windows");
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0" })).toBe("Edge on Windows");
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" })).toBe("Chrome on Linux");
   });
 });

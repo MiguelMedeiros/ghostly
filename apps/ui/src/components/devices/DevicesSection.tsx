@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
+import { MAX_DEVICES } from "@ghostly/browser/devices/state";
 import { useI18n } from "../../contexts/I18nContext";
 import { errorText } from "../../lib/errorText";
 import { listNames, openJoinAnother, removeErrorKey, useDeviceSet } from "../../lib/devices";
@@ -53,12 +54,15 @@ export function DevicesSection() {
     } catch { setChecked((was) => ({ ...was, [key]: t("devices.section.noAnswer") })); }
   };
   const devices = view?.devices ?? [];
+  const full = devices.length >= MAX_DEVICES;
   // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
   const stopped = view?.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
   return (
     <Section title={t("devices.section.title")} testId="profile-devices">
-      <Row label={t("devices.section.lead")} hint={t("devices.section.leadHint")} info={t("devices.section.info")}>
-        <Button data-testid="device-add-open" onClick={() => setAdding(true)} disabled={!view || devices.length >= 4}>{t("devices.add.button")}</Button>
+      {/* Four devices, the most a profile has (WISP 06): the button stays, off, and the line says why. */}
+      <Row testId={full ? "device-add-full" : undefined} label={t("devices.section.lead")} hint={full ? t("devices.section.full") : t("devices.section.leadHint")}
+        info={full ? t("devices.section.fullInfo") : t("devices.section.info")}>
+        <Button data-testid="device-add-open" onClick={() => setAdding(true)} disabled={!view || full}>{t("devices.add.button")}</Button>
       </Row>
       {/* The other way round: this device, with a profile from another device. Offered while this profile has no other device. */}
       {canSwitch && view && devices.length <= 1 && !view.foreignSet && (

@@ -5470,6 +5470,18 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * Whether a device code may be used in this profile now, asked before the person presses Add (WISP 06 § User
+   * experience): `ready`, or why not: `set` (this profile is already on several devices), `in-use` (it holds something,
+   * `inUse`), `loading` (what it holds is not known yet). The page says up front that a new profile is made for the
+   * code; `deviceEnrollJoin` still decides, and refuses as before.
+   */
+  async deviceEnrollReady(): Promise<"ready" | "set" | "in-use" | "loading"> {
+    if (this.starting) await this.starting;
+    if (await readDeviceRecord(databaseName()).catch(() => null)) return "set";
+    return this.inUse() ?? "ready";
+  }
+
+  /**
    * Whether this profile holds anything a person would lose if it became a standby here: a chat, a group, an identity,
    * money or a payment, or a wallet with keys of its own. The wallets a new profile gets by itself (Mainnet Cashu, with
    * the Cashu mints' Lightning card, and USDT, `walletSetup.ts`) count only once they hold, wait for or have moved

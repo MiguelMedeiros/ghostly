@@ -4,7 +4,8 @@ import { listSessions } from "./storage";
 /*
  * "What should people call you?", asked once by a new profile (`NameStep`). A profile is new when it is made here: the
  * first start of the app (no settings yet, no chat), or "New profile". A profile restored from a backup, or added to a
- * profile on another device ("I already use Ghostly", "Add this device to another profile"), is not: it is never marked.
+ * profile on another device ("I already use Ghostly", "Add this phone to <profile>"), is not: a profile made for a code
+ * is never marked, and a first start that joins a profile loses its mark once the device is added (`JoinProfileDialog`).
  * The mark is a key of its own in the profile's storage, which backups and handoffs leave out (`profileBackup.ts`), so
  * a copy of the profile never carries the question somewhere else.
  */

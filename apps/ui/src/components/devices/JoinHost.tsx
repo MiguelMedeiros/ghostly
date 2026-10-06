@@ -1,50 +1,45 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { readDeviceInvite } from "@ghostly/core";
 import { useI18n, type TranslationKey } from "../../contexts/I18nContext";
-import { DEVICE_LINK_EVENT, JOIN_OPEN_EVENT, failureKey, joinInNewProfile, takeDeviceLink, takeJoinRequest, type JoinOpen } from "../../lib/devices";
-import { errorText } from "../../lib/errorText";
-import { servicesPlatform } from "../../lib/platform";
-import { activeProfileId, listProfiles } from "../../lib/profiles";
-import { listSessions } from "../../lib/storage";
-import { InfoButton } from "../layout/Section";
-import { DeviceDialog, primaryButton, quietButton } from "./DeviceDialog";
+import { DEVICE_LINK_EVENT, JOIN_OPEN_EVENT, failureKey, takeDeviceLink, takeJoinRequest, type JoinRequest } from "../../lib/devices";
+import { activeProfileId } from "../../lib/profiles";
 import { JoinProfileDialog } from "./JoinProfileDialog";
 
 /**
  * Where "Add this device to my profile" opens (WISP 06 § User experience), over whatever the app shows: the chat list
  * on a phone, the home pane on a wide screen, or the standby screen. It opens:
- * - on "I already use Ghostly" (`openJoinProfile`), in this profile;
- * - in a profile made to join (`joinInNewProfile`), once it starts;
- * - on "Add this device to another profile" (`openJoinAnother`), which asks first;
- * - on a device code opened as a link (`takeDeviceLinkFromAddress`): straight in on a fresh install (one profile, no
- *   chat), else it asks first, and the code goes into a new profile, never into one the person uses.
- * A code the engine refuses in this profile because it is in use (it holds a group, an identity or money, not only
- * chats) goes the same way: on to "Add this device to another profile", with the code kept.
+ * - on "I already use Ghostly" (`openJoinProfile`), at its first step;
+ * - on "Add this device to another profile" (`openJoinAnother`), at the scanner;
+ * - on a device code opened as a link (`takeDeviceLinkFromAddress`), or read by Join on the chat list, at the one
+ *   screen "Add this phone to <profile>", in whatever profile this is: the dialog makes a new profile for the code
+ *   when this one holds something, never puts it into one in use;
+ * - in a profile made for a code (`joinInNewProfile`), once it starts, straight on to the digits.
+ * Each opening replaces the last: a second code read while one shows takes its place.
  */
 export function JoinHost({ standby = false }: { standby?: boolean }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState<JoinOpen | null>(() => {
+  const [open, setOpen] = useState<{ request: JoinRequest; key: number } | null>(() => {
     const request = standby ? null : takeJoinRequest(activeProfileId());
-    return request ? { kind: "join", request } : null;
+    return request ? { request, key: 0 } : null;
   });
   const [invalid, setInvalid] = useState<TranslationKey | null>(null);
 
   useEffect(() => {
-    const onOpen = (event: Event) => setOpen((event as CustomEvent<JoinOpen>).detail);
+    const show = (request: JoinRequest) => setOpen((last) => ({ request, key: (last?.key ?? 0) + 1 }));
+    const onOpen = (event: Event) => show((event as CustomEvent<{ request: JoinRequest }>).detail.request);
     const onLink = () => {
-      const code = takeDeviceLink();
-      if (!code) return;
-      const reading = readDeviceInvite(code);
+      const link = takeDeviceLink();
+      if (!link) return;
+      const reading = readDeviceInvite(link.code);
       if (!reading.ok) { setInvalid(failureKey(reading.reason)); return; }
-      const fresh = !standby && listProfiles().length === 1 && listSessions().length === 0;
-      setOpen(fresh ? { kind: "join", request: { code, start: "name" } } : { kind: "another", code });
+      show({ code: link.code, ...(link.profile ? { profile: link.profile } : {}) });
     };
     window.addEventListener(JOIN_OPEN_EVENT, onOpen);
     window.addEventListener(DEVICE_LINK_EVENT, onLink);
     // A link taken before this mounted (the address is read first, the lock asked after).
     onLink();
     return () => { window.removeEventListener(JOIN_OPEN_EVENT, onOpen); window.removeEventListener(DEVICE_LINK_EVENT, onLink); };
-  }, [standby]);
+  }, []);
 
   useEffect(() => {
     if (!invalid) return;
@@ -60,44 +55,9 @@ export function JoinHost({ standby = false }: { standby?: boolean }) {
         {t(invalid)}
       </div>
     )}
-    {open?.kind === "join" && (
-      <JoinProfileDialog code={open.request.code} start={open.request.start} onClose={close}
-        onRestore={() => { close(); window.location.hash = "#/profile"; }}
-        // A good code read in a profile that is in use here: it goes into a new profile, asked first, as a link's does.
-        // An app with one profile only has nowhere else to put it, and says why it cannot.
-        onInUse={servicesPlatform?.features.profiles ? (code) => setOpen({ kind: "another", code }) : undefined} />
+    {open && (
+      <JoinProfileDialog key={open.key} request={open.request} standby={standby} onClose={close}
+        onRestore={() => { close(); window.location.hash = "#/profile"; }} />
     )}
-    {open?.kind === "another" && <JoinAnotherDialog code={open.code} onClose={close} />}
   </>;
-}
-
-/**
- * "Add this device to another profile": a new, empty profile here opens on "Add this device to my profile" (with the
- * code a link carried); the profiles here stay as they are. The code says nothing of the device that made it, so the
- * question names none.
- */
-export function JoinAnotherDialog({ code, onClose }: { code?: string; onClose(): void }) {
-  const { t } = useI18n();
-  const id = useId();
-  const [more, setMore] = useState(false);
-  const [error, setError] = useState("");
-  // Continue has the focus, so Enter goes on: the dialog, opened after this mounts, would give it to the close button.
-  const primary = useRef<HTMLButtonElement>(null);
-  useEffect(() => { const timer = setTimeout(() => primary.current?.focus()); return () => clearTimeout(timer); }, []);
-  const go = () => {
-    try { joinInNewProfile(t("devices.join.profileName"), { code, start: "name" }); }
-    catch (cause) { setError(errorText(cause, t)); }
-  };
-  return (
-    <DeviceDialog title={code ? t("devices.join.linkTitle") : t("devices.join.another")} onClose={onClose} testId="device-join-another">
-      <div className="flex items-start gap-2">
-        <p className="flex-1 text-text-secondary">{t("devices.join.newHere")}</p>
-        <InfoButton open={more} onToggle={() => setMore(!more)} controls={id} testId="device-join-another-info" />
-      </div>
-      {more && <p id={id} className="text-xs text-text-secondary leading-relaxed ps-3 border-s-2 border-border">{code ? t("devices.join.linkInfo") : t("devices.join.anotherInfo")}</p>}
-      {error && <p role="alert" className="text-danger">{error}</p>}
-      <button type="button" ref={primary} data-testid="device-join-another-go" onClick={go} className={primaryButton}>{t("devices.join.go")}</button>
-      <button type="button" data-testid="device-join-another-cancel" onClick={onClose} className={quietButton}>{t("common.cancel")}</button>
-    </DeviceDialog>
-  );
 }

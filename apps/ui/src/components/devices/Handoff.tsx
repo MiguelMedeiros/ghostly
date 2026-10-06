@@ -42,7 +42,7 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
     // A wake push went to the other device (a phone that suspended the app): the person opens Ghostly there.
     : view.step === "connecting" ? (view.woken ? t("devices.handoff.fail.woken", { device }) : t("devices.handoff.step.connecting", { device }))
       : view.step === "authorizing" ? t("devices.handoff.step.authorizing")
-        : view.step === "copying" ? t("devices.handoff.step.copying", { done: sizeText(view.bytes), total: sizeText(view.total) })
+        : view.step === "copying" ? t("devices.handoff.step.copying", { done: sizeText(view.bytes, t), total: sizeText(view.total, t) })
           : view.step === "paused" ? t("devices.handoff.step.paused", { percent })
             : view.step === "ready" ? t("devices.handoff.step.ready")
               : view.step === "rest" ? t("devices.handoff.step.rest")
@@ -96,7 +96,7 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
       )}
       {view.step === "copying" && view.role === "giver" && <p className="text-xs text-text-muted">{t("devices.handoff.step.keepUsing")}</p>}
       {phone && !failed && !done && view.role === "taker" && <p data-testid="handoff-keep-open" className="text-xs text-text-muted">{t("devices.handoff.keepOpen")}</p>}
-      {!!view.later && <p data-testid="handoff-later-note" className="text-xs text-text-muted">{t("devices.handoff.laterNote", { size: sizeText(view.later), device })}</p>}
+      {!!view.later && <p data-testid="handoff-later-note" className="text-xs text-text-muted">{t("devices.handoff.laterNote", { size: sizeText(view.later, t), device })}</p>}
       {view.newer && <p className="text-xs text-text-muted">{t("devices.handoff.newer")}</p>}
       {!failed && view.role === "giver" && (view.stays ?? []).map((stay) => (
         <p key={`${stay.type}:${stay.network}`} data-testid="handoff-stays" className="text-xs text-text-muted">
@@ -157,7 +157,7 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
     <div data-testid="handoff-offer" className="space-y-3">
       <div className="space-y-1">
         <p className="font-semibold text-text-primary">{t("devices.handoff.offerTitle", { device })}</p>
-        <p className="text-sm text-text-secondary">{t("devices.handoff.offerHint", { size: sizeText(view.offer ?? 0) })}</p>
+        <p className="text-sm text-text-secondary">{t("devices.handoff.offerHint", { size: sizeText(view.offer ?? 0, t) })}</p>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button type="button" data-testid="handoff-decline" disabled={busy} onClick={() => act(() => engine.call("deviceHandoffCancel"))} className={`${quietButton} max-sm:order-last`}>{t("devices.handoff.notNow")}</button>

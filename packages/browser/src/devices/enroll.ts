@@ -73,8 +73,11 @@ export type EnrollFailure =
 
 /** What a page is told of an enrollment in progress. Never a secret: the code is for the person to hand over. */
 export type EnrollView =
-  /** The code is out; nobody has used it yet. `refused`: how many other devices tried it after it was spent. */
-  | { role: "inviter"; step: "waiting"; code: string; expires: number; refused?: number }
+  /**
+   * The code is out; nobody has used it yet. `refused`: how many other devices tried it after it was spent. `seen`: a
+   * device that read the code is on the link and the session is opening (the page says "Connecting to a device").
+   */
+  | { role: "inviter"; step: "waiting"; code: string; expires: number; refused?: number; seen?: true }
   /** Both screens show these digits; the person says whether they match. */
   | { role: "inviter"; step: "confirm"; digits: string; device: string; kind: DeviceKind; refused?: number }
   /** The grant is out: the new device stores it, then this one adds it to the turn record. */
@@ -319,6 +322,7 @@ export class EnrollInviter extends Enrollment {
         // so (the joiner's at the same timeout), rather than this one showing the code for the rest of its ten minutes.
         if (this.seen || this.over) return;
         this.seen = true;
+        if (this.view.role === "inviter" && this.view.step === "waiting") this.show({ ...this.view, seen: true });
         this.timer(this.options.timing?.proofMs ?? ENROLL_PROOF_TIMEOUT_MS, () => { if (this.view.step === "waiting") void this.fail("unreached"); });
       },
     });

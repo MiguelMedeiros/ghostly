@@ -29,16 +29,19 @@ test("a profile adds a second device: the same digits on both, a standby with a 
   await add.getByTestId("device-add-next").click();
   const shown = add.getByTestId("device-add-code");
   await expect(shown).toBeVisible();
-  await expect(add).toContainText("Valid for 10 minutes");
+  // Under the QR code, where it stands, and the time left on the code.
+  await expect(add.getByTestId("device-add-status")).toHaveText("Waiting for your other device…");
+  await expect(add.getByTestId("device-add-left")).toHaveText(/^(10:00|9:\d\d) left$/);
   const code = (await shown.getAttribute("data-code"))!;
   expect(code).toMatch(/^ghostly1z/);
 
-  // The new device: I already use Ghostly, Add this device to my profile, its name, and the code.
+  // The new device: I already use Ghostly, Add this device to my profile, the code, then one screen with its name.
   await phone.page.getByTestId("home-already").click();
   await phone.page.getByTestId("device-join-add").click();
+  await pasteInvite(phone.page, code);
+  await expect(phone.page.getByTestId("device-join-confirm")).toHaveAttribute("data-place", "here");
   await phone.page.getByTestId("device-join-name").fill("Phone");
   await phone.page.getByTestId("device-join-next").click();
-  await pasteInvite(phone.page, code);
 
   // Both show the same six digits; the new one only once the active one proved itself.
   const desktopDigits = desktop.page.getByTestId("device-add-digits");
@@ -48,7 +51,8 @@ test("a profile adds a second device: the same digits on both, a standby with a 
   const digits = await desktopDigits.getAttribute("data-digits");
   expect(digits).toMatch(/^\d{6}$/);
   expect(await phoneDigits.getAttribute("data-digits")).toBe(digits);
-  await expect(add).toContainText("The new device calls itself Phone.");
+  await expect(add.getByTestId("device-add-status")).toHaveText("Found Phone. Check that it shows the same digits.");
+  await expect(phone.page.getByTestId("device-join")).toContainText("Check that your other device shows the same digits.");
   await expect(phone.page.getByTestId("device-join")).toContainText("Confirm on your other device.");
 
   await add.getByTestId("device-add-match").click();
