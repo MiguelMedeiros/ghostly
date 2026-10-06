@@ -41,7 +41,7 @@
     "typescript": "^5"
   },
   "overrides": {
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "postcss": "8.5.24"
   }
 }
