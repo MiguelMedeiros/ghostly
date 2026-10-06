@@ -61,9 +61,9 @@ test("the chat list's search, the composer and a chat's search show a ring with 
   const alice = await peer("ring-alice", { viewport: { width: 1280, height: 900 } });
   const { page } = alice;
   await seedChat(page);
-  await expect(page.getByText("Message 4", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("message-text").filter({ hasText: /^Message 4$/ })).toBeVisible();
 
-  const search = page.getByTestId("sidebar-search"), composer = page.getByPlaceholder("Message…"), find = page.getByTestId("chat-search-input");
+  const search = page.getByPlaceholder("Search chats..."), composer = page.getByPlaceholder("Message…"), find = page.getByTestId("chat-search-input");
   const fields: [string, Locator, Locator][] = [
     ["the chat list's search", search, search.locator("xpath=..")],
     ["the composer", composer, page.locator(".composer-field")],

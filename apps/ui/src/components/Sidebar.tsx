@@ -254,7 +254,6 @@ export function Sidebar() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
                   placeholder={t("sidebar.searchPlaceholder")}
-            data-testid="sidebar-search"
             className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted outline-none py-1"
           />
         </div>

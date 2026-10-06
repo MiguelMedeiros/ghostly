@@ -60,7 +60,7 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           }}
           placeholder={t("chat.search.placeholder")}
           aria-label={t("chat.search.placeholder")}
-          className="min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring [&::-webkit-search-cancel-button]:hidden"
+          className="min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring [&::-webkit-search-cancel-button]:hidden"
         />
         <span data-testid="chat-search-count" role="status" aria-live="polite" className="shrink-0 px-1 text-xs tabular-nums text-text-muted">
           {searched ? (total ? t("chat.search.count", { current: String(Math.max(search.index, 0) + 1), total: String(total) }) : t("chat.search.none")) : ""}
