@@ -11,7 +11,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { unseenSatsLabel, useUnseenSats } from "../hooks/useUnseenSats";
 import { UnseenSatsDot } from "./UnseenSatsDot";
 import { useBackupDue } from "../hooks/useBackupDue";
-import { useAppsAvailable } from "../lib/apps/flag";
+import { useAppsState } from "../lib/apps/flag";
 import { AppGlyph } from "./apps/AppIcon";
 
 const icon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -86,7 +86,8 @@ export function MobileTabBar() {
   const unseen = useUnseenSats();
   const backupDue = useBackupDue().length > 0;
   // Services is still reached from Profile and from a chat's Shared services.
-  const appsOn = useAppsAvailable();
+  // Apps holds the place while the runner's header is checked too: the bar does not jump on every start.
+  const appsOn = useAppsState() !== "off";
   const tabs = appsOn ? TABS.map((tab) => (tab.path === "/services" ? APPS_TAB : tab)) : TABS;
 
   return (

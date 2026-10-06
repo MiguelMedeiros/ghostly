@@ -13,7 +13,7 @@ import { IdentitiesIcon } from "./identities/IdentitiesIcon";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
 import { SWITCHER_SHORTCUT, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useAppNavigation } from "../hooks/useAppNavigation";
-import { useAppsAvailable } from "../lib/apps/flag";
+import { useAppsState } from "../lib/apps/flag";
 import { AppGlyph } from "./apps/AppIcon";
 
 
@@ -69,7 +69,8 @@ export function AccountBar() {
   const [labelsHidden, setLabelsHidden] = useState(false);
   // Apps (WISP 1200), where it shows, takes Services' place: five places is what the bar holds at its narrowest (each
   // stays a 44px target). Services is still reached from the Profile page and from a chat's Shared services.
-  const appsOn = useAppsAvailable();
+  // Apps holds the place while the runner's header is checked too: the bar does not jump on every start.
+  const appsOn = useAppsState() !== "off";
   const placeNames = [t("tabs.wallets"), t("tabs.identities"), appsOn ? t("apps.title") : t("tabs.services"), t("sidebar.settings")].join("\n");
   const placeCount = 3 + (wallet ? 1 : 0) + (platform || appsOn ? 1 : 0);
   useEffect(() => {
