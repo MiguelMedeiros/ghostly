@@ -504,6 +504,11 @@ export interface GhostLinkOptions {
   /** The contact's capability record, as last read, says `upgrade/1` (WISP 03). */
   peerUpgrades?: () => boolean;
   /**
+   * Whether this device has no network now. A native dial that fails then says nothing about its transport, so it
+   * counts toward no demotion. By default the browser's `navigator.onLine`; a host that cannot tell is never offline.
+   */
+  offline?: () => boolean;
+  /**
    * A device link (WISP 06): the capabilities it announces on the open session, and so the device frames it carries
    * (`sendDeviceFrame`, `onDeviceFrame`). Never given for a chat or a group's link, which drop every device frame.
    */
@@ -724,8 +729,13 @@ export class GhostLink {
   private autoConnectFailures = 0;
   /** Native transports a record just read listed with no way to dial them (`record-undescribed`), until one describes them again. */
   private readonly undescribed = new Set<NativeTransport>();
-  /** The native dial under way (`dialNative`): its attempt, its transport and the endpoint it went to (`redescribedDial`). */
-  private nativeDial: { epoch: number; transport: NativeTransport; endpoint: unknown } | null = null;
+  /**
+   * The native dial under way (`dialNative`): its attempt, its transport, the endpoint it went to (`redescribedDial`),
+   * and whether it started with this device offline (`networkBack`).
+   */
+  private nativeDial: { epoch: number; transport: NativeTransport; endpoint: unknown; offline: boolean } | null = null;
+  /** When the device's network last came back (`wake({ network: true })`): a dial under way across it is no failure. */
+  private networkBackAt = -Infinity;
   /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
   private offerAwaitedFor = 0;
   /** Whether the stream was blocked (DHT-only on either side) when last looked at. */
@@ -2043,7 +2053,7 @@ export class GhostLink {
     const descriptor = this.peerDescriptors[transport as NativeEndpoint["transport"]];
     if (!endpoint || !descriptor) return new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
     const started = Date.now();
-    const dialed = this.nativeDial = { epoch, transport: transport as NativeTransport, endpoint: endpointId(transport as NativeTransport, descriptor) };
+    const dialed = this.nativeDial = { epoch, transport: transport as NativeTransport, endpoint: endpointId(transport as NativeTransport, descriptor), offline: this.isOffline() };
     try {
       const { channel, binding } = await endpoint.connect(descriptor);
       this.nativeFailures.delete(transport); this.demotedUntil.delete(transport);
@@ -2053,6 +2063,12 @@ export class GhostLink {
       traceLink(this.myPubKeyZ32, "dial-failed", { transport, error: error instanceof Error ? error.message : String(error), ms: Date.now() - started });
       if (epoch !== this.connectionEpoch) return true;
       this.attemptFailed(transport, error instanceof Error ? error.message : String(error));
+      // Started or ended with this device offline, or the network came back meanwhile: no network says nothing of the
+      // transport. Three such drops would demote it for an hour (bug hunt r10a, 2026-10-06).
+      if (dialed.offline || this.isOffline() || this.networkBackAt >= started) {
+        traceLink(this.myPubKeyZ32, "dial-failed-offline", { transport });
+        return error instanceof Error ? error : new Error(String(error));
+      }
       // Three failures in a row demote it for an hour (WISP 100).
       const failures = (this.nativeFailures.get(transport) ?? 0) + 1;
       if (failures >= DEMOTE_AFTER_FAILURES) { this.nativeFailures.delete(transport); this.demotedUntil.set(transport, Date.now() + DEMOTE_MS); traceLink(this.myPubKeyZ32, "demote", { transport }); }
@@ -2083,6 +2099,36 @@ export class GhostLink {
     this.autoConnectFailures = Math.max(0, this.autoConnectFailures - 1);
     this.redial();
     return true;
+  }
+
+  /** Whether this device has no network now (`GhostLinkOptions.offline`). */
+  private isOffline(): boolean {
+    return this.options.offline ? this.options.offline() : (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine === false;
+  }
+
+  /**
+   * The device's network came back. A native dial that started while it was away would end only at its connect timeout
+   * (Iroh: 20 s), well past the return: it is let go, and the chat dialled again now. Its WebRTC offer, if one stands,
+   * was made with no network too, and goes with it.
+   */
+  private networkBack(): void {
+    this.networkBackAt = Date.now();
+    const dial = this.nativeDial;
+    if (!dial?.offline || dial.epoch !== this.connectionEpoch || !this.dialing || this.channel) return;
+    // Only where the chat dials again on its own (`redial`): otherwise the dial goes on to its end.
+    if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect) return;
+    traceLink(this.myPubKeyZ32, "offline-dial", { transport: dial.transport });
+    this.nativeDial = null;
+    if (this.dataLink.state !== "idle") this.disconnect();
+    else {
+      this.connectionEpoch++;
+      this.dialing = false;
+      this.clearRace();
+      this.afterRtc = undefined;
+    }
+    this.autoConnectFailures = 0;
+    this.lastAutoConnectAt = 0;
+    this.redial();
   }
 
   /** A WebRTC attempt this side dialled ended without opening: the next ranked transports, in order. */
@@ -3580,9 +3626,10 @@ export class GhostLink {
 
   /**
    * Someone is here again (the chat was opened, the window came back): look now, and try at once rather
-   * than after the wait between failed attempts.
+   * than after the wait between failed attempts. `network`: the device's network just came back.
    */
-  wake(): void {
+  wake(params: { network?: boolean } = {}): void {
+    if (params.network) this.networkBack();
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     this.session.pollNow();
