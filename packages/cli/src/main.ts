@@ -606,6 +606,12 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   const g = globals(parsed);
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
+  if (command.run) {
+    const result = await command.run(parsed, args);
+    if (typeof result.warning === "string") { process.stderr.write(`ghostly: ${result.warning}\n`); delete result.warning; }
+    print(result);
+    return;
+  }
   const params = command.params?.(parsed, args) ?? {};
   for (const key of Object.keys(params)) if (params[key] === undefined) delete params[key];
   // Evidence is read here, where the file is: the daemon runs elsewhere.
