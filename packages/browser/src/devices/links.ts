@@ -31,6 +31,8 @@ export interface DeviceHandoffHandler {
   linkChanged(key: string, live: boolean): void;
   /** A page's call, or undefined when the method is not this handler's. */
   call?(method: string, params: unknown): Promise<unknown> | undefined;
+  /** What a turn read found: a standby that released learns from it that its release was taken. */
+  turnRead?(outcome: TurnOutcome): void;
   stop(): void;
 }
 
@@ -872,6 +874,7 @@ export class DeviceLinks implements DeviceLinkEngine {
     const keeper = await this.turnKeeper();
     if (!keeper) return null;
     const outcome = await keeper.check(atStart);
+    try { if (outcome) this.handoff?.turnRead?.(outcome); } catch { /* the handler's own trouble */ }
     await this.refresh();
     return outcome;
   }

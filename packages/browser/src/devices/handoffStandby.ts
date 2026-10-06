@@ -5,6 +5,7 @@ import { handoffProfileHost, handoffSelf, type HandoffProfileHost } from "./hand
 import type { DeviceHandoffHandler, DeviceLinks } from "./links";
 import { deviceIdentity } from "./setup";
 import { copyDeviceSigningKey } from "./signingKey";
+import { deviceSetOf } from "./turn";
 import type { DevicePatch, DeviceRecord } from "./state";
 import { amendDevice, forgetDevice, installDeviceRecord, moveDevice, readDeviceRecord } from "./store";
 import { DB_VERSION } from "../shared/idb";
@@ -168,6 +169,12 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
       void route(from, frame).receive(from, frame);
     },
     linkChanged: (key, live) => { giver.linkChanged(key, live); taker.linkChanged(key, live); },
+    // "Active on <device>": the record of the device this one released to is out, so it took the turn.
+    turnRead: (outcome) => {
+      const taken = outcome.kind === "show" && outcome.screen === "active-on" ? outcome.read.record : undefined;
+      const key = taken ? deviceSetOf(taken)[taken.active]?.key : undefined;
+      if (taken && key) void giver.turnTaken(key, taken.turn);
+    },
     call: (method, params) => {
       const p = (params ?? {}) as { password?: unknown; later?: unknown };
       const later = typeof p.later === "number" && p.later >= 0 ? p.later : 0;
@@ -181,7 +188,9 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
             if (now?.state === "superseded") await options.links.checkTurn(false).catch(() => null);
             // A standby with no live link to the device it believes active reads the turn first: it may have been removed
             // meanwhile (the active device closed its link), and the screen then says so, not "can't reach" that device.
-            else if (now?.state === "standby" && !activeLive(now)) {
+            // So does one that released and never heard that the device it released to took the profile: the read ends
+            // that handoff here when the taker's record is out (`turnRead`).
+            else if (now?.state === "standby" && (!activeLive(now) || giver.view()?.step === "switching")) {
               await options.links.checkTurn(false).catch(() => null);
               const after = await readDeviceRecord(options.profile).catch(() => null);
               if (after && (after.state !== now.state || after.activeSlot !== now.activeSlot || after.d !== now.d)) {
