@@ -129,19 +129,31 @@ export function appDataFrame(app: string, data: unknown): AppFrame {
   return { t: APP_FRAME, a: app, d: data };
 }
 
+/** Why a reader refuses a `paired-app` frame (the vectors' `refusal`). */
+export type AppFrameRefusal = "not-app" | "bad-a" | "o-and-d" | "no-o-or-d" | "too-large" | "unknown-o" | "bad-v";
+
 /**
- * A `paired-app` frame as the peer sent it, or null when a reader must refuse it: no valid `a`, both or neither of
- * `o` and `d`, an unknown `o`, an `open` without a valid `v`, or a `d` over `APP_DATA_MAX_BYTES`. Other keys are
- * ignored, so a later version can add some.
+ * A `paired-app` frame as the peer sent it, or why a reader must refuse it: no valid `a` (22 base64url characters),
+ * both or neither of `o` and `d`, an unknown `o`, an `open` without a valid `v`, or a `d` over `APP_DATA_MAX_BYTES`.
+ * Other keys are ignored, so a later version can add some.
  */
-export function parseAppFrame(frame: Record<string, unknown>): AppFrame | null {
-  if (frame?.t !== APP_FRAME || !isChatAppId(frame.a)) return null;
+export function readAppFrame(frame: Record<string, unknown>): { ok: true; frame: AppFrame } | { ok: false; refusal: AppFrameRefusal } {
+  const refuse = (refusal: AppFrameRefusal) => ({ ok: false as const, refusal });
+  if (frame?.t !== APP_FRAME) return refuse("not-app");
+  if (!isChatAppId(frame.a)) return refuse("bad-a");
   const hasO = Object.hasOwn(frame, "o"), hasD = Object.hasOwn(frame, "d");
-  if (hasO === hasD) return null;
-  if (hasD) return appDataBytes(frame.d) <= APP_DATA_MAX_BYTES ? { t: APP_FRAME, a: frame.a, d: frame.d } : null;
-  if (frame.o === "close") return { t: APP_FRAME, a: frame.a, o: "close" };
-  if (frame.o === "open" && isAppVersion(frame.v)) return { t: APP_FRAME, a: frame.a, o: "open", v: frame.v };
-  return null;
+  if (hasO && hasD) return refuse("o-and-d");
+  if (!hasO && !hasD) return refuse("no-o-or-d");
+  if (hasD) return appDataBytes(frame.d) <= APP_DATA_MAX_BYTES ? { ok: true, frame: { t: APP_FRAME, a: frame.a, d: frame.d } } : refuse("too-large");
+  if (frame.o === "close") return { ok: true, frame: { t: APP_FRAME, a: frame.a, o: "close" } };
+  if (frame.o !== "open") return refuse("unknown-o");
+  return isAppVersion(frame.v) ? { ok: true, frame: { t: APP_FRAME, a: frame.a, o: "open", v: frame.v } } : refuse("bad-v");
+}
+
+/** A `paired-app` frame as the peer sent it, or null when a reader must refuse it (`readAppFrame` says why). */
+export function parseAppFrame(frame: Record<string, unknown>): AppFrame | null {
+  const read = readAppFrame(frame);
+  return read.ok ? read.frame : null;
 }
 
 /** Frames per app in a sliding window, for at most `max` apps at once. */
