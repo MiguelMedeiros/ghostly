@@ -5,6 +5,7 @@ import { handoffProfileHost, handoffSelf, type HandoffProfileHost } from "./hand
 import type { DeviceHandoffHandler, DeviceLinks } from "./links";
 import { deviceIdentity } from "./setup";
 import { copyDeviceSigningKey } from "./signingKey";
+import { deviceSetOf } from "./turn";
 import type { DevicePatch, DeviceRecord } from "./state";
 import { amendDevice, forgetDevice, installDeviceRecord, moveDevice, readDeviceRecord } from "./store";
 import { DB_VERSION } from "../shared/idb";
@@ -98,6 +99,11 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
     links, records, self: () => handoffSelf(host),
   };
   const reload = () => options.show({ state: "standby", reload: true });
+  /** Whether the link to the device the record names active is live now. */
+  const activeLive = (now: DeviceRecord) => {
+    const key = now.activeSlot === undefined ? undefined : now.deviceSet[now.activeSlot]?.key;
+    return !!key && options.links.handoffLive(key);
+  };
   // The standby screen follows the record: a device that released is on standby now, not moving.
   let shown = record.state;
   const follow = () => void readDeviceRecord(options.profile).then((now) => { if (now && now.state !== shown) { shown = now.state; options.show(viewOf(now)); } }).catch(() => {});
@@ -163,6 +169,12 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
       void route(from, frame).receive(from, frame);
     },
     linkChanged: (key, live) => { giver.linkChanged(key, live); taker.linkChanged(key, live); },
+    // "Active on <device>": the record of the device this one released to is out, so it took the turn.
+    turnRead: (outcome) => {
+      const taken = outcome.kind === "show" && outcome.screen === "active-on" ? outcome.read.record : undefined;
+      const key = taken ? deviceSetOf(taken)[taken.active]?.key : undefined;
+      if (taken && key) void giver.turnTaken(key, taken.turn);
+    },
     call: (method, params) => {
       const p = (params ?? {}) as { password?: unknown; later?: unknown };
       const later = typeof p.later === "number" && p.later >= 0 ? p.later : 0;
@@ -174,6 +186,19 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
           return (async () => {
             const now = await readDeviceRecord(options.profile).catch(() => null);
             if (now?.state === "superseded") await options.links.checkTurn(false).catch(() => null);
+            // A standby with no live link to the device it believes active reads the turn first: it may have been removed
+            // meanwhile (the active device closed its link), and the screen then says so, not "can't reach" that device.
+            // So does one that released and never heard that the device it released to took the profile: the read ends
+            // that handoff here when the taker's record is out (`turnRead`).
+            else if (now?.state === "standby" && (!activeLive(now) || giver.view()?.step === "switching")) {
+              await options.links.checkTurn(false).catch(() => null);
+              const after = await readDeviceRecord(options.profile).catch(() => null);
+              if (after && (after.state !== now.state || after.activeSlot !== now.activeSlot || after.d !== now.d)) {
+                options.show(viewOf(after));
+                // Removed, or moving to a new set: nothing to pull, and the screen already says why.
+                if (after.state !== "standby") return taker.view();
+              }
+            }
             return taker.pull(p.password as string, later);
           })();
         case "deviceHandoffAccept": return taker.accept(later);

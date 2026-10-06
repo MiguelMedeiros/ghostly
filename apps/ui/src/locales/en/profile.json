@@ -127,6 +127,12 @@
   "name": "Name",
   "nameInChats": "Name in chats",
   "nameLabel": "Profile name",
+  "nameStep": {
+    "placeholder": "Your name",
+    "save": "Continue",
+    "skip": "Skip",
+    "title": "What should people call you?"
+  },
   "newProfile": "+ New profile",
   "oneOnly": "One profile only in this client, for now.",
   "profiles": "Profiles",

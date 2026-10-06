@@ -325,6 +325,7 @@
     },
     "payee": "Beneficiario",
     "provider": "Proveedor",
+    "returnedInfo": "Recuperar ecash es un intercambio en el mint, y el mint se queda una pequeña comisión por cada intercambio: {{fee}} {{unit}} esta vez. El resto volvió a tu billetera.",
     "states": {
       "cancelled": "cancelado",
       "confirmed": "confirmado",

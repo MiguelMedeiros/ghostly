@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INVITER_DIAL_GRACE_MS, PAIRING_ATTEMPT_MS, PAIRING_RETRY_MS } from "../src/ghostlink";
 import { RELAY_POLL_INTERVALS } from "../src/link";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, run, untilLive, useFakeWorld, type NetworkModel } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, rtc, run, untilLive, useFakeWorld, type NetworkModel } from "./support/pairingWorld";
 
 // covers: chat.paired.pair-timing, chat.paired.progress, chat.paired.pair
 
@@ -16,6 +16,7 @@ import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, 
 const LIVE_WITHIN_MS = 5_000;
 
 beforeEach(useFakeWorld);
+const stagesOf = (side: { progress: { stage: string }[] }) => side.progress.map(p => p.stage).filter((stage, i, all) => stage !== all[i - 1]);
 afterEach(closeWorld);
 
 describe("a first pairing, at desktop pace", () => {
@@ -57,6 +58,80 @@ describe("a first pairing, at desktop pace", () => {
     expect(took).toBeLessThanOrEqual(LIVE_WITHIN_MS + INVITER_DIAL_GRACE_MS);
     expect(inviter.progress.map(p => p.stage)).toEqual(["waiting", "waiting", "knocking", "connecting", "live"]);
   }, 30_000);
+
+  /**
+   * Where the STUN servers never answer, an offer waited for them until its gathering gave up (5 s): One's e2e runs had
+   * 13 offers of 89 at 5 s, and their pairings live 5.5 to 11 s after the join (2026-10-05). It goes after 2 s now,
+   * with its host candidates (`OFFER_HOST_GATHER_MS`).
+   */
+  it.each(["inviter", "joiner"] as const)("an offer whose STUN servers never answer goes after 2 s · the %s's key is lower", async lower => {
+    rtc.srflxAfterMs = Infinity;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere(lower);
+    const inviter = open(made.inviter, pkarr);
+    await run(10_000);
+    const joiner = open(made.joiner, pkarr);
+    const took = await untilLive(inviter, joiner, 60_000);
+    // Before: 6.5 s with the joiner's key lower (its offer's 5 s, then the answer), 11.9 s with the inviter's (it offered
+    // too after its grace, and kept its own). After: 3.7 s either way.
+    expect(took, "live after the join").toBeLessThanOrEqual(4_500);
+    for (const side of [inviter, joiner]) expect(side.progress.at(-1)).toMatchObject({ stage: "live", attempt: 1 });
+  }, 60_000);
+
+  /**
+   * The cost: an offer that went without its server reflexive candidate (STUN answered after 3 s) to a contact behind a
+   * NAT that lets nothing through without one. The attempt fails, and the next offer waits for STUN as long as it takes.
+   */
+  it("an offer without its STUN candidate to a contact that needs one: the attempt fails, the next offer waits for it and connects", async () => {
+    rtc.srflxAfterMs = 3_000;
+    rtc.needsSrflx = true;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere("joiner");
+    const inviter = open(made.inviter, pkarr);
+    await run(10_000);
+    const joiner = open(made.joiner, pkarr);
+    const took = await untilLive(inviter, joiner, 60_000);
+    // Before: 4.45 s, the first offer waited the 3 s for its STUN candidate. After: the first attempt fails, the second
+    // offer waits for it, live at 10.7 s.
+    expect(took, "live after the join").toBeLessThanOrEqual(PAIRING_ATTEMPT_MS + PAIRING_RETRY_MS + 6_000);
+    expect(joiner.progress.at(-1)).toMatchObject({ stage: "live", attempt: 2 });
+  }, 60_000);
+
+  /**
+   * On the public relays a read takes 0.25 to 0.8 s (the joiner's first look at the inviter: 0.73 and 0.8 s, 2026-10-05)
+   * and an offer's gathering 0.2 s and more. The joiner made its offer only once that look was done; it gathers it
+   * meanwhile now, and sends it once the look finds the inviter.
+   */
+  it.each(["desktop", "web"] as const)("the joiner gathers its offer while it first looks for the inviter · %s pace", async pace => {
+    // A STUN server that answers in 1.5 s (One's e2e runs: 9 offers of 89 between 1.3 and 3 s).
+    rtc.srflxAfterMs = 1_500;
+    const pkarr = new MemoryPkarr({ publishMs: 700, visibleAfterMs: 300, readMs: 750 });
+    const made = invitationWhere("joiner");
+    const intervals = pace === "web" ? RELAY_POLL_INTERVALS : undefined;
+    const inviter = open(made.inviter, pkarr, { pollIntervals: intervals });
+    await run(10_000);
+    const reads = pkarr.reads, publishes = pkarr.publishes;
+    const joiner = open(made.joiner, pkarr, { pollIntervals: intervals });
+    const took = await untilLive(inviter, joiner, 60_000);
+    // Before: 5.4 s (desktop) and 6.75 s (web), 11 and 7 reads, 5 publishes. After: 4.4 s and 4.85 s, 9 and 5 reads, 4.
+    expect(took, "live after the join").toBeLessThanOrEqual(pace === "web" ? 5_500 : 5_000);
+    expect(stagesOf(joiner)).toEqual(["resolving", "knocking", "connecting", "live"]);
+    // No request more: the offer goes in the joiner's first packet, now that it is ready by then.
+    expect(pkarr.publishes - publishes).toBeLessThanOrEqual(4);
+    expect(pkarr.reads - reads).toBeLessThanOrEqual(pace === "web" ? 6 : 10);
+  }, 60_000);
+
+  it("a joiner whose first look finds no inviter drops the offer it gathered, says nothing of it, and dials once the inviter shows", async () => {
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere("joiner");
+    const joiner = open(made.joiner, pkarr);
+    await run(5_000);
+    expect(joiner.link.liveAttempt, "no failed attempt").toBeUndefined();
+    expect(stagesOf(joiner)).not.toContain("knocking");
+    const inviter = open(made.inviter, pkarr);
+    expect(await untilLive(inviter, joiner, 60_000)).toBeLessThan(Infinity);
+    expect(joiner.progress.at(-1)).toMatchObject({ stage: "live", attempt: 1 });
+  }, 60_000);
 
   it("polls the contact's key in the foreground while pairing, and in the background once connected", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK);

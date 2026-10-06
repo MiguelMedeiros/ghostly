@@ -33,7 +33,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
+import { BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
 import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
@@ -200,7 +200,7 @@ import { TransportLog, resumeHere } from "./transportLog";
 import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
-import { PaymentDesk } from "./payments";
+import { PaymentDesk, refusedLine } from "./payments";
 import { CashuWallet, TEST_COINS_NOTE, normalizeMintUrl } from "./wallet";
 import { identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
 import { CLOCK_SAMPLES, messageAttention, writtenAt } from "./attention";
@@ -820,9 +820,9 @@ export class GhostlyNode implements EngineImplementation {
   private readonly bitcoins: PerNetwork<BitcoinService> = perNetwork((network) => new BitcoinService(network, () => this.providers().onchain, () => this.providerHost(network), () => { void this.refreshWallet(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); }));
   private readonly desk: PaymentDesk = new PaymentDesk(this.wallet, {
     onReviewedPaymentResult:async(id)=>{await this.reconcilePayment({id});},
-    onReviewedPaymentRefused:async(id,reason)=>{
+    onReviewedPaymentRefused:async(id,reason,back)=>{
       const intent=await intentRepository.get(id);
-      if(intent && ["submitted","unknown"].includes(intent.review.state))await intentRepository.put({...intent,review:{...intent.review,state:"failed",error:`Refused: ${reason}. The sats came back.`}});
+      if(intent && ["submitted","unknown"].includes(intent.review.state))await intentRepository.put({...intent,review:{...intent.review,state:"failed",error:refusedLine(reason,back),...(back?{returned:back}:{})}});
       this.emitState();
     },
     getLink: (linkId) => this.paymentLink(linkId),
@@ -2706,7 +2706,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   wake(params: { network?: boolean } = {}): void {
     if (params.network) { this.transport.networkChanged?.(); this.directPath.reset(); }
-    for (const live of this.links.values()) live.link?.wake();
+    for (const live of this.links.values()) live.link?.wake({ network: params.network });
     this.hold.wake();
     // A wallet source that could not be reached at start-up (no network yet, a server asleep) tries again.
     for (const network of WALLET_NETWORKS) { this.lightnings[network].wake(); this.bitcoins[network].sources.wake(); }
@@ -5470,6 +5470,18 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * Whether a device code may be used in this profile now, asked before the person presses Add (WISP 06 § User
+   * experience): `ready`, or why not: `set` (this profile is already on several devices), `in-use` (it holds something,
+   * `inUse`), `loading` (what it holds is not known yet). The page says up front that a new profile is made for the
+   * code; `deviceEnrollJoin` still decides, and refuses as before.
+   */
+  async deviceEnrollReady(): Promise<"ready" | "set" | "in-use" | "loading"> {
+    if (this.starting) await this.starting;
+    if (await readDeviceRecord(databaseName()).catch(() => null)) return "set";
+    return this.inUse() ?? "ready";
+  }
+
+  /**
    * Whether this profile holds anything a person would lose if it became a standby here: a chat, a group, an identity,
    * money or a payment, or a wallet with keys of its own. The wallets a new profile gets by itself (Mainnet Cashu, with
    * the Cashu mints' Lightning card, and USDT, `walletSetup.ts`) count only once they hold, wait for or have moved
@@ -5507,6 +5519,13 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The giver of this active device: answers a pull, makes a push, runs pass 1 while this engine goes on. */
   private handoffGiver: HandoffGiver | null = null;
+
+  /** A call is on in one of the pages (`setCallOn`, told by the host for all of them): a handoff waits for it to end. */
+  private callOn = false;
+
+  setCallOn({ on }: { on: boolean }): void {
+    this.callOn = on === true;
+  }
 
   private async startHandoff(): Promise<void> {
     const host = handoffProfileHost(), links = this.deviceLinks;
@@ -5583,6 +5602,8 @@ export class GhostlyNode implements EngineImplementation {
    * or anything this build cannot judge. Null: the wallets move or stay home by their plan.
    */
   private async handoffBusy(taker?: HandoffTakerFacts): Promise<BusyReport | null> {
+    // A call is on here: moving the profile would cut it (WISP 06 § States and events, "A request while a call is on").
+    if (this.callOn) return { why: "call" };
     // Limited mode opened no wallet, and wallets not started yet say nothing: what they hold is not known.
     if (this.limitedMode || !this.walletsStarted) return { why: "loading" };
     // Read now, not the view of the last change: a wallet that changed since is counted as it is.
@@ -6146,6 +6167,9 @@ export class GhostlyNode implements EngineImplementation {
       buttonsSupport: true,
       // 1:1 chats only, as typing: a wake-up names a chat, and a group edge is none.
       wakeSupport: true,
+      // 1:1 chats only: back after an absence over a relay at once, then to a direct path on the session (WISP 100).
+      upgradeSupport: true,
+      peerUpgrades: () => !!live.caps?.peer?.capabilities.includes(UPGRADE_CAPABILITY),
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
@@ -6473,6 +6497,8 @@ export class GhostlyNode implements EngineImplementation {
       versions: [1],
       transports: this.runnableTransports(live),
       capabilities: ["chat/1", DHT_TEXT_CAPABILITY, DHT_FILE_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
+        // A session live on a relay moves to a direct path (WISP 100): the contact knocks there at once.
+        UPGRADE_CAPABILITY,
         // Edits on the DHT floor too (WISP 403 § Edits): an app from before would show one as a new message.
         ...(GhostlyNode.testNoEdit() ? [] : [EDIT_CAPABILITY]),
         ...(cashu || lightning ? ["payments/1"] : []), ...(cashu ? ["payments-cashu/1"] : []), ...(lightning ? ["payments-lightning/1"] : [])],

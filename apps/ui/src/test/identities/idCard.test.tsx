@@ -84,6 +84,11 @@ describe("what an ID card says", () => {
     expect(line).toMatch(/^ID<GHOSTLY<<NOSTR<<NPUB1[A-Z0-9<]+$/);
     expect(machineLine("Domain", "a.io")).toBe("ID<GHOSTLY<<DOMAIN<<A<IO".padEnd(44, "<"));
   });
+
+  it("writes accented letters without their marks on the machine-readable line", () => {
+    expect(machineLine("Ghostly", "João Müller")).toBe("ID<GHOSTLY<<GHOSTLY<<JOAO<MULLER".padEnd(44, "<"));
+    expect(machineLine("Identité", "Ünïcode")).toBe("ID<GHOSTLY<<IDENTITE<<UNICODE".padEnd(44, "<"));
+  });
 });
 
 describe("the ID card's face", () => {

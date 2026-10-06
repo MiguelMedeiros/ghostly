@@ -68,6 +68,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet, less "],
   // Never alone: the start of the two above, said on its own before what came back.
   ["The Lightning payment did not go through.", `${BROWSER}/engine/wallet.ts`, "The Lightning payment did not go through. ${"],
+  ["The Lightning payment did not go through", `${BROWSER}/engine/payments.ts`, "error: \"The Lightning payment did not go through\" "],
   ["This invoice is already being paid", `${BROWSER}/engine/wallet.ts`],
   ["A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.", `${BROWSER}/engine/wallet.ts`],
   ["Cashu is off in this chat", `${BROWSER}/engine/payments.ts`],
@@ -75,6 +76,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Both peers need on-chain Bitcoin on a connected data link", `${BROWSER}/engine/payments.ts`],
   ["Join a federation first (Wallet → New → Testnet Fedimint)", `${BROWSER}/engine/payments.ts`, "Join a federation first (Wallet → New → "],
   ["You have no Mainnet Cashu wallet: create one in Wallet → New", `${BROWSER}/engine/payments.ts`, " wallet: create one in Wallet → New"],
+  ["This is a Testnet payment, and you have no Testnet Ark wallet: create one in Wallet → New", `${BROWSER}/engine/node.ts`, " payment, and you have no "],
   ["Your contact has no Testnet on-chain Bitcoin wallet", `${BROWSER}/engine/payments.ts`, "Your contact has no "],
   ["Mainnet Lightning is off in this chat", `${BROWSER}/engine/payments.ts`, " is off in this chat"],
   ["Lightning is not allowed by both of you here", `${BROWSER}/engine/payments.ts`, " is not allowed by both of you here"],
@@ -87,6 +89,12 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This request is no longer open", `${BROWSER}/engine/payments.ts`],
   ["A Lightning payment for this request is still pending", `${BROWSER}/engine/payments.ts`],
   ["You already paid this request", `${BROWSER}/engine/payments.ts`],
+  ["Already paid by another member of the group", `${BROWSER}/engine/payments.ts`],
+  ["The payment was refused", `${BROWSER}/engine/payments.ts`],
+  // A refused send's review once its ecash came back (refusedLine): what came back, less what the mint kept.
+  ["Refused: Already paid by another member of the group. 98 sats came back; the mint kept 2 as its fee.", `${BROWSER}/engine/payments.ts`, " came back; the mint kept ${back.fee} as its fee."],
+  ["Refused: Already paid by another member of the group. All 100 sats came back.", `${BROWSER}/engine/payments.ts`, "All ${satsWord(back.amount)} came back."],
+  ["Refused: unknown mint. The sats came back.", `${BROWSER}/engine/payments.ts`, "The sats came back."],
   ["This request cannot be paid over Lightning in this chat", `${BROWSER}/engine/payments.ts`],
   ["No way of paying this request is allowed in this chat", `${BROWSER}/engine/payments.ts`],
   ["The invoice does not match the requested amount", `${BROWSER}/engine/payments.ts`],
@@ -144,6 +152,84 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Share the group's link with them: anyone who opens it joins", `${BROWSER}/engine/groups.ts`],
   ["At most 4 members can be pinned as hubs", `${CORE}/groupSession.ts`, " members can be pinned as hubs"],
   ["A community group chooses its hubs by itself", `${BROWSER}/engine/groups.ts`],
+  ["No route to the recipient within the fee limit", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
+  ["Not enough outbound liquidity in the node's channels", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
+  ["The node gave up finding a route", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
+  ["The recipient refused the payment (unknown or already paid invoice)", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
+  ["The payment failed", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
+  ["The payment failed: no route found", `${BROWSER}/engine/paymentAdapters/providers/nwc.ts`, "The payment failed: "],
+  ["The payment was canceled", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
+  ["The node did not answer in time", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
+  ["The payment did not go through", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["No answer from the source. It is being checked; nothing is paid again.", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again.", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["Interrupted. It is being checked; nothing is paid again.", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["This invoice is already paid", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["That invoice is for regtest, a test network: pay it from a Testnet wallet", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`, ", a test network: pay it from a Testnet wallet"],
+  ["This is a Bitcoin invoice (real money): test sats pay one only through the public test mint. Nothing was sent.", `${BROWSER}/shared/mints.ts`],
+  ["This quote is no longer valid: check the invoice again", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["The Lightning source changed: check the invoice again", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["That is not a Lightning invoice", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["Invoices without an amount are not supported", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`],
+  ["The wallet refused the payment: insufficient balance", `${BROWSER}/engine/paymentAdapters/providers/nwc.ts`, "The wallet refused the payment: "],
+  ["The payment did not reach the wallet: The relay did not confirm the request", `${BROWSER}/engine/paymentAdapters/providers/nwc.ts`, "The payment did not reach the wallet: "],
+  ["The wallet said the payment failed (timeout), and cannot confirm it yet", `${BROWSER}/engine/paymentAdapters/providers/nwc.ts`, "), and cannot confirm it yet"],
+  ["Could not reach the wallet's relay", `${BROWSER}/engine/paymentAdapters/providers/nwc.ts`],
+  ["The wallet's relay did not answer", `${BROWSER}/engine/paymentAdapters/providers/nwc.ts`],
+  ["The wallet's relay closed the connection", `${BROWSER}/engine/paymentAdapters/providers/nwc.ts`],
+  ["The browser wallet did not pay: User rejected", `${BROWSER}/engine/paymentAdapters/providers/webln.ts`, "The browser wallet did not pay: "],
+  ["Not enough in the browser wallet (1200 sats)", `${BROWSER}/engine/paymentAdapters/providers/webln.ts`, "Not enough in the browser wallet ("],
+  ["The Lightning fee (1200 sats) is above your limit (1000)", `${BROWSER}/engine/paymentAdapters/providers/breez.ts`, "sats) is above your limit ("],
+  ["Not enough sats in the Breez wallet (1000; 1200 needed)", `${BROWSER}/engine/paymentAdapters/providers/breez.ts`, "Not enough sats in the Breez wallet ("],
+  ["This federation has no Lightning gateway online", `${BROWSER}/engine/paymentAdapters/providers/fedimint.ts`],
+  ["The gateway's fee (1200 sats) is above your maximum", `${BROWSER}/engine/paymentAdapters/providers/fedimint.ts`, " sats) is above your maximum"],
+  ["Not enough in this federation (1,000 sats; 1,200 needed)", `${BROWSER}/engine/paymentAdapters/providers/fedimint.ts`, "Not enough in this federation ("],
+  ["Insufficient Bark balance", `${BROWSER}/engine/paymentAdapters/bark.ts`, "Insufficient Bark balance"],
+  ["Could not prepare this Ark payment. Check funds, address and provider.", `${BROWSER}/engine/paymentAdapters/arkade.ts`],
+  ["The Spark fee exceeds your limit", `${BROWSER}/engine/paymentAdapters/spark.ts`, "The Spark fee exceeds your limit"],
+  ["Bark payment outcome unknown", `${BROWSER}/engine/paymentAdapters/bark.ts`, "Bark payment outcome unknown"],
+  ["The Bark fee changed. Create a new review", `${BROWSER}/engine/paymentAdapters/bark.ts`, "The Bark fee changed. Create a new review"],
+  ["Spark balance changed. Create a new review", `${BROWSER}/engine/paymentAdapters/spark.ts`, "Spark balance changed. Create a new review"],
+  ["The Bark server did not take this payment. Nothing was sent.", `${BROWSER}/engine/paymentAdapters/bark.ts`],
+  ["Spark did not take this payment. Nothing was sent.", `${BROWSER}/engine/paymentAdapters/spark.ts`],
+  ["The Spark invoice has expired", `${BROWSER}/engine/paymentAdapters/spark.ts`],
+  ["USDT RPC rejected the operation", `${BROWSER}/engine/paymentAdapters/usdt.ts`],
+  ["Token or gas balance changed. Create a new review", `${BROWSER}/engine/paymentAdapters/usdt.ts`],
+  ["Account nonce changed. Create a new review", `${BROWSER}/engine/paymentAdapters/usdt.ts`],
+  ["Not enough confirmed sats: 1000 available, 1200 needed with the fee", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, "Not enough confirmed sats: "],
+  ["The fee (1200 sats) is above your limit of 1000", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, " sats) is above your limit of "],
+  ["The node refused the transaction: min relay fee not met", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, "The node refused the transaction: "],
+  ["Your node cannot estimate a fee yet. Nothing was sent.", `${BROWSER}/engine/paymentAdapters/providers/bitcoind.ts`],
+  ["Your node did not send it: insufficient fee", `${BROWSER}/engine/paymentAdapters/providers/bitcoind.ts`, "Your node did not send it: "],
+  ["Another transaction spent these coins: this payment can never confirm", `${BROWSER}/engine/paymentAdapters/providers/bitcoinService.ts`],
+  ["The Bitcoin source that prepared this payment is not connected. Nothing was sent.", `${BROWSER}/engine/paymentAdapters/providers/bitcoinService.ts`],
+  ["This payment was never approved: nothing was sent", `${BROWSER}/engine/paymentAdapters/providers/bitcoinService.ts`],
+  ["Not enough in this federation: 1,000 sats", `${BROWSER}/engine/paymentAdapters/fedimint.ts`, "Not enough in this federation: "],
+  ["Not enough in this federation any more", `${BROWSER}/engine/paymentAdapters/fedimint.ts`],
+  ["Taken back: the sats are in your wallet again", `${BROWSER}/engine/paymentAdapters/fedimint.ts`],
+  ["Nothing was spent", `${BROWSER}/engine/paymentAdapters/fedimint.ts`],
+  ["Interrupted before it reached your contact: the sats came back", `${BROWSER}/engine/paymentAdapters/fedimint.ts`],
+  ["Canceled before it was funded", `${BROWSER}/engine/paymentAdapters/fedimintSdk.ts`],
+  ["Only whole amounts in sats are supported", `${BROWSER}/engine/payments.ts`],
+  ["Unknown payment", `${BROWSER}/engine/payments.ts`],
+  ["The mint did not confirm the ecash", `${BROWSER}/engine/payments.ts`],
+  ["your contact closed it", `${BROWSER}/engine/payments.ts`],
+  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/node.ts`],
+  ["Fedimint is off in this chat", `${BROWSER}/engine/payments.ts`],
+  ["This app has no Fedimint wallet", `${BROWSER}/engine/payments.ts`],
+  ["Unsupported amount", `${BROWSER}/engine/payments.ts`],
+  ["These notes are from a federation I have not joined", `${BROWSER}/engine/payments.ts`],
+  ["These notes are worth less than a sat", `${BROWSER}/engine/payments.ts`],
+  ["These notes were already redeemed", `${BROWSER}/engine/payments.ts`],
+  ["The server took too long to answer", `${CORE}/lnurl.ts`],
+  ["No way to reach the network here", `${CORE}/lnurl.ts`],
+  ["shop.example refused: amount too small", `${CORE}/lnurl.ts`, " refused: "],
+  ["shop.example answered HTTP 502", `${CORE}/lnurl.ts`, " answered HTTP "],
+  ["shop.example did not answer with JSON", `${CORE}/lnurl.ts`, " did not answer with JSON"],
+  ["shop.example did not answer with JSON (HTTP 502)", `${CORE}/lnurl.ts`, " (HTTP ${"],
+  ["shop.example did not answer with a pay request", `${CORE}/lnurl.ts`, " did not answer with a pay request"],
+  ["shop.example did not answer with an invoice", `${CORE}/lnurl.ts`, " did not answer with an invoice"],
+  ["The invoice the service answered with has already expired", `${CORE}/lnurl.ts`],
   ["Give the profile a name", "apps/ui/src/lib/profiles.ts"],
   ["That profile already exists", "apps/ui/src/lib/profiles.ts"],
   ["The first profile cannot be removed", "apps/ui/src/lib/profiles.ts"],
@@ -176,6 +262,38 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This device cannot decode the recording", "apps/ui/src/lib/voiceMp3.ts"],
   ["That update is no longer available", "apps/ui/src/desktop/updates.ts"],
   ["The video took too long", "apps/ui/src/lib/videoPoster.ts"],
+  ["You already have a Testnet Cashu wallet", `${BROWSER}/engine/node.ts`, "You already have a "],
+  ["The Testnet Ark wallet did not come up. Nothing was lost: try again.", `${BROWSER}/engine/node.ts`, " wallet did not come up. Nothing was lost: try again."],
+  ["It did not answer in time", `${BROWSER}/engine/node.ts`],
+  ["No mint answered", `${BROWSER}/engine/node.ts`],
+  ["Paste the federation's invite code (fed11…)", `${BROWSER}/engine/node.ts`],
+  ["Choose a Lightning source that runs on Testnet", `${BROWSER}/engine/node.ts`, " source that runs on "],
+  ["This wallet cannot be made here", `${BROWSER}/engine/node.ts`],
+  ["No Lightning source runs on Mainnet here yet", `${BROWSER}/engine/node.ts`, "No Lightning source runs on "],
+  ["No on-chain wallet runs on Mainnet here yet", `${BROWSER}/engine/node.ts`, "No on-chain wallet runs on "],
+  ["The Bark server is not answering", `${BROWSER}/engine/paymentAdapters/bark.ts`],
+  ["Could not join the federation: its guardians did not answer, or the invite code is not valid", `${BROWSER}/engine/paymentAdapters/fedimintSdk.ts`],
+  ["That Ark provider runs on bitcoin, not mutinynet", `${BROWSER}/engine/paymentAdapters/arkWallet.ts`, "That Ark provider runs on "],
+  ["That Bark server does not run on signet", `${BROWSER}/engine/paymentAdapters/barkWallet.ts`, "That Bark server does not run on "],
+  ["bitcoin is a Mainnet network: this is the Testnet Ark wallet", `${BROWSER}/engine/paymentAdapters/arkWallet.ts`, " network: this is the "],
+  ["Could not connect to LND: The node did not answer in time", `${BROWSER}/engine/paymentAdapters/providers/sources.ts`, "Could not connect to ${"],
+  ["Could not read the balance: The node did not answer in time", `${BROWSER}/engine/paymentAdapters/providers/sources.ts`, "Could not read the balance: "],
+  ["cln is not available in this version of Ghostly", `${BROWSER}/engine/paymentAdapters/providers/sources.ts`, " is not available in this version of Ghostly"],
+  ["the Esplora server at mempool.space did not answer in 10 s", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, " did not answer in ${"],
+  ["the Esplora server at mempool.space did not answer (Failed to fetch)", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, " did not answer (${"],
+  ["nothing answers at localhost:3002: the local Esplora server is not running", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, ": the local Esplora server is not running"],
+  ["the Esplora server at mempool.space answered 503: it is down or busy", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, ": it is down or busy"],
+  ["no public signet Esplora server answered (mempool.space): Failed to fetch", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, " Esplora server answered (${"],
+  ["wrong network: the Esplora server at mempool.space is on bitcoin, not signet", `${BROWSER}/engine/paymentAdapters/providers/bdk.ts`, "wrong network: the Esplora server at "],
+  ["Connecting to Ark…", `${BROWSER}/engine/paymentAdapters/arkWallet.ts`, "Connecting to Ark… ${"],
+  ["Connecting to Bark… The Bark server is not answering", `${BROWSER}/engine/paymentAdapters/barkWallet.ts`, "Connecting to Bark… ${"],
+  ["Could not read the balance, history from the Ark provider. Last values may be stale.", `${BROWSER}/engine/paymentAdapters/arkWallet.ts`, " from the Ark provider. Last values may be stale."],
+  ["Could not read the balance from the Bark server. Last values may be stale.", `${BROWSER}/engine/paymentAdapters/barkWallet.ts`, " from the Bark server. Last values may be stale."],
+  ["Could not read the address, sync from Spark. Last values may be stale.", `${BROWSER}/engine/paymentAdapters/sparkWallet.ts`, " from Spark. Last values may be stale."],
+  ["RPC unavailable. Balance may be stale.", `${BROWSER}/engine/paymentAdapters/usdtWallet.ts`],
+  ["Rate limited: the faucet is busy. Try again in a minute.", `${BROWSER}/engine/paymentAdapters/testCoins.ts`],
+  ["The faucet did not answer: Failed to fetch", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not answer: "],
+  ["The faucet did not pay: empty", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not pay: "],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -192,6 +310,17 @@ describe("errors in the app's language", () => {
     expect(same).toEqual([]);
   });
 
+  it.each(LANGUAGES)("no known error leaves a value unfilled in %s", (language) => {
+    expect(SAMPLES.map(([text]) => errorText(text, translators[language])).filter((said) => said.includes("{{"))).toEqual([]);
+  });
+
+  it("a reason nested in a wallet that could not be made is said in the language, also without its final period", () => {
+    const pt = translators.pt;
+    expect(errorText("Could not create the Mainnet Cashu wallet: Could not reach mint.example. Check the address: it should be a Cashu mint. Nothing was saved; try again.", pt))
+      .toBe("Não foi possível criar a carteira Mainnet Cashu: Não foi possível acessar mint.example. Confira o endereço: deve ser um mint Cashu. Nada foi salvo; tente de novo.");
+    expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK: o servidor Esplora em esplora.example não respondeu em 10 s");
+  });
+
   it("each rule has a sample, so none stops matching unseen", () => {
     const covered = new Set(SAMPLES.map(([text]) => matched(text)));
     expect(ERROR_RULES.filter((rule) => !covered.has(rule)).map((rule) => String(rule.match))).toEqual([]);
@@ -202,6 +331,8 @@ describe("errors in the app's language", () => {
     expect(errorText("No mint could create an invoice: mint.example did not answer", pt)).toBe("Nenhum mint conseguiu criar uma fatura: mint.example não respondeu");
     expect(errorText("The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", pt))
       .toBe("O pagamento Lightning não foi concluído. Os sats voltaram para a sua carteira, menos 2 sats que o mint ficou de taxa.");
+    expect(errorText("Refused: Already paid by another member of the group. 1200 sats came back; the mint kept 2 as its fee.", pt))
+      .toBe("Recusado: Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2 de taxa.");
     expect(errorText("Both peers need on-chain Bitcoin on a connected data link", pt)).toBe("Você e seu contato precisam de Bitcoin on-chain, com a conversa ao vivo");
     expect(errorText("This pays with real money: confirm it with Send real money first. Nothing was sent.", pt)).toContain("Enviar dinheiro real");
   });

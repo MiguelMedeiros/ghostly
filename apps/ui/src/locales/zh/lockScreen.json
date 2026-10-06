@@ -1,4 +1,6 @@
 {
+  "answer": "接听",
+  "answerPassword": "输入密码接听",
   "enterPassword": "输入密码解锁",
   "incorrectPassword": "密码错误，请重试",
   "title": "Ghostly 已锁定",

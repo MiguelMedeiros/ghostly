@@ -29,7 +29,8 @@ const button ="shrink-0 grid place-items-center w-8 h-8 max-md:w-10 max-md:h-10 
 
 /**
  * The bar under a chat's header while its search is open (useChatSearch): the words, how many messages hold them and
- * which one is shown, ↑ for an older match and ↓ for a newer one (Enter and Shift+Enter), ✕ or Escape to close.
+ * which one is shown, ↑ for an older match and ↓ for a newer one (Enter and Shift+Enter), ✕ or Escape to close (the focus
+ * goes back to what had it before).
  */
 export function ChatSearchBar({ search }: { search: ChatSearch }) {
   const { t } = useI18n();
@@ -54,12 +55,12 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           {...composition.inputProps}
           onKeyDown={(e) => {
             if (composition.composing(e)) return;
-            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); search.close(); }
+            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); search.dismiss(); }
             else if (e.key === "Enter") { e.preventDefault(); if (e.shiftKey) search.newer(); else search.older(); }
           }}
           placeholder={t("chat.search.placeholder")}
           aria-label={t("chat.search.placeholder")}
-          className="min-w-0 flex-1 bg-transparent px-1.5 py-1 text-sm text-text-primary placeholder:text-text-muted outline-none [&::-webkit-search-cancel-button]:hidden"
+          className="min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring [&::-webkit-search-cancel-button]:hidden"
         />
         <span data-testid="chat-search-count" role="status" aria-live="polite" className="shrink-0 px-1 text-xs tabular-nums text-text-muted">
           {searched ? (total ? t("chat.search.count", { current: String(Math.max(search.index, 0) + 1), total: String(total) }) : t("chat.search.none")) : ""}
@@ -74,7 +75,7 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
         <button type="button" data-testid="chat-search-newer" disabled={!total} onClick={search.newer} aria-label={t("chat.search.newer")} title={t("chat.search.newer")} className={button}>
           <svg {...icon}><path d="m6 9 6 6 6-6" /></svg>
         </button>
-        <button type="button" data-testid="chat-search-close" onClick={search.close} aria-label={t("chat.search.close")} title={t("chat.search.close")} className={button}>
+        <button type="button" data-testid="chat-search-close" onClick={search.dismiss} aria-label={t("chat.search.close")} title={t("chat.search.close")} className={button}>
           <svg {...icon}><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
       </div>

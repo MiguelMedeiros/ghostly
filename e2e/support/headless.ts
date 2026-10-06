@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import type { TestInfo } from "@playwright/test";
 
 /** The CLI stays off the public Mainline DHT in tests (it would bootstrap to the public routers): relays only, as the web app. */
 const headlessEnv = (): NodeJS.ProcessEnv => ({ GHOSTLY_DHT: "0", ...process.env });
@@ -24,6 +25,10 @@ export class HeadlessBot {
   readonly home = mkdtempSync(join(tmpdir(), "ghostly-e2e-bot-"));
   private readonly running: ChildProcess[] = [];
   readonly events: Record<string, unknown>[] = [];
+  /** What the daemon and the listener wrote to stderr (still shown as they write it), for `attachLogs`. */
+  private stderr = "";
+  /** The daemon's steps on each chat's way to live (`GHOSTLY_LINK_TRACE`), for `attachLogs`. */
+  private readonly linkTrace = join(this.home, "link-trace.jsonl");
 
   /** `env`: more environment for every command and the daemon (the CLI's test switches). */
   constructor(private readonly env: NodeJS.ProcessEnv = {}) {}
@@ -58,9 +63,21 @@ export class HeadlessBot {
   }
 
   private spawn(...args: string[]): ChildProcess {
-    const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: { ...headlessEnv(), ...this.env }, stdio: ["ignore", "pipe", "inherit"] });
+    const env = { ...headlessEnv(), GHOSTLY_LINK_TRACE: this.linkTrace, ...this.env };
+    const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
+    child.stderr!.on("data", (d: Buffer) => { this.stderr += d; process.stderr.write(d); });
     this.running.push(child);
     return child;
+  }
+
+  /**
+   * The bot's side of a failure, in the test's report: its daemon's stderr and its link trace. Called from a spec's
+   * `catch` before `stop` (which deletes the profile folder), so a chat or group edge that never went live can be
+   * followed on both sides (One's nightly run, 2026-10-05: a group edge with the web app that never came up).
+   */
+  async attachLogs(info: TestInfo): Promise<void> {
+    if (this.stderr) await info.attach("bot-stderr.log", { body: this.stderr, contentType: "text/plain" });
+    if (existsSync(this.linkTrace)) await info.attach("bot-link-trace.jsonl", { body: readFileSync(this.linkTrace), contentType: "text/plain" });
   }
 
   /** The first event that matches, waiting for it. */

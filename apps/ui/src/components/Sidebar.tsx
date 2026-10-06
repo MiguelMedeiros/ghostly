@@ -8,6 +8,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupRouteId } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useLabelsFit } from "../hooks/useLabelsFit";
 import { Menu, MenuItem } from "./Menu";
 import { useLocation, useNavigate } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
@@ -37,6 +38,7 @@ import { chatPath } from "../lib/url";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useRowReorder } from "../hooks/useRowReorder";
+import { usePageShown } from "../hooks/usePageShown";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
@@ -68,6 +70,9 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t, language } = useI18n();
+  // New and Join keep their words while they fit beside the logo, in this language (French needs more room).
+  const headerRef = useRef<HTMLDivElement>(null), brandRef = useRef<HTMLDivElement>(null), actionsRef = useRef<HTMLDivElement>(null);
+  const labelsFit = useLabelsFit(headerRef, brandRef, actionsRef, language);
   const isMobile = useIsMobile();
   const density = useSettings().settings.chatListDensity;
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -75,7 +80,7 @@ export function Sidebar() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
-  const newMenuRef = useRef<HTMLDivElement>(null);
+  const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
   const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
   const groups = engineState?.groups ?? [];
@@ -145,9 +150,11 @@ export function Sidebar() {
     };
   }, [refreshSessions]);
 
+  // The open chat is read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  const pageShown = usePageShown();
   useEffect(() => {
-    if (activeSessionId) markSessionAsRead(activeSessionId);
-  }, [activeSessionId, sessions]);
+    if (activeSessionId && pageShown) markSessionAsRead(activeSessionId);
+  }, [activeSessionId, pageShown, sessions]);
 
   // The installed app's shortcuts (manifest.json): `#/new` starts a chat, `#/scan` opens Join with the camera on.
   // Each address is acted on once (StrictMode runs effects twice), and leaves the history at once (an intake, Root.tsx).
@@ -196,13 +203,13 @@ export function Sidebar() {
       style={isMobile ? undefined : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
       {/* Header */}
-      <div className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
-        <AppBrand onHome={() => nav.home()} />
-        <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
+      <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
+        <div ref={brandRef} className="flex shrink-0"><AppBrand onHome={() => nav.home()} /></div>
+        <div ref={actionsRef} className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={() => void createPairedChat().then(id => nav.conversation(chatPath(id)))} aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
-            <button onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
+            <button onClick={() => void createPairedChat().then(id => nav.conversation(chatPath(id)))} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
+            <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
@@ -225,14 +232,14 @@ export function Sidebar() {
       <LimitedBanner />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
       <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />
-      {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
+      {showNewGroup && <NewGroupDialog returnFocus={newMoreRef} onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
       {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); nav.conversation(chatPath(ensureSession(keys))); refreshSessions();}}
         onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
         onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
 
       {/* Search */}
       <div className="px-3 py-2 bg-sidebar-bg">
-        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5">
+        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
           <svg
             width="16"
             height="16"
@@ -250,7 +257,7 @@ export function Sidebar() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
                   placeholder={t("sidebar.searchPlaceholder")}
-            className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted focus:outline-none py-1"
+            className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted outline-none py-1"
           />
         </div>
       </div>

@@ -37,7 +37,7 @@ test("closing the window hides it and the app runs on; the Dock and the menu bri
   const visible = async () => (await app.windowState()).visible;
   const hash = () => app.execute<string>(`return location.hash;`);
   // The app is up once it has drawn its home.
-  await expect.poll(() => app.text('[title="New Chat"]'), { timeout: 90_000 }).not.toBeNull();
+  await expect.poll(() => app.text('[title="New chat"]'), { timeout: 90_000 }).not.toBeNull();
   expect(await visible()).toBe(true);
 
   await test.step("closed, the window goes out of sight and the page runs on", async () => {

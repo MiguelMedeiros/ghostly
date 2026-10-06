@@ -325,6 +325,7 @@
     },
     "payee": "Beneficiario",
     "provider": "Fornitore",
+    "returnedInfo": "Riprendere ecash è uno scambio presso il mint, che trattiene una piccola commissione per ogni scambio: {{fee}} {{unit}} questa volta. Il resto è tornato nel tuo portafoglio.",
     "states": {
       "cancelled": "annullato",
       "confirmed": "confermato",

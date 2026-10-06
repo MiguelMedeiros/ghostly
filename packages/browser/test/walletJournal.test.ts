@@ -159,7 +159,7 @@ describe("ecash in", () => {
     await expect(wallet.receiveToken(tokenFrom(TEST_MINT, [8]), "ecash-in", undefined, { addTestMint: false })).rejects.toThrow("is not accepted");
     expect(events.onTestMintNeeded).not.toHaveBeenCalled();
 
-    await expect(wallet.receiveToken(tokenFrom(`${TEST_MINT}/`, [8]))).resolves.toEqual({ amount: 8, mint: TEST_MINT });
+    await expect(wallet.receiveToken(tokenFrom(`${TEST_MINT}/`, [8]))).resolves.toEqual({ amount: 8, mint: TEST_MINT, fee: 0 });
     expect(events.onTestMintNeeded).toHaveBeenCalledWith(TEST_MINT);
     expect(rows<StoredProof>("proofs")).toMatchObject([{ mint: TEST_MINT, secret: "fresh" }]);
   });
@@ -182,7 +182,7 @@ describe("ecash in", () => {
     mint.receive.mockResolvedValue([proof(64, "x"), proof(32, "y")]);
     const payment = vi.fn((amount: number, at: string): StoredPayment => ({ id: "p1", linkId: "l1", kind: "payment", direction: "in", amount, unit: "sat", state: "settled", createdAt: 0, mint: at }));
     const { wallet } = setup();
-    await expect(wallet.receiveToken(tokenFrom(MINT, [64, 32, 4]), "ecash-in", "x".repeat(200), { payment })).resolves.toEqual({ amount: 96, mint: MINT });
+    await expect(wallet.receiveToken(tokenFrom(MINT, [64, 32, 4]), "ecash-in", "x".repeat(200), { payment })).resolves.toEqual({ amount: 96, mint: MINT, fee: 4 });
     expect(payment).toHaveBeenCalledWith(96, MINT);
     expect(rows<StoredPayment>("payments")).toMatchObject([{ id: "p1", amount: 96 }]);
     const [tx] = rows<WalletTx>("walletTx");

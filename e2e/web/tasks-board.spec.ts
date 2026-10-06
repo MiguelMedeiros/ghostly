@@ -40,7 +40,9 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
   const bot = new HeadlessBot();
   try {
     await bot.start(url, "Coordinator");
-    const person = await peer("board-person");
+    // Both sides' steps toward live in the report (the page's in its trace, the bot's attached on a failure): a group
+    // edge with the bot that never came up (One's nightly run, 2026-10-05) left nothing to follow.
+    const person = await peer("board-person", { beforeOpen: async (context) => { await context.addInitScript(() => { (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace = true; }); } });
     const page = person.page;
 
     // A profile with no card: no way to the board above the chat list, and the page itself says what tasks are.
@@ -232,6 +234,9 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
     expect(frames.scrolled).toBeGreaterThan(1000);
     expect(frames.median).toBeLessThan(34);
     await shot(page, "board-desktop-500.png");
+  } catch (error) {
+    await bot.attachLogs(test.info());
+    throw error;
   } finally {
     await bot.stop();
   }

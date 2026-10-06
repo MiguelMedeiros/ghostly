@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { searchable, searchMessages } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
+import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
 import { revealMessage } from "./useRowWindow";
 
@@ -16,22 +17,43 @@ function jump(id: string) {
  * Search inside a chat (apps/ui/src/lib/chatSearch.ts): its messages as this device keeps them, never the page's text, so a
  * chat of thousands of messages answers as fast as a short one. Ctrl/Cmd+F opens it while `active` (the chat on
  * screen), Escape in its field closes it, another chat closes it. The newest match comes first; `older` and `newer`
- * go through the rest, round, each one scrolled to and marked.
+ * go through the rest, round, each one scrolled to and marked. Put away (Escape, ✕), it gives the focus back to what had
+ * it as it opened (the composer, for Ctrl/Cmd+F there), or to `returnFocus` (the chat's ⋮, whose row went with its menu).
  */
-export function useChatSearch({ messages, chat, active }: { messages: readonly ChatMessage[]; chat: string; active: boolean }) {
+export function useChatSearch({ messages, chat, active, t, returnFocus }: { messages: readonly ChatMessage[]; chat: string; active: boolean; t?: Translate; returnFocus?: RefObject<HTMLElement | null> }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
   const [current, setCurrent] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** What had the focus as the search opened, to have it back: not a menu's row (it goes with the menu), not the bar. */
+  const before = useRef<HTMLElement | null>(null);
 
   const close = useCallback(() => { setOpen(false); setQuery(""); setTerm(""); setCurrent(null); }, []);
   const show = useCallback(() => {
+    const at = document.activeElement;
+    const bar = inputRef.current?.closest("[data-testid=chat-search]");
+    if (!bar?.contains(at)) before.current = at instanceof HTMLElement && at !== document.body && !at.closest("[data-menu]") ? at : null;
     setOpen(true);
     // Already open: back to its field, the words in it chosen, so typing replaces them.
     requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
   }, []);
 
+  /**
+   * Closed by the person (Escape, ✕): the focus goes back where it was, so the keys go on from there. Before, it fell to
+   * the page. Focus that went somewhere else meanwhile (a click in the chat) stays there.
+   */
+  const dismiss = () => {
+    const at = document.activeElement;
+    const inside = !at || at === document.body || !!inputRef.current?.closest("[data-testid=chat-search]")?.contains(at);
+    close();
+    if (!inside) return;
+    const back = before.current?.isConnected ? before.current : returnFocus?.current;
+    before.current = null;
+    back?.focus({ preventScroll: true });
+  };
+
+  // Another chat: closed, the focus left alone (the chat that opens decides).
   useEffect(() => close, [chat, close]);
 
   useEffect(() => {
@@ -51,8 +73,9 @@ export function useChatSearch({ messages, chat, active }: { messages: readonly C
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Folded once while the search is open, not on each key; a closed search costs nothing.
-  const items = useMemo(() => (open ? searchable(messages) : []), [open, messages]);
+  // Folded once while the search is open, not on each key; a closed search costs nothing. `t`: a voice message, a video
+  // or a picture is found by its kind in the profile's language too.
+  const items = useMemo(() => (open ? searchable(messages, t) : []), [open, messages, t]);
   const results = useMemo(() => searchMessages(items, term), [items, term]);
   const found = useMemo(() => new Set(results), [results]);
   const latest = useRef(results);
@@ -85,7 +108,7 @@ export function useChatSearch({ messages, chat, active }: { messages: readonly C
   /** The words to mark in a message: the search's, when that message is one of its matches. */
   const highlight = useCallback((id: string) => (found.has(id) ? term : undefined), [found, term]);
 
-  return { open, show, close, query, setQuery, term, results, index, current, older, newer, highlight, inputRef };
+  return { open, show, close, dismiss, query, setQuery, term, results, index, current, older, newer, highlight, inputRef };
 }
 
 export type ChatSearch = ReturnType<typeof useChatSearch>;

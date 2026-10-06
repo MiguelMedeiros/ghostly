@@ -1,4 +1,7 @@
 import { getStorageProfile } from "./storage";
+import { markFirstStart } from "./nameStep";
+import { sizeIn } from "./sizeText";
+import type { Translate } from "../locales/translate";
 
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
@@ -87,11 +90,29 @@ const DEFAULT_SETTINGS: AppSettings = {
   linkPreviews: true,
 };
 
+const LANGUAGES: readonly Language[] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
+
+/**
+ * The language a new profile starts in: the first of the browser's languages the app speaks ("pt-BR" is Portuguese,
+ * "zh-TW" Chinese), or English. Settings → Language changes it afterwards.
+ */
+export function browserLanguage(languages: readonly string[] | undefined = typeof navigator === "undefined" ? undefined
+  : navigator.languages?.length ? navigator.languages : [navigator.language]): Language {
+  for (const tag of languages ?? []) {
+    const base = tag?.toLowerCase().split("-")[0] as Language;
+    if (LANGUAGES.includes(base)) return base;
+  }
+  return "en";
+}
+
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(settingsKey());
     if (!raw) {
-      const initialSettings = { ...DEFAULT_SETTINGS };
+      // A new profile: in the browser's language, kept from now on as its setting.
+      const initialSettings = { ...DEFAULT_SETTINGS, language: browserLanguage() };
+      // The first start of a profile made here: it asks once for a name (NameStep).
+      markFirstStart(getStorageProfile());
       localStorage.setItem(settingsKey(), JSON.stringify(initialSettings));
       return initialSettings;
     }
@@ -120,7 +141,7 @@ export function loadSettings(): AppSettings {
       linkPreviews: parsed.linkPreviews !== false,
     };
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, language: browserLanguage() };
   }
 }
 
@@ -138,12 +159,11 @@ export function getStorageUsage(): { used: number; keys: number } {
   return { used: totalSize * 2, keys: keyCount };
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+/** A size in the app's language, up to two decimals: "144 KB", "1.46 MB"; "1,46 Mo" in French (`t`). */
+export function formatBytes(bytes: number, t?: Translate): string {
+  const units = ["b", "kb", "mb", "gb"] as const;
+  const i = bytes > 0 ? Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024))) : 0;
+  return sizeIn(bytes / Math.pow(1024, i), units[i], t, 2);
 }
 
 export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";

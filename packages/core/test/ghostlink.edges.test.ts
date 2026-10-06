@@ -1224,6 +1224,29 @@ describe("DHT-only delivery", () => {
     return { link, credentials, verifyPeer, onPairingState };
   }
 
+  it("the online wake clears a DHT read error from while the device was offline, and reads the mailbox again", async () => {
+    vi.useFakeTimers();
+    let down = true;
+    const resolve = vi.fn(async () => { if (down) throw new Error("No Pkarr relay reachable"); return null; });
+    const link = new GhostLink({ params: { ...createLink().mine, profile: "paired-chat/1" },
+      pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: vi.fn(async () => {}) },
+      dht: { state: { sequence: 0, peerSequence: 0 }, save: vi.fn(async () => {}), pollMs: 5 * 60_000 },
+      transport: { publish: vi.fn(async () => {}), resolve, describe: () => ({ protocol: "test", relays: [] }) },
+      createPeerConnection: () => { throw new Error("no dial in this test"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined });
+    live.push(link);
+    vi.spyOn(link.session, "start").mockImplementation(() => {});
+    link.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(link.dhtDelivery?.error).toMatch(/Could not read DHT delivery: No Pkarr relay reachable/);
+    down = false;
+    const reads = resolve.mock.calls.length;
+    link.wake({ network: true });
+    expect(link.dhtDelivery?.error).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolve.mock.calls.length).toBeGreaterThan(reads);
+    expect(link.dhtDelivery?.error).toBeUndefined();
+  });
+
   it("switching to DHT-only closes live delivery and validates text for the DHT, and switching back restarts discovery", async () => {
     const { link, onPairingState } = dhtLink();
     const stop = vi.spyOn(link.session, "stop"), start = vi.spyOn(link.session, "start").mockImplementation(() => {});

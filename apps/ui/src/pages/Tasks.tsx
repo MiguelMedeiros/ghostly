@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from "react";
 import type { TaskStatus } from "@ghostly/core";
 import { PageHeader } from "../components/layout";
 import { MemberFace } from "../components/chat/SenderAvatar";
@@ -150,20 +150,19 @@ export function Tasks() {
     const column = scroller?.querySelectorAll<HTMLElement>("[data-board-column]")[index];
     if (scroller && column) scroller.scrollTo?.({ left: column.offsetLeft - scroller.offsetLeft, behavior: smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto" });
   };
-  useEffect(() => {
-    const scroller = boardRef.current;
-    if (!phone || !scroller) return;
-    let frame = 0;
-    const settle = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const width = scroller.clientWidth;
-        if (width) setTab(Math.round(Math.abs(scroller.scrollLeft) / width));
-      });
-    };
-    scroller.addEventListener("scroll", settle, { passive: true });
-    return () => { cancelAnimationFrame(frame); scroller.removeEventListener("scroll", settle); };
-  }, [phone, showing]);
+  // Heard on the board itself, not by an effect that looks for it once: the page draws the board only when the cards
+  // have been read, after its first render, and an effect that ran before then never heard a swipe.
+  const settleFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(settleFrame.current), []);
+  const settle = (event: UIEvent<HTMLDivElement>) => {
+    if (!phone) return;
+    const scroller = event.currentTarget;
+    cancelAnimationFrame(settleFrame.current);
+    settleFrame.current = requestAnimationFrame(() => {
+      const width = scroller.clientWidth;
+      if (width) setTab(Math.round(Math.abs(scroller.scrollLeft) / width));
+    });
+  };
   const tabKeys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
     event.preventDefault();
@@ -255,7 +254,7 @@ export function Tasks() {
                   ))}
                 </div>
               )}
-              <div ref={boardRef} data-testid="tasks-board" data-grouping={grouping} data-layout={phone ? "tabs" : "columns"}
+              <div ref={boardRef} data-testid="tasks-board" data-grouping={grouping} data-layout={phone ? "tabs" : "columns"} onScroll={settle}
                 className={phone ? "flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]" : "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-3"}>
                 {model.groups.map((group, i) => (
                   <Column key={group.id} group={group} name={nameOf(group)} dot={grouping === "status" ? COLUMN_DOT[group.id as BoardColumn] : undefined} grouping={grouping}

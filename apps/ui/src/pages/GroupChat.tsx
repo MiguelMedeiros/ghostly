@@ -21,6 +21,7 @@ import { routineStacks } from "../lib/statusCards";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
+import { openOnArrow } from "../lib/menuButton";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
@@ -43,6 +44,7 @@ import { messageSnippet, quoteFor, replyIndex, replyTarget, type NameOf, type Qu
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
+import { usePageShown } from "../hooks/usePageShown";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
@@ -140,9 +142,9 @@ function writtenEvent(event: StoredMessage["event"], text: string, t: Translate)
 function eventText(message: StoredMessage, group: GroupView, t: Translate): string {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
   const text = message.text;
-  // A member who has left since: a private group still knows the name they had (`formerNames`), so their lines are
-  // said in the interface's language too. A community keeps no former names: its stored line stays as it is.
-  const former = !member && !!message.member && group.profile !== "community" && FORMER_EVENTS.has(message.event);
+  // A member who has left since: the group still knows the name they had (`formerNames`), so their lines are said in
+  // the interface's language too. A community knows only the names it heard: for anyone else its stored line stays.
+  const former = !member && !!message.member && FORMER_EVENTS.has(message.event) && (group.profile !== "community" || !!group.formerNames?.[message.member]);
   if (!member && !former) {
     if (message.event === "created" && text.startsWith("Group created. ")) return `${t("group.event.created")} ${readNote(group, t)}`;
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
@@ -274,7 +276,7 @@ export function GroupChat() {
     navigate(location.pathname, { replace: true, state: navOnly(location.state) });
   }, [location.state, location.pathname, navigate]);
   const [error, setError] = useState("");
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
   const shown = useMemo(() => group ? messages.filter(m => !m.event && !m.groupPay).map(m => toChatMessage(m, group, t, settings.defaultNickname)) : [],
@@ -321,8 +323,10 @@ export function GroupChat() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
   const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
-  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink });
-  useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
+  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink, t, returnFocus: optionsRef });
+  // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  const pageShown = usePageShown();
+  useEffect(() => { if (group && pageShown) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group, pageShown]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
     const answering = replyingRef.current;
@@ -354,7 +358,7 @@ export function GroupChat() {
   if (!state) return null;
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm text-text-muted">{t("group.chat.gone")}</div>;
   const nameOf = replyNames(group, t("chat.reply.you"), t);
-  const quoteOf = (m: StoredMessage): QuoteView | undefined => m.replyTo && quoteFor(m.replyTo, quoteIndex, nameOf);
+  const quoteOf = (m: StoredMessage): QuoteView | undefined => m.replyTo && quoteFor(m.replyTo, quoteIndex, nameOf, t);
   // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
   const react = (messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); };
   const reactionName = (by: string) => nameOf("peer", by) ?? by.slice(0, 8);
@@ -471,16 +475,16 @@ export function GroupChat() {
           {group.status === "active" && <GroupConnection group={group} />}
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={messages} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
-          {canShare && <button onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
+          {canShare && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
             <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
           </button>}
           <div className="relative" ref={menuRef}>
-            <button onClick={() => setMenuOpen(!menuOpen)} className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
+            <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
             </button>
-            <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
+            <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
               <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>
               <MuteMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
               {!joiningByLink && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
@@ -556,7 +560,7 @@ export function GroupChat() {
       {forwarding.dialog}
       {!joiningByLink && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
         onTyping={group.profile === "mesh" ? onTyping : undefined}
-        reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: messageSnippet(replyingTo),
+        reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: messageSnippet(replyingTo, t),
           mine: replyingTo.sender === "me", ...(replyingTo.sender === "peer" && replyingTo.member && { member: replyingTo.member }), onCancel: () => setReplyingTo(null) } : undefined}
         // Editing one of mine (WISP 902 § Edits): the new text shows here at once and goes to the members; @ names more.
         edit={editing ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
@@ -570,10 +574,10 @@ export function GroupChat() {
         paymentsUnavailable={others.length === 0 ? t("group.chat.nobodyElse") : undefined}
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}
 
-      {showMembers && <GroupMembersDialog group={group} focusKey={focusMember} onClose={() => { setShowMembers(false); setFocusMember(undefined); }} />}
+      {showMembers && <GroupMembersDialog group={group} focusKey={focusMember} returnFocus={optionsRef} onClose={() => { setShowMembers(false); setFocusMember(undefined); }} />}
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
-      {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} onClose={() => setSharing("")} />}
-      {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}
+      {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={() => setSharing("")} />}
+      {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmLeave(false); nav.home(); }} />}
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}

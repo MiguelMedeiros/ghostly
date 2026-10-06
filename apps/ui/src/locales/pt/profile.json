@@ -11,7 +11,7 @@
     "content": {
       "everything": "Tudo",
       "everythingSize": "Arquivos: {{size}}",
-      "info": "O leve guarda as conversas e todas as mensagens, contatos, grupos, identidades, carteiras e configurações. Deixa de fora os arquivos acima de 1 MB; mensagens de voz de até 4 MB ficam. Depois de restaurar, cada arquivo deixado de fora aparece como Não está neste backup.",
+      "info": "O leve guarda as conversas e todas as mensagens, contatos, grupos, identidades, carteiras e ajustes. Deixa de fora os arquivos acima de 1 MB; mensagens de voz de até 4 MB ficam. Depois de restaurar, cada arquivo deixado de fora aparece como Não está neste backup.",
       "label": "Conteúdo",
       "leftOut": "Arquivos acima de 1 MB ficaram de fora ({{size}}).",
       "light": "Leve",
@@ -76,7 +76,7 @@
     },
     "sameDevice": {
       "copy": "Restaurar como cópia mesmo assim",
-      "firstProfile": "O primeiro perfil não pode ser removido. Para substituí-lo, limpe os dados dele em Configurações.",
+      "firstProfile": "O primeiro perfil não pode ser removido. Para substituí-lo, limpe os dados dele em Ajustes.",
       "hint": "Os dois agiriam como a mesma pessoa para seus contatos. Substitua o original ou não use os dois.",
       "info": "Uma cópia restaurada mantém as chaves de conversa do original. Com os dois rodando, eles respondem aos mesmos contatos como uma só pessoa e disputam as mesmas conexões, então as mensagens podem chegar em qualquer um. Substituir restaura a cópia, troca para ela e depois oferece remover o original com as verificações de sempre: o que ele guarda, um backup antes e o nome dele para confirmar.",
       "replace": "Substituir o original",
@@ -127,6 +127,12 @@
   "name": "Nome",
   "nameInChats": "Nome nas conversas",
   "nameLabel": "Nome do perfil",
+  "nameStep": {
+    "placeholder": "Seu nome",
+    "save": "Continuar",
+    "skip": "Pular",
+    "title": "Como as pessoas devem chamar você?"
+  },
   "newProfile": "+ Novo perfil",
   "oneOnly": "Por enquanto, só um perfil neste app.",
   "profiles": "Perfis",

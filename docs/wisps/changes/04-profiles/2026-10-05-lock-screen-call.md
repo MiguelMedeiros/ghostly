@@ -1,0 +1,1 @@
+The lock screen shows a call that rings while the profile is locked: who calls and what kind of call, with Decline and Answer; Answer takes the lock password first. Nothing else of the profile is shown (WISP 601, Locked).

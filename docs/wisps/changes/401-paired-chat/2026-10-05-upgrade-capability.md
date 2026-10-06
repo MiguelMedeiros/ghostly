@@ -1,0 +1,1 @@
+A new session capability, `upgrade/1`, in `paired-capabilities`. When both sides list it, a session live on a relayed transport with no choice behind it moves once to a direct transport ranked first ([100](../../100-transports.md)). Older apps do not list it and keep today's behaviour.

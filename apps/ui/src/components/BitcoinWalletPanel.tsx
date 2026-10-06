@@ -13,6 +13,7 @@ import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
+import { errorText } from "../lib/errorText";
 
 /** The most the person accepts to pay in fees unless they change it; the review shows the real fee. */
 const DEFAULT_FEE_CAP = 2_000;
@@ -53,7 +54,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
               {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: formatAt(bt.balanceAt, { dateStyle: "medium", timeStyle: "short" }, t.language) }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
             </p>
           )}
-          {bt.error && <Notice tone={bt.status === "error" ? "error" : "warning"} testId="bitcoin-connect-error">{bt.status === "connecting" ? t("wallet.bitcoin.retrying", { error: bt.error }) : bt.error}</Notice>}
+          {bt.error && <Notice tone={bt.status === "error" ? "error" : "warning"} testId="bitcoin-connect-error">{bt.status === "connecting" ? t("wallet.bitcoin.retrying", { error: errorText(bt.error, t) }) : errorText(bt.error, t)}</Notice>}
           {(bt.status === "error" || !!bt.failures) && (
             <div className="flex flex-wrap justify-center gap-2">
               <Button disabled={busy} data-testid="bitcoin-retry" onClick={() => void run(() => wallet.bitcoinRetrySource())}>{t("wallet.bitcoin.retry")}</Button>

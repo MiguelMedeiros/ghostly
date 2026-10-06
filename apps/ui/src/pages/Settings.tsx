@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useRef, type ReactNode } from "react";
+import { useState, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
@@ -56,10 +56,11 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 import { errorText } from "../lib/errorText";
+import { listText } from "../lib/listText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
-import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, settingsPath, settingsSection, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
-import { SettingsIndex, SettingsMenu } from "../components/settings/SettingsMenu";
+import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingEntry, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
+import { SettingsIndex, SettingsMenu, SettingsSearch } from "../components/settings/SettingsMenu";
 
 /** The fields of the lock password form, each with its own error line. */
 type PasswordField = "current" | "new" | "confirm";
@@ -75,8 +76,18 @@ interface SectionView { phone: boolean; section: SettingsSection | null }
  * heading is left to screen readers there.
  */
 function SettingsGroup({ id, view, children }: { id: SettingsSection; view: SectionView; children: ReactNode }) {
+  const { t } = useI18n();
   if (view.phone && view.section !== id) return null;
-  if (id === "media" && !hasMediaDevices()) return null; // no devices to pick here: no empty space for them either
+  if (id === "media" && !hasMediaDevices()) {
+    // No devices to pick here: no empty space for them on the whole page, and one line on the section's own screen
+    // (opened by its address), not an empty screen.
+    if (!view.phone) return null;
+    return (
+      <Section title={t("settings.media.title")} testId="settings-media-none">
+        <Row label={t("settings.media.none")} info={t("settings.media.noneInfo")} />
+      </Section>
+    );
+  }
   return (
     <div id={`settings-section-${id}`} data-settings-section={id} className={`space-y-6 scroll-mt-2 ${view.phone ? "[&>section:first-child>h2]:sr-only" : ""}`}>
       {children}
@@ -125,8 +136,11 @@ export function Settings() {
   const content = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState<SettingsSection>(section ?? SETTINGS_SECTIONS[0]);
   const picked = useRef<SettingsSection | null>(null);
+  // The section picked in the index or named by the address: marked while in view, until the page is scrolled by hand.
+  const wanted = useRef<SettingsSection | null>(section);
   useEffect(() => {
     if (isMobile || !section) return;
+    wanted.current = section;
     if (picked.current === section) { picked.current = null; return; } // picked in the index: already on its way there
     document.getElementById(`settings-section-${section}`)?.scrollIntoView({ block: "start" });
     setInView(section);
@@ -135,17 +149,26 @@ export function Settings() {
     const body = content.current?.closest<HTMLElement>("[data-page-body]");
     if (isMobile || !body) return;
     const onScroll = () => {
-      const top = body.getBoundingClientRect().top + 48;
-      let current: SettingsSection | null = null;
-      for (const group of body.querySelectorAll<HTMLElement>("[data-settings-section]")) {
-        if (group.getBoundingClientRect().top <= top) current = group.dataset.settingsSection as SettingsSection;
-      }
-      setInView(current ?? SETTINGS_SECTIONS[0]);
+      const view = body.getBoundingClientRect();
+      const boxes = [...body.querySelectorAll<HTMLElement>("[data-settings-section]")].map((group) => {
+        const box = group.getBoundingClientRect();
+        return { section: group.dataset.settingsSection as SettingsSection, top: box.top, bottom: box.bottom };
+      });
+      const atEnd = body.scrollTop > 0 && body.scrollTop + body.clientHeight >= body.scrollHeight - 2;
+      setInView(sectionInView(boxes, view.top + 48, view.bottom, atEnd, wanted.current));
     };
+    // Scrolled by hand (wheel, touch, keys, the scroll bar): the section at the top is marked again.
+    const byHand = (event: Event) => { if (event.type !== "pointerdown" || event.target === body) wanted.current = null; };
+    const hands = ["wheel", "touchmove", "keydown", "pointerdown"] as const;
     body.addEventListener("scroll", onScroll, { passive: true });
-    return () => body.removeEventListener("scroll", onScroll);
+    for (const type of hands) body.addEventListener(type, byHand, { passive: true });
+    return () => {
+      body.removeEventListener("scroll", onScroll);
+      for (const type of hands) body.removeEventListener(type, byHand);
+    };
   }, [isMobile]);
   const pick = (to: SettingsSection) => {
+    wanted.current = to;
     document.getElementById(`settings-section-${to}`)?.scrollIntoView({ block: "start", behavior: settings.reduceMotion ? "auto" : "smooth" });
     setInView(to);
     // The page stays where it is; its address names the section, so a reload comes back to it.
@@ -169,6 +192,17 @@ export function Settings() {
   const passwordId = useId();
   const passwordInputs = { current: useRef<HTMLInputElement>(null), new: useRef<HTMLInputElement>(null), confirm: useRef<HTMLInputElement>(null) };
   const [showPasswordForm, setShowPasswordForm] = useState(false);
+  // The form opened by the person (the lock switch, Change password): its first field takes the focus, and the keyboard comes up.
+  const focusPasswordForm = useRef(false);
+  const openPasswordForm = () => { focusPasswordForm.current = true; setShowPasswordForm(true); };
+  useLayoutEffect(() => {
+    if (!showPasswordForm || !focusPasswordForm.current) return;
+    // Not drawn yet (a phone still on the menu, about to open the section): once it is.
+    const first = passwordInputs.current.current ?? passwordInputs.new.current;
+    if (!first) return;
+    focusPasswordForm.current = false;
+    first.focus();
+  }, [showPasswordForm, section, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it is drawn
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
@@ -237,7 +271,7 @@ export function Settings() {
 
   const handleLockToggle = async () => {
     if (!lockEnabled && !hasPassword) {
-      setShowPasswordForm(true);
+      openPasswordForm();
       return;
     }
 
@@ -347,7 +381,9 @@ export function Settings() {
         <label className="block text-sm text-text-secondary">
           {label}
           <input ref={passwordInputs[which]} type="password" value={value} data-testid={`settings-password-${which}`}
-            autoComplete={which === "current" ? "current-password" : "new-password"}
+            // Not "new-password": that is what makes Safari offer "Use Strong Password?", a generated password nobody
+            // remembers for a lock typed by hand on every unlock. The current one may still come from a password manager.
+            autoComplete={which === "current" ? "current-password" : "off"}
             aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}
             onChange={(e) => { change(e.target.value); if (passwordError?.field === which) setPasswordError(null); }}
             className={`${field} mt-1 aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
@@ -390,6 +426,8 @@ export function Settings() {
   const has = (needs: SettingNeeds) => needs === "profiles" ? canSwitch : needs === "updates" ? update.supported
     : needs === "wake" ? canWake : hasMediaDevices();
   const shown = (id: SettingsSection) => id !== "media" || hasMediaDevices();
+  // "Password" found by the search opens the lock's password form: to set one when there is none (no row of its own then).
+  const found = (entry: SettingEntry) => { if (entry.opens === "passwordForm" && !showPasswordForm) openPasswordForm(); };
 
   if (isMobile && !section) {
     // A phone: the menu of sections, each opened on a screen of its own, under the profile's own line.
@@ -397,18 +435,18 @@ export function Settings() {
     const language = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native;
     const summary: Partial<Record<SettingsSection, ReactNode>> = {
       profile: settings.defaultNickname || undefined,
-      appearance: [scheme, language].filter(Boolean).join(", "),
+      appearance: listText([scheme, language].filter((item): item is string => !!item), t),
       notifications: t("settings.notificationsHint"),
       media: t("settings.mediaHint"),
       privacy: t("settings.privacyHint"),
       network: t("settings.networkHint"),
-      storage: desktopUsed ? formatBytes(desktopUsed.total) : formatBytes(estimate?.used ?? storageInfo.used),
+      storage: desktopUsed ? formatBytes(desktopUsed.total, t) : formatBytes(estimate?.used ?? storageInfo.used, t),
       about: update.update ? t("updates.available", { version: update.update.version }) : `${t("settings.version")} ${appVersion}`,
     };
     return (
       <Page title={t("settings.title")} width="md" testId="settings-page" overlay={overlay}>
         {installApp}
-        <SettingsMenu summary={summary} shown={shown} has={has} onOpen={(id) => nav.open(settingsPath(id))} top={
+        <SettingsMenu summary={summary} shown={shown} has={has} onFound={found} onOpen={(id) => nav.open(settingsPath(id))} top={
           <div className="bg-surface rounded-xl divide-y divide-border">
             {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
             <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
@@ -578,7 +616,7 @@ export function Settings() {
         )}
         {hasPassword && (
           <Row label={t("settings.password")}>
-            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : setShowPasswordForm(true))}>
+            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : openPasswordForm())}>
               {showPasswordForm ? t("common.close") : t("settings.passwordEdit")}
             </Button>
           </Row>
@@ -611,9 +649,9 @@ export function Settings() {
       <SettingsGroup id="storage" view={view}>
       <Section title={t("settings.data")}>
         <Row label={t("settings.storageUsed")} testId="settings-storage-used"
-          value={desktopUsed ? formatBytes(desktopUsed.total) : estimate ? t("settings.storageOf", { used: formatBytes(estimate.used), quota: formatBytes(estimate.quota) }) : formatBytes(storageInfo.used)}
+          value={desktopUsed ? formatBytes(desktopUsed.total, t) : estimate ? t("settings.storageOf", { used: formatBytes(estimate.used, t), quota: formatBytes(estimate.quota, t) }) : formatBytes(storageInfo.used, t)}
           info={desktopUsed ? <span data-testid="settings-storage-parts">
-            {desktopUsed.parts.map((part) => <span key={part.key} className="block">{t(`settings.storageParts.${part.key}`, { size: formatBytes(part.bytes), count: part.count ?? 0 })}</span>)}
+            {desktopUsed.parts.map((part) => <span key={part.key} className="block">{t(`settings.storageParts.${part.key}`, { size: formatBytes(part.bytes, t), count: part.count ?? 0 })}</span>)}
             <span className="block mt-1">{t("settings.storagePartsNote")}</span>
           </span> : undefined} />
         {protection && (
@@ -724,14 +762,19 @@ export function Settings() {
     );
   }
 
-  // A wider screen: every section on one page, and the index beside it once the column has room for both.
+  // A wider screen: every section on one page, and the index beside it once the column has room for both (its search
+  // above the page until then).
   return (
     <Page title={t("settings.title")} width="xl" testId="settings-page" overlay={overlay}>
       <div className="@3xl/page:grid @3xl/page:grid-cols-[12rem_minmax(0,42rem)] @3xl/page:justify-center @3xl/page:gap-8">
         <aside className="hidden @3xl/page:block sticky top-0 self-start">
-          <SettingsIndex active={inView} shown={shown} has={has} onPick={pick} />
+          <SettingsIndex active={inView} shown={shown} has={has} onFound={found} onPick={pick} />
         </aside>
         <div ref={content} className="max-w-2xl mx-auto w-full min-w-0 space-y-6">
+          {/* Too narrow for the index: its search, above the page. */}
+          <div className="@3xl/page:hidden">
+            <SettingsSearch has={has} onFound={found} onPick={pick} />
+          </div>
           {installApp}
           {groups}
         </div>

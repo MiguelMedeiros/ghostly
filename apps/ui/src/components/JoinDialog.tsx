@@ -1,18 +1,20 @@
 import { useBackdropDismiss } from "../hooks/useDismiss";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import jsQR from "jsqr";
 import { decodeCommunityLink, decodeGroupEntryLink, readDeviceInvite } from "@ghostly/core";
 import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
+import { dragHasFiles, droppedFiles, pastedFiles } from "../lib/pastedFiles";
 import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
 import { errorText } from "../lib/errorText";
 
 /**
- * Scanned data is only parsed as an invite; never opened as a URL or executed. A group's link
+ * Scanned data is only parsed as an invite; never opened as a URL or executed. A picture pasted or dropped on the
+ * dialog (a screenshot of an invite's QR) is read as "Open image" reads one. A group's link
  * (`group1/…`) goes to `onJoinGroup`, which the dialog waits for, so a refusal is shown here.
  *
  * An invite this profile already has a chat for makes no second chat (WISP 801 Q9): one it made itself
@@ -108,8 +110,9 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       if (current !== generation.current || closed.current) return;
       // A phone has no keys to press: there the field pastes with a long press.
       const touch = touchOnly();
-      if (value === null) { setError(touch ? t("join.clipboardUnavailableTouch") : t("join.clipboardUnavailable", { keys: pasteShortcut() })); setManual(true); return; }
-      if (!value.trim()) { setError(touch ? t("join.emptyTouch") : t("join.empty", { keys: pasteShortcut() })); setManual(true); return; }
+      // A device code is not an invite: the words say which one to paste.
+      if (value === null) { setError(touch ? t("join.clipboardUnavailableTouch") : t(onDevice ? "devices.join.codeUnavailable" : "join.clipboardUnavailable", { keys: pasteShortcut() })); setManual(true); return; }
+      if (!value.trim()) { setError(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() })); setManual(true); return; }
       accept(value.trim());
     } finally {
       if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); }
@@ -171,8 +174,25 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     } catch { if (current === generation.current) setError(t("join.imageFailed")); }
     finally { if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); } }
   };
+  // A screenshot of the QR, pasted (the desktop app's WebKit hands it as a file) or dropped: read as "Open image" reads
+  // one. A paste of text is left to the field.
+  const pastedImage = (event: ClipboardEvent) => {
+    const image = pastedFiles(event.clipboardData)?.find(file => file.type.startsWith("image/"));
+    if (!image) return;
+    event.preventDefault();
+    void readImage(image);
+  };
+  const droppedImage = (event: DragEvent) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    // Taken here, so the window does not open the file in place of the app.
+    event.preventDefault();
+    const file = droppedFiles(event.dataTransfer)[0];
+    if (file?.type.startsWith("image/")) void readImage(file);
+    else if (file) setError(t("join.imageFailed"));
+  };
   const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed";
   return <dialog ref={dialog} {...backdrop} onCancel={event => { event.preventDefault(); close(); }}
+    onPaste={pastedImage} onDragOver={event => { if (dragHasFiles(event.dataTransfer)) event.preventDefault(); }} onDrop={droppedImage}
     onKeyDown={event => {
       if (event.key !== "Tab") return;
       const elements = Array.from(dialog.current?.querySelectorAll<HTMLElement>("button:not(:disabled), textarea, input:not(:disabled)") ?? []).filter(element => element.getClientRects().length);
@@ -201,6 +221,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
           {t("join.image")}<input disabled={busy} aria-label={t("join.image")} type="file" accept="image/*" className="sr-only" onChange={event => { void readImage(event.target.files?.[0]); event.target.value = ""; }} />
         </label>
       </div>
+      <p className="mt-2 text-center text-xs text-text-secondary">{t("join.pasteScreenshot")}</p>
     </>}
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
@@ -208,8 +229,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header`}>{t("join.openChat")}</button>
     </div>}
     {manual && <form className="mt-3" onSubmit={event => { event.preventDefault(); if (!busyRef.current) accept(input.trim()); }}>
-      <textarea ref={manualInput} aria-label={t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} onChange={event => { setInput(event.target.value); setError(""); }} placeholder={t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
-      <div className="mt-3 grid grid-cols-2 gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><button disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{t("join.submit")}</button></div>
+      <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} onChange={event => { setInput(event.target.value); setError(""); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
+      <div className="mt-3 grid grid-cols-2 gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><button disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</button></div>
     </form>}
   </dialog>;
 }

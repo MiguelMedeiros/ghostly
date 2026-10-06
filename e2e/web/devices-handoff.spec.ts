@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { expect, test, chat, connect, link, say, type Peer } from "../support/fixtures";
 import { DEVICE_SET_PASSWORD, enrollDevice, profileFileDigests, untilShown } from "../support/devices";
+import { pair } from "../support/paired";
 
 /**
  * Moving a profile between devices (WISP 06 § The handoff, part 5). Two browser contexts are the person's two devices
@@ -124,12 +125,16 @@ test("a push: Move to on the active device, Use here on the other; and a wrong p
   await expect(chat(contact).getByText("pushed here")).toBeVisible({ timeout: 180_000 });
 });
 
-test("moved there and back: the device that has the profile again talks to the contact at once", { tag: ["@feature:devices.handoff"] }, async ({ peer }) => {
+test("moved there and back: the device that has the profile again talks to the contact at once, and keeps its files", { tag: ["@feature:devices.handoff"] }, async ({ peer }) => {
   test.setTimeout(12 * 60_000);
   const [desktop, phone, contact] = await Promise.all([peer("desktop"), peer("phone"), peer("contact", traced)]);
   const lines = traceLines(contact);
   await link(desktop, contact);
   await connect(desktop, contact);
+  // A small file (kept whole on its record, as a photo is): the desktop's frozen copy holds it when the profile comes
+  // back, so it is copied there from that copy, not sent again. That copy failed, and the move back ended "damaged".
+  const photo = randomBytes(200_000);
+  await sendFile(desktop, contact, "photo.bin", photo);
   await enrollDevice(desktop, phone);
   /** Move to `to` from the active device `from`, and wait until `to` runs the profile. */
   const move = async (from: Peer, to: Peer) => {
@@ -149,6 +154,7 @@ test("moved there and back: the device that has the profile again talks to the c
   // And back: the desktop takes the profile again, and its first message reaches the contact.
   await move(phone, desktop);
   const back = Date.now();
+  expect(Object.values(await profileFileDigests(desktop.page)).map((f) => f.sha256)).toEqual([sha(photo)]);
   await desktop.page.goto("/#/");
   await untilShown(desktop.page, desktop.page.getByTestId("sidebar").getByTestId("chat-row").first());
   await openTheChat(desktop);
@@ -213,4 +219,48 @@ test("five wrong passwords in an hour lock the standby out", { tag: ["@feature:d
   await phone.page.getByTestId("handoff-start").click();
   await expect(phone.page.getByTestId("handoff-progress")).toHaveAttribute("data-failure", "locked-out", { timeout: 60_000 });
   await expect(phone.page.getByTestId("handoff-line")).toContainText("Too many tries.");
+});
+
+test("a call on the active device keeps the profile there: Use here and Move to wait until it ends, and the call goes on", { tag: ["@feature:devices.handoff", "@feature:calls.paired"] }, async ({ peer }) => {
+  test.setTimeout(10 * 60_000);
+  const [desktop, phone, contact] = await Promise.all([peer("desktop"), peer("phone"), peer("contact")]);
+  await pair(desktop, contact);
+  await enrollDevice(desktop, phone);
+  await openTheChat(desktop);
+
+  // The desktop is on a call with the contact.
+  await desktop.page.getByTestId("call-audio").click();
+  await contact.page.getByTitle("Accept audio call").click();
+  for (const p of [desktop, contact]) await expect(p.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+  // Use here on the phone: the desktop answers that a call is on there, and says it on its own screen too.
+  await phone.page.getByTestId("handoff-use-here").click();
+  await phone.page.getByTestId("handoff-password").fill(DEVICE_SET_PASSWORD);
+  await phone.page.getByTestId("handoff-start").click();
+  const progress = phone.page.getByTestId("handoff-progress");
+  await expect(progress).toHaveAttribute("data-step", "failed", { timeout: 120_000 });
+  await expect(progress).toHaveAttribute("data-failure", "call-there");
+  await expect(phone.page.getByTestId("handoff-line")).toHaveText("A call is on there. Try again after it.");
+  await desktop.page.evaluate(() => { location.hash = "#/profile"; });
+  await expect(desktop.page.getByTestId("handoff-wallet-refusal")).toContainText("A call is on. Try again after it.");
+  // Move to, from the desktop: the same.
+  const row = desktop.page.getByTestId("device-row").filter({ hasText: "Phone" });
+  await row.getByTestId("device-move").click();
+  await expect(desktop.page.getByTestId("handoff-move-error")).toHaveText("A call is on. Try again after it.");
+  await desktop.page.keyboard.press("Escape");
+  // The call was not cut: before, the desktop froze and reloaded, and the contact sat on "Reconnecting..." until it ended.
+  for (const p of [desktop, contact]) await expect(p.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+  await expect(desktop.page.getByTitle("New Chat")).toBeVisible();
+
+  // Once the call is over, Use here moves the profile.
+  await desktop.page.getByTitle("End call").click();
+  await expect(contact.page.getByTitle("End call")).toHaveCount(0);
+  await phone.page.getByTestId("handoff-use-here").click();
+  await phone.page.getByTestId("handoff-password").fill(DEVICE_SET_PASSWORD);
+  await phone.page.getByTestId("handoff-start").click();
+  await untilShown(phone.page, phone.page.getByTitle("New Chat"), { timeout: 300_000 });
+  await untilShown(desktop.page, desktop.page.getByTestId("device-standby").and(desktop.page.locator("[data-state=standby]")));
+  // The call's end line moved with the history.
+  await openTheChat(phone);
+  await expect(chat(phone).getByText("Audio call ended")).toBeVisible();
 });

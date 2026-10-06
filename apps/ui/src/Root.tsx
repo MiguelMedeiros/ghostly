@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
+import { NameStep } from "./components/NameStep";
 import { App } from "./App";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
@@ -18,6 +19,7 @@ import { LockScreenProvider, useLockScreen } from "./contexts/LockScreenContext"
 import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
 import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
+import { PreUnlockRing } from "./components/PreUnlockRing";
 import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -26,7 +28,7 @@ import { DeviceStandby } from "./components/DeviceStandby";
 import { LimitedStartGate } from "./components/devices/LimitedStart";
 import { useDeviceGate } from "./hooks/useDeviceGate";
 import { JoinHost } from "./components/devices/JoinHost";
-import { isDeviceCode, offerDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
+import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { groupPath } from "./lib/groups";
@@ -42,8 +44,18 @@ import "./index.css";
  * the keys stay out of the history. Runs while locked too: the address must
  * not wait for the password.
  */
+/**
+ * A device code's link that names the profile, `#<profile>#ghostly1z…` (WISP 06 § Adding a device), as the router reads
+ * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
+ */
+function namedDeviceLink(pathname: string, hash: string): string | null {
+  const named = `#${pathname.replace(/^\//, "")}${hash}`;
+  const link = readDeviceLink(named);
+  return link.profile && /^ghostly1/i.test(link.code) && isDeviceCode(link.code) ? named : null;
+}
+
 function ChatLinkIntake() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const { t } = useI18n();
   const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | null>(null);
@@ -51,6 +63,9 @@ function ChatLinkIntake() {
   // An effect, not a layout effect: the router starts listening in its own layout effect, after this
   // one's, and would miss a navigation made before it (an invite link opened in a new tab).
   useEffect(() => {
+    // A device code's link that names the profile, opened while the app was open already: the join host takes it.
+    const named = namedDeviceLink(pathname, hash);
+    if (named) { offerDeviceLink(named); navigate("/", { replace: true }); return; }
     const rest = inviteRouteCode(pathname);
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
@@ -74,7 +89,7 @@ function ChatLinkIntake() {
     }
     window.dispatchEvent(new Event("session-updated"));
     navigate(chatPath(sessionId), { replace: true });
-  }, [pathname, navigate]);
+  }, [pathname, hash, navigate]);
 
   useEffect(() => {
     if (!invalid) return;
@@ -160,7 +175,9 @@ function isIntake(pathname: string): boolean {
 }
 
 function HomeAnchor() {
-  useAnchorHome(isIntake);
+  // A named device link is an intake too: home is not put under it, and its name is never kept as a route.
+  const { hash } = useLocation();
+  useAnchorHome((pathname) => isIntake(pathname) || !!namedDeviceLink(pathname, hash));
   return null;
 }
 
@@ -171,8 +188,8 @@ function HomeAnchor() {
 const ChatRoute = () => null;
 
 /**
- * Nothing of the app exists until the password has been entered once. When it
- * locks again later the app stays mounted (a call keeps going) but can be
+ * Nothing of the app exists until the password has been entered once, but a chat whose call rings meanwhile
+ * (`PreUnlockRing`, hidden and inert). When it locks again later the app stays mounted (a call keeps going) but can be
  * neither reached nor read by assistive technology under the lock screen.
  */
 function LockGate({ children }: { children: ReactNode }) {
@@ -219,6 +236,8 @@ export function Root() {
               <JoinNotice />
               <GroupLinkIntake />
               <HomeAnchor />
+              {/* A call that rings before the first unlock: shown on the lock screen (WISP 601 § Locked). */}
+              <PreUnlockRing />
               <LockGate>
                 {/* Asking for updates says this device runs Ghostly: not before the password. */}
                 <UpdateProvider>
@@ -227,6 +246,7 @@ export function Root() {
                   {/* A start that could not check which device is active asks first (WISP 06 § When a device checks). */}
                   <LimitedStartGate>
                   <AttentionFeedback />
+                  <NameStep />
                   <Routes>
                     {/* What the intakes above take out of the history at once (a group's link, an invite code, a
                         web+ghostly: link): nothing drawn for them, as before, and no "No routes matched" warning. */}

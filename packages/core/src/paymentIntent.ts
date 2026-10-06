@@ -50,6 +50,8 @@ export interface PaymentReview extends PaymentTarget {
   state: IntentState;
   txid?: string;
   error?: string;
+  /** A refused Cashu send whose ecash came back: what came back, and the fee the mint kept for taking it in. */
+  returned?: { amount: number; fee: number };
   evm?: { from: string; nonce: number; gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string; confirmations: number };
   /**
    * Parked (WISP 06 § Forced takeover): an attempt that holds signed bytes or a signed transaction, found unfinished by

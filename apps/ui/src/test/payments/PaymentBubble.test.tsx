@@ -92,6 +92,18 @@ describe("what the bubble says", () => {
     expect(status()).toHaveTextContent("Failed · Mint unreachable");
   });
 
+  it.each([
+    ["No route to the recipient within the fee limit", "Nenhuma rota até o destinatário dentro do limite de taxa"],
+    ["The wallet refused the payment: Not enough sats in your wallet", "A carteira recusou o pagamento: Sats insuficientes na sua carteira"],
+    ["Insufficient token balance", "Saldo de tokens insuficiente"],
+    ["The mint did not confirm the ecash", "O mint não confirmou o ecash"],
+  ])("says why a payment failed in the app's language: %s", (reason, said) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(REAL_MINT, 0)] }, payments: { "pay-1": paymentView({ kind: "payment", direction: "out", state: "failed", error: reason }) } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language: "pt" });
+    expect(status()).toHaveTextContent(said);
+    expect(status()).not.toHaveTextContent(reason);
+  });
+
   it("drops an old error once the payment settled", () => {
     show({ kind: "payment", direction: "in", state: "settled", error: "Mint unreachable" });
     expect(status()).toHaveTextContent(/^Received$/);
@@ -456,6 +468,44 @@ describe("paying a request's invoice over Lightning", () => {
     engine.on("walletQuoteInvoice", () => quote({ feeReserve: 100 }));
     await user.click(payButton());
     expect(await screen.findByText("The Lightning fee (up to 100 sats) is above your maximum")).toBeInTheDocument();
+  });
+
+  it("drops the red line of a failed attempt once the request is paid", async () => {
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
+    engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "fake-lightning" })).on("payRequest", () => { throw new Error("No route"); });
+    await user.click(payButton());
+    await user.click(await screen.findByRole("button", { name: "Approve payment" }));
+    expect(await screen.findByText("No route")).toBeInTheDocument();
+    // Paid all the same (another attempt, another device, the payee's own word): the request says Paid, and only that.
+    act(() => engine.update({ payments: { "pay-1": paymentView(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE, state: "settled" })) } }));
+    expect(status()).toHaveTextContent(/^Paid$/);
+    expect(screen.queryByText("No route")).not.toBeInTheDocument();
+  });
+
+  it("never approves more than the card says it holds, and says why", async () => {
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning", balance: 100_000 }) } });
+    engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "fake-lightning" })).on("payRequest", () => undefined);
+    await user.click(payButton());
+    const review = await screen.findByTestId("payment-review");
+    expect(within(review).getByTestId("payment-lightning-over")).toHaveTextContent("More than the 100,000 test sats on this card.");
+    expect(screen.getByRole("button", { name: "Approve payment" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Approve payment" }));
+    expect(engine.callsTo("payRequest")).toEqual([]);
+    // It took in enough meanwhile: Approve is back, with nothing to say.
+    act(() => engine.update({ wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning", balance: 300_000 }) } }));
+    expect(screen.queryByTestId("payment-lightning-over")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve payment" }));
+    expect(engine.callsTo("payRequest")).toEqual([expect.objectContaining({ paymentId: "pay-1", via: "lightning" })]);
+  });
+
+  it("leaves Approve to the node when the card does not say what it holds", async () => {
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
+    engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "fake-lightning" })).on("payRequest", () => undefined);
+    await user.click(payButton());
+    await screen.findByTestId("payment-review");
+    expect(screen.queryByTestId("payment-lightning-over")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve payment" }));
+    expect(engine.callsTo("payRequest")).toEqual([expect.objectContaining({ paymentId: "pay-1", via: "lightning" })]);
   });
 });
 

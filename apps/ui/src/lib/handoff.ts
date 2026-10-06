@@ -3,19 +3,21 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffFailure, HandoffView } from "@ghostly/browser/devices/handoff";
 import type { TranslationKey } from "../contexts/I18nContext";
 import { WALLET_NAME } from "../components/wallet/names";
+import { englishT, type Translate } from "../locales/translate";
+import { sizeIn } from "./sizeText";
 
 /* The handoff (WISP 06 § The handoff) as the pages need it: what a failure says, sizes, and the view of the engine's. */
 
-/** A size as people read it: "480 MB", "1.2 GB". */
-export function sizeText(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+/** A size as people read it, in the app's language: "480 MB", "1.2 GB", "1,2 Go" in French. */
+export function sizeText(bytes: number, t: Translate = englishT): string {
+  if (bytes >= 1024 ** 3) return sizeIn(bytes / 1024 ** 3, "gb", t, 1, true);
+  if (bytes >= 1024 ** 2) return sizeIn(Math.max(1, Math.round(bytes / 1024 ** 2)), "mb", t);
+  return sizeIn(Math.max(1, Math.round(bytes / 1024)), "kb", t);
 }
 
 export const FAILURES: Record<HandoffFailure, TranslationKey> = {
   unreachable: "devices.handoff.fail.unreachable", password: "devices.handoff.fail.password", "locked-out": "devices.handoff.fail.lockedOut",
-  refused: "devices.handoff.fail.refused", payment: "devices.handoff.fail.payment", call: "devices.handoff.fail.call", busy: "devices.handoff.fail.busy",
+  refused: "devices.handoff.fail.refused", payment: "devices.handoff.fail.payment", call: "devices.handoff.fail.call", "call-there": "devices.handoff.fail.callThere", busy: "devices.handoff.fail.busy",
   older: "devices.handoff.fail.older", room: "devices.handoff.fail.room", damaged: "devices.handoff.fail.damaged", dropped: "devices.handoff.fail.dropped",
   wallet: "devices.handoff.fail.wallet", loading: "devices.handoff.fail.loading", mainnet: "devices.handoff.fail.mainnet", expiry: "devices.handoff.fail.expiry",
   cancelled: "devices.handoff.fail.cancelled", turn: "devices.handoff.fail.turn", offline: "devices.handoff.fail.offline",

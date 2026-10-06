@@ -5,8 +5,7 @@ import { MobileTabBar } from "./components/MobileTabBar";
 import { InstallSteps } from "./components/InstallApp";
 import { Chat } from "./pages/Chat";
 import { chatRouteSession } from "./lib/url";
-import { listSessions } from "./lib/storage";
-import { parseCallSignal } from "@ghostly/core";
+import { offerSession } from "./lib/lockedRing";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { useServicesPlatform } from "./hooks/useServicesPlatform";
@@ -21,6 +20,7 @@ import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake } from "./lib/keepAwake";
+import { useCallOnSync } from "./hooks/useCallOnSync";
 import { useI18n } from "./contexts/I18nContext";
 
 /** The browser's status bar follows the header of whichever theme is active. */
@@ -103,6 +103,8 @@ function useLoadedChats() {
   const [callSessions, setCallSessions] = useState<readonly string[]>([]);
   // A call keeps the screen on (Screen Wake Lock, where there is one).
   useWakeLock(callSessions.length > 0);
+  // And the profile on this device: a handoff waits for the call to end.
+  useCallOnSync();
   // The call window hangs here instead of inside its chat, which may be off
   // screen. Still within `LockGate`, so the lock reaches it like the rest.
   const [callLayer, setCallLayer] = useState<HTMLElement | null>(null);
@@ -110,13 +112,11 @@ function useLoadedChats() {
   // A call can come in for a chat that is not open: that chat is loaded, off screen, so it rings.
   const [ringSessions, setRingSessions] = useState<readonly string[]>([]);
   useEffect(() => engine.onCallSignal((linkId, signal) => {
-    if (parseCallSignal(signal)?.t !== "o") return;
-    const peer = engine.state?.links.find((link) => link.id === linkId)?.peerPubKeyZ32;
-    const session = peer ? listSessions().find((s) => s.peerPubKeyB64 === peer) : undefined;
+    const session = offerSession(linkId, signal);
     if (!session) return;
-    setRingSessions((current) => (current.includes(session.id) ? current : [...current, session.id]));
+    setRingSessions((current) => (current.includes(session) ? current : [...current, session]));
     // It holds itself once it rings (a call keeps its chat loaded); one that never does is let go.
-    setTimeout(() => setRingSessions((current) => current.filter((id) => id !== session.id)), 15_000);
+    setTimeout(() => setRingSessions((current) => current.filter((id) => id !== session)), 15_000);
   }), []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {

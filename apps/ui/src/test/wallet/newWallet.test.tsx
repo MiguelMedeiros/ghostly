@@ -606,3 +606,29 @@ describe("real money and test money, two wallets apart", () => {
     expect(engine.callsTo("walletReceiveLightning")).toEqual([{ amount: 21, via: "cashu", network: "testnet" }]);
   });
 });
+
+describe("why a wallet is not there, in the app's language", () => {
+  it("a first-run failure says why on the Wallet page and on New's card, also when its reason lost its final period", async () => {
+    const { user, engine } = renderApp(<Wallet />, { language: "pt" });
+    const reason = "Could not create the Mainnet Cashu wallet: Could not reach mint.example. Check the address: it should be a Cashu mint. Nothing was saved; try again.";
+    engine.update({ wallet: walletView({ offers: offers({ "bitcoin:mainnet": { reason: "No on-chain wallet runs on Mainnet here yet" } }), setup: { running: false, failed: [{ type: "cashu", network: "mainnet", reason }] } }) });
+    expect(await screen.findByTestId("wallet-setup-error-cashu")).toHaveTextContent("Não foi possível acessar mint.example.");
+    expect(screen.getByTestId("wallet-setup-error-cashu")).not.toHaveTextContent("Could not");
+    await user.click(screen.getByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-network-mainnet"));
+    expect(screen.getByTestId("new-wallet-type-cashu-reason")).toHaveTextContent(/^Não foi possível acessar mint\.example\.$/);
+    // A kind not offered here says why in the language too, in its line and on hover.
+    expect(screen.getByTestId("new-wallet-type-bitcoin")).toHaveAttribute("title", "Nenhuma carteira on-chain funciona na Mainnet aqui ainda");
+    expect(screen.getByTestId("new-wallet-type-bitcoin")).toHaveTextContent("Nenhuma carteira on-chain funciona na Mainnet aqui ainda");
+  });
+
+  it("a kind New could not make says why on its card and below it", async () => {
+    const { user, engine } = renderApp(<Wallet />, { language: "pt" });
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, offers: offers() }) });
+    engine.on("walletCreate", () => Promise.reject(new Error("Could not create the Testnet Ark wallet: The Bark server is not answering. Nothing was saved; try again.")));
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-type-arkade"));
+    expect(await screen.findByTestId("new-wallet-type-arkade-reason")).toHaveTextContent(/^O servidor Bark não está respondendo\.$/);
+    expect(screen.getByTestId("new-wallet-error")).toHaveTextContent("Não foi possível criar a carteira Testnet Ark: O servidor Bark não está respondendo. Nada foi salvo; tente de novo.");
+  });
+});

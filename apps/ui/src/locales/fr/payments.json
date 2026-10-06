@@ -325,6 +325,7 @@
     },
     "payee": "Bénéficiaire",
     "provider": "Fournisseur",
+    "returnedInfo": "Reprendre de l'ecash est un échange auprès du mint, qui garde de petits frais à chaque échange : {{fee}} {{unit}} cette fois. Le reste est de retour dans votre portefeuille.",
     "states": {
       "cancelled": "annulé",
       "confirmed": "confirmé",

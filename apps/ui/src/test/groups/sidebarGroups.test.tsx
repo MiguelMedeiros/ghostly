@@ -173,4 +173,19 @@ describe("Sidebar: groups in the chat list", () => {
     expect(await screen.findByText("/group/fresh")).toBeInTheDocument();
     expect(screen.queryByTestId("new-group-dialog")).not.toBeInTheDocument();
   });
+
+  it("gives the focus back to New ▾ when New group closes without a group, by Cancel or by Escape", async () => {
+    const { user } = sidebar([]);
+    const more = screen.getByTestId("sidebar-new-more");
+    for (const close of ["cancel", "escape"] as const) {
+      await user.click(more);
+      await user.click(screen.getByTestId("new-group"));
+      const dialog = screen.getByTestId("new-group-dialog");
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      if (close === "cancel") await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      else act(() => { dialog.dispatchEvent(new Event("cancel", { cancelable: true })); });
+      expect(screen.queryByTestId("new-group-dialog")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(more);
+    }
+  });
 });

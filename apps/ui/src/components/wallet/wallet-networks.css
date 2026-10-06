@@ -4,8 +4,8 @@
    colour. Two equal columns, so both fit a 375px phone. */
 .wallet-networks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:4px;border:1px solid var(--color-border);border-radius:16px;background:var(--color-surface)}
 .wallet-network{--net:var(--color-accent);display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 8px;min-width:0;min-height:44px;padding:6px 10px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--color-text-secondary);font-size:14px;font-weight:600;cursor:pointer;transition:border-color .2s,background-color .2s,color .2s}
-.wallet-network[data-network=testnet]{--net:#e0a800}
-.wallet-network .network-tag{color:var(--net)}
+.wallet-network[data-network=testnet]{--net:#e0a800;--net-ink:var(--color-test-money-ink)}
+.wallet-network .network-tag{color:var(--net-ink,var(--net))}
 .wallet-network:hover:not([aria-selected=true]){background:var(--color-surface-alt);color:var(--color-text-primary)}
 .wallet-network:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .wallet-network[aria-selected=true]{border-color:var(--net);background:color-mix(in srgb,var(--net) 10%,transparent);color:var(--color-text-primary)}

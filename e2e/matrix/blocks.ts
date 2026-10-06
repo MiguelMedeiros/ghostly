@@ -90,7 +90,7 @@ const hashOf = (actor: Actor) => actor.page.evaluate(() => location.hash);
 export const pair: Block = {
   id: "pair",
   run: async ({ a, b, combo }) => {
-    await a.page.getByTitle(either("New Chat")).click();
+    await a.page.getByTitle(either("New chat")).click();
     if (combo.delivery === "dht") {
       // DHT only is chosen in the chat's Connection menu (WISP 400), not in its invite.
       await dhtOnly(a, true);
@@ -742,7 +742,7 @@ export const group: Block = {
       const c = await w.open("web", "carol");
       await nickname(c, "Carol");
       await home(a);
-      await a.page.getByTitle(either("New Chat")).click();
+      await a.page.getByTitle(either("New chat")).click();
       // The group's edges need a live link: a new chat is never DHT only unless someone chooses it.
       await joinWith(c, await copyInvite(a));
       await expect(c.page.getByPlaceholder(either("Message…"))).toBeEnabled({ timeout: 90_000 });

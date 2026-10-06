@@ -48,6 +48,22 @@ describe("Paste from clipboard in Join", () => {
     expect(onJoin).not.toHaveBeenCalled();
   });
 
+  it("adding this device: the field, its hints and its button speak of the code, not of an invite or a chat", async () => {
+    const onDevice = vi.fn(async () => {});
+    const { user, engine } = renderApp(<JoinDialog onDevice={onDevice} onClose={() => {}} />);
+    engine.readClipboardText = async () => { throw new Error("Not allowed from this window"); };
+    await user.click(screen.getByRole("button", { name: "Paste from clipboard" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Could not read the clipboard\. Press (⌘V|Ctrl\+V) to paste the code below\.$/);
+    const field = screen.getByRole("textbox", { name: "Code from your other device" });
+    expect(field).toHaveAttribute("placeholder", "Paste the code…");
+    expect(screen.getByRole("button", { name: "Add this device" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Join chat" })).toBeNull();
+    engine.readClipboardText = async () => "  ";
+    await user.click(screen.getByRole("button", { name: "Paste from clipboard" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/^Clipboard is empty\. Copy the code from your other device, then press (⌘V|Ctrl\+V) below\.$/));
+    expect(onDevice).not.toHaveBeenCalled();
+  });
+
   it("on the web, a denied Clipboard API does the same, and an empty one says so", async () => {
     const { user } = renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
     pageClipboard(async () => { throw new DOMException("denied", "NotAllowedError"); });

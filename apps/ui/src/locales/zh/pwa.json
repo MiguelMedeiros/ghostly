@@ -13,7 +13,7 @@
   "iosHint": "在 Safari 中点按分享，然后点按添加到主屏幕。",
   "iosLabel": "添加到主屏幕",
   "iosStep1": "点按分享 {{icon}}（如果看不到，在 ⋯ 里）。",
-  "iosStep2": "选取“添加到主屏幕”。",
+  "iosStep2": "选取“添加到主屏幕”（如果看不到，在“更多”里）。",
   "iosTitle": "将 Ghostly 添加到主屏幕",
   "notNow": "以后再说",
   "offline": "离线",

@@ -1,0 +1,1 @@
+The capability record may list `upgrade/1`: this app moves a session it holds over a relay to a direct path once live. A contact back after an absence reads it before it knocks on a relayed transport at once.

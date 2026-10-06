@@ -158,6 +158,16 @@ export function spendable(rail:WalletRail,s:WalletState):number|undefined {
  }
 }
 
+/**
+ * What the paying card holds, when that is less than `amount`: a review never approves more (the node or the mint
+ * would only refuse it afterwards), and says how much the card has. `undefined` when it holds enough, or does not say
+ * (then the payment is left to its node, as before).
+ */
+export function holdsLess(rail:WalletRail,s:WalletState|null|undefined,amount:number|null|undefined):number|undefined {
+ const holds=s&&amount?spendable(rail,s):undefined;
+ return holds!==undefined&&amount!>holds?holds:undefined;
+}
+
 type Face=Omit<WalletCard<string>,'id'|'rail'|'network'>;
 /** Lightning goes through its network's source: the Cashu mints (sharing the Cashu balance) unless another was chosen. */
 function lightningCard(t:Translate,s:WalletState,cashu:string,sats:(n:number)=>string):Face {

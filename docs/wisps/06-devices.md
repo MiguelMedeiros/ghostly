@@ -181,7 +181,9 @@ Today's path is a backup restored on the second device. It copies every secret t
 | Flags (bit 0: own device) | 1 byte |
 | Expires, UNIX seconds | 4 bytes |
 
-It is shown as a QR code and as a link to copy or share, and read through the existing `JoinDialog` (scan, paste, open an image). The QR code and the link are the code in the fragment of a link to the web app, `https://app.ghostly.tools/#ghostly1z…` (the web app's own origin when the active device is the web app), the form chat invites use (`inviteLink`, `inviteQrSegments`): a phone's own camera then opens Ghostly with the code, which no request carries. The app takes the code out of the address before anything else reads it. On a device with no chat in its only profile it goes straight to "Name this device" with the code; elsewhere it asks first and puts the code into a new, empty profile, never into one in use. Readers take the bare code or the link. The code may travel by any channel the person likes: the digits below protect it. The inviter enforces the 10 minutes and the single use; an app from before this WISP does not know version 2 and must refuse the code.
+It is shown as a QR code and as a link to copy or share, and read through the existing `JoinDialog` (scan, paste, open an image). The QR code and the link are the code in the fragment of a link to the web app, `https://app.ghostly.tools/#<profile>#ghostly1z…` (the web app's own origin when the active device is the web app), the form chat invites use (`inviteLink`, `inviteQrSegments`): a phone's own camera then opens Ghostly with the code, which no request carries. `<profile>` is the name of the profile the device is added to, escaped, at most 32 characters, with no `#`; it goes before the code because every reader takes the code after the last `#`, so an app that does not know it reads the code alone. The name is only shown ("Add this phone to <profile>"); nothing checks it, and the digits remain the check. The app takes the code out of the address before anything else reads it. Readers take the bare code or either form of the link. The code may travel by any channel the person likes: the digits below protect it. The inviter enforces the 10 minutes and the single use; an app from before this WISP does not know version 2 and must refuse the code.
+
+**Where a code goes on the new device.** Every route to a code (the camera opening the link, Join on the chat list, "I already use Ghostly", "Add this device to another profile", a paste) ends on one screen, in whatever profile is open. Before the person presses its button the app asks the engine whether the code may go into this profile (`deviceEnrollReady`: `ready`, or `set`, `in-use`, `loading`). A profile that holds something (the rule of `deviceEnrollJoin`, which still decides) or is already on several devices, and any profile on standby, never takes the code: the button makes a new, empty profile, named after `<profile>`, and that profile goes on to the session by itself once it starts, waiting while its wallets load. The new profile inherits the lock of the one it came from; the lock the person passed in this tab is handed across that one reload, and the one into the standby screen, through a marker in the tab's session storage that names the profile and its password hash and is good once, for 15 seconds. An app with one profile only says the profile is in use.
 
 **The session** is a paired session on that one-time link, with capability `enroll/1`. Its participation keys are the two device signing keys: B pins A's from the invite; A, for this one session only, accepts the first joiner's key, which is exactly what the digits then confirm. Its frames:
 
@@ -201,7 +203,7 @@ So an attacker who photographed the code and joined first holds A's only session
 
 **Transports of the session.** As on a device link, each side says in its own packet which transports its app runs and how to dial its native ones (`_tr`), signed with its device signing key. A side with no WebRTC (the Linux Desktop) starts its native endpoints at once; a side with WebRTC starts its own as soon as the other side's packet says it has none. B checks A's value against the key in the code. A has no key to check B's against until a joiner authenticated, so until then it takes B's value unchecked, as where to dial and nothing more: whoever can write that packet holds the code and could be the first joiner anyway, and the session there still authenticates. Without this, a page with WebRTC never reached a Desktop without it, and when A's one-time key sorted first (A dials) it had nothing to dial.
 
-**When the two cannot connect.** B waits 2 minutes for A's proof. If B saw A's packet on the link and no session opened, it says "The two devices found each other but could not connect", and so does A, 2 minutes after it first saw B's packet with no session: neither screen waits out the code's 10 minutes in silence. A B that never saw A says "Your other device did not answer".
+**When the two cannot connect.** A says "A device is connecting" from the moment it sees B's packet on the link (`seen` on its waiting view), so the person knows the code was read. B waits 2 minutes for A's proof. If B saw A's packet on the link and no session opened, it says "The two devices found each other but could not connect", and so does A, 2 minutes after it first saw B's packet with no session: neither screen waits out the code's 10 minutes in silence. A B that never saw A says "Your other device did not answer".
 
 Enrollment transfers `D` and the device set, **nothing else**: no chat key, no wallet, no storage credential. The new device ends on the standby screen, which offers the first handoff at once: "Bring my profile here now · 480 MB".
 
@@ -419,7 +421,7 @@ A relay read is not free: the web app and the extension share 30 requests a minu
 
 A hint is never authority. A contact or a relay cannot make a device give the turn up; it can only make it read the record.
 
-A standby reads the record when its screen is opened and every 10 minutes while it shows.
+A standby reads the record when its screen is opened, every 10 minutes while it shows, and on **Use here** when its link to the device it believes active is down (a device removed meanwhile then shows that it was removed).
 
 ### When a device finds itself superseded
 
@@ -556,7 +558,7 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | A is | Event | A does | Next |
 |---|---|---|---|
 | `active` | `handoff-request`, or the person presses Move to | Checks versions; starts the password proof (pull) | authorizing |
-| `active` | A request while a call is on, or from a locked-out device | `handoff-busy` | `active` |
+| `active` | A request while a call is on or rings in, or from a locked-out device | `handoff-busy` | `active` |
 | authorizing | Proof fails | Counts the attempt, notice on screen, `handoff-busy` when the limit is reached | `active` |
 | authorizing | Proof holds; no frame for 60 s | Cancels | `active` |
 | offered (a push) | A new session of the link, or B's hello or `handoff-have` of an earlier attempt, or B's hello for this offer on a later session than its first (its request was lost) | Sends the offer again | offered |
@@ -786,15 +788,15 @@ Copy follows the app's rules: short labels, one-line hints, details behind ⓘ. 
 
 **Adding a device**
 
-- Without a lock password of 8 characters: "Set a password first". Hint: "Without a password, anyone holding one of your devices can take this profile."
-- Active device, after the password: "Scan this with your phone's camera. On a computer, open Ghostly and choose Add this device to another profile." QR code, "Copy link", "Valid for 10 minutes".
-- New device, first screen: "I already use Ghostly" (on the chat list of a new profile, where a phone shows it, and the home pane), then "Add this device to my profile" or "Restore a backup". On iPhone in a Safari tab: "Add Ghostly to your Home Screen first."
-- New device that has a profile: "Add this device to another profile" in the profile switcher and the profile list, and on Profile, Devices while the profile has no other device: "Use this device with a profile from another device". It asks first: "A new profile opens here for it. Your profiles here stay as they are." The new, empty profile opens on "Name this device".
-- The QR code opened by a phone's camera: "Add this device to another profile?" on a device with a profile in use (the code names no device, so the question names none); "Name this device" with the code filled in on a fresh install.
-- Both: "Do both devices show 482 913?" On the active device: "They match" and "They don't match". On the new one: "Confirm on <device>."
-- New device: "Name this device" (prefilled: "Phone", "MacBook", "Firefox"; 16 characters).
-- Where the browser did not grant persistent storage: "This browser may clear Ghostly's data. Keep a copy on <device>."
-- Done, active device: "<device> added. It is on standby." Done, new device: the standby screen with "Bring my profile here now · 480 MB".
+- One dialog, "Add a device". Without a lock password of 8 characters it asks inline first: "Set a password first", ⓘ "Without a password, anyone holding one of your devices can take this profile." (or "Type your lock password", "Choose a longer password", each with its reason behind ⓘ).
+- Active device, after the password: "Scan this with your phone's camera." ⓘ "On a computer, open Ghostly and choose Add this device to another profile, then scan or paste the code. It works once, for 10 minutes." QR code, "Copy link", and under it where it stands, as it changes: "Waiting for your other device…", "A device is connecting…", with "9:41 left" in small type; then "Found <device>. Check that it shows the same digits." with the digits, "They match" and "They don't match"; then "Adding <device>…" and "<device> added. It is on standby." An enrollment that ends says why in one line, with "Try again", which makes a new code.
+- New device, first screen: "I already use Ghostly" (on the chat list of a new profile, where a phone shows it, and the home pane), then "Add this device to my profile" (the scanner) or "Restore a backup".
+- New device that has a profile: "Add this device to another profile" in the profile switcher and the profile list, and on Profile, Devices while the profile has no other device: "Use this device with a profile from another device". It opens the scanner.
+- New device, the one screen every code ends on: "Add this phone to <profile>" ("tablet", "computer"; "to your profile" when the link names none), "Name this device" prefilled ("Phone", "Mac app", "Firefox on Mac"; 16 characters), and one button, "Add". In a profile that holds something it says "Ghostly makes a new profile here for it. Your profile here stays as it is." ⓘ "The profile on this device has chats, groups or money, so it can't become a copy of the other one. Switch between them in the profile menu."
+- New device, then: "Connecting to your other device…" (or "Getting ready…" while a new profile's wallets load), "Check that your other device shows the same digits." with the digits and "Confirm on your other device.", then "This device is on standby for your profile." and the standby screen opens by itself. A failure says why with "Scan a new code".
+- On iPhone and iPad in a Safari tab: "Add Ghostly to your Home Screen first", one line "Your profile needs the app, not a Safari tab." (ⓘ the storage reason), and three steps: "Tap Share in Safari (in the ⋯ menu on newer iPhones).", "Tap Add to Home Screen (under More if you don't see it).", "Open Ghostly from your Home Screen and scan the code again." (or "and choose I already use Ghostly." when no code was read). The app on the Home Screen has storage of its own and opens at the manifest's start page, whatever the address was when it was added (checked on iOS 26: added from `#/settings`, it still opens at `/`), so the code does not go with it.
+- Where the browser did not grant persistent storage: "This browser may clear Ghostly's data. Keep a copy on <device>.", with "Continue".
+- Done, new device: the standby screen with "Bring my profile here now · 480 MB".
 
 **What a standby shows**, the whole profile area, behind the lock screen:
 

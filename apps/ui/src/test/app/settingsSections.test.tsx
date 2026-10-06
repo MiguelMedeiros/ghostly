@@ -1,15 +1,18 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { useAnchorHome, useAppNavigation } from "../../hooks/useAppNavigation";
 import { HOME, anchorTarget, plan, readNav, stackOf } from "../../lib/navigation";
-import { SETTINGS_INDEX, searchSettings, settingsSection } from "../../lib/settingsSections";
+import { SETTINGS_INDEX, searchSettings, sectionInView, settingsSection } from "../../lib/settingsSections";
 import { Settings } from "../../pages/Settings";
 import { renderApp } from "../render";
 import { windowIs } from "../viewport";
 import en from "../../locales/en";
+import { locales } from "../../locales";
+import { translateWith } from "../../locales/translate";
+import type { Language } from "../../lib/settings";
 
 // covers: settings.sections
 
@@ -57,6 +60,18 @@ describe("Settings on a phone", () => {
     expect(screen.queryByTestId("settings-lock")).not.toBeInTheDocument();
   });
 
+  it("a section's line lists what it holds the way the app's language lists things", () => {
+    windowIs(true);
+    // Dark mode and the language's own name, joined as each language joins a list: not with an English comma.
+    const lines = { en: "Dark, English", zh: "深色、中文", ja: "ダーク、日本語", ar: "داكن والعربية" } as const;
+    for (const [language, line] of Object.entries(lines)) {
+      const { unmount } = renderApp(<LockScreenProvider><UpdateProvider><Harness /></UpdateProvider></LockScreenProvider>, { route: "/settings", language: language as keyof typeof lines });
+      expect(screen.getByTestId("settings-open-appearance"), language).toHaveTextContent(line);
+      unmount();
+      localStorage.clear();
+    }
+  });
+
   it("opens a section on its own screen; its Back and the browser's return to the menu", async () => {
     windowIs(true);
     const { user } = renderSettings();
@@ -101,6 +116,26 @@ describe("Settings on a phone", () => {
     await reach("about", "settings-about-version");
   });
 
+  it("Audio & video opened by its address on a device with no microphone or camera says so, not an empty screen", async () => {
+    windowIs(true);
+    const had = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
+    try {
+      const { user } = renderSettings("/settings/media");
+      expect(screen.getByRole("heading", { level: 1, name: "Audio & video" })).toBeInTheDocument();
+      const none = screen.getByTestId("settings-media-none");
+      expect(none).toHaveTextContent("No microphone or camera found");
+      await user.click(within(none).getByRole("button", { name: "More info" }));
+      expect(within(none).getByTestId("row-info-text")).toHaveTextContent("secure address");
+      // Not a line in the menu, nor on the whole page of a wider screen.
+      await user.click(screen.getByTestId("page-back"));
+      expect(screen.queryByTestId("settings-open-media")).not.toBeInTheDocument();
+    } finally {
+      if (had) Object.defineProperty(navigator, "mediaDevices", had);
+      else delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+    }
+  });
+
   it("an old address opens its new place, with Back to the menu", async () => {
     windowIs(true);
     const { user } = renderSettings("/settings/advanced");
@@ -130,6 +165,42 @@ describe("Settings on a phone", () => {
     await user.clear(screen.getByTestId("settings-search"));
     await user.type(screen.getByTestId("settings-search"), "nothing like this");
     expect(screen.getByTestId("settings-search-empty")).toHaveTextContent("No settings match");
+  });
+});
+
+describe("Password found by the search", () => {
+  /** The result named "Password" itself (the lock screen's line may be found too). */
+  const passwordResult = () => screen.getAllByTestId("settings-search-result").find((row) => row.textContent?.startsWith("Password"))!;
+
+  it("on a phone, with no password set: opens Privacy with the form to set one, its first field focused", async () => {
+    windowIs(true);
+    const { user } = renderSettings();
+    await user.click(screen.getByRole("button", { name: "Settings tab" }));
+    await user.type(screen.getByTestId("settings-search"), "password");
+    await user.click(passwordResult());
+    expect(where()).toBe("/settings/privacy");
+    expect(screen.getByTestId("settings-password-form")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set password" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-password-new")).toHaveFocus();
+  });
+
+  it("between a phone and the index's width: the search above the page opens the form too", async () => {
+    windowIs(false);
+    const { user } = renderSettings("/settings");
+    await user.type(screen.getByTestId("settings-page-search-field"), "password");
+    await user.click(passwordResult());
+    expect(where()).toBe("/settings/privacy");
+    expect(screen.getByTestId("settings-password-new")).toHaveFocus();
+  });
+
+  it("on a wide screen: the index's search opens the form too", async () => {
+    windowIs(false);
+    const { user } = renderSettings("/settings");
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    await user.type(screen.getByTestId("settings-index-search"), "password");
+    await user.click(passwordResult());
+    expect(where()).toBe("/settings/privacy");
+    expect(screen.getByTestId("settings-password-new")).toHaveFocus();
   });
 });
 
@@ -179,9 +250,47 @@ describe("settings sections", () => {
     expect(settingsSection(undefined)).toBeNull();
   });
 
+  it("the wide index marks the section picked while it is in view, else the one at the page's top, and the last at its end", () => {
+    // The last three sections at the page's end: Network's top passed the line (148), Data & storage and About are below it.
+    const boxes = [
+      { section: "privacy", top: -600, bottom: -100 },
+      { section: "network", top: -90, bottom: 400 },
+      { section: "storage", top: 410, bottom: 640 },
+      { section: "about", top: 650, bottom: 800 },
+    ] as const;
+    expect(sectionInView(boxes, 148, 800, true, "about")).toBe("about");
+    expect(sectionInView(boxes, 148, 800, true, "storage")).toBe("storage");
+    // Picked, and the page has since grown under it (options still loading): still the one picked.
+    expect(sectionInView(boxes, 148, 800, false, "about")).toBe("about");
+    // Nothing picked, or scrolled by hand since: the one at the top, and the last at the end.
+    expect(sectionInView(boxes, 148, 800, false, null)).toBe("network");
+    expect(sectionInView(boxes, 148, 800, true, null)).toBe("about");
+    // Picked, but out of view: the same rules.
+    expect(sectionInView(boxes, 148, 800, false, "privacy")).toBe("network");
+    // Above the first section: the first.
+    expect(sectionInView([{ section: "profile", top: 200, bottom: 400 }], 148, 800, false, null)).toBe("profile");
+  });
+
+  it("finds an option by the words people look for it by, not only its label, in the language shown", () => {
+    const found = (language: Language, query: string) => searchSettings(query, translateWith(locales[language], language), () => true).map((entry) => entry.label);
+    expect(found("en", "dark")).toEqual(["settings.colorScheme"]);
+    expect(found("en", "theme")).toEqual(["settings.colorTheme", "settings.colorScheme"]);
+    expect(found("en", "colour")).toEqual(["settings.colorTheme"]);
+    expect(found("en", "password")).toEqual(["settings.lockScreen", "settings.password"]);
+    expect(found("en", "mentions")).toEqual(["settings.cues.chat"]);
+    expect(found("pt", "escuro")).toEqual(["settings.colorScheme"]);
+    expect(found("zh", "深色")).toEqual(["settings.colorScheme"]);
+    expect(found("ar", "داكن")).toEqual(["settings.colorScheme"]);
+    // Words of another language are not found: the search is in the language shown.
+    expect(found("pt", "dark")).toEqual([]);
+  });
+
   it("every option the search knows has an English label, and search ignores case and accents", () => {
     const t = (key: string) => key.split(".").reduce<unknown>((at, part) => (at as Record<string, unknown>)?.[part], en) as string;
-    for (const entry of SETTINGS_INDEX) expect(typeof t(entry.label), entry.label).toBe("string");
+    for (const entry of SETTINGS_INDEX) {
+      expect(typeof t(entry.label), entry.label).toBe("string");
+      if (entry.words) expect(typeof t(entry.words), entry.words).toBe("string");
+    }
     expect(searchSettings("LOCK", t, () => true).map((entry) => entry.label)).toContain("settings.lockScreen");
     const accents = (key: string) => (key === "settings.language" ? "Língua" : t(key));
     expect(searchSettings("lingua", accents, () => true).map((entry) => entry.label)).toEqual(["settings.language"]);

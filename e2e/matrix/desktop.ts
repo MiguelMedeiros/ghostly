@@ -52,7 +52,7 @@ const connected = (p: Person, transport: string, timeout = 180_000) =>
   expect.poll(() => p.connection(), { timeout, message: `${p.name} is connected over ${transport}` }).toMatch(new RegExp(`Connected · ${transport}`));
 
 async function pair({ a, b }: DesktopWorld): Promise<void> {
-  await a.press("New Chat");
+  await a.press("New chat");
   const invite = await a.copyInvite();
   expect(invite).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
   await b.join(invite);

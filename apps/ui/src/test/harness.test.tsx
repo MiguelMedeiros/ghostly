@@ -35,7 +35,7 @@ describe("component test harness", () => {
 
   it("speaks the language in the settings", () => {
     renderApp(<Probe />, { language: "pt" });
-    expect(screen.getByText(/Configurações/)).toBeInTheDocument();
+    expect(screen.getByText(/Ajustes/)).toBeInTheDocument();
   });
 });
 

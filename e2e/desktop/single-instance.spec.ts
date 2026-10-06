@@ -30,7 +30,7 @@ test("a second launch on the same profile hands over to the running app and exit
     const env = { DBUS_SESSION_BUS_ADDRESS: bus!.address, GHOSTLY_PROFILE: "single" };
     const { app, stop } = await openDesktop({ home: home.dir, profile: "single", env });
     try {
-      await expect.poll(() => app.text('[title="New Chat"]'), { timeout: 90_000 }).not.toBeNull();
+      await expect.poll(() => app.text('[title="New chat"]'), { timeout: 90_000 }).not.toBeNull();
 
       const again = launch({ ...homeEnv(home.dir), ...env });
       running.push(again.app);
@@ -38,7 +38,7 @@ test("a second launch on the same profile hands over to the running app and exit
       expect(ended, "the second launch on the same profile exits").not.toBeNull();
       expect(ended!.value).toBe(0);
       // The first is untouched.
-      expect(await app.text('[title="New Chat"]')).not.toBeNull();
+      expect(await app.text('[title="New chat"]')).not.toBeNull();
 
       // Another profile in the same home is another person's peer: it runs.
       const other = launch({ ...homeEnv(home.dir), ...env, GHOSTLY_PROFILE: "single-other" });

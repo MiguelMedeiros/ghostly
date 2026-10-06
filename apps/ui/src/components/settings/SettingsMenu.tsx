@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { LinkRow } from "../layout";
-import { SECTION_TITLE, SETTINGS_SECTIONS, searchSettings, type SettingNeeds, type SettingsSection } from "../../lib/settingsSections";
+import { SECTION_TITLE, SETTINGS_SECTIONS, searchSettings, type SettingEntry, type SettingNeeds, type SettingsSection } from "../../lib/settingsSections";
 
 const stroke = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
@@ -32,13 +32,13 @@ function SearchField({ value, onChange, testId }: { value: string; onChange: (va
         className="absolute start-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
       <input type="search" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId}
         placeholder={t("settings.search")} aria-label={t("settings.search")}
-        className="w-full min-w-0 ps-9 pe-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent" />
+        className="w-full min-w-0 ps-9 pe-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />
     </div>
   );
 }
 
 /** What a search found: each option with its section's name, or a line saying nothing matched. */
-function SearchResults({ query, has, onOpen }: { query: string; has: (needs: SettingNeeds) => boolean; onOpen: (section: SettingsSection) => void }) {
+function SearchResults({ query, has, onOpen }: { query: string; has: (needs: SettingNeeds) => boolean; onOpen: (entry: SettingEntry) => void }) {
   const { t } = useI18n();
   const found = searchSettings(query, t, has);
   if (!found.length) return <p role="status" data-testid="settings-search-empty" className="px-1 text-sm text-text-muted">{t("settings.searchEmpty")}</p>;
@@ -46,7 +46,7 @@ function SearchResults({ query, has, onOpen }: { query: string; has: (needs: Set
     <div className="bg-surface rounded-xl divide-y divide-border" data-testid="settings-search-results">
       {found.map((entry) => (
         <LinkRow key={`${entry.section}:${entry.label}`} testId="settings-search-result" leading={<SectionIcon section={entry.section} small />}
-          label={t(entry.label)} hint={t(SECTION_TITLE[entry.section])} onClick={() => onOpen(entry.section)} />
+          label={t(entry.label)} hint={t(SECTION_TITLE[entry.section])} onClick={() => onOpen(entry)} />
       ))}
     </div>
   );
@@ -56,20 +56,22 @@ function SearchResults({ query, has, onOpen }: { query: string; has: (needs: Set
  * A phone's Settings: a search field, then one line per section (its mark, its name, what it holds now) that opens
  * the section on a screen of its own. `top` is what comes before the sections (the profile's own line).
  */
-export function SettingsMenu({ top, summary, shown, has, onOpen }: {
+export function SettingsMenu({ top, summary, shown, has, onOpen, onFound }: {
   top?: ReactNode;
   summary: Partial<Record<SettingsSection, ReactNode>>;
   /** Whether a section has anything on this device. */
   shown: (section: SettingsSection) => boolean;
   has: (needs: SettingNeeds) => boolean;
   onOpen: (section: SettingsSection) => void;
+  /** An option picked among the search's results, before its section opens. */
+  onFound?: (entry: SettingEntry) => void;
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   return (
     <div className="space-y-6" data-testid="settings-menu">
       <SearchField value={query} onChange={setQuery} testId="settings-search" />
-      {query.trim() ? <SearchResults query={query} has={has} onOpen={onOpen} /> : <>
+      {query.trim() ? <SearchResults query={query} has={has} onOpen={(entry) => { onFound?.(entry); onOpen(entry.section); }} /> : <>
         {top}
         <nav aria-label={t("settings.title")} className="bg-surface rounded-xl divide-y divide-border">
           {SETTINGS_SECTIONS.filter(shown).map((section) => (
@@ -83,21 +85,42 @@ export function SettingsMenu({ top, summary, shown, has, onOpen }: {
 }
 
 /**
+ * The search field of a page too narrow for the index beside it (a phone on its side, a tablet held upright): what it
+ * finds shows under it, over the page, and picking one scrolls to its section.
+ */
+export function SettingsSearch({ has, onPick, onFound }: {
+  has: (needs: SettingNeeds) => boolean;
+  onPick: (section: SettingsSection) => void;
+  /** An option picked among the results, before the page scrolls to its section. */
+  onFound?: (entry: SettingEntry) => void;
+}) {
+  const [query, setQuery] = useState("");
+  return (
+    <div className="space-y-3" data-testid="settings-page-search">
+      <SearchField value={query} onChange={setQuery} testId="settings-page-search-field" />
+      {query.trim() && <SearchResults query={query} has={has} onOpen={(entry) => { setQuery(""); onFound?.(entry); onPick(entry.section); }} />}
+    </div>
+  );
+}
+
+/**
  * A wide screen's index of the sections, beside the page that holds them all: picking one scrolls to it. The
  * search field above it finds an option by name.
  */
-export function SettingsIndex({ active, shown, has, onPick }: {
+export function SettingsIndex({ active, shown, has, onPick, onFound }: {
   active: SettingsSection | null;
   shown: (section: SettingsSection) => boolean;
   has: (needs: SettingNeeds) => boolean;
   onPick: (section: SettingsSection) => void;
+  /** An option picked among the search's results, before the page scrolls to its section. */
+  onFound?: (entry: SettingEntry) => void;
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   return (
     <div className="space-y-3" data-testid="settings-index">
       <SearchField value={query} onChange={setQuery} testId="settings-index-search" />
-      {query.trim() ? <SearchResults query={query} has={has} onOpen={(section) => { setQuery(""); onPick(section); }} /> : (
+      {query.trim() ? <SearchResults query={query} has={has} onOpen={(entry) => { setQuery(""); onFound?.(entry); onPick(entry.section); }} /> : (
         <nav aria-label={t("settings.title")} className="space-y-0.5">
           {SETTINGS_SECTIONS.filter(shown).map((section) => (
             <button key={section} type="button" data-testid={`settings-index-${section}`} aria-current={active === section ? "true" : undefined} onClick={() => onPick(section)}

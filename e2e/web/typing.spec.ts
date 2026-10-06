@@ -21,7 +21,7 @@ test("the contact sees typing… while one writes, until the message, a cleared 
   // Alice sends: it goes with the message.
   await box.pressSequentially("lo");
   await box.press("Enter");
-  await expect(chat(bob).getByText("hello")).toBeVisible();
+  await expect(chat(bob).getByText("hello", { exact: true })).toBeVisible();
   await expect(typing).toHaveCount(0);
   await expect(rowTyping).toHaveCount(0);
   await expect(bob.page.getByTestId("chat-subtitle")).not.toHaveText(/typing/);

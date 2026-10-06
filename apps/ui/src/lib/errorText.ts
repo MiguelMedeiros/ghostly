@@ -27,6 +27,17 @@ const railName = (rail: string, t: Translate) =>
       : rail === "the Ark payment capability" ? "Ark"
         : rail;
 
+/** An amount of sats as the engine wrote it (digits, maybe with its own separators), written the app's way. */
+const sats = (value: string, t: Translate) => formatAmount(Number(value.replace(/\D/g, "")), t.language ?? "en");
+
+/** The words a "Could not read the …" line lists (arkWallet.ts, barkWallet.ts, sparkWallet.ts): each said in the language when known. */
+const PARTS: Record<string, TranslationKey> = {
+  address: "errors.wallet.part.address", balance: "errors.wallet.part.balance", "boarding address": "errors.wallet.part.boardingAddress",
+  "coin expiry": "errors.wallet.part.coinExpiry", history: "errors.wallet.part.history", incoming: "errors.wallet.part.incoming",
+  recoverable: "errors.wallet.part.recoverable", sync: "errors.wallet.part.sync",
+};
+const readParts = (parts: string, t: Translate) => parts.split(", ").map((part) => (PARTS[part] ? t(PARTS[part]) : part)).join(", ");
+
 const NETWORK = "(?<network>Mainnet|Testnet)";
 const HOST = "(?<host>[^\\s:/]+(?::\\d+)?)";
 
@@ -85,13 +96,16 @@ const RULES: readonly Rule[] = [
   // A failed payment and what came back: "<why> The sats are back in your wallet[, less N sats the mint kept as its fee]."
   { match: /^(?<reason>[\s\S]+?) The sats are back in your wallet, less (?<fee>\d+) sats? the mint kept as its fee\.$/, key: "errors.cashu.backInWalletLessFee", params: ({ reason, fee }, t) => ({ reason: errorText(reason, t), fee }) },
   { match: /^(?<reason>[\s\S]+?) The sats are back in your wallet\.$/, key: "errors.cashu.backInWallet", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
-  exact("The Lightning payment did not go through.", "errors.cashu.lightningFailed"),
+  // With its period on its own (wallet.ts), without it as a chat request's line (payments.ts).
+  { match: /^The Lightning payment did not go through\.?$/, key: "errors.cashu.lightningFailed" },
 
   // Payments in a chat (packages/browser/src/engine/payments.ts, paymentAdapters/walletInstances.ts).
   exact("Cashu is off in this chat", "errors.pay.cashuOff"),
   { match: /^Both peers need (?<rail>USDT support|the Ark payment capability|Bark|Fedimint|Spark|on-chain Bitcoin) on a connected data link$/, key: "errors.pay.bothNeed", params: ({ rail }, t) => ({ rail: railName(rail, t) }) },
   { match: new RegExp(`^Join a federation first \\(Wallet → New → ${NETWORK} Fedimint\\)$`), key: "errors.pay.joinFederation" },
   { match: new RegExp(`^You have no ${NETWORK} (?<method>.+) wallet: create one in Wallet → New$`), key: "errors.pay.youHaveNone", params: ({ network, method }, t) => ({ network, method: railName(method, t) }) },
+  // A payment of a network this profile has no wallet of, as node.ts names it: said as the line above.
+  { match: new RegExp(`^This is a ${NETWORK} payment, and you have no (?:Mainnet|Testnet) (?<method>.+) wallet: create one in Wallet → New$`), key: "errors.pay.youHaveNone", params: ({ network, method }, t) => ({ network, method: railName(method, t) }) },
   { match: new RegExp(`^Your contact has no ${NETWORK} (?<method>.+) wallet$`), key: "errors.pay.contactHasNone", params: ({ network, method }, t) => ({ network, method: railName(method, t) }) },
   { match: new RegExp(`^${NETWORK} (?<method>.+) is off in this chat$`), key: "errors.pay.offHere", params: ({ network, method }, t) => ({ network, method: railName(method, t) }) },
   { match: /^(?<method>Cashu|Lightning) is not allowed by both of you here$/, key: "errors.pay.notBoth" },
@@ -104,6 +118,12 @@ const RULES: readonly Rule[] = [
   exact("This request is no longer open", "errors.pay.requestClosed"),
   exact("A Lightning payment for this request is still pending", "errors.pay.lightningPending"),
   exact("You already paid this request", "errors.pay.alreadyPaid"),
+  exact("Already paid by another member of the group", "errors.pay.paidByOther"),
+  exact("The payment was refused", "errors.pay.refused"),
+  // A refused send whose ecash came back (payments.ts refusedLine): why, and what came back, less the mint's fee.
+  { match: /^Refused: (?<reason>[\s\S]+?)\. (?<amount>\d+) sats? came back; the mint kept (?<fee>\d+) as its fee\.$/, key: "errors.pay.refusedLessFee", params: ({ reason, amount, fee }, t) => ({ reason: errorText(reason, t).replace(/\.$/, ""), amount: formatAmount(Number(amount), t.language ?? "en"), fee: formatAmount(Number(fee), t.language ?? "en") }) },
+  { match: /^Refused: (?<reason>[\s\S]+?)\. All (?<amount>\d+) sats? came back\.$/, key: "errors.pay.refusedAllBack", params: ({ reason, amount }, t) => ({ reason: errorText(reason, t).replace(/\.$/, ""), amount: formatAmount(Number(amount), t.language ?? "en") }) },
+  { match: /^Refused: (?<reason>[\s\S]+?)\. The sats came back\.$/, key: "errors.pay.refusedBack", params: ({ reason }, t) => ({ reason: errorText(reason, t).replace(/\.$/, "") }) },
   exact("This request cannot be paid over Lightning in this chat", "errors.pay.noLightningHere"),
   exact("No way of paying this request is allowed in this chat", "errors.pay.noWayHere"),
   exact("The invoice does not match the requested amount", "errors.pay.invoiceMismatch"),
@@ -117,7 +137,87 @@ const RULES: readonly Rule[] = [
   exact("This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", "errors.pay.wrongNetworkMainnet"),
   exact("This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", "errors.pay.wrongNetworkTestnet"),
   { match: /^This pays with real money: confirm it with Send real money first\. Nothing was sent\.$/, key: "errors.pay.confirmRealFirst", params: (_, t) => ({ button: t("payments.confirmReal.send") }) },
-  { match: /^Could not create the (?<label>.+?) wallet: (?<reason>[\s\S]+)\. Nothing was saved; try again\.$/, key: "errors.pay.createFailed", params: ({ label, reason }, t) => ({ label: railName(label, t), reason: errorText(reason, t).replace(/\.$/, "") }) },
+  { match: /^Could not create the (?<label>.+?) wallet: (?<reason>[\s\S]+)\. Nothing was saved; try again\.$/, key: "errors.pay.createFailed", params: ({ label, reason }, t) => ({ label: railName(label, t), reason: nestedError(reason, t).replace(/\.$/, "") }) },
+
+  // What a Lightning source, another rail or a Lightning address answered when a payment failed (paymentAdapters/**, core/lnurl.ts), and what a chat payment was refused or closed with.
+  exact("No route to the recipient within the fee limit", "errors.lightning.noRoute"),
+  exact("Not enough outbound liquidity in the node's channels", "errors.lightning.noLiquidity"),
+  exact("The node gave up finding a route", "errors.lightning.gaveUp"),
+  exact("The recipient refused the payment (unknown or already paid invoice)", "errors.lightning.recipientRefused"),
+  exact("The payment failed", "errors.lightning.failed"),
+  { match: /^The payment failed: (?<reason>[\s\S]+)$/, key: "errors.lightning.failedBecause", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  exact("The payment was canceled", "errors.lightning.canceled"),
+  exact("The node did not answer in time", "errors.lightning.nodeTimedOut"),
+  exact("The payment did not go through", "errors.lightning.didNotGoThrough"),
+  exact("No answer from the source. It is being checked; nothing is paid again.", "errors.lightning.noAnswerChecking"),
+  exact("No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again.", "errors.lightning.noAnswerUnaskable"),
+  exact("Interrupted. It is being checked; nothing is paid again.", "errors.lightning.interrupted"),
+  exact("This invoice is already paid", "errors.lightning.alreadyPaid"),
+  { match: /^That invoice is for (?<network>\S+), a test network: pay it from a Testnet wallet$/, key: "errors.lightning.testInvoiceOnMainnet" },
+  exact("This is a Bitcoin invoice (real money): test sats pay one only through the public test mint. Nothing was sent.", "errors.lightning.realInvoiceOnTestnet"),
+  exact("This quote is no longer valid: check the invoice again", "errors.lightning.quoteGone"),
+  exact("The Lightning source changed: check the invoice again", "errors.lightning.sourceChanged"),
+  exact("That is not a Lightning invoice", "errors.lightning.notInvoice"),
+  exact("Invoices without an amount are not supported", "errors.lightning.noAmount"),
+  { match: /^The wallet refused the payment: (?<reason>[\s\S]+)$/, key: "errors.lightning.walletRefused", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^The payment did not reach the wallet: (?<reason>[\s\S]+)$/, key: "errors.lightning.notReached", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^The wallet said the payment failed \((?<reason>[\s\S]+)\), and cannot confirm it yet$/, key: "errors.lightning.failedUnconfirmed", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  exact("Could not reach the wallet's relay", "errors.lightning.relayUnreachable"),
+  exact("The wallet's relay did not answer", "errors.lightning.relaySilent"),
+  exact("The wallet's relay closed the connection", "errors.lightning.relayClosed"),
+  { match: /^The browser wallet did not pay: (?<reason>[\s\S]+)$/, key: "errors.lightning.browserDidNotPay", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^Not enough in the browser wallet \((?<amount>\d+) sats\)$/, key: "errors.lightning.browserNotEnough", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
+  { match: /^The Lightning fee \((?<fee>\d+) sats\) is above your limit \((?<max>\d+)\)$/, key: "errors.lightning.feeAboveLimit", params: ({ fee, max }, t) => ({ fee: sats(fee, t), max: sats(max, t) }) },
+  { match: /^Not enough sats in the Breez wallet \((?<have>\d+); (?<need>\d+) needed\)$/, key: "errors.lightning.breezNotEnough", params: ({ have, need }, t) => ({ have: sats(have, t), need: sats(need, t) }) },
+  exact("This federation has no Lightning gateway online", "errors.lightning.noGateway"),
+  { match: /^The gateway's fee \((?<fee>\d+) sats\) is above your maximum$/, key: "errors.lightning.gatewayFee", params: ({ fee }, t) => ({ fee: sats(fee, t) }) },
+  { match: /^Not enough in this federation \((?<have>[\d.,\s\u00a0\u202f]+) sats; (?<need>[\d.,\s\u00a0\u202f]+) needed\)$/, key: "errors.lightning.federationNotEnough", params: ({ have, need }, t) => ({ have: sats(have, t), need: sats(need, t) }) },
+  { match: /^Insufficient (?<rail>Ark|Bark|Spark) balance$/, key: "errors.rails.notEnough" },
+  exact("Could not prepare this Ark payment. Check funds, address and provider.", "errors.rails.arkPrepare"),
+  { match: /^The (?<rail>Bark|Spark) fee exceeds your limit$/, key: "errors.rails.feeAboveLimit" },
+  { match: /^(?<rail>Bark|Spark) payment outcome unknown$/, key: "errors.rails.outcomeUnknown" },
+  { match: /^The (?<rail>Bark|Spark) fee changed\. Create a new review$/, key: "errors.rails.feeChanged" },
+  { match: /^(?<rail>Bark|Spark) balance changed\. Create a new review$/, key: "errors.rails.balanceChanged" },
+  exact("The Bark server did not take this payment. Nothing was sent.", "errors.rails.barkNotTaken"),
+  exact("Spark did not take this payment. Nothing was sent.", "errors.rails.sparkNotTaken"),
+  exact("The Spark invoice has expired", "errors.rails.sparkInvoiceExpired"),
+  exact("USDT RPC rejected the operation", "errors.rails.usdtRejected"),
+  exact("Token or gas balance changed. Create a new review", "errors.rails.usdtBalanceChanged"),
+  exact("Account nonce changed. Create a new review", "errors.rails.usdtNonceChanged"),
+  { match: /^Not enough confirmed sats: (?<available>\d+) available, (?<needed>\d+) needed with the fee$/, key: "errors.rails.bitcoinNotEnough", params: ({ available, needed }, t) => ({ available: sats(available, t), needed: sats(needed, t) }) },
+  { match: /^The fee \((?<fee>\d+) sats\) is above your limit of (?<max>\d+)$/, key: "errors.rails.bitcoinFeeAboveLimit", params: ({ fee, max }, t) => ({ fee: sats(fee, t), max: sats(max, t) }) },
+  { match: /^The node refused the transaction: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeRefusedTx" },
+  exact("Your node cannot estimate a fee yet. Nothing was sent.", "errors.rails.noFeeEstimate"),
+  { match: /^Your node did not send it: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeDidNotSend" },
+  exact("Another transaction spent these coins: this payment can never confirm", "errors.rails.conflicted"),
+  exact("The Bitcoin source that prepared this payment is not connected. Nothing was sent.", "errors.rails.sourceGone"),
+  exact("This payment was never approved: nothing was sent", "errors.rails.neverApproved"),
+  { match: /^Not enough in this federation: (?<have>[\d.,\s\u00a0\u202f]+) sats$/, key: "errors.rails.federationHas", params: ({ have }, t) => ({ have: sats(have, t) }) },
+  exact("Not enough in this federation any more", "errors.rails.federationNotEnoughNow"),
+  exact("Taken back: the sats are in your wallet again", "errors.rails.takenBack"),
+  exact("Nothing was spent", "errors.rails.nothingSpent"),
+  exact("Interrupted before it reached your contact: the sats came back", "errors.rails.interruptedBack"),
+  exact("Canceled before it was funded", "errors.rails.canceledUnfunded"),
+  exact("Only whole amounts in sats are supported", "errors.pay.wholeSats"),
+  exact("Unknown payment", "errors.pay.unknownPayment"),
+  exact("The mint did not confirm the ecash", "errors.pay.mintDidNotConfirm"),
+  exact("your contact closed it", "errors.pay.contactClosed"),
+  exact("your contact removed the wallet it was paid to", "errors.pay.contactRemovedWallet"),
+  exact("Fedimint is off in this chat", "errors.pay.fedimintOff"),
+  exact("This app has no Fedimint wallet", "errors.pay.noFedimint"),
+  exact("Unsupported amount", "errors.pay.unsupportedAmount"),
+  exact("These notes are from a federation I have not joined", "errors.pay.notesUnknownFederation"),
+  exact("These notes are worth less than a sat", "errors.pay.notesTooSmall"),
+  exact("These notes were already redeemed", "errors.pay.notesRedeemed"),
+  exact("The server took too long to answer", "errors.lnurl.tooSlow"),
+  exact("No way to reach the network here", "errors.lnurl.noNetwork"),
+  { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) refused: (?<reason>[\s\S]+)$/, key: "errors.lnurl.refused" },
+  { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) answered HTTP (?<status>\d+)$/, key: "errors.lnurl.http" },
+  { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) did not answer with JSON$/, key: "errors.lnurl.noJson" },
+  { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) did not answer with JSON \(HTTP (?<status>\d+)\)$/, key: "errors.lnurl.noJsonStatus" },
+  { match: /^(?<domain>\S+) did not answer with a pay request$/, key: "errors.lnurl.noPayRequest" },
+  { match: /^(?<domain>\S+) did not answer with an invoice$/, key: "errors.lnurl.noInvoice" },
+  exact("The invoice the service answered with has already expired", "errors.lnurl.invoiceExpired"),
 
   // Groups (packages/core/src/groupSession.ts and groupCommunity.ts, packages/browser/src/engine/groups.ts and
   // community.ts): why a group stopped (its notice, the line under its name, its row in the list), what a send or an
@@ -164,6 +264,40 @@ const RULES: readonly Rule[] = [
   exact("Share the group's link with them: anyone who opens it joins", "errors.group.shareLinkInstead"),
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
+
+  // Making a wallet, connecting its source and reading it (engine/node.ts, paymentAdapters/**): why a kind could not be made or offered, and what a card says while it connects.
+  { match: /^(?:You already have a|There is already a) (?<network>Mainnet|Testnet) (?<kind>Cashu|Lightning|Ark|Bark|Spark|Bitcoin|Fedimint|USDT) wallet$/, key: "errors.wallet.alreadyHave" },
+  { match: /^The (?<label>.+?) wallet did not come up\. Nothing was lost: try again\.$/, key: "errors.wallet.didNotComeUp" },
+  exact("It did not answer in time", "errors.wallet.didNotAnswer"),
+  exact("No mint answered", "errors.wallet.noMintAnswered"),
+  exact("Paste the federation's invite code (fed11…)", "errors.wallet.pasteInvite"),
+  { match: /^Choose a (?<kind>Lightning|Bitcoin) source that runs on (?<network>Mainnet|Testnet)$/, key: "errors.wallet.chooseSource" },
+  exact("This wallet cannot be made here", "errors.wallet.cannotBeMade"),
+  { match: /^No Lightning source runs on (?<network>Mainnet|Testnet) here yet$/, key: "errors.wallet.noLightningSource" },
+  { match: /^No on-chain wallet runs on (?<network>Mainnet|Testnet) here yet$/, key: "errors.wallet.noOnchain" },
+  exact("The Bark server is not answering", "errors.wallet.barkSilent"),
+  exact("Could not join the federation: its guardians did not answer, or the invite code is not valid", "errors.wallet.joinFederation"),
+  { match: /^That Ark provider runs on (?<actual>\S+), not (?<expected>\S+)$/, key: "errors.wallet.arkProviderNetwork" },
+  { match: /^That Bark server does not run on (?<network>\S+)$/, key: "errors.wallet.barkServerNetwork" },
+  { match: /^(?<chain>\S+) is a (?<network>Mainnet|Testnet) network: this is the (?<wallet>Mainnet|Testnet) (?<kind>Ark|Bark|Spark|USDT) wallet$/, key: "errors.wallet.wrongChain" },
+  { match: /^Could not connect to (?<label>[^:]+): (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotConnect", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^Could not read the balance: (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotReadBalance", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^(?<id>\S+) is not available in this version of Ghostly$/, key: "errors.wallet.notInThisVersion" },
+  { match: /^the Esplora server at (?<host>\S+) did not answer in (?<seconds>\d+) s$/, key: "errors.wallet.esploraSlow" },
+  { match: /^the Esplora server at (?<host>\S+) did not answer \((?<reason>[\s\S]+)\)$/, key: "errors.wallet.esploraSilent" },
+  { match: /^nothing answers at (?<host>\S+): the local Esplora server is not running$/, key: "errors.wallet.esploraLocal" },
+  { match: /^the Esplora server at (?<host>\S+) answered (?<status>\d+): it is down or busy$/, key: "errors.wallet.esploraBusy" },
+  { match: /^no public (?<network>\S+) Esplora server answered \((?<hosts>[^)]*)\): (?<reason>[\s\S]+)$/, key: "errors.wallet.esploraNonePublic", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^wrong network: the Esplora server at (?<host>\S+) is on (?<actual>.+), not (?<network>\S+)$/, key: "errors.wallet.esploraWrongNetwork" },
+  { match: /^Connecting to (?<what>Ark|Bark|Spark|Ethereum)…$/, key: "errors.wallet.connecting" },
+  { match: /^Connecting to (?<what>Ark|Bark|Spark|Ethereum)… (?<reason>[\s\S]+)$/, key: "errors.wallet.connectingBecause", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^Could not read the (?<parts>.+) from the Ark provider\. Last values may be stale\.$/, key: "errors.wallet.readFailedArk", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  { match: /^Could not read the (?<parts>.+) from the Bark server\. Last values may be stale\.$/, key: "errors.wallet.readFailedBark", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  { match: /^Could not read the (?<parts>.+) from Spark\. Last values may be stale\.$/, key: "errors.wallet.readFailedSpark", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  exact("RPC unavailable. Balance may be stale.", "errors.wallet.rpcStale"),
+  exact("Rate limited: the faucet is busy. Try again in a minute.", "errors.wallet.faucetBusy"),
+  { match: /^The faucet did not answer: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetSilent", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^The faucet did not pay: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetDidNotPay", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
 
   // Profiles, backups and pictures (apps/ui/src/lib).
   exact("Give the profile a name", "errors.profile.giveName"),
@@ -276,6 +410,18 @@ export function errorText(cause: unknown, t: Translate = english): string {
     return t(key, Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value])));
   }
   return raw;
+}
+
+/**
+ * A reason nested in another message, said in `t`'s language when known. The message around it may have taken the
+ * reason's final period (createFailure: "Could not create the … wallet: <reason>. Nothing was saved"), so a reason
+ * known only with its period ("Could not reach x. Check the address: it should be a Cashu mint.") is found too.
+ */
+export function nestedError(reason: string, t: Translate = english): string {
+  const said = errorText(reason, t);
+  if (said !== reason || reason.endsWith(".")) return said;
+  const dotted = errorText(`${reason}.`, t);
+  return dotted !== `${reason}.` ? dotted : said;
 }
 
 /** Every rule's pattern, for the test that each still matches what its source throws. */

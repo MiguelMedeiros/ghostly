@@ -117,7 +117,10 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   const view = useHandoffView();
   const [asking, setAsking] = useState(false);
   const device = gate.activeDevice ?? t("devices.join.otherDevice");
-  const running = !!view && view.step !== "failed" && view.step !== "offer";
+  // Released, and the other device's word that it took the profile not heard yet: Use here stays (WISP 06 § What a standby
+  // shows), and reads the turn first. That word can be lost, and this screen would otherwise wait for it for good.
+  const released = view?.role === "giver" && view.step === "switching";
+  const running = !!view && view.step !== "failed" && view.step !== "offer" && !released;
   if (!view && gate.state === "releasing") return null;
   // Not while the new device list waits for an answer: "If this list looks wrong, do not use this device". A replaced
   // device takes the profile back the same way (WISP 06 § User experience): what only it holds stays, in Data and storage.

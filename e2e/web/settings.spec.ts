@@ -47,12 +47,13 @@ test("the language changes the interface", { tag: ["@feature:app.i18n"] }, async
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   await choose(page.getByTestId("settings-language"), "pt");
-  await expect(page.getByTitle("Nova Conversa")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Configurações" })).toBeVisible();
+  await expect(page.getByTitle("Nova conversa", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ajustes" })).toBeVisible();
   await page.reload();
-  await expect(page.getByTitle("Nova Conversa")).toBeVisible();
+  await expect(page.getByTitle("Nova conversa")).toBeVisible();
   await choose(page.getByTestId("settings-language"), "en");
-  await expect(page.getByTitle("New Chat")).toBeVisible();
+  // Sentence case, as every label (Settings is "Ajustes" in Portuguese, on every bar).
+  await expect(page.getByTitle("New chat", { exact: true })).toBeVisible();
 });
 
 test("<html lang> and <html dir> follow the language, from the first paint", { tag: ["@feature:app.i18n"] }, async ({ peer }) => {
@@ -210,7 +211,7 @@ test("on a phone: a menu of sections, each on its own screen, and Back to the me
   await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByRole("heading", { level: 1, name: "Aparência" })).toBeVisible();
   await page.getByTestId("page-back").click();
-  await expect(page.getByRole("heading", { level: 1, name: "Configurações" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Ajustes" })).toBeVisible();
 
   // An address from before the sections opens its new place, with Back to the menu, after a reload too.
   await page.goto("/#/settings/advanced");
@@ -220,4 +221,71 @@ test("on a phone: a menu of sections, each on its own screen, and Back to the me
   await expect(page.getByTestId("network-relays")).toBeVisible();
   await page.getByTestId("page-back").click();
   await expect(page.getByTestId("settings-menu")).toBeVisible();
+});
+
+test("on a wide screen: the index marks the section picked or named, the last ones too", { tag: ["@feature:settings.sections"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  const marked = page.locator("[data-testid^=settings-index-][aria-current=true]");
+  await page.goto("/#/settings");
+  // About and Data & storage end the page: it cannot scroll them to its top, and the index still marks them.
+  for (const section of ["about", "storage", "network", "about"]) {
+    await page.getByTestId(`settings-index-${section}`).click();
+    await expect(page).toHaveURL(new RegExp(`#/settings/${section}$`));
+    await expect(marked).toHaveAttribute("data-testid", `settings-index-${section}`);
+  }
+  // An address that names the last section, after a reload.
+  await page.reload();
+  await expect(page.getByTestId("settings-about-version")).toBeInViewport();
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-about");
+  // Scrolled by hand to the top and back to the end: the first section, then the last.
+  await page.getByTestId("settings-about-version").hover();
+  await page.mouse.wheel(0, -100_000);
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-profile");
+  await page.mouse.wheel(0, 100_000);
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-about");
+  // Picked Network, then scrolled up by hand while it is still in view: the section now at the top is marked.
+  await page.getByTestId("settings-index-network").click();
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-network");
+  // Once the page has scrolled there (smoothly) and stopped: Network's top under the header. Coming up from About,
+  // Network is above the page (y < 0) until the scroll ends; a wheel turned while the smooth scroll still ran left
+  // the page far above it (r9j: 1 run in 3).
+  await expect.poll(async () => {
+    const y = (await page.locator("#settings-section-network").boundingBox())?.y ?? -1;
+    return y >= 0 && y < 120;
+  }).toBe(true);
+  await page.locator("[data-page-body]").evaluate((body) => new Promise<void>((done) => {
+    let last = -1, still = 0;
+    const tick = () => { still = body.scrollTop === last ? still + 1 : 0; last = body.scrollTop; if (still >= 5) done(); else requestAnimationFrame(tick); };
+    tick();
+  }));
+  await page.getByTestId("network-relays").hover();
+  await page.mouse.wheel(0, -400);
+  await expect(page.getByTestId("network-relays")).toBeInViewport();
+  await expect(marked).not.toHaveAttribute("data-testid", "settings-index-network");
+});
+
+for (const screen of [{ name: "a tablet held upright", width: 820, height: 1180, mobile: true }, { name: "a phone on its side", width: 874, height: 402, mobile: true }, { name: "a narrow window", width: 1024, height: 768, mobile: false }]) {
+  test(`${screen.name}: the search is there with no room for the index beside the page`, { tag: ["@feature:settings.sections", "@feature:app.responsive"] }, async ({ peer }) => {
+    // From 768px Settings is one page, and its index (with the search) waits for room beside it: in between there was
+    // neither the phone's menu search nor the index's.
+    const { page } = await peer("alice", { mobile: screen.mobile, viewport: { width: screen.width, height: screen.height } });
+    await page.goto("/#/settings");
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+    await expect(page.getByTestId("settings-index")).toBeHidden();
+    const search = page.getByTestId("settings-page-search-field");
+    await expect(search).toBeVisible();
+    await search.fill("chat list");
+    await page.getByTestId("settings-search-result").click();
+    await expect(page).toHaveURL(/#\/settings\/appearance$/);
+    await expect(page.getByTestId("chat-list-density")).toBeInViewport();
+    await expect(search).toHaveValue("");
+    await expect(page.getByTestId("settings-search-result")).toHaveCount(0);
+  });
+}
+
+test("a wide window: the index's search beside the page, no second one above it", { tag: ["@feature:settings.sections"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  await page.goto("/#/settings");
+  await expect(page.getByTestId("settings-index-search")).toBeVisible();
+  await expect(page.getByTestId("settings-page-search-field")).toBeHidden();
 });

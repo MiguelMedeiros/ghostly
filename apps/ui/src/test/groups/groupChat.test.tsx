@@ -401,6 +401,20 @@ describe("GroupChat: history and sending", () => {
     expect(screen.queryByText("~Member goneyyyy")).not.toBeInTheDocument();
   });
 
+  it("in a community, names a member who left by the name it was heard under, on their messages and their join line", async () => {
+    // Bug hunt r9c: after Caio left, his messages read "~Member xxxx", and his join line, written before his name came,
+    // read "Member d19xxqgr joined" right above "Caio is no longer a member".
+    const gone = "gone".padEnd(52, "y");
+    openGroup(active({ profile: "community", formerNames: { [gone]: "Caio" } }), [
+      stored({ id: "e1", event: "joined", member: gone, text: "Member goneyyyy joined" }),
+      stored({ id: "m1", member: gone, text: "caio was here" }),
+      stored({ id: "e2", event: "gone", member: gone, text: "Caio is no longer a member" }),
+    ]);
+    expect(await screen.findByText("~Caio")).toBeInTheDocument();
+    expect(screen.getByText("Caio joined")).toBeInTheDocument();
+    expect(screen.queryByText(/Member goneyyyy/)).not.toBeInTheDocument();
+  });
+
   it("keeps what was stored for an event about someone no longer there", async () => {
     openGroup(active(), [stored({ id: "e1", event: "removed", member: "gone".padEnd(52, "y"), text: "Carol was removed" })]);
     expect(await screen.findByText("Carol was removed")).toBeInTheDocument();

@@ -9,6 +9,8 @@ import {
 } from "react";
 import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
+import { activeProfileId } from "../lib/profiles";
+import { takeUnlockHandover } from "../lib/lockHandover";
 
 interface LockScreenContextValue {
   isLocked: boolean;
@@ -19,6 +21,31 @@ interface LockScreenContextValue {
   lock: () => void;
   unlock: (password: string) => Promise<boolean>;
   resetTimer: () => void;
+  /** Calls ringing now, oldest first: while locked, the lock screen shows the first one (WISP 601 § Locked). */
+  ringing: readonly LockedCall[];
+  /** A chat says its call rings; the function it returns says it stopped. */
+  offerCall: (call: LockedCall) => () => void;
+}
+
+/**
+ * A call ringing in a chat, as the lock screen may show it: who calls, as the chat shows them (the contact face rules),
+ * and the two things it can do. Nothing else of the chat.
+ */
+export interface LockedCall {
+  /** The chat's session id. */
+  id: string;
+  name: string;
+  /** False when the contact has no name: the picture is then a pattern of their key, as in the chat. */
+  named: boolean;
+  peerPubKey?: string;
+  /** The picture of the identity the contact is shown as, when there is one. */
+  photo?: string;
+  hasVideo: boolean;
+  /** Ends the other call first when one is on ("End and answer"). */
+  onCall: boolean;
+  /** Answers as the call came: with the camera for a video call. */
+  answer: () => void;
+  decline: () => void;
 }
 
 const LockScreenContext = createContext<LockScreenContextValue | null>(null);
@@ -55,13 +82,19 @@ function saveAttempts(attempts: Attempts | null): void {
 export function LockScreenProvider({ children }: { children: ReactNode }) {
   const { settings, updateLockScreen } = useSettings();
   const lockActive = settings.lockScreen.enabled && !!settings.lockScreen.passwordHash;
-  // Locked from the first render: a reload must not skip the password.
-  const [isLocked, setIsLocked] = useState(lockActive);
-  const [hasUnlocked, setHasUnlocked] = useState(!lockActive);
+  // Locked from the first render: a reload must not skip the password, unless the app handed the lock it passed across.
+  const [handed] = useState(() => lockActive && takeUnlockHandover(activeProfileId(), settings.lockScreen.passwordHash));
+  const [isLocked, setIsLocked] = useState(lockActive && !handed);
+  const [hasUnlocked, setHasUnlocked] = useState(!lockActive || handed);
   const [retryAt, setRetryAt] = useState<number | null>(() => {
     const { retryAt } = loadAttempts();
     return retryAt > Date.now() ? retryAt : null;
   });
+  const [ringing, setRinging] = useState<readonly LockedCall[]>([]);
+  const offerCall = useCallback((call: LockedCall) => {
+    setRinging((current) => [...current.filter((c) => c.id !== call.id), call]);
+    return () => setRinging((current) => current.filter((c) => c !== call));
+  }, []);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
 
@@ -166,7 +199,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   ]);
 
   return (
-    <LockScreenContext.Provider value={{ isLocked, hasUnlocked, retryAt, lock, unlock, resetTimer }}>
+    <LockScreenContext.Provider value={{ isLocked, hasUnlocked, retryAt, lock, unlock, resetTimer, ringing, offerCall }}>
       {children}
     </LockScreenContext.Provider>
   );
@@ -183,4 +216,21 @@ export function useLockScreen(): LockScreenContextValue {
 /** Whether the lock screen is up; false where there is none (a part rendered on its own). */
 export function useIsLocked(): boolean {
   return useContext(LockScreenContext)?.isLocked ?? false;
+}
+
+/**
+ * Tells the lock screen that this chat's call rings (`call`), or that it no longer does (null). Registered again only
+ * when what the screen shows changes; `answer` and `decline` are read when pressed, so a call that ended meanwhile does
+ * nothing.
+ */
+export function useRingOnLockScreen(call: LockedCall | null): void {
+  const offerCall = useContext(LockScreenContext)?.offerCall;
+  const latest = useRef(call);
+  latest.current = call;
+  const key = call ? JSON.stringify([call.id, call.name, call.named, call.peerPubKey, call.photo, call.hasVideo, call.onCall]) : null;
+  useEffect(() => {
+    const shown = latest.current;
+    if (!offerCall || !key || !shown) return;
+    return offerCall({ ...shown, answer: () => latest.current?.answer(), decline: () => latest.current?.decline() });
+  }, [offerCall, key]);
 }

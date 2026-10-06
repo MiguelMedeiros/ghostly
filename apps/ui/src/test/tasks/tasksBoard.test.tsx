@@ -399,6 +399,21 @@ describe("the Tasks board on a phone", () => {
     await user.keyboard("{Home}");
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
+
+  it("a swipe to another column chooses its tab, on a page opened before its cards were read", async () => {
+    // The page draws the board only once the cards are read, after its first render: the swipe is heard on the board
+    // it draws then (tasks-board.spec.ts, 3 runs in 10 on a Mac: the tab stayed on Running with Done on screen).
+    viewport(375, 740);
+    profile(rowsOfThree());
+    await loaded();
+    const board = screen.getByTestId("tasks-board");
+    Object.defineProperty(board, "clientWidth", { configurable: true, value: 375 });
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    act(() => { board.scrollLeft = 375 * 3; board.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(tabs[3]).toHaveAttribute("aria-selected", "true"));
+    act(() => { board.scrollLeft = 375; board.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(tabs[1]).toHaveAttribute("aria-selected", "true"));
+  });
 });
 
 describe("the way to the board, above the chat list", () => {

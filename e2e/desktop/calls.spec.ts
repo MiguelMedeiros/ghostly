@@ -88,7 +88,7 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
       expect(await p.app.execute<boolean>(`return typeof RTCPeerConnection !== "undefined";`), `${p.name} has no WebRTC`).toBe(false);
     }
 
-    await a.press("New Chat");
+    await a.press("New chat");
     await b.join(await a.copyInvite());
     for (const p of [a, b]) {
       await expect.poll(() => p.canWrite(), { timeout: 120_000, message: `${p.name}'s chat is open` }).toBe(true);

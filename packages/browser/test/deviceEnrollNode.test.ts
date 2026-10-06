@@ -109,3 +109,19 @@ describe("joining a profile in place of the one this device runs", () => {
     await expect(n.deviceEnrollJoin({ code: "ghostly1zx", name: "Phone" })).rejects.toThrow(/^enroll-(typo|not-ghostly|damaged):/);
   });
 });
+
+describe("asked before the person presses Add", () => {
+  it("says ready, in use or loading as the join would decide", async () => {
+    const { node: n, inner } = node();
+    inner.walletsStarted = false;
+    expect(await n.deviceEnrollReady()).toBe("loading");
+    inner.walletsStarted = true;
+    inner.walletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
+    expect(await n.deviceEnrollReady()).toBe("ready");
+    inner.walletView = { mints: [], balance: 5, history: [], feesPaid: 0 };
+    expect(await n.deviceEnrollReady()).toBe("in-use");
+    inner.walletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
+    vi.spyOn((inner.groups as { views(): unknown[] }), "views").mockReturnValue([{ id: "g" }]);
+    expect(await n.deviceEnrollReady()).toBe("in-use");
+  });
+});

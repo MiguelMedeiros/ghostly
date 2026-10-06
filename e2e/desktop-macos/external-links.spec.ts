@@ -20,7 +20,8 @@ import { LocalRelay } from "../support/relay";
  * shows it: it appears only for an update this install cannot apply, which on Desktop is a Linux `.deb` or `.rpm`.
  *
  * With the app paired, the same test checks the Dock icon's badge: a message that comes while Settings is open puts
- * "1" on it, the count the web app's icon would show, and opening the chat clears it. The driver reads the label
+ * "1" on it, the count the web app's icon would show, and opening the chat clears it; so does one that comes while the
+ * window is closed with the chat open, until the window shows again. The driver reads the label
  * AppKit holds for the icon (the copy under test stays out of the Dock, so nobody sees it there).
  *
  *   npm run desktop:macos:build
@@ -99,6 +100,19 @@ test("a link in a message and one in Settings open in the system browser", {
       await bot.run("send", botChat, "Unread on the Dock", "--wait", "delivered");
       await expect.poll(async () => (await app.windowState()).badge, { timeout: 30_000 }).toBe("1");
       await alice!.go(chatHash);
+      await expect.poll(async () => (await app.windowState()).badge, { timeout: 30_000 }).toBeNull();
+    });
+
+    await test.step("a message that comes while the window is closed with the chat open puts 1 on the Dock icon; showing it clears it", async () => {
+      // The chat open in a hidden window has not been read (hooks/usePageShown.ts): it was read at once, so no badge.
+      await app.close();
+      await expect.poll(async () => (await app.windowState()).visible).toBe(false);
+      await bot.run("send", botChat, "Unread behind the Dock", "--wait", "delivered");
+      await expect.poll(async () => (await app.windowState()).badge, { timeout: 30_000 }).toBe("1");
+      // And it stays: the open chat used to mark it read a moment after it came, which took the "1" off again.
+      await new Promise((done) => setTimeout(done, 6_000));
+      expect((await app.windowState()).badge).toBe("1");
+      await app.reopen();
       await expect.poll(async () => (await app.windowState()).badge, { timeout: 30_000 }).toBeNull();
     });
   } catch (error) {

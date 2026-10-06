@@ -131,6 +131,28 @@ describe("a refused lock password in Settings", () => {
   }, 30_000);
 });
 
+describe("opening the lock password form", () => {
+  it("turning the lock on puts the focus in New password, ready to type", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    expect(screen.getByTestId("settings-password-form")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-password-new")).toHaveFocus();
+    await user.keyboard("spooky");
+    expect(screen.getByTestId("settings-password-new")).toHaveValue("spooky");
+  });
+
+  it("Change password puts the focus in Current password, again when it is closed and opened", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    expect(screen.getByTestId("settings-password-current")).toHaveFocus();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    expect(screen.getByTestId("settings-password-current")).toHaveFocus();
+  });
+});
+
 describe("a refused lock password in Add a device", () => {
   it("a wrong password: under the field and in a card inside the dialog, and nothing starts", async () => {
     await lockWith("a long password");
@@ -184,5 +206,19 @@ describe("the floating card", () => {
     expect(screen.getByTestId("toast")).toBeInTheDocument();
     await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
     expect(screen.queryByTestId("toast")).toBeNull();
+  });
+});
+
+describe("the lock password's fields and password managers", () => {
+  it("New and Confirm are not marked new-password, so Safari does not offer a generated one; Current still reads a saved one", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    expect(screen.getByTestId("settings-password-current")).toHaveAttribute("autocomplete", "current-password");
+    for (const which of ["new", "confirm"]) {
+      const field = screen.getByTestId(`settings-password-${which}`);
+      expect(field).toHaveAttribute("type", "password");
+      expect(field).toHaveAttribute("autocomplete", "off");
+    }
   });
 });

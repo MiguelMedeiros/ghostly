@@ -116,8 +116,12 @@ export const CONNECT_MS = 600;
  * ICE does once every check went unanswered; unset, it waits for its attempt timeout.
  * `noCandidates`: the apps (by `owner`) whose connections gather no candidate at all, as a browser's under
  * `disable_non_proxied_udp` (a VPN's extension, a network with no UDP).
+ * `srflxAfterMs`: an offer's server reflexive candidate (its STUN server's answer) comes this long after its host one,
+ * and its gathering completes then; `Infinity`: never (STUN servers that never answer). Unset: at once.
+ * `needsSrflx`: the contact is behind a NAT that lets nothing through to an offer without one: such an offer, answered,
+ * goes `failed` 3 s later (ICE gives up).
  */
-export const rtc: { blocked: boolean; answerFailsAfterMs?: number; blockedFailsAfterMs?: number; noCandidates: Set<string> } = { blocked: false, noCandidates: new Set() };
+export const rtc: { blocked: boolean; answerFailsAfterMs?: number; blockedFailsAfterMs?: number; noCandidates: Set<string>; srflxAfterMs?: number; needsSrflx?: boolean } = { blocked: false, noCandidates: new Set() };
 
 class FakePeerConnection extends EventTarget {
   /** The app this connection belongs to, for `killRtc`. */
@@ -135,6 +139,18 @@ class FakePeerConnection extends EventTarget {
   private made(setup: string) { const made = sdp(setup, !rtc.noCandidates.has(this.owner ?? "")); byFingerprint.set(made.fingerprint, this); return made.sdp; }
   async setLocalDescription(description: RTCSessionDescriptionInit) {
     this.localDescription = description;
+    const srflxAfter = rtc.srflxAfterMs;
+    if (description.type === "offer" && srflxAfter !== undefined && !rtc.noCandidates.has(this.owner ?? "")) {
+      this.iceGatheringState = "gathering";
+      if (Number.isFinite(srflxAfter)) setTimeout(() => {
+        if (this.closed) return;
+        const line = "a=candidate:2 1 udp 1686052607 203.0.113.7 50001 typ srflx raddr 127.0.0.1 rport 50000";
+        this.localDescription = { ...description, sdp: `${description.sdp}${line}\r\n` };
+        this.dispatchEvent(Object.assign(new Event("icecandidate"), { candidate: { candidate: line } }));
+        this.iceGatheringState = "complete";
+        this.dispatchEvent(new Event("icegatheringstatechange"));
+      }, srflxAfter);
+    }
     const failAfter = rtc.answerFailsAfterMs;
     if (description.type === "answer" && failAfter !== undefined) setTimeout(() => {
       if (this.closed || this.connectionState === "connected") return;
@@ -148,6 +164,15 @@ class FakePeerConnection extends EventTarget {
     // The answer came back to the offer it answers: the two connect.
     const answerer = byFingerprint.get(fingerprintOf(description.sdp!));
     if (!answerer || answerer.closed || fingerprintOf(answerer.remoteDescription!.sdp!) !== fingerprintOf(this.localDescription!.sdp!)) return;
+    // The offer as the contact got it (a candidate that came after it went is not in it).
+    if (rtc.needsSrflx && !/ typ srflx/.test(answerer.remoteDescription?.sdp ?? "")) {
+      setTimeout(() => {
+        if (this.closed || this.connectionState === "connected") return;
+        this.connectionState = "failed";
+        this.dispatchEvent(new Event("connectionstatechange"));
+      }, 3_000);
+      return;
+    }
     if (rtc.blocked) {
       const failAfter = rtc.blockedFailsAfterMs;
       if (failAfter !== undefined) setTimeout(() => {
@@ -301,5 +326,7 @@ export async function closeWorld(): Promise<void> {
   rtc.answerFailsAfterMs = undefined;
   rtc.blockedFailsAfterMs = undefined;
   rtc.noCandidates.clear();
+  rtc.srflxAfterMs = undefined;
+  rtc.needsSrflx = undefined;
   vi.useRealTimers();
 }

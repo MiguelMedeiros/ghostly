@@ -13,6 +13,11 @@ export interface SwitchPlan {
   local: TransportPolicy;
   remote: TransportPolicy;
   choices: PairedTransport[];
+  /**
+   * Nobody chose: the session is on a relayed transport and a direct one ranks first, and both sides said they move
+   * (`upgrade`). Quiet: no transport shown as wanted, no row when it does not connect, and tried once.
+   */
+  upgrade?: boolean;
 }
 export const allowedTransports = (policy: TransportPolicy) => transportOrder(policy.available, policy.preferred, policy.fallback);
 
@@ -62,6 +67,8 @@ export class TransportSwitch {
      * `reason` is known on the side that dialled. Without this callback, the failure is an error state, as before.
      */
     unreached?(target: PairedTransport, reason?: string): void;
+    /** Both sides move a session off a relayed transport to a direct one ranked first, nobody having chose (`upgrade/1`). */
+    upgrade?(): boolean;
     timeoutMs?: number;
   }) {}
 
@@ -111,7 +118,10 @@ export class TransportSwitch {
   begin(context: string, actual: PairedTransport, migrated = false): void {
     const landed = migrated ? this.plan : null;
     this.settled = landed ? this.signature(landed.local, landed.remote) : "";
-    if (!migrated) this.failed = "";
+    // A fresh session may be the contact's app started again, which counts its revisions from 0: its policy is heard
+    // anew (it announces it on this session). One kept from the old session made every newer policy look older, and
+    // no change ever moved the chat after a contact's crash and resume (`attachReplacement` stops nothing here).
+    if (!migrated) { this.failed = ""; this.remote = null; }
     // A choice made while apart is a choice now: above the contact's last intent, as one made on a session would be.
     if (this.apart) { this.intent = Math.max(this.intent, this.lastRemote?.intent ?? 0) + 1; this.apart = false; }
     this.clearPlan();
@@ -149,7 +159,7 @@ export class TransportSwitch {
   keep(reason?: string): void {
     const target = this.plan?.choices[0];
     if (this.plan) this.settled = this.signature(this.plan.local, this.plan.remote);
-    if (target && target !== this.actual) this.options.kept?.(target, reason);
+    if (target && target !== this.actual && !this.plan?.upgrade) this.options.kept?.(target, reason);
     this.send({ t: "paired-switch-keep", id: this.plan?.id });
     this.clearPlan(); this.options.state(); this.reconcile();
   }
@@ -171,10 +181,12 @@ export class TransportSwitch {
     this.timer = null; this.plan = null; this.preparing = false;
   }
   fail(error: string): void {
-    const target = this.plan?.choices[0];
+    const target = this.plan?.choices[0], upgrade = !!this.plan?.upgrade;
     if (this.plan) this.failed = this.signature(this.plan.local, this.plan.remote);
     this.send({ t: "paired-switch-failed", id: this.plan?.id });
-    this.clearPlan(); this.options.cancel(); this.unreached(target, error, error);
+    this.clearPlan(); this.options.cancel();
+    // A move off a relay that did not connect: the chat stays where it is, as it would have without it.
+    if (upgrade) this.options.state(); else this.unreached(target, error, error);
     this.replanIfMoved();
   }
   /**
@@ -195,14 +207,33 @@ export class TransportSwitch {
     if (!ranked.length) return [];
     const winner = this.winner(local, remote);
     // Nobody chose: the current transport stays, a relayed one too (no probing while live, WISP 100); the next
-    // dial ranks direct paths first again.
-    const target = winner.intent === 0 && this.actual && ranked.includes(this.actual) ? this.actual
+    // dial ranks direct paths first again. Unless both sides move off a relay (`upgrade`): then a direct transport
+    // ranked first is where the chat goes, once (a plan that does not connect is not made again for these policies).
+    const upgrade = this.upgrading(winner, ranked, relayed);
+    const target = upgrade ? ranked[0] : winner.intent === 0 && this.actual && ranked.includes(this.actual) ? this.actual
       : ranked.includes(winner.preferred) ? winner.preferred : ranked[0];
     return [target, ...(local.fallback && remote.fallback ? ranked.filter(t => t !== target) : [])];
   }
+  /** Nobody chose, the session is on a relayed transport, a direct one ranks first, and both sides move (`upgrade/1`). */
+  private upgrading(winner: TransportPolicy, ranked: PairedTransport[], relayed: readonly string[]): boolean {
+    return winner.intent === 0 && !!this.actual && relayed.includes(this.actual) && ranked.includes(this.actual)
+      && ranked[0] !== this.actual && !relayed.includes(ranked[0]) && !!this.options.upgrade?.();
+  }
+  private isUpgrade(local: TransportPolicy, remote: TransportPolicy): boolean {
+    const relayed = relayedTransports(local.descriptors, remote.descriptors);
+    return this.upgrading(this.winner(local, remote), rankTransports(allowedTransports(local), allowedTransports(remote), relayed), relayed);
+  }
+  /**
+   * Something `upgrade` depends on changed (what the contact's app offers on this session, said once it is ready): plan
+   * again. The session's first agreement, made before that, settled on the relay it is on; a move off it is not that.
+   */
+  reconsider(): void {
+    if (this.context && this.remote && !this.plan && this.isUpgrade(this.local(), this.remote) && this.settled === this.signature(this.local(), this.remote)) this.settled = "";
+    this.reconcile();
+  }
   private install(plan: SwitchPlan): void {
     this.clearPlan(); this.plan = plan;
-    this.options.state(undefined, plan.choices[0]);
+    this.options.state(undefined, plan.upgrade ? undefined : plan.choices[0]);
     this.timer = setTimeout(() => this.fail("Transport change timed out. Your previous connection is kept when available; retry or choose another transport."), this.options.timeoutMs ?? 30_000);
   }
   private reconcile(): void {
@@ -224,15 +255,17 @@ export class TransportSwitch {
       this.settled = signature; this.clearPlan(); this.options.state(); return;
     }
     if (signature === this.failed) return;
-    this.options.state(undefined, choices[0]);
+    const upgrade = this.isUpgrade(local, remote);
+    this.options.state(undefined, upgrade ? undefined : choices[0]);
     if (this.options.key > this.options.peerKey) {
       if (!this.timer) this.timer = setTimeout(() => {
         this.failed = signature; this.clearPlan();
+        if (upgrade) { this.options.state(); return; }
         this.unreached(choices[0], "Your contact did not acknowledge the transport change. Retry when both peers are connected.", "Your contact did not answer");
       }, this.options.timeoutMs ?? 30_000);
       return;
     }
-    const plan = { id: `${signature}:${choices[0]}`, local, remote, choices };
+    const plan = { id: `${signature}:${choices[0]}`, local, remote, choices, ...(upgrade && { upgrade }) };
     this.install(plan);
     this.send({ t: "paired-switch-plan", id: plan.id, revisions: [local.revision, remote.revision], target: choices[0] });
   }
@@ -253,7 +286,7 @@ export class TransportSwitch {
       const local = this.local(), remote = this.remote, choices = this.choices(local, remote);
       if (!Array.isArray(frame.revisions) || frame.revisions[0] !== remote.revision || frame.revisions[1] !== local.revision ||
         choices[0] !== frame.target || frame.id !== `${this.signature(local, remote)}:${choices[0]}`) { this.announce(); return true; }
-      if (!this.plan || this.plan.id !== frame.id) this.install({ id: String(frame.id), local, remote, choices });
+      if (!this.plan || this.plan.id !== frame.id) this.install({ id: String(frame.id), local, remote, choices, ...(this.isUpgrade(local, remote) && { upgrade: true }) });
       // Permission is installed before the ACK; a native channel may arrive before
       // the subsequent GO frame on the old channel. Its fresh proof is still mandatory.
       this.options.prepare(this.plan!, false);
@@ -261,15 +294,16 @@ export class TransportSwitch {
     }
     if (!this.plan || frame.id !== this.plan.id) return true;
     if (frame.t === "paired-switch-failed") {
-      const target = this.plan.choices[0];
+      const target = this.plan.choices[0], upgrade = !!this.plan.upgrade;
       this.failed = this.signature(this.plan.local, this.plan.remote);
       this.clearPlan(); this.options.cancel();
-      this.unreached(target, "The transport change failed. Retry or choose another transport.");
+      if (upgrade) this.options.state();
+      else this.unreached(target, "The transport change failed. Retry or choose another transport.");
       this.replanIfMoved(); return true;
     }
     if (frame.t === "paired-switch-keep") {
       if (this.actual && this.plan.choices.includes(this.actual)) {
-        if (this.plan.choices[0] !== this.actual) this.options.kept?.(this.plan.choices[0]);
+        if (this.plan.choices[0] !== this.actual && !this.plan.upgrade) this.options.kept?.(this.plan.choices[0]);
         this.settled = this.signature(this.plan.local, this.plan.remote);
         this.clearPlan(); this.options.state(); this.reconcile();
       }

@@ -21,8 +21,8 @@
   },
   "dependencies": {
     "github-slugger": "^2.0.0",
-    "motion": "^13.4.4",
-    "next": "16.3.6",
+    "motion": "^13.5.0",
+    "next": "16.3.8",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-markdown": "^10.1.0",
@@ -31,17 +31,17 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.6",
+    "eslint-config-next": "16.3.8",
     "puppeteer": "^25.12.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "overrides": {
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "postcss": "8.5.24"
   }
 }

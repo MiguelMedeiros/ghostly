@@ -8,7 +8,7 @@ test("on a phone: tabs for chats, wallet, sharing and settings, and Profile thro
 
   await tabs.getByRole("button", { name: "Wallets" }).click();
   await expect(page).toHaveURL(/#\/wallet$/);
-  await expect(page.getByRole("heading", { name: "Wallet", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Wallets", exact: true })).toBeVisible();
   await expect(page.getByTestId("wallet")).toBeVisible();
 
   await tabs.getByRole("button", { name: "Services" }).click();
@@ -115,12 +115,48 @@ test("on a 320px phone every tab's name fits whole, in every language", { tag: [
   expect(cut).toEqual([]);
 });
 
+test("on a phone New and Join stay on the screen beside the logo, in every language", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // French at 375px: "Nouveau" and "Rejoindre" ran 5px off the screen, and against the logo; Spanish and Italian at 360px.
+  const { page } = await peer("header-words", { mobile: true, viewport: { width: 375, height: 812 } });
+  const bad: string[] = [];
+  for (const language of ["en", "pt", "es", "fr", "it", "ar", "ja", "zh"]) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    for (const width of [360, 375, 390, 430]) {
+      await page.setViewportSize({ width, height: 812 });
+      await page.reload();
+      await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+      await expect(page.getByTestId("sidebar-chat-actions")).toBeVisible();
+      const { logo, actions } = await page.evaluate(() => {
+        const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+        const { left, right } = box("[data-testid=app-brand]"), at = box("[data-testid=sidebar-chat-actions]");
+        return { logo: { left, right }, actions: { left: at.left, right: at.right } };
+      });
+      // The 16px padding on either side, and 8px at least between the logo and the buttons, whichever side each is on.
+      const [first, second] = logo.left < actions.left ? [logo, actions] : [actions, logo];
+      if (first.left < 16 - 1 || second.right > width - 16 + 1 || second.left - first.right < 8 - 1) bad.push(`${language} ${width}px: logo ${Math.round(logo.left)}..${Math.round(logo.right)}, buttons ${Math.round(actions.left)}..${Math.round(actions.right)}`);
+    }
+  }
+  expect(bad).toEqual([]);
+  // Where the words fit, they are there: English on a 390px phone.
+  await page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "en" }));
+  });
+  await page.setViewportSize({ width: 390, height: 812 });
+  await page.reload();
+  await expect(page.getByTestId("sidebar-chat-actions")).toContainText("New");
+  await expect(page.getByTestId("sidebar-chat-actions")).toContainText("Join");
+});
+
 test("on a wide screen the wallet and services are pages beside the list", { tag: ["@feature:app.navigation", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await expect(page.getByTestId("mobile-tabs")).toHaveCount(0);
   await page.getByTestId("wallet-chip").click();
   await expect(page).toHaveURL(/#\/wallet$/);
-  await expect(page.getByRole("heading", { name: "Wallet", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Wallets", exact: true })).toBeVisible();
   await page.getByTestId("account-services").click();
   await expect(page).toHaveURL(/#\/services$/);
   await expect(page.getByRole("heading", { name: "Services" })).toBeVisible();

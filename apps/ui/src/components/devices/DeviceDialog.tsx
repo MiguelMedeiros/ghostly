@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
+import { InfoButton } from "../layout/Section";
 
 /**
  * The frame of the device dialogs (WISP 06): a modal card with a title and a close button, the width of a phone less its
@@ -44,3 +45,33 @@ export function Digits({ digits, testId }: { digits: string; testId: string }) {
 /** The full-screen notices' buttons (standby, limited start): full width on a phone, side by side from a small tablet up, 44 px tall to touch. */
 export const SCREEN_BUTTON = "inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-40 disabled:cursor-not-allowed max-sm:w-full";
 export const SCREEN_QUIET = "inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm text-text-secondary border border-border hover:bg-surface-hover hover:text-text-primary cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed max-sm:w-full";
+
+/** A small spinner beside a status line: something is going on, and nothing is asked of the person yet. */
+export function Spinner() {
+  return <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />;
+}
+
+/**
+ * Where an enrollment stands, in one line (WISP 06 § User experience): with a spinner while it waits on the network or
+ * on the other device. Read out as it changes.
+ */
+export function Status({ children, spin = true, testId, step }: { children: ReactNode; spin?: boolean; testId?: string; step?: string }) {
+  return (
+    <p role="status" aria-live="polite" data-testid={testId} data-step={step} className="flex items-center gap-2 text-text-secondary">
+      {spin && <Spinner />}<span className="min-w-0">{children}</span>
+    </p>
+  );
+}
+
+/** One line, with the rest of what there is to say behind an ⓘ (the app's copy rule: details behind ⓘ). */
+export function InfoLine({ children, info, testId, className = "text-text-secondary" }: { children: ReactNode; info: ReactNode; testId?: string; className?: string }) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  return <>
+    <div className="flex items-start gap-2" data-testid={testId}>
+      <p className={`flex-1 min-w-0 ${className}`}>{children}</p>
+      <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId ? `${testId}-info` : undefined} className="mt-0.5" />
+    </div>
+    {open && <p id={id} className="text-xs text-text-secondary leading-relaxed ps-3 border-s-2 border-border">{info}</p>}
+  </>;
+}

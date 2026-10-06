@@ -204,6 +204,8 @@ export class DhtDelivery {
   /** Until when the relays' request budget holds publications back: what is due then goes at once. */
   private budgetUntil = 0;
   private errors: Partial<Record<"publish" | "read", string>> = {};
+  /** When the device's network last came back (`networkBack`): a read or publication started before failed for want of it. */
+  private networkBackAt = -Infinity;
   private foreignKeySeenAt?: number;
   /** When the pinned mailbox was last looked in while the contact had not said it uses it. */
   private pinnedProbeAt = 0;
@@ -363,6 +365,17 @@ export class DhtDelivery {
   }
   /** Reads the contact's mailbox now: something says it may have changed its delivery method. */
   refresh(): void { this.urgent = true; void this.tick(); }
+  /**
+   * The device's network came back: a read or publication error from while it was away says nothing now (No Pkarr
+   * relay reachable). It goes at once, and the mailbox is read now: one that still fails says so again.
+   */
+  networkBack(): void {
+    this.networkBackAt = Date.now();
+    if (!this.errors.read && !this.errors.publish) return;
+    delete this.errors.read; delete this.errors.publish;
+    this.changed();
+    void this.tick();
+  }
   /**
    * Reads the contact's mailbox at the signaling pace for a while (a fresh packet of a contact not pinned yet).
    * `signal`: the contact is leaving DHT only (a fresh packet on its link key, or its offer), and the live link waits
@@ -797,12 +810,15 @@ export class DhtDelivery {
       const signal = this.signalReads > 0;
       this.urgent = false; if (signal) this.signalReads--;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
+      // One that started before the network came back failed for want of it (`networkBack`): the read after it says.
+      const readAt = Date.now();
       try { await this.read(background, signal); if (!this.running) return; delete this.errors.read; }
-      catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      catch (error) { if (!isDiscoveryBudgetError(error) && readAt >= this.networkBackAt) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       // The contact says it left DHT only: nothing waits on its mailbox any more.
       if (this.state.peerMode !== "dht") this.signalReads = 0;
+      const publishAt = Date.now();
       try { await this.publish(); }
-      catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      catch (error) { if (!isDiscoveryBudgetError(error) && publishAt >= this.networkBackAt) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       this.changed();
     });
     } finally { this.ticking = false; }

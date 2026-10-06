@@ -110,6 +110,22 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     expect(world.texts(bob, id)).toContain("after dave");
   });
 
+  it("what a member who left wrote is still named by the name it was heard under", async () => {
+    // Bug hunt r9c: once Carol left, her messages read "~Member xxxx" right above "Carol is no longer a member".
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");
+    const { id, link } = await community(world, admin);
+    await joinAll(world, id, link, [bob, carol]);
+    await world.run(15_000);
+    await carol.groups.send(id, "carol was here");
+    await world.until(() => world.texts(bob, id).includes("carol was here"), 60_000);
+    const carolKey = world.view(carol, id)!.myKey!;
+    expect(world.view(bob, id)?.formerNames).toBeUndefined();
+    await carol.groups.leave(id);
+    await world.until(() => !world.view(bob, id)?.members.some(m => m.key === carolKey), 2 * 60_000);
+    expect(world.view(bob, id)?.formerNames).toEqual({ [carolKey]: "carol" });
+  });
+
   it("a replaced link admits nobody; the new one works through any member", async () => {
     const world = new CommunityWorld();
     const admin = world.add("admin"), bob = world.add("bob"), eve = world.add("eve"), finn = world.add("finn");

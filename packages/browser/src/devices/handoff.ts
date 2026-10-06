@@ -55,6 +55,8 @@ const NO_ANSWER: unique symbol = Symbol("no answer");
 /** Why a handoff did not happen, as the screens say it. */
 export type HandoffFailure =
   | "unreachable" | "password" | "locked-out" | "refused" | "payment" | "call" | "busy" | "older" | "room" | "damaged" | "dropped"
+  /** The taker's words for the giver's `call`: the call is on the other device. */
+  | "call-there"
   | "wallet" | "loading" | "mainnet" | "expiry" | "cancelled" | "turn" | "offline" | "version" | "failed" | "woken"
   /** The copy stopped: nothing came from the other device for `HANDOFF_TIMINGS.stuckMs`. */
   | "stalled"
@@ -172,6 +174,11 @@ export type LocalBusy = "wallet" | "payment" | "call" | "loading" | "mainnet" | 
 export interface BusyReport { why: LocalBusy; wallet?: string; expiresAt?: number }
 
 const reportOf = (busy: LocalBusy | BusyReport | null): BusyReport | null => (busy === null ? null : typeof busy === "string" ? { why: busy } : busy);
+/**
+ * What `handoff-busy` tells the taker of a local reason (WISP 06: the requesting device "Shows why"). A call is said as
+ * itself, so the person waits for it to end; the rest stay "handoff": which wallet keeps the profile is said on this device.
+ */
+const wireWhy = (report: BusyReport): HandoffBusyReason => (report.why === "call" ? "call" : "handoff");
 
 /** What a device says about itself in `handoff-hello`, but its key for this session. */
 export type HandoffSelf = Omit<HandoffHello, "v" | "e" | "id" | "later">;
@@ -588,6 +595,26 @@ export class HandoffGiver {
     return this.exclusive(() => this.handle(from, frame)).catch(() => {});
   }
 
+  /**
+   * A turn read on this standby found the record of `key` at `turn`: the device it released to took the turn, which is
+   * what the `handoff-done` would have said. That frame goes once, as the taker reloads, and can be lost; without this
+   * the screen said "Moving to …" for good, with no Use here, until that device offered the profile back.
+   */
+  turnTaken(key: string, turn: number): Promise<void> {
+    return this.exclusive(async () => {
+      if (this.stopped || this.phase !== "released" || key !== this.peer || turn <= this.turn) return;
+      await this.taken();
+    }).catch(() => {});
+  }
+
+  /** The release was taken: the handoff note goes, and this device is a plain standby. */
+  private async taken(): Promise<void> {
+    await this.dropBreez();
+    await this.ports.records.amend({ handoff: undefined });
+    this.phase = "idle"; this.peer = null;
+    this.changed();
+  }
+
   private async handle(from: string, frame: DeviceFrame): Promise<void> {
     if (this.stopped) return;
     // Only this handoff's own frames count as the taker being there.
@@ -609,10 +636,7 @@ export class HandoffGiver {
         // (it is sent just before that device reloads). The same as the done.
         if (from !== this.peer || this.phase !== "released") return;
         if (frame.t === HANDOFF_DONE ? readHandoffDone(frame) === null : readHandoffTurnFrame(frame) === null) return;
-        await this.dropBreez();
-        await this.ports.records.amend({ handoff: undefined });
-        this.phase = "idle"; this.peer = null;
-        this.changed();
+        await this.taken();
         return;
       }
       case HANDOFF_CANCEL: {
@@ -667,12 +691,12 @@ export class HandoffGiver {
     if (this.phase !== "idle" && this.phase !== "failed" && !pushed) return busy("handoff");
     const session = this.sessionFor(from);
     if (!session?.peer) return busy("handoff", 5);
-    // Why is this device's own business (money, a call): the other device is told it is busy, nothing more.
+    // Why is said on this device; the other one is told it is busy, and that a call is on when one is (`wireWhy`).
     const local = reportOf(await this.ports.busy(this.takerFacts(from)));
     if (local) {
       // Said on this device, which a pull may find unattended: the screen there names what keeps the profile here.
       if (!pushed) { this.peer = from; this.deviceName = name(record, from); this.failure = this.failWith(local); this.changed(); }
-      return busy("handoff");
+      return busy(wireWhy(local));
     }
     const self = await this.ownSelf();
     const versions = handoffVersions(self, session.peer);
@@ -819,8 +843,8 @@ export class HandoffGiver {
       const deadline = this.now() + HANDOFF_TIMINGS.paymentMs;
       while (this.now() < deadline && reportOf(await this.ports.busy(taker))?.why === "payment") await new Promise((resolve) => setTimeout(resolve, 1_000));
       const still = reportOf(await this.ports.busy(taker));
-      if (still) { this.out(handoffBusyFrame("handoff", 30)); this.reset(still.why === "payment" ? "payment" : this.failWith(still)); return; }
-    } else if (why) { this.out(handoffBusyFrame("handoff", 30)); this.reset(this.failWith(why)); return; }
+      if (still) { this.out(handoffBusyFrame(wireWhy(still), 30)); this.reset(still.why === "payment" ? "payment" : this.failWith(still)); return; }
+    } else if (why) { this.out(handoffBusyFrame(wireWhy(why), 30)); this.reset(this.failWith(why)); return; }
     this.phase = "quiescing";
     this.changed();
     await this.ports.quiesce({
@@ -970,9 +994,13 @@ const takes = (state: DeviceRecord["state"]): boolean => state === "standby" || 
  * device's; the turn that replaced it is in its mark (the highest sequence it saw), and a release names that one plus one.
  */
 function takerTurn(record: DeviceRecord): number {
-  if (record.state !== "superseded") return record.turn;
+  // A turn this device released is one the active device holds at least, before this device's own record says so: a
+  // standby reads the turn record on the active device's hint, or every 10 minutes. A Use here right after a move away
+  // asked for the old turn, and the giver could not read its `handoff-verified` (the move sat at "Checking").
+  const known = Math.max(record.turn, record.releasedTurn ?? 0);
+  if (record.state !== "superseded") return known;
   const seen = Math.floor((record.seenSequence ?? 0) / 2 ** 20);
-  return seen <= TURN_MAX ? Math.max(record.turn, seen) : record.turn;
+  return seen <= TURN_MAX ? Math.max(known, seen) : known;
 }
 
 /**
@@ -1159,7 +1187,7 @@ export class HandoffTaker {
         const busy = readHandoffBusy(frame);
         if (!busy || from !== this.peer || (this.phase !== "connecting" && this.phase !== "authorizing" && this.phase !== "receiving")) return;
         this.retry = busy.retry || undefined;
-        const failure: HandoffFailure = busy.why === "handoff" ? "busy" : busy.why;
+        const failure: HandoffFailure = busy.why === "handoff" ? "busy" : busy.why === "call" ? "call-there" : busy.why;
         await this.giveUp(failure);
         return;
       }

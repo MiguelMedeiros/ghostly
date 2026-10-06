@@ -45,20 +45,33 @@ export function findSecret(text: string): SecretFinding | null {
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
  * is nothing but 12, 15, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). Prose
  * breaks a run at once: "the", "a", "is", "to", "and", "of" and "I" are not on the list.
+ *
+ * One word said over and over is not a seed, though one in 16 such runs passes a 12-word checksum ("word" does): a
+ * window of a single word never counts, and a window mostly of one word ("abandon … about") counts only when that
+ * word does not go on past it on either side.
  */
 function hasMnemonic(text: string): boolean {
   const tokens = text.toLowerCase().match(/[a-z]+/g);
   if (!tokens || tokens.length < 12) return false;
   let budget = CHECKSUM_BUDGET;
   let run: number[] = [];
+  const seedLike = (start: number, length: number) => {
+    const window = run.slice(start, start + length);
+    const counts = new Map<number, number>();
+    for (const word of window) counts.set(word, (counts.get(word) ?? 0) + 1);
+    if (counts.size === 1) return false;
+    const [most, times] = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a));
+    if (times > length / 2 && (run[start - 1] === most || run[start + length] === most)) return false;
+    return checksumHolds(window);
+  };
   const check = () => {
     if (run.length >= 12) {
       for (const length of MNEMONIC_LENGTHS) {
         for (let start = 0; start + length <= run.length && budget > 0; start++, budget--) {
-          if (checksumHolds(run.slice(start, start + length))) return true;
+          if (seedLike(start, length)) return true;
         }
       }
-      if (run.length === tokens.length && MNEMONIC_LENGTHS.includes(run.length)) return true;
+      if (run.length === tokens.length && MNEMONIC_LENGTHS.includes(run.length) && new Set(run).size > 1) return true;
     }
     run = [];
     return false;

@@ -316,6 +316,20 @@ describe("a pull with the right password", () => {
     expect(w.giverRecords.record.handoff).toBeUndefined();
   });
 
+  it("a pull right after this device released the profile to the giver: the taker counts the turn it released", async () => {
+    // B moved the profile to A a moment ago: A took turn N + 1, and B, on standby, released N + 1 but has not read the
+    // turn record since (it does on A's hint when their link is up, or every 10 minutes). Its own record still says N.
+    // Before, B asked for and signed N + 1 while A expected N + 2: A dropped `handoff-verified` as unreadable, and the
+    // move sat at "Checking" (Omarchy 1.1.3: Use here on Linux right after the move to the web).
+    const w = world();
+    w.profile.add("f1", bytesOf(500));
+    w.giverRecords.record = { ...w.giverRecords.record, turn: N + 1 };
+    w.takerRecords.record = { ...w.takerRecords.record, releasedTurn: N + 1 };
+    await fullPull(w);
+    expect(w.giverRecords.record).toMatchObject({ state: "standby", releasedTurn: N + 2 });
+    expect(w.takes[0].turn).toBe(N + 2);
+  });
+
   it("the giver's count of wrong passwords goes with the release, so a device gets no fresh tries on the new active one", async () => {
     const w = world();
     w.profile.add("f1", bytesOf(100));
@@ -806,10 +820,26 @@ describe("Try again on the active device after a move that stopped", () => {
     expect(w.giver.view()).toBeNull();
     expect(w.giverRecords.record.handoff).toBeUndefined();
   });
+
+  it("a standby that released and never heard `handoff-done` learns from a turn read that names the taker's record", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-done" ? null : frame);
+    await fullPull(w);
+    await settle();
+    expect(w.giver.view()?.step).toBe("switching");
+    // Not the taker, or not past the turn the handoff started at: nothing changes.
+    await w.giver.turnTaken(C, N + 1);
+    await w.giver.turnTaken(B, N);
+    expect(w.giver.view()?.step).toBe("switching");
+    await w.giver.turnTaken(B, N + 1);
+    expect(w.giver.view()).toBeNull();
+    expect(w.giverRecords.record.handoff).toBeUndefined();
+  });
 });
 
 describe("refusals before a byte is copied", () => {
-  it.each(["wallet", "payment", "call", "loading"] as const)("the giver is busy (%s): the taker is told only that it is busy, and no try is used", async (why) => {
+  it.each(["wallet", "payment", "loading"] as const)("the giver is busy (%s): the taker is told only that it is busy, and no try is used", async (why) => {
     const w = world();
     w.busy.why = why;
     await w.taker.pull(PASSWORD);
@@ -817,6 +847,18 @@ describe("refusals before a byte is copied", () => {
     expect(w.taker.view()!.failure).toBe("busy");
     expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["handoff"]);
     // The taker sends the first message with its request; the giver answers none.
+    expect(w.link.count("handoff-pake", A)).toBe(0);
+    expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
+  });
+
+  it("a call on the giver: the taker is told a call is on there (WISP 06 handoff-busy \"call\"), the giver says it on its own screen, and no try is used", async () => {
+    const w = world();
+    w.busy.why = "call";
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["call"]);
+    expect(w.taker.view()!.failure).toBe("call-there");
+    expect(w.giver.view()).toMatchObject({ role: "giver", step: "failed", failure: "call" });
     expect(w.link.count("handoff-pake", A)).toBe(0);
     expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
   });

@@ -25,6 +25,9 @@
   --color-accent: var(--theme-accent);
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
+  /* The keyboard focus's ring around a field: the accent, 3:1 or more on what is around it (WCAG 2.4.13), except where
+     the accent is too light for that (the classic light theme, below). */
+  --color-focus-ring: var(--theme-focus-ring, var(--theme-accent));
   /* Danger's red: brighter on dark themes, darker on light ones, so its words read at 4.5:1 on either. */
   --color-danger: var(--theme-danger);
   /* Danger as a fill under white words (Delete, hang up): dark enough for 4.5:1 with white in every theme. */
@@ -33,6 +36,9 @@
   --color-success: #22a55a;
   /* Test money's colour, the same in every theme (Real money takes the accent). */
   --color-test-money: #e0a800;
+  /* Its words ("Test money"): that yellow on a dark page, a darker one on a light page, where the yellow reads at
+     about 2:1 (html[data-theme="light"] below). A wallet card is dark in every theme and keeps the yellow. */
+  --color-test-money-ink: var(--theme-test-money-ink, #e0a800);
   --color-text-primary: var(--theme-text-primary);
   --color-text-secondary: var(--theme-text-secondary);
   --color-text-muted: var(--theme-text-muted);
@@ -328,8 +334,17 @@ html {
   color-scheme: dark;
 }
 
+/* The classic green reads at about 2.7:1 on the light greys: a darker one, 4.3:1 or more on white, the greys and the
+   chat's beige. The other light themes' accents already do. */
+:root[data-theme="light"]:not([data-color-theme]),
+:root[data-theme="light"][data-color-theme="classic"] {
+  --theme-focus-ring: #008069;
+}
+
 html[data-theme="light"] {
   color-scheme: light;
+  /* 4.6:1 or more on every light theme's pages and rows (white, the greys, the chat's beige). */
+  --theme-test-money-ink: #856200;
 }
 
 body {
@@ -504,6 +519,29 @@ html[data-standalone="true"] {
 .call-mini .call-controls svg {
   width: 17px;
   height: 17px;
+}
+
+/* With Share screen the small window's row has five buttons: 230 px with these sizes, wider than the window at its
+   narrowest (190 px, where a phone-wide window opens it and where a pulled corner stops), so flex squeezed them into
+   ovals against both edges. Five are smaller and closer there (180 px), and none shrinks. The row sits a little
+   higher, so the end buttons' middles stay clear of the corner grips (26 px) above them. */
+.call-mini .call-controls > * {
+  flex-shrink: 0;
+}
+
+.call-mini .call-controls:has(> :nth-child(5)) {
+  bottom: 16px;
+  gap: 5px;
+}
+
+.call-mini .call-controls:has(> :nth-child(5)) button {
+  width: 32px;
+  height: 32px;
+}
+
+.call-mini .call-controls:has(> :nth-child(5)) svg {
+  width: 15px;
+  height: 15px;
 }
 
 /*
@@ -777,6 +815,30 @@ html[data-standalone="true"] {
   html[data-keyboard="true"] .toast-place.toast-place-page {
     bottom: 0.75rem;
   }
+}
+
+/* A touch screen two panes wide (a phone on its side, a tablet) with the keyboard up: iOS leaves the window its
+   height, so a card over the whole window stands on what the keyboard leaves, as on a phone held upright. */
+@media (pointer: coarse) and (min-width: 768px) {
+  html[data-keyboard="true"] .toast-place {
+    bottom: calc(100% - var(--app-height, 100%) + 0.75rem);
+  }
+
+  html[data-keyboard="true"] .toast-place.toast-place-page {
+    bottom: 1.5rem;
+  }
+}
+
+/* Where the card would cover the field it is about (a short screen with the keyboard up: a phone on its side shows
+   about 200px), it goes to the top instead (Toast.tsx measures both). After the rules above, as specific as they are. */
+html .toast-place[data-at="top"] {
+  bottom: auto;
+  top: calc(env(safe-area-inset-top) + 0.75rem);
+}
+
+html .toast-place.toast-place-page[data-at="top"] {
+  bottom: auto;
+  top: 0.75rem;
 }
 
 .animate-pulse-dot {
@@ -1162,10 +1224,16 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   .sidebar-new-split > .sidebar-header-action { width: auto; }
   [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
 }
+/* Wherever the words do not fit beside the logo in this language (hooks/useLabelsFit.ts): the same. */
+.sidebar-header[data-labels="off"] .sidebar-action-label { display: none; }
+.sidebar-header[data-labels="off"] .sidebar-header-action { width: 40px; gap: 0; }
+.sidebar-header[data-labels="off"] .sidebar-new-split > .sidebar-header-action { width: auto; }
+.sidebar-header[data-labels="off"] [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
 
 /* Which money: "Test money" or "Real money", wherever money moves. Words first; the colour only echoes them. */
 .network-tag{display:inline-block;padding:0 6px;border:1px solid currentColor;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;line-height:1.7;text-transform:uppercase;vertical-align:middle;white-space:nowrap}
-.network-tag[data-network="testnet"]{color:var(--color-test-money)}
+.network-tag[data-network="testnet"]{color:var(--color-test-money-ink)}
+.payment-back .network-tag[data-network="testnet"]{color:var(--color-test-money)}
 .network-tag[data-network="mainnet"]{color:var(--color-accent)}
 /* In a bubble, half of it is the bubble's own ink: the accent and the yellow alone fall under 3:1 on sent bubbles
    (the accent on classic's green, the yellow on every light one). The mix keeps the hue and reads at 4:1 or more. */

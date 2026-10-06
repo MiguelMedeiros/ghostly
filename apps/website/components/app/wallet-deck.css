@@ -60,3 +60,6 @@
  .wallet-deck-card-chip,.wallet-deck-card-ghost{display:none}
  .wallet-deck-card-text{grid-column:1/-1}
 }
+/* Arabic is joined writing: a monospace font draws its letters apart ("ج ا ه ز ة"). The words on a card ("Ready", what
+   it holds) keep the app's font there; amounts stay in the monospace font. */
+:lang(ar) .wallet-deck-card-status,:lang(ar) .wallet-deck-card-detail{font-family:inherit;letter-spacing:0}

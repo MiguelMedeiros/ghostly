@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/extension",
   "private": true,
-  "version": "1.1.3",
+  "version": "1.1.4",
   "type": "module",
   "description": "Ghostly Browser: an ephemeral Ghostly peer as a Chromium extension",
   "scripts": {
@@ -16,7 +16,7 @@
     "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "@ghostly/react": "*",
-    "@tauri-apps/api": "^2.12.0",
+    "@tauri-apps/api": "^2.12.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -24,14 +24,14 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
-    "@types/chrome": "^0.3.3",
+    "@types/chrome": "^0.3.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "playwright": "^1.63.0",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.1",
-    "vitest": "^5.0.2"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   }
 }

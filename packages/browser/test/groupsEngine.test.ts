@@ -160,6 +160,29 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect(world.events("bob")).toContain("removed");
   });
 
+  it("a member removed and invited again keeps the names of what it holds: on the invitation, and once back", async () => {
+    // Bug hunt r4b, r9c: the invitation of a member removed and invited again showed its kept history as "Member xxxx".
+    const { world, alice, others: [bob, carol], groupId, key } = await groupOf(["bob", "carol"]);
+    const [aliceKey, carolKey] = [key(alice), key(carol)];
+    const session = (g: Groups) => (g as unknown as { sessions: Map<string, { setNick(key: string, nick: string): Promise<void> }> }).sessions.get(groupId)!;
+    await session(bob).setNick(carolKey, "Carol");
+    expect(view(bob, groupId).members.find(m => m.key === aliceKey)?.nick).toBe("contact:chat-ab");
+
+    await alice.remove(groupId, key(bob)); await world.settle();
+    await alice.remove(groupId, carolKey); await world.settle();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    const invited = view(bob, groupId);
+    expect(invited.invitation).toBeDefined();
+    expect(invited.formerNames).toEqual({ [aliceKey]: "contact:chat-ab", [carolKey]: "Carol" });
+
+    await bob.accept(groupId); await world.settle(); await world.meet();
+    const back = view(bob, groupId);
+    expect(back.status).toBe("active");
+    // Carol left while Bob was out: what she wrote before is still hers.
+    expect(back.formerNames).toEqual({ [carolKey]: "Carol" });
+    expect(back.members.find(m => m.key === aliceKey)?.nick).toBe("contact:chat-ab");
+  });
+
   it("a pin by a member who is removed goes with them; the others' pins stay", async () => {
     const { world, alice, others: [bob, carol], groupId, key } = await groupOf(["bob", "carol"]);
     const pinBy = (by: string) => ({ id: `${key(bob)}:1:1`, n: Date.now(), by, at: Date.now(), k: by, sig: "s" });
