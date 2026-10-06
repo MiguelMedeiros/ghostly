@@ -34,6 +34,7 @@
       "delivered": "O app do seu contato recebeu.",
       "failed": "Não enviada. Toque para enviar de novo.",
       "held": "Guardada para seu contato até ele ficar online.",
+      "offline": "Envia sozinha quando você voltar a ficar online.",
       "queued": "Sem confirmação ainda. Envia de novo sozinha.",
       "sending": "A caminho.",
       "sent": "Enviada. Sem confirmação ainda.",
@@ -42,6 +43,7 @@
       "waitingLiveContact": "Arquivos precisam de conexão direta. A conversa do seu contato está em Só DHT: o arquivo vai quando ele permitir de novo.",
       "waitingLiveYou": "Arquivos precisam de conexão direta. Esta conversa está em Só DHT: mude no ícone de conexão."
     },
+    "offline": "Você está offline",
     "retry": "Não enviada. Enviar de novo",
     "sending": "Enviando",
     "sent": "Enviada",

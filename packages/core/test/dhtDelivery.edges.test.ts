@@ -569,6 +569,46 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("a read error from while the device was offline goes as the network comes back, and one that stands shows again", async () => {
+    // Bug hunt r10a (2026-10-06): back online, the chat kept "Could not read DHT delivery: No Pkarr relay reachable"
+    // in red until its next read, minutes later for a chat in the background.
+    const h = setup({ pollMs: 5 * 60_000 });
+    h.transport.resolve.mockRejectedValueOnce(new Error("No Pkarr relay reachable"));
+    h.transport.publish.mockRejectedValueOnce(new Error("No Pkarr relay reachable"));
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(h.views.at(-1)?.error).toMatch(/^Could not read DHT delivery: No Pkarr relay reachable/);
+    const reads = h.transport.resolve.mock.calls.length;
+    h.bob.networkBack();
+    expect(h.views.at(-1)?.error, "gone at once").toBeUndefined();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.resolve.mock.calls.length, "read now, not at the next look").toBeGreaterThan(reads);
+    expect(h.views.at(-1)?.error).toBeUndefined();
+    // Relays that really are down: the read that follows says so again.
+    h.transport.resolve.mockRejectedValueOnce(new Error("relay down"));
+    h.transport.publish.mockRejectedValueOnce(new Error("relay down"));
+    h.bob.refresh(); await vi.advanceTimersByTimeAsync(0);
+    expect(h.views.at(-1)?.error).toMatch(/relay down/);
+    h.transport.resolve.mockRejectedValueOnce(new Error("relay down"));
+    h.bob.networkBack();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.views.at(-1)?.error).toMatch(/^Could not read DHT delivery: relay down/);
+    await h.bob.stop();
+  });
+
+  it("a read under way when the network comes back, failing for want of it, leaves no error: the read after it says", async () => {
+    const h = setup({ pollMs: 5 * 60_000 });
+    h.transport.resolve.mockRejectedValueOnce(new Error("No Pkarr relay reachable"));
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    let fail!: (error: Error) => void;
+    h.transport.resolve.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    h.bob.refresh(); await vi.advanceTimersByTimeAsync(0);
+    h.bob.networkBack();
+    fail(new Error("No Pkarr relay reachable"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.views.at(-1)?.error).toBeUndefined();
+    await h.bob.stop();
+  });
+
   it("a save that fails rejects that call only; later operations still run in order", async () => {
     const h = setup(); await h.bob.start();
     expect(await h.bob.send("hi", Date.now(), ID)).toBeNull();

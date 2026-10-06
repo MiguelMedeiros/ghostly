@@ -287,6 +287,28 @@ describe("MessageBubble: delivery", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
+  it.each(["waiting", "sending", "queued"] as const)("with this device offline, a %s message says it waits for this device, not the contact", async (delivery) => {
+    // Bug hunt r10a (2026-10-06): texts written offline said "Waiting for your contact to be online".
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      const { user } = bubble({ sender: "me", delivery });
+      expect(mark()).toHaveAccessibleName("You are offline");
+      await user.hover(mark());
+      expect(screen.getByRole("tooltip")).toHaveTextContent("Sends by itself when you are back online.");
+      onLine.mockReturnValue(true);
+      act(() => { window.dispatchEvent(new Event("online")); });
+      expect(mark()).not.toHaveAccessibleName("You are offline");
+    } finally { onLine.mockRestore(); }
+  });
+
+  it("with this device offline, a message the contact's hold keeps still waits for the contact", () => {
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      bubble({ sender: "me", delivery: "held" });
+      expect(mark()).toHaveAccessibleName("Waiting for your contact to be online");
+    } finally { onLine.mockRestore(); }
+  });
+
   it("puts no text line under the bubble and none of the engine's words, whatever the state", () => {
     for (const [delivery, deliveryError] of [["waiting", "Sent when you are live."], ["failed", "The contact's app is closed"], ["queued", "Connection closed before receipt."]] as const) {
       const { container, unmount } = bubble({ sender: "me", delivery, deliveryError });
