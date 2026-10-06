@@ -34,6 +34,7 @@
       "delivered": "Your contact's app received it.",
       "failed": "Not sent. Tap to send again.",
       "held": "Kept for your contact until they are online.",
+      "offline": "Sends by itself when you are back online.",
       "queued": "No receipt yet. Sends again by itself.",
       "sending": "On its way.",
       "sent": "Sent. No receipt yet.",
@@ -42,6 +43,7 @@
       "waitingLiveContact": "Files need a live connection. Your contact's chat is on DHT only: it goes when they allow live again.",
       "waitingLiveYou": "Files need a live connection. This chat is on DHT only: change it from the connection icon."
     },
+    "offline": "You are offline",
     "retry": "Not sent. Send again",
     "sending": "Sending",
     "sent": "Sent",
