@@ -489,9 +489,11 @@ const OFF: &[&str] = &[
 
 /// The WebKit side of an app window on macOS: what the CSP does not govern there. Measured (WISP 12xx, Desktop
 /// spike): `<link rel=preconnect>` opened a TCP connection under the runner's full policy.
-/// - A content rule list that blocks every load but `ghostly-app:` (public API).
+/// - A content rule list that blocks every load but `ghostly-app:` (public API). Required: without it no app
+///   window opens.
 /// - WebKit's own switches (`WKPreferences._features`, private API, as Ghostly ships outside the App Store):
-///   `OFF` below. A WebKit without one of them opens no app, so a rename shows up as a refusal, not a leak.
+///   `OFF` below. Defence in depth on top of the public layers: a WebKit without one of them logs it and the
+///   window opens anyway.
 #[cfg(target_os = "macos")]
 #[cfg_attr(test, allow(dead_code))]
 mod webkit {
@@ -600,10 +602,12 @@ mod webkit {
             let preferences = unsafe { config.preferences() };
             let features = features();
             for key in OFF {
-                let (_, feature) = features
-                    .iter()
-                    .find(|(k, _)| k == key)
-                    .ok_or_else(|| format!("WebKit has no {key}"))?;
+                let Some((_, feature)) = features.iter().find(|(k, _)| k == key) else {
+                    crate::diagnostics::log(&format!(
+                        "app window: WebKit has no feature {key}, left as it is"
+                    ));
+                    continue;
+                };
                 let _: () = unsafe {
                     msg_send![&*preferences, _setEnabled: Bool::NO, forFeature: &**feature]
                 };
@@ -875,10 +879,10 @@ mod tests {
         assert!(!RULES_ID.is_empty());
     }
 
-    /// WebKit's switches are private, so a WebKit that renamed one would leave it on: `webkit::configuration`
-    /// refuses to make an app window when one is missing. These are the keys WKWebView listed on macOS 15.6
-    /// (the test driver's `GET /app-webkit`); WebKit wants the main thread of a running app to list them, so
-    /// the macOS e2e is where a renamed one shows (an app window that does not open).
+    /// WebKit's switches are private, so a WebKit that renamed one would leave it on (`webkit::configuration`
+    /// logs a missing one and opens the window anyway: the CSP, the navigation lock and the rule list are the
+    /// required layers). These are the keys WKWebView listed on macOS 15.6 (the test driver's
+    /// `GET /app-webkit`); a change here is a change to what app windows turn off.
     #[test]
     fn an_app_window_turns_off_preconnect_prefetch_and_webrtc() {
         assert_eq!(
