@@ -47,6 +47,19 @@ afterEach(async () => { for (const node of nodes.splice(0)) await node.shutdown(
 
 const settle = async (ms = 40) => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, ms / 4)); };
 
+/**
+ * The edge once its link has started. An edge is in the engine's links (its link `null`) while it is being stored, and
+ * gets its link only after: `toBeDefined` passed on that `null`, and a busy runner then stood in for no link at all
+ * ("Object.defineProperty called on non-object", PR CI of #1333).
+ */
+async function startedEdge<T extends { link?: GhostLink | null }>(find: () => T | undefined): Promise<T & { link: GhostLink }> {
+  return vi.waitFor(() => {
+    const live = find();
+    expect(live?.link).toBeInstanceOf(GhostLink);
+    return live as T & { link: GhostLink };
+  }, { timeout: 10_000 });
+}
+
 /** Every method of the link that puts something on the wire is written down instead, while the stand-in connection is open. */
 function standIn(link: GhostLink, wire: Member["wire"], sent: Sent[]): void {
   const define = (name: string, get: () => unknown) => Object.defineProperty(link, name, { get, configurable: true });
@@ -81,8 +94,7 @@ async function adminOf(names: string[]) {
   const admit = async (up = true): Promise<Member> => {
     const key = createIdentity().pubKeyZ32;
     await session.admit(key);
-    await vi.waitFor(() => expect(edgeOf(key)?.link).toBeDefined());
-    const live = edgeOf(key)!, link = live.link!;
+    const live = await startedEdge(() => edgeOf(key)), link = live.link!;
     const sent: Sent[] = [], wire = { open: false, groups: true };
     standIn(link, wire, sent);
     const events = (link as unknown as { options: { events: EdgeEvents } }).options.events;
@@ -228,8 +240,7 @@ describe("a private group's traffic goes to its current members only", () => {
     if ("error" in joined) throw new Error(joined.error);
     const said: GroupEdgeFrame[] = [];
     const carol = new GroupSession(joined.state, { save: async () => {}, send: (to, frame) => { if (to === session.myKey) said.push(structuredClone(frame)); }, message: () => {}, changed: () => {} });
-    await vi.waitFor(() => expect(a.edgeOf(key)?.link).toBeDefined());
-    const link = a.edgeOf(key)!.link!;
+    const link = (await startedEdge(() => a.edgeOf(key))).link!;
     standIn(link, { open: true, groups: true }, []);
     const events = (link as unknown as { options: { events: EdgeEvents } }).options.events;
     events.onDataLinkState("open"); events.onGroupsSupport(true);
