@@ -386,6 +386,8 @@ A publisher needs four steps, about as many as Umbrel's template repository, two
 3. `ghostly app publish` makes the publisher key on first run (kept by the CLI, with a reminder to back it up), raises `sequence`, bundles, signs, writes the GitHub SSH proof into `proofs`, and writes **`app.ghostlyapp` at the repository root** (or on a `ghostly` branch). Committing the built bundle is required: a page cannot read GitHub release assets (no CORS).
 4. Optional: `ghostly catalog submit <store repository>` writes the listing and opens the pull request to a store.
 
+In release 1.2 the CLI has `ghostly app publish`, `ghostly app verify` (checks a bundle as a client would) and `ghostly store sign` (signs a store index with the store key). `ghostly app init`, the SDK's template with the commit-reveal helper, and `ghostly catalog submit` come later; until then a publisher builds the single-file app with its own tools and writes the listing by hand.
+
 ### Paste a URL
 
 The person pastes `https://github.com/<owner>/<repo>` (or a `/tree/<ref>` form) in the Apps page, or in a chat as a message. The client reads, **without `api.github.com`**:
@@ -564,7 +566,7 @@ All additive. An older app sees an app card as its text (a link: [405](405-statu
 
 **Free mini-apps, turn-based games and light real-time versus games (Tetris, Snake) included, played live in a 1:1 chat, on the web app and Desktop, installed from a pasted URL, a store or a card in a chat. No network access for apps. The default store is a signed file in a repository of its own, signed with the owner's offline key; custom stores are HTTPS URLs. Behind a feature flag on `dev` until the web chess e2e passes.** In pieces that can each be a pull request:
 
-1. **Format and publisher tools.** Bundle, canonical manifest, digest, signatures with their prefixes, revocation, with the [test vectors](#test-vectors), in `packages/core`. `ghostly app init | publish` and `ghostly catalog submit` in the CLI. The single-file template with the commit-reveal helper in the SDK.
+1. **Format and publisher tools.** Bundle, canonical manifest, digest, signatures with their prefixes, revocation, with the [test vectors](#test-vectors), in `packages/core`. `ghostly app publish`, `ghostly app verify` and `ghostly store sign` in the CLI.
 2. **The package store.** Verified bundles kept per profile, with `sequence`, permissions and per-app, per-chat storage. Install, update, uninstall with export.
 3. **The runner and the broker.** `/app-frame.html` and its nginx location on web; the `ghostly-app` scheme, `app-*` windows and `app_broker` on Desktop, after a Desktop spike that measures them. The port, the teardown, the WebRTC deletion, `frame-src 'self'`. The malicious mini-app suite.
 4. **The Apps page.** Installed apps, paste, Stores, permissions with the IP line, updates, the removal screen.
@@ -578,7 +580,7 @@ Phase 1 has no payments, no reviews, no themes, no network permission, no fast r
 
 | Phase | What it gives |
 |---|---|
-| 1.2.x, 1.3 | Apps in the extension, after a test submission passes the Chrome Web Store review. A bundle sent as a file over `files/3`. The `store` card. The crawler and the default index (1.3) |
+| 1.2.x, 1.3 | `ghostly app init`, the SDK's single-file template with the commit-reveal helper, and `ghostly catalog submit`. Apps in the extension, after a test submission passes the Chrome Web Store review. A bundle sent as a file over `files/3`. The `store` card. The crawler and the default index (1.3) |
 | 2 | Real-time games: the `realtime` permission, the unordered mode on `apps/1` over WebRTC, 64 MiB bundles. Bots on the other side of `apps/1` (`ghostly app serve`, `app.message` events, `ghostly app send`) and the `cards` permission. Themes as typed values. Paid apps on Testnet, then Mainnet when the owner says. Licences, reviews and reports, and an optional indexer service with search. Key rotation with a pinned recovery key. The publisher's Pkarr record. The `network` permission as an exact list of sites. Apps in groups |
 | 3 | Bots for the CLI as signed packages under an operating-system sandbox. A frame in the chat on Desktop once tested. Package sources over peer-to-peer content addressing |
 | Research | A permissioned host for adapter plugins (WebAssembly components get only the capabilities the host gives them, [component model](https://component-model.bytecodealliance.org/)); process isolation for apps; a transparency log for publisher keys; reproducible-build checks by stores |

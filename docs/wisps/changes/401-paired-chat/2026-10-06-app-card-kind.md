@@ -1,0 +1,1 @@
+The status card's example on `paired-message` lists the `app` kind beside `task` and `routine`, and says that WISP 405 defines the kinds: since its revision 2026-10-06, a person's app may send an `app` card (planned with WISP 1200 for release 1.2). The frame and its bounds are unchanged.
