@@ -138,10 +138,13 @@ export function Settings() {
   const picked = useRef<SettingsSection | null>(null);
   // The section picked in the index or named by the address: marked while in view, until the page is scrolled by hand.
   const wanted = useRef<SettingsSection | null>(section);
+  // How the page went to it: smoothly from the index, at once from an address.
+  const glide = useRef<ScrollBehavior>("auto");
   useEffect(() => {
     if (isMobile || !section) return;
     wanted.current = section;
     if (picked.current === section) { picked.current = null; return; } // picked in the index: already on its way there
+    glide.current = "auto";
     document.getElementById(`settings-section-${section}`)?.scrollIntoView({ block: "start" });
     setInView(section);
   }, [section, isMobile]);
@@ -162,14 +165,22 @@ export function Settings() {
     const hands = ["wheel", "touchmove", "keydown", "pointerdown"] as const;
     body.addEventListener("scroll", onScroll, { passive: true });
     for (const type of hands) body.addEventListener(type, byHand, { passive: true });
+    // A section above the wanted one drawn late (Network once its settings load) moves it down while a smooth scroll
+    // still heads for its old place, which ends short of it: the page goes on to where it is now.
+    const moved = new ResizeObserver(() => {
+      if (wanted.current) document.getElementById(`settings-section-${wanted.current}`)?.scrollIntoView({ block: "start", behavior: glide.current });
+    });
+    if (content.current) moved.observe(content.current);
     return () => {
+      moved.disconnect();
       body.removeEventListener("scroll", onScroll);
       for (const type of hands) body.removeEventListener(type, byHand);
     };
   }, [isMobile]);
   const pick = (to: SettingsSection) => {
     wanted.current = to;
-    document.getElementById(`settings-section-${to}`)?.scrollIntoView({ block: "start", behavior: settings.reduceMotion ? "auto" : "smooth" });
+    glide.current = settings.reduceMotion ? "auto" : "smooth";
+    document.getElementById(`settings-section-${to}`)?.scrollIntoView({ block: "start", behavior: glide.current });
     setInView(to);
     // The page stays where it is; its address names the section, so a reload comes back to it.
     if (to === section) return;
