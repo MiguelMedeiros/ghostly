@@ -79,14 +79,19 @@ impl TurnDht {
         let node = self
             .node
             .get_or_try_init(|| async {
-                let mut builder = mainline::Dht::builder();
-                if let Some(bootstrap) = &self.bootstrap {
-                    builder.bootstrap(bootstrap);
-                }
-                builder
-                    .build()
-                    .map(|dht| dht.as_async())
-                    .map_err(|e| format!("DHT node: {e}"))
+                let bootstrap = self.bootstrap.clone();
+                // Making it looks up the bootstrap nodes' names, blocking: not on a worker of the runtime.
+                tokio::task::spawn_blocking(move || {
+                    let mut builder = mainline::Dht::builder();
+                    if let Some(bootstrap) = &bootstrap {
+                        builder.bootstrap(bootstrap);
+                    }
+                    builder.build()
+                })
+                .await
+                .map_err(|e| format!("DHT node: {e}"))?
+                .map(|dht| dht.as_async())
+                .map_err(|e| format!("DHT node: {e}"))
             })
             .await?;
         if !self.joined.load(Ordering::Relaxed) {
