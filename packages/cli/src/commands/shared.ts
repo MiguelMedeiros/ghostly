@@ -16,6 +16,11 @@ export interface Command {
   /** Positionals, in order; a trailing `...` one takes the rest joined by spaces. */
   args?: string[];
   params?: (parsed: Parsed, args: Record<string, string | undefined>) => Record<string, unknown>;
+  /**
+   * A command that runs here, on files, with no profile or daemon (the publisher tools of WISP 1200): its answer is
+   * printed as a method's is, and `method` only names it.
+   */
+  run?: (parsed: Parsed, args: Record<string, string | undefined>) => Promise<Record<string, unknown>>;
 }
 
 export const wait: Record<string, OptionSpec> = {
