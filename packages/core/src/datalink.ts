@@ -105,9 +105,11 @@ export const REANSWERS = 2;
  * in node-datachannel 0.33.4: the answerer's DTLS handshake can end inside setRemoteDescription, before the answer's
  * fingerprint is in, and the connection closes), is followed by a new offer at once, up to this many times until a
  * connection opens. The answerer is there; it was the dial after it that waited: its backoff, 40 s, then its next
- * look (a member let in to a group reached one of its members 72 s after its welcome on CI, 2026-10-06).
+ * look (a member let in to a group reached one of its members 72 s after its welcome on CI, 2026-10-06). Two were
+ * not enough: on CI the race refused an answer again right after two others, and the edge waited 160 s for its
+ * backoff (meshSignals, PR #1363). Offers through members cost no relay request; over the relays four is still a few.
  */
-export const ANSWER_REFUSED_REDIALS = 2;
+export const ANSWER_REFUSED_REDIALS = 4;
 /** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
 const REANSWER_MARGIN_MS = 15_000;
 

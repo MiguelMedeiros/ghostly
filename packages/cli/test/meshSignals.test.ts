@@ -18,7 +18,8 @@ import { ghostly, home, localRelay, ok, Running } from "./support/cli";
  * The joiner refuses one in two answers to its offers (`GHOSTLY_TEST_REFUSE_DATA_ANSWERS`), as libdatachannel 0.24.5
  * now and then does in its race: the dial after one goes at once. It waited for its backoff and its next look, and a
  * member let in was up with another member 72 s after its welcome (CI, 2026-10-06). The joiner only: it offers on at
- * most its two edges at once, so no edge has more refused than it offers again for at once (`ANSWER_REFUSED_REDIALS`).
+ * most its two edges at once, so the test refuses at most two answers on an edge, and the race itself may refuse more
+ * before the link stops offering again at once (`ANSWER_REFUSED_REDIALS`).
  * Every daemon refusing, the admin's and the first member's links before the welcome each signaled twice over the slow
  * relays, and once on CI they were not up in 180 s.
  */
