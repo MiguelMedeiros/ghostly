@@ -9,7 +9,7 @@ import { buildLinkRecords, LABEL, parseLinkRecords } from "../src/records";
 import { fromBase64Url } from "../src/bytes";
 import type { PairingState } from "../src/pairedSession";
 import type { NativeTransport, PairedTransport } from "../src/pairedTransports";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, rtc, useFakeWorld, yieldToLoop } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
 // covers: groups.native-links, groups.send
 
@@ -33,18 +33,18 @@ interface Member {
 
 let pkarr: MemoryPkarr, native: NativeWorld;
 
-function member(name: string, group: string, me: Identity, peer: Identity, options: { rtc: boolean; transports?: NativeTransport[]; entry?: "host" | "guest"; endpointAfterMs?: number }): Member {
+function member(name: string, group: string, me: Identity, peer: Identity, options: { rtc: boolean; transports?: NativeTransport[]; entry?: "host" | "guest"; endpointAfterMs?: number; offAfterFailure?: boolean }): Member {
   const states: PairingState[] = [], frames: unknown[] = [], heard: PairedTransport[][] = [];
   const transports = options.transports ?? ["iroh/1"];
-  let started = false;
+  let started = false, rtcOn = options.rtc;
   const startEndpoints = () => {
     if (started) return;
     started = true;
     for (const transport of transports) result.link.registerEndpoint(native.endpoint(transport, name));
   };
-  const link = new GhostLink({
+  const make = () => new GhostLink({
     params: edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32),
-    rtcAvailable: options.rtc,
+    rtcAvailable: rtcOn,
     pairing: { credentials: { seedB64: me.seedB64, peerKey: peer.pubKeyZ32, requireSignedSignals: true, verifiedPeerKey: peer.pubKeyZ32 },
       pinPeer: async key => { if (key !== peer.pubKeyZ32) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
     native: { automatic: true },
@@ -56,7 +56,7 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
     autoConnect: true,
     groupsSupport: true,
     createPeerConnection: () => {
-      if (!options.rtc) throw new ReferenceError("RTCPeerConnection is not defined");
+      if (!rtcOn) throw new ReferenceError("RTCPeerConnection is not defined");
       return fakePeerConnection(name);
     },
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
@@ -67,11 +67,24 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
         heard.push(said);
         if (!said.includes("webrtc/1")) setTimeout(startEndpoints, options.endpointAfterMs ?? 0);
       },
+      // `offAfterFailure`: as the engine does (node.ts `edgeWithoutRtc`), an edge whose WebRTC attempt connected nothing
+      // starts again as on an app with no WebRTC, its native endpoints up, for this run of the app.
+      onDirectEvidence: evidence => {
+        if (!options.offAfterFailure || !rtcOn || evidence === "open" || evidence === "closed") return;
+        rtcOn = false;
+        const old = result.link;
+        void old.stop(false).then(() => {
+          result.link = make();
+          result.link.start();
+          started = false;
+          startEndpoints();
+        });
+      },
     },
   });
-  const result: Member = { name, link, states, frames, heard };
-  link.start();
-  if (options.entry === "guest") link.expectPeer();
+  const result: Member = { name, link: make(), states, frames, heard };
+  result.link.start();
+  if (options.entry === "guest") result.link.expectPeer();
   if (!options.rtc) { if (options.endpointAfterMs) setTimeout(startEndpoints, options.endpointAfterMs); else startEndpoints(); }
   return result;
 }
@@ -152,6 +165,27 @@ describe("a group's edge with a member whose app has no WebRTC", () => {
     console.log(`GROUP_EDGE_NATIVE entry, ${host} hosts, endpoints after ${endpointAfterMs / 1000} s: live in ${took / 1000} s`);
     expect(took).toBeLessThan(90_000);
     expect(liveOn(hostSide)).toBe("iroh/1");
+  }, 120_000);
+
+  // Either key order: the side whose attempt failed may be the one that dials, or the one that answered.
+  for (const failing of ["the side that dials", "the side that answered"] as const) it(`an edge whose WebRTC failed on ${failing} goes live over Iroh in seconds, not after the other side's attempt runs out`, async () => {
+    // Offer and answer meet, and one side's connection fails at once (ICE gave up: a VPN, a firewall). That side starts
+    // the edge again with no WebRTC (node.ts `edgeWithoutRtc`), and says so in its packet. The other side still held
+    // its attempt, connecting, and took nothing else until it timed out (30 s): a member let in over slow relays reached
+    // another 32 to 73 s after its welcome (meshSignals.test.ts on CI, 2026-10-06).
+    rtc.blocked = true;
+    if (failing === "the side that dials") rtc.blockedFailsAfterMs = 0; else rtc.answerFailsAfterMs = 0;
+    const group = toBase64Url(randomBytes(16));
+    let [one, two] = [createIdentity(), createIdentity()];
+    const edgeKey = (me: Identity, peer: Identity) => edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32).peerPubKeyZ32;
+    // `one` dials: its link key is the lower.
+    if (edgeKey(two, one) > edgeKey(one, two)) [one, two] = [two, one];
+    const dials = member("dials", group, one, two, { rtc: true, offAfterFailure: true });
+    const answers = member("answers", group, two, one, { rtc: true, offAfterFailure: true });
+    const took = await untilLive(dials, answers, 3 * 60_000);
+    console.log(`GROUP_EDGE_NATIVE WebRTC failed on ${failing}: live in ${took / 1000} s`);
+    expect(took).toBeLessThan(15_000);
+    expect(liveOn(dials)).toBe("iroh/1");
   }, 120_000);
 
   it("two apps with no WebRTC go live over a native transport too", async () => {
