@@ -1,0 +1,695 @@
+{
+  "about": {
+    "pins": "ghostly-store.json with ghostly-store.sig (ghostly-store/1), a listing.json, and the reader's update rule for store indexes and apps",
+    "wisp": "WISP 1200, Stores, Updates and rollback and Test vectors",
+    "test": "packages/core/test/appStore.test.ts (APPS_VECTORS_WRITE=1 writes this file again)",
+    "index": "The exact bytes of ghostly-store.json and ghostly-store.sig, as UTF-8 text; times are Unix seconds and `now` is the reader's clock"
+  },
+  "inputs": {
+    "keys": {
+      "store": {
+        "label": "store",
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho"
+      },
+      "other-store": {
+        "label": "other store",
+        "key": "epdkri1mdk1n5ts4iy8wboozgrn1a9gy7ikqhuzrwesgsg778y8o"
+      },
+      "publisher": {
+        "label": "publisher",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo"
+      },
+      "other-publisher": {
+        "label": "other publisher",
+        "key": "4hobqncczkybog5d7ntdy4ue4i1ygmtcw78u8kj5i5d1c51ni5xy"
+      }
+    },
+    "now": 1790000000
+  },
+  "valid": [
+    {
+      "name": "a curated index with apps, removed and revoked",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"jF1eH6FCTa4XMB7ls77dFrDpTMwseRqDln2F4lPComJ7YXISnQRoFKjldBSyyo-qt47CihwSv8-aVmXRYGHuAw\"}",
+      "heldKey": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+      "read": {
+        "index": {
+          "apps": [
+            {
+              "category": "games",
+              "developer": "Ghostly vectors",
+              "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+              "repo": "https://github.com/ghostly-vectors/chess",
+              "sequence": 2,
+              "submitter": "Ana",
+              "support": "https://github.com/ghostly-vectors/chess/issues",
+              "tagline": "Play chess with a contact",
+              "title": "Chess",
+              "urls": [
+                "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp",
+                "https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp"
+              ]
+            }
+          ],
+          "description": "Apps for the vectors.\nCurated by hand.",
+          "expires": 1792592000,
+          "ghostlyStore": 1,
+          "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+          "kind": "curated",
+          "name": "Vector store",
+          "removed": [
+            {
+              "at": 1789913600,
+              "digest": "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+              "reason": "Malware: forged moves",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess"
+            }
+          ],
+          "revoked": [
+            {
+              "signature": {
+                "alg": "ed25519",
+                "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+                "sig": "zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ"
+              },
+              "statement": {
+                "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+                "digests": [
+                  "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY"
+                ],
+                "ghostlyRevoke": 1,
+                "reason": "Moves could be forged"
+              }
+            }
+          ],
+          "sequence": 3
+        },
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s",
+        "expired": false
+      }
+    },
+    {
+      "name": "an indexed index",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"indexed\",\"name\":\"Vector index\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"9n8Cfea-TI7ttfyzIW5WVh31st_TTqsd6zxI0HMWfEzhVeYAEVF71CuduaBcTzzAl30siWw6GmNWOz--d6QhCQ\"}",
+      "read": {
+        "index": {
+          "apps": [
+            {
+              "category": "games",
+              "developer": "Ghostly vectors",
+              "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+              "repo": "https://github.com/ghostly-vectors/chess",
+              "sequence": 2,
+              "submitter": "Ana",
+              "support": "https://github.com/ghostly-vectors/chess/issues",
+              "tagline": "Play chess with a contact",
+              "title": "Chess",
+              "urls": [
+                "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp",
+                "https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp"
+              ]
+            }
+          ],
+          "expires": 1792592000,
+          "ghostlyStore": 1,
+          "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+          "kind": "indexed",
+          "name": "Vector index",
+          "removed": [
+            {
+              "at": 1789913600,
+              "digest": "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+              "reason": "Malware: forged moves",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess"
+            }
+          ],
+          "revoked": [
+            {
+              "signature": {
+                "alg": "ed25519",
+                "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+                "sig": "zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ"
+              },
+              "statement": {
+                "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+                "digests": [
+                  "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY"
+                ],
+                "ghostlyRevoke": 1,
+                "reason": "Moves could be forged"
+              }
+            }
+          ],
+          "sequence": 3
+        },
+        "digest": "ru0kUypJK1PrIoTjmryLOPs8rkyZSHspF5b4-XAvrh4",
+        "expired": false
+      }
+    },
+    {
+      "name": "an empty index",
+      "index": "{\"apps\":[],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[],\"revoked\":[],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"yF2TRdXt_BiA3O1o3tXOx_754DuFAD1mmfJd7PKEuTq3PhDmwovjkFfdoASf_afKxDgSXPKeLNztEMLwnt4DCw\"}",
+      "read": {
+        "index": {
+          "apps": [],
+          "description": "Apps for the vectors.\nCurated by hand.",
+          "expires": 1792592000,
+          "ghostlyStore": 1,
+          "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+          "kind": "curated",
+          "name": "Vector store",
+          "removed": [],
+          "revoked": [],
+          "sequence": 3
+        },
+        "digest": "nggwO_cqSW6Gc2TvsVes79PHax5Ef49mYe5dvqBt9e4",
+        "expired": false
+      }
+    },
+    {
+      "name": "expires exactly 90 days ahead",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1797776000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"zdvHJMKgrdOJJJay8hCsfEBn4uEzFJ3XLjPMVTKY34tUJEOXtmqQhyqdIsMcwA2wHA3vZCN11m1SRO-N2rqUDQ\"}",
+      "read": {
+        "index": {
+          "apps": [
+            {
+              "category": "games",
+              "developer": "Ghostly vectors",
+              "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+              "repo": "https://github.com/ghostly-vectors/chess",
+              "sequence": 2,
+              "submitter": "Ana",
+              "support": "https://github.com/ghostly-vectors/chess/issues",
+              "tagline": "Play chess with a contact",
+              "title": "Chess",
+              "urls": [
+                "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp",
+                "https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp"
+              ]
+            }
+          ],
+          "description": "Apps for the vectors.\nCurated by hand.",
+          "expires": 1797776000,
+          "ghostlyStore": 1,
+          "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+          "kind": "curated",
+          "name": "Vector store",
+          "removed": [
+            {
+              "at": 1789913600,
+              "digest": "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+              "reason": "Malware: forged moves",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess"
+            }
+          ],
+          "revoked": [
+            {
+              "signature": {
+                "alg": "ed25519",
+                "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+                "sig": "zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ"
+              },
+              "statement": {
+                "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+                "digests": [
+                  "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY"
+                ],
+                "ghostlyRevoke": 1,
+                "reason": "Moves could be forged"
+              }
+            }
+          ],
+          "sequence": 3
+        },
+        "digest": "cfTB3rKT2UwDJTf8dXI_8pQ6JD6TLE58FDk20KA9WpE",
+        "expired": false
+      }
+    },
+    {
+      "name": "past expires: read, and marked expired",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1789999999,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"p32FJBLaj_paUiNfi70R7dp_Pc-vOTQMWind7LDAvIDHM9hN2_fDeNoRz3OQwMwvZssqfBe7OBKtO2HfBvKoBA\"}",
+      "read": {
+        "index": {
+          "apps": [
+            {
+              "category": "games",
+              "developer": "Ghostly vectors",
+              "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+              "repo": "https://github.com/ghostly-vectors/chess",
+              "sequence": 2,
+              "submitter": "Ana",
+              "support": "https://github.com/ghostly-vectors/chess/issues",
+              "tagline": "Play chess with a contact",
+              "title": "Chess",
+              "urls": [
+                "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp",
+                "https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp"
+              ]
+            }
+          ],
+          "description": "Apps for the vectors.\nCurated by hand.",
+          "expires": 1789999999,
+          "ghostlyStore": 1,
+          "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+          "kind": "curated",
+          "name": "Vector store",
+          "removed": [
+            {
+              "at": 1789913600,
+              "digest": "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+              "reason": "Malware: forged moves",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess"
+            }
+          ],
+          "revoked": [
+            {
+              "signature": {
+                "alg": "ed25519",
+                "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+                "sig": "zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ"
+              },
+              "statement": {
+                "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+                "digests": [
+                  "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY"
+                ],
+                "ghostlyRevoke": 1,
+                "reason": "Moves could be forged"
+              }
+            }
+          ],
+          "sequence": 3
+        },
+        "digest": "aQL1mEmPG7BqpMbFSeahisOQ2U8oNV6Thi9Xq4iR6Zg",
+        "expired": true
+      }
+    },
+    {
+      "name": "a listing with only the required fields",
+      "index": "{\"apps\":[{\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"sequence\":1,\"tagline\":\"Chess\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"vCUmRgw843LzijG5GNG1cRPoL-9MMUR8aw-BURV96nMwIiYAlthNzkrqUVv8F2SSiKdi0WCYQlOyQlD-0BhOBA\"}",
+      "read": {
+        "index": {
+          "apps": [
+            {
+              "digest": "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+              "sequence": 1,
+              "tagline": "Chess",
+              "title": "Chess",
+              "urls": [
+                "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+              ]
+            }
+          ],
+          "description": "Apps for the vectors.\nCurated by hand.",
+          "expires": 1792592000,
+          "ghostlyStore": 1,
+          "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+          "kind": "curated",
+          "name": "Vector store",
+          "removed": [
+            {
+              "at": 1789913600,
+              "digest": "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+              "reason": "Malware: forged moves",
+              "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess"
+            }
+          ],
+          "revoked": [
+            {
+              "signature": {
+                "alg": "ed25519",
+                "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+                "sig": "zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ"
+              },
+              "statement": {
+                "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+                "digests": [
+                  "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY"
+                ],
+                "ghostlyRevoke": 1,
+                "reason": "Moves could be forged"
+              }
+            }
+          ],
+          "sequence": 3
+        },
+        "digest": "JhPDV_LEBTsp1Xb6-GBVLCclnwLl_UryVcIBXKkJxwg",
+        "expired": false
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "bytes that are not canonical",
+      "refusal": "not-canonical",
+      "index": "{\n  \"ghostlyStore\": 1,\n  \"key\": \"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\n  \"name\": \"Vector store\",\n  \"description\": \"Apps for the vectors.\\nCurated by hand.\",\n  \"kind\": \"curated\",\n  \"sequence\": 3,\n  \"expires\": 1792592000,\n  \"apps\": [\n    {\n      \"ref\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\n      \"sequence\": 2,\n      \"digest\": \"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\n      \"urls\": [\n        \"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\n        \"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"\n      ],\n      \"title\": \"Chess\",\n      \"tagline\": \"Play chess with a contact\",\n      \"category\": \"games\",\n      \"developer\": \"Ghostly vectors\",\n      \"submitter\": \"Ana\",\n      \"repo\": \"https://github.com/ghostly-vectors/chess\",\n      \"support\": \"https://github.com/ghostly-vectors/chess/issues\"\n    }\n  ],\n  \"removed\": [\n    {\n      \"ref\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\n      \"digest\": \"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\n      \"reason\": \"Malware: forged moves\",\n      \"at\": 1789913600\n    }\n  ],\n  \"revoked\": [\n    {\n      \"statement\": {\n        \"ghostlyRevoke\": 1,\n        \"app\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\n        \"digests\": [\n          \"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"\n        ],\n        \"reason\": \"Moves could be forged\"\n      },\n      \"signature\": {\n        \"alg\": \"ed25519\",\n        \"key\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\n        \"sig\": \"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"\n      }\n    }\n  ]\n}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"jF1eH6FCTa4XMB7ls77dFrDpTMwseRqDln2F4lPComJ7YXISnQRoFKjldBSyyo-qt47CihwSv8-aVmXRYGHuAw\"}"
+    },
+    {
+      "name": "keys out of order",
+      "refusal": "not-canonical",
+      "index": "{\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"name\":\"Vector store\",\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"kind\":\"curated\",\"sequence\":3,\"expires\":1792592000,\"apps\":[{\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"sequence\":2,\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"],\"title\":\"Chess\",\"tagline\":\"Play chess with a contact\",\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"submitter\":\"Ana\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\"}],\"removed\":[{\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"at\":1789913600}],\"revoked\":[{\"statement\":{\"ghostlyRevoke\":1,\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"reason\":\"Moves could be forged\"},\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"}}]}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"jF1eH6FCTa4XMB7ls77dFrDpTMwseRqDln2F4lPComJ7YXISnQRoFKjldBSyyo-qt47CihwSv8-aVmXRYGHuAw\"}"
+    },
+    {
+      "name": "a signature statement that is not canonical",
+      "refusal": "bad-signature-statement",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\n \"alg\": \"ed25519\",\n \"key\": \"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\n \"sig\": \"jF1eH6FCTa4XMB7ls77dFrDpTMwseRqDln2F4lPComJ7YXISnQRoFKjldBSyyo-qt47CihwSv8-aVmXRYGHuAw\"\n}"
+    },
+    {
+      "name": "a bad signature",
+      "refusal": "bad-signature",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector stork\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"jF1eH6FCTa4XMB7ls77dFrDpTMwseRqDln2F4lPComJ7YXISnQRoFKjldBSyyo-qt47CihwSv8-aVmXRYGHuAw\"}"
+    },
+    {
+      "name": "signed by another key, named",
+      "refusal": "signature-key",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"epdkri1mdk1n5ts4iy8wboozgrn1a9gy7ikqhuzrwesgsg778y8o\",\"sig\":\"DCugcCLSn3GuOqHtdNwnNjjlZBNRog4vHC8BoBlpsYcLzFOJf1oMWJh533XHmeaEc5R9YihZfa1mRTkySG1mCA\"}"
+    },
+    {
+      "name": "signed as a manifest",
+      "refusal": "bad-signature",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"7CHFjV8oJsL95ODv_vd49dgsfJDbn8KSdDv0CUdwpjhzqfWsAPasj5DheS4XeHqRLB_4K7ufWL9MCHfR6pF7Ag\"}"
+    },
+    {
+      "name": "another key than the store the reader holds",
+      "refusal": "store-key",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"jF1eH6FCTa4XMB7ls77dFrDpTMwseRqDln2F4lPComJ7YXISnQRoFKjldBSyyo-qt47CihwSv8-aVmXRYGHuAw\"}",
+      "heldKey": "epdkri1mdk1n5ts4iy8wboozgrn1a9gy7ikqhuzrwesgsg778y8o"
+    },
+    {
+      "name": "expires more than 90 days ahead",
+      "refusal": "expires-too-far",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1797776001,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"WukRUbo90j4DqjeDGSDyWAriVs-t4haTN7gyqbe4psBIdAqPP4kSrorX2UjPSujfLf6_i0Yvj5gGM54dk1sNBQ\"}"
+    },
+    {
+      "name": "a jsDelivr URL on a branch",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@main/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"JF7RLhC135j75YMgofUmeLVvgHkPeVLBrDbhMGjuDyxwoAwa7SxSPANbXq9b8PW3cW2GLwUNlS2MRc4LhkGVAQ\"}"
+    },
+    {
+      "name": "a jsDelivr URL on a tag",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@v1.0.0/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"EKGMMHbWb8W66itIkO-b8yE916hbsmQPTFrCtnPEK4nYgR0vqbM-MkIzA1K8N3l2i-3nlk-7T4rdoGmYSSe7Ag\"}"
+    },
+    {
+      "name": "a jsDelivr URL at latest",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@latest/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"k9fbnlkwSKmLNm7KlT__P0jLrKB7nj324cctfFLM8AxhUOrgbWhmHQrl7KgekLwwVJ5HaQUhrc7HAGUKGX2bBg\"}"
+    },
+    {
+      "name": "a jsDelivr URL on a version range",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@1/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"Uxr8vkePpIssrxGQ_gtuEoz3yn9LM0fe-ytqd50QktDEn-_zHSE4CKg0-S2T3eLNFUSoSgmXO7RG6OPMPVksBg\"}"
+    },
+    {
+      "name": "a jsDelivr URL with a short commit",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"sZgCm74T-ZPmKbxNYTKhRt2ZiGR-81p_ycmzSdJcwGwEXv9sdho26thGhUXUvjUs32txtSo8oRHHxSfmO6wwBw\"}"
+    },
+    {
+      "name": "a URL over http",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"http://example.org/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"kfCv1Lq0InO52kIXfwgl4jeF08Nk6nnv-Yf_eW5aQ_lO7dGI2u5gxgeM62pZ4jXY4l2Z-t4hBIw12MUtNCUJBA\"}"
+    },
+    {
+      "name": "five URLs",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"ZIOrM4W2TY0Pdnell-cO0xm6mrM6NPENgBZMhFAqewo_bmlde5A8xmX2Y5PZ2PL3mN2H1i-H-19fip8MfVBXCA\"}"
+    },
+    {
+      "name": "an unknown key in the index",
+      "refusal": "unknown-key",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"promoted\":[],\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"wLSHkF57pMHUWjszUILJmQQyJ0px4jgGcgC4UZ6lBhK8Pm2F0rWtySW9PIXoBHwIsFW4Wt6RN5MxtxV9ZpbUBA\"}"
+    },
+    {
+      "name": "an unknown key in a listing",
+      "refusal": "unknown-key",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"icon\":\"https://example.org/icon.png\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"sPVZg8UZYMka1m4s7B0g-TEwkcc83eGQKedsgfbjJc4lDE36H4-9uPHIyvniztGJX0hiaYFui1re9mtEKB0rAw\"}"
+    },
+    {
+      "name": "no expires",
+      "refusal": "missing-key",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"Cb0gDZTPzy-StTxem2YLKecdeY-JF4ObtbxL3xT8o14YP_0KPevH5SArSzNpErNFefxff_zxttZfrBwldakTAg\"}"
+    },
+    {
+      "name": "format version 2",
+      "refusal": "unsupported-format",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":2,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"9_Iiwb7DLjT6VjnezfhXNglr9bx8zg5GXD-2FnSP0ofY4yPyXsqBcZcxOexotvAGE0KjGhG_ulTsDKOxsX34Cw\"}"
+    },
+    {
+      "name": "another kind",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"official\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"MnTqwBsZV9P6EVg1kvcnr4uUWYrBV9YBMHiFzLRKZPiRut5TBJK84rFV0msfXD9o5JZx7QYBQVobTXL__cSDCw\"}"
+    },
+    {
+      "name": "sequence 0",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":0}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"_pLPiJiqyVd-4qZwK75LId3bRkCYkROshpEcoRyUR4HU6iq8a7eEH3xFrHycC_y-0o9CNyCZM7W2JHytdq7nBw\"}"
+    },
+    {
+      "name": "a listing whose ref is not one",
+      "refusal": "bad-field",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"lUP1hrlXZHZpFppjMNwQmD3wXeYxbD3jJ4J0XRJcSR3x0A06BGu6GHXuDdSAErlqpgaBCtF56I2J-mbCGIszAQ\"}"
+    },
+    {
+      "name": "one app listed twice",
+      "refusal": "duplicate-app",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]},{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":1,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"LxmZpPlH6ryViPAM5v-FrmwPYrfRYVpGxpBUtB7P-erd1_HRlIzkndg_NidL-MWUYmAwU6lNDwP9TA3-yXRyBA\"}"
+    },
+    {
+      "name": "a removal without a reason",
+      "refusal": "missing-key",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1790000000,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Moves could be forged\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"fTQz8hfLLCyN_X0KQpE-v-woygeiKlr9BTv1MQ6ThwygiDBzt3kEuoDWB3eKG7R26IjX8GhvAKgqseEnY7HOBQ\"}"
+    },
+    {
+      "name": "a revocation that does not verify",
+      "refusal": "bad-revocation",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"zTmG47TPjHTVYnJjQ7JaGkWfirdxXEN0Liatb6rId8wXcIO7NsUNbMA15KoLL3BxYbg38aoPKkjOv7P5HncWBQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\"],\"ghostlyRevoke\":1,\"reason\":\"Changed by the store\"}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"hGZTr76at_AA4ClgdmRB_eXsLMoSAcIYTG7cDH96TLHHb-fyzSvOHD6Ee5LhpAUywf1j0dsVOBE8eMN5l4svDA\"}"
+    },
+    {
+      "name": "a revocation signed by the store",
+      "refusal": "bad-revocation",
+      "index": "{\"apps\":[{\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"sequence\":2,\"submitter\":\"Ana\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"]}],\"description\":\"Apps for the vectors.\\nCurated by hand.\",\"expires\":1792592000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vector store\",\"removed\":[{\"at\":1789913600,\"digest\":\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"reason\":\"Malware: forged moves\",\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\"}],\"revoked\":[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"xQ2a1lSY92AVF925coGoNqhdGNxVP-OP2Ye5K4r7igMcM8TBiL0IPoZHnSgIiCdakxJXIKSyjMtMlqNP6by0DA\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"ghostlyRevoke\":1,\"upTo\":1}}],\"sequence\":3}",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"E5Bhdx0rctcdElEy_0YlZxQeGrA55HharkH8PjMmDl_eBMrPL_NvzNk09qZ6WG4wqQW_sq1biJ730blTRx7ABA\"}"
+    },
+    {
+      "name": "bytes that are not JSON",
+      "refusal": "not-json",
+      "index": "ghostly-store",
+      "sig": "{\"alg\":\"ed25519\",\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"sig\":\"jF1eH6FCTa4XMB7ls77dFrDpTMwseRqDln2F4lPComJ7YXISnQRoFKjldBSyyo-qt47CihwSv8-aVmXRYGHuAw\"}"
+    }
+  ],
+  "listings": {
+    "valid": [
+      {
+        "name": "a listing.json",
+        "json": "{\n  \"ref\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\n  \"sequence\": 2,\n  \"digest\": \"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\n  \"urls\": [\n    \"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\n    \"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"\n  ],\n  \"title\": \"Chess\",\n  \"tagline\": \"Play chess with a contact\",\n  \"category\": \"games\",\n  \"developer\": \"Ghostly vectors\",\n  \"submitter\": \"Ana\",\n  \"repo\": \"https://github.com/ghostly-vectors/chess\",\n  \"support\": \"https://github.com/ghostly-vectors/chess/issues\"\n}"
+      }
+    ],
+    "invalid": [
+      {
+        "name": "a listing with a store's key",
+        "refusal": "unknown-key",
+        "json": "{\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"sequence\":2,\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"urls\":[\"https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp\",\"https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp\"],\"title\":\"Chess\",\"tagline\":\"Play chess with a contact\",\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"submitter\":\"Ana\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\",\"expires\":1}"
+      },
+      {
+        "name": "a listing without urls",
+        "refusal": "missing-key",
+        "json": "{\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"sequence\":2,\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"title\":\"Chess\",\"tagline\":\"Play chess with a contact\",\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"submitter\":\"Ana\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\"}"
+      },
+      {
+        "name": "a listing with a jsDelivr branch",
+        "refusal": "bad-field",
+        "json": "{\"ref\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"sequence\":2,\"digest\":\"ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4\",\"urls\":[\"https://cdn.jsdelivr.net/gh/o/r@main/app.ghostlyapp\"],\"title\":\"Chess\",\"tagline\":\"Play chess with a contact\",\"category\":\"games\",\"developer\":\"Ghostly vectors\",\"submitter\":\"Ana\",\"repo\":\"https://github.com/ghostly-vectors/chess\",\"support\":\"https://github.com/ghostly-vectors/chess/issues\"}"
+      }
+    ]
+  },
+  "storeDecisions": [
+    {
+      "name": "none held",
+      "held": null,
+      "read": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 3,
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s"
+      },
+      "decision": "new"
+    },
+    {
+      "name": "a higher sequence",
+      "held": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 3,
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s"
+      },
+      "read": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 4,
+        "digest": "nggwO_cqSW6Gc2TvsVes79PHax5Ef49mYe5dvqBt9e4"
+      },
+      "decision": "update"
+    },
+    {
+      "name": "the same index",
+      "held": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 3,
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s"
+      },
+      "read": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 3,
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s"
+      },
+      "decision": "same"
+    },
+    {
+      "name": "a lower sequence than the one held",
+      "held": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 3,
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s"
+      },
+      "read": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 2,
+        "digest": "nggwO_cqSW6Gc2TvsVes79PHax5Ef49mYe5dvqBt9e4"
+      },
+      "decision": "rollback"
+    },
+    {
+      "name": "the same sequence, other bytes",
+      "held": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 3,
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s"
+      },
+      "read": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 3,
+        "digest": "nggwO_cqSW6Gc2TvsVes79PHax5Ef49mYe5dvqBt9e4"
+      },
+      "decision": "equivocation"
+    },
+    {
+      "name": "another store's key",
+      "held": {
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "sequence": 3,
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s"
+      },
+      "read": {
+        "key": "epdkri1mdk1n5ts4iy8wboozgrn1a9gy7ikqhuzrwesgsg778y8o",
+        "sequence": 9,
+        "digest": "Q-hzziu_w2B545QAjSWfg4v8Rx7NmYuCsopnaCH-n9s"
+      },
+      "decision": "other-key"
+    }
+  ],
+  "appDecisions": [
+    {
+      "name": "a higher sequence",
+      "installed": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 1,
+        "digest": "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY"
+      },
+      "candidate": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 2,
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4"
+      },
+      "decision": "update"
+    },
+    {
+      "name": "the version installed",
+      "installed": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 2,
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4"
+      },
+      "candidate": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 2,
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4"
+      },
+      "decision": "same"
+    },
+    {
+      "name": "a lower sequence",
+      "installed": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 2,
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4"
+      },
+      "candidate": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 1,
+        "digest": "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY"
+      },
+      "decision": "rollback"
+    },
+    {
+      "name": "two different versions 2",
+      "installed": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 2,
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4"
+      },
+      "candidate": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 2,
+        "digest": "Wy2PYZu_8A_mUXcHf3LG5ny2K7R439uP-5lNYABu0vQ"
+      },
+      "decision": "equivocation"
+    },
+    {
+      "name": "the same name under another key",
+      "installed": {
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 2,
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4"
+      },
+      "candidate": {
+        "ref": "4hobqncczkybog5d7ntdy4ue4i1ygmtcw78u8kj5i5d1c51ni5xy/chess",
+        "sequence": 9,
+        "digest": "Wy2PYZu_8A_mUXcHf3LG5ny2K7R439uP-5lNYABu0vQ"
+      },
+      "decision": "other-app"
+    }
+  ]
+}

@@ -1,0 +1,514 @@
+{
+  "about": {
+    "pins": "Signing under each phase 1 prefix (ghostly-app/1, ghostly-store/1, ghostly-revoke/1) and the ghostly-revoke/1 revocations",
+    "wisp": "WISP 1200, Signatures, Publisher keys and Test vectors",
+    "test": "packages/core/test/appStatements.test.ts (APPS_VECTORS_WRITE=1 writes this file again)",
+    "signedBytes": "The prefix, a zero byte, then the SHA-256 of the object's canonical JSON, in hex: what Ed25519 signs"
+  },
+  "inputs": {
+    "keys": {
+      "publisher": {
+        "label": "publisher",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo"
+      },
+      "other-publisher": {
+        "label": "other publisher",
+        "key": "4hobqncczkybog5d7ntdy4ue4i1ygmtcw78u8kj5i5d1c51ni5xy"
+      },
+      "store": {
+        "label": "store",
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho"
+      }
+    },
+    "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess"
+  },
+  "valid": {
+    "statements": [
+      {
+        "name": "a manifest, ghostly-app/1",
+        "prefix": "ghostly-app/1",
+        "json": "{\"entry\":\"index.html\",\"files\":[{\"path\":\"index.html\",\"sha256\":\"q_ogkQHmbPiWCqieyITMW_vgqgYrtsiZ6zZWXQtMpI0\",\"size\":67}],\"ghostlyApp\":1,\"kind\":\"mini-app\",\"license\":\"MIT\",\"name\":\"chess\",\"permissions\":[\"chat\"],\"publisher\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"runtime\":{\"clients\":[\"web\",\"desktop\"],\"host\":\">=1.2\"},\"sequence\":1,\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"version\":\"1.0.0\"}",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+        "signedBytes": "67686f73746c792d6170702f3100720fd495fe5bdb04bda73dbc3e9d0344413092ba069ae75fe476e5629d046ab6",
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "LLjVkrGT9TpDF7a0e9JtzCbvm-jPDLJq_a8WGk1V9wevCylcdNu-9W2r6ne5cpyzWdqooZZN5lv40CkQSdV8AQ"
+        }
+      },
+      {
+        "name": "a store index, ghostly-store/1",
+        "prefix": "ghostly-store/1",
+        "json": "{\"apps\":[],\"expires\":1790000000,\"ghostlyStore\":1,\"key\":\"t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho\",\"kind\":\"curated\",\"name\":\"Vectors\",\"removed\":[],\"revoked\":[],\"sequence\":1}",
+        "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+        "signedBytes": "67686f73746c792d73746f72652f31005c8a88fde0e7b2ca3cfe4aa90007c36f9b95dcf5febee30967fc211ab44e78c6",
+        "signature": {
+          "alg": "ed25519",
+          "key": "t5qr5mxu7eo31njs63o87umxf8i7un4d11iqn4k7isxfrb76knho",
+          "sig": "9PkB9ssHU-O7DaoIpiCIuY5MK8CFgzx_te0nv9shLOx5H4SMM_CU2HSPqXEGb_xyZRr5Mvwdr-cO4mrbqu6sAA"
+        }
+      },
+      {
+        "name": "a revocation by digests, ghostly-revoke/1",
+        "prefix": "ghostly-revoke/1",
+        "json": "{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk\"],\"ghostlyRevoke\":1,\"reason\":\"Leaked a test key\"}",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+        "signedBytes": "67686f73746c792d7265766f6b652f3100a08bfea5ce8cc143466c079b53eeb17080c1561b355a32a2ec021c1013db29cc",
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw"
+        }
+      },
+      {
+        "name": "a revocation up to a sequence, ghostly-revoke/1",
+        "prefix": "ghostly-revoke/1",
+        "json": "{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"ghostlyRevoke\":1,\"upTo\":2}",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+        "signedBytes": "67686f73746c792d7265766f6b652f310056c7f634099f8f549dce01e70070d7ef05f00d605754d960d4ca214b7244e8ea",
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "kbK247cMxes620q2R9k44h7EshaxcbIcI5RAkvSLHhRGIRhGm5FhNLkjb4Zj4ukFPyOegz-hn65XFH7Kc1UcAw"
+        }
+      }
+    ],
+    "revocations": [
+      {
+        "name": "by digests, with a reason",
+        "value": {
+          "statement": {
+            "ghostlyRevoke": 1,
+            "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+            "digests": [
+              "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+              "DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk"
+            ],
+            "reason": "Leaked a test key"
+          },
+          "signature": {
+            "alg": "ed25519",
+            "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+            "sig": "hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw"
+          }
+        }
+      },
+      {
+        "name": "every version up to sequence 2",
+        "value": {
+          "statement": {
+            "ghostlyRevoke": 1,
+            "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+            "upTo": 2
+          },
+          "signature": {
+            "alg": "ed25519",
+            "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+            "sig": "kbK247cMxes620q2R9k44h7EshaxcbIcI5RAkvSLHhRGIRhGm5FhNLkjb4Zj4ukFPyOegz-hn65XFH7Kc1UcAw"
+          }
+        }
+      }
+    ],
+    "file": {
+      "json": "[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk\"],\"ghostlyRevoke\":1,\"reason\":\"Leaked a test key\"}},{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"kbK247cMxes620q2R9k44h7EshaxcbIcI5RAkvSLHhRGIRhGm5FhNLkjb4Zj4ukFPyOegz-hn65XFH7Kc1UcAw\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"ghostlyRevoke\":1,\"upTo\":2}}]",
+      "count": 2
+    }
+  },
+  "invalid": [
+    {
+      "name": "a revocation checked as a manifest",
+      "check": "statement",
+      "refusal": "bad-signature",
+      "prefix": "ghostly-app/1",
+      "json": "{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk\"],\"ghostlyRevoke\":1,\"reason\":\"Leaked a test key\"}",
+      "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+      "signature": {
+        "alg": "ed25519",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+        "sig": "hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw"
+      }
+    },
+    {
+      "name": "a manifest checked as a store index",
+      "check": "statement",
+      "refusal": "bad-signature",
+      "prefix": "ghostly-store/1",
+      "json": "{\"entry\":\"index.html\",\"files\":[{\"path\":\"index.html\",\"sha256\":\"q_ogkQHmbPiWCqieyITMW_vgqgYrtsiZ6zZWXQtMpI0\",\"size\":67}],\"ghostlyApp\":1,\"kind\":\"mini-app\",\"license\":\"MIT\",\"name\":\"chess\",\"permissions\":[\"chat\"],\"publisher\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"runtime\":{\"clients\":[\"web\",\"desktop\"],\"host\":\">=1.2\"},\"sequence\":1,\"tagline\":\"Play chess with a contact\",\"title\":\"Chess\",\"version\":\"1.0.0\"}",
+      "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+      "signature": {
+        "alg": "ed25519",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+        "sig": "LLjVkrGT9TpDF7a0e9JtzCbvm-jPDLJq_a8WGk1V9wevCylcdNu-9W2r6ne5cpyzWdqooZZN5lv40CkQSdV8AQ"
+      }
+    },
+    {
+      "name": "a statement that is not canonical",
+      "check": "statement",
+      "refusal": "not-canonical",
+      "prefix": "ghostly-revoke/1",
+      "json": "{\"ghostlyRevoke\":1,\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk\"],\"reason\":\"Leaked a test key\"}",
+      "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+      "signature": {
+        "alg": "ed25519",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+        "sig": "hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw"
+      }
+    },
+    {
+      "name": "a statement checked under another key",
+      "check": "statement",
+      "refusal": "signature-key",
+      "prefix": "ghostly-revoke/1",
+      "json": "{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk\"],\"ghostlyRevoke\":1,\"reason\":\"Leaked a test key\"}",
+      "key": "4hobqncczkybog5d7ntdy4ue4i1ygmtcw78u8kj5i5d1c51ni5xy",
+      "signature": {
+        "alg": "ed25519",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+        "sig": "hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw"
+      }
+    },
+    {
+      "name": "both digests and upTo",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "digests": [
+            "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+            "DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk"
+          ],
+          "reason": "Leaked a test key",
+          "upTo": 2
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "eNmTZVTYXZ73I9otDXxVkgdCE6sz8o7F0NpFA7uzAoi7ic3X5pBIHeGl2n47k9qO3X4WQVFUGZIMztwF1VpNBg"
+        }
+      }
+    },
+    {
+      "name": "neither digests nor upTo",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess"
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "M0hoVIkezPpmNBTCGBoZAIi3UG1cei5XeBRxtE40YBEA5GtpghvsyKtvWqbua06u0EhhEdNJNvi-o0bAeUs0DQ"
+        }
+      }
+    },
+    {
+      "name": "no digest",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "digests": []
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "7Plz9SD4Zv5n0JOgl9QQ_pMd-D_1I6X1GJ5-urTTXZLoXtD9VorndCszhfoPDIKOdH0aUl_bE0msBewJyt7oAw"
+        }
+      }
+    },
+    {
+      "name": "a digest twice",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "digests": [
+            "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY",
+            "cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY"
+          ]
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "f0dbNEG43_UjmdvXC5VyLIVZda15Q9NF9RWFVLLmDM7PrUwZY-7zkddGDyxlfkf-RgBLrh94PKuHqPQDXC3ECw"
+        }
+      }
+    },
+    {
+      "name": "65 digests",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "digests": [
+            "STgSJ487CnqvQkMz5cCB-2H9InfaHp9GGd5Wp90qpro",
+            "sZ-O2uLubCJbcniyicKCOrmsz6IlxdZ8S-8nC4jqVfA",
+            "9HYaoCPDY53DcaIzbuNRSrYja60oxaDr8uUvtuQgMNE",
+            "eRytjDqO4vCGnFdeJ17uNHrRqbv9bGsAx6yqDVLtflI",
+            "Ri4rQtYBCQ4Bf-iz_e1tZy8gtSdJycX3ttuvIbDdp4k",
+            "SeogF2jlX9pVYjLkQOFL-aoc2hlGyDNWP5kVH6L7Axg",
+            "OAcER1_Re5TuIkLKJ2LjXcc4g9GzCHYceNrzaDTwmUM",
+            "Z8pvHFPtSlcR1URx4A01IEY_PLGIM15yUkNMRKJKpaE",
+            "OOyxJNk-Rei8xcCVmXLBDviPEldRX_hVGpl4hEqse1k",
+            "jG7RjkvQxZ4Vh4_-B9-aZDeAkb2MbTRDBz0lLZlbISU",
+            "HQTY3FzbhiT8VdcWl5AjutrnMhYsmRzAC2HpI4wSucw",
+            "FXBZy1x7E8gYQXz2ItWr62lwwEcavZ2BGV6T6-xnk5I",
+            "XTyeYgLxEfN1jaHFaRQ2nmF9kitKYguCPHlzSZEk1Yg",
+            "az0D4Yz-xzAdolFnTS1ehm_bXaTmAVP2u4ZNY-ee0iI",
+            "RkCk4Fpagl5pDMRRVE82LAoRxCsEk53k0wsNXLmjrvU",
+            "bXQg_L2Kwi_9N0joJe55O77-aABQs1CIfRsj9f4Q7HA",
+            "PuU6oSQ2hic-fgNaQt4wO5F5ohQSYXn6CuRzY5DfFvc",
+            "Uw9URFNfTVvUQhqZb8ZakF-5xsjkIf55FYFdlHgJogE",
+            "FWGIutAOkJ-umR-dyKAcohl3WHwYQt8371HALfE4JLk",
+            "rx4vtx1ws9pguovDwlBmPtouU4DzlX_ixnrE8tnNlKU",
+            "Up8H7w8HN1WMOlT94CMUkHjcZwOdWpY6LxSdTAW_XUM",
+            "Apz-295xy4BLXQzMNXSgr_hoL1awaVniw9dLcgXB_Y0",
+            "V8YPU2EoequrBKJvWSAPlxnICuk2N2QBbNkNTYJ_e2s",
+            "HCkJPvyrE7YTrlWUJ8UQpk65weSbSBqmShzvnz_WIRs",
+            "rr_ODivJ75KVqtuu-bkm8zvVf01ob1TLnKfoIkyZBOw",
+            "vpvAQkc3nKxvPNgXXYkxVMbUFfj-J-0qMu3VX3g0YNw",
+            "s-1y7Pb3-pyor-4sEBmO-H4zffbCF6v_kplYNH1HQ18",
+            "toAi6ygp2A2fAor4tOM41JUOnt-WivVSOzdMep4EqEk",
+            "rmWGz3ZrJpONb2D8lmIuXO8qTXipQMYj7dAdUvB7Blk",
+            "NhcoMd0-Y2c9mGOleNFyqsp-MU6ClazpzeA7W51O8LE",
+            "cjh4xcxlC7-RMN-QJ7mohdS3_Uo_z4LwQaJNZ_c4Gbc",
+            "UpPWCA9lZpHDWifhfHCa48E4JSMb2PPqYTgPT6soNeA",
+            "_Cue9mMBvi05gp5j9xFhUszI2s_tRNo1p4O1nT_-cQ0",
+            "Nm5mJcHOzy-aC37upZ6aH0JwHSKy9uMKBirZ-xiVQwY",
+            "EErPrSLrXce4M-iU_2YnCkXrEOdvgQMgegGi6hGWMRs",
+            "pXIC6JdqoDd1XezmlWHsSabWJGWyPZQMb2Wnyip5vWk",
+            "DaS5PzLa0CfF_yjiCsv8_flCxOLhFzyWaAZjJ8hwKlM",
+            "Z3eojVM-8BCn5SZoiPqSsJj-g0BtHKGMB2EjnYz-cI0",
+            "1lygDFCiG8kquwlwdHqgWV3-ciXfynYfAc6rO9-1n3o",
+            "i8oSFuVN6wcs-T_KGW3tur1DCzWUiUyGgl7Jwre5Y00",
+            "uOWWjryM6twe3lrMaKsMflzvXX8Bi4HNqZLOsz2lTes",
+            "pqMKnzd51r25uvXBMtYB987Dog6C9NL4pZy3obbplDA",
+            "iYeFw82ro9mJ51u_6Wm5uv5Glh8M4FsBRRTucObuZcU",
+            "fP-IC3iQ_bcMyNHjiRg-7VUJVvMfw95mUo_N4x4Qm6c",
+            "7v8IOO14W2ZFaOX0VbMc859fEdxXbi_VHpnQZs1iiGY",
+            "hQ-sBnJWVdlOqMJ-0i0mLgXaNfZvKCIZg_DlzNMLIaw",
+            "e-P1Z2APoP4jWco7wxIfEN4GScH0rTrirRGggWP1Asc",
+            "VsxYBruIPLtQGWTr11Gj7OJS1y3sWKyQP_eenDxsjos",
+            "M5-bazwiWdNJ-30AiQMf3syM222sleoW3UJjNE_fmHo",
+            "KEfoSY3QvJtt4SZA3KRYCaGvnQdAFo-rPa1Xqfaiipo",
+            "IzGO0nftkLus_U8utqOb8sWiXk7UQyVrMh1X-Uj-xBU",
+            "znhR2ytSVEzci5MDfz_abFcMjqpEKYd24TPer7P7h_I",
+            "4dkbyulzixUUyDx7pdazY_fI4RjHN-tAL5o7WMkZm4o",
+            "CTNDYNp5VWRYNhFE0NSs0VEj7-D8Xx5V5DFJ3RPICSs",
+            "IETZl6h4f3c4q4z6Bc2I6otWsoECDHcqkxBQ8gGawwI",
+            "EYPbakxvULVFtV3EnSV7r3vwsTfNOZBQOozACGVVjrM",
+            "fNKPhctgs-h7-OnjeuGPwGQXY-o67nVu-TWo-fm2KgQ",
+            "NHKa0bx6EE2t0qc_BhvRJMZiK0cnM2sdIqbVvYou6DE",
+            "wy1K-hDA2u6jshH6V5EN0Dmc9NI5DtB95DiaUmbdrjs",
+            "xib7ZyKgY8ZjjGCnCNAEH2bsqN0A0RxPX6VcYQhU9v8",
+            "TQkW6Ud7gNQk7EJnB4NUjpsERP3hzGaLxlmNhW8BhtU",
+            "NzOj1-uo8Tz9YFRzA01I7mCB_KMGshJQL5Kf6CYQ5_Q",
+            "zHCdczzvv0eB5OQL7YLttmDFfn0TyLnC7bPnZaDI5es",
+            "pMRawQlposVWcsEvxN3FNYKuu-YCcIBk3Lr9ug9xZvI",
+            "ubJEo7b-j508tKVhy3d6eiSZrEYxjyE44BiFyv_cm3g"
+          ]
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "lvXZwjAO-uwILoKNV5_LPoUQmOTeyeZuAc6HE7YF0VEMkISaunRIN2HWc097ycGTaDLESKG7jx-vjN3LRRPBAQ"
+        }
+      }
+    },
+    {
+      "name": "upTo 0",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 0
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "8drN4itEC3Wb2EdMIbjil4DF8CHs3ORzxBflnfyavvhOnI374Ja4uW6jEG3hRX6PmF5L1E58eyELoXybJaslBw"
+        }
+      }
+    },
+    {
+      "name": "a reason of two lines",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 2,
+          "reason": "Leaked\nkey"
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "gNlNG-ihTu_aKxMIupczZ2fgmirMuGst3Bno5OaUGkjaE-gn7r-D7rjVa3V7TMUkySMGdZ--1F4lrGM_bQCuAw"
+        }
+      }
+    },
+    {
+      "name": "an unknown key",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 2,
+          "at": 1
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "nCMVaZjkOHl5dQWEl5ZgENlJqnQu58UrE4KT027CW5SonxGmLQMz5SY9uU6ERvyR95FJ4H3-Cpn90XN8DO3QBA"
+        }
+      }
+    },
+    {
+      "name": "format version 2",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 2,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 2
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "UNASFlwKkukIJuRlKfy7jDiFSRff2Wi6QC3kBx597mjeQNaS6JO94emRrqMujjvKxhNSL_21kznSxpbAE3FoDQ"
+        }
+      }
+    },
+    {
+      "name": "a reference that is not one",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "chess",
+          "upTo": 2
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "Fssk4p0Dfwh4RCmj1RL-l5naTo3VwMhhG2SceLbcrsF_jCRunFsfK6fHNqO3nYkgAtYpCH0frMzNvxN6pLwpAw"
+        }
+      }
+    },
+    {
+      "name": "signed by another key, named",
+      "check": "revocation",
+      "refusal": "signature-key",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 2
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "4hobqncczkybog5d7ntdy4ue4i1ygmtcw78u8kj5i5d1c51ni5xy",
+          "sig": "o0yWWfsOx1Jfv8JS171WHJxZvLEikXBUjIG2lNrHraflzeyeQxnIB61fc0WuQ-b3K4MrmecdAAe7B3GsTaNVCQ"
+        }
+      }
+    },
+    {
+      "name": "signed by another key, under the publisher's name",
+      "check": "revocation",
+      "refusal": "bad-signature",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 2
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "o0yWWfsOx1Jfv8JS171WHJxZvLEikXBUjIG2lNrHraflzeyeQxnIB61fc0WuQ-b3K4MrmecdAAe7B3GsTaNVCQ"
+        }
+      }
+    },
+    {
+      "name": "signed as a manifest",
+      "check": "revocation",
+      "refusal": "bad-signature",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 2
+        },
+        "signature": {
+          "alg": "ed25519",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "gTPB2U7wZRYNOR_n800QqtI4a_4ms9tq-2s5dAlA-Y8fAV6f7Qim5lmfAzKQIePPIuG9K7DO14uEzQRddEKQBw"
+        }
+      }
+    },
+    {
+      "name": "a signature statement with another algorithm",
+      "check": "revocation",
+      "refusal": "bad-signature-statement",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 2
+        },
+        "signature": {
+          "alg": "ed448",
+          "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo",
+          "sig": "kbK247cMxes620q2R9k44h7EshaxcbIcI5RAkvSLHhRGIRhGm5FhNLkjb4Zj4ukFPyOegz-hn65XFH7Kc1UcAw"
+        }
+      }
+    },
+    {
+      "name": "no signature",
+      "check": "revocation",
+      "refusal": "bad-revocation",
+      "value": {
+        "statement": {
+          "ghostlyRevoke": 1,
+          "app": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+          "upTo": 2
+        }
+      }
+    },
+    {
+      "name": "a ghostly-revoke.json that is not canonical",
+      "check": "revocations-file",
+      "refusal": "not-canonical",
+      "json": "[\n  {\n    \"statement\": {\n      \"ghostlyRevoke\": 1,\n      \"app\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\n      \"digests\": [\n        \"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\n        \"DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk\"\n      ],\n      \"reason\": \"Leaked a test key\"\n    },\n    \"signature\": {\n      \"alg\": \"ed25519\",\n      \"key\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\n      \"sig\": \"hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw\"\n    }\n  },\n  {\n    \"statement\": {\n      \"ghostlyRevoke\": 1,\n      \"app\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\n      \"upTo\": 2\n    },\n    \"signature\": {\n      \"alg\": \"ed25519\",\n      \"key\": \"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\n      \"sig\": \"kbK247cMxes620q2R9k44h7EshaxcbIcI5RAkvSLHhRGIRhGm5FhNLkjb4Zj4ukFPyOegz-hn65XFH7Kc1UcAw\"\n    }\n  }\n]"
+    },
+    {
+      "name": "a ghostly-revoke.json that is not a list",
+      "check": "revocations-file",
+      "refusal": "bad-revocation",
+      "json": "{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk\"],\"ghostlyRevoke\":1,\"reason\":\"Leaked a test key\"}}"
+    },
+    {
+      "name": "a ghostly-revoke.json with one bad entry",
+      "check": "revocations-file",
+      "refusal": "signature-key",
+      "json": "[{\"signature\":{\"alg\":\"ed25519\",\"key\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo\",\"sig\":\"hU1Ef65JCyB2XLClx4duPtbRGPCUUYZ2ws6PFfZWV_-JBpRdY5wImOZb5SrdyNNsD9HKMI4egaH0l_9FS1y4Bw\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"digests\":[\"cg_Ulf5b2wS9pz28Pp0DREEwkroGmudf5HblYp0EarY\",\"DGLMfEiixwOwn-olG3gdNTxnRdeDHv8eDXCCVm5-zNk\"],\"ghostlyRevoke\":1,\"reason\":\"Leaked a test key\"}},{\"signature\":{\"alg\":\"ed25519\",\"key\":\"4hobqncczkybog5d7ntdy4ue4i1ygmtcw78u8kj5i5d1c51ni5xy\",\"sig\":\"o0yWWfsOx1Jfv8JS171WHJxZvLEikXBUjIG2lNrHraflzeyeQxnIB61fc0WuQ-b3K4MrmecdAAe7B3GsTaNVCQ\"},\"statement\":{\"app\":\"yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess\",\"ghostlyRevoke\":1,\"upTo\":2}}]"
+    }
+  ]
+}

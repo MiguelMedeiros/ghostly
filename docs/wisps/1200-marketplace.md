@@ -201,20 +201,22 @@ UTF-8 JSON. Exact keys; an unknown key is refused, so a later version raises `gh
 | `ghostlyApp` | Yes | Format version: `1` |
 | `publisher` | Yes | The publisher key: Ed25519, 32 bytes, z-base32 |
 | `name` | Yes | `^[a-z][a-z0-9-]{0,31}$`, unique per publisher |
-| `version` | Yes | Semantic version, shown to people |
-| `sequence` | Yes | An integer that rises with every version. Rollback protection compares it, never `version`. The CLI raises it by itself |
+| `version` | Yes | Semantic version ([SemVer 2.0.0](https://semver.org/)), at most 64 characters, shown to people |
+| `sequence` | Yes | An integer from 1 to 2^53 - 1 that rises with every version. Rollback protection compares it, never `version`. The CLI raises it by itself |
 | `kind` | Yes | `mini-app` in phase 1 |
-| `title`, `tagline`, `description` | Yes, yes, no | 40, 80 and 2000 characters at most |
-| `entry` | Yes | The entry file, usually `index.html` |
-| `permissions` | Yes, may be empty | [Permissions](#permissions) |
-| `runtime` | Yes | `{"host": ">=1.2", "clients": ["web", "desktop"]}`. The clients are `web`, `desktop` and, once it runs apps, `extension` |
-| `license` | Yes | An SPDX expression, or `proprietary` |
-| `sources` | No | HTTPS URLs where newer bundles of this app are published, in order (for GitHub, the `raw.githubusercontent.com/<owner>/<repo>/HEAD/app.ghostlyapp` URL) |
-| `proofs` | No | Public proofs linking the publisher key to an identity people know ([Publisher identity](#publisher-identity)) |
-| `homepage`, `support`, `releaseNotes` | No | Two HTTPS URLs and 500 characters |
-| `files` | Yes | Every file: `{"path", "size", "sha256"}`, sorted by path, SHA-256 in base64url |
+| `title`, `tagline`, `description` | Yes, yes, no | 40, 80 and 2000 characters at most (Unicode code points). Title and tagline are one line of at least one character; the description may hold line feeds. No other control character in any |
+| `entry` | Yes | The entry file, usually `index.html`: a path of `files` ending in `.html` |
+| `permissions` | Yes, may be empty | [Permissions](#permissions): in phase 1 only `chat` and `name`, each at most once, in any order |
+| `runtime` | Yes | `{"host": ">=1.2", "clients": ["web", "desktop"]}`, exactly these two keys. `host` is `>=MAJOR.MINOR` or `>=MAJOR.MINOR.PATCH`. The clients, at least one and each once, are `web`, `desktop` and, once it runs apps, `extension` |
+| `license` | Yes | An SPDX expression (identifiers joined by `AND` and `OR`, `WITH` an exception, parentheses), or `proprietary`; at most 128 characters |
+| `sources` | No | At most 8 HTTPS URLs where newer bundles of this app are published, in order (for GitHub, the `raw.githubusercontent.com/<owner>/<repo>/HEAD/app.ghostlyapp` URL) |
+| `proofs` | No | Reserved for public proofs linking the publisher key to an identity people know ([Publisher identity](#publisher-identity)). **Phase 1 accepts it only absent or empty** (`[]`) and refuses any proof (`proofs-unsupported`) |
+| `homepage`, `support`, `releaseNotes` | No | Two HTTPS URLs and 500 characters of one line |
+| `files` | Yes | Every file: exactly `{"path", "size", "sha256"}`, sorted by path (byte order, no two equal), SHA-256 in base64url |
 
 Reserved and refused in phase 1: `price` (phase 2) and `recovery` ([Keys](#publisher-keys-no-rotation-in-phase-1)).
+
+**Every URL** of this WISP (`sources`, `homepage`, `support`, a store's `urls`, `repo` and `support`) is `https:`, at most 512 characters, with no user or password; on jsDelivr (`*.jsdelivr.net`) it is only `https://cdn.jsdelivr.net/gh/<owner>/<repo>@<commit>/<path>` with a full 40-character lowercase hex commit ([Stores](#stores)). **Paths:** a file under `screenshots/` is a screenshot (`.png`, `.jpg` or `.webp`, at most 8); `icon.png` is the icon (at most 256 KiB, a PNG whose header says it is square). Other files are data. **Keys** are 52 z-base32 characters that decode to 32 bytes and encode back to the same text; **hashes** are 43 base64url characters without padding that decode to 32 bytes and encode back to the same text, and a signature 86 that decode to 64.
 
 ### Signatures: one rule for every statement
 
@@ -225,18 +227,30 @@ Every signed object in this document is signed the same way: Ed25519 over the by
 | Package manifest | `ghostly-app/1` | Publisher | 1 |
 | Store index | `ghostly-store/1` | Store key | 1 |
 | Revocation | `ghostly-revoke/1` | Publisher | 1 |
-| Publisher proof statement | `ghostly-publisher/1` | Publisher | 1 |
+| Publisher proof statement | `ghostly-publisher/1` | Publisher | Later: publisher proofs are not in phase 1 (2026-10-06) |
 | Report | `ghostly-report/1` | Reporter | 2 |
 | Review | `ghostly-review/1` | Reviewer | 2 |
 | Licence | `ghostly-licence/1` | Publisher | 2 |
 | Key rotation, recovery key | `ghostly-rotate/1`, `ghostly-recovery/1` | Publisher, recovery key | Reserved |
 
-The signature statement in a bundle is `{"alg": "ed25519", "key": "<publisher key>", "sig": "<base64url>"}`. A package is **valid** when the manifest is canonical and holds every bound, the signature verifies under `publisher`, and every file matches its size and hash. A client checks all of it before it stores a bundle, and the files again before it runs one. [Test vectors](#test-vectors) come before this draft is Proposed.
+The signature statement in a bundle is `{"alg": "ed25519", "key": "<publisher key>", "sig": "<base64url>"}`: exactly these keys, its bytes canonical as the manifest's (at most 1 KiB), and `key` equal to the manifest's `publisher`. Signatures verify as RFC 8032 writes it (canonical encodings of the key, the point and the scalar), so two parsers accept exactly the same ones. A package is **valid** when the manifest is canonical and holds every bound, the signature verifies under `publisher`, and every file matches its size and hash. A client checks all of it before it stores a bundle, and the files again before it runs one. [Test vectors](#test-vectors) come before this draft is Proposed.
+
+**Reading a bundle, in this order.** Every parser checks in the same order, so a broken bundle gets the same refusal code from each; the code in parentheses is the one the [vectors](#test-vectors) pin.
+
+1. The whole is at most 16 MiB (`too-large`).
+2. The first 11 bytes are `GHOSTLYAPP1` (`magic`; fewer bytes that match are `truncated`).
+3. The manifest's length is at most 64 KiB (`manifest-too-large`), read before the manifest itself; then the manifest, the statement's length and the statement are there (`truncated`).
+4. The manifest is UTF-8 JSON (`not-json`) whose bytes are its canonical form (`not-canonical`: whitespace, keys out of order, a duplicated key, `1.0`, a byte order mark).
+5. Its fields: `ghostlyApp` is 1 (`unsupported-format`); no key outside the table (`reserved-key` for `price` and `recovery`, `unknown-key` for any other); every required key (`missing-key`); each field as the table says (`bad-field`), `proofs` empty (`proofs-unsupported`); at most 64 files (`too-many-files`); each path (`bad-path`, also a screenshot of another type), no two equal ignoring ASCII case (`path-collision`), sorted (`files-unsorted`); at most 8 screenshots (`too-many-screenshots`); the icon's size (`bad-icon`); the entry (`bad-entry`).
+6. The statement is canonical JSON with exactly `alg`, `key` and `sig` and `alg` `ed25519` (`bad-signature-statement`).
+7. The bytes after the statement are exactly the files' sizes added up: fewer is `truncated`, more is `trailing-bytes`.
+8. The statement's `key` is the manifest's `publisher` (`signature-key`), and the signature verifies under `ghostly-app/1` (`bad-signature`).
+9. Every file's SHA-256 (`file-hash`), in the manifest's order; then the icon's PNG header says it is square (`bad-icon`).
 
 ### Publisher identity
 
 - A publisher key is **not a profile key**. The CLI makes and keeps it ([Publishing](#publishing-the-publisher-cli)), so a developer's chat profile never signs packages and a signing key never sits in a browser.
-- `proofs` holds public proofs of [300](300-peer-proofs.md)'s kinds that work for anyone: in phase 1 the **GitHub SSH proof** (a `ghostly-publisher/1` statement signed with an SSH key GitHub publishes for the account, checked against `api.github.com/users/<login>/keys` as the existing proof does), and a domain proof. The CLI writes the GitHub one.
+- **Later, not in phase 1** (the release 1.2 plan, 2026-10-06): publisher proofs and their `ghostly-publisher/1` statement are not built in phase 1, and a phase 1 client refuses a manifest whose `proofs` is not empty. Every phase 1 app shows its fingerprint, and "Unknown publisher" unless a curated store of the person's lists it. The design kept for then: `proofs` holds public proofs of [300](300-peer-proofs.md)'s kinds that work for anyone: the **GitHub SSH proof** (a `ghostly-publisher/1` statement signed with an SSH key GitHub publishes for the account, checked against `api.github.com/users/<login>/keys` as the existing proof does), and a domain proof. The CLI writes the GitHub one.
 - **What people see, in this order:** the verified proof ("github.com/ana ✓"), then the publisher fingerprint: the first 16 z-base32 characters of the key (80 bits), in four groups (`7f3k q9ax 81mz c4tp`). With no proof that verifies and no **curated** store of the person's listing the app, the card says **"Unknown publisher"** instead of any "Signed" badge: anyone can sign with a throwaway key, so a signature alone says nothing to a person. Only a curated store clears "Unknown publisher" and "Not in any of your stores": an **indexed** store's listing (the default index included, though the owner signs it, because a crawler chose its entries) shows "Found by <index>" and leaves both warnings in place.
 - A repository's URL alone proves nothing about the key.
 
@@ -246,7 +260,7 @@ Phase 1 has **one key per app and no rotation or recovery**. If a publisher key 
 
 Why not the recovery key now: in the first draft it sat in the manifest, which the publisher key signs, so a thief of that key could name a recovery key of its own. The fix, a recovery key pinned at first install and changed only by a statement the current recovery key signs, is right, and phase 2 adopts exactly that. But it adds a key people must keep offline, a chain to verify and a screen to explain, before any publisher has a key worth recovering. One key per app is easier to get right first. The cost, said plainly: **an app installed in phase 1 can never pin a recovery key later**, because pinning one at an update has the same thief problem. Its publisher moves to a new app under a new key when it wants rotation.
 
-**Revocation** (phase 1): a `ghostly-revoke/1` statement naming digests, or every version up to a `sequence`. **Published** in the app's repository as `ghostly-revoke.json` (a list of signed statements) next to `app.ghostlyapp`, and copied verbatim by stores into their index (`revoked`). **Read** at every update check from the app's `sources` and the person's stores; a client keeps every revocation it has verified. A client that sees one stops those versions with no "Run anyway".
+**Revocation** (phase 1): a `ghostly-revoke/1` statement naming digests, or every version up to a `sequence`. The statement is `{"ghostlyRevoke": 1, "app": "<ref>", "digests": [...]}` (1 to 64 digests, each once) or `{"ghostlyRevoke": 1, "app": "<ref>", "upTo": <sequence>}` (every version with that `sequence` or a lower one), exactly one of `digests` and `upTo`, with an optional `"reason"` of one line of at most 200 characters, and no other key. A **signed revocation** is `{"statement": {...}, "signature": {"alg", "key", "sig"}}`, signed under `ghostly-revoke/1` by the key in the statement's `app`; a signature by any other key is refused (`signature-key`), as is a statement of another shape (`bad-revocation`). `ghostly-revoke.json` is a canonical JSON list of at most 4096 signed revocations, and one that does not verify refuses the file. **Published** in the app's repository as `ghostly-revoke.json` (a list of signed statements) next to `app.ghostlyapp`, and copied verbatim by stores into their index (`revoked`). **Read** at every update check from the app's `sources` and the person's stores; a client keeps every revocation it has verified. A client that sees one stops those versions with no "Run anyway".
 
 ### Updates and rollback
 
@@ -383,7 +397,7 @@ A publisher needs four steps, about as many as Umbrel's template repository, two
 
 1. `ghostly app init` makes a project from the SDK's template (single-file build, the broker's typings, the commit-reveal helper).
 2. Build it with the template's command.
-3. `ghostly app publish` makes the publisher key on first run (kept by the CLI, with a reminder to back it up), raises `sequence`, bundles, signs, writes the GitHub SSH proof into `proofs`, and writes **`app.ghostlyapp` at the repository root** (or on a `ghostly` branch). Committing the built bundle is required: a page cannot read GitHub release assets (no CORS).
+3. `ghostly app publish` makes the publisher key on first run (kept by the CLI, with a reminder to back it up), raises `sequence`, bundles, signs, writes the GitHub SSH proof into `proofs` (once publisher proofs exist, after phase 1), and writes **`app.ghostlyapp` at the repository root** (or on a `ghostly` branch). Committing the built bundle is required: a page cannot read GitHub release assets (no CORS).
 4. Optional: `ghostly catalog submit <store repository>` writes the listing and opens the pull request to a store.
 
 In release 1.2 the CLI has `ghostly app publish`, `ghostly app verify` (checks a bundle as a client would) and `ghostly store sign` (signs a store index with the store key). `ghostly app init`, the SDK's template with the commit-reveal helper, and `ghostly catalog submit` come later; until then a publisher builds the single-file app with its own tools and writes the listing by hand.
@@ -412,10 +426,12 @@ For people there is **one concept, "Stores"**: a list on the Apps page, the defa
  "revoked": [<publisher-signed ghostly-revoke/1 statements, verbatim>]}
 ```
 
+- **Fields.** Times (`expires`, `at`) are Unix seconds. Required: `ghostlyStore` (1, else `unsupported-format`), `key`, `name` (one line, 1 to 40 characters), `kind`, `sequence` (1 to 2^53 - 1), `expires`, `apps`, `removed`, `revoked`; `description` (2000 characters, line feeds allowed) is optional. An `apps` entry requires `ref`, `sequence`, `digest`, `urls` (1 to 4), `title` (40) and `tagline` (80), and may have `category`, `developer` and `submitter` (one line of 40 characters each) and `repo` and `support` (URLs); one app is listed at most once (`duplicate-app`). A `removed` entry is exactly `{ref, digest, reason, at}`, the reason one line of 1 to 200 characters. `apps`, `removed` and `revoked` hold at most 4096 entries each, and the index at most 16 MiB before compression. Any other key is refused (`unknown-key`), a missing one too (`missing-key`), a field out of bounds is `bad-field`, and a `revoked` entry that does not verify refuses the whole index (`bad-revocation`): the store copied it, so a broken one is the store's fault.
+- **Reading, in this order:** size (`too-large`), JSON (`not-json`), canonical bytes (`not-canonical`), the fields and revocations as above, the signature statement (`bad-signature-statement`), the store key the reader holds (`store-key`), the signature (`signature-key`, `bad-signature`), then `expires` (`expires-too-far`).
 - **Signature:** `ghostly-store.sig` beside it, the same statement as a bundle's (`{"alg": "ed25519", "key", "sig"}`, prefix `ghostly-store/1`). The index's bytes must be its canonical form, as a manifest's. Keys are z-base32, hashes and signatures base64url.
 - `urls` point at the bundle: the publisher's raw URL, and a jsDelivr URL pinned to the commit the curator reviewed (immutable, and kept after a repository is deleted). **A jsDelivr URL MUST name a full 40-character commit**, as `https://cdn.jsdelivr.net/gh/<owner>/<repo>@<commit>/app.ghostlyapp`; one naming a branch, a tag, a version range or `latest` is refused wherever it appears (an index, a card, the Apps page), since jsDelivr serves those from a copy that moves.
 - The listing fields are Umbrel's (`tagline`, `category`, `developer`, `submitter`, `repo`, `support`). The icon, the screenshots and the description come **from the bundle**, which the publisher signed, never from the store, so a store cannot dress an app in someone else's pictures.
-- `expires` is at most 90 days ahead; past it the store still installs, and the Apps page says "<store> was not updated since <date>". A lower `sequence` than the one held is refused.
+- `expires` is at most 90 days ahead of the reader's clock (`expires-too-far`); past it the store still installs, and the Apps page says "<store> was not updated since <date>". A lower `sequence` than the one held is refused (`rollback`), and the same `sequence` with other bytes (another SHA-256 of the index) is refused as equivocation, the held index kept, as for apps. A store is its key: an index under another key than the one the person added is another store (`store-key`).
 - A store's repository is a folder per app, as Umbrel's: `apps/<name>.<publisher prefix>/listing.json`, where `listing.json` is exactly one entry of `apps` above (the same keys, nothing else), written by `ghostly catalog submit`. The signed `ghostly-store.json` is built from those files. The client reads only `ghostly-store.json`.
 
 **Ghostly's default store** is one repository of its own, separate from Ghostly's repository, so its pull requests and takedowns stay apart from the app's (the owner's decision, 2026-10-06), curated by the maintainers. Apps enter by **pull request**; CI checks each submission (the bundle at `urls` has the listed digest and verifies, the bounds hold, the listing is well formed); **the owner signs `ghostly-store.json` with the store key, held offline**, in batches. A key held by CI would make a GitHub account takeover a store takeover.
@@ -538,7 +554,7 @@ A new derivation adds a row here, or to the WISP that owns it with a link here.
 | A store host | The address and time of each index download: only for people with an app installed, or who open a store |
 | A publisher | Possibly the person's address and when they open the app, through channels not yet measured |
 | A contact | Only the apps the person opens in a chat with them, or shares |
-| `api.github.com` | The publisher login whose proof is checked, from the person's address, at install |
+| `api.github.com` | The publisher login whose proof is checked, from the person's address, at install, once publisher proofs exist (after phase 1). In phase 1 the client never asks it |
 | Ghostly's maintainers | What the default store's host (GitHub) would tell them: nothing, as they run no server |
 
 ### Before phase 1 ships: the tests that must exist
@@ -615,14 +631,16 @@ Every byte format of this WISP is pinned by vectors before any client reads a bu
 - **Where.** One JSON file per format in `packages/core/test/vectors/`, checked in.
 - **How they are made.** Each file is built by its test from fixed labels: every key and seed is the SHA-256 of `ghostly apps vectors: <label>`, a test value and never a real key. The test writes the file again when an environment variable says so (`APPS_VECTORS_WRITE=1`), and otherwise reads it and fails on any difference, so a change to a format shows in review as a changed vector.
 - **Shape.** Each file has `about` (what it pins, the section of this WISP and the test that builds it), the fixed inputs, `valid` (cases a reader must accept, each with what it must read) and `invalid` (cases a reader must refuse: `name`, `refusal`, the reader's reason, and the bytes or the JSON).
-- **Encodings.** Raw bytes are hex in the files; keys are z-base32, and hashes, signatures and chat app ids base64url without padding, as on the wire.
+- **Encodings.** Raw bytes are hex in the files; keys are z-base32, and hashes, signatures and chat app ids base64url without padding, as on the wire. A bundle's bytes are a list of segments to join in order, `{"hex": "..."}` as written or `{"fill": "<one byte in hex>", "size": <n>}` for that byte repeated, so the 16 MiB case stays a few lines; each valid bundle also gives its length and SHA-256. JSON that must be read as exact bytes (a store index, a statement) is given as its exact text.
+- **The reader's clock** is fixed at `now` = 1790000000 (Unix seconds) in every file.
+- **Refusals** are the codes of [Reading a bundle](#signatures-one-rule-for-every-statement) and [Stores](#stores). Two parsers that refuse one case with different codes have a bug, though only the refusal itself is the security property.
 - **Who reads them.** Every parser of these formats: the TypeScript one in `packages/core` in phase 1, and any other later (Rust on Desktop, another client). Two parsers that read one vector differently means a bug in one of them.
 
 | File | Pins | Valid cases | Refusals, at least |
 |---|---|---|---|
-| `app-bundle.json` | [The bundle](#the-bundle-the-one-published-unit), the canonical manifest, the digest and the `ghostly-app/1` signature | A bundle with the entry only; one with an icon, screenshots and data files; each bound at its limit | Each bound passed by one; a manifest that is not canonical; a duplicated key; an unknown key; `price` or `recovery`; a bad signature; a signature by another key; a wrong file size or hash; a path with `..`, an empty segment, or two paths equal ignoring case; a wrong magic; a truncated bundle; a byte past the last file |
-| `app-statements.json` | `ghostly-revoke/1` (by digests, and up to a `sequence`) and `ghostly-publisher/1`, and one object signed under each phase 1 prefix of [Signatures](#signatures-one-rule-for-every-statement) | Each statement, with its signed bytes | A statement checked under another prefix; one that is not canonical |
-| `app-store.json` | `ghostly-store.json` with `ghostly-store.sig` ([Stores](#stores)), and a `listing.json` entry | An index with apps, `removed` and `revoked`; each kind | Bytes that are not canonical; a bad signature; `expires` more than 90 days ahead; a jsDelivr URL with a branch, a tag or `latest`; an unknown key; the reader's refusal of a lower `sequence` than one it holds |
+| `app-bundle.json` | [The bundle](#the-bundle-the-one-published-unit), the canonical manifest, the digest and the `ghostly-app/1` signature | A bundle with the entry only; one with an icon, screenshots and data files; each bound at its limit (but the manifest's 64 KiB, which a manifest within the field bounds cannot reach: it is pinned by its refusal only) | Each bound passed by one; a manifest that is not canonical; a duplicated key; an unknown key; `price` or `recovery`; a bad signature; a signature by another key; a wrong file size or hash; a path with `..`, an empty segment, or two paths equal ignoring case; a wrong magic; a truncated bundle; a byte past the last file |
+| `app-statements.json` | `ghostly-revoke/1` (by digests, and up to a `sequence`), and one object signed under each phase 1 prefix of [Signatures](#signatures-one-rule-for-every-statement) (`ghostly-app/1`, `ghostly-store/1`, `ghostly-revoke/1`; `ghostly-publisher/1` comes with publisher proofs, later) | Each statement, with its signed bytes; signed revocations; a `ghostly-revoke.json` | A statement checked under another prefix or another key; one that is not canonical; each malformed revocation |
+| `app-store.json` | `ghostly-store.json` with `ghostly-store.sig` ([Stores](#stores)), a `listing.json` entry, and the update rule as decisions for indexes (`new`, `update`, `same`, `rollback`, `equivocation`, `other-key`) and apps (`update`, `same`, `rollback`, `equivocation`, `other-app`) | An index with apps, `removed` and `revoked`; each kind; `expires` exactly 90 days ahead, and past | Bytes that are not canonical; a bad signature; `expires` more than 90 days ahead; a jsDelivr URL with a branch, a tag, a range, a short commit or `latest`; an unknown key; the reader's refusal of a lower `sequence` than one it holds |
 | `app-chat.json` | The chat app id and the `paired-app` frames ([In a chat](#in-a-chat-apps1)) | Ids for one pair of keys given in both orders (the same id) and for two apps; an `open`, a `close`, and data frames whose `d` is small and exactly 32 KiB | `d` one byte past 32 KiB; an unknown `o`; no `a`; an `a` that is not 22 characters |
 | `app-card.json` | The `app` card ([405](405-status-cards.md#an-app)) and its fallback text | A shared card and an opened card, with and without `url` | Each required field missing or invalid; a `ref` whose key is not 52 z-base32 characters; an `id` that does not match the `ref`; a `url` that is not https |
 
