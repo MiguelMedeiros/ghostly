@@ -137,6 +137,9 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
   await options.beforeOpen?.(context);
   const page = context.pages()[0] ?? await context.newPage();
   page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));
+  // A busy CI runner on a quiet machine: E2E_CPU_RATE=6 runs every page six times slower (Chromium only).
+  const cpuRate = Number(process.env.E2E_CPU_RATE) || 1;
+  if (cpuRate > 1 && browser.browserType().name() === "chromium") await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: cpuRate });
   await page.goto("/");
   await expect(page.getByTitle("New Chat")).toBeVisible();
   if (options.irohRelay) await setIrohRelay(page, options.irohRelay);
