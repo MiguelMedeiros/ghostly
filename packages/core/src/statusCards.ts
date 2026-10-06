@@ -1,4 +1,5 @@
 import { utf8Encode } from "./bytes";
+import { isAppHash, isAppRef } from "./appStatements";
 import { MESSAGE_CLOCK_SKEW_MS } from "./messageTime";
 import { sanitizeDisplayText } from "./text";
 
@@ -49,6 +50,9 @@ export const STATUS_CARD_LIMITS = {
   buttonId: 32,
   /** A button's label, in characters. */
   buttonLabel: 40,
+  /** An app card's title and version, in characters (WISP 405 § An app): the manifest's bounds. */
+  appTitle: 40,
+  appVersion: 32,
 } as const;
 
 /** How a button looks: `primary` is the one highlighted, `danger` warns; `neutral` when none is said. */
@@ -140,7 +144,24 @@ export interface ButtonsCard {
   closed?: true;
 }
 
-export type StatusCard = TaskCard | RoutineCard | ButtonsCard;
+/**
+ * A mini-app the sender shared in the chat, or opened in it (WISP 405 § An app, WISP 1200 § Apps sent in a chat): what a
+ * contact needs to install the same app and check it. Every field is the sender's claim, unsigned; nothing is fetched to
+ * show it. `id` is made from `ref` (`appCardId`); `opened` only for "Ana opened Chess".
+ */
+export interface AppCard {
+  kind: "app";
+  id: string;
+  ref: string;
+  digest: string;
+  sequence: number;
+  title: string;
+  version?: string;
+  url?: string;
+  opened?: true;
+}
+
+export type StatusCard = TaskCard | RoutineCard | ButtonsCard | AppCard;
 export type StatusCardKind = StatusCard["kind"];
 
 const ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$/;
@@ -171,6 +192,14 @@ export function buttonLabelClash(buttons: readonly unknown[]): { at: number; wit
   }
   return undefined;
 }
+
+/** An app card's id, made from its reference: the app's name, a dot, the first 16 characters of the publisher key. */
+export function appCardId(ref: string): string {
+  return `${ref.slice(53)}.${ref.slice(0, 16)}`;
+}
+
+/** An app card's `sequence`: a whole number from 0 to 2^53 - 1. */
+const appSequence = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -255,6 +284,15 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
   if (!isObject(raw) || statusCardBytes(raw) > STATUS_CARD_LIMITS.bytes) return undefined;
   const id = typeof raw.id === "string" && ID.test(raw.id) ? raw.id : undefined;
   if (!id) return undefined;
+  if (raw.kind === "app") {
+    // Dropped unless the app it names holds: the reference, its id, the digest, the sequence and a title.
+    if (!isAppRef(raw.ref) || id !== appCardId(raw.ref) || !isAppHash(raw.digest) || !appSequence(raw.sequence)) return undefined;
+    const title = cardLine(raw.title, STATUS_CARD_LIMITS.appTitle);
+    if (!title) return undefined;
+    const version = cardLine(raw.version, STATUS_CARD_LIMITS.appVersion), url = cardUrl(raw.url);
+    return { kind: "app", id, ref: raw.ref, digest: raw.digest, sequence: raw.sequence, title,
+      ...(version && { version }), ...(url && { url }), ...(raw.opened === true && { opened: true as const }) };
+  }
   const latest = now + MESSAGE_CLOCK_SKEW_MS;
   const links = readLinks(raw.links);
   if (raw.kind === "task") {
@@ -337,7 +375,7 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
   if (!isObject(raw)) return { error: "A card is an object" };
   const bytes = statusCardBytes(raw);
   if (bytes > STATUS_CARD_LIMITS.bytes) return { error: `The card takes ${bytes} bytes; at most ${STATUS_CARD_LIMITS.bytes}` };
-  if (raw.kind !== "task" && raw.kind !== "routine" && raw.kind !== "buttons") return { error: "kind is task, routine or buttons" };
+  if (raw.kind !== "task" && raw.kind !== "routine" && raw.kind !== "buttons" && raw.kind !== "app") return { error: "kind is task, routine, buttons or app" };
   if (typeof raw.id !== "string" || !ID.test(raw.id)) return { error: `id is 1 to ${STATUS_CARD_LIMITS.id} of A-Z a-z 0-9 _ . : - and does not start with -` };
   const line = (field: string, value: unknown, max: number, required = false): string | null => {
     if (value === undefined && !required) return null;
@@ -355,7 +393,16 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
       errors.push(url(`links[${i}].url`, link.url), line(`links[${i}].label`, link.label, STATUS_CARD_LIMITS.linkLabel));
     }
   }
-  if (raw.kind === "buttons") {
+  if (raw.kind === "app") {
+    if (raw.links !== undefined) errors.push("an app card takes no links");
+    if (!isAppRef(raw.ref)) errors.push("ref is <publisher key in z-base32>/<name>");
+    else if (raw.id !== appCardId(raw.ref)) errors.push(`id is ${appCardId(raw.ref)}, made from ref`);
+    if (!isAppHash(raw.digest)) errors.push("digest is a SHA-256 in base64url without padding");
+    if (!appSequence(raw.sequence)) errors.push("sequence is a whole number from 0 to 2^53 - 1");
+    errors.push(line("title", raw.title, STATUS_CARD_LIMITS.appTitle, true), line("version", raw.version, STATUS_CARD_LIMITS.appVersion));
+    if (raw.url !== undefined) errors.push(url("url", raw.url));
+    if (raw.opened !== undefined && raw.opened !== true) errors.push("opened is true or left out");
+  } else if (raw.kind === "buttons") {
     if (raw.links !== undefined) errors.push("buttons take no links");
     if (!Array.isArray(raw.buttons) || !raw.buttons.length || raw.buttons.length > STATUS_CARD_LIMITS.buttons) errors.push(`buttons is a list of 1 to ${STATUS_CARD_LIMITS.buttons}`);
     else {
@@ -466,6 +513,11 @@ export function cardTimeUtc(ms: number): string {
  * and search finds. Plain lines, the first naming the card, no bars or layout that would read badly elsewhere.
  */
 export function statusCardText(card: StatusCard): string {
+  // An app card names the app, and its url on a line of its own so an older app shows a link (WISP 405 § An app).
+  if (card.kind === "app") {
+    const named = `${card.title}${card.version ? ` ${card.version}` : ""}`;
+    return [card.opened ? `🧩 Opened ${named} in this chat (Ghostly app)` : `🧩 ${named} (Ghostly app)`, ...(card.url ? [card.url] : [])].join("\n");
+  }
   // Buttons show with the bot's own text; this is only what goes when it gave none.
   if (card.kind === "buttons") return `Reply: ${card.buttons.map(b => b.label).join(" / ")}`;
   if (card.kind === "task") {
