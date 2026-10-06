@@ -313,7 +313,7 @@ The runner is a small page **shipped inside the client**, never fetched. One run
 | `ghostly.*` | Message type | What it does |
 |---|---|---|
 | (runner only) | `start` (Desktop), `writing` | The entry; the start of the write |
-| `ghostly.context()` | `context` | `{version, inChat, peer: {version} or null, name}` (`name` only with that permission) |
+| `ghostly.context()` | `context` | `{version, inChat, peer: {version} or null, name, theme, locale}` (`name` only with that permission; `theme` is `"light"` or `"dark"`, the client's; `locale` is the client's language as a BCP 47 tag, so the app can match both) |
 | `ghostly.file(path)` | `file` | The bytes of a file of the bundle, as an `ArrayBuffer` |
 | `ghostly.storage.get(key)`, `.set(key, value)`, `.delete(key)`, `.keys()` | `storage.get`, `storage.set`, `storage.delete`, `storage.keys` | The app's storage in the current scope (this app, this chat or alone): keys up to 256 bytes, JSON values up to 64 KiB, 5 MiB in all |
 | `ghostly.chat.send(value)` | `chat.send` | One `paired-app` data frame (`chat` permission, live chat, the peer open). Refused with `offline` while the session is not live, and with `too-large` when `value` passes 32 KiB as JSON |

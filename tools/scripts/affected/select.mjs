@@ -101,11 +101,18 @@ export const UNIT_PROJECTS = [
     // under `sources`) hands vitest the runner too, and vitest runs the tests that import it.
     bundle: { entry: "packages/cli/src/bin.ts", runner: "packages/cli/test/support/cli.ts", sources: ["packages/core/src/**", "packages/browser/src/**", "packages/cli/src/**"] },
   },
+  {
+    // The Chess mini-app: its tests import only its own code and the mini-app API types (packages/core/src/miniApp.ts).
+    name: "chess", cwd: "apps/mini/chess", args: [],
+    sources: ["packages/core/src/miniApp.ts", "apps/mini/chess/**"],
+    whole: ["apps/mini/chess/package.json", "apps/mini/chess/vitest.config.ts", "apps/mini/chess/vite.config.ts", "tools/vitest.shared.ts"],
+    tests: ["apps/mini/chess/test/**"],
+  },
 ];
 
 /** `npm run lint`'s scope: what eslint is given, and what makes the whole lint run. */
 export const LINT = {
-  scope: ["apps/ui/src/**", "packages/**", "apps/extension/src/**", "apps/extension/test/*.ts", "apps/web/src/**", "e2e/**"],
+  scope: ["apps/ui/src/**", "packages/**", "apps/extension/src/**", "apps/extension/test/*.ts", "apps/web/src/**", "apps/mini/**", "e2e/**"],
   ext: /\.(?:[cm]?[jt]sx?)$/,
   whole: ["eslint.config.mjs"],
 };
@@ -123,6 +130,7 @@ export const TYPECHECKS = [
   { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "apps/ui/src/**", "apps/extension/**"] },
   { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/web/**"] },
   { name: "e2e", cmd: ["npx", "tsc", "--noEmit", "-p", "e2e"], sources: ["e2e/**", "packages/core/src/**"] },
+  { name: "chess", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/mini/chess/tsconfig.json"], sources: ["packages/core/src/**", "apps/mini/chess/**"] },
 ];
 export const TYPECHECK_WHOLE = ["tsconfig.json", "packages/*/tsconfig*.json"];
 
@@ -327,6 +335,8 @@ export function throughCoreBarrel(changedCore, files) {
     // Type-only imports are left out: they change no test's behaviour, and the typecheck step covers them.
     for (const m of text.matchAll(/\b(import|export)\s+(type\s+)?(\*\s*(?:as\s+[A-Za-z0-9_$]+\s*)?|\{([^}]*)\}\s*)from\s*["']([^"']+)["']/g)) {
       if (hit) break;
+      // A subpath of the package (`@ghostly/core/miniApp`, its package.json "exports") is that one module.
+      if (!m[2] && m[5].startsWith("@ghostly/core/") && affected.has(`${CORE_SRC}${m[5].slice("@ghostly/core/".length)}`)) hit = true;
       if (m[2] || !isBarrel(path, m[5])) continue;
       if (m[3].trim().startsWith("*")) hit = true;
       else if (m[4] !== undefined && m[4].split(",").filter((n) => !/^\s*type\s/.test(n)).map(origNameOf).some((n) => exposed.has(n))) hit = true;
