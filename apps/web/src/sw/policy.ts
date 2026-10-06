@@ -40,9 +40,10 @@ export interface RequestLike {
 /**
  * Paths of this origin that always go to the network, whatever else would match. `/version.json` is how a
  * tab learns about a deploy, so a cached answer would hide every update; the sign-in callback carries a
- * provider's answer; the worker's own script is the browser's to fetch.
+ * provider's answer; the worker's own script is the browser's to fetch; the mini-app runner's sandbox is in its
+ * server's header (WISP 1200), which a cached copy could lose.
  */
-const NEVER = new Set(["/version.json", "/oidc-callback.html", "/sw.js"]);
+const NEVER = new Set(["/version.json", "/oidc-callback.html", "/sw.js", "/app-frame.html"]);
 
 /** Pages that are the app: its root and its file. Any other path is a static file, or nothing. */
 const APP_PAGES = new Set(["/", "/index.html"]);

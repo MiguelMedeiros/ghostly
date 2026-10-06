@@ -49,9 +49,12 @@ function testReactions(): Pick<NodeOptions, "reactions"> {
 export const webHost = createInPageHost({
   version: __APP_VERSION__,
   features: { shareLocalServices: false, openServices: false, profiles: true },
+  // Mini-apps run in this server's runner page (apps/web/public/app-frame.html, its header in nginx.conf; WISP 1200).
+  appRunner: "/app-frame.html",
   // Iroh through a relay (WISP 102): where WebRTC cannot connect, before the chat drops to the DHT.
   // A new profile gets its default Mainnet wallets, never under test (see defaultWalletsAllowed).
-  node: { ...testPace(), ...testReactions(), irohWeb: testIroh(), defaultWallets: defaultWalletsAllowed() },
+  // Mini-apps on in the e2e suite's build only (VITE_APPS_TEST, fixed when the build is made; never at runtime).
+  node: { ...testPace(), ...testReactions(), irohWeb: testIroh(), defaultWallets: defaultWalletsAllowed(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true } : {}) },
 
   /**
    * The deployed build says what it is in `/version.json`, on this origin and

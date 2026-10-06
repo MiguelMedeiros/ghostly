@@ -53,6 +53,13 @@ describe("what goes to the network untouched, and is never stored", () => {
     expect(route("/voice-gallery.html", { mode: "navigate" })).toBe("pass");
   });
 
+  // covers: apps.web-sandbox
+  it("the mini-app runner, always from the server with its sandbox header, even when a build put it in the cache", () => {
+    const precached = new Set([...PRECACHED, "/app-frame.html"]);
+    for (const mode of [undefined, "navigate"]) expect(classify({ method: "GET", url: ORIGIN + "/app-frame.html", mode }, ORIGIN, precached)).toBe("pass");
+    expect(precacheList(["index.html", "app-frame.html", "assets/main-abc.js"])).toEqual(["/", "/assets/main-abc.js"]);
+  });
+
   it("anything but GET, except the share target's POST", () => {
     expect(route(SHARE_TARGET_PATH, { method: "POST" })).toBe("share");
     expect(route("/", { method: "POST" })).toBe("pass");

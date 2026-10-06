@@ -1,0 +1,191 @@
+<!doctype html>
+<!--
+  The mini-app runner (WISP 1200, "The runner and the broker"). Shipped inside the client, never fetched from anywhere
+  else: one runner hosts one app instance, in an <iframe sandbox="allow-scripts"> of the client's own page. Its server
+  sends the runner's policy as an HTTP header (apps/web/runnerPolicy.ts), so the frame has an opaque origin and no way
+  to the network.
+
+  Before any app code:
+  - the WebRTC constructors are deleted from this realm;
+  - the runner refuses to run unless its origin is "null" and it has a parent;
+  - the page is locked with a nonce: a second policy, `script-src 'nonce-N' 'wasm-unsafe-eval'`, where N is random and
+    lives only in this script's closure (never in an attribute). A frame the app makes (srcdoc, about:blank) has
+    WebRTC of its own and inherits this page's policies, so without the nonce it can run no script at all. After the
+    entry is written a last policy, `script-src 'wasm-unsafe-eval'`, allows no new script anywhere;
+  - a probe frame checks that the lock holds in this browser, and the runner refuses to run where it does not.
+
+  Then it takes the one MessageChannel port the client sends after the frame's first load, gets the app's entry over
+  it, says `writing`, waits for the answer and writes the entry into itself. From then on the app runs in this realm:
+  every check belongs to the broker (apps/ui/src/lib/apps/broker.ts), which knows the app by its port.
+
+  Plain script on purpose: it runs as it is written, inline (the policy allows no other script), and is small enough
+  to read whole.
+-->
+<html><head><meta charset="utf-8"><meta http-equiv="x-dns-prefetch-control" content="off"><meta name="referrer" content="no-referrer"><title>Ghostly app</title>
+<script>
+(() => {
+  "use strict";
+  for (const name of Object.getOwnPropertyNames(window)) {
+    if (/^(webkit)?RTC/.test(name)) { try { delete window[name]; } catch (e) { /* stays: refused below */ } }
+  }
+  const stop = (why) => {
+    document.documentElement.textContent = "This app cannot run here.";
+    document.documentElement.setAttribute("data-ghostly-refused", why);
+  };
+  if (self.origin !== "null" || window.parent === window) return stop("origin");
+  if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
+
+  // What the runner keeps for itself, taken before the app can touch a prototype.
+  const nonceProperty = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "nonce");
+  const setNonce = nonceProperty && nonceProperty.set;
+  if (typeof setNonce !== "function") return stop("nonce");
+  const parser = new DOMParser();
+  const nonce = (() => {
+    const bytes = crypto.getRandomValues(new Uint8Array(24));
+    let text = "";
+    for (const byte of bytes) text += byte.toString(16).padStart(2, "0");
+    return text;
+  })();
+  const token = crypto.getRandomValues(new Uint32Array(2)).join("");
+
+  // A policy for this document from now on. Taking the <meta> out again leaves the policy in place, so the nonce is
+  // never in the page for the app to read.
+  const lock = (policy) => {
+    const meta = document.createElement("meta");
+    meta.httpEquiv = "Content-Security-Policy";
+    meta.content = policy;
+    (document.head || document.documentElement).appendChild(meta);
+    meta.remove();
+  };
+  lock("script-src 'nonce-" + nonce + "' 'wasm-unsafe-eval'");
+
+  // Where else the nonce could be read: the element's own property, and the text of a policy in a violation report.
+  for (const proto of [HTMLElement.prototype, typeof SVGElement === "function" && SVGElement.prototype, typeof MathMLElement === "function" && MathMLElement.prototype]) {
+    if (proto && Object.prototype.hasOwnProperty.call(proto, "nonce")) delete proto.nonce;
+  }
+  for (const proto of [typeof SecurityPolicyViolationEvent === "function" && SecurityPolicyViolationEvent.prototype, typeof CSPViolationReportBody === "function" && CSPViolationReportBody.prototype]) {
+    if (proto && Object.prototype.hasOwnProperty.call(proto, "originalPolicy")) delete proto.originalPolicy;
+  }
+  try { delete window.ReportingObserver; } catch (e) { /* none */ }
+  if ("nonce" in HTMLElement.prototype || typeof ReportingObserver !== "undefined") return stop("nonce");
+
+  // The lock, checked: a frame made now must not run its script. Where it does, this browser does not hold the
+  // policy as measured, and no app runs.
+  const lockHolds = new Promise((resolve) => {
+    let ran = false;
+    const heard = (event) => { if (event.data === "ghostly-probe-" + token) ran = true; };
+    addEventListener("message", heard);
+    const probe = document.createElement("iframe");
+    probe.srcdoc = "<script>parent.postMessage(\"ghostly-probe-" + token + "\", \"*\")<\/script>";
+    probe.style.display = "none";
+    probe.addEventListener("load", () => setTimeout(() => {
+      removeEventListener("message", heard);
+      probe.remove();
+      resolve(!ran);
+    }, 50));
+    (document.body || document.documentElement).appendChild(probe);
+  });
+
+  // The port, once, from the parent only, after which nothing on the window is listened to.
+  const portReady = new Promise((resolve) => {
+    const take = (event) => {
+      if (event.source !== window.parent || !event.data || event.data.ghostly !== "port" || event.ports.length !== 1) return;
+      removeEventListener("message", take);
+      resolve(event.ports[0]);
+    };
+    addEventListener("message", take);
+  });
+
+  /** The entry with its scripts taken out, each left as a placeholder the runner fills with a script that has the nonce. */
+  const prepare = (entry) => {
+    const doc = parser.parseFromString(entry, "text/html");
+    const scripts = [];
+    for (const script of Array.from(doc.getElementsByTagName("script"))) {
+      if (script.namespaceURI !== "http://www.w3.org/1999/xhtml") { script.remove(); continue; }
+      const type = (script.getAttribute("type") || "").trim().toLowerCase();
+      const module = type === "module";
+      const classic = type === "" || /^(text|application)\/(x-)?(java|ecma)script$/.test(type);
+      if (!module && !classic) continue; // A data block (JSON, templates): never run, kept as it is.
+      if (script.hasAttribute("src")) { script.remove(); continue; } // A file: the policy refuses it anyway.
+      scripts.push({ module, text: script.textContent || "" });
+      const placeholder = doc.createElement("template");
+      placeholder.setAttribute("data-ghostly-script-" + token, String(scripts.length - 1));
+      script.replaceWith(placeholder);
+    }
+    return { html: "<!doctype html>" + doc.documentElement.outerHTML, scripts };
+  };
+
+  const write = ({ html, scripts }) => {
+    document.open();
+    document.write(html);
+    const attribute = "data-ghostly-script-" + token;
+    for (const placeholder of Array.from(document.querySelectorAll("template[" + attribute + "]"))) {
+      const script = scripts[Number(placeholder.getAttribute(attribute))];
+      if (!script) { placeholder.remove(); continue; }
+      const element = document.createElement("script");
+      if (script.module) element.type = "module";
+      element.async = false;
+      setNonce.call(element, nonce);
+      element.textContent = script.text;
+      placeholder.replaceWith(element);
+    }
+    document.close();
+    lock("script-src 'wasm-unsafe-eval'");
+  };
+
+  Promise.all([portReady, lockHolds]).then(([port, holds]) => {
+    if (!holds) { port.close(); return stop("lock"); }
+    let nextId = 1;
+    const pending = new Map();
+    const listeners = { message: new Set(), peer: new Set() };
+    let entry = null;
+    const send = (type, args) => new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject });
+      try { port.postMessage({ id, type, args }); } catch (error) { pending.delete(id); reject(new TypeError("Not a JSON value")); }
+    });
+    port.onmessage = (event) => {
+      const message = event.data;
+      if (!message || typeof message !== "object") return;
+      if (typeof message.id === "number") {
+        const waiting = pending.get(message.id);
+        if (!waiting) return;
+        pending.delete(message.id);
+        if (message.ok === true) waiting.resolve(message.value);
+        else waiting.reject(new Error(typeof message.error === "string" ? message.error : "refused"));
+        return;
+      }
+      if (message.event === "start" && entry === null && typeof message.data === "string") {
+        entry = message.data;
+        const prepared = prepare(entry);
+        send("writing", []).then(() => write(prepared), () => stop("broker"));
+        return;
+      }
+      const kind = message.event === "chat.message" ? "message" : message.event === "chat.peer" ? "peer" : null;
+      if (kind) for (const listener of Array.from(listeners[kind])) { try { listener(message.data); } catch (error) { setTimeout(() => { throw error; }); } }
+    };
+    const call = (type) => (...args) => send(type, args);
+    const ghostly = Object.freeze({
+      context: call("context"),
+      file: (path) => send("file", [path]),
+      storage: Object.freeze({
+        get: call("storage.get"),
+        set: call("storage.set"),
+        delete: call("storage.delete"),
+        keys: call("storage.keys"),
+      }),
+      chat: Object.freeze({
+        send: (value) => send("chat.send", [value]).then(() => undefined),
+        on: (event, listener) => {
+          const set = listeners[event];
+          if (!set || typeof listener !== "function") throw new TypeError("chat.on takes \"message\" or \"peer\" and a function");
+          set.add(listener);
+          return () => { set.delete(listener); };
+        },
+      }),
+      close: () => send("close", []).then(() => undefined),
+    });
+    Object.defineProperty(window, "ghostly", { value: ghostly, enumerable: true });
+  });
+})();
+</script></head><body></body></html>
