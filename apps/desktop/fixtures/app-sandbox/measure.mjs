@@ -117,8 +117,14 @@ try {
   for (let i = 0; i < 60; i++) {
     try { await driver("GET", "/windows"); break; } catch { await sleep(500); }
   }
-  const mainBefore = await evalIn("main", "JSON.stringify({ origin: self.origin, rtc: typeof RTCPeerConnection, seen: window.__seen || null })").catch((e) => `main eval failed: ${e.message}`);
-  outcome.main = mainBefore;
+  // The Ghostly window is read after the first app window ran, not at start: a script sent to a window still
+  // loading its page never answers (the driver's 504 after 30 s, seen on Linux and macOS).
+  const readMain = async () => {
+    for (let i = 0; i < 2; i++) {
+      try { return await evalIn("main", "JSON.stringify({ origin: self.origin, rtc: typeof RTCPeerConnection, seen: window.__seen || null, ready: document.readyState })"); }
+      catch (e) { if (i === 1) return `main eval failed: ${e.message}`; await sleep(2000); }
+    }
+  };
   outcome.webkit = await driver("GET", "/app-webkit").catch((e) => `(${e.message})`);
   const groups = args.groups ? args.groups.split(",") : ["net", "nav-top", "nav-tauri", "nav-reload", "nav-meta", "nav-form", "nav-form-blank", "nav-open", "nav-link-blank", "nav-ping", "nav-frame-top"];
   const guards = (args.guards ?? "full,header+lock,header,control").split(",");
@@ -126,10 +132,11 @@ try {
     for (const group of groups) {
       const r = await run(group, guard);
       outcome.runs.push(r);
+      if (outcome.main === undefined) outcome.main = await readMain();
       console.error(`${guard} ${group}: ${r.hits.length} hits, refused ${r.refused.length}, new windows ${r.newWindows.length}, proxy caught ${r.caught.length}`);
     }
   }
-  outcome.mainAfter = await evalIn("main", "JSON.stringify({ seen: window.__seen || null, windows: Object.keys(window).length })").catch((e) => `main eval failed: ${e.message}`);
+  outcome.mainAfter = await readMain();
 } finally {
   child.kill("SIGTERM");
   await sleep(1000);
