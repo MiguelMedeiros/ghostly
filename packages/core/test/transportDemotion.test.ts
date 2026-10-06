@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { DEMOTE_AFTER_FAILURES, DEMOTE_MS, GhostLink } from "../src/ghostlink";
+import { DEMOTE_AFTER_FAILURES, DEMOTE_MS, GhostLink, RACE_DIRECT_MS } from "../src/ghostlink";
+import { fakePeerConnection } from "./support/pairingWorld";
 import { createLink } from "../src/invite";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import type { NativeEndpoint, NativeTransport } from "../src/pairedTransports";
@@ -238,5 +239,46 @@ it("a native dial started offline is let go when the network comes back, and the
   // The first dial times out: no failure of Iroh's.
   await vi.advanceTimersByTimeAsync(10_000);
   expect((link as unknown as { nativeFailures: Map<string, number> }).nativeFailures.has("iroh/1")).toBe(false);
+  await link.stop(false);
+});
+
+it("a race dial started offline while the WebRTC offer stands: let go with its offer when the network comes back, and the chat dialled again", async () => {
+  // Bug hunt r10a's case: the offer went out with no network, Iroh was raced after it, and ran its 20 s timeout past
+  // the network's return.
+  vi.useFakeTimers();
+  let offline = true;
+  let made = createLink();
+  while (identityFromSeedB64(made.mine.seedB64).pubKeyZ32 > made.mine.peerPubKeyZ32) made = createLink();
+  const offers: number[] = [];
+  const link = new GhostLink({
+    params: { ...made.mine, profile: "paired-chat/1" }, rtcAvailable: true, autoConnect: true, offline: () => offline,
+    pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: async () => {} },
+    native: { fallback: true, automatic: true, peerFallback: true },
+    transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) },
+    createPeerConnection: () => { offers.push(Date.now()); return fakePeerConnection("offline-side"); },
+    localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+  });
+  const session = (link as unknown as { session: object }).session;
+  Object.defineProperty(session, "peerPresence", { get: () => ({ online: true, lastPacketAt: Date.now() - 60_000, seenAt: Date.now() - 60_000, services: null }) });
+  const calls: number[] = [];
+  link.registerEndpoint(slowEndpoint("iroh/1", calls));
+  link.learnPeerTransports(["webrtc/1", "iroh/1"], { "iroh/1": { id: "a" } });
+  // The offer, then Iroh raced after it.
+  await vi.advanceTimersByTimeAsync(RACE_DIRECT_MS + 1_000);
+  expect(offers.length).toBeGreaterThan(0);
+  expect(calls).toHaveLength(1);
+  const offersBefore = offers.length;
+  await vi.advanceTimersByTimeAsync(5_000);
+  offline = false;
+  const back = Date.now();
+  link.wake({ network: true });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(offers.length, "a new offer at once").toBeGreaterThan(offersBefore);
+  expect(offers.at(-1)! - back).toBeLessThan(100);
+  // Iroh raced again after the new offer, not after the first dial's timeout and the wait between attempts.
+  await vi.advanceTimersByTimeAsync(RACE_DIRECT_MS);
+  expect(calls.length).toBeGreaterThan(1);
+  expect(calls[1]! - back).toBeLessThanOrEqual(RACE_DIRECT_MS + 100);
+  expect((link as unknown as { nativeFailures: Map<string, number> }).nativeFailures.has("iroh/1"), "the dial let go is no failure").toBe(false);
   await link.stop(false);
 });
