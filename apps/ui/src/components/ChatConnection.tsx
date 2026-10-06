@@ -22,6 +22,7 @@ import { DirectBlockedHint } from "./DirectBlockedHint";
 import { ClockOffHint } from "./ClockOffHint";
 import { errorText } from "../lib/errorText";
 import { useWindowAway } from "../lib/windowAway";
+import { useOnline } from "../hooks/useOnline";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -62,10 +63,12 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false), [comparing, setComparing] = useState(false);
   const root = useRef<HTMLDetailsElement>(null), trigger = useRef<HTMLElement>(null);
-  const id = useId(), online = state?.settings.online ?? true;
+  // Offline either way: Ghostly's own switch, or a device with no network. The banner says the second; what the relays
+  // answer meanwhile (nothing reachable, cooling down) is that and nothing more, so it is no connection issue.
+  const id = useId(), ghostlyOnline = state?.settings.online ?? true, deviceOnline = useOnline(), online = ghostlyOnline && deviceOnline;
   const dht = link?.deliveryMode === "dht", textDht = link?.textDelivery === "dht", ready = online && pair?.status === "ready" && link?.dataLink === "open" && !!pair.transport;
-  const connectionFailure = error || pair?.transitionError || (pair?.status === "error" ? pair.error : "") || ((dht || textDht) ? link?.dhtDelivery?.error : "");
-  const discoveryFailure = !ready ? link?.discoveryError : "";
+  const connectionFailure = error || (online ? pair?.transitionError || (pair?.status === "error" ? pair.error : "") || ((dht || textDht) ? link?.dhtDelivery?.error : "") : "");
+  const discoveryFailure = !ready && online ? link?.discoveryError : "";
   const failure = connectionFailure || discoveryFailure;
   const preferred = link?.preferredTransport ?? "webrtc/1";
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
@@ -191,9 +194,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
       {failure && <p role="alert" className="mt-1.5 break-words px-1 text-danger">{failure}</p>}
       {paired && online && !dht && state?.transport?.directBlocked && <DirectBlockedHint />}
       {online && state?.transport?.clockOffMs !== undefined && <ClockOffHint ms={state.transport.clockOffMs} />}
-      {paired && <fieldset disabled={busy || !online || !link} className="mt-2">
+      {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
-        {link && <TransportOptions link={link} disabled={busy || !online}
+        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline}
           onChoose={choice => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice }))} />}
         <label className="connection-switch-row mt-1 flex min-h-11 items-center justify-between gap-2 rounded-lg px-2.5"><span className="text-text-primary">{t("connection.panel.fallback")}</span>
           <span className="connection-switch"><input type="checkbox" role="switch" aria-label={t("connection.panel.fallback")} aria-checked={link?.transportFallback??true} checked={link?.transportFallback??true} disabled={!link || dht}
@@ -208,7 +211,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
               <p className="font-medium text-text-primary">{waitText.label}</p>
               <p className="mt-0.5 break-words" data-testid="connection-waiting-why">{waitText.why}</p>
               <p className="mt-0.5">{waitText.meanwhile}</p>
-              {waitText.automatic && link && <button type="button" data-testid="connection-waiting-automatic" disabled={busy || !online}
+              {waitText.automatic && link && <button type="button" data-testid="connection-waiting-automatic" disabled={busy || !ghostlyOnline}
                 className={`mt-1.5 min-h-9 rounded-md px-2 text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
                 onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>{t("connection.panel.useAutomatic")}</button>}
             </div>}
@@ -265,7 +268,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
             {!!link?.transportHistory?.length && <ConnectionHistory events={link.transportHistory} contact={contact} />}
             {paired && <p>{t("connection.panel.fallbackNote")}</p>}
             {pair?.transitionTarget && <p>{t("connection.panel.preparing", { transport: name(pair.transitionTarget), current: name(pair.transport) })}</p>}
-            {!dht && !textDht && link?.dhtDelivery?.error && <p>{t("connection.panel.offlineText", { error: link.dhtDelivery.error })}</p>}
+            {online && !dht && !textDht && link?.dhtDelivery?.error && <p>{t("connection.panel.offlineText", { error: link.dhtDelivery.error })}</p>}
             {pinned && !pair?.keyMismatch && <p>{link?.peerVerified ? t("connection.panel.pinnedVerified") : t("connection.panel.pinnedUnverified")}</p>}
             {(dht || textDht) && <div data-testid="dht-delivery-details">
               <p>{t("connection.panel.dhtText", { bytes: link?.dhtDelivery?.maxTextBytes ?? 256 })}</p>
