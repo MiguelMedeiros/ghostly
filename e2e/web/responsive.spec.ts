@@ -147,6 +147,11 @@ for (const width of WIDTHS) {
     await expect(page.getByTestId("my-services")).toBeVisible();
     await expectTidy(page, "[data-testid=my-services]", "Services");
 
+    // Apps (WISP 1200; on in the suite's build).
+    await page.goto("/#/apps");
+    await expect(page.getByTestId("apps-page")).toBeVisible();
+    await expectTidy(page, "[data-testid=apps-page]", "Apps");
+
     await page.goto("/#/settings");
     await expect(page.getByTestId("settings-page")).toBeVisible();
     if ("mobile" in width) {
@@ -277,7 +282,7 @@ test("the account bar names its places whenever the names fit, however long the 
   const { page } = await peer("alice", { viewport: { width: 1440, height: 900 } });
   // The list at its default width (420px): five places of about 77px.
   expect(Math.round((await page.getByTestId("account-bar").boundingBox())!.width)).toBeGreaterThanOrEqual(419);
-  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: ["Personal", "Wallets", "Identities", "Services", "Settings"] });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: ["Personal", "Wallets", "Identities", "Apps", "Settings"] });
 
   // A profile name wider than its place ends in "…" (whole in the tooltip) and hides nothing.
   const long = "This is Fine, a longer name";
@@ -285,14 +290,14 @@ test("the account bar names its places whenever the names fit, however long the 
   await page.getByTestId("profile-name").fill(long);
   await page.getByTestId("profile-name").press("Enter");
   await expect(page.getByTestId("account-profile")).toHaveAttribute("title", `Profile: ${long}`);
-  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], nameCut: true, visible: [long, "Wallets", "Identities", "Services", "Settings"] });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], nameCut: true, visible: [long, "Wallets", "Identities", "Apps", "Settings"] });
   expect(await navProblems(page)).toEqual([]);
 
   // In Portuguese, whose names are longer, they still fit at 420px.
   await page.getByTestId("account-settings").click();
   await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identidades");
-  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: [long, "Carteiras", "Identidades", "Serviços", "Ajustes"] });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: [long, "Carteiras", "Identidades", "Apps", "Ajustes"] });
 
   // At the list's narrowest (280px), "Identidades" would be cut: all the labels step aside, and come back with the width.
   const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;

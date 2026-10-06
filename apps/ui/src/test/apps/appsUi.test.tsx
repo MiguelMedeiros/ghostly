@@ -120,9 +120,10 @@ describe("with the apps flag on", () => {
     expect(await screen.findByRole("heading", { name: "Shared services with Ana" })).toBeInTheDocument();
   });
 
-  it("puts Apps in the sidebar, and in Services' tab on a phone", async () => {
+  it("puts Apps in Services' place, in the sidebar and in a phone's tabs: five places each", async () => {
     renderApp(<><AccountBar /><MobileTabBar /></>);
     expect(await screen.findByTestId("account-apps")).toHaveAccessibleName("Apps");
+    expect(screen.queryByTestId("account-services")).not.toBeInTheDocument();
     expect(screen.getByTestId("mobile-tab-apps")).toHaveTextContent("Apps");
     expect(screen.queryByTestId("mobile-tab-services")).not.toBeInTheDocument();
     expect(screen.getAllByTestId(/^mobile-tab-[a-z]+$/)).toHaveLength(5);

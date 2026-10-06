@@ -1,4 +1,4 @@
-import { chat, connect, expect, link, say, test } from "../support/fixtures";
+import { chat, connect, expect, link, openServicesPage, say, test } from "../support/fixtures";
 
 test("on a phone: tabs for chats, wallet, sharing and settings, and Profile through Settings", { tag: ["@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("alice", { mobile: true });
@@ -11,8 +11,9 @@ test("on a phone: tabs for chats, wallet, sharing and settings, and Profile thro
   await expect(page.getByRole("heading", { name: "Wallets", exact: true })).toBeVisible();
   await expect(page.getByTestId("wallet")).toBeVisible();
 
-  await tabs.getByRole("button", { name: "Services" }).click();
-  await expect(page.getByTestId("my-services")).toBeVisible();
+  // Apps has Services' tab in the suite's build (WISP 1200; five tabs is what a phone holds).
+  await tabs.getByRole("button", { name: "Apps" }).click();
+  await expect(page.getByTestId("apps-page")).toBeVisible();
 
   await tabs.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
@@ -157,7 +158,11 @@ test("on a wide screen the wallet and services are pages beside the list", { tag
   await page.getByTestId("wallet-chip").click();
   await expect(page).toHaveURL(/#\/wallet$/);
   await expect(page.getByRole("heading", { name: "Wallets", exact: true })).toBeVisible();
-  await page.getByTestId("account-services").click();
+  // Apps holds Services' place in the suite's build (WISP 1200): Services is a page beside the list, through Profile.
+  await page.getByTestId("account-apps").click();
+  await expect(page).toHaveURL(/#\/apps$/);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await openServicesPage(page);
   await expect(page).toHaveURL(/#\/services$/);
   await expect(page.getByRole("heading", { name: "Services" })).toBeVisible();
   // The old phone route still lands on the page.

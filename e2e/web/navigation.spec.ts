@@ -28,8 +28,9 @@ test("the header's Back goes home after Wallets → Identities → Settings, not
 
   // And the browser's Back from a place is home too, not the place visited before it.
   await page.getByTestId("wallet-chip").click();
-  await page.getByTestId("account-services").click();
-  await expect(page).toHaveURL(/#\/services$/);
+  // Apps holds Services' place in the suite's build (WISP 1200; Services is reached from Profile there).
+  await page.getByTestId("account-apps").click();
+  await expect(page).toHaveURL(/#\/apps$/);
   await page.goBack();
   await home(page);
 });
@@ -59,7 +60,7 @@ test("a sub-page's Back goes up to the page it was opened from, then home", { ta
 test("on a phone: the browser's Back from a tab goes home, and Profile goes up to Settings", { tag: ["@feature:app.navigation.back", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("pocket", { mobile: true });
   const tabs = page.getByTestId("mobile-tabs");
-  for (const tab of ["Wallets", "Identities", "Services", "Settings"]) await tabs.getByRole("button", { name: tab }).click();
+  for (const tab of ["Wallets", "Identities", "Apps", "Settings"]) await tabs.getByRole("button", { name: tab }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
   // The tab bar is the way home: no header Back on a tab of its own.
   await expect(back(page)).toBeHidden();

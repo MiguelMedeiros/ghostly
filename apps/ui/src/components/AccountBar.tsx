@@ -67,10 +67,11 @@ export function AccountBar() {
   // be long (32 characters is wider than any place), so it never decides this: it ends in "…", whole in its tooltip.
   const navRef = useRef<HTMLElement>(null);
   const [labelsHidden, setLabelsHidden] = useState(false);
-  // Apps (WISP 1200), where it shows: a place of its own beside Identities.
+  // Apps (WISP 1200), where it shows, takes Services' place: five places is what the bar holds at its narrowest (each
+  // stays a 44px target). Services is still reached from the Profile page and from a chat's Shared services.
   const appsOn = useAppsAvailable();
-  const placeNames = [t("tabs.wallets"), t("tabs.identities"), ...(appsOn ? [t("apps.title")] : []), t("tabs.services"), t("sidebar.settings")].join("\n");
-  const placeCount = 3 + (wallet ? 1 : 0) + (platform ? 1 : 0) + (appsOn ? 1 : 0);
+  const placeNames = [t("tabs.wallets"), t("tabs.identities"), appsOn ? t("apps.title") : t("tabs.services"), t("sidebar.settings")].join("\n");
+  const placeCount = 3 + (wallet ? 1 : 0) + (platform || appsOn ? 1 : 0);
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
@@ -187,7 +188,7 @@ export function AccountBar() {
           </button>
         )}
 
-        {platform && (
+        {platform && !appsOn && (
           <button
             data-testid="account-services"
             onClick={() => (location.pathname === "/services" ? nav.home() : nav.place("/services"))}

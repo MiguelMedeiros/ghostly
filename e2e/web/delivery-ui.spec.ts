@@ -100,7 +100,8 @@ test("header connection popover, five desktop destinations and resizing preserve
     const footer=a.page.getByTestId("account-bar");
     expect((await a.page.getByTestId("sidebar").boundingBox())!.width).toBe(width);
     expect((await footer.boundingBox())!.width).toBeGreaterThanOrEqual(width-1);
-    for(const id of ["account-profile","wallet-chip","account-identities","account-services","account-settings"]) {
+    // Apps holds Services' place in the suite's build (WISP 1200).
+    for(const id of ["account-profile","wallet-chip","account-identities","account-apps","account-settings"]) {
       const action=a.page.getByTestId(id); await expect(action).toBeVisible(); expect((await action.boundingBox())!.width).toBeGreaterThan(44);
     }
     await expect(a.page.getByTestId("wallet-chip")).toHaveText("Wallets");
@@ -110,7 +111,7 @@ test("header connection popover, five desktop destinations and resizing preserve
   }
   await openProfilePage(a.page); await expect(a.page.getByTestId("account-nickname")).toBeVisible();
   await a.page.getByTestId("wallet-chip").click(); await expect(a.page.getByTestId("wallet")).toBeVisible();
-  await a.page.getByTestId("account-services").click(); await expect(a.page.getByText("needs the Ghostly browser extension or desktop app").first()).toBeVisible();
+  await a.page.getByTestId("account-apps").click(); await expect(a.page.getByTestId("apps-page")).toBeVisible();
   await a.page.getByTestId("account-settings").click(); await expect(a.page).toHaveURL(/settings/);
 });
 

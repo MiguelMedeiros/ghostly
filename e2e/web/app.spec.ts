@@ -1,7 +1,7 @@
 import { copyInvite } from "../support/clipboard";
 import { manualFallback } from "../support/clipboard";
 import type { Page } from "@playwright/test";
-import { expect, test } from "../support/fixtures";
+import { expect, openServicesPage, test } from "../support/fixtures";
 
 /** Chats kept by this browser, counted the way the app stores them. */
 const storedChats = (page: Page) =>
@@ -56,7 +56,7 @@ test("opens on the home screen", { tag: ["@feature:app.home"] }, async ({ peer }
 
 test("a web page says plainly what it cannot do", { tag: ["@feature:app.web-limits", "@feature:services.web-unavailable"] }, async ({ peer }) => {
   const { page } = await peer("alice");
-  await page.getByTestId("account-services").click();
+  await openServicesPage(page);
   await expect(page.getByTestId("add-service")).toHaveCount(0);
   await expect(page.getByText("needs the Ghostly browser extension or desktop app").first()).toBeVisible();
 });
