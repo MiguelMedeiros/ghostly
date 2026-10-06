@@ -122,6 +122,11 @@ const ENTRY_UNANSWERED_MS = 90_000;
  * before the turn ends. A paired session over Pkarr can take the better part of a minute to come up.
  */
 const KNOCK_SLOT_MS = 2 * 60_000;
+/**
+ * A knock the relays have not taken yet (their budget refused it) is tried again this soon: within `WRITE_FIRST_MS`
+ * of the refusal, while the budget still keeps the next request it frees for that write.
+ */
+export const UNKNOCKED_RETRY_MS = 3_000;
 const KNOCK_SLOT_OPEN_MS = 20_000;
 /** How long a hub missing from the beacon still counts as one for the edges already up. */
 const HUB_GRACE_MS = 3 * 60_000;
@@ -581,7 +586,8 @@ export class Communities {
         // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
         if (!this.knocking(group, live) && waited > CHECK_MS) await this.endCheck(group);
         // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.
-        else if (!this.host.linkReady(group.joining.linkId, 2) && !this.host.linkSeen?.(group.joining.linkId) && now - (this.lastKnock.get(group.id) ?? 0) >= every) await this.knock(group, now).catch(() => {});
+        else if (!this.host.linkReady(group.joining.linkId, 2) && !this.host.linkSeen?.(group.joining.linkId)
+          && now - (this.lastKnock.get(group.id) ?? 0) >= (this.knocked.has(group.id) ? every : Math.min(every, UNKNOCKED_RETRY_MS))) await this.knock(group, now).catch(() => {});
         if (!live) continue;
       }
       if (!live) continue;
@@ -1231,10 +1237,12 @@ export class Communities {
     if (live.doors !== doorSig) { if (door === s.myKey && live.doors) live.knocksScanned = false; live.doors = doorSig; }
     const records = this.knockRecordsToRead(live, door === s.myKey, busy, now);
     if (!records.length) return;
+    let failed = 0;
     const read = await Promise.all(records.map(async n => {
       const record = knockRecord(link, n);
-      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true, door === s.myKey && n === KNOCK_BELL).catch(() => null)) ?? []);
+      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true, door === s.myKey && n === KNOCK_BELL).catch(() => { failed++; return null; })) ?? []);
     }));
+    traceJoin(groupId, "knock.read", { records: records.length, knocks: read.flat().length, ...(failed ? { failed } : {}) });
     const bell = records.indexOf(KNOCK_BELL);
     if (bell >= 0 && read[bell].filter(k => now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) live.crowdUntil = now + CROWD_MS;
     // A joiner that moved from the bell to its own record is in both for a while: its newest knock counts.
@@ -1297,10 +1305,16 @@ export class Communities {
    * Leaves (or refreshes) my knock: in the bell while it has room, in my own record once a crowd has
    * filled it. The first one goes out at once; refreshes are background requests, and keep my side of
    * the entry session looking fast while I still expect a member to answer soon.
+   *
+   * "The first" is the first of this run that the relays took (`knocked`), not the first tried: a knock the relays'
+   * budget refused is tried again as one, every `UNKNOCKED_RETRY_MS`. Taken for a refresh, it went as a background
+   * request, every `knockMs`, and background requests are held to a few a minute while a link of this app signals: its
+   * own entry session, looking fast for the door's answer. A CLI that was the door of another community, its budget
+   * spent, never knocked at all (groupCompat, with the budget scaled down to 12 requests a minute).
    */
   private async knock(group: StoredGroup, now = this.now()): Promise<void> {
     const joining = group.joining!;
-    const first = !this.lastKnock.has(group.id);
+    const first = !this.knocked.has(group.id);
     this.lastKnock.set(group.id, now);
     // The first knock of this run too: after a restart the entry session starts again at the background pace, and the
     // door's side, opened on this knock, waited up to half a minute for its answer.

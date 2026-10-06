@@ -157,7 +157,11 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   // Read first: a mistyped one stops here, before anything opens.
   const pinned = pkarrRelays();
   const trace = process.env.GHOSTLY_LINK_TRACE;
-  if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
+  if (trace) {
+    setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
+    // A join through a group's link, step by step (what the door read, whom it let in), in the same file.
+    (await import("@ghostly/browser/engine/joinTrace")).setJoinTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
+  }
   const store = await openPersistentIndexedDb(paths.db);
   // A profile a restore made, started for the first time: its store is the backup's, as old as the backup. Its ecash
   // is checked with the mints and its unfinished payment attempts authorize nothing, as in the app's restore. Done
