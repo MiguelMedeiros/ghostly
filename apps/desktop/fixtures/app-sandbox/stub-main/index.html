@@ -1,0 +1,7 @@
+<!doctype html><meta charset="utf-8"><title>m0 stub main</title>
+<script>
+window.__seen = [];
+try { new BroadcastChannel("ghostly").onmessage = (e) => window.__seen.push(["bc", String(e.data)]); } catch (e) { window.__seen.push(["bc-error", String(e)]); }
+window.addEventListener("message", (e) => window.__seen.push(["message", String(e.origin), String(e.data)]));
+try { localStorage.setItem("m0-secret", "main-only"); } catch (e) {}
+</script><p>stub main window for the app sandbox spike</p>

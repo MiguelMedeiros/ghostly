@@ -65,34 +65,103 @@ const RUNNER: &str = r#"<!doctype html>
 })();
 </script></head><body></body></html>"#;
 
-/// How a window is guarded. Only `Full` exists outside the test driver; the others are the spike's controls,
-/// which show that each probe does reach the network when the layer it tests is off.
+/// How a window is guarded: one switch per layer. Apps always get `Guard::FULL`; the test driver can turn
+/// layers off, which is how the spike shows what each one stops (`Guard::parse`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Guard {
-    /// The runner's CSP header and the navigation lock.
-    Full,
-    /// The header, no navigation lock: what the CSP alone stops.
-    #[cfg(any(test, feature = "e2e-driver"))]
-    HeaderOnly,
-    /// Neither: a plain page, the control.
-    #[cfg(any(test, feature = "e2e-driver"))]
-    Control,
+pub struct Guard {
+    /// The runner's CSP header (and the runner's own check that its origin is `"null"`).
+    header: bool,
+    /// The navigation lock: the runner once, then nothing (frames included).
+    lock: bool,
+    /// macOS: a content rule list that blocks every load but `ghostly-app:` (`webkit`).
+    rules: bool,
+    /// macOS: WebKit's preconnect, DNS prefetch and WebRTC switched off for the window (`webkit`).
+    prefs: bool,
+    /// A proxy that goes nowhere, with a data store of its own. Measured, not used: WKWebView never sent a
+    /// request to it (macOS 15.6); kept for the test driver so Linux can be measured the same way.
+    proxy: bool,
 }
 
 impl Guard {
-    fn header(self) -> bool {
-        match self {
-            Guard::Full => true,
-            #[cfg(any(test, feature = "e2e-driver"))]
-            Guard::HeaderOnly => true,
-            #[cfg(any(test, feature = "e2e-driver"))]
-            Guard::Control => false,
-        }
-    }
+    pub const FULL: Guard = Guard {
+        header: true,
+        lock: true,
+        rules: true,
+        prefs: true,
+        proxy: false,
+    };
 
-    fn locked(self) -> bool {
-        self == Guard::Full
+    /// `full`, `control` (nothing), or layers joined by `+`: `header`, `lock`, `rules`, `prefs`, `proxy`.
+    #[cfg(any(test, feature = "e2e-driver"))]
+    pub fn parse(name: &str) -> Option<Guard> {
+        if name == "full" {
+            return Some(Guard::FULL);
+        }
+        let mut guard = Guard {
+            header: false,
+            lock: false,
+            rules: false,
+            prefs: false,
+            proxy: false,
+        };
+        if name == "control" {
+            return Some(guard);
+        }
+        for layer in name.split('+') {
+            match layer {
+                "header" => guard.header = true,
+                "lock" => guard.lock = true,
+                "rules" => guard.rules = true,
+                "prefs" => guard.prefs = true,
+                "proxy" => guard.proxy = true,
+                _ => return None,
+            }
+        }
+        Some(guard)
     }
+}
+
+/// The spike's proxy that goes nowhere: it answers every request with 403, connects nowhere, and writes down
+/// what it was asked for (`caught`).
+#[cfg(any(test, feature = "e2e-driver"))]
+fn black_hole() -> Option<u16> {
+    use std::io::{BufRead, BufReader, Write};
+    static PORT: std::sync::OnceLock<Option<u16>> = std::sync::OnceLock::new();
+    *PORT.get_or_init(|| {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).ok()?;
+        let port = listener.local_addr().ok()?.port();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                let mut line = String::new();
+                let _ = BufReader::new(&stream).read_line(&mut line);
+                let target = line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                if let Ok(mut caught) = CAUGHT.lock() {
+                    if caught.len() < 256 {
+                        caught.push(target);
+                    }
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                );
+            }
+        });
+        Some(port)
+    })
+}
+
+#[cfg(any(test, feature = "e2e-driver"))]
+static CAUGHT: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// What the spike's proxy was asked for, so far.
+#[cfg(any(test, feature = "e2e-driver"))]
+#[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
+pub fn caught() -> Vec<String> {
+    CAUGHT.lock().map(|c| c.clone()).unwrap_or_default()
 }
 
 struct AppWindow {
@@ -148,14 +217,15 @@ fn may_navigate(url: &url::Url, started: bool) -> bool {
     !started && is_runner(url)
 }
 
-/// Opens an app in a window of its own and answers its label. Nothing calls it yet: the Apps screen will.
+/// Opens an app in a window of its own and answers its label. Nothing calls it yet: the Apps screen will,
+/// from an async command (on macOS the window is built on the main thread, so this must not run there).
 #[allow(dead_code)]
 pub fn open<R: Runtime>(
     app: &AppHandle<R>,
     app_id: String,
     entry: String,
 ) -> Result<String, String> {
-    open_guarded(app, app_id, entry, Guard::Full)
+    open_guarded(app, app_id, entry, Guard::FULL)
 }
 
 pub fn open_guarded<R: Runtime>(
@@ -165,8 +235,7 @@ pub fn open_guarded<R: Runtime>(
     guard: Guard,
 ) -> Result<String, String> {
     let label = format!("{LABEL_PREFIX}{:016x}", rand::random::<u64>());
-    let state = app.state::<AppSandboxState>();
-    state
+    app.state::<AppSandboxState>()
         .windows
         .lock()
         .map_err(|_| "app state poisoned")?
@@ -180,18 +249,34 @@ pub fn open_guarded<R: Runtime>(
                 refused: Vec::new(),
             },
         );
+    let built = build_window(app, &label, &app_id, guard);
+    if let Err(e) = built {
+        forget_window(app, &label);
+        return Err(e);
+    }
+    Ok(label)
+}
+
+/// The window, with every layer that does not depend on the platform.
+fn window_builder<'a, R: Runtime>(
+    app: &'a AppHandle<R>,
+    label: &str,
+    app_id: &str,
+    guard: Guard,
+) -> Result<WebviewWindowBuilder<'a, R, AppHandle<R>>, String> {
     let url = format!("{SCHEME}://localhost/")
         .parse()
         .map_err(|e| format!("URL: {e}"))?;
-    let (nav_app, nav_label) = (app.clone(), label.clone());
-    let (new_app, new_label) = (app.clone(), label.clone());
-    let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url))
+    let (nav_app, nav_label) = (app.clone(), label.to_string());
+    let (new_app, new_label) = (app.clone(), label.to_string());
+    #[allow(unused_mut)]
+    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
         .title(format!("{app_id} (Ghostly)"))
         .on_navigation(move |to| {
-            let state = nav_app.state::<AppSandboxState>();
-            state
+            nav_app
+                .state::<AppSandboxState>()
                 .with(&nav_label, |window| {
-                    let allowed = !window.guard.locked() || may_navigate(to, window.started);
+                    let allowed = !window.guard.lock || may_navigate(to, window.started);
                     if !allowed {
                         window.refused.push(format!("navigation {to}"));
                     }
@@ -208,13 +293,67 @@ pub fn open_guarded<R: Runtime>(
                 });
             tauri::webview::NewWindowResponse::Deny
         })
-        .inner_size(480.0, 360.0)
-        .build();
-    if let Err(e) = built {
-        forget_window(app, &label);
-        return Err(format!("Window: {e}"));
+        .inner_size(480.0, 360.0);
+    #[cfg(any(test, feature = "e2e-driver"))]
+    if guard.proxy {
+        let port = black_hole().ok_or("No proxy")?;
+        builder = builder.incognito(true).proxy_url(
+            format!("http://127.0.0.1:{port}")
+                .parse()
+                .map_err(|e| format!("URL: {e}"))?,
+        );
     }
-    Ok(label)
+    #[cfg(not(any(test, feature = "e2e-driver")))]
+    let _ = guard;
+    Ok(builder)
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+fn build_window<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    app_id: &str,
+    guard: Guard,
+) -> Result<(), String> {
+    window_builder(app, label, app_id, guard)?
+        .build()
+        .map(|_| ())
+        .map_err(|e| format!("Window: {e}"))
+}
+
+/// On macOS the window gets a WebKit configuration of its own (`webkit`), which has to be made and used on
+/// the main thread; this waits for it there.
+#[cfg(all(target_os = "macos", not(test)))]
+fn build_window<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    app_id: &str,
+    guard: Guard,
+) -> Result<(), String> {
+    if objc2_foundation::MainThreadMarker::new().is_some() {
+        return Err("Open apps from a command, not the main thread".into());
+    }
+    if guard.rules {
+        webkit::compile_rules(app)?;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (handle, label, app_id) = (app.clone(), label.to_string(), app_id.to_string());
+    app.run_on_main_thread(move || {
+        let built = (|| {
+            let mut builder = window_builder(&handle, &label, &app_id, guard)?;
+            if guard.rules || guard.prefs {
+                builder = builder.with_webview_configuration(webkit::configuration(guard)?);
+            }
+            builder
+                .build()
+                .map(|_| ())
+                .map_err(|e| format!("Window: {e}"))
+        })();
+        let _ = tx.send(built);
+    })
+    .map_err(|e| format!("Window: {e}"))?;
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .map_err(|_| "The window did not open".to_string())?
 }
 
 /// What a window was refused so far (the spike's measurements read it).
@@ -265,11 +404,19 @@ pub fn handle<R: Runtime>(
         .header("x-content-type-options", "nosniff")
         .header("referrer-policy", "no-referrer")
         .header("cache-control", "no-store");
-    if guard.header() {
+    if guard.header {
         response = response.header("content-security-policy", RUNNER_CSP);
     }
+    #[cfg(any(test, feature = "e2e-driver"))]
+    let runner = if !guard.header {
+        RUNNER.replace(r#"self.origin !== "null" || "#, "")
+    } else {
+        RUNNER.to_string()
+    };
+    #[cfg(not(any(test, feature = "e2e-driver")))]
+    let runner = RUNNER;
     response
-        .body(RUNNER.as_bytes().to_vec())
+        .body(runner.as_bytes().to_vec())
         .expect("runner response")
 }
 
@@ -321,6 +468,154 @@ pub fn app_broker<R: Runtime>(
     request: BrokerRequest,
 ) -> Result<Value, String> {
     broker(&state, webview.label(), request)
+}
+
+/// The content rule list of an app window on macOS: every load blocked but the runner's own scheme.
+const RULES_ID: &str = "ghostly-app-sandbox-1";
+const RULES: &str = r#"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^ghostly-app:"},"action":{"type":"ignore-previous-rules"}}]"#;
+
+/// The WebKit features an app window has off on macOS: `<link rel=preconnect>` (and in Early Hints), DNS
+/// prefetch, `<link rel=prefetch>`, and WebRTC itself, which also reaches frames the runner never ran in.
+const OFF: &[&str] = &[
+    "DNSPrefetchingEnabled",
+    "LinkPreconnect",
+    "LinkPreconnectEarlyHintsEnabled",
+    "LinkPrefetchEnabled",
+    "PeerConnectionEnabled",
+];
+
+/// The WebKit side of an app window on macOS: what the CSP does not govern there. Measured (WISP 12xx, Desktop
+/// spike): `<link rel=preconnect>` opened a TCP connection under the runner's full policy.
+/// - A content rule list that blocks every load but `ghostly-app:` (public API).
+/// - WebKit's own switches (`WKPreferences._features`, private API, as Ghostly ships outside the App Store):
+///   `OFF` below. A WebKit without one of them opens no app, so a rename shows up as a refusal, not a leak.
+#[cfg(target_os = "macos")]
+#[cfg_attr(test, allow(dead_code))]
+mod webkit {
+    use super::Guard;
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyClass, AnyObject, Bool};
+    use objc2::{msg_send, MainThreadMarker};
+    use objc2_foundation::{NSArray, NSError, NSString};
+    use objc2_web_kit::{WKContentRuleList, WKContentRuleListStore, WKWebViewConfiguration};
+    use std::cell::RefCell;
+    use std::sync::OnceLock;
+    use tauri::{AppHandle, Runtime};
+
+    use super::{OFF, RULES, RULES_ID};
+
+    thread_local! {
+        /// Compiled once, on the main thread, where WebKit wants it.
+        static RULE_LIST: RefCell<Option<Retained<WKContentRuleList>>> = const { RefCell::new(None) };
+    }
+
+    /// Compiles the rule list, once, and waits for it. Not on the main thread, where WebKit answers.
+    pub fn compile_rules<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+        static COMPILED: OnceLock<Result<(), String>> = OnceLock::new();
+        COMPILED
+            .get_or_init(|| {
+                let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+                app.run_on_main_thread(move || {
+                    let Some(mtm) = MainThreadMarker::new() else {
+                        let _ = tx.send(Err("not the main thread".into()));
+                        return;
+                    };
+                    let Some(store) = (unsafe { WKContentRuleListStore::defaultStore(mtm) }) else {
+                        let _ = tx.send(Err("no rule list store".into()));
+                        return;
+                    };
+                    let done = block2::RcBlock::new(move |list: *mut WKContentRuleList, error: *mut NSError| {
+                        let answer = match unsafe { Retained::retain(list) } {
+                            Some(list) => {
+                                RULE_LIST.with(|slot| *slot.borrow_mut() = Some(list));
+                                Ok(())
+                            }
+                            None => Err(unsafe { error.as_ref() }
+                                .map(|e| e.localizedDescription().to_string())
+                                .unwrap_or_else(|| "rule list not compiled".into())),
+                        };
+                        let _ = tx.send(answer);
+                    });
+                    unsafe {
+                        store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
+                            Some(&NSString::from_str(RULES_ID)),
+                            Some(&NSString::from_str(RULES)),
+                            Some(&done),
+                        );
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+                rx.recv_timeout(std::time::Duration::from_secs(10))
+                    .map_err(|_| "rule list not compiled in time".to_string())?
+            })
+            .clone()
+    }
+
+    /// Every WebKit feature this WebKit knows: its key and the `_WKFeature` itself.
+    pub fn features() -> Vec<(String, Retained<AnyObject>)> {
+        let Some(class) = AnyClass::get(c"WKPreferences") else {
+            return Vec::new();
+        };
+        let list: Option<Retained<NSArray<AnyObject>>> = unsafe { msg_send![class, _features] };
+        list.map(|list| {
+            list.iter()
+                .map(|feature| {
+                    let key: Retained<NSString> = unsafe { msg_send![&*feature, key] };
+                    (key.to_string(), feature)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    /// The keys of WebKit features whose name says preconnect, prefetch or WebRTC (the spike's list).
+    pub fn candidates() -> Vec<String> {
+        features()
+            .into_iter()
+            .map(|(key, _)| key)
+            .filter(|key| {
+                let key = key.to_ascii_lowercase();
+                ["preconnect", "prefetch", "peerconnection", "webrtc", "dns"]
+                    .iter()
+                    .any(|word| key.contains(word))
+            })
+            .collect()
+    }
+
+    /// The window's configuration: made here, on the main thread, and handed to wry.
+    pub fn configuration(guard: Guard) -> Result<Retained<WKWebViewConfiguration>, String> {
+        let mtm = MainThreadMarker::new().ok_or("not the main thread")?;
+        let config = unsafe { WKWebViewConfiguration::new(mtm) };
+        if guard.rules {
+            let list = RULE_LIST
+                .with(|slot| slot.borrow().clone())
+                .ok_or("rule list not compiled")?;
+            unsafe { config.userContentController().addContentRuleList(&list) };
+        }
+        if guard.prefs {
+            let preferences = unsafe { config.preferences() };
+            let features = features();
+            for key in OFF {
+                let (_, feature) = features
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .ok_or_else(|| format!("WebKit has no {key}"))?;
+                let _: () = unsafe {
+                    msg_send![&*preferences, _setEnabled: Bool::NO, forFeature: &**feature]
+                };
+            }
+        }
+        Ok(config)
+    }
+}
+
+/// The WebKit features the spike looks at (macOS), for the test driver.
+#[cfg(feature = "e2e-driver")]
+pub fn webkit_candidates() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    return webkit::candidates();
+    #[cfg(not(target_os = "macos"))]
+    Vec::new()
 }
 
 #[cfg(test)]
@@ -427,7 +722,7 @@ mod tests {
                     app: "ana/chess".into(),
                     entry: Some("<p>hi</p>".into()),
                     started: false,
-                    guard: Guard::Full,
+                    guard: Guard::FULL,
                     refused: Vec::new(),
                 },
             );
@@ -488,7 +783,7 @@ mod tests {
                     app: app.into(),
                     entry: Some(format!("<p>{app}</p>")),
                     started: false,
-                    guard: Guard::Full,
+                    guard: Guard::FULL,
                     refused: Vec::new(),
                 },
             );
@@ -536,6 +831,58 @@ mod tests {
             broker(&state, "app-2", request("context", json!(big))).unwrap_err(),
             "Request too large"
         );
+    }
+
+    #[test]
+    fn apps_get_every_layer_and_the_driver_can_take_them_off_one_by_one() {
+        assert_eq!(
+            Guard::FULL,
+            Guard {
+                header: true,
+                lock: true,
+                rules: true,
+                prefs: true,
+                proxy: false
+            }
+        );
+        assert_eq!(Guard::parse("full"), Some(Guard::FULL));
+        let control = Guard::parse("control").unwrap();
+        assert!(
+            !control.header && !control.lock && !control.rules && !control.prefs && !control.proxy
+        );
+        let some = Guard::parse("header+lock").unwrap();
+        assert!(some.header && some.lock && !some.rules && !some.prefs);
+        assert_eq!(Guard::parse("header+nothing"), None);
+        assert_eq!(Guard::parse(""), None);
+    }
+
+    /// Measured on WKWebView: the rule list alone stops every load the CSP stops and `<link rel=preconnect>`,
+    /// which the CSP does not; it must let the runner itself through.
+    #[test]
+    fn the_rule_list_blocks_everything_but_the_runner() {
+        let rules: Value = serde_json::from_str(RULES).unwrap();
+        assert_eq!(
+            rules,
+            json!([
+                {"trigger": {"url-filter": ".*"}, "action": {"type": "block"}},
+                {"trigger": {"url-filter": "^ghostly-app:"}, "action": {"type": "ignore-previous-rules"}},
+            ])
+        );
+        assert!(!RULES_ID.is_empty());
+    }
+
+    /// WebKit's switches are private: a WebKit that renamed one would leave it on. Each one an app window turns
+    /// off must exist in the WebKit on this Mac (an app window refuses to open otherwise).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn webkit_knows_every_switch_an_app_window_turns_off() {
+        let known: Vec<String> = webkit::features().into_iter().map(|(key, _)| key).collect();
+        for key in OFF {
+            assert!(
+                known.iter().any(|k| k == key),
+                "WebKit has no {key}: {known:?}"
+            );
+        }
     }
 
     #[test]

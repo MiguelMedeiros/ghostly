@@ -186,8 +186,9 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             (200, handled.to_string())
         }
         // An installed app's window (src/app_sandbox.rs), the only way to open one until the marketplace lands:
-        // `{"app", "entry", "guard"}`, where `guard` is `full` (as the app will), or, for the sandbox spike's
-        // controls, `header` (no navigation lock) or `control` (no policy either). Answers the window's label.
+        // `{"app", "entry", "guard"}`, where `guard` is `full` (as the app will) or, for the sandbox spike, the
+        // layers to keep (`Guard::parse`: `control` for none, or `header+lock+rules+prefs+proxy`). Answers the
+        // window's label.
         ("POST", "/app-open") => {
             #[derive(Deserialize)]
             struct Open {
@@ -199,12 +200,9 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
                 Ok(open) => open,
                 Err(e) => return (400, error(&e.to_string())),
             };
-            use crate::app_sandbox::Guard;
-            let guard = match open.guard.as_deref().unwrap_or("full") {
-                "full" => Guard::Full,
-                "header" => Guard::HeaderOnly,
-                "control" => Guard::Control,
-                other => return (400, error(&format!("no guard {other}"))),
+            let name = open.guard.as_deref().unwrap_or("full");
+            let Some(guard) = crate::app_sandbox::Guard::parse(name) else {
+                return (400, error(&format!("no guard {name}")));
             };
             match crate::app_sandbox::open_guarded(app, open.app, open.entry, guard) {
                 Ok(label) => (200, serde_json::to_string(&label).unwrap_or_default()),
@@ -220,6 +218,30 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             match crate::app_sandbox::refused(app, &label) {
                 Some(refused) => (200, serde_json::to_string(&refused).unwrap_or_default()),
                 None => (404, error(&format!("no app window {label}"))),
+            }
+        }
+        // The WebKit features whose name says preconnect, prefetch or WebRTC (macOS).
+        ("GET", "/app-webkit") => (
+            200,
+            serde_json::to_string(&crate::app_sandbox::webkit_candidates()).unwrap_or_default(),
+        ),
+        // Every request app windows sent to the proxy that goes nowhere, so far.
+        ("GET", "/app-caught") => (
+            200,
+            serde_json::to_string(&crate::app_sandbox::caught()).unwrap_or_default(),
+        ),
+        // Closes an app window. Body: the label, as a JSON string.
+        ("POST", "/app-close") => {
+            let label: String = match serde_json::from_slice(&request.body) {
+                Ok(label) => label,
+                Err(e) => return (400, error(&e.to_string())),
+            };
+            match app.get_webview_window(&label) {
+                Some(window) if crate::app_sandbox::is_app_label(&label) => match window.close() {
+                    Ok(()) => (200, "true".into()),
+                    Err(e) => (400, error(&e.to_string())),
+                },
+                _ => (404, error(&format!("no app window {label}"))),
             }
         }
         _ => (404, error("no such route")),
