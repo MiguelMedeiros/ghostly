@@ -2,7 +2,7 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Roster,
+  type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -294,6 +294,8 @@ export class Communities {
   private readonly knockAt = new Map<string, number>();
   /** Joiners: how many others had a knock still being refreshed in the record I last read (they wait with me). */
   private readonly knockingWith = new Map<string, number>();
+  /** Joiners: the knock record a knock read whose write the relays refused, and when it was read (`knock`). */
+  private readonly knockRead = new Map<string, { n: number; knocks: Knock[]; at: number }>();
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
   private readonly frames = new FramesTaken();
   private readonly carriers = new Map<string, string>();
@@ -421,7 +423,7 @@ export class Communities {
 
   /** `check`: a member, as far as this device knows, asking the door whether it still is (`joinByLink`). */
   private async startJoining(link: GroupEntryLink, seedB64: string, since: number, check = false): Promise<void> {
-    this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g);
+    this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g); this.knockRead.delete(link.g);
     const before = this.stored.get(link.g)?.joining;
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     if (before && before.linkId !== linkId) await this.host.closeEdge(before.linkId);
@@ -440,7 +442,7 @@ export class Communities {
     if (!joining) return;
     delete group.joining;
     this.lastKnock.delete(group.id); this.knocked.delete(group.id); this.knockAt.delete(group.id);
-    this.knockingWith.delete(group.id);
+    this.knockingWith.delete(group.id); this.knockRead.delete(group.id);
     await this.host.closeEdge(joining.linkId);
     await this.store.putGroup(group);
     this.host.emit();
@@ -562,6 +564,7 @@ export class Communities {
     this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
     this.knockingWith.delete(groupId);
+    this.knockRead.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     this.host.historyGone?.(groupId);
@@ -1322,11 +1325,27 @@ export class Communities {
     const me = identityFromSeedB64(joining.seedB64).pubKeyZ32, link = { g: group.id, host: joining.host };
     const started = Date.now();
     const read = async (n: number) => { const record = knockRecord(link, n); return { record, knocks: readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, !first)) ?? []) }; };
-    let n = this.knockAt.get(group.id) ?? KNOCK_BELL, { record, knocks } = await read(n);
-    if (n === KNOCK_BELL && !knocks.some(k => k.key === me) && knocks.filter(k => k.key !== me && now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) ({ record, knocks } = await read(n = ownKnockRecord(me)));
-    await this.host.publish(knockIdentity(record), knockRecords(record, mergeKnocks(knocks, { key: me, ts: now }, now)), !first);
+    // The write of the last knock was refused (the relays' budget): this one writes what that one read. The budget keeps
+    // the next request it frees for that write (`WRITE_FIRST_MS`) and holds reads back meanwhile, so a read first was
+    // refused, the knock with it, and the write went a retry later, or later still if a read took the request it waited for.
+    const kept = this.knockRead.get(group.id);
+    this.knockRead.delete(group.id);
+    const reuse = !!kept && now - kept.at < this.timings.knockMs;
+    let n: number, record: GroupEntryLink, knocks: Knock[];
+    if (reuse) ({ n, knocks } = kept!, record = knockRecord(link, n));
+    else {
+      n = this.knockAt.get(group.id) ?? KNOCK_BELL;
+      ({ record, knocks } = await read(n));
+      if (n === KNOCK_BELL && !knocks.some(k => k.key === me) && knocks.filter(k => k.key !== me && now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) ({ record, knocks } = await read(n = ownKnockRecord(me)));
+    }
+    try {
+      await this.host.publish(knockIdentity(record), knockRecords(record, mergeKnocks(knocks, { key: me, ts: now }, now)), !first);
+    } catch (error) {
+      this.knockRead.set(group.id, { n, knocks, at: reuse ? kept!.at : now });
+      throw error;
+    }
     this.knockAt.set(group.id, n);
-    traceJoin(group.id, "knock.published", { ms: Date.now() - started, record: n });
+    traceJoin(group.id, "knock.published", { ms: Date.now() - started, record: n, ...(reuse && { kept: true }) });
     // Who else is knocking in my record (their knock refreshed lately, as a hub counts it): the joining card says so,
     // since a wait behind others is not a link that stopped working.
     const others = knocks.filter(k => k.key !== me && now - k.ts < 2 * this.timings.slowKnockMs).length;
@@ -1450,6 +1469,7 @@ export class Communities {
         this.knocked.delete(g);
         this.knockAt.delete(g);
         this.knockingWith.delete(g);
+        this.knockRead.delete(g);
         await this.host.closeEdge(linkId);
         await this.reconcile(g, live, now);
         this.host.emit();

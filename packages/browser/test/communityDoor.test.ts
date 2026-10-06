@@ -220,6 +220,41 @@ describe("a community's door", { timeout: 120_000 }, () => {
     await world.until(() => world.member(bob, id), 60_000, 500);
   });
 
+  it("a knock the relays' budget refused goes again first, from the bell it read, not after a read of its own", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const alice = world.add("alice");
+    const { id, link, entry } = await community(world, alice);
+    const bob = world.add("bob");
+    // Its first knock read the bell, and the write after it was refused. The relays' budget keeps the next request it
+    // frees for that write (`WRITE_FIRST_MS`): a group read is held back meanwhile.
+    const bell = recordKey(entry, 0), ops: { at: number; op: string }[] = [];
+    const publish = bob.host.publish, resolve = bob.host.resolve;
+    let refusedAt: number | undefined;
+    const writeFirst = () => refusedAt !== undefined && !ops.some(o => o.op === "write") && world.now - refusedAt < RELAY_NETWORK.writeFirstMs;
+    bob.host.resolve = async (key, background, door) => {
+      if (key !== bell) return resolve(key, background, door);
+      if (writeFirst()) { ops.push({ at: world.now, op: "read refused" }); throw new DiscoveryBudgetError(refusedAt! + RELAY_NETWORK.writeFirstMs - world.now); }
+      const found = await resolve(key, background, door);
+      ops.push({ at: world.now, op: "read" });
+      return found;
+    };
+    bob.host.publish = async (identity, records, background, door) => {
+      if (identity.pubKeyZ32 === bell && refusedAt === undefined) {
+        refusedAt = world.now; ops.push({ at: world.now, op: "write refused" });
+        throw new DiscoveryBudgetError(RELAY_NETWORK.writeFirstMs);
+      }
+      await publish(identity, records, background, door);
+      if (identity.pubKeyZ32 === bell) ops.push({ at: world.now, op: "write" });
+    };
+    await bob.groups.joinByLink(link);
+    await world.until(() => ops.some(o => o.op === "write"), 60_000, 500);
+    // The write goes at the first retry, with no read before it. Before, that retry read the bell first: the read was
+    // held back for the write's turn, the knock failed with it, and the write went only at the retry after (6 s).
+    expect(ops.map(o => `${o.op} +${o.at - refusedAt!}`)).toEqual(["read +0", "write refused +0", `write +${UNKNOCKED_RETRY_MS}`]);
+    expect(knocksIn(world, entry, 0)).toContain(guestKey(bob));
+    await world.until(() => world.member(bob, id), 60_000, 500);
+  });
+
   it("the member let in gets its edge from both sides at once, each looking fast, without the lobby; it is a hub only later", async () => {
     const world = new CommunityWorld();
     const alice = world.add("alice"), bob = world.add("bob");
