@@ -264,6 +264,23 @@ test("on a wide screen: the index marks the section picked or named, the last on
   await expect(marked).not.toHaveAttribute("data-testid", "settings-index-network");
 });
 
+test("on a wide screen: a section drawn late above the one picked still lets the page reach it", { tag: ["@feature:settings.sections"] }, async ({ peer }) => {
+  // Network is drawn once its settings load, 680px taller: on a busy machine that came while the page still glided to
+  // About, which then ended short of it, Network marked (CI, nearly every run). Made certain here: Network grows a
+  // frame after the pick, the smooth scroll already on its way.
+  const { page } = await peer("alice");
+  const marked = page.locator("[data-testid^=settings-index-][aria-current=true]");
+  await page.goto("/#/settings");
+  await expect(page.getByTestId("network-relays")).toBeAttached();
+  await page.getByTestId("settings-index-about").evaluate((button) => button.addEventListener("click", () => {
+    requestAnimationFrame(() => { document.getElementById("settings-section-network")!.style.minHeight = "1600px"; });
+  }, { once: true }));
+  await page.getByTestId("settings-index-about").click();
+  await expect(page).toHaveURL(/#\/settings\/about$/);
+  await expect(page.getByTestId("settings-about-version")).toBeInViewport();
+  await expect(marked).toHaveAttribute("data-testid", "settings-index-about");
+});
+
 for (const screen of [{ name: "a tablet held upright", width: 820, height: 1180, mobile: true }, { name: "a phone on its side", width: 874, height: 402, mobile: true }, { name: "a narrow window", width: 1024, height: 768, mobile: false }]) {
   test(`${screen.name}: the search is there with no room for the index beside the page`, { tag: ["@feature:settings.sections", "@feature:app.responsive"] }, async ({ peer }) => {
     // From 768px Settings is one page, and its index (with the search) waits for room beside it: in between there was
