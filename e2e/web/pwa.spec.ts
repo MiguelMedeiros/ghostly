@@ -89,7 +89,8 @@ test.describe("service worker", () => {
       expect([...seen]).toEqual(["Connection options: Offline"]);
       await header.click();
       await expect(ana.page.getByTestId("connection-state")).toHaveText("Offline");
-      await expect(ana.page.getByText(/Pkarr|relay is cooling|Publish failed|DHT delivery/)).toHaveCount(0);
+      // (Details, closed, keeps each relay's health for whoever looks.)
+      await expect(ana.page.getByText(/Pkarr|relay is cooling|Publish failed|DHT delivery/).filter({ visible: true })).toHaveCount(0);
       await ana.page.keyboard.press("Escape");
     } finally {
       offline = false;
