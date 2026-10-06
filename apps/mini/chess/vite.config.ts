@@ -52,13 +52,23 @@ function singleFile(): Plugin {
         if (bad.test(text)) return this.error(`the ${what} contains text that would end its tag early`);
       }
       const notice = thirdPartyNotices(Object.keys(chunk.modules));
-      let page = String(html.source)
-        .replace(/\s*<script\b[^>]*\bsrc="[^"]*"[^>]*><\/script>/g, "")
-        .replace(/\s*<link\b[^>]*\brel="(?:stylesheet|modulepreload)"[^>]*>/g, "");
-      // Replacement functions, not strings: minified code is full of "$`" and "$'", which a string would expand.
-      page = page.replace("</head>", () => `  <style>\n${css}</style>\n  </head>`);
-      page = page.replace("</body>", () => `  <script>\n/*!\n${notice}\n*/\n(() => {\n${code}\n})();\n</script>\n  </body>`);
-      html.source = page;
+      // The page is written here whole rather than edited from Vite's: index.html is only the dev server's entry.
+      html.source = [
+        "<!doctype html>",
+        '<html lang="en">',
+        "  <head>",
+        '    <meta charset="utf-8" />',
+        '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
+        "    <title>Chess</title>",
+        `    <style>\n${css}</style>`,
+        "  </head>",
+        "  <body>",
+        '    <div id="app"></div>',
+        `    <script>\n/*!\n${notice}\n*/\n(() => {\n${code}\n})();\n</script>`,
+        "  </body>",
+        "</html>",
+        "",
+      ].join("\n");
       delete bundle[chunk.fileName];
       for (const s of styles) delete bundle[s.fileName];
     },
