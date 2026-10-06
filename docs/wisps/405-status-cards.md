@@ -138,7 +138,7 @@ Revision 2026-10-06, planned with [1200](1200-marketplace.md#apps-sent-in-a-chat
 | `url` | Optional. Where the bundle is fetched on Install: https only, at most 512 characters, held to the rules of a card's links. Which hosts a client fetches from is [1200](1200-marketplace.md#apps-sent-in-a-chat)'s rule (in phase 1, `raw.githubusercontent.com`, and `cdn.jsdelivr.net` pinned to a commit): a reader keeps any https url, and its client refuses to fetch from another host. A card without one shows no Install, and says to ask the sender for the app. |
 | `opened` | Optional. `true` when the sender opened the app in this chat ("Ana opened Chess"); absent when the sender only shared it ("Ana shared Chess"). Any other value reads as absent. |
 
-Every field is the sender's claim, unsigned. The reader shows the title and version as the sender's, a generic icon, the publisher's fingerprint from `ref` and "Not checked yet", until Install fetches the bundle and checks it against `ref` and `digest` ([1200](1200-marketplace.md#apps-sent-in-a-chat)): a bundle of the same app with a higher `sequence` is newer and fine, a lower one or another app's is refused.
+Every field is the sender's claim, unsigned. The reader shows the title and version as the sender's, a generic icon, the publisher's fingerprint from `ref` and "Not checked yet", until Install fetches the bundle and checks it ([1200](1200-marketplace.md#apps-sent-in-a-chat)): it must be the app `ref` names; with the card's `sequence` it must have the card's `digest`; a higher `sequence` is a newer version and fine; a lower one is refused.
 
 - **Not updated.** A person's app sends an app card once and never edits it. An edit that carries one is read as any card edit is: the card of the latest version.
 - **Not a task.** The Tasks button, panel and board list task and routine cards only; an app card counts in none of them.
@@ -152,6 +152,7 @@ Every field is the sender's claim, unsigned. The reader shows the title and vers
 | Title, name | 120 characters | |
 | Items, links, runs | 20, 4, 10 | |
 | Tags | 3, of 24 characters each | Chips on a card: a few short words |
+| An app card | Title 40 characters, version 32; `ref`, `digest` and `id` by their formats | The manifest's bounds, so a card never claims more than a bundle can hold |
 | Counts | 0 to 1,000,000,000 | |
 | Times | A received time no later than 5 minutes past the reader's clock (as a message's, [400](400-chat.md) requirement 10); a next run no later than a year | A peer must not pin a card to "just now" forever; a next run is ahead by nature |
 | Edits of a card message | **5,000** | A bot updates a long task often; a text keeps its 100 ([400](400-chat.md#edits)) |
