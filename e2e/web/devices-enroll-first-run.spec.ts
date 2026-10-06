@@ -35,6 +35,14 @@ async function showCode(page: Page) {
   return { add, link };
 }
 
+/**
+ * From here on the phone asks a new profile "What should people call you?" as a person's app does (`NameStep`, off under
+ * test), so a profile added from another device shows it never asks.
+ */
+const nameStepOn = (page: Page) => page.evaluate(() => localStorage.setItem("ghostly-test-name-step", "on"));
+/** Whether a profile on this page still has the first-run name question pending. */
+const namePending = (page: Page) => page.evaluate(() => Object.keys(localStorage).some((key) => key.endsWith("name_step") && localStorage.getItem(key) === "ask"));
+
 const phoneOptions = { mobile: true, beforeOpen: async (context: BrowserContext) => { await mockMainnetMints(context); await mockEthereum(context); await setupOn(context); } };
 
 test("a locked phone in use opens the code's link: one password, one button, and the new profile joins with its first-run wallets on", { tag: ["@feature:devices.enroll", "@feature:wallet.instances.first-run"] }, async ({ peer }) => {
@@ -48,6 +56,7 @@ test("a locked phone in use opens the code's link: one password, one button, and
   await page.goto("/#/");
   await expect(page.getByTestId("chat-row")).toHaveCount(1);
   await setLock(page, DEVICE_SET_PASSWORD);
+  await nameStepOn(page);
 
   const { add, link } = await showCode(desktop.page);
 
@@ -76,6 +85,9 @@ test("a locked phone in use opens the code's link: one password, one button, and
   // And on to the standby screen, still without the password a second time.
   await finishJoin(page);
   await expect(page.getByText("Ghostly is locked")).toHaveCount(0);
+  // The profile made for the code is not a new one: it never asks for a name (the question opens just after a start).
+  await page.waitForTimeout(1_000);
+  await expect(page.getByTestId("name-step")).toHaveCount(0);
 });
 
 test("a new profile that already made its first-run wallets joins in place: the one screen sees it is not in use", { tag: ["@feature:devices.enroll", "@feature:wallet.instances.first-run"] }, async ({ peer }) => {
@@ -86,6 +98,9 @@ test("a new profile that already made its first-run wallets joins in place: the 
   await page.goto("/#/wallet");
   await expect(walletCard(page, "cashu-mainnet")).toBeVisible({ timeout: 60_000 });
   await expect(walletCard(page, "usdt-mainnet")).toBeVisible({ timeout: 60_000 });
+  // Its first start would ask for a name; it is added to a profile instead.
+  expect(await namePending(page)).toBe(true);
+  await nameStepOn(page);
 
   const { add, link } = await showCode(desktop.page);
 
@@ -104,4 +119,9 @@ test("a new profile that already made its first-run wallets joins in place: the 
   await add.getByTestId("device-add-match").click();
   await expect(add.getByTestId("device-add-done")).toHaveText("Phone added. It is on standby.");
   await expect(page.getByTestId("device-join-done")).toHaveAttribute("data-step", "done");
+  // Added to a profile from another device: the first start's name question is gone, for the standby and after.
+  await finishJoin(page);
+  await page.waitForTimeout(1_000);
+  await expect(page.getByTestId("name-step")).toHaveCount(0);
+  expect(await namePending(page)).toBe(false);
 });
