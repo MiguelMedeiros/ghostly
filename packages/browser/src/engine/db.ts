@@ -1,5 +1,5 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { CARD_INDEX, STORES, fileStore, store, wrap, openDb } from "../shared/idb";
+import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, STORES, fileStore, store, wrap, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
 import type { MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
@@ -129,6 +129,10 @@ export const db = {
     await fileStore.deleteForLink(linkId);
     await removeFileBytes(`${linkId}-in-`);
     await removeFileBytes(`${linkId}-out-`);
+    // What mini-apps kept for this chat (WISP 1200 § Permissions: storage per app and per chat) is the chat's.
+    const appStorage = await store(STORES.appStorage, "readwrite");
+    const appKeys = await wrap(appStorage.index(APP_STORAGE_CHAT_INDEX).getAllKeys(linkId));
+    await Promise.all(appKeys.map((key) => wrap(appStorage.delete(key))));
   },
 
   async getMessages(linkId: string): Promise<StoredMessage[]> {

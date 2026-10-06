@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 13;
+export const DB_VERSION = 14;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -120,7 +120,18 @@ export const STORES = {
    * again: WebKit loses the Blob of a record written back with the Blob it read (see `fileStore`).
    */
   fileState: "fileState",
+  /** Installed mini-apps (WISP 1200 § Updates and rollback), by app reference: `InstalledApp` (`engine/apps.ts`). */
+  apps: "apps",
+  /** The app stores the person added, by store key: `AddedAppStore`. A store is its key; its URL is kept on the record. */
+  appStores: "appStores",
+  /** Each installed app's own storage, by (app reference, scope, key): `AppStorageRow`. Scope: a chat's link id, or `alone`. */
+  appStorage: "appStorage",
 } as const;
+
+/** The app storage store's index by (app reference, scope): one scope's rows, for its 5 MiB cap and its keys. */
+export const APP_STORAGE_SCOPE_INDEX = "byAppScope";
+/** The app storage store's index by scope: every app's rows of one chat, which go with the chat. */
+export const APP_STORAGE_CHAT_INDEX = "byScope";
 
 /**
  * A file's contents. Metadata travels with the chat message; this is only the bytes: in `blob` for a file
@@ -214,6 +225,15 @@ export function openDb(): Promise<IDBDatabase> {
       if (!has(STORES.swaps)) db.createObjectStore(STORES.swaps, { keyPath: "id" });
       // v13: no change of the schema. A build from here can hold a frozen copy of a profile on a standby device (WISP 06
       // § Compatibility and rollout): the step keeps an older build (1.0.3 reads 12) from opening and starting one.
+      // v14: mini-apps (WISP 1200): the installed apps, the stores added and each app's storage per scope. Empty until the
+      // apps feature is on; the bundles themselves are in file storage under `app-<digest>`, outside every store here.
+      if (!has(STORES.apps)) db.createObjectStore(STORES.apps, { keyPath: "ref" });
+      if (!has(STORES.appStores)) db.createObjectStore(STORES.appStores, { keyPath: "key" });
+      if (!has(STORES.appStorage)) {
+        const storage = db.createObjectStore(STORES.appStorage, { keyPath: ["ref", "scope", "key"] });
+        storage.createIndex(APP_STORAGE_SCOPE_INDEX, ["ref", "scope"]);
+        storage.createIndex(APP_STORAGE_CHAT_INDEX, "scope");
+      }
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
@@ -238,8 +258,8 @@ export function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-/** The stores "Clear all data" empties: chats and their keys, messages, files, shared apps, groups. */
-export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STORES.fileState, STORES.fileChunks, STORES.services, STORES.groups] as const;
+/** The stores "Clear all data" empties: chats and their keys, messages, files, shared apps, groups, mini-apps and their data. */
+export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STORES.fileState, STORES.fileChunks, STORES.services, STORES.groups, STORES.apps, STORES.appStores, STORES.appStorage] as const;
 
 /**
  * Records of the settings store that belong to the profile, not to a wallet: its DID and its key, its identity proofs

@@ -471,6 +471,47 @@ export interface EngineApi {
   deviceTurnCheck(): { kind: string; screen?: string; device?: string; state?: string; result?: string } | null;
   /** "Your devices are now: ..." answered on a device that took a new secret: OK, or "This is wrong" (`wrong`), which keeps it out. */
   deviceSetNoticeSeen(params: { wrong?: boolean }): void;
+  /*
+   * Mini-apps (WISP 1200 § Updates and rollback, § Stores, § Permissions; `engine/apps.ts`), refused while the apps
+   * feature is off. Errors start with their code (`<code>: words`). `ref` is an app reference `<publisher key>/<name>`;
+   * a storage `scope` is a 1:1 chat's link id, or `alone`. Reads go only to raw.githubusercontent.com and to
+   * cdn.jsdelivr.net at a commit, and none goes out while no app is installed but those the person asks for here.
+   */
+  /** The installed apps, each with whether it may run now. No request. */
+  appList(): import("../engine/apps").InstalledAppView[];
+  /** The stores the person has, with the last index read of each. No request. */
+  appStoreList(): import("../engine/apps").AppStoreSummary[];
+  /** Reads a store at a URL (a GitHub repository, or a URL of `ghostly-store.json`) for the person to see. Nothing is kept. */
+  appStorePreview(params: { url: string }): import("../engine/apps").AppStorePreview;
+  /** Adds a store, pinned to its key (`key`: the one the person saw; another is refused). */
+  appStoreAdd(params: { url: string; key?: string }): import("../engine/apps").AppStoreSummary;
+  /** Removes a store. A default store removed stays removed. */
+  appStoreRemove(params: { key: string }): void;
+  /** Reads one store again, or every one. */
+  appStoreRefresh(params?: { key?: string }): import("../engine/apps").AppStoreSummary[];
+  /** Fetches and checks an app for its install screen: a pasted URL, a store's listing or a chat card's pointer. Nothing is stored. */
+  appPreview(params: import("../engine/apps").AppSource): import("../engine/apps").AppPreview;
+  /** Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for. */
+  appInstall(params: { digest: string; grant: string[] }): import("../engine/apps").InstalledAppView;
+  /** Installs the waiting update whose new permissions the person accepted. */
+  appUpdateAccept(params: { ref: string }): import("../engine/apps").InstalledAppView;
+  /** The update check, now (the Apps page opened). Nothing is asked for with no app installed. */
+  appCheckUpdates(): import("../engine/apps").AppCheckResult[];
+  /** Uninstalls an app: its files, its record and its storage in every chat. */
+  appUninstall(params: { ref: string }): void;
+  /** Whether an installed app may run: `revoked` stops it, `removed` warns, `needs-files` waits for its files. No request. */
+  appRunCheck(params: { ref: string }): import("../engine/apps").AppRunStatus;
+  /** The runner's entry, from the bundle checked again; refused when revoked, and when removed unless `runAnyway`. */
+  appEntry(params: { ref: string; runAnyway?: boolean }): import("../engine/apps").AppRunEntry;
+  /** One file of an installed app (`ghostly.file(path)`). */
+  appFile(params: { ref: string; path: string }): Uint8Array;
+  /** An app's storage in one scope: keys of up to 256 bytes, JSON values of up to 64 KiB, 5 MiB in all. `null`: no such key. */
+  appStorageGet(params: { ref: string; scope: string; key: string }): { value: import("@ghostly/core").JsonValue } | null;
+  appStorageSet(params: { ref: string; scope: string; key: string; value: unknown }): void;
+  appStorageDelete(params: { ref: string; scope: string; key: string }): void;
+  appStorageKeys(params: { ref: string; scope: string }): string[];
+  /** An app's storage in every scope, as export files, offered before an uninstall. */
+  appDataExport(params: { ref: string }): import("../engine/apps").AppDataExport[];
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

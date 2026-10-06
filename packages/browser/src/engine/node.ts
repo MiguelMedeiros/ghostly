@@ -109,6 +109,8 @@ import {
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
+import { Apps, type AppDataExport, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type InstalledAppView } from "./apps";
+import { boundedAppFetch } from "./appFetch";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
 import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
 import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
@@ -415,6 +417,11 @@ export interface NodeOptions {
   pollIntervals?: PollIntervals;
   /** How to reach a shared local web app. Default: `fetch`, which needs the app's or the browser's consent. */
   localFetch?: LocalFetch;
+  /**
+   * How mini-apps and their stores are read (WISP 1200 § Stores), under the hosts and caps of `appFetch.ts`, which hold
+   * whatever is passed here. Default: `fetch`. Tests pass their own.
+   */
+  appFetch?: typeof fetch;
   /** Create and connect the Ark, Bark, Spark and USDT wallets at start. Default: on; tests without a network turn it off. */
   automaticWallets?: boolean;
   /**
@@ -1528,6 +1535,8 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
     if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
+    // Mini-apps (WISP 1200): the default stores preloaded, and the update check, which asks nothing with no app installed.
+    if (this.appsOn) void this.appStore.start().catch(() => {});
     // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
     // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
     if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
@@ -1916,6 +1925,7 @@ export class GhostlyNode implements EngineImplementation {
     const quiet = options.quiet === true || this.gatedOut;
     this.shuttingDown = true;
     if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
+    this.appShelf?.stop();
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     if (!quiet) this.depart();
     this.directPath.close();
@@ -1983,6 +1993,38 @@ export class GhostlyNode implements EngineImplementation {
     await this.shutdown();
     await clearProfileStores();
   }
+
+  // ---------- mini-apps: installed apps, stores and app storage (WISP 1200; `apps.ts`) ----------
+
+  private appShelf?: Apps;
+  /** The installed apps and stores, refused while the apps feature is off. */
+  private get appStore(): Apps {
+    if (!this.appsOn) throw new Error("Apps are unavailable in this release");
+    return this.appShelf ??= new Apps({
+      fetch: boundedAppFetch({ fetcher: this.options.appFetch, online: () => this.networkOn }),
+      isChat: (scope) => { const stored = this.links.get(scope)?.stored; return !!stored && !stored.group && !!stored.profile && !!stored.pairedPeerKey; },
+      online: () => this.networkOn && !this.shuttingDown,
+    });
+  }
+  appList(): Promise<InstalledAppView[]> { return this.appStore.list(); }
+  appStoreList(): Promise<AppStoreSummary[]> { return this.appStore.listStores(); }
+  appStorePreview(params: { url: string }): Promise<AppStorePreview> { return this.appStore.previewStore(params); }
+  appStoreAdd(params: { url: string; key?: string }): Promise<AppStoreSummary> { return this.appStore.addStore(params); }
+  appStoreRemove(params: { key: string }): Promise<void> { return this.appStore.removeStore(params); }
+  appStoreRefresh(params: { key?: string } = {}): Promise<AppStoreSummary[]> { return this.appStore.refreshStores(params); }
+  appPreview(params: AppSource): Promise<AppPreview> { return this.appStore.preview(params); }
+  appInstall(params: { digest: string; grant: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
+  appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
+  appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
+  appUninstall(params: { ref: string }): Promise<void> { return this.appStore.uninstall(params); }
+  appRunCheck(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.runCheck(params); }
+  appEntry(params: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> { return this.appStore.entry(params); }
+  appFile(params: { ref: string; path: string }): Promise<Uint8Array> { return this.appStore.file(params); }
+  appStorageGet(params: { ref: string; scope: string; key: string }): Promise<{ value: import("@ghostly/core").JsonValue } | null> { return this.appStore.storageGet(params); }
+  appStorageSet(params: { ref: string; scope: string; key: string; value: unknown }): Promise<void> { return this.appStore.storageSet(params); }
+  appStorageDelete(params: { ref: string; scope: string; key: string }): Promise<void> { return this.appStore.storageDelete(params); }
+  appStorageKeys(params: { ref: string; scope: string }): Promise<string[]> { return this.appStore.storageKeys(params); }
+  appDataExport(params: { ref: string }): Promise<AppDataExport[]> { return this.appStore.exportData(params); }
 
   getState(): EngineState {
     const groups = this.groups.views();
