@@ -41,6 +41,7 @@ import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
+import { handOverCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
 import { callLineId } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
@@ -104,6 +105,11 @@ interface ChatProps {
   onCallChange: (sessionId: string, onCall: boolean) => void;
   /** Where the call window hangs, outside this chat. `App` owns it. */
   callLayer: HTMLElement | null;
+  /**
+   * Loaded before the first unlock, only to ring (`PreUnlockRing`): Answer hands the call to the chat the app opens
+   * once unlocked, since this one goes with the lock.
+   */
+  holdForUnlock?: boolean;
 }
 
 /**
@@ -114,7 +120,7 @@ function editableText(message: ChatMessage): boolean {
   return message.sender === "me" && !!message.ref && message.id === `me_${message.ref}` && !message.file && !message.paymentId && !message.systemEvent && !message.callEvent && !message.card;
 }
 
-export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps) {
+export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnlock = false }: ChatProps) {
   const nav = useAppNavigation();
   const { t, language } = useI18n();
   const { settings } = useSettings();
@@ -501,9 +507,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   useRingOnLockScreen(params && callState === "incoming" ? {
     id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
     hasVideo: incomingHasVideo, onCall: webrtc.otherCallOn,
-    answer: () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
+    answer: holdForUnlock
+      // The offer goes back to the engine for the chat the unlocked app opens, which answers it at once (lib/lockedRing).
+      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
+      : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
   } : null);
+  // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
+  useEffect(() => {
+    if (holdForUnlock || callState !== "incoming") return;
+    const video = takeHandedCall(sessionId);
+    if (video !== undefined) webrtc.acceptCall(video);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring; `webrtc` changes with every render
+  }, [callState, sessionId, holdForUnlock]);
   // Under the lock it would only hold the keys: the lock screen shows the call instead.
   const locked = useIsLocked();
 
@@ -511,6 +527,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
     return visible ? <Navigate to="/" replace /> : null;
   }
+  // Before the first unlock only the call is wanted of this chat (its hooks: the ring, the timeout, Decline): nothing
+  // of it is drawn, no message, preview or name. The lock screen shows who calls.
+  if (holdForUnlock) return null;
 
   const handleDelete = () => {
     if (confirmDelete) {
