@@ -121,24 +121,71 @@ const DHT_SILENT_LOOKUPS: u32 = 2;
 pub enum Dht {
     /// The node every record is read from and published to, and the turn record's own node (WISP 06), which
     /// is made only when a turn is first read or put.
-    Mainline(DhtClient, Arc<TurnDht>),
+    Mainline(MainlineNode, Arc<TurnDht>),
     #[cfg_attr(not(test), allow(dead_code))]
     StandIn(Client),
 }
 
+/// The Mainline node, made on a thread of its own. Making it looks up the public bootstrap nodes' names, a blocking
+/// DNS query for each of four, before the call returns: made in `main` it held the app before its window, up to 55 s
+/// where the resolver was slow (Linux under Xvfb, 2026-10-06). Reads and writes wait for it instead.
+#[derive(Clone)]
+pub struct MainlineNode(watch::Receiver<Option<Result<DhtClient, String>>>);
+
+impl MainlineNode {
+    /// Starts making the node with `build` on a thread of its own, and returns at once.
+    fn spawn(build: impl FnOnce() -> Result<DhtClient, String> + Send + 'static) -> Self {
+        let (made, node) = watch::channel(None);
+        std::thread::Builder::new()
+            .name("ghostly dht node".into())
+            .spawn(move || {
+                let result = build();
+                if let Err(error) = &result {
+                    diagnostics::log(&format!("pkarr dht node: {error}"));
+                }
+                let _ = made.send(Some(result));
+            })
+            .expect("a thread for the DHT node");
+        MainlineNode(node)
+    }
+
+    /// The node, once it is made.
+    async fn get(&self) -> Result<DhtClient, String> {
+        let mut node = self.0.clone();
+        let made = node
+            .wait_for(Option::is_some)
+            .await
+            .map_err(|_| "DHT node: never made".to_string())?;
+        made.clone().expect("waited for it")
+    }
+}
+
 impl Dht {
-    /// A node of the Mainline DHT, joining through `bootstrap` (the public bootstrap nodes when `None`).
+    /// A node of the Mainline DHT, joining through `bootstrap` (the public bootstrap nodes when `None`). Returns at
+    /// once: the node is made on a thread of its own (`MainlineNode`).
     pub fn mainline(bootstrap: Option<Vec<SocketAddrV4>>) -> Result<Self, String> {
         let mut config = DhtConfig::default();
         config.bootstrap = bootstrap.clone();
-        DhtClient::build(config)
-            .map(|dht| Dht::Mainline(dht, Arc::new(TurnDht::new(bootstrap))))
-            .map_err(|e| format!("DHT node: {e}"))
+        Ok(Self::mainline_with(bootstrap, move || {
+            DhtClient::build(config).map_err(|e| format!("DHT node: {e}"))
+        }))
+    }
+
+    fn mainline_with(
+        bootstrap: Option<Vec<SocketAddrV4>>,
+        build: impl FnOnce() -> Result<DhtClient, String> + Send + 'static,
+    ) -> Self {
+        Dht::Mainline(
+            MainlineNode::spawn(build),
+            Arc::new(TurnDht::new(bootstrap)),
+        )
     }
 
     async fn publish(&self, packet: &SignedPacket) -> Result<(), String> {
         match self {
-            Dht::Mainline(dht, _) => dht
+            Dht::Mainline(node, _) => node
+                .get()
+                .await?
                 .publish(packet)
                 .await
                 .map(|_| ())
@@ -159,7 +206,11 @@ impl Dht {
         first: impl FnOnce(&SignedPacket),
     ) -> (Option<SignedPacket>, bool) {
         match self {
-            Dht::Mainline(dht, _) => {
+            Dht::Mainline(node, _) => {
+                // A node that could not be made hears from nobody, as a DHT out of reach.
+                let Ok(dht) = node.get().await else {
+                    return (None, false);
+                };
                 let response = dht.resolve(key, None).await;
                 if let Some(packet) = response.first() {
                     first(packet);
@@ -1873,6 +1924,29 @@ mod direct {
             Some(Path::Dht),
             "the panel says DHT direct"
         );
+    }
+
+    /// Making the Mainline node looks up the bootstrap nodes' names (blocking DNS): on a slow resolver that held `main`,
+    /// and the window, up to 55 s. The node is made on a thread of its own; reads and writes wait for it.
+    #[tokio::test]
+    async fn the_dht_node_is_made_off_the_thread_that_asks_for_it() {
+        let started = Instant::now();
+        let dht = Dht::mainline_with(None, || {
+            std::thread::sleep(Duration::from_millis(800));
+            Err("DHT node: a resolver that takes its time".into())
+        });
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "returned after {:?}",
+            started.elapsed()
+        );
+        // A read waits for the node; one that could not be made hears from nobody, as a DHT out of reach.
+        let (packet, heard) = dht.resolve(&Keypair::random().public_key(), |_| {}).await;
+        assert!(packet.is_none() && !heard);
+        assert!(started.elapsed() >= Duration::from_millis(800));
+        let keypair = Keypair::random();
+        let packet = SignedPacket::builder().sign(&keypair).unwrap();
+        assert!(dht.publish(&packet).await.is_err());
     }
 
     /// A DHT whose only bootstrap node is a closed port: UDP that goes nowhere, as behind a VPN or a firewall.
