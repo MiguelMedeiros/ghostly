@@ -504,12 +504,12 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "none",
+    "oldId": "12xx-marketplace",
     "id": "1200",
     "oldFile": "12xx-marketplace.md",
-    "file": "12xx-marketplace.md",
+    "file": "1200-marketplace.md",
     "kind": "Contract",
-    "displayNumber": "12xx",
-    "numberAssignment": "unassigned"
+    "displayNumber": "1200",
+    "numberAssignment": "defined"
   }
 ]
