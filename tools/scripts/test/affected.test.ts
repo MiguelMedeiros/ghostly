@@ -138,6 +138,17 @@ describe("a core change", () => {
     expect(got).not.toContain("packages/browser/src/proofs/ssh.ts");
   });
 
+  it("follows an import of a core subpath (@ghostly/core/miniApp) to that module only", () => {
+    const files = {
+      "packages/core/src/miniApp.ts": `export const MINI_APP_LIMITS = {};`,
+      "packages/core/src/index.ts": `export * from "./sshsig";`,
+      "apps/mini/chess/test/mockBroker.ts": `import { MINI_APP_LIMITS, type MiniAppApi } from "@ghostly/core/miniApp";`,
+      "apps/mini/chess/src/game.ts": `import type { MiniAppApi } from "@ghostly/core/miniApp";`,
+      "apps/mini/chess/src/other.ts": `import { x } from "@ghostly/core/other";`,
+    };
+    expect(throughCoreBarrel(["packages/core/src/miniApp.ts"], files)).toEqual(["apps/mini/chess/test/mockBroker.ts"]);
+  });
+
   it("hands each project the importers under it instead of the core module", () => {
     const p = plan({ changed: changed("packages/core/src/sshsig.ts"), inventory, e2eFiles, codeFiles });
     const unit = byName(p.unit);
