@@ -42,11 +42,11 @@ import {
 } from "./http";
 import type { LinkParams } from "./invite";
 import type { Payment, PaymentAsk, PaymentRequest, PaymentResult } from "./payments";
-import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, presenceSeenAt, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
+import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeenAt, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
@@ -493,6 +493,14 @@ export interface GhostLinkOptions {
   buttonsSupport?: boolean;
   /** Offer `wake/1` on paired sessions: this app wakes a contact's closed web app with a push (1:1 chats, not group edges). */
   wakeSupport?: boolean;
+  /**
+   * Offer `upgrade/1` on paired sessions (1:1 chats): a session live on a relayed transport, nobody having chosen it,
+   * moves once to a direct one ranked first; and back after an absence, a relayed transport is knocked on at once too,
+   * where the contact's capability record says it moves as well (`peerUpgrades`).
+   */
+  upgradeSupport?: boolean;
+  /** The contact's capability record, as last read, says `upgrade/1` (WISP 03). */
+  peerUpgrades?: () => boolean;
   /**
    * A device link (WISP 06): the capabilities it announces on the open session, and so the device frames it carries
    * (`sendDeviceFrame`, `onDeviceFrame`). Never given for a chat or a group's link, which drop every device frame.
@@ -963,7 +971,10 @@ export class GhostLink {
         if (this.activeBinding) return;
         events.onDataLinkState?.(state);
         if (state === "open") this.afterRtc = undefined;
-        if (state === "answering") this.answeringEpoch = this.connectionEpoch;
+        if (state === "answering") {
+          this.answeringEpoch = this.connectionEpoch;
+          if (this.resumingOverRtc) { const epoch = this.connectionEpoch; setTimeout(() => this.maybeKnockAnswering(epoch), 0); }
+        }
         this.answeredAt = 0;
         // This side's offer was answered: what is ranked after WebRTC is dialled soon after, if nothing connects.
         if (state === "connecting" && was === "offering" && this.offered?.epoch === this.connectionEpoch) {
@@ -1040,6 +1051,7 @@ export class GhostLink {
         if (this.unreached(target, reason)) options.events?.onTransportSwitchFailed?.(target, reason);
       },
       unreached: (target, reason) => { this.unreached(target, reason); },
+      upgrade: () => !!this.options.upgradeSupport && this.sessionCapabilities.agreed(UPGRADE_CAPABILITY),
     });
     // A transport chosen before this link started (the owner says `automatic: false`: kept from a run before a
     // restart) is still a choice (WISP 100, "A choice made while not live"): the first session begins with it as a
@@ -1966,8 +1978,11 @@ export class GhostLink {
           // transport would otherwise wait for the offer's 90 s timeout.
           const rest = [...failedFirst, ...ordered.slice(index + 1)];
           this.afterRtc = fallback && rest.length ? { epoch, rest } : undefined;
-          const offeredAt = Date.now();
-          this.offered = fallback ? { epoch, at: offeredAt, ...(resume && { resume }) } : undefined;
+          // Dialled again while this attempt's offer is out (the app dials once its native endpoints are up): the offer
+          // stands as it was made, its time and whether it resumes with it, or the knock and the race would go by the second.
+          const standing = this.offerOut && this.offered?.epoch === epoch ? this.offered : undefined;
+          const offeredAt = standing?.at ?? Date.now();
+          this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }) } : undefined;
           const gate = this.dialGate;
           this.dialGate = undefined;
           if (await this.dataLink.connect(gate) === "held") {
@@ -2098,26 +2113,53 @@ export class GhostLink {
     if (this.offered?.resume && this.knockedEarly !== epoch) setTimeout(() => this.maybeKnockEarly(epoch), 0);
     this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, Math.max(0, Math.min(...at) - now));
   }
+  /**
+   * Back after an absence, this side answers an offer the contact made while it was away (it dials whatever its key):
+   * the contact looks for that answer at the pace of an offer out a while (every 8 s on the relays), and its attempt may
+   * end before it does. The direct transports both run are knocked on meanwhile, and the relayed ones where both apps
+   * move off a relay once live (`upgrade/1`): the first live wins, and a knock that does not connect counts as nothing.
+   */
+  private maybeKnockAnswering(epoch: number): void {
+    if (!this.resumingOverRtc || epoch !== this.connectionEpoch || this.knockedEarly === epoch || this.dataLink.state === "idle") return;
+    // Its offer out longer than `OFFER_FAST_MS`: it looks for the answer every 4 s and then 8 s (on the relays), not 2 s.
+    if (this.channel || this.dialing || this.stopped || this.streamBlocked || this.keyStopped || !this.contactQuiet(OFFER_FAST_MS)) return;
+    if (!this.fallback || !this.peerFallback) return;
+    this.knockedEarly = epoch;
+    if (this.resuming === "webrtc/1") this.resuming = undefined;
+    const relayed = this.upgradesFromRelay() ? [] : this.relayedTransports;
+    const offer = this.transportOffer();
+    const direct = TRANSPORTS.filter(t => t !== "webrtc/1" && offer.includes(t) && !!this.peerTransports?.includes(t) && !relayed.includes(t) && this.canDial(t));
+    if (!direct.length) return;
+    void this.knockEarly(epoch, direct, () => this.dataLink.state === "answering" || this.dataLink.state === "connecting");
+  }
+  /** Back after an absence over WebRTC: not dialled yet, or this attempt's offer is the resume's (`offered.resume`). */
+  private get resumingOverRtc(): boolean {
+    return this.resuming === "webrtc/1" || (!!this.offered?.resume && this.offered.epoch === this.connectionEpoch);
+  }
+  /** Both apps move a chat off a relay once live (`upgrade/1`): this one, and the contact's by its capability record. */
+  private upgradesFromRelay(): boolean { return !!this.options.upgradeSupport && !!this.options.peerUpgrades?.(); }
   /** The contact's newest packet is older than `EXPECT_PEER_MS`: it is not signalling, and reads at a slow pace. */
-  private contactQuiet(): boolean {
-    return Date.now() - presenceSeenAt(this.session.peerPresence) >= EXPECT_PEER_MS;
+  private contactQuiet(ms = EXPECT_PEER_MS): boolean {
+    return Date.now() - presenceSeenAt(this.session.peerPresence) >= ms;
   }
   /** The direct transports of an attempt that resumes to a quiet contact, knocked on while its offer stands (`scheduleRace`). */
   private maybeKnockEarly(epoch: number): void {
     const next = this.afterRtc;
     if (!this.offered?.resume || this.offered.epoch !== epoch || this.knockedEarly === epoch || next?.epoch !== epoch || epoch !== this.connectionEpoch) return;
     if (this.dialing || this.channel || this.stopped || !this.offerOut || !this.contactQuiet()) return;
-    const relayed = this.relayedTransports;
+    // A relayed transport too where both apps move off it once live (`upgrade/1`): the chat is live over the relay in a
+    // second, and on the direct path a moment later, its signaling on the session (WISP 100 § Back to a quiet contact).
+    const relayed = this.upgradesFromRelay() ? [] : this.relayedTransports;
     const direct = next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
     if (!direct.length) return;
     this.knockedEarly = epoch;
     void this.knockEarly(epoch, direct);
   }
-  private async knockEarly(epoch: number, transports: PairedTransport[]): Promise<void> {
+  private async knockEarly(epoch: number, transports: PairedTransport[], standing = () => this.offerOut): Promise<void> {
     this.knockingEarly = true;
     try {
       for (const transport of transports) {
-        if (epoch !== this.connectionEpoch || this.channel || this.stopped || !this.offerOut) return;
+        if (epoch !== this.connectionEpoch || this.channel || this.stopped || !standing()) return;
         await this.knock(transport as NativeTransport);
       }
     } finally { this.knockingEarly = false; }
@@ -2635,6 +2677,7 @@ export class GhostLink {
     if (this.options.pinSupport) offered.push(PIN_CAPABILITY);
     if (this.options.statusCardSupport) offered.push(STATUS_CARD_CAPABILITY);
     if (this.options.buttonsSupport) offered.push(BUTTONS_CAPABILITY);
+    if (this.options.upgradeSupport) offered.push(UPGRADE_CAPABILITY);
     if (this.options.deviceCapabilities) offered.push(...this.options.deviceCapabilities);
     return offered;
   }
@@ -2804,6 +2847,7 @@ export class GhostLink {
     if (changed.includes(EDIT_CAPABILITY)) this.options.events?.onEditSupport?.(this.supportsEdits);
     if (changed.includes(PIN_CAPABILITY)) this.options.events?.onPinSupport?.(this.supportsPins);
     if (changed.includes(WAKE_SESSION_CAPABILITY)) this.options.events?.onWakeSupport?.(this.supportsWake);
+    if (changed.includes(UPGRADE_CAPABILITY)) this.switcher.reconsider();
     const devices = this.options.deviceCapabilities;
     if (devices && changed.some(capability => (devices as readonly string[]).includes(capability))) this.options.events?.onDeviceCapabilities?.(devices.filter(capability => this.supportsDevice(capability)));
     this.emitPairingState();

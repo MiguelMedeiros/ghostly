@@ -53,13 +53,22 @@ export const STATUS_CARD_CAPABILITY = "status-card/1";
 export const BUTTONS_CAPABILITY = "buttons/1";
 
 /**
+ * A session live on a relayed transport while a direct one ranks first, with nobody's choice behind it, moves to the
+ * direct one once, in place, its signaling on the session (WISP 100 § Back to a quiet contact): what a chat that came
+ * back over a relay at once (rather than wait for an offer's answer) needs to end where a direct path would have put
+ * it. Both sides must say it: the switch is planned by one and checked by the other. Also in the capability record
+ * (WISP 03), so an app back after an absence knows before any session whether a relay can carry it there at once.
+ */
+export const UPGRADE_CAPABILITY = "upgrade/1";
+
+/**
  * What only a device link offers (WISP 06, `deviceLink.ts`): the frames between a person's own devices. They are in
  * the type so a device link can announce them, and not in `KNOWN_SESSION_CAPABILITIES`: no chat knows them.
  */
-export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY;
+export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY | typeof UPGRADE_CAPABILITY;
 
 /** Every capability this app knows on a session: what `receive` reports changes of. */
-export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY];
+export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY];
 
 export const SESSION_CAPABILITIES_FRAME = "paired-capabilities";
 

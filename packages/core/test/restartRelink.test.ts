@@ -62,7 +62,9 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
  * `endpointAfterMs`: the native endpoint starts this long after the link (a Desktop's Iroh can take seconds).
  * `chosen`: the person chose the native transport in the chat's Connection menu, and the chat was live on it.
  */
-function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, kind: Kind, dhtState: DhtDeliveryState, wasLive = false, endpointAfterMs?: number, chosen = false): App {
+function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, kind: Kind, dhtState: DhtDeliveryState, wasLive = false, endpointAfterMs?: number, chosen = false,
+  /** `upgrade/1`: this app's, and the contact's as its capability record says. */
+  upgrade: { mine?: boolean; contact?: boolean } = {}): App {
   const app = { name, side, dhtState, requests: [] } as unknown as App;
   const native = kind === "webrtc" ? undefined : kind === "webrtc+hyperdht" ? "hyperdht/1" as const : "iroh/1" as const;
   const peerNative = native === "hyperdht/1" ? { publicKey: `${contact.name}:hyperdht/1` } : { id: `${contact.name}:iroh/1`, relay: "https://relay.test./", addresses: [] };
@@ -81,6 +83,7 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
     transport: counted(world.pkarr, app),
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
+    ...(upgrade.mine ? { upgradeSupport: true, peerUpgrades: () => !!upgrade.contact } : {}),
     createPeerConnection: () => fakePeerConnection(name),
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
   });
@@ -481,6 +484,88 @@ describe("back after a while away, to a contact reading in the background", () =
     await run(RACE_DIRECT_MS);
     // The knock as the offer went out, then the race's dial `RACE_DIRECT_MS` after: only the race's counts.
     expect((goes.link as unknown as { nativeFailures: Map<string, number> }).nativeFailures.get("hyperdht/1")).toBe(1);
+  }, 240_000);
+});
+
+/**
+ * Two web apps: WebRTC, and Iroh through its relay (a browser's Iroh has no direct address). The lower key's app comes back
+ * after 5 minutes away to a contact whose chat is in the background (it reads every 30 s): its offer waits for that read,
+ * and the relayed Iroh is dialled only 40 s on (`RACE_RELAYED_MS`). Measured in this world: live again 17.5 s after the
+ * return (median, 3.3 to 35.6 s, n=8). Where both apps say `upgrade/1`, the relay is knocked on at once and the session
+ * moves to WebRTC on itself a moment later (WISP 100 § Back to a quiet contact).
+ */
+describe("back after a while away over a relay at once, then to WebRTC on the session", () => {
+  const transportOf = (app: App) => (app.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport;
+  /**
+   * `higher`: the app that goes has the higher key. The one that stays dials it meanwhile, its offer standing for its
+   * attempt (90 s) once it is due again, and the app back answers it.
+   */
+  async function awayAndBack(upgrade: { goes: boolean; stays: boolean }, { higher = false, kind = "webrtc+iroh" as Kind, awayMs = 5 * 60_000 + 3_700, endpointAfterMs = undefined as number | undefined, dialOnEndpoint = false } = {}) {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
+    const up = (mine: boolean, contact: boolean) => ({ mine, contact });
+    let goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, emptyDhtDeliveryState(), false, undefined, false, up(upgrade.goes, upgrade.stays));
+    const stays = startApp(world, "stays", staysSide, { side: goesSide, name: "goes" }, kind, emptyDhtDeliveryState(), false, undefined, false, up(upgrade.stays, upgrade.goes));
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    expect(transportOf(goes)).toBe("webrtc/1");
+    await quit(world, goes, "graceful");
+    await run(awayMs);
+    goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, goes.dhtState, true, endpointAfterMs, false, up(upgrade.goes, upgrade.stays));
+    const back = goes;
+    if (endpointAfterMs !== undefined && dialOnEndpoint) setTimeout(() => void back.link.connect().catch(() => {}), endpointAfterMs);
+    const requests = () => goes.requests.length + stays.requests.length;
+    const before = requests();
+    // The packets that carry a WebRTC signal from here on (an offer or an answer put on the relays).
+    const signalled: number[] = [];
+    const traceFile = process.env.RESTART_TRACE;
+    setLinkTraceSink(line => {
+      if (traceFile) appendFileSync(traceFile, line + "\n");
+      const step = JSON.parse(line) as { step: string; rtc?: boolean; t: number }; if (step.step === "publish" && step.rtc) signalled.push(step.t);
+    });
+    const liveMs = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000);
+    const firstOn = transportOf(goes), liveAt = Date.now(), atLive = requests();
+    const directMs = kind === "webrtc+iroh" ? await until(() => transportOf(goes) === "webrtc/1" && transportOf(stays) === "webrtc/1", 60_000) : 0;
+    setLinkTraceSink(traceFile ? line => appendFileSync(traceFile, line + "\n") : null);
+    return { goes, stays, liveMs, firstOn, directMs, requestsToLive: atLive - before, requestsToDirect: requests() - atLive,
+      signalsToDirect: signalled.filter(t => t > liveAt).length };
+  }
+
+  it("both apps move: live over the relay at once, then on WebRTC, with no request to the relays for the move", async () => {
+    const { liveMs, firstOn, directMs, signalsToDirect, requestsToLive } = await awayAndBack({ goes: true, stays: true });
+    // Before: 27.6 s, over WebRTC once the contact read the offer. After: 0.6 s over the relayed Iroh, WebRTC 0.9 s later.
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(2_000);
+    expect(firstOn).toBe("iroh/1");
+    expect(directMs, "then to WebRTC, on the session").toBeLessThan(3_000);
+    expect(signalsToDirect, "the move's offer and answer go on the session, not on the relays").toBe(0);
+    // Before: 8 requests from the return to live.
+    expect(requestsToLive).toBeLessThanOrEqual(8);
+  }, 240_000);
+
+  it.each(["webrtc+iroh", "webrtc+hyperdht"] as const)("back with the higher key, it answers the contact's standing offer and knocks too (%s)", async kind => {
+    // Away a little longer: the contact's offer is near the end of its attempt as the app comes back.
+    const { liveMs, firstOn } = await awayAndBack({ goes: true, stays: true }, { higher: true, kind, awayMs: 5 * 60_000 + 7 * 3_700 });
+    // Before: 5.7 s (WebRTC: the contact looked for the answer only every 8 s, its offer out a while). After: 1.0 s, over
+    // the knocked transport. Over 8 returns 3.7 s apart: 4.05 s median (1.4-7.3) before, 1.0 / 1.3 s (1.0-3.6) after.
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(2_000);
+    expect(firstOn).toBe(kind === "webrtc+iroh" ? "iroh/1" : "hyperdht/1");
+  }, 240_000);
+
+  it("the app's Iroh endpoint comes up after its offer is out, and it dials again then (node.ts): it still knocks", async () => {
+    // A browser's Iroh starts in some 300 ms, after an offer gathered in 0.2 s, and the engine dials once its native
+    // endpoints are up. That second dial made the offer's record anew, without its resume: no knock (e2e, 1 run in 4).
+    rtc.srflxAfterMs = 50;
+    const { liveMs, firstOn } = await awayAndBack({ goes: true, stays: true }, { endpointAfterMs: 500, dialOnEndpoint: true });
+    expect(liveMs).toBeLessThan(2_000);
+    expect(firstOn).toBe("iroh/1");
+  }, 240_000);
+
+  it("a contact whose app does not move off a relay: the offer waits, as before, and nothing is said of a move", async () => {
+    const { goes, liveMs, firstOn } = await awayAndBack({ goes: true, stays: false });
+    expect(liveMs).toBeGreaterThan(10_000);
+    expect(firstOn).toBe("webrtc/1");
+    expect(goes.link.liveAttempt).toBeUndefined();
   }, 240_000);
 });
 
