@@ -7,6 +7,8 @@
 //
 //   node apps/desktop/fixtures/app-sandbox/measure.mjs --app <path to the ghostly binary> [--port-base 4300] [--out results.json]
 //     [--guards full,header+lock,header,control] [--groups net,nav-top,…]
+//   Layers for --guards (Guard::parse): full, control, or header+lock+rules+prefs+proxy+webrtc (webrtc: Linux,
+//   WebRTC switched on, to show the nested-frame case closed by the other layers).
 //
 // `full` also sends the window's network to the app's own proxy that goes nowhere; what it caught is listed.
 // Ports, from --port-base: +0 the driver, +10 HTTP (fetch and the rest), +11 UDP (STUN), +12 TCP (preconnect),

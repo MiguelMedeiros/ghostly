@@ -57,11 +57,17 @@ const RUNNER: &str = r#"<!doctype html>
     context: () => broker("context"),
     close: () => broker("close"),
   }) });
-  broker("start").then((entry) => broker("writing").then(() => {
+  const fail = (error) => { document.documentElement.textContent = "This app could not start: " + error; };
+  // On Linux the window's filter goes in just after it is made: until then the broker says "Not ready".
+  const begin = (tries) => broker("start").then((entry) => broker("writing").then(() => {
     document.open();
     document.write(entry);
     document.close();
-  })).catch((error) => { document.documentElement.textContent = "This app could not start: " + error; });
+  }), (error) => {
+    if (String(error).includes("Not ready") && tries < 400) setTimeout(() => begin(tries + 1), 25);
+    else fail(error);
+  }).catch(fail);
+  begin(0);
 })();
 </script></head><body></body></html>"#;
 
@@ -73,13 +79,19 @@ pub struct Guard {
     header: bool,
     /// The navigation lock: the runner once, then nothing (frames included).
     lock: bool,
-    /// macOS: a content rule list that blocks every load but `ghostly-app:` (`webkit`).
+    /// A content rule list that blocks every load but `ghostly-app:`: `WKContentRuleList` on macOS (`webkit`),
+    /// `WebKitUserContentFilter` on Linux (`webkitgtk`), same JSON. Required: no app runs without it there.
     rules: bool,
-    /// macOS: WebKit's preconnect, DNS prefetch and WebRTC switched off for the window (`webkit`).
+    /// Best effort: WebKit's preconnect, DNS prefetch and WebRTC switched off for the window (macOS private
+    /// features, Linux `WebKitSettings`).
     prefs: bool,
     /// A proxy that goes nowhere, with a data store of its own. Measured, not used: WKWebView never sent a
     /// request to it (macOS 15.6); kept for the test driver so Linux can be measured the same way.
     proxy: bool,
+    /// Test driver only, Linux: WebRTC switched ON in the window (WebKitGTK has it off by default), so the
+    /// nested-frame WebRTC case can be shown closed by the other layers rather than by its absence.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    webrtc: bool,
 }
 
 impl Guard {
@@ -89,13 +101,21 @@ impl Guard {
         rules: true,
         prefs: true,
         proxy: false,
+        webrtc: false,
     };
 
-    /// `full`, `control` (nothing), or layers joined by `+`: `header`, `lock`, `rules`, `prefs`, `proxy`.
+    /// `full`, `control` (nothing), or layers joined by `+`: `header`, `lock`, `rules`, `prefs`, `proxy`, and
+    /// `webrtc` (Linux: WebRTC on, the opposite of a layer). `full+webrtc` is every layer with WebRTC on.
     #[cfg(any(test, feature = "e2e-driver"))]
     pub fn parse(name: &str) -> Option<Guard> {
         if name == "full" {
             return Some(Guard::FULL);
+        }
+        if name == "full+webrtc" {
+            return Some(Guard {
+                webrtc: true,
+                ..Guard::FULL
+            });
         }
         let mut guard = Guard {
             header: false,
@@ -103,6 +123,7 @@ impl Guard {
             rules: false,
             prefs: false,
             proxy: false,
+            webrtc: false,
         };
         if name == "control" {
             return Some(guard);
@@ -114,6 +135,7 @@ impl Guard {
                 "rules" => guard.rules = true,
                 "prefs" => guard.prefs = true,
                 "proxy" => guard.proxy = true,
+                "webrtc" => guard.webrtc = true,
                 _ => return None,
             }
         }
@@ -170,6 +192,9 @@ struct AppWindow {
     /// The verified entry, handed over once on `start`.
     entry: Option<String>,
     started: bool,
+    /// Whether every required layer is in place, so the entry may be handed over (`start`). On Linux the
+    /// filter goes into the window just after it is made (`webkitgtk`); elsewhere it is ready when made.
+    ready: bool,
     guard: Guard,
     /// What the window was refused (navigations and new windows), for the spike's measurements.
     refused: Vec<String>,
@@ -245,6 +270,7 @@ pub fn open_guarded<R: Runtime>(
                 app: app_id.clone(),
                 entry: Some(entry),
                 started: false,
+                ready: !cfg!(all(target_os = "linux", not(test))),
                 guard,
                 refused: Vec::new(),
             },
@@ -308,7 +334,7 @@ fn window_builder<'a, R: Runtime>(
     Ok(builder)
 }
 
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(any(all(not(target_os = "macos"), not(target_os = "linux")), test))]
 fn build_window<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
@@ -318,6 +344,47 @@ fn build_window<R: Runtime>(
     window_builder(app, label, app_id, guard)?
         .build()
         .map(|_| ())
+        .map_err(|e| format!("Window: {e}"))
+}
+
+/// On Linux wry gives no way to configure the WebKitWebView before it exists, so the window is hardened just
+/// after (`webkitgtk::harden`, on the GTK thread), and the broker holds the entry back until it is
+/// (`AppWindow::ready`). A filter that cannot be made closes the window.
+#[cfg(all(target_os = "linux", not(test)))]
+fn build_window<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    app_id: &str,
+    guard: Guard,
+) -> Result<(), String> {
+    let window = window_builder(app, label, app_id, guard)?
+        .build()
+        .map_err(|e| format!("Window: {e}"))?;
+    let store = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("Cache: {e}"))?
+        .join("app-filters");
+    let (handle, label) = (app.clone(), label.to_string());
+    window
+        .with_webview(move |platform| {
+            let webview = platform.inner();
+            webkitgtk::harden(&webview, guard, &store, move |result| {
+                let state = handle.state::<AppSandboxState>();
+                match result {
+                    Ok(()) => {
+                        state.with(&label, |window| window.ready = true);
+                    }
+                    Err(e) => {
+                        crate::diagnostics::log(&format!("app window: not hardened ({e}), closed"));
+                        forget_window(&handle, &label);
+                        if let Some(window) = handle.get_webview_window(&label) {
+                            let _ = window.close();
+                        }
+                    }
+                }
+            });
+        })
         .map_err(|e| format!("Window: {e}"))
 }
 
@@ -443,6 +510,7 @@ pub fn broker(
     }
     state
         .with(label, |window| match request.kind.as_str() {
+            "start" if !window.ready => Err("Not ready".into()),
             // The entry, once: a second start (a reload that got through) is refused.
             "start" if !window.started => {
                 window.started = true;
@@ -470,10 +538,10 @@ pub fn app_broker<R: Runtime>(
     broker(&state, webview.label(), request)
 }
 
-/// The content rule list of an app window on macOS: every load blocked but the runner's own scheme.
-#[cfg(any(target_os = "macos", test))]
+/// The content rule list of an app window on macOS and Linux: every load blocked but the runner's own scheme.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 const RULES_ID: &str = "ghostly-app-sandbox-1";
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 const RULES: &str = r#"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^ghostly-app:"},"action":{"type":"ignore-previous-rules"}}]"#;
 
 /// The WebKit features an app window has off on macOS: `<link rel=preconnect>` (and in Early Hints), DNS
@@ -617,6 +685,102 @@ mod webkit {
     }
 }
 
+/// The WebKitGTK side of an app window on Linux, the counterpart of `webkit`: a user content filter made from
+/// the same rule list (public API, required), and `WebKitSettings` for DNS prefetch and WebRTC (public API,
+/// best effort). WebKitGTK has no switch for `<link rel=preconnect>`: the filter is what is measured for it.
+#[cfg(all(target_os = "linux", not(test)))]
+mod webkitgtk {
+    use super::{Guard, RULES, RULES_ID};
+    use std::cell::RefCell;
+    use std::path::Path;
+    use webkit2gtk::glib::translate::{FromGlibPtrFull, ToGlibPtr};
+    use webkit2gtk::{ffi, gio, glib, SettingsExt, WebViewExt};
+
+    /// A filter, kept with a reference of its own.
+    struct Filter(*mut ffi::WebKitUserContentFilter);
+
+    thread_local! {
+        /// Made once, on the GTK thread, where WebKitGTK answers.
+        static FILTER: RefCell<Option<Filter>> = const { RefCell::new(None) };
+    }
+
+    type Done = Box<dyn FnOnce(Result<(), String>)>;
+
+    fn add(
+        webview: &webkit2gtk::WebView,
+        filter: *mut ffi::WebKitUserContentFilter,
+    ) -> Result<(), String> {
+        let manager = webview
+            .user_content_manager()
+            .ok_or("no user content manager")?;
+        unsafe { ffi::webkit_user_content_manager_add_filter(manager.to_glib_none().0, filter) };
+        Ok(())
+    }
+
+    /// Settings now, the filter now or once it is made; then `done`.
+    pub fn harden(
+        webview: &webkit2gtk::WebView,
+        guard: Guard,
+        store: &Path,
+        done: impl FnOnce(Result<(), String>) + 'static,
+    ) {
+        if let Some(settings) = WebViewExt::settings(webview) {
+            if guard.prefs {
+                settings.set_enable_dns_prefetching(false);
+                settings.set_enable_webrtc(false);
+            }
+            if guard.webrtc {
+                settings.set_enable_webrtc(true);
+            }
+        }
+        if !guard.rules {
+            return done(Ok(()));
+        }
+        if let Some(filter) = FILTER.with(|slot| slot.borrow().as_ref().map(|f| f.0)) {
+            return done(add(webview, filter));
+        }
+        let _ = std::fs::create_dir_all(store);
+        let path = std::ffi::CString::new(store.to_string_lossy().as_bytes()).unwrap_or_default();
+        let id = std::ffi::CString::new(RULES_ID).unwrap_or_default();
+        let source = glib::Bytes::from_static(RULES.as_bytes());
+        let pending: Box<(webkit2gtk::WebView, Done)> = Box::new((webview.clone(), Box::new(done)));
+        unsafe {
+            let store = ffi::webkit_user_content_filter_store_new(path.as_ptr());
+            ffi::webkit_user_content_filter_store_save(
+                store,
+                id.as_ptr(),
+                ToGlibPtr::<*const glib::ffi::GBytes>::to_glib_none(&source).0 as *mut _,
+                std::ptr::null_mut(),
+                Some(saved),
+                Box::into_raw(pending) as glib::ffi::gpointer,
+            );
+            // The save holds its own reference to the store until it calls back.
+            glib::gobject_ffi::g_object_unref(store as *mut _);
+        }
+    }
+
+    unsafe extern "C" fn saved(
+        store: *mut glib::gobject_ffi::GObject,
+        result: *mut gio::ffi::GAsyncResult,
+        pending: glib::ffi::gpointer,
+    ) {
+        let (webview, done) = *Box::from_raw(pending as *mut (webkit2gtk::WebView, Done));
+        let mut error = std::ptr::null_mut();
+        let filter =
+            ffi::webkit_user_content_filter_store_save_finish(store as *mut _, result, &mut error);
+        if filter.is_null() {
+            let message = if error.is_null() {
+                "filter not made".to_string()
+            } else {
+                glib::Error::from_glib_full(error).to_string()
+            };
+            return done(Err(message));
+        }
+        FILTER.with(|slot| *slot.borrow_mut() = Some(Filter(filter)));
+        done(add(&webview, filter));
+    }
+}
+
 /// The WebKit features the spike looks at (macOS), for the test driver.
 #[cfg(any(test, feature = "e2e-driver"))]
 pub fn webkit_candidates() -> Vec<String> {
@@ -730,6 +894,7 @@ mod tests {
                     app: "ana/chess".into(),
                     entry: Some("<p>hi</p>".into()),
                     started: false,
+                    ready: true,
                     guard: Guard::FULL,
                     refused: Vec::new(),
                 },
@@ -791,6 +956,7 @@ mod tests {
                     app: app.into(),
                     entry: Some(format!("<p>{app}</p>")),
                     started: false,
+                    ready: true,
                     guard: Guard::FULL,
                     refused: Vec::new(),
                 },
@@ -850,7 +1016,8 @@ mod tests {
                 lock: true,
                 rules: true,
                 prefs: true,
-                proxy: false
+                proxy: false,
+                webrtc: false
             }
         );
         assert_eq!(Guard::parse("full"), Some(Guard::FULL));
@@ -894,6 +1061,40 @@ mod tests {
                 "LinkPrefetchEnabled",
                 "PeerConnectionEnabled",
             ]
+        );
+    }
+
+    /// On Linux the filter goes into the window just after it is made: the entry waits for it.
+    #[test]
+    fn the_entry_waits_until_the_window_is_hardened() {
+        let state = AppSandboxState::default();
+        state.windows.lock().unwrap().insert(
+            "app-1".into(),
+            AppWindow {
+                app: "ana/chess".into(),
+                entry: Some("<p>chess</p>".into()),
+                started: false,
+                ready: false,
+                guard: Guard::FULL,
+                refused: Vec::new(),
+            },
+        );
+        for _ in 0..3 {
+            assert_eq!(
+                broker(&state, "app-1", request("start", Value::Null)).unwrap_err(),
+                "Not ready"
+            );
+        }
+        // The runner's other requests do not wait; nothing was handed over.
+        assert!(broker(&state, "app-1", request("context", Value::Null)).is_ok());
+        state.with("app-1", |window| window.ready = true);
+        assert_eq!(
+            broker(&state, "app-1", request("start", Value::Null)).unwrap(),
+            json!("<p>chess</p>")
+        );
+        assert!(
+            RUNNER.contains("Not ready"),
+            "the runner asks again while the window is hardened"
         );
     }
 
