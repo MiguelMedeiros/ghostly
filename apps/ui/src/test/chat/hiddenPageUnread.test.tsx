@@ -1,7 +1,9 @@
+import type { ReactNode } from "react";
 import { act, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
 import { addMessages, getUnreadCount, loadSession, saveSession } from "../../lib/storage";
+import { resetAppBadge, setAppBadgeTarget, useAppBadge } from "../../lib/appBadge";
 import type { ChatMessage } from "../../lib/types";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -25,10 +27,20 @@ const setVisibility = (next: DocumentVisibilityState) => {
   document.dispatchEvent(new Event("visibilitychange"));
 };
 
+/** The app's icon, kept by `App` around the open chat as in the app (useAppBadge): every number it is given. */
+const icon: number[] = [];
+function AppIcon({ children }: { children: ReactNode }) {
+  useAppBadge();
+  return children;
+}
+
 function openChat() {
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
   saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [theirs("hello", T)], createdAt: T - 1000 });
-  const utils = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
+  icon.length = 0;
+  resetAppBadge();
+  setAppBadgeTarget({ setAppBadge: async (count) => { icon.push(count ?? 0); }, clearAppBadge: async () => { icon.push(0); } });
+  const utils = renderApp(<AppIcon><Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} /></AppIcon>);
   utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
   utils.engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
   return utils;
@@ -36,7 +48,7 @@ function openChat() {
 
 const unread = () => getUnreadCount(loadSession("chat-1")!);
 
-afterEach(() => { visibility = "visible"; vi.restoreAllMocks(); });
+afterEach(() => { visibility = "visible"; setAppBadgeTarget(null); vi.restoreAllMocks(); });
 
 describe("the open chat's unread messages", () => {
   it("in a hidden page stay unread until the page shows again", async () => {
@@ -51,6 +63,7 @@ describe("the open chat's unread messages", () => {
     });
     await screen.findByText("still away");
     expect(unread()).toBe(2);
+    expect(icon[icon.length - 1]).toBe(2);
 
     act(() => setVisibility("visible"));
     expect(unread()).toBe(0);
@@ -65,5 +78,7 @@ describe("the open chat's unread messages", () => {
     });
     await screen.findByText("on screen");
     expect(unread()).toBe(0);
+    // The icon never showed it: a 1 there until the chat marked it read made the Dock badge blink for every message.
+    expect(icon.filter((count) => count > 0)).toEqual([]);
   });
 });
