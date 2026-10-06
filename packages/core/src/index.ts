@@ -99,3 +99,8 @@ export * from "./pairingProgress";
 export * from "./directPath";
 export * from "./clockWatch";
 export { setLinkTraceSink, traceLink } from "./linkTrace";
+export * from "./canonicalJson";
+export * from "./appStatements";
+export * from "./appBundle";
+export * from "./appStore";
+export * from "./appUpdates";
