@@ -14,6 +14,10 @@ import { ghostly, home, localRelay, ok, Running } from "./support/cli";
  *
  * Each daemon keeps a link trace (`GHOSTLY_LINK_TRACE`): a run over the bound prints the steps of the edges' way to
  * live, without which a CI failure said only how long it took.
+ *
+ * Each daemon refuses one in two answers to its offers (`GHOSTLY_TEST_REFUSE_DATA_ANSWERS`), as libdatachannel 0.24.5
+ * now and then does in its race: the dial after one goes at once. It waited for its backoff and its next look, and a
+ * member let in was up with another member 72 s after its welcome (CI, 2026-10-06).
  */
 const RELAY_MS = 2_500;
 let relays: { url: string; server: Server }[] = [];
@@ -63,7 +67,7 @@ describe("a private group's edges signal through members", { timeout: 300_000 },
     for (const [dir, name] of [[admin, "Admin"], [member, "Member"], [joiner, "Joiner"]]) {
       ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((relay) => relay.url))));
       ok(await as(dir, "profile", "set", "--name", name));
-      const daemon = new Running(["--home", dir, "daemon"], { GHOSTLY_LINK_TRACE: join(dir, "link-trace.jsonl") });
+      const daemon = new Running(["--home", dir, "daemon"], { GHOSTLY_LINK_TRACE: join(dir, "link-trace.jsonl"), GHOSTLY_TEST_REFUSE_DATA_ANSWERS: "2" });
       running.push(daemon);
       await daemon.waitFor((l) => l.daemon === "ready");
     }

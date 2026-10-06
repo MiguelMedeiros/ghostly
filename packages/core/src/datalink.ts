@@ -51,7 +51,8 @@ export interface DataLinkOptions {
   offerStanding?: (offerTs: number) => boolean;
   /**
    * This side's attempt was given up because the answerer answered its offer again (its connection for the answer
-   * applied here is gone): the answerer is there, so the caller may dial again now rather than at its next look.
+   * applied here is gone), or because its answer could not be applied (`ANSWER_REFUSED_REDIALS`): the answerer is
+   * there, so the caller may dial again now rather than at its next look.
    */
   onAnswerReplaced?: () => void;
   /**
@@ -99,6 +100,14 @@ const DISCONNECT_GRACE_MS = 12_000;
  * offerer's attempt ran out: a community's edge was live again 110 s after a member restarted (2026-09-30).
  */
 export const REANSWERS = 2;
+/**
+ * An answer to this side's offer that could not be applied, its connection failing as it was (libdatachannel 0.24.5,
+ * in node-datachannel 0.33.4: the answerer's DTLS handshake can end inside setRemoteDescription, before the answer's
+ * fingerprint is in, and the connection closes), is followed by a new offer at once, up to this many times until a
+ * connection opens. The answerer is there; it was the dial after it that waited: its backoff, 40 s, then its next
+ * look (a member let in to a group reached one of its members 72 s after its welcome on CI, 2026-10-06).
+ */
+export const ANSWER_REFUSED_REDIALS = 2;
 /** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
 const REANSWER_MARGIN_MS = 15_000;
 
@@ -122,6 +131,8 @@ export class DataLink {
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
   /** The offer this side answered in the current attempt, when it took it (this clock), and how many times it answered it again. */
   private answered: { offer: RtcSignal; at: number; again: number } | null = null;
+  /** Answers refused since a connection last opened, each followed by a new offer at once (`ANSWER_REFUSED_REDIALS`). */
+  private refusedAnswers = 0;
 
   constructor(private readonly options: DataLinkOptions) {}
 
@@ -211,8 +222,8 @@ export class DataLink {
         await pc.setRemoteDescription({ type: "answer", sdp: this.remoteSdp });
         // On a quick path the channel is open before this resolves: never step back from open.
         if (this.pc === pc && this.state === "offering") this.setState("connecting");
-      } catch {
-        if (this.pc === pc) this.reset();
+      } catch (error) {
+        if (this.pc === pc) this.answerRefused(error);
       }
     }
   }
@@ -261,6 +272,8 @@ export class DataLink {
    * else goes back to idle.
    */
   private failed(): void {
+    // The connection failed while the answer to this side's offer was being applied: as if it was refused.
+    if (this.state === "offering" && this.remoteSdp) { this.answerRefused("failed"); return; }
     const answered = this.state === "connecting" ? this.answered : null;
     // How long the offerer's attempt still runs, counted on this clock from when its offer was taken (its `ts` is its clock's).
     const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.at) : 0;
@@ -275,6 +288,16 @@ export class DataLink {
     }
     this.reset();
     if (evidence) this.options.onDirect?.(evidence);
+  }
+
+  /** The answer to this side's offer did not go in (`ANSWER_REFUSED_REDIALS`): the attempt ends, and the caller may offer again now. */
+  private answerRefused(error: unknown): void {
+    const again = this.refusedAnswers < ANSWER_REFUSED_REDIALS;
+    traceLink(this.options.myPubKeyZ32, "answer-refused", { error: error instanceof Error ? error.message : String(error), again });
+    this.reset();
+    if (!again) return;
+    this.refusedAnswers++;
+    this.options.onAnswerReplaced?.();
   }
 
   private async answer(offer: RtcSignal): Promise<void> {
@@ -339,6 +362,7 @@ export class DataLink {
       if (this.pc !== pc) return;
       this.clearTimers();
       this.answered = null;
+      this.refusedAnswers = 0;
       this.fullGather = false;
       this.setState("open");
       this.options.setFastPoll(false);
