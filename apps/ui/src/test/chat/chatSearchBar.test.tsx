@@ -77,6 +77,35 @@ describe("search inside a chat", () => {
     expect(field()).toBeInTheDocument();
   });
 
+  it("gives the focus back as it closes: to ⋮ when opened from its menu, to the composer after Ctrl+F there", async () => {
+    const { user } = openChat();
+    await screen.findByText(`Message ${COUNT - 1}`);
+    const options = screen.getByTestId("chat-options");
+    for (const how of ["escape", "close"] as const) {
+      options.focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("chat-search-open").focus();
+      await user.keyboard("{Enter}");
+      await settle();
+      expect(document.activeElement).toBe(field());
+      if (how === "escape") fireEvent.keyDown(field(), { key: "Escape" });
+      else await user.click(screen.getByTestId("chat-search-close"));
+      expect(screen.queryByTestId("chat-search")).toBeNull();
+      expect(document.activeElement, how).toBe(options);
+    }
+
+    const composer = screen.getByPlaceholderText("Message…");
+    composer.focus();
+    ctrlF();
+    await settle();
+    expect(document.activeElement).toBe(field());
+    // Ctrl+F again in the open bar: the place to go back to stays the composer.
+    ctrlF();
+    await settle();
+    fireEvent.keyDown(field(), { key: "Escape" });
+    expect(document.activeElement).toBe(composer);
+  });
+
   it("leaves Ctrl+F to the browser while the chat is not on screen", async () => {
     openChat(false);
     await settle();
