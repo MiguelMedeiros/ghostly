@@ -1978,8 +1978,11 @@ export class GhostLink {
           // transport would otherwise wait for the offer's 90 s timeout.
           const rest = [...failedFirst, ...ordered.slice(index + 1)];
           this.afterRtc = fallback && rest.length ? { epoch, rest } : undefined;
-          const offeredAt = Date.now();
-          this.offered = fallback ? { epoch, at: offeredAt, ...(resume && { resume }) } : undefined;
+          // Dialled again while this attempt's offer is out (the app dials once its native endpoints are up): the offer
+          // stands as it was made, its time and whether it resumes with it, or the knock and the race would go by the second.
+          const standing = this.offerOut && this.offered?.epoch === epoch ? this.offered : undefined;
+          const offeredAt = standing?.at ?? Date.now();
+          this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }) } : undefined;
           const gate = this.dialGate;
           this.dialGate = undefined;
           if (await this.dataLink.connect(gate) === "held") {

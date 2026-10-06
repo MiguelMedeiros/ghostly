@@ -500,7 +500,7 @@ describe("back after a while away over a relay at once, then to WebRTC on the se
    * `higher`: the app that goes has the higher key. The one that stays dials it meanwhile, its offer standing for its
    * attempt (90 s) once it is due again, and the app back answers it.
    */
-  async function awayAndBack(upgrade: { goes: boolean; stays: boolean }, { higher = false, kind = "webrtc+iroh" as Kind, awayMs = 5 * 60_000 + 3_700 } = {}) {
+  async function awayAndBack(upgrade: { goes: boolean; stays: boolean }, { higher = false, kind = "webrtc+iroh" as Kind, awayMs = 5 * 60_000 + 3_700, endpointAfterMs = undefined as number | undefined, dialOnEndpoint = false } = {}) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     const made = invitationWhere("inviter");
     const [goesSide, staysSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
@@ -512,7 +512,9 @@ describe("back after a while away over a relay at once, then to WebRTC on the se
     expect(transportOf(goes)).toBe("webrtc/1");
     await quit(world, goes, "graceful");
     await run(awayMs);
-    goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, goes.dhtState, true, undefined, false, up(upgrade.goes, upgrade.stays));
+    goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, goes.dhtState, true, endpointAfterMs, false, up(upgrade.goes, upgrade.stays));
+    const back = goes;
+    if (endpointAfterMs !== undefined && dialOnEndpoint) setTimeout(() => void back.link.connect().catch(() => {}), endpointAfterMs);
     const requests = () => goes.requests.length + stays.requests.length;
     const before = requests();
     // The packets that carry a WebRTC signal from here on (an offer or an answer put on the relays).
@@ -548,6 +550,15 @@ describe("back after a while away over a relay at once, then to WebRTC on the se
     // the knocked transport. Over 8 returns 3.7 s apart: 4.05 s median (1.4-7.3) before, 1.0 / 1.3 s (1.0-3.6) after.
     expect(liveMs, "from the return to live on both sides").toBeLessThan(2_000);
     expect(firstOn).toBe(kind === "webrtc+iroh" ? "iroh/1" : "hyperdht/1");
+  }, 240_000);
+
+  it("the app's Iroh endpoint comes up after its offer is out, and it dials again then (node.ts): it still knocks", async () => {
+    // A browser's Iroh starts in some 300 ms, after an offer gathered in 0.2 s, and the engine dials once its native
+    // endpoints are up. That second dial made the offer's record anew, without its resume: no knock (e2e, 1 run in 4).
+    rtc.srflxAfterMs = 50;
+    const { liveMs, firstOn } = await awayAndBack({ goes: true, stays: true }, { endpointAfterMs: 500, dialOnEndpoint: true });
+    expect(liveMs).toBeLessThan(2_000);
+    expect(firstOn).toBe("iroh/1");
   }, 240_000);
 
   it("a contact whose app does not move off a relay: the offer waits, as before, and nothing is said of a move", async () => {
