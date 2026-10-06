@@ -2018,6 +2018,7 @@ export class GhostlyNode implements EngineImplementation {
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
   appUninstall(params: { ref: string }): Promise<void> { return this.appStore.uninstall(params); }
   appRunCheck(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.runCheck(params); }
+  appFetchFiles(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.fetchFiles(params); }
   appEntry(params: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> { return this.appStore.entry(params); }
   appFile(params: { ref: string; path: string }): Promise<Uint8Array> { return this.appStore.file(params); }
   appStorageGet(params: { ref: string; scope: string; key: string }): Promise<{ value: import("@ghostly/core").JsonValue } | null> { return this.appStore.storageGet(params); }

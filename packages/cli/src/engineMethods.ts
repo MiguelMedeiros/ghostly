@@ -36,7 +36,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "deviceHandoffSettle", "deviceHandoffCancel", "deviceHandoffView", "deviceHandoffAllow", "deviceTakeoverInfo", "deviceTakeover", "deviceTurnPeek", "deviceForkDiscard", "deviceRestoreStartOwn",
   "deviceRemove", "deviceNewSecret", "deviceSecretOfferDismiss", "deviceSetNoticeSeen", "deviceTurnCheck", "devicePushState", "devicePushSet",
   "appList", "appStoreList", "appStorePreview", "appStoreAdd", "appStoreRemove", "appStoreRefresh", "appPreview", "appInstall",
-  "appUpdateAccept", "appCheckUpdates", "appUninstall", "appRunCheck", "appEntry", "appFile", "appStorageGet", "appStorageSet",
+  "appUpdateAccept", "appCheckUpdates", "appUninstall", "appRunCheck", "appFetchFiles", "appEntry", "appFile", "appStorageGet", "appStorageSet",
   "appStorageDelete", "appStorageKeys", "appDataExport",
 ];
 

@@ -501,6 +501,11 @@ export interface EngineApi {
   appUninstall(params: { ref: string }): void;
   /** Whether an installed app may run: `revoked` stops it, `removed` warns, `needs-files` waits for its files. No request. */
   appRunCheck(params: { ref: string }): import("../engine/apps").AppRunStatus;
+  /**
+   * Fetches an installed app's files again when they are not on this device (a restored profile), by its digest, checked
+   * whole; `needs-files` when no source answers. `appEntry` does it by itself on the first open.
+   */
+  appFetchFiles(params: { ref: string }): import("../engine/apps").AppRunStatus;
   /** The runner's entry, from the bundle checked again; refused when revoked, and when removed unless `runAnyway`. */
   appEntry(params: { ref: string; runAnyway?: boolean }): import("../engine/apps").AppRunEntry;
   /** One file of an installed app (`ghostly.file(path)`). */

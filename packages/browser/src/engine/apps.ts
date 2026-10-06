@@ -679,7 +679,10 @@ export class Apps {
     await this.refreshStores();
     const stores = await this.stores();
     const out: AppCheckResult[] = [];
-    for (const first of apps) {
+    for (const listed of apps) {
+      if (!(await this.hasBundle(listed.bytes, listed.digest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
+      const first = await this.app(listed.ref);
+      if (!first) continue;
       let app = first;
       let outcome: AppCheckOutcome = "none";
       const highest = Math.max(app.sequence, app.pending?.sequence ?? 0);
@@ -741,6 +744,35 @@ export class Apps {
     return out;
   }
 
+  // ---------- files again (a restored profile) ----------
+
+  /**
+   * Fetches an installed app's bundle again when it is not on this device (a profile restored from a backup, which
+   * carries the installed list but no bundle: WISP 1200 § Where installed apps live). Only the installed digest is
+   * taken, checked whole: from the URL it was installed from, the listings of the person's stores that name that digest,
+   * then its `sources`. Nothing answers: it stays `needs-files`, and it never runs unchecked.
+   */
+  async fetchFiles({ ref }: { ref: string }): Promise<AppRunStatus> {
+    const app = await this.installedOrFail(ref);
+    const stores = await this.stores();
+    if (await this.hasBundle(app.bytes, app.digest)) return this.runCheckOf(app, stores);
+    const urls = [app.from];
+    for (const s of stores) for (const listing of s.index?.apps ?? []) if (listing.ref === app.ref && listing.digest === app.digest) urls.push(...listing.urls);
+    urls.push(...(app.manifest.sources ?? []));
+    for (const url of new Set(urls.filter(isAppFetchUrl))) {
+      let fetched: { bundle: AppBundle; bytes: Uint8Array };
+      try { fetched = await this.fetchBundle(url); } catch { continue; }
+      if (fetched.bundle.digest !== app.digest) continue;
+      const kind = await this.writeBundle(app.digest, fetched.bytes);
+      // Uninstalled meanwhile: its files go again.
+      const now = await this.app(app.ref);
+      if (!now || now.digest !== app.digest) { await this.removeBundle(kind, app.digest); fail("not-installed", "This app is not installed"); }
+      if (now.bytes !== kind) await this.putApp({ ...now, bytes: kind });
+      return this.runCheckOf({ ...now, bytes: kind }, stores);
+    }
+    return { status: "needs-files" };
+  }
+
   // ---------- running ----------
 
   private async runCheckOf(app: InstalledApp, stores: AddedAppStore[]): Promise<AppRunStatus> {
@@ -758,8 +790,10 @@ export class Apps {
    * never runs; one a store removed runs only when the person chose "Run anyway" (`runAnyway`).
    */
   async entry({ ref, runAnyway }: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> {
-    const app = await this.installedOrFail(ref);
-    const run = await this.runCheckOf(app, await this.stores());
+    let app = await this.installedOrFail(ref);
+    let run = await this.runCheckOf(app, await this.stores());
+    // Opened with its files missing (a restored profile): fetched again by digest first, or not run.
+    if (run.status === "needs-files") { run = await this.fetchFiles({ ref }); app = await this.installedOrFail(ref); }
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed" && runAnyway !== true) fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     if (run.status === "needs-files") fail("needs-files", "This app's files are not on this device yet");
