@@ -50,8 +50,9 @@ function steps(welcomed: number): string {
     if (!existsSync(file)) continue;
     for (const line of readFileSync(file, "utf8").split("\n")) {
       try {
-        const { t, me, step, ...rest } = JSON.parse(line) as { t: number; me: string; step: string };
-        if (t >= welcomed - 3_000 && step !== "poll") lines.push(`${((t - welcomed) / 1000).toFixed(1).padStart(6)} ${name} ${me} ${step} ${JSON.stringify(rest)}`);
+        // Link steps name the link's key (`me`); join steps, the group (`g`).
+        const { t, me, g, step, ...rest } = JSON.parse(line) as { t: number; me?: string; g?: string; step: string };
+        if (t >= welcomed - 3_000 && step !== "poll") lines.push(`${((t - welcomed) / 1000).toFixed(1).padStart(6)} ${name} ${me ?? `group ${g?.slice(0, 6)}`} ${step} ${JSON.stringify(rest)}`);
       } catch { /* a partial line */ }
     }
   }
