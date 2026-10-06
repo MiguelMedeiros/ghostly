@@ -110,8 +110,9 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       if (current !== generation.current || closed.current) return;
       // A phone has no keys to press: there the field pastes with a long press.
       const touch = touchOnly();
-      if (value === null) { setError(touch ? t("join.clipboardUnavailableTouch") : t("join.clipboardUnavailable", { keys: pasteShortcut() })); setManual(true); return; }
-      if (!value.trim()) { setError(touch ? t("join.emptyTouch") : t("join.empty", { keys: pasteShortcut() })); setManual(true); return; }
+      // A device code is not an invite: the words say which one to paste.
+      if (value === null) { setError(touch ? t("join.clipboardUnavailableTouch") : t(onDevice ? "devices.join.codeUnavailable" : "join.clipboardUnavailable", { keys: pasteShortcut() })); setManual(true); return; }
+      if (!value.trim()) { setError(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() })); setManual(true); return; }
       accept(value.trim());
     } finally {
       if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); }
@@ -228,8 +229,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header`}>{t("join.openChat")}</button>
     </div>}
     {manual && <form className="mt-3" onSubmit={event => { event.preventDefault(); if (!busyRef.current) accept(input.trim()); }}>
-      <textarea ref={manualInput} aria-label={t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} onChange={event => { setInput(event.target.value); setError(""); }} placeholder={t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
-      <div className="mt-3 grid grid-cols-2 gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><button disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{t("join.submit")}</button></div>
+      <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} onChange={event => { setInput(event.target.value); setError(""); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
+      <div className="mt-3 grid grid-cols-2 gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><button disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</button></div>
     </form>}
   </dialog>;
 }
