@@ -558,7 +558,7 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | A is | Event | A does | Next |
 |---|---|---|---|
 | `active` | `handoff-request`, or the person presses Move to | Checks versions; starts the password proof (pull) | authorizing |
-| `active` | A request while a call is on, or from a locked-out device | `handoff-busy` | `active` |
+| `active` | A request while a call is on or rings in, or from a locked-out device | `handoff-busy` | `active` |
 | authorizing | Proof fails | Counts the attempt, notice on screen, `handoff-busy` when the limit is reached | `active` |
 | authorizing | Proof holds; no frame for 60 s | Cancels | `active` |
 | offered (a push) | A new session of the link, or B's hello or `handoff-have` of an earlier attempt, or B's hello for this offer on a later session than its first (its request was lost) | Sends the offer again | offered |
