@@ -22,6 +22,7 @@ vi.mock("../src/engine/node", () => ({
     async start() { this.started++; (await import("../src/shared/idb")).openDb(); }
     getState() { return { links: [] }; }
     setActiveLink() {}
+    appsCloseAll() {}
     echo(params: unknown) { return params; }
   },
 }));
