@@ -48,6 +48,8 @@ export interface Listeners {
   /** Hits per tag (`/<tag>` for HTTP, `<tag>:stun` and `<tag>:turn` for WebRTC, `preconnect`). */
   hits: Map<string, number>;
   reset(): void;
+  /** Serves `html` at `<http>/__control`. */
+  setControl(html: string): void;
   close(): Promise<void>;
 }
 
@@ -63,7 +65,10 @@ export async function startListeners(): Promise<Listeners> {
     return (server.address() as net.AddressInfo).port;
   };
 
+  let control = "";
   const web = http.createServer((request, response) => {
+    // The control page: the same app with no runner around it, from this listener's own origin (not counted).
+    if (request.url === "/__control") { response.setHeader("content-type", "text/html"); response.end(control); return; }
     hit(new URL(request.url ?? "/", "http://x").pathname.split("/")[1] || "/");
     response.setHeader("access-control-allow-origin", "*");
     response.end("x");
@@ -86,6 +91,7 @@ export async function startListeners(): Promise<Listeners> {
     targets: { http: `http://${host}:${webPort}`, preconnect: `http://${host}:${preconnectPort}`, rtc, host },
     hits,
     reset: () => hits.clear(),
+    setControl: (html) => { control = html; },
     close: async () => { await Promise.all(closers.map((close) => close())); },
   };
 }
@@ -121,7 +127,7 @@ function netProbes(P: any) {
   const me = document.currentScript as any;
   r.nonceProperty = me ? String(me.nonce) : "no script";
   r.nonceAttribute = me ? String(me.getAttribute("nonce")) : "no script";
-  r.nonceInMarkup = /\snonce=/.test(document.documentElement.outerHTML);
+  r.nonceInMarkup = Array.from(document.querySelectorAll("*")).some((e) => e.hasAttribute("nonce"));
   r.metaPolicies = document.querySelectorAll("meta[http-equiv]").length;
   attempt("localStorage", () => { r.localStorage = String(localStorage.length); });
   attempt("cookie", () => { r.cookie = document.cookie; });
@@ -148,7 +154,7 @@ function netProbes(P: any) {
   add(`<link rel="stylesheet" href="${url("link-stylesheet")}"><link rel="prefetch" href="${url("link-prefetch")}"><link rel="preload" as="image" href="${url("link-preload")}"><link rel="modulepreload" href="${url("link-modulepreload")}"><link rel="icon" href="${url("link-icon")}"><link rel="prerender" href="${url("link-prerender")}">`);
   add(`<link rel="preconnect" href="${P.preconnect}"><link rel="dns-prefetch" href="${P.preconnect}">`);
   attempt("speculation-rules", () => { const s = document.createElement("script"); s.type = "speculationrules"; s.textContent = JSON.stringify({ prefetch: [{ source: "list", urls: [url("speculation-rules")] }] }); document.head.appendChild(s); });
-  add(`<script src="${url("script-src")}">${SCRIPT_END}`);
+  attempt("script-src", () => { const s = document.createElement("script"); s.src = url("script-src"); document.head.appendChild(s); });
   attempt("import", () => { (0, eval)("1"); });
   attempt("import()", () => { import(/* @vite-ignore */ url("import")).catch(() => {}); });
   attempt("worker", () => { new Worker(url("worker")); });
@@ -232,9 +238,9 @@ function floodApp() {
   (async () => {
     const answers = await Promise.allSettled(Array.from({ length: 200 }, () => G.storage.keys()));
     const refused = answers.filter((a) => a.status === "rejected").map((a: any) => a.reason.message);
+    await new Promise((r) => setTimeout(r, 1100));
     let large = "sent";
     try { await G.storage.set("big", "x".repeat(64 * 1024)); } catch (e: any) { large = e.message; }
-    await new Promise((r) => setTimeout(r, 1100));
     await G.storage.set("report", { ok: answers.length - refused.length, refused: [...new Set(refused)], large });
   })();
 }
@@ -243,7 +249,8 @@ function floodApp() {
 const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp } as const;
 
 /** An app's entry: the probe's source, given its targets. */
-export function appEntry(kind: keyof typeof SOURCES, P: Record<string, unknown> = {}): string {
+export function appEntry(kind: keyof typeof SOURCES, targets: object = {}): string {
+  const P = targets as Record<string, unknown>;
   const source = `(${SOURCES[kind].toString()})(${JSON.stringify(P)});`.replace(/<\/(script)/gi, "<\\/$1");
   // The static frames come from the markup itself, before any script of the app runs: frames the parser makes.
   const rtc = P.rtc as ProbeTargets["rtc"] | undefined;
