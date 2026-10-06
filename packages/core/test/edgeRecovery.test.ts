@@ -6,7 +6,8 @@ import { createIdentity, type Identity } from "../src/identity";
 import { edgeParams } from "../src/groupCrypto";
 import { toBase64Url, randomBytes } from "../src/bytes";
 import { RelayTransport } from "../src/relay";
-// covers: core.relay-client, groups.send
+import { setLinkTraceSink } from "../src/linkTrace";
+// covers: core.relay-client, groups.send, chat.paired.reconnect
 
 /**
  * Measured before the fix (fake time, six runs, from the relays answering again to live): a new edge 104-125 s after a
@@ -42,6 +43,8 @@ class FlakyRelays {
 }
 
 let fingerprints = 0;
+/** Connections that fail once offer and answer met (a path that does not come up), before any opens. */
+let failConnections = 0;
 const byFingerprint = new Map<string, FakePeerConnection>();
 function sdp(setup: string): { sdp: string; fingerprint: string } {
   const n = ++fingerprints;
@@ -91,6 +94,13 @@ class FakePeerConnection extends EventTarget {
     if (description.type !== "answer") return;
     const answerer = byFingerprint.get(fingerprintOf(description.sdp!));
     if (!answerer || answerer.closed || fingerprintOf(answerer.remoteDescription!.sdp!) !== fingerprintOf(this.localDescription!.sdp!)) return;
+    if (failConnections > 0) {
+      failConnections--;
+      realSetTimeout(() => {
+        for (const pc of [this, answerer]) { pc.connectionState = "failed"; pc.dispatchEvent(new Event("connectionstatechange")); }
+      }, 0);
+      return;
+    }
     this.channel.peer = answerer.channel; answerer.channel.peer = this.channel;
     realSetTimeout(() => {
       if (this.closed || answerer.closed) return;
@@ -138,6 +148,8 @@ beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "se
 afterEach(async () => {
   await Promise.all(links.splice(0).map(link => link.stop(false)));
   byFingerprint.clear();
+  failConnections = 0;
+  setLinkTraceSink(null);
   vi.useRealTimers();
 });
 
@@ -189,5 +201,39 @@ describe("a group's edge while the Pkarr relays answer 500", () => {
     report({ scenario: "one relay failing", recoverMs: took });
     console.log(`EDGE_RECOVERY one relay failing: live in ${took / 1000} s`);
     expect(took).toBeLessThanOrEqual(30_000);
+  }, 120_000);
+});
+
+describe("a group's edge whose connection failed", () => {
+  it("dials again when its backoff ends, not at its next look", async () => {
+    const relays = new FlakyRelays();
+    const group = toBase64Url(randomBytes(16));
+    const [one, two] = [createIdentity(), createIdentity()];
+    // The first two attempts get as far as offer and answer, and no path comes up.
+    failConnections = 2;
+    const dials: { me: string; at: number }[] = [];
+    setLinkTraceSink(line => { const step = JSON.parse(line) as { me: string; step: string; t: number }; if (step.step === "dial") dials.push({ me: step.me, at: step.t }); });
+    const a = edge("one", relays, group, one, two), b = edge("two", relays, group, two, one);
+    const dialer = a.dialer === "you" ? a : b, me = (dialer as unknown as { myPubKeyZ32: string }).myPubKeyZ32.slice(0, 6);
+    // When each failed attempt said the next would go (`liveAttempt.retryAt`), in order.
+    const retries: number[] = [];
+    const start = Date.now();
+    while (!(a.isDataLinkOpen && b.isDataLinkOpen) && Date.now() - start < 10 * 60_000) {
+      const retryAt = dialer.liveAttempt?.retryAt;
+      if (retryAt && retries.at(-1) !== retryAt) retries.push(retryAt);
+      await run(250);
+    }
+    const took = Date.now() - start, mine = dials.filter(d => d.me === me).map(d => d.at);
+    report({ scenario: "failed connections", liveMs: took, dials: mine.map(at => at - start), retriesDue: retries.map(at => at - start) });
+    console.log(`EDGE_RETRY live in ${took / 1000} s; dials at ${mine.map(at => (at - start) / 1000).join(", ")} s; retries due at ${retries.map(at => (at - start) / 1000).join(", ")} s`);
+    expect(a.isDataLinkOpen && b.isDataLinkOpen).toBe(true);
+    expect(retries.length, "two attempts failed").toBe(2);
+    // Each dial after a failed attempt goes when its backoff ends: before, it waited for the edge's next look as well
+    // (its background pace, 30 s), which the backoff knows nothing of.
+    for (const due of retries) {
+      const next = mine.find(at => at >= due);
+      expect(next, `a dial after the retry due at ${(due - start) / 1000} s`).toBeDefined();
+      expect(next! - due).toBeLessThanOrEqual(1_500);
+    }
   }, 120_000);
 });

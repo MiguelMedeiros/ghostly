@@ -748,6 +748,12 @@ export class GhostLink {
   private answeringEpoch = -1;
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
+  /** The look due when a failed dial's backoff ends (`lookAtRetry`). */
+  private retryLook: ReturnType<typeof setTimeout> | null = null;
+  /** This side's offer is out to the data link and has not reached the relays yet. */
+  private offerUnsent = false;
+  /** The last dial ended with its offer never out (`offerUnsent`): the contact saw nothing of it. */
+  private dialUnseen = false;
   /** Native transports a record just read listed with no way to dial them (`record-undescribed`), until one describes them again. */
   private readonly undescribed = new Set<NativeTransport>();
   /**
@@ -913,9 +919,10 @@ export class GhostLink {
           if (result.waiting) return;
           if (result.error) { this.tracker?.failed("publish", true, result.error); return; }
           // An offer or answer the relays held back (their budget, an outage) has its whole attempt from when it went out.
-          if (result.signalOut) this.dataLink.signalWentOut();
+          if (result.signalOut) { this.offerUnsent = false; this.dataLink.signalWentOut(); }
           this.tracker?.published();
           this.publishRecovered();
+          this.dialSeenNow();
         },
         onPeerAck: (ack) => events.onPeerAck?.(ack),
         onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(heardCallSignal(signal)); },
@@ -1005,6 +1012,7 @@ export class GhostLink {
         if (this.activeBinding) return;
         events.onDataLinkState?.(state);
         if (state === "open") this.afterRtc = undefined;
+        if (state === "offering") { this.offerUnsent = true; this.dialUnseen = false; }
         if (state === "answering") {
           this.answeringEpoch = this.connectionEpoch;
           if (this.resumingOverRtc) { const epoch = this.connectionEpoch; setTimeout(() => this.maybeKnockAnswering(epoch), 0); }
@@ -1016,6 +1024,8 @@ export class GhostLink {
           this.scheduleRace(this.offered.epoch, this.offered.at);
         }
         if (state !== "idle") return;
+        this.dialUnseen = was === "offering" && this.offerUnsent;
+        this.offerUnsent = false;
         // An answer that could not even be made (no candidate at all), in an attempt nothing else ended: this side has
         // no WebRTC to give for now, and dials what else it runs, whatever its key. The contact, its offer standing,
         // would dial a relayed transport only after `RACE_RELAYED_MS`.
@@ -1032,7 +1042,7 @@ export class GhostLink {
           void this.dialAfterRtc(next); return;
         }
         this.afterRtc = undefined;
-        if (!this.dialing) this.attemptEnded();
+        if (!this.dialing) { this.attemptEnded(); this.lookAtRetry(); }
         this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
         if (unanswerable && this.dialsPastRtc()) this.redial();
       },
@@ -1375,12 +1385,14 @@ export class GhostLink {
     void this.dial().catch(error => {
       this.tracker?.failed("transport", true);
       this.dialFailed(error instanceof Error ? error.message : String(error));
+      this.lookAtRetry();
     });
   }
 
   async stop(announce = true): Promise<void> {
     this.stopped = true;
     this.clearRace();
+    if (this.retryLook) clearTimeout(this.retryLook);
     if (this.dhtPinGrace) clearTimeout(this.dhtPinGrace);
     if (this.waiting?.timer) clearTimeout(this.waiting.timer);
     await this.dht?.stop();
@@ -2554,13 +2566,18 @@ export class GhostLink {
       return;
     }
     const wait = this.dialWait();
-    if (Date.now() - this.lastAutoConnectAt < wait) { traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) }); return; }
+    if (Date.now() - this.lastAutoConnectAt < wait) {
+      traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) });
+      this.lookAtRetry();
+      return;
+    }
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
     this.lastAutoConnectAt = Date.now();
     this.autoConnectFailures++;
     void this.dial().catch(error => {
       this.tracker?.failed("transport", true);
       this.dialFailed(error instanceof Error ? error.message : String(error));
+      this.lookAtRetry();
     });
   }
 
@@ -2578,7 +2595,43 @@ export class GhostLink {
     void this.dial().catch(error => {
       this.tracker?.failed("transport", true);
       this.dialFailed(error instanceof Error ? error.message : String(error));
+      this.lookAtRetry();
     });
+  }
+
+  /**
+   * A failed dial waits `dialWait` before the next, and only a look at the contact's record dials: the next one came at
+   * the link's own pace (30 s in the background), which knows nothing of the backoff. A member let in to a group
+   * reached one of its members 72 s after its welcome, 40 s of backoff and 32 s more for its next look (meshSignals on
+   * CI, 2026-10-06). One look goes when the backoff ends (`liveAttempt.retryAt`), and its read decides, as any look's
+   * does. A dial or a reset of the backoff since makes it moot: what comes next arms its own.
+   */
+  private lookAtRetry(): void {
+    if (this.retryLook) clearTimeout(this.retryLook);
+    this.retryLook = null;
+    const from = this.lastAutoConnectAt;
+    if (!from || this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect) return;
+    this.retryLook = setTimeout(() => {
+      this.retryLook = null;
+      if (this.lastAutoConnectAt !== from || this.stopped || this.leaving || this.yielding || this.streamBlocked || this.keyStopped || this.channel || this.dialing || this.dataLink.state !== "idle") return;
+      traceLink(this.myPubKeyZ32, "retry-look", { failures: this.autoConnectFailures });
+      this.session.lookNow();
+    }, Math.max(0, from + this.dialWait() - Date.now()));
+  }
+
+  /**
+   * A packet of this link reached the relays after a dial whose offer never did (the relays failed, or their budget held
+   * it, for the whole attempt): the contact saw nothing of that dial, so it is no reason to wait, and the next goes now.
+   * Without this a dial made during an outage set the wait, three minutes once it had grown, from when the relays
+   * answered again.
+   */
+  private dialSeenNow(): void {
+    if (!this.dialUnseen) return;
+    this.dialUnseen = false;
+    if (this.channel || this.dialing || this.dataLink.state !== "idle") return;
+    traceLink(this.myPubKeyZ32, "dial-unseen", { failures: this.autoConnectFailures });
+    this.lastAutoConnectAt = 0;
+    this.maybeAutoConnect(this.presence);
   }
 
   /** How long after the last automatic dial the next one may go. A first pairing tries again sooner: the contact just read the invite and is waiting. */
