@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -30,7 +31,24 @@ async function member(dir: string, group: string, name: string): Promise<void> {
     if ((shown.members as { name: string | null; me: boolean }[]).some((m) => !m.me && m.name === name)) return;
     await new Promise((r) => setTimeout(r, 1000));
   }
-  expect.fail(`${group} on ${dir} never named ${name}: ${JSON.stringify(shown)}`);
+  // What the other side knew, and the links' steps meanwhile: a join that never completed said nothing else on CI
+  // (3 times in ~450 runs, the old one never letting this CLI in).
+  const other = JSON.stringify((await as(dir === old ? now : old, "group", "show", group)).json);
+  expect.fail(`${group} on ${dir} never named ${name}: ${JSON.stringify(shown)}\nthe other side: ${other}\n${steps(Date.now() - 160_000)}`);
+}
+
+/** The link steps both daemons traced since `since`, polls aside, the last 200. */
+function steps(since: number): string {
+  const file = env.GHOSTLY_LINK_TRACE ?? process.env.GHOSTLY_LINK_TRACE;
+  if (!file || !existsSync(file)) return "(no link trace)";
+  const lines: string[] = [];
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    try {
+      const { t, me, step, ...rest } = JSON.parse(line) as { t: number; me: string; step: string };
+      if (t >= since && step !== "poll") lines.push(`${new Date(t).toISOString().slice(11, 23)} ${me} ${step} ${JSON.stringify(rest)}`);
+    } catch { /* a partial line */ }
+  }
+  return lines.slice(-200).join("\n");
 }
 
 /**
