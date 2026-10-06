@@ -19,6 +19,8 @@ export const RUNNER_HEADERS: Readonly<Record<string, string>> = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  // A header, not a <meta>: the runner's own head is gone once it writes the app's entry.
+  "X-DNS-Prefetch-Control": "off",
   "Cache-Control": "no-cache",
 };
 

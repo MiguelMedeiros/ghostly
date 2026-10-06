@@ -113,7 +113,7 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
     expect(runner, "a location for /app-frame.html").toBeDefined();
     expect(header(runner!.body, "Content-Security-Policy")).toBe(RUNNER_CSP);
     expect(RUNNER_HEADERS["Content-Security-Policy"]).toBe(RUNNER_CSP);
-    const desktop = /pub const RUNNER_CSP: &str = "([^;]*(?:;[^"]*)*)";/.exec(read("apps/desktop/src/app_sandbox.rs"))![1]!.replace(/\\\n/g, "");
+    const desktop = /pub const RUNNER_CSP: &str = "([^"]*)";/.exec(read("apps/desktop/src/app_sandbox.rs"))![1]!.replace(/\\\n/g, "");
     expect(desktop).toBe(RUNNER_CSP);
     const d = directives(RUNNER_CSP);
     expect(d.get("sandbox")).toEqual(["allow-scripts"]);
@@ -129,7 +129,7 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
       expect(header(runner!.body, name), name).toBe(header(common, name));
     }
     expect(header(runner!.body, "Permissions-Policy")).toBe(RUNNER_HEADERS["Permissions-Policy"]);
-    for (const name of ["X-Content-Type-Options", "Referrer-Policy", "Permissions-Policy"]) expect(RUNNER_HEADERS[name], name).toBe(header(runner!.body, name));
+    for (const name of ["X-Content-Type-Options", "Referrer-Policy", "Permissions-Policy", "X-DNS-Prefetch-Control"]) expect(RUNNER_HEADERS[name], name).toBe(header(runner!.body, name));
   });
 
   it("every other location keeps the page's policy, and with it frame-ancestors 'none'", () => {
