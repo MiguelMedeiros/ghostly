@@ -127,6 +127,12 @@
   "name": "名前",
   "nameInChats": "チャットでの名前",
   "nameLabel": "プロフィール名",
+  "nameStep": {
+    "placeholder": "あなたの名前",
+    "save": "続ける",
+    "skip": "スキップ",
+    "title": "みんなに何と呼ばれたいですか？"
+  },
   "newProfile": "+ 新しいプロフィール",
   "oneOnly": "このアプリでは今のところプロフィールは 1 つだけです。",
   "profiles": "プロフィール",

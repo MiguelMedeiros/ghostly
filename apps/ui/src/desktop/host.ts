@@ -39,6 +39,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 import { setWindowThemeSink } from "../lib/windowTheme";
+import { setNameStepUnderTest } from "../lib/nameStep";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -268,6 +269,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
   listenForAppCommands();
+  // A new profile asks for a name; never under an e2e suite, which runs no automated browser here (desktopUnderTest).
+  setNameStepUnderTest(desktopUnderTest);
   // Files sent and received are real files in the app's data folder, written and read through Rust.
   registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.

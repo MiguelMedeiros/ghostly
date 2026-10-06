@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
+import { NameStep } from "./components/NameStep";
 import { App } from "./App";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
@@ -230,6 +231,7 @@ export function Root() {
                   {/* A start that could not check which device is active asks first (WISP 06 § When a device checks). */}
                   <LimitedStartGate>
                   <AttentionFeedback />
+                  <NameStep />
                   <Routes>
                     {/* What the intakes above take out of the history at once (a group's link, an invite code, a
                         web+ghostly: link): nothing drawn for them, as before, and no "No routes matched" warning. */}
