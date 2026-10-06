@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from "react";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
-import { useServicesPlatform } from "../../hooks/useServicesPlatform";
+import { servicesPlatform } from "../platform";
 import { useAppOpener } from "./open";
 import { runnerAvailable } from "./runnerCheck";
 
@@ -35,7 +35,9 @@ export function useAppsAvailable(): boolean {
 /** `checking` while the runner check has not answered (a page waits, rather than sending the person away). */
 export function useAppsState(): "on" | "off" | "checking" {
   const enabled = appsEnabled();
-  const apps = useServicesPlatform()?.apps;
+  // Read, not subscribed to: where apps run depends on the host, not on the engine's state, and every message bubble
+  // asks (a subscription would draw each of them again on every change of state).
+  const apps = servicesPlatform?.apps;
   const opener = useAppOpener();
   const runner = enabled && apps && opener ? apps.runnerUrl : null;
   const [, setChecked] = useState(0);

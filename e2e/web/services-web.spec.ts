@@ -78,7 +78,8 @@ test("an older chat's apps strip on the web: Manage opens the same explanation",
 
   await strip.getByTestId("grant-services").click();
   const dialog = alice.page.getByTestId("chat-services");
-  await expect(dialog.getByRole("heading", { name: /^Apps with / })).toBeVisible();
+  // The suite's build has Apps on (VITE_APPS_TEST): this dialog is then "Shared services" (WISP 1200 § Terms).
+  await expect(dialog.getByRole("heading", { name: /^Shared services with / })).toBeVisible();
   await expect(dialog).toContainText("Needs the extension or desktop app.");
   // Nothing on the web to add, nor to grant.
   await expect(dialog.getByText("+ Add an app")).toHaveCount(0);
