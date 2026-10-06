@@ -443,10 +443,10 @@ describe("DataLink failures and teardown", () => {
       expect(pc.closed).toBe(true);
       vi.advanceTimersByTime(1_000);
     };
-    await refuse("throws");
-    expect(onAnswerReplaced).toHaveBeenCalledTimes(1);
-    await refuse("fails");
-    expect(onAnswerReplaced).toHaveBeenCalledTimes(ANSWER_REFUSED_REDIALS);
+    for (let n = 1; n <= ANSWER_REFUSED_REDIALS; n++) {
+      await refuse(n % 2 ? "throws" : "fails");
+      expect(onAnswerReplaced).toHaveBeenCalledTimes(n);
+    }
     // Past them, the caller's own pace: an answer that never goes in must not become a stream of offers.
     await refuse("throws");
     expect(onAnswerReplaced).toHaveBeenCalledTimes(ANSWER_REFUSED_REDIALS);
