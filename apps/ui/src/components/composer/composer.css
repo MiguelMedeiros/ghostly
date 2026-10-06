@@ -63,6 +63,8 @@
   line-height: 22px;
 }
 .composer-textarea::placeholder { color: var(--color-text-muted); }
+/* The message field with the keyboard focus: the well is ringed (the field itself has no edge of its own). */
+.composer-field:has(.composer-textarea:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
 .composer-textarea:disabled { opacity: 0.5; }
 
 /* Recording takes the field's place, in the field's shape. */
@@ -179,7 +181,7 @@
   box-shadow: inset 0 0 0 1px var(--composer-well-edge);
   color: var(--color-text-muted);
 }
-.expression-search:focus-within { box-shadow: inset 0 0 0 2px var(--color-accent); }
+.expression-search:focus-within { box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
 .expression-search input {
   flex: 1;
   min-width: 0;
