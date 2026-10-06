@@ -39,8 +39,9 @@ function write(value: unknown, depth: number): string {
   }
   if (Array.isArray(value)) return `[${value.map((v) => write(v, depth + 1)).join(",")}]`;
   if (typeof value === "object") {
-    const keys = Object.keys(value).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const record = value as Record<string, unknown>;
+    // A member whose value is undefined is left out, as JSON.stringify leaves it out.
+    const keys = Object.keys(value).filter((k) => record[k] !== undefined).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     return `{${keys.map((k) => {
       if (hasLoneSurrogate(k)) throw new Error("A JSON key holds a lone surrogate");
       return `${JSON.stringify(k)}:${write(record[k], depth + 1)}`;

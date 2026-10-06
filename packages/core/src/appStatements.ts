@@ -1,7 +1,7 @@
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, fromZ32, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { canonicalJsonBytes, readCanonicalJson, type CanonicalJsonRefusal, type JsonValue } from "./canonicalJson";
-import { verify } from "./identity";
 import type { Signer } from "./signer";
 
 /*
@@ -87,6 +87,18 @@ export async function signAppObject(prefix: AppPrefix, value: unknown, signer: S
   return { bytes, signature: { alg: "ed25519", key: toZ32(signer.publicKey), sig: toBase64Url(sig) } };
 }
 
+/**
+ * Ed25519 verification as RFC 8032 writes it (`zip215: false`): canonical encodings of the point and the scalar only,
+ * so every parser (this one, a Rust one with `verify_strict`) accepts exactly the same signatures.
+ */
+function strictVerify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean {
+  try {
+    return ed25519.verify(signature, message, publicKey, { zip215: false });
+  } catch {
+    return false;
+  }
+}
+
 export type AppSignatureRefusal = "bad-signature-statement" | "signature-key" | "bad-signature";
 
 const exactKeys = (value: unknown, keys: readonly string[], optional: readonly string[] = []): value is Record<string, JsonValue> => {
@@ -118,7 +130,7 @@ export function readAppSignature(bytes: Uint8Array): { ok: true; signature: AppS
 export function verifyAppSignature(prefix: AppPrefix, canonical: Uint8Array, signature: AppSignature, key: string): { ok: true } | { ok: false; reason: AppSignatureRefusal } {
   if (!isAppSignature(signature)) return { ok: false, reason: "bad-signature-statement" };
   if (signature.key !== key) return { ok: false, reason: "signature-key" };
-  return verify(fromBase64Url(signature.sig), appSignedBytes(prefix, canonical), fromZ32(key)) ? { ok: true } : { ok: false, reason: "bad-signature" };
+  return strictVerify(fromBase64Url(signature.sig), appSignedBytes(prefix, canonical), fromZ32(key)) ? { ok: true } : { ok: false, reason: "bad-signature" };
 }
 
 /** Verifies a signed object given as bytes: they must be canonical, then the signature as above. */
