@@ -1,6 +1,7 @@
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { concatBytes, fromZ32, toBase64Url, toZ32, utf8Encode } from "./bytes";
+import { isAppRef } from "./appStatements";
+import { concatBytes, toBase64Url, utf8Encode } from "./bytes";
 
 /**
  * Mini-apps talking in a 1:1 chat (WISP 1200 § In a chat: `apps/1`): the same app on both sides sends JSON to the
@@ -65,8 +66,6 @@ export type AppFrameEvent =
 
 const DOMAIN = "ghostly-apps/1";
 const APP_ID = /^[A-Za-z0-9_-]{22}$/;
-/** The manifest's `name` (WISP 1200 § Manifest). */
-const APP_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 /** Semantic versioning 2.0.0, as a manifest's `version` is. */
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
@@ -78,15 +77,6 @@ export function isChatAppId(value: unknown): value is string {
 /** A version an `open` may carry: semantic versioning, at most `APP_VERSION_MAX` characters. */
 export function isAppVersion(value: unknown): value is string {
   return typeof value === "string" && value.length <= APP_VERSION_MAX && SEMVER.test(value);
-}
-
-/** An app reference, `<publisher key in z-base32>/<name>`: a canonical 52-character key and a manifest name. */
-export function isAppRef(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 52 + 1 + 32) return false;
-  const slash = value.indexOf("/");
-  if (slash !== 52 || !APP_NAME.test(value.slice(53))) return false;
-  const key = value.slice(0, 52);
-  try { const bytes = fromZ32(key); return bytes.length === 32 && toZ32(bytes) === key; } catch { return false; }
 }
 
 function compareBytes(a: Uint8Array, b: Uint8Array): number {

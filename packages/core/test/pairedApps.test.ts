@@ -8,9 +8,10 @@ import { GhostLink, type GhostLinkOptions } from "../src/ghostlink";
 import { createIdentity, identityFromSeed } from "../src/identity";
 import { createLink } from "../src/invite";
 import { APPS_CAPABILITY, KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
+import { isAppRef } from "../src/appStatements";
 import {
   APP_DATA_MAX_BYTES, APP_FRAME, APP_PEER_OPEN_MAX, APP_RATE_LIMIT, APP_RATE_WINDOW_MS, APP_SEND_LIMIT, AppSessions, appCloseFrame, appDataBytes,
-  appDataFrame, appOpenFrame, chatAppId, isAppRef, isAppVersion, isChatAppId, parseAppFrame, readAppFrame, type AppFrameEvent,
+  appDataFrame, appOpenFrame, chatAppId, isAppVersion, isChatAppId, parseAppFrame, readAppFrame, type AppFrameEvent,
 } from "../src/pairedApps";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
 // covers: apps.chat.wire
