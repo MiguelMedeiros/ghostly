@@ -1330,10 +1330,12 @@ export class Communities {
     // refused, the knock with it, and the write went a retry later, or later still if a read took the request it waited for.
     const kept = this.knockRead.get(group.id);
     this.knockRead.delete(group.id);
-    const reuse = !!kept && now - kept.at < this.timings.knockMs;
+    const reuse = kept && now - kept.at < this.timings.knockMs ? kept : undefined;
     let n: number, record: GroupEntryLink, knocks: Knock[];
-    if (reuse) ({ n, knocks } = kept!, record = knockRecord(link, n));
-    else {
+    if (reuse) {
+      n = reuse.n; knocks = reuse.knocks;
+      record = knockRecord(link, n);
+    } else {
       n = this.knockAt.get(group.id) ?? KNOCK_BELL;
       ({ record, knocks } = await read(n));
       if (n === KNOCK_BELL && !knocks.some(k => k.key === me) && knocks.filter(k => k.key !== me && now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) ({ record, knocks } = await read(n = ownKnockRecord(me)));
@@ -1341,11 +1343,11 @@ export class Communities {
     try {
       await this.host.publish(knockIdentity(record), knockRecords(record, mergeKnocks(knocks, { key: me, ts: now }, now)), !first);
     } catch (error) {
-      this.knockRead.set(group.id, { n, knocks, at: reuse ? kept!.at : now });
+      this.knockRead.set(group.id, { n, knocks, at: reuse?.at ?? now });
       throw error;
     }
     this.knockAt.set(group.id, n);
-    traceJoin(group.id, "knock.published", { ms: Date.now() - started, record: n, ...(reuse && { kept: true }) });
+    traceJoin(group.id, "knock.published", { ms: Date.now() - started, record: n, ...(reuse && { kept: true as const }) });
     // Who else is knocking in my record (their knock refreshed lately, as a hub counts it): the joining card says so,
     // since a wait behind others is not a link that stopped working.
     const others = knocks.filter(k => k.key !== me && now - k.ts < 2 * this.timings.slowKnockMs).length;

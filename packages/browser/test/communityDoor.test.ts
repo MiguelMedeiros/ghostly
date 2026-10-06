@@ -230,6 +230,8 @@ describe("a community's door", { timeout: 120_000 }, () => {
     const bell = recordKey(entry, 0), ops: { at: number; op: string }[] = [];
     const publish = bob.host.publish, resolve = bob.host.resolve;
     let refusedAt: number | undefined;
+    // The relays' rule, kept here: the world's own `writeWaiting` ends with any write of the app (its entry session's),
+    // as the relays' group lane does (`RelayTransport`), so it would let this read through.
     const writeFirst = () => refusedAt !== undefined && !ops.some(o => o.op === "write") && world.now - refusedAt < RELAY_NETWORK.writeFirstMs;
     bob.host.resolve = async (key, background, door) => {
       if (key !== bell) return resolve(key, background, door);
