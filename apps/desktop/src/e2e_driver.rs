@@ -185,6 +185,43 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             let handled = crate::app_window::on_menu_event(app, &id);
             (200, handled.to_string())
         }
+        // An installed app's window (src/app_sandbox.rs), the only way to open one until the marketplace lands:
+        // `{"app", "entry", "guard"}`, where `guard` is `full` (as the app will), or, for the sandbox spike's
+        // controls, `header` (no navigation lock) or `control` (no policy either). Answers the window's label.
+        ("POST", "/app-open") => {
+            #[derive(Deserialize)]
+            struct Open {
+                app: String,
+                entry: String,
+                guard: Option<String>,
+            }
+            let open: Open = match serde_json::from_slice(&request.body) {
+                Ok(open) => open,
+                Err(e) => return (400, error(&e.to_string())),
+            };
+            use crate::app_sandbox::Guard;
+            let guard = match open.guard.as_deref().unwrap_or("full") {
+                "full" => Guard::Full,
+                "header" => Guard::HeaderOnly,
+                "control" => Guard::Control,
+                other => return (400, error(&format!("no guard {other}"))),
+            };
+            match crate::app_sandbox::open_guarded(app, open.app, open.entry, guard) {
+                Ok(label) => (200, serde_json::to_string(&label).unwrap_or_default()),
+                Err(e) => (400, error(&e)),
+            }
+        }
+        // What an app window was refused so far: navigations and new windows. Body: the label, as a JSON string.
+        ("POST", "/app-refused") => {
+            let label: String = match serde_json::from_slice(&request.body) {
+                Ok(label) => label,
+                Err(e) => return (400, error(&e.to_string())),
+            };
+            match crate::app_sandbox::refused(app, &label) {
+                Some(refused) => (200, serde_json::to_string(&refused).unwrap_or_default()),
+                None => (404, error(&format!("no app window {label}"))),
+            }
+        }
         _ => (404, error("no such route")),
     }
 }

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_sandbox;
 mod app_window;
 mod bitcoind_rpc;
 mod clipboard;
@@ -48,12 +49,24 @@ use viewer::ViewerState;
 
 /// Only the Ghostly window may call commands. The capabilities already say so;
 /// this holds even if they are ever loosened, because the other windows run a
-/// contact's code.
+/// contact's code. One exception: `app_broker`, from an app window (`app-*`)
+/// only, and from no other window, the Ghostly window included.
+fn may_call(label: &str, command: &str) -> bool {
+    if command == "app_broker" {
+        app_sandbox::is_app_label(label)
+    } else {
+        label == "main"
+    }
+}
+
 fn only_main<R: tauri::Runtime>(
     handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
-        if invoke.message.webview_ref().label() != "main" {
+        if !may_call(
+            invoke.message.webview_ref().label(),
+            invoke.message.command(),
+        ) {
             invoke.resolver.reject("Not allowed from this window");
             return true;
         }
@@ -67,6 +80,7 @@ fn only_main<R: tauri::Runtime>(
 macro_rules! commands {
     () => {
         tauri::generate_handler![
+            app_sandbox::app_broker,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
@@ -202,6 +216,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { pkarr })
         .manage(ViewerState::default())
+        .manage(app_sandbox::AppSandboxState::default())
         .manage(paired_transport::TransportState::default())
         .manage(hyperdht::HyperState::default())
         .manage(oidc::OidcState::default())
@@ -271,9 +286,14 @@ fn main() {
                 responder.respond(viewer::handle(app, label, request).await);
             });
         })
+        // An installed app's window (WISP 12xx): the runner, under its own policy.
+        .register_uri_scheme_protocol(app_sandbox::SCHEME, |ctx, request| {
+            app_sandbox::handle(ctx.app_handle(), ctx.webview_label(), &request)
+        })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::Destroyed => {
-                viewer::forget_window(window.app_handle(), window.label())
+                viewer::forget_window(window.app_handle(), window.label());
+                app_sandbox::forget_window(window.app_handle(), window.label());
             }
             // Closing the Ghostly window on a Mac hides it: the app runs on until Cmd+Q.
             tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -374,6 +394,22 @@ mod tests {
         serde_json::from_str(include_str!("../capabilities/default.json")).unwrap()
     }
 
+    /// The app windows' capability (WISP 12xx).
+    fn app_capability() -> serde_json::Value {
+        serde_json::from_str(include_str!("../capabilities/app.json")).unwrap()
+    }
+
+    /// The commands a capability grants (`allow-<name>`), as command names.
+    fn granted_by(capability: &serde_json::Value) -> BTreeSet<String> {
+        capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p.as_str()?.strip_prefix("allow-"))
+            .map(|p| p.replace('-', "_"))
+            .collect()
+    }
+
     /// The app as `main()` builds it, every command and state included, on the mock runtime.
     fn app() -> tauri::App<MockRuntime> {
         let relay = format!("http://127.0.0.1:{}", test_support::closed_port());
@@ -382,10 +418,14 @@ mod tests {
             .register_uri_scheme_protocol(viewer::SCHEME, |_, _| {
                 tauri::http::Response::new(Vec::new())
             })
+            .register_uri_scheme_protocol(app_sandbox::SCHEME, |_, _| {
+                tauri::http::Response::new(Vec::new())
+            })
             .manage(AppState {
                 pkarr: Pkarr::new(None, &[relay.parse().unwrap()]).unwrap(),
             })
             .manage(ViewerState::default())
+            .manage(app_sandbox::AppSandboxState::default())
             .manage(paired_transport::TransportState::default())
             .manage(hyperdht::HyperState::default())
             .manage(oidc::OidcState::default())
@@ -458,14 +498,14 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        let granted: BTreeSet<String> = capability()["permissions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|p| p.as_str()?.strip_prefix("allow-"))
-            .map(|p| p.replace('-', "_"))
-            .collect();
+        let main = granted_by(&capability());
+        let app = granted_by(&app_capability());
+        let granted: BTreeSet<String> = main.union(&app).cloned().collect();
         assert_eq!(granted, declared, "every command granted, nothing else");
+        assert!(
+            !main.contains("app_broker"),
+            "the Ghostly window has no broker"
+        );
         for command in &declared {
             let file = format!(
                 "{}/permissions/autogenerated/{command}.toml",
@@ -516,6 +556,107 @@ mod tests {
         assert!(capability.get("platforms").is_none());
     }
 
+    /// An installed app's window gets its broker and nothing else: no `core:default`, no plugin, no event.
+    #[test]
+    fn the_app_capability_is_the_broker_alone_for_app_windows() {
+        // covers: apps.desktop-sandbox
+        let capability = app_capability();
+        assert_eq!(capability["windows"], serde_json::json!(["app-*"]));
+        assert_eq!(
+            capability["permissions"],
+            serde_json::json!(["allow-app-broker"])
+        );
+        assert!(capability.get("webviews").is_none());
+        assert!(capability.get("remote").is_none(), "no remote URL may call");
+    }
+
+    #[test]
+    fn only_app_windows_may_call_the_broker_and_they_may_call_nothing_else() {
+        // covers: apps.desktop-sandbox
+        assert!(may_call("app-0123456789abcdef", "app_broker"));
+        for label in ["main", "svc-1", "app-", "app", "apps-1", "xapp-1", "App-1"] {
+            assert!(!may_call(label, "app_broker"), "{label}");
+        }
+        for command in registered().iter().filter(|c| *c != "app_broker") {
+            assert!(!may_call("app-1", command), "{command}");
+            assert!(may_call("main", command), "{command}");
+        }
+    }
+
+    /// Through the real IPC path: the broker answers an app window, which every other command refuses.
+    #[test]
+    fn an_app_window_reaches_the_broker_and_no_other_command() {
+        // covers: apps.desktop-sandbox
+        let app = app();
+        let label =
+            app_sandbox::open(app.handle(), "ana/chess".into(), "<p>chess</p>".into()).unwrap();
+        let window = app.get_webview_window(&label).unwrap();
+        let runner = format!("{}://localhost/", app_sandbox::SCHEME);
+        let context = invoke(
+            &window,
+            &runner,
+            "app_broker",
+            serde_json::json!({"request": {"type": "context", "args": {"app": "bob/snake"}}}),
+        )
+        .unwrap();
+        assert_eq!(
+            context["app"], "ana/chess",
+            "the window's app, not the one it named"
+        );
+        assert_eq!(context["window"], label.as_str());
+        for command in registered().iter().filter(|c| *c != "app_broker") {
+            let error = invoke(&window, &runner, command, arguments())
+                .expect_err(command)
+                .to_string();
+            assert!(error.contains("not allowed"), "{command}: {error}");
+        }
+        // Plugins answer their own capabilities, which an app window has none of.
+        for command in [
+            "plugin:event|listen",
+            "plugin:event|emit",
+            "plugin:window|close",
+            "plugin:webview|create_webview_window",
+            "plugin:app|version",
+        ] {
+            let error = invoke(&window, &runner, command, serde_json::json!({}))
+                .expect_err(command)
+                .to_string();
+            assert!(
+                error.contains("not allowed") || error.contains("not found"),
+                "{command}: {error}"
+            );
+        }
+        // The same page outside its window: a remote page, or one in a window that is not an app's.
+        let error = invoke(
+            &window,
+            "https://evil.example/",
+            "app_broker",
+            serde_json::json!({"request": {"type": "context"}}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("not allowed"), "{error}");
+    }
+
+    #[test]
+    fn no_other_window_reaches_the_broker() {
+        // covers: apps.desktop-sandbox
+        let app = app();
+        let request = serde_json::json!({"request": {"type": "context"}});
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let error = invoke(&main, "tauri://localhost", "app_broker", request.clone())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not allowed"), "main: {error}");
+        let (viewer, url) = viewer(&app, "svc-1");
+        let error = invoke(&viewer, &url, "app_broker", request)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not allowed"), "svc-1: {error}");
+    }
+
     /// A command registered but not declared is refused by the ACL ("not allowed by ACL") from the Ghostly
     /// window too: the app would build and the feature would silently never work.
     #[test]
@@ -542,7 +683,8 @@ mod tests {
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        for command in registered() {
+        // `app_broker` is the app windows' alone (`no_other_window_reaches_the_broker`).
+        for command in registered().into_iter().filter(|c| c != "app_broker") {
             // An empty payload: most commands refuse it for a missing argument,
             // which only happens once the command was found and allowed.
             let answer = invoke(&main, "tauri://localhost", &command, serde_json::json!({}));
@@ -578,7 +720,7 @@ mod tests {
                 .permission("allow-generate-enc-key"),
         )
         .unwrap();
-        for label in ["svc-1", "main-2", "Main"] {
+        for label in ["svc-1", "main-2", "Main", "app-1"] {
             let (window, url) = viewer(&app, label);
             let error = invoke(&window, &url, "generate_enc_key", serde_json::json!({}))
                 .unwrap_err()
