@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
@@ -8,9 +8,10 @@ import { errorText } from "../lib/errorText";
 
 /**
  * Leaving a group, said before it happens: it goes from this device with its history, and an admin
- * hands the role to a member who is online (the engine picks the first one over a direct edge, as here).
+ * hands the role to a member who is online (the engine picks the first one over a direct edge, as here). Closed without
+ * leaving, it gives the focus back to what opened it, or to `returnFocus` (the group's ⋮, whose row went with its menu).
  */
-export function LeaveGroupDialog({ group, onClose, onConfirm }: { group: GroupView; onClose(): void; onConfirm(): Promise<void> }) {
+export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus }: { group: GroupView; onClose(): void; onConfirm(): Promise<void>; returnFocus?: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
@@ -18,9 +19,15 @@ export function LeaveGroupDialog({ group, onClose, onConfirm }: { group: GroupVi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
+    const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal(); cancel.current?.focus();
-    return () => element.close();
-  }, []);
+    return () => {
+      element.close();
+      // Left: the group's page is gone, and nothing here is still connected.
+      const back = before && before !== document.body && before.isConnected ? before : opener;
+      if (back?.isConnected) back.focus();
+    };
+  }, [returnFocus]);
   const others = group.members.filter(m => !m.me);
   // A community hands the role to a member it is connected to, or to anyone: the commit travels through the hubs.
   // A private group hands it to the first member over a direct edge of mine, as the engine's `successor()` does: a
