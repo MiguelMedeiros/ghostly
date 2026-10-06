@@ -20,6 +20,8 @@ let dht: { bootstrap: string; destroy(): Promise<void> };
 const running: Running[] = [];
 let env: NodeJS.ProcessEnv, oldEnv: NodeJS.ProcessEnv;
 const now = home("now"), old = home("old");
+/** Each daemon's trace, in its own file: one shared by both had their steps apart only by each link's key. */
+const traceOf = (dir: string) => join(dir, "trace.jsonl");
 const bin = (dir: string) => (dir === old ? OLD_BIN : process.env.GHOSTLY_NEW_CLI);
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env: dir === old ? oldEnv : env, bin: bin(dir) });
 
@@ -37,18 +39,30 @@ async function member(dir: string, group: string, name: string): Promise<void> {
   expect.fail(`${group} on ${dir} never named ${name}: ${JSON.stringify(shown)}\nthe other side: ${other}\n${steps(Date.now() - 160_000)}`);
 }
 
-/** The link steps both daemons traced since `since`, polls aside, the last 200. */
+/**
+ * What each daemon traced since `since` (`GHOSTLY_LINK_TRACE`: its links' steps, and its joins' steps, the door's reads
+ * of the knocks among them), polls aside, the last 150 of each; and how many of its relay requests its own budget held
+ * back meanwhile. A join that never completed said nothing else on CI.
+ */
 function steps(since: number): string {
-  const file = env.GHOSTLY_LINK_TRACE ?? process.env.GHOSTLY_LINK_TRACE;
-  if (!file || !existsSync(file)) return "(no link trace)";
-  const lines: string[] = [];
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    try {
-      const { t, me, step, ...rest } = JSON.parse(line) as { t: number; me: string; step: string };
-      if (t >= since && step !== "poll") lines.push(`${new Date(t).toISOString().slice(11, 23)} ${me} ${step} ${JSON.stringify(rest)}`);
-    } catch { /* a partial line */ }
-  }
-  return lines.slice(-200).join("\n");
+  return ([[now, "now"], [old, "old"]] as const).map(([dir, name]) => {
+    const file = traceOf(dir);
+    if (!existsSync(file)) return `${name}: (no trace)`;
+    const lines: string[] = [];
+    let held = 0;
+    // A door reads its knocks every few seconds: a read only when what it found changed.
+    const lastRead = new Map<string, string>();
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      try {
+        const { t, me, g, step, ...rest } = JSON.parse(line) as { t: number; me?: string; g?: string; step: string; error?: string };
+        if (t < since) continue;
+        if (rest.error?.includes("budget")) held++;
+        if (step === "knock.read" && g) { const found = JSON.stringify(rest); if (lastRead.get(g) === found) continue; lastRead.set(g, found); }
+        if (step !== "poll") lines.push(`${new Date(t).toISOString().slice(11, 23)} ${name} ${me ?? `group ${g?.slice(0, 6)}`} ${step} ${JSON.stringify(rest)}`);
+      } catch { /* a partial line */ }
+    }
+    return `${name}: ${held} steps held back by its relay budget\n${lines.slice(-150).join("\n")}`;
+  }).join("\n");
 }
 
 /**
@@ -85,8 +99,8 @@ async function hears(dir: string, from: string, group: string, text: string): Pr
 beforeAll(async () => {
   relays = await Promise.all([localRelay(), localRelay()]);
   dht = await hyperdhtTestnet();
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, ...(process.env.GHOSTLY_LINK_TRACE ? {} : { GHOSTLY_LINK_TRACE: join(home("trace"), "link.jsonl") }) };
-  oldEnv = { ...env, ...(OLD_BIN ? {} : { GHOSTLY_TEST_WEBRTC_GROUP_LINKS: "1" }) };
+  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_LINK_TRACE: traceOf(now) };
+  oldEnv = { ...env, GHOSTLY_LINK_TRACE: traceOf(old), ...(OLD_BIN ? {} : { GHOSTLY_TEST_WEBRTC_GROUP_LINKS: "1" }) };
   for (const [dir, name] of [[now, "Now"], [old, "Old"]] as const) {
     ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
     ok(await as(dir, "profile", "set", "--name", name));
