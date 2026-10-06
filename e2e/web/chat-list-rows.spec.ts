@@ -156,7 +156,7 @@ test("a row mutes and unmutes its chat without opening it, and its marks keep ro
   late.setHours(23, 30, 0, 0);
   await page.clock.setFixedTime(late);
   const end = new Date(late.getTime() + 60 * 60_000).toLocaleString("en", { weekday: "short", hour: "numeric", minute: "2-digit" });
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByTestId("sidebar-new-chat").click();
   const row = rows(page).first();
   await expect(row).toBeVisible();
   // Somewhere else: whatever the row's actions do, the chat stays closed.
@@ -248,7 +248,7 @@ test("on a phone the whole row is the target, at least 40px tall, with nothing c
 
 test("Comfortable brings the key back as a line of its own, and the choice survives a reload", { tag: ["@feature:settings.chat-list-density", "@feature:chats.list.pin"] }, async ({ peer }) => {
   const { page } = await peer("density");
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByTestId("sidebar-new-chat").click();
   const row = rows(page).first();
   await expect(row).toBeVisible();
   await expect(row.getByTestId("chat-row-key")).toHaveCount(0);
