@@ -22,11 +22,24 @@ export interface BadgeGroup {
   invitation?: unknown;
 }
 
-/** Unread messages the icon counts: every unmuted 1:1 chat's, and one for each unmuted group with something new. */
+/**
+ * The 1:1 chat open on a page that shows (`Chat`, as it marks read): what comes to it is read as it lands, so the icon
+ * leaves it out, as the chat list leaves out its row. Counted, a message there put 1 on the icon until the chat marked
+ * it read a moment later, and the Dock badge blinked for every message while the chat was being read.
+ */
+let chatOnScreen: string | null = null;
+
+/** `Chat`: session `id` is on screen until the returned function runs (another chat, the page hidden, unmounted). */
+export function showChatOnScreen(id: string): () => void {
+  chatOnScreen = id;
+  return () => { if (chatOnScreen === id) chatOnScreen = null; };
+}
+
+/** Unread messages the icon counts: every unmuted 1:1 chat's but the one on screen, and one for each unmuted group with something new. */
 export function badgeCount(sessions: readonly ChatSession[], groups: readonly BadgeGroup[], now = Date.now()): number {
   let count = 0;
   for (const session of sessions) {
-    if (!mutedFor(session.id, false, now)) count += getUnreadCount(session);
+    if (session.id !== chatOnScreen && !mutedFor(session.id, false, now)) count += getUnreadCount(session);
   }
   for (const group of groups) {
     const readAt = groupReadAt(group.id);

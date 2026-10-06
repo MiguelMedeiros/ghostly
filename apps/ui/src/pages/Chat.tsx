@@ -93,6 +93,7 @@ import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
 import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
+import { showChatOnScreen } from "../lib/appBadge";
 import { errorText } from "../lib/errorText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
@@ -494,6 +495,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => {
     if (visible && pageShown) markSessionAsRead(sessionId);
   }, [visible, pageShown, sessionId, messages.length]);
+  // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
+  useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop;
