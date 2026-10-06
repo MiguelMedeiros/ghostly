@@ -630,7 +630,8 @@ export class Apps {
       sequence: manifest.sequence, digest, permissions: [...manifest.permissions], manifest, bytes: kind, from,
       installedAt: installed?.installedAt ?? now, updatedAt: now,
       ...(installed?.revocations?.length && { revocations: installed.revocations }),
-      ...(installed?.equivocation && { equivocation: installed.equivocation }),
+      // A mark at a number this version passed is over: what was installed then is not any more.
+      ...(installed?.equivocation && installed.equivocation.sequence >= manifest.sequence && { equivocation: installed.equivocation }),
       ...(keepPending && { pending: keepPending }),
       ...(installed?.checkedAt !== undefined && { checkedAt: installed.checkedAt }),
     };

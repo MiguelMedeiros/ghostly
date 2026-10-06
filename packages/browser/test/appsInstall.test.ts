@@ -170,6 +170,11 @@ describe("updates", () => {
     await again.store.addStore({ url: STORE_URL });
     expect((await again.store.checkUpdates())[0]!.outcome).toBe("equivocation");
     expect((await again.store.list())[0]).toMatchObject({ digest: again.v1.digest, equivocation: { sequence: 1 } });
+    // A later version past that number ends the mark.
+    const v2 = await bundle({ sequence: 2 });
+    net.put(BUNDLE_URL, v2.bytes);
+    await again.store.preview({ url: BUNDLE_URL });
+    expect((await again.store.install({ digest: v2.digest, grant: ["chat"] })).equivocation).toBeUndefined();
   });
 
   it("with no app installed the check asks nothing", async () => {
