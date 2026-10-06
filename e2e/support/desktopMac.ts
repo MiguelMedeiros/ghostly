@@ -1,6 +1,6 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,7 +72,10 @@ const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks
 /** A copy of the app with a bundle id of its own, ad-hoc signed again (its Info.plist changed). */
 function copyApp(source: string, name: string, parent = tmpdir()): { app: string; bundleId: string; remove: () => void } {
   mkdirSync(parent, { recursive: true });
-  const dir = mkdtempSync(join(parent, `ghostly-mac-${name}-`));
+  // Its real path: macOS's temporary folder is under /var, a link to /private/var, and Tauri takes an app started
+  // through a link for no app at all (tauri-utils StartingBinary): its resource folder is an "unknown path", so the
+  // copy ran without its packaged runtime and HyperDHT never started.
+  const dir = mkdtempSync(join(realpathSync(parent), `ghostly-mac-${name}-`));
   const app = join(dir, `Ghostly-${name}.app`);
   const bundleId = `${BUNDLE_PREFIX}${name}`;
   execFileSync("ditto", [source, app]);
