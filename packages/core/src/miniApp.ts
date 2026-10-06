@@ -1,12 +1,9 @@
 /**
  * The mini-app API: what an app in the runner's sandbox can ask the client's broker for, and nothing more.
  *
- * Matches the broker table of the marketplace WISP (docs/wisps/12xx-marketplace.md, candidate number 1200,
- * "The runner and the broker"). Types and limits only: the broker (apps/ui) and the apps (apps/mini/*) import this
+ * Matches the broker table of WISP 1200 (docs/wisps/1200-marketplace.md, "The runner and the broker"). Types and limits only: the broker (apps/ui) and the apps (apps/mini/*) import this
  * one module, so neither side can drift from the other. It is imported as `@ghostly/core/miniApp`, outside the
  * core barrel, because apps bundle it into their single HTML file.
- *
- * Anything marked "not in the WISP yet" is a proposal the WISP has to accept before the broker relies on it.
  */
 
 /** A JSON value: what `storage` keeps and what `chat.send` carries. */
@@ -22,9 +19,9 @@ export interface MiniAppContext {
   peer: { version: string } | null;
   /** The person's display name in this chat, only with the `name` permission. */
   name?: string;
-  /** Not in the WISP yet: the client's theme, so the app can match it. Apps fall back to `prefers-color-scheme`. */
+  /** The client's theme, so the app can match it. An app may fall back to `prefers-color-scheme` when it is missing. */
   theme?: "light" | "dark";
-  /** Not in the WISP yet: the client's language (BCP 47, for example "pt-BR"). Apps fall back to `navigator.language`. */
+  /** The client's language (BCP 47, for example "pt-BR"). An app may fall back to `navigator.language` when it is missing. */
   locale?: string;
 }
 
