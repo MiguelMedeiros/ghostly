@@ -1,4 +1,4 @@
-import { chat, connect, expect, linkLegacy, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, linkLegacy, openServicesPage, say, test, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 import { pair } from "../support/paired";
 
@@ -18,7 +18,7 @@ function errors(p: Peer): string[] {
 test("the Services page on the web explains sharing needs the extension, and offers no add", { tag: ["@feature:services.web-unavailable", "@feature:app.web-limits"] }, async ({ peer }) => {
   const alice = await peer("services-web");
   const thrown = errors(alice);
-  await alice.page.getByTestId("account-services").click();
+  await openServicesPage(alice.page);
   const page = alice.page.getByTestId("my-services");
   await expect(page.getByRole("heading", { name: "Services" })).toBeVisible();
 
@@ -100,7 +100,7 @@ test("an older chat's apps strip on the web: Manage opens the same explanation",
   await alice.page.keyboard.press("Escape");
 
   // And the Services page knows of no apps from this contact.
-  await alice.page.getByTestId("account-services").click();
+  await openServicesPage(alice.page);
   await expect(alice.page.getByTestId("contact-services")).toContainText("Apps your contacts share show up here.");
   expect(thrown.flat()).toEqual([]);
 });
