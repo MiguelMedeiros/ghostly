@@ -15,6 +15,7 @@ import { Profile } from "../../pages/Profile";
 import { deviceLink, deviceLinkQr, deviceNoun, offerDeviceLink, readDeviceLink, takeDeviceLink, takeDeviceLinkFromAddress, takeJoinRequest, timeLeft } from "../../lib/devices";
 import { handOverUnlock, takeUnlockHandover } from "../../lib/lockHandover";
 import { activeProfileId, createProfile, listProfiles, prefixOf } from "../../lib/profiles";
+import { askNameIn, nameStepPending } from "../../lib/nameStep";
 import { hashPassword } from "../../lib/settings";
 import { listSessions } from "../../lib/storage";
 import { appLinkOrigin } from "../../lib/url";
@@ -144,6 +145,8 @@ describe("in a profile that holds something", () => {
     // This profile keeps its chat; the new one is empty.
     expect(listSessions()).toHaveLength(1);
     expect(localStorage.getItem(`${prefixOf(added.id)}chat1`)).toBeNull();
+    // A profile made for a code is one added from another device, never a new one: no "What should people call you?".
+    expect(nameStepPending(added.id)).toBe(false);
   });
 
   it("asked as ready, the engine's refusal on join still hands the code to a new profile: no dead end", async () => {
@@ -402,6 +405,8 @@ describe("a profile made for a code", () => {
     const hash = await hashPassword("a long lock password");
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: hash, timeoutMinutes: 5 } }));
     const reload = catchReload();
+    // A fresh install's first start asks for a name; once added to a profile from another device, it never does.
+    askNameIn(activeProfileId());
     sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
     fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
     fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "done", device: "MacBook" }));
@@ -413,6 +418,7 @@ describe("a profile made for a code", () => {
       expect(screen.queryByTestId("device-join-continue")).toBeNull();
       await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
       expect(JSON.parse(sessionStorage.getItem(HANDOVER)!)).toMatchObject({ profile: activeProfileId(), hash });
+      expect(nameStepPending()).toBe(false);
     } finally { Reflect.deleteProperty(navigator, "storage"); }
   });
 

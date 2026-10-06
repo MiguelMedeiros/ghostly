@@ -10,6 +10,7 @@ import {
 } from "../../lib/devices";
 import { errorText } from "../../lib/errorText";
 import { isDesktopApp } from "../../lib/externalLink";
+import { nameStepDone } from "../../lib/nameStep";
 import { servicesPlatform } from "../../lib/platform";
 import { JoinDialog } from "../JoinDialog";
 import { Notice } from "../wallet/ui";
@@ -98,7 +99,9 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
 
   // Done: the standby screen opens by itself, unless the browser may clear the data, which the person reads first.
+  // The profile is now one added from another device: a first start's "What should people call you?" is not asked.
   useEffect(() => {
+    if (view?.step === "done") nameStepDone();
     if (view?.step !== "done" || kept === false) return;
     const timer = setTimeout(() => void reloadIntoGate({ keepUnlocked: true }), DONE_PAUSE_MS);
     return () => clearTimeout(timer);
