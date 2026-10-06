@@ -86,6 +86,8 @@ export const CROSSED_WAIT_MS = 3_000;
  * takes over.
  */
 export const CROSSED_FRESH_MS = 10_000;
+/** A WebRTC attempt under way, not yet open: what a member's packet saying it has no WebRTC ends (`peerPacketTransports`). */
+const WEBRTC_ATTEMPT: ReadonlySet<DataLinkState> = new Set(["offering", "answering", "connecting"]);
 /** A joiner gathers its offer while it first looks for the inviter (`dialEarly`) only this soon after the join. */
 export const EARLY_DIAL_JOIN_MS = 60_000;
 /** What a joiner is told when someone else used the invite first (`DhtDeliveryView.inviteTaken`). */
@@ -1771,8 +1773,11 @@ export class GhostLink {
     if (!said) return;
     const transports = said.transports as PairedTransport[], descriptors = dialDescriptors(said.descriptors);
     traceLink(this.myPubKeyZ32, "packet-transports", { transports });
-    // Its app has no WebRTC: an offer out to it is never answered, and would hold the data link for its whole attempt.
-    if (!transports.includes("webrtc/1") && !this.channel && this.dataLink.state === "offering") this.disconnect();
+    // Its app has no WebRTC: an offer out to it is never answered, and an attempt it answered or took an answer for is
+    // gone on its side (its edge started again without WebRTC when that attempt failed there, node.ts `edgeWithoutRtc`).
+    // Either would hold the data link for its whole attempt (30 s), and this side would neither dial nor say it is here
+    // meanwhile: its packet carried the dead answer.
+    if (!transports.includes("webrtc/1") && !this.channel && WEBRTC_ATTEMPT.has(this.dataLink.state)) this.disconnect();
     this.options.events?.onPacketTransports?.(transports, descriptors);
     this.learnPeerTransports(transports, descriptors, true);
   }
