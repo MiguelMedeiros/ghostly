@@ -8,6 +8,7 @@ import { ConnectionIcon } from "./ConnectionIcon";
 import { useI18n } from "../contexts/I18nContext";
 import { agoIn } from "../lib/relativeTime";
 import { errorText } from "../lib/errorText";
+import { useOnline } from "../hooks/useOnline";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -22,7 +23,8 @@ type GroupKind = ConnectionKind | "partial";
 export function GroupConnection({ group }: { group: GroupView }) {
   const { t, language } = useI18n();
   const state = useSyncExternalStore(subscribe, snapshot);
-  const online = state?.settings.online ?? true;
+  // Offline either way: Ghostly's own switch, or a device with no network.
+  const deviceOnline = useOnline(), online = (state?.settings.online ?? true) && deviceOnline;
   const [menuOpen, setMenuOpen] = useState(false);
   const [tip, setTip] = useState(false);
   const [busy, setBusy] = useState("");

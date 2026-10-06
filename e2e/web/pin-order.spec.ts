@@ -15,7 +15,7 @@ const middle = async (locator: Locator) => { const box = (await locator.bounding
 /** A new chat (alone in it: nobody has to answer), and its id. */
 async function newChat(page: Page): Promise<string> {
   const before = page.url();
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByTestId("sidebar-new-chat").click();
   await expect(page).not.toHaveURL(before);
   await expect(page).toHaveURL(/#\/chat\/\w+$/);
   return page.url().split("/chat/")[1];

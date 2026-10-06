@@ -9,7 +9,7 @@ const countChats = (page: import("@playwright/test").Page) => page.evaluate(() =
 
 test("New shows a real QR; Join decodes its image once and preserves a single conversation", { tag: ["@feature:invite.qr.show", "@feature:invite.qr.image"] }, async ({ peer }) => {
   const a = await peer("qr-owner"), b = await peer("qr-reader");
-  await a.page.getByRole("button", {name: "New chat", exact: true}).click();
+  await a.page.getByTestId("sidebar-new-chat").click();
   await expect(a.page.getByPlaceholder("Paste invite…")).toHaveCount(0);
   await expect(a.page.getByText("Create a legacy chat")).toHaveCount(0);
   const qr = await a.page.getByTestId("invite-qr").screenshot();
@@ -154,7 +154,7 @@ test("home actions have equal sizes and enabled controls signal clicks", { tag: 
   for (const mobile of [false, true]) {
     const p = await peer(`action-affordances-${mobile}`, {mobile});
     const actions = p.page.getByTestId("home-chat-actions").getByRole("button");
-    const create = mobile ? p.page.getByRole("button", {name:"New chat", exact:true}) : actions.nth(0);
+    const create = mobile ? p.page.getByTestId("sidebar-new-chat") : actions.nth(0);
     const join = mobile ? p.page.getByRole("button", {name: "Join chat", exact: true}).first() : actions.nth(1);
     // Home fades in: let it settle, then measure both, so the animation cannot land between them.
     await p.page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getTiming().iterations !== 1));
@@ -197,7 +197,7 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
       return route.fulfill({status: down ? 503 : read ? 404 : 204,
         headers: {"access-control-allow-origin":"*"}});
     });
-    await page.getByRole("button", {name:"New chat", exact:true}).click();
+    await page.getByTestId("sidebar-new-chat").click();
     await expect.poll(() => copyInvite(page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
     const menu = page.getByTestId("connection-options");
     await expect.poll(() => reads).toBeGreaterThan(0);
