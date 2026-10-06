@@ -126,14 +126,26 @@ export class DataLink {
   constructor(private readonly options: DataLinkOptions) {}
 
   /** Offers a connection to the peer. Resolves once the offer is published. */
-  async connect(): Promise<void> {
+  /**
+   * Makes an offer and publishes it. `gate`: gathered ahead, while the caller still finds out whether the peer is there
+   * (a joiner reading the inviter's record): the link stays idle meanwhile, and the offer goes once the gate says yes.
+   * On no, the connection is dropped, nothing having been said, and `"held"` is the answer.
+   */
+  async connect(gate?: Promise<boolean>): Promise<"held" | void> {
     if (this.state !== "idle") return;
     this.answered = null;
-    this.setState("offering");
-    this.options.setFastPoll(true, true);
+    if (!gate) { this.setState("offering"); this.options.setFastPoll(true, true); }
     try {
       const pc = await this.gathered(true, async (pc) => { await pc.setLocalDescription(await pc.createOffer()); });
       if (!pc) return;
+      if (gate) {
+        const go = await gate;
+        // The peer's offer came meanwhile (it was answered), or the link was closed.
+        if (this.pc !== pc || this.state !== "idle") return;
+        if (!go) { this.teardown(); return "held"; }
+        this.setState("offering");
+        this.options.setFastPoll(true, true);
+      }
 
       this.myOfferTs = Date.now();
       this.offerLacksPublic = !PUBLIC_CANDIDATE.test(pc.localDescription?.sdp ?? "");
