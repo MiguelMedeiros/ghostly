@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "app",
+  "description": "A window running an installed app (WISP 12xx): its broker and nothing else.",
+  "windows": ["app-*"],
+  "permissions": ["allow-app-broker"]
+}
