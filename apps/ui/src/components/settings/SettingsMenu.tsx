@@ -32,7 +32,7 @@ function SearchField({ value, onChange, testId }: { value: string; onChange: (va
         className="absolute start-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
       <input type="search" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId}
         placeholder={t("settings.search")} aria-label={t("settings.search")}
-        className="w-full min-w-0 ps-9 pe-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent" />
+        className="w-full min-w-0 ps-9 pe-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />
     </div>
   );
 }

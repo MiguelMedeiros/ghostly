@@ -236,7 +236,7 @@ export function Sidebar() {
 
       {/* Search */}
       <div className="px-3 py-2 bg-sidebar-bg">
-        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5">
+        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
           <svg
             width="16"
             height="16"
@@ -254,7 +254,7 @@ export function Sidebar() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
                   placeholder={t("sidebar.searchPlaceholder")}
-            className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted focus:outline-none py-1"
+            className="flex-1 bg-transparent border-none text-sm text-text-primary placeholder-text-muted outline-none py-1"
           />
         </div>
       </div>
