@@ -102,6 +102,7 @@ for (const [from, to] of [
   ["/wisps/3xx-did", "/wisps/311-did"],
   ["/wisps/3xx-did-dht", "/wisps/310-did-dht"],
   ["/wisps/11xx-headless", "/wisps/1100-headless"],
+  ["/wisps/12xx-marketplace", "/wisps/1200-marketplace"],
   ["/developers/wisps/9xx-group-mesh", "/wisps/902-group-mesh"],
 ]) {
   test(`${from} redirects permanently to ${to}`, async ({ request }) => {

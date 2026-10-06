@@ -81,10 +81,10 @@ A file forwarded carries the same `fw` on its announcement (`pf-offer`, `pf-star
 
 ### Status cards
 
-A `paired-message` MAY carry `sc`, a bot's status card (revision 2026-09-29, [405 · Status Cards](405-status-cards.md)), and so MAY a `paired-edit`, with the card of that version:
+A `paired-message` MAY carry `sc`, a status card (revision 2026-09-29, [405 · Status Cards](405-status-cards.md), which defines the kinds: a bot's task or routine, and since revision 2026-10-06 the `app` card a person's app sends), and so MAY a `paired-edit`, with the card of that version:
 
 ```
-{ "t": "paired-message", "id", "ts", "m", "pv"?, "r"?, "fw"?, "sc"?: { "kind": "task" | "routine", "id", … } }
+{ "t": "paired-message", "id", "ts", "m", "pv"?, "r"?, "fw"?, "sc"?: { "kind": "task" | "routine" | "app", "id", … } }
 { "t": "paired-edit", "id", "e", "ts", "m", "pv"?, "sc"? }
 ```
 

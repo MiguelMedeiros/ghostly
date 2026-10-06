@@ -43,7 +43,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 402 | Chat | [Compatibility Chat (v0.4 Timestamp Profile)](402-legacy-chat.md) | Profile | Draft | Available |
 | 403 | Chat | [DHT Text](403-dht-text.md) | Profile | Draft | Available |
 | 404 | Chat | [Store-and-Forward for an Away Contact](404-store-and-forward.md) | Profile | Draft | Available |
-| 405 | Chat | [Status Cards for Bots](405-status-cards.md) | Profile | Draft | Available |
+| 405 | Chat | [Status Cards for Bots and Apps](405-status-cards.md) | Profile | Draft | Available |
 | 406 | Chat | [Message Buttons for Bots](406-message-buttons.md) | Profile | Draft | Available |
 | 500 | Files | [File Transfer](500-files.md) | Contract | Draft | Available |
 | 501 | Files | [Chat Files](501-paired-files.md) | Profile | Draft | Available |
@@ -62,7 +62,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 1001 | Storage | [Local File Storage](1001-local-storage.md) | Adapter | Draft | Available |
 | 1002 | Storage | [S3-Compatible Storage](1002-s3-storage.md) | Adapter | Draft | Available |
 | 1100 | Headless | [Headless Runtime and Local Control API](1100-headless.md) | Contract | Draft | Available |
-| 12xx | Apps and plugins | [Apps and Plugins: Packages, Stores and Apps Sent in a Chat](12xx-marketplace.md) | Contract | Draft | Planned |
+| 1200 | Apps and plugins | [Apps and Plugins: Packages, Stores and Apps Sent in a Chat](1200-marketplace.md) | Contract | Draft | Planned |
 
 <!-- wisp-index:end -->
 
