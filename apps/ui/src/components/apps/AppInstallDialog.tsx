@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppListedBy, AppPreview, AppRunStatus, AppSource, InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { AppPermission } from "@ghostly/core";
@@ -44,7 +45,7 @@ function runLine(run: AppRunStatus, t: Translate): string | null {
 }
 
 function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
-  const color = { muted: "text-text-secondary", danger: "text-danger", warning: "text-yellow-500" }[tone];
+  const color = { muted: "text-text-secondary", danger: "text-danger", warning: "text-test-money-ink" }[tone];
   return <p data-testid={testId} className={`text-xs whitespace-pre-line ${color}`}>{children}</p>;
 }
 
@@ -56,7 +57,7 @@ function Publisher({ fingerprint, unknown, listedBy, sentBy }: { fingerprint: st
   return (
     <div className="bg-surface rounded-xl px-4 py-3 space-y-1" data-testid="app-publisher">
       <div className="flex items-center gap-2">
-        <span className={`text-sm ${unknown ? "text-yellow-500" : "text-text-primary"}`} data-testid="app-publisher-name">
+        <span className={`text-sm ${unknown ? "text-test-money-ink" : "text-text-primary"}`} data-testid="app-publisher-name">
           {unknown ? t("apps.install.unknownPublisher") : t("apps.install.publisher")}
         </span>
         {unknown && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} />}
@@ -102,13 +103,15 @@ function Shell({ titleId, onClose, children, testId }: { titleId: string; onClos
   const backdrop = useBackdropDismiss(onClose);
   const ref = useRef<HTMLDivElement>(null);
   useDialogFocus(ref, onClose);
-  return (
+  // Over the whole window: opened from a card in the chat's timeline, whose scrolling box would hold a fixed layer.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid={testId}
         className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-safe">
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

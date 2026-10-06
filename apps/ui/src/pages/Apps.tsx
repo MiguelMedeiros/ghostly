@@ -36,7 +36,7 @@ function appHint(app: InstalledAppView, t: Translate): { text: string; tone: "mu
 function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDetails: () => void; onOpen: () => void }) {
   const { t } = useI18n();
   const hint = appHint(app, t);
-  const color = { muted: "text-text-muted", warning: "text-yellow-500", danger: "text-danger" }[hint.tone];
+  const color = { muted: "text-text-muted", warning: "text-test-money-ink", danger: "text-danger" }[hint.tone];
   return (
     <div className="flex items-center gap-3 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
       <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-1 text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" aria-label={t("apps.page.details", { title: app.title })}>
@@ -79,7 +79,7 @@ function StoreBlock({ store, installed, onInstall, onChanged, onError }: {
             <Fingerprint value={store.fingerprint} />
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
-          {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-yellow-500">{t("apps.store.stale", { date: date(store.expires ?? 0) })}</span>}
+          {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0) })}</span>}
           {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
         </button>
         <div className="flex items-center gap-2">

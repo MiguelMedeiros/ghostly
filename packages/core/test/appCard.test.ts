@@ -4,6 +4,8 @@ import { appCardId, checkStatusCard, readStatusCard, statusCardText, type AppCar
 import { appKey, matchVectorFile } from "./appVectors";
 import { readStatusCard as readStatusCard101 } from "./fixtures/statusCards-1.0.1";
 
+// covers: apps.card
+
 /*
  * The `app` card (WISP 405 § An app, WISP 1200 § Apps sent in a chat): a mini-app a person shared in a chat, or opened in
  * it, read from its own data. Pinned by `vectors/app-card.json`; write it again with `APPS_VECTORS_WRITE=1`.
