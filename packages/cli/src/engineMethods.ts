@@ -16,7 +16,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "withdrawIdentityProof", "recheckIdentityProof", "lookupIdentityDisplay", "loadPublicProfile", "loadPublicPosts",
   "loadPublicGraph", "loadPublicPostImage", "clearProfileData", "setDidListed", "nostrLoadContact", "nostrForgetContact", "nostrLoadOwn",
   "nostrLookup", "nostrDraft", "nostrPublish", "createLink", "takeInvite", "joinLink", "ensureLink", "confirmPair",
-  "pollNow", "removeLink", "renameLink", "setActiveLink", "sendMessage", "editMessage", "retryMessage", "react", "pinMessage", "messageDetails",
+  "pollNow", "removeLink", "renameLink", "setActiveLink", "sendMessage", "editMessage", "retryMessage", "react", "pinMessage", "appId", "appOpen", "appClose", "appSend", "messageDetails",
   "deleteMessage", "exportLinks", "sendFile", "forwardMessages", "fileAction", "setDeliveryMode", "setTransportPreference",
   "setChatTransport", "setChatPaymentMethods", "setChatHold", "connect", "walletAddMint", "walletCreate",
   "walletRemove", "walletTestCoins", "walletSetupRetry", "walletSetupDismiss", "wake", "peekProfile", "walletSetPrimaryMint", "walletRemoveMint", "walletReceiveLightning",

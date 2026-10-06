@@ -165,6 +165,22 @@ export interface EngineApi {
    * community only the admin pins.
    */
   pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null };
+  /**
+   * Mini-apps in a paired 1:1 chat (`apps/1`, WISP 1200 § In a chat), refused while the apps feature is off. `ref` is
+   * the app reference `<publisher key in z-base32>/<name>`; the contact's frames (`app-frame` events) name the app by
+   * its chat app id, which `appId` gives.
+   */
+  appId(params: { linkId: string; ref: string }): { app: string };
+  /** This side opened the app in the chat (or updated it to `version`): `open` goes now and on every session that comes back. */
+  appOpen(params: { linkId: string; ref: string; version: string }): { app: string };
+  /** This side closed the app in the chat. */
+  appClose(params: { linkId: string; ref: string }): void;
+  /**
+   * One data frame to the same app on the contact's side, live only: `offline` while the session is not live (nothing is
+   * kept), `too-large` past 32 KiB as JSON, `not-open`, `peer-closed` (the contact's app is not open, or cannot run
+   * apps), `too-fast` (over 48 a second for this app).
+   */
+  appSend(params: { linkId: string; ref: string; data: unknown }): { error: import("@ghostly/core").AppSendError | null };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
@@ -511,6 +527,8 @@ export type EngineEvent =
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string }
+  /** A contact's mini-app frame in a 1:1 chat (`apps/1`, WISP 1200 § In a chat), already checked; never stored. */
+  | { kind: "app-frame"; linkId: string; event: import("@ghostly/core").AppFrameEvent }
   /**
    * The peer did not start: the profile's database did not open (`shared/idb.ts`). Sent to every client in place of
    * its first state; no state follows, and every call fails with the same words.

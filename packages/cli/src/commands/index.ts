@@ -1,4 +1,5 @@
 import { CliError } from "../errors";
+import { commands as apps } from "./apps";
 import { commands as calls } from "./calls";
 import { commands as chats } from "./chats";
 import { commands as files } from "./files";
@@ -26,6 +27,7 @@ export const COMMANDS: Record<string, Command> = {
   ...identities,
   ...services,
   ...calls,
+  ...apps,
 };
 
 /** Commands that take text (argument or stdin), with the secret guard and delivery waits. */

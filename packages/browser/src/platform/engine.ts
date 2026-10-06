@@ -1,4 +1,5 @@
 import { getBrowserHost, type EngineConnection } from "../host";
+import type { AppFrameEvent } from "@ghostly/core";
 import type { AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges } from "../shared/messageChanges";
@@ -33,6 +34,7 @@ class EngineClient {
   private readonly messageListeners = new Set<(linkId: string, messages: StoredMessage[]) => void>();
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
   private readonly callListeners = new Set<(linkId: string, signal: string) => void>();
+  private readonly appListeners = new Set<(linkId: string, event: AppFrameEvent) => void>();
   /**
    * The latest call offer per link, until something answers or ends it: a chat that is not open
    * when the call comes in is loaded because of it, and then reads the offer it would have missed.
@@ -68,6 +70,12 @@ class EngineClient {
    */
   keepCallOffer(linkId: string, signal: string): void {
     this.offers.set(linkId, signal);
+  }
+
+  /** A contact's mini-app frame in a 1:1 chat (`apps/1`, WISP 1200 § In a chat). */
+  onAppFrame(listener: (linkId: string, event: AppFrameEvent) => void): () => void {
+    this.appListeners.add(listener);
+    return () => this.appListeners.delete(listener);
   }
 
   onCallSignal(listener: (linkId: string, signal: string) => void): () => void {
@@ -152,6 +160,9 @@ class EngineClient {
         for (const listener of this.callListeners) listener(message.linkId, message.signal);
         break;
       }
+      case "app-frame":
+        for (const listener of this.appListeners) listener(message.linkId, message.event);
+        break;
       case "response": {
         const pending = this.pending.get(message.id);
         this.pending.delete(message.id);

@@ -46,7 +46,8 @@ import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeen
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { APP_DATA_MAX_BYTES, APP_FRAME, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
@@ -396,6 +397,14 @@ export interface GhostLinkEvents {
   onPeerWake?(target: WakeTarget | null): void;
   /** Both sides offer `wake/1` on the open session (true), or no longer (false): the moment to share this side's. */
   onWakeSupport?(supported: boolean): void;
+  /**
+   * The contact's app opened, closed or sent data in one of this chat's mini-apps (`apps/1`, WISP 1200 § In a chat),
+   * already checked against the receiver's limits; or, as a `close` with `offline`, the session ended while it had one
+   * open. Never stored.
+   */
+  onAppFrame?(event: AppFrameEvent): void;
+  /** Both sides offer `apps/1` on the open session (true), or no longer (false). */
+  onAppsSupport?(supported: boolean): void;
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
   /** What a WebRTC attempt of this link said about direct connections from this device (`directPath.ts`). */
@@ -501,6 +510,16 @@ export interface GhostLinkOptions {
    * where the contact's capability record says it moves as well (`peerUpgrades`).
    */
   upgradeSupport?: boolean;
+  /**
+   * Offer `apps/1` on paired sessions (1:1 chats, not group edges): mini-apps talk to the same app on the contact's
+   * side (WISP 1200 § In a chat). Behind the apps feature flag.
+   */
+  appsSupport?: boolean;
+  /**
+   * The apps this side has open in this chat (chat app id to version), kept by the caller across this link's restarts.
+   * Each new session says `open` for each. Without it the link keeps its own.
+   */
+  appsOpen?: Map<string, string>;
   /** The contact's capability record, as last read, says `upgrade/1` (WISP 03). */
   peerUpgrades?: () => boolean;
   /**
@@ -683,6 +702,8 @@ export class GhostLink {
   /** Typing on this session (`typing/1`): when to say `start` again, and the contact's word with its timeout. */
   private readonly typingSender = new TypingSender();
   private readonly typingReceiver = new TypingReceiver((typing, activity) => this.options.events?.onPeerTyping?.(typing, activity));
+  /** Mini-apps on this session (`apps/1`): this side's open apps (kept across sessions), the peer's, the limits. */
+  private readonly apps: AppSessions;
   /** Reaction frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly reactionsReceived = new ReactionWindow(REACTION_LIMITS.receive);
   /** Pin frames the contact may send per window; the rest go unconfirmed and come again. */
@@ -786,6 +807,7 @@ export class GhostLink {
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
+    this.apps = new AppSessions(options.appsOpen);
     // A link that signs through a signer (a device link) has no seed for what a chat signs beside its session.
     if (options.pairing?.credentials.signer && (options.dht || options.params.deliveryMode === "dht")) throw new Error("A link that signs through a signer has no DHT delivery");
     this.deliveryMode = options.params.deliveryMode ?? "stream";
@@ -2736,6 +2758,7 @@ export class GhostLink {
     if (this.options.statusCardSupport) offered.push(STATUS_CARD_CAPABILITY);
     if (this.options.buttonsSupport) offered.push(BUTTONS_CAPABILITY);
     if (this.options.upgradeSupport) offered.push(UPGRADE_CAPABILITY);
+    if (this.options.appsSupport) offered.push(APPS_CAPABILITY);
     if (this.options.deviceCapabilities) offered.push(...this.options.deviceCapabilities);
     return offered;
   }
@@ -2840,6 +2863,42 @@ export class GhostLink {
     if (!frame || !this.channel || !this.supportsTyping) return;
     try { this.channel.send(JSON.stringify(frame)); } catch { /* the session is going; the contact's timeout ends it */ }
   }
+  /** Both sides offer `apps/1` on the open session: mini-apps can talk (WISP 1200 § In a chat). */
+  get supportsApps(): boolean { return !!this.options.params.profile && this.isDataLinkOpen && this.sessionCapabilities.agreed(APPS_CAPABILITY); }
+  /** The apps the contact has open on this session (chat app id to version). */
+  get peerApps(): ReadonlyMap<string, string> { return this.apps.peerOpen; }
+  /**
+   * This side opened an app in this chat (or updated it): `open` goes now when both sides offer `apps/1` on the live
+   * session, and again on every session that comes back while the app stays open. Never on the DHT.
+   */
+  openApp(app: string, version: string): void {
+    const frame = JSON.stringify(appOpenFrame(app, version));
+    this.apps.open.set(app, version);
+    if (this.supportsApps && this.channel) try { this.channel.send(frame); } catch { /* said again on the next session */ }
+  }
+  /** This side closed an app in this chat: `close` goes now when it can; nothing is said later. */
+  closeApp(app: string): void {
+    const frame = JSON.stringify(appCloseFrame(app));
+    if (!this.apps.open.delete(app)) return;
+    if (this.supportsApps && this.channel) try { this.channel.send(frame); } catch { /* the session is going: the contact hears it ended */ }
+  }
+  /**
+   * One data frame of an app open on both sides, on the live session only. An error when it did not go: nothing is
+   * kept to send later.
+   */
+  sendAppData(app: string, data: unknown): AppSendError | null {
+    if (!this.apps.open.has(app)) return "not-open";
+    if (appDataBytes(data) > APP_DATA_MAX_BYTES) return "too-large";
+    if (!this.channel || !this.isDataLinkOpen) return "offline";
+    if (!this.supportsApps) return "peer-closed";
+    const refused = this.apps.canSend(app, data);
+    if (refused) return refused;
+    try { this.channel.send(JSON.stringify(appDataFrame(app, data))); return null; } catch { return "offline"; }
+  }
+  /** What the contact had open is gone (the session ended, or `apps/1` is no longer agreed): each app hears it. */
+  private appsEnded(): void {
+    for (const event of this.apps.sessionEnded()) this.options.events?.onAppFrame?.(event);
+  }
   /** Whether files/3 was agreed on the session open now; kept to say when that changes. */
   private filesOpen = false;
   private emitFilesSession(again = false): void {
@@ -2906,6 +2965,12 @@ export class GhostLink {
     if (changed.includes(PIN_CAPABILITY)) this.options.events?.onPinSupport?.(this.supportsPins);
     if (changed.includes(WAKE_SESSION_CAPABILITY)) this.options.events?.onWakeSupport?.(this.supportsWake);
     if (changed.includes(UPGRADE_CAPABILITY)) this.switcher.reconsider();
+    if (changed.includes(APPS_CAPABILITY)) {
+      // Back on a session: each app this side has open says so again, and catches up once the contact's says so too.
+      if (this.supportsApps && this.channel) for (const [app, version] of this.apps.open) try { this.channel.send(JSON.stringify(appOpenFrame(app, version))); } catch { /* the next session */ }
+      if (!this.supportsApps) this.appsEnded();
+      this.options.events?.onAppsSupport?.(this.supportsApps);
+    }
     const devices = this.options.deviceCapabilities;
     if (devices && changed.some(capability => (devices as readonly string[]).includes(capability))) this.options.events?.onDeviceCapabilities?.(devices.filter(capability => this.supportsDevice(capability)));
     this.emitPairingState();
@@ -3188,6 +3253,7 @@ export class GhostLink {
           this.peerHoldOverride = null;
           this.sessionCapabilities.reset();
           this.typingSender.reset(); this.typingReceiver.clear();
+          this.appsEnded();
           this.pairedHttp?.close();
           this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch);
           this.emitPairingState();
@@ -3304,6 +3370,13 @@ export class GhostLink {
           if (frame?.t === TYPING_FRAME) {
             // Only on the authenticated session with the pinned contact, and only once both said typing/1.
             if (this.supportsTyping) this.typingReceiver.receive(frame);
+            return;
+          }
+          if (frame?.t === APP_FRAME) {
+            // Only once both said apps/1; counted per app before it is read (WISP 1200 § In a chat).
+            if (!this.supportsApps) return;
+            const event = this.apps.receive(frame);
+            if (event) this.options.events?.onAppFrame?.(event);
             return;
           }
           if (frame?.t === REACTION_FRAME) {
@@ -3665,6 +3738,7 @@ export class GhostLink {
     this.peerNickOverride = null;
     this.sessionCapabilities.reset();
     this.typingSender.reset(); this.typingReceiver.clear();
+    this.appsEnded();
     this.emitFilesSession();
     if (this.peerGroupVersions) { this.peerGroupVersions = null; this.options.events?.onGroupsSupport?.(false); }
     this.session.setDataLinkOpen(false);
