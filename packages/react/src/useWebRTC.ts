@@ -16,7 +16,7 @@ import {
   type CallMedia,
   type CallIceServer,
 } from "@ghostly/core";
-import { endOtherCalls, otherCallOn as anotherCallOn, setCallOn, subscribeCalls } from "./callRegistry";
+import { endOtherCalls, otherCallOn as anotherCallOn, setCallOn, setRingingIn, subscribeCalls } from "./callRegistry";
 
 /** What a peer can put on the video lane of a call. */
 export type Picture = "camera" | "screen";
@@ -343,6 +343,8 @@ export function useWebRTC({
     // One call at a time (WISP 601, "On a call already"): answering a call in another chat hangs this one up, as its
     // person would, so the contact is told and both chats keep the end line.
     setCallOn(callKey, ON_A_CALL.has(state) ? () => { traceCallEnd("answered-another", { state: callStateRef.current }); hangUpRef.current(true, true); } : null);
+    // A call ringing in is not on (the rule above), but it holds the device: a handoff now would lose it.
+    setRingingIn(callKey, state === "incoming");
   }, [callKey]);
 
   /**
@@ -1341,6 +1343,7 @@ export function useWebRTC({
     return () => {
       // Not on a call any more as far as the other chats can tell.
       setCallOn(callKey, null);
+      setRingingIn(callKey, false);
       // A start or an answer still waiting for the microphone or for ICE is cancelled, as a hang-up cancels it.
       attempts.current++;
       // The chat holding the call went away with it on: nothing is sent, and the contact's call ends when its media does.

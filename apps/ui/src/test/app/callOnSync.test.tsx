@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
-import { setCallOn } from "../../../../../packages/react/src/callRegistry";
+import { setCallOn, setRingingIn } from "../../../../../packages/react/src/callRegistry";
 import { useCallOnSync } from "../../hooks/useCallOnSync";
 import { fakeEngine } from "../fakeEngine";
 // covers: devices.handoff
@@ -11,7 +11,7 @@ import { fakeEngine } from "../fakeEngine";
  */
 
 const call = Symbol("a chat's call");
-afterEach(() => { setCallOn(call, null); fakeEngine.reset(); });
+afterEach(() => { setCallOn(call, null); setRingingIn(call, false); fakeEngine.reset(); });
 
 it("tells the engine when a call is on and when it is over", async () => {
   fakeEngine.on("setCallOn", () => undefined);
@@ -20,5 +20,15 @@ it("tells the engine when a call is on and when it is over", async () => {
   act(() => setCallOn(call, () => {}));
   await waitFor(() => expect(fakeEngine.callsTo("setCallOn")).toEqual([{ on: false }, { on: true }]));
   act(() => setCallOn(call, null));
+  await waitFor(() => expect(fakeEngine.callsTo("setCallOn")).toEqual([{ on: false }, { on: true }, { on: false }]));
+});
+
+it("tells the engine while a call rings in, and once the ring is over", async () => {
+  fakeEngine.on("setCallOn", () => undefined);
+  renderHook(() => useCallOnSync());
+  await waitFor(() => expect(fakeEngine.callsTo("setCallOn")).toEqual([{ on: false }]));
+  act(() => setRingingIn(call, true));
+  await waitFor(() => expect(fakeEngine.callsTo("setCallOn")).toEqual([{ on: false }, { on: true }]));
+  act(() => setRingingIn(call, false));
   await waitFor(() => expect(fakeEngine.callsTo("setCallOn")).toEqual([{ on: false }, { on: true }, { on: false }]));
 });
