@@ -1329,7 +1329,14 @@ export class GhostLink {
     // Only as the person joins: a joined chat whose inviter never came, started again later, gathers nothing until it shows.
     const startedAt = this.options.pairingProgress?.startedAt ?? 0;
     if (Date.now() - startedAt > EARLY_DIAL_JOIN_MS) return;
-    this.dialGate = new Promise<boolean>(resolve => { this.firstLookDone = resolve; });
+    // The offer that goes counts as a dial (`maybeAutoConnect`): one that fails waits the backoff before the next, or a
+    // joiner with the lower key offered again at once, and the inviter, answering each, stayed `connecting` (not `on-dht`).
+    this.dialGate = new Promise<boolean>(resolve => {
+      this.firstLookDone = online => {
+        if (online) { this.lastAutoConnectAt = Date.now(); this.autoConnectFailures++; }
+        resolve(online);
+      };
+    });
     traceLink(this.myPubKeyZ32, "dial", { early: true });
     void this.dial().catch(error => {
       this.tracker?.failed("transport", true);

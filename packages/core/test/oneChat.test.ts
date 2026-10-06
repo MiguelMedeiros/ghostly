@@ -54,9 +54,11 @@ beforeEach(useFakeWorld);
 afterEach(closeWorld);
 
 describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
-  it("with every transport blocked a first pairing opens on the DHT, chats there, and goes live by itself once one connects", async () => {
+  // Either side may hold the lower key, the one that dials once the pairing is on the DHT: a joiner whose first offer
+  // (gathered early) did not count as a dial offered again at once, and kept the inviter `connecting`.
+  it.each(["inviter", "joiner"] as const)("with every transport blocked a first pairing opens on the DHT, chats there, and goes live by itself once one connects (the %s dials)", async dialer => {
     rtc.blocked = true;
-    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitationWhere(dialer);
     const inviter = open(made.inviter, pkarr, { dht: true });
     await run(2_000);
     const joiner = open(made.joiner, pkarr, { dht: true });
