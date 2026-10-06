@@ -1,0 +1,1 @@
+`ghostly.context()` also carries `theme` (`"light"` or `"dark"`, the client's) and `locale` (the client's language as a BCP 47 tag), so a mini-app can match the client's look and language without reading anything else about the person. Chess, the first mini-app, uses both and falls back to `prefers-color-scheme` and the browser's language when a client does not send them.
