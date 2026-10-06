@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DiscoveryBudgetError, EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, beaconKeys, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readBeacon, readKnocks, type GroupEntryLink } from "@ghostly/core";
-import { COMMUNITY_TIMINGS, KNOCK_SHARDS, dialedKey } from "../src/engine/community";
+import { COMMUNITY_TIMINGS, KNOCK_SHARDS, UNKNOCKED_RETRY_MS, dialedKey } from "../src/engine/community";
 import { otherEndSeen } from "../src/engine/groups";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.community.join, groups.protocol.community-topology
@@ -192,6 +192,32 @@ describe("a community's door", { timeout: 120_000 }, () => {
     // Once the budget lets it, its entry is listed, as any hub's.
     await world.run(heldUntil - world.now + 10_000, 500);
     expect(readBeacon(beacon, world.pkarr.get(beacon.identity.pubKeyZ32) ?? []).map(h => h.key)).toContain(alice.groups.communities.session(id)!.myKey);
+  });
+
+  it("a joiner whose knock the relays' budget refused knocks again within seconds, as a first knock, not a background refresh", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const alice = world.add("alice");
+    const { id, link, entry } = await community(world, alice);
+    const bob = world.add("bob");
+    // Its budget spent elsewhere (the door of another community, say): its knocks are refused for 20 s.
+    const bell = recordKey(entry, 0), heldUntil = world.now + 20_000, publish = bob.host.publish;
+    const tries: { at: number; background: boolean }[] = [];
+    bob.host.publish = async (identity, records, background, door) => {
+      if (identity.pubKeyZ32 === bell) {
+        tries.push({ at: world.now, background: !!background });
+        if (world.now < heldUntil) throw new DiscoveryBudgetError(heldUntil - world.now);
+      }
+      return publish(identity, records, background, door);
+    };
+    await bob.groups.joinByLink(link);
+    await world.until(() => tries.some(t => t.at >= heldUntil), 60_000, 500);
+    const out = tries.find(t => t.at >= heldUntil)!;
+    // Every try until one went out was a first knock, a few seconds apart. As background refreshes every 10 s, the
+    // budget held them back further while the joiner's entry session looked fast for an answer.
+    expect(tries.filter(t => t.at <= out.at).map(t => t.background)).toEqual(tries.filter(t => t.at <= out.at).map(() => false));
+    expect(out.at - heldUntil).toBeLessThanOrEqual(UNKNOCKED_RETRY_MS + 1_000);
+    expect(world.view(bob, id)?.invitation?.stage).not.toBe("knocking");
+    await world.until(() => world.member(bob, id), 60_000, 500);
   });
 
   it("the member let in gets its edge from both sides at once, each looking fast, without the lobby; it is a hub only later", async () => {
