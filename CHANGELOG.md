@@ -4,6 +4,124 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.1.4
+
+Ghostly 1.1.4 makes adding your phone to your profile one screen, shows who is calling on the lock screen, and gets chats live sooner. Moving a profile between devices is steadier, and Ghostly Desktop opens its window at once on a slow network.
+
+Known issues, for the next release: on iPhone the camera opens Safari, not the app on the Home Screen; moving a profile needs both devices online at the same time; adding a device can fail with "could not connect" when the direct connection between the two devices is blocked (for example a phone on mobile data).
+
+### For users
+
+**Everywhere**
+
+- Adding your phone to your profile is one screen: scan the code on your computer with the phone's camera, or in Ghostly, and the phone shows "Add this phone to <your profile>" with one button. If the phone's profile is in use, Ghostly makes a new profile for it by itself and keeps yours as it is, without asking for your password again. The computer shows each step under the QR code (waiting, a device connecting, the digits to check, added) and the time left on the code.
+- A new profile asks once what people should call you, with an empty field. Skip keeps the anonymous name contacts see today. A profile restored from a backup or added from another device is not asked.
+- The home screen no longer says messages disappear: Ghostly has no disappearing messages. It now says what is true: your messages stay on your devices, with no central server.
+- In Portuguese, Settings is "Ajustes" everywhere, the account bar and the Settings page included, as the phone's tab bar already said.
+- "New chat" is in sentence case, and the Wallet page is titled "Wallets", as its place in the bars.
+
+**Chat**
+
+- Join reads a screenshot of an invite's QR code pasted or dropped on it, as Open image does.
+- Search in a chat finds a voice message, a video or a picture by what it is, in your language and in English: "voz"
+  finds a voice message in a Portuguese profile.
+
+**Calls**
+
+- A call that comes while Ghostly is locked now shows on the lock screen: who is calling, with Decline and Answer. Answer asks for your lock password, then answers at once. Nothing else of the chat is shown. This works also when Ghostly has been locked since it started.
+
+### Fixed
+
+**Everywhere**
+
+- In Arabic, the words on wallet cards ("Ready", what a card holds), the line under a card in the payment sheet and the ID card's issuer line keep their letters joined. A monospace font, and in Safari wide letter spacing, drew them apart one by one.
+- The chat list shows a call line ("Audio call ended", "Missed video call") as the chat's last message as soon as the chat has it. It lagged up to 3 seconds behind, until the list's next refresh.
+- Ghostly Desktop opens its window at once on a slow network. Before, it could wait up to a minute for the DHT's starting points to resolve.
+- Adding this device to a profile when the clipboard can't be read (Safari, Firefox, the Mac app): the field to paste into now asks for the code from your other device, and its button says Add this device. It said "Paste invite…" and "Join chat".
+- Use here on a device while the active one is on a call now says "A call is on there. Try again after it." instead of a generic "can't hand over the profile now".
+- Use here and Move to wait while the active device is on a call: they say "A call is on. Try again after it." Before, the move went ahead and cut the call, the contact saw "Reconnecting..." for half a minute, and the moved chat kept the call as still connected.
+- Use here and Move to also wait while a call is ringing in on the active device: they say "A call is on there. Try again after it." and "A call is on. Try again after it." Before, the move went ahead, the ringing stopped, the caller rang on until "No answer" and the new device only showed a missed call.
+- Moving your profile back to a device that had it before works again when a chat holds a photo or another file up to 16 MB. The move stopped with "The copy was damaged. Nothing changed." every time.
+- Moving your profile between Ghostly Desktop on Linux and the web app no longer takes about 20 seconds longer on some moves. A page that reloads during a move gets a new address, and the other device first tried the old one until it timed out. It now goes to the new address as soon as it reads it.
+- A device you removed while its screen was open now says "This device was removed" when you press Use here on it. Before, it tried for 40 seconds and then said your other device could not be reached.
+- Use here right after your profile moved to a web browser works again when the two devices talk over Iroh (Ghostly Desktop on Linux and the web app). It could stop with "Can't reach … It must be on, with Ghostly open." because the device still held the connection to the page before it reloaded. That stale connection is now dropped and dialled again within about 20 seconds, instead of after 30.
+- Use here on a device that moved your profile away a moment before no longer stops at "Checking". That device asked for the turn it had just given away, and the other device could not check its answer, so the profile never moved back.
+- When the network comes back, a chat no longer keeps showing "Could not read DHT delivery: No Pkarr relay reachable" in red until its next check, which could be minutes away. The error from while you were offline goes at once and the chat checks again right away. If the relays really are down, the error shows again.
+- A new profile starts in your browser's language when it is one of Ghostly's eight (Portuguese, Spanish, French, Italian, Chinese, Japanese, Arabic or English), and in English otherwise. It always started in English. Settings → Language still changes it, and a profile you already have keeps its language.
+- After moving a profile to another device, the device it left no longer stays on "Moving to <device>. Waiting for it to finish." for good when the other device's last word was lost on the way. Use here is there in that state, and the screen clears on its own once Ghostly sees the other device has the profile.
+- Sizes while a profile moves between devices (copied so far, left for later, what a push sends) are now written in the app's language, as other sizes are: "1,2 Go" in French, number first in Arabic.
+- The line of capital letters along the bottom of an ID card keeps accented letters as plain ones, as a passport does: "João" reads JOAO, no longer JO<O.
+- A proof its owner removes while you are chatting now ends as "Revoked" on your side, as the CLI's `identity recheck` already said. It stayed "No longer shared" for good, because a withdrawn proof was never looked up for its revocation.
+- The steps to add Ghostly to an iPhone's Home Screen say where iOS 26 keeps Add to Home Screen: under More in the Share sheet.
+- Setting a lock screen password no longer marks its fields as a new account password, which made Safari on an iPhone offer "Use Strong Password?": a generated password you would have to type on every unlock.
+- A menu (a chat's or a group's ⋮, New ▾, Mute) gives the keyboard focus back to its button when it closes with Escape or a chosen row, and a dialog a row opened (the invite's QR code, for one) gives it back there too. It was lost to the top of the page.
+- A message you write while this device is offline now says "You are offline" and that it sends by itself when you are back online. It used to say it was waiting for your contact to be online, which blamed your contact.
+- A chat no longer stops preferring Iroh for an hour because this device was offline for a few minutes. Connection attempts made with no network no longer count as Iroh failures, and one still waiting when the network comes back is dropped so the chat connects again at once.
+- A second tab of the web app says "Ghostly is already open in another tab" (and, opened for a share, that the share went to the other tab) in the profile's language, not always in English.
+- On a phone, New and Join stay on the screen beside the logo in every language. In French on a 375px phone, Join went off the edge of the screen, and in Spanish and Italian on a 360px phone the buttons pressed against the logo. Their words now go wherever they do not fit, as on the narrowest phones.
+- On a wide screen, the Settings index marks the section you pick or open by its address, Data & storage and About included. It marked Network or Data & storage instead, since the page cannot scroll its last sections to the top.
+- On a wide screen, picking About or Data & storage in the Settings index right after opening Settings goes all the way there and marks it, even when the Network section above it appears a moment later.
+- Turning the lock screen on in Settings puts the cursor in New password, and Change password puts it in Current password, so you can type at once (on a phone the keyboard comes up). The form opened with nothing focused.
+- Settings → Audio & video opened by its address on a phone with no microphone or camera to choose says "No microphone or camera found", with why behind ⓘ. It showed an empty screen under its title.
+- Settings has its search at every width. Between a phone held upright and a window wide enough for the index beside the page (a phone on its side, a tablet held upright, a narrow window), it was one long page with no way to search it.
+- Picking "Password" in the Settings search opens the lock's password form, ready to type, so with no password set you can set one there. It opened Privacy & security, where nothing is called Password until one is set.
+- Settings search finds an option by the words people look for it by, in all eight languages: "dark" or "theme" finds Mode, "colour" finds Color, "password" finds the lock screen, "mentions" finds the chat sounds. It matched the options' labels only, so "dark" and "theme" found nothing.
+- On a phone, the Settings menu's Appearance line lists the mode and the language the way the app's language writes a list ("深色、中文" in Chinese, "داكن والعربية" in Arabic). It joined them with an English comma in every language.
+- Sizes in Settings (storage used), in backups and in a chat's held messages are now written in the app's language: "1,5 Mo" in French, "1,46 MB" in Portuguese. In Arabic the size reads number first, where it showed "KB 144".
+- On a phone on its side or a tablet with the keyboard up, the floating card that says why a password was refused no longer covers the field it is about or the error under it: where it would, it shows at the top instead. A card over the whole window also stands above the keyboard there, as it does on a phone held upright.
+
+**Wallets**
+
+- Restoring a backup that holds an Ark wallet works again. A wallet backup or profile backup made with this version was refused with "Unsupported Ark backup schema". Backups from earlier versions restore too, and the wallet brings its data up to date the first time it opens.
+- Paying an invoice from a chat, the wallet's Pay invoice and paying a Lightning address no longer let you approve more than the card says it holds. The review says so and Pay stays off, instead of the node or the mint refusing afterwards. A card that does not say what it holds works as before.
+- Paying a chat request over Lightning no longer lets you approve more than the card says it holds. The review says so and Approve stays off, instead of the node refusing afterwards. A card that does not say what it holds works as before.
+- A payment request in a chat that turns Paid no longer keeps the red error of an earlier attempt that failed.
+- Why a payment failed is said in the app's language: a Lightning node's or wallet's answer (no route, not enough outbound liquidity, the wallet refused it), an Ark, Bark, Spark, USDT, on-chain or Fedimint refusal, a Lightning address server's answer, and a chat payment refused or closed by the other side. A reason Ghostly does not know is still shown as it came.
+- On a phone with the keyboard up, the payment review in a chat now scrolls so Approve is in view after Send, instead of sitting below the fold.
+- A Cashu payment that comes back refused (a group request another member paid first) now says exactly how many sats came back and what the mint kept as its fee, instead of "The sats came back". The ⓘ says why the mint keeps a fee. These refusals are now also translated.
+- In the light theme, the yellow "Test money" tag (Wallets tabs, New wallet, a wallet's panel, reviews and history) is a darker yellow that reads at 4.6:1 or more. It was about 2:1 on white. Cards and the dark theme keep the bright yellow.
+- USDT no longer gives up on the first failed read from its Ethereum RPC. A read that fails once (a dropped request, a busy server, a block that moved on) is asked again a second later, so switching a Testnet USDT wallet to another network, restoring one, or making one with New works when the RPC hiccups once.
+- A wallet card that has the keyboard focus shows its ring in the light theme too. The ring was white, and all but vanished on a light page.
+- Why a wallet could not be made, why New does not offer a kind, and what an Ark, Bark, Spark, Bitcoin or Lightning card says while it connects or reads are said in the app's language. This includes the first-run setup's line on the Wallet page, which showed the engine's English, and a reason that lost its final period on the way (a Cashu mint that could not be reached).
+
+**Chat**
+
+- With no network (the web app opened from its cache, or the network gone mid-chat), a chat's and a group's header say Offline, as the banner does, instead of "Connection issue" in red with the relays' own errors in English.
+- A new chat that cannot connect directly shows "on the DHT" again on the inviter's side, not "connecting": the joiner's first offer counts as an attempt, so it waits before offering again.
+- Joining a chat goes live a little sooner: the app prepares its connection offer while it first looks for the person who invited you.
+- A file whose name is over 200 characters keeps its extension when the name is shortened, so "….pdf" is still saved as a PDF. Before, the end of the name was cut, extension and all.
+- A new chat goes live seconds sooner on networks where the STUN servers answer slowly or not at all: an offer waits for them 2 s at most, not 5 s.
+- Coming back to a chat whose contact has it in the background is live in about a second: over a relay first, then on a direct connection a moment later, with no wait for the contact to look.
+- A Desktop or headless app back after a while away is live with a contact whose chat is in the background in under a second over a direct transport, instead of about 8 seconds.
+- A message that repeats one word many times (such as "word word word …") no longer asks "Send a wallet seed?". Real seeds, including the ones made mostly of one word like the "abandon … about" test seed, are still asked about.
+- After your contact's app stopped without closing and came back on its own, choosing another transport in the chat moves it again. Before, every choice on either side waited and failed with "Your contact did not answer" until one of the apps restarted.
+- Choosing WebRTC again a few seconds after moving a chat to Iroh or HyperDHT connects in about 3 seconds. It took about 30 seconds, because the new connection waited until the old one had closed and then for the next retry.
+- On a phone, swiping the Tasks board to another column now selects that column's tab even when the page was opened before its cards had loaded. Before, the tab could stay on the column you left.
+- Messages that come while Ghostly is hidden (the Desktop window closed to the Dock or minimised, or a background browser tab) stay unread even when their chat is the one open, so the app icon's badge counts them. They were marked read as they came.
+- A reply to a voice message or a video, the reply bar while answering one, and the pinned bar of one say "Voice message" or "Video" in the app's language. Before, they showed it in English in every language.
+
+**Accessibility**
+
+- A chat's and a group's ⋮ open with Enter, Space or ↓ with the focus on their first row, and the arrow keys move between rows. Before, the focus stayed on ⋮.
+- Closing a chat's search (Escape or ✕) gives the focus back to ⋮, or to the message field after Ctrl/Cmd+F there. A group's Members and Leave windows give it back to what opened them. It was lost to the top of the page.
+- The chat list's search, the message field and a chat's search show a ring while they have the keyboard focus, 3:1 or more against the page in every colour theme, light and dark. Before, only the caret showed where the focus was. The ring on the Settings, Forward and emoji searches is darker in the classic light theme, where the green read at about 2.7:1.
+
+**Groups**
+
+- In a community, what someone wrote before they left or were removed still shows their name, instead of "Member" and a key. Their "joined" line names them too once the group has heard their name.
+- A group member whose direct connection to another member fails reaches it over Iroh or HyperDHT within seconds. Before, the other member's app could wait about 30 s for its failed attempt to run out.
+- Invited back into a private group you were removed from, the messages you kept name who wrote them while the invitation waits, instead of "Member" and a key. Once you accept, someone who left the group meanwhile is still named on what they wrote.
+- Closing a group's link (after making the group, or from Share) keeps the keyboard focus in the group: on what had it, else on Share. It was lost to the top of the page.
+- Closing New group with Cancel or Escape puts the keyboard focus back on New ▾. It was lost to the top of the page, so a keyboard or screen reader user had to start over from the first control.
+
+**Identities**
+
+- A contact's identity card that is no longer shared or was revoked no longer says "Check again looks for a revocation by its owner." on its back: such a card has no Check again button.
+
+**Calls**
+
+- The small call window keeps all its buttons round and inside it when Share screen is there too: in a narrow browser window, or after you pull the window in to its smallest, the five buttons were squeezed into ovals against both edges.
+
 ## 1.1.3
 
 Ghostly 1.1.3 makes adding a phone or another browser to your profile work again. Since 1.1.0, a profile that had been open for a minute was judged "in use" because of the empty wallets every new profile makes by itself, so the new device was refused. Messages, files and payments sent in the first seconds after the app opens also no longer fail with "You are offline".
