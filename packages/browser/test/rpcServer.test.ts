@@ -17,6 +17,7 @@ interface FakeNodeShape {
   state: { links: { id: string }[] };
   secret: string;
   setActiveLink: ReturnType<typeof vi.fn>;
+  appsCloseAll: ReturnType<typeof vi.fn>;
   shutdown: ReturnType<typeof vi.fn>;
 }
 
@@ -25,6 +26,7 @@ vi.mock("../src/engine/node", () => ({
     state = { links: [{ id: "a" }, { id: "b" }] };
     secret = "not a method";
     setActiveLink = vi.fn();
+    appsCloseAll = vi.fn();
     shutdown = vi.fn(async () => {});
     constructor(public events: FakeNodeShape["events"], public options: unknown) { fake.nodes.push(this as unknown as FakeNodeShape); }
     start() { return fake.start(); }
@@ -168,15 +170,17 @@ describe("EngineServer and its clients", () => {
     expect(broken).toBe(1);
   });
 
-  it("closes the open chat only when the last client leaves", async () => {
+  it("closes the open chat, and every open app, only when the last client leaves", async () => {
     const server = new EngineServer();
     const [a, b] = [sink(), sink()];
     server.attach(a);
     server.attach(b);
     server.detach(a);
     expect(fake.nodes[0].setActiveLink).not.toHaveBeenCalled();
+    expect(fake.nodes[0].appsCloseAll).not.toHaveBeenCalled();
     server.detach(b);
     expect(fake.nodes[0].setActiveLink).toHaveBeenCalledWith({ linkId: null });
+    expect(fake.nodes[0].appsCloseAll).toHaveBeenCalledTimes(1);
   });
 
   it("passes the host's options to the peer", () => {

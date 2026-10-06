@@ -1,7 +1,7 @@
 {
   "about": {
     "pins": "The chat app id and the paired-app frames of apps/1",
-    "wisp": "docs/wisps/1200-marketplace.md#in-a-chat-apps1",
+    "wisp": "WISP 1200, In a chat: apps/1",
     "test": "packages/core/test/pairedApps.test.ts (APPS_VECTORS_WRITE=1 writes it again)",
     "encodings": "keys z-base32; hmacKey hex; chat app ids base64url without padding; dataBytes is d as compact UTF-8 JSON"
   },
