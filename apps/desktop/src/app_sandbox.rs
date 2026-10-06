@@ -471,11 +471,14 @@ pub fn app_broker<R: Runtime>(
 }
 
 /// The content rule list of an app window on macOS: every load blocked but the runner's own scheme.
+#[cfg(any(target_os = "macos", test))]
 const RULES_ID: &str = "ghostly-app-sandbox-1";
+#[cfg(any(target_os = "macos", test))]
 const RULES: &str = r#"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^ghostly-app:"},"action":{"type":"ignore-previous-rules"}}]"#;
 
 /// The WebKit features an app window has off on macOS: `<link rel=preconnect>` (and in Early Hints), DNS
 /// prefetch, `<link rel=prefetch>`, and WebRTC itself, which also reaches frames the runner never ran in.
+#[cfg(any(target_os = "macos", test))]
 const OFF: &[&str] = &[
     "DNSPrefetchingEnabled",
     "LinkPreconnect",
@@ -569,6 +572,7 @@ mod webkit {
     }
 
     /// The keys of WebKit features whose name says preconnect, prefetch or WebRTC (the spike's list).
+    #[cfg(any(test, feature = "e2e-driver"))]
     pub fn candidates() -> Vec<String> {
         features()
             .into_iter()
@@ -610,7 +614,7 @@ mod webkit {
 }
 
 /// The WebKit features the spike looks at (macOS), for the test driver.
-#[cfg(feature = "e2e-driver")]
+#[cfg(any(test, feature = "e2e-driver"))]
 pub fn webkit_candidates() -> Vec<String> {
     #[cfg(target_os = "macos")]
     return webkit::candidates();
@@ -871,18 +875,22 @@ mod tests {
         assert!(!RULES_ID.is_empty());
     }
 
-    /// WebKit's switches are private: a WebKit that renamed one would leave it on. Each one an app window turns
-    /// off must exist in the WebKit on this Mac (an app window refuses to open otherwise).
-    #[cfg(target_os = "macos")]
+    /// WebKit's switches are private, so a WebKit that renamed one would leave it on: `webkit::configuration`
+    /// refuses to make an app window when one is missing. These are the keys WKWebView listed on macOS 15.6
+    /// (the test driver's `GET /app-webkit`); WebKit wants the main thread of a running app to list them, so
+    /// the macOS e2e is where a renamed one shows (an app window that does not open).
     #[test]
-    fn webkit_knows_every_switch_an_app_window_turns_off() {
-        let known: Vec<String> = webkit::features().into_iter().map(|(key, _)| key).collect();
-        for key in OFF {
-            assert!(
-                known.iter().any(|k| k == key),
-                "WebKit has no {key}: {known:?}"
-            );
-        }
+    fn an_app_window_turns_off_preconnect_prefetch_and_webrtc() {
+        assert_eq!(
+            OFF,
+            [
+                "DNSPrefetchingEnabled",
+                "LinkPreconnect",
+                "LinkPreconnectEarlyHintsEnabled",
+                "LinkPrefetchEnabled",
+                "PeerConnectionEnabled",
+            ]
+        );
     }
 
     #[test]
