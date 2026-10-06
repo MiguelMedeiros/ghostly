@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_STORE_LIMITS, appDigest, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, appDigest, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
   canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocations, readAppStore,
   toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
@@ -404,7 +404,7 @@ export class Apps {
 
   private async readStoreAt(url: string, heldKey?: string) {
     const [indexBytes, sigBytes] = await Promise.all([
-      this.host.fetch(url, { maxBytes: APP_STORE_LIMITS.indexBytes }),
+      this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
       this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
     ]);
     return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);

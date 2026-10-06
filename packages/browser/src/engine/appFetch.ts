@@ -11,6 +11,11 @@ import { isAppUrl } from "@ghostly/core";
 export const APP_FETCH_HOSTS = ["raw.githubusercontent.com", "cdn.jsdelivr.net"] as const;
 
 export const APP_FETCH_LIMITS = {
+  /**
+   * A store index as read (WISP 1200 § Stores, Privacy): 4 MiB in phase 1, under the format's 16 MiB. Counted on the body
+   * as it arrives, after the browser undid any compression, since a page never sees the compressed size.
+   */
+  storeIndexBytes: 4 * 1024 * 1024,
   /** A store's signature statement, `ghostly-store.sig` (canonical, at most 1 KiB). */
   sigBytes: 1024,
   /** `ghostly-revoke.json`: at most 4096 signed revocations. */
@@ -29,7 +34,8 @@ export type AppFetchErrorCode = "host" | "offline" | "status" | "too-large" | "n
 
 export class AppFetchError extends Error {
   constructor(readonly code: AppFetchErrorCode, message: string, readonly status?: number) {
-    super(message);
+    // Its code first, as every error of the apps calls (`<code>: words`).
+    super(`${code}: ${message}`);
     this.name = "AppFetchError";
   }
 }

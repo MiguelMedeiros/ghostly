@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APP_CHECK_TIMINGS } from "../src/engine/apps";
-import { APP_FETCH_HOSTS, AppFetchError, appPasteUrl, besideUrl, boundedAppFetch, isAppFetchUrl } from "../src/engine/appFetch";
+import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, boundedAppFetch, isAppFetchUrl } from "../src/engine/appFetch";
 import { DEFAULT_APP_STORES } from "../src/engine/appDefaults";
 import {
   BUNDLE_URL, FakeNet, NOW_S, PINNED_URL, SIG_URL, STORE_KEY, STORE_URL, apps, bundle, emptyProfile, keyOf, listing, signer, storeFiles,
@@ -218,6 +218,24 @@ describe("stores", () => {
     await expect(apps(net).addStore({ url: STORE_URL })).rejects.toThrow(/^expires-too-far/);
     await net.putStore(await storeFiles({ expires: NOW_S - 1 }));
     expect(await apps(net).addStore({ url: STORE_URL })).toMatchObject({ expired: true });
+  });
+
+  it("reads at most 4 MiB of an index and stops there (WISP 1200 § Stores, Privacy), though the format allows 16 MiB", async () => {
+    expect(APP_FETCH_LIMITS.storeIndexBytes).toBe(4 * 1024 * 1024);
+    let read = 0, cancelled = false;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === SIG_URL) return new Response("{}");
+      // An index that never ends, sent without a length: the cap holds on the bytes as they arrive.
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) { read += 256 * 1024; controller.enqueue(new Uint8Array(256 * 1024).fill(0x20)); },
+        cancel() { cancelled = true; },
+      }));
+    });
+    const store = apps(net, { fetch: boundedAppFetch({ fetcher: fetcher as unknown as typeof fetch }) });
+    await expect(store.addStore({ url: STORE_URL })).rejects.toThrow(/^too-large/);
+    expect(cancelled).toBe(true);
+    expect(read).toBeLessThanOrEqual(APP_FETCH_LIMITS.storeIndexBytes + 2 * 256 * 1024);
+    expect(await store.listStores()).toEqual([]);
   });
 
   it("a signature that does not verify is refused", async () => {
