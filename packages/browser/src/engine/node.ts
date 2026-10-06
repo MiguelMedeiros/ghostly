@@ -22,7 +22,8 @@ import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/provid
 import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
-import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
 import { IdentityProofs } from './identities';
 import { setOwnDidSource } from '../proofs/providers/did';
 import { ProfileDid } from './did';
@@ -289,6 +290,8 @@ interface LiveLink {
   carried?: CarriedTransport;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
+  /** The mini-apps this side has open in this chat (chat app id to version), for this run (`apps/1`, WISP 1200). */
+  appsOpen?: Map<string, string>;
 }
 
 /** What one peer has sent us, so it can neither fill the disk nor reuse an id. */
@@ -402,6 +405,11 @@ export interface NodeOptions {
   irohWeb?: boolean;
   /** Reactions on 1:1 chats (`react/1`, WISP 401 § Reactions). Default on; off only stands in for an older app in tests. */
   reactions?: boolean;
+  /**
+   * Mini-apps in 1:1 chats (`apps/1`, WISP 1200 § In a chat): offered on paired sessions, and the `app*` calls. Default:
+   * `APPS_ENABLED` (off until the feature ships); tests turn it on here.
+   */
+  apps?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -487,6 +495,8 @@ export interface NodeEvents {
   /** Only what changed in a chat's or group's history; without it, `onMessages` gets the whole history on each change. */
   onMessageChanges?(linkId: string, changes: MessageChanges): void;
   onCallSignal(linkId: string, signal: string): void;
+  /** A contact's mini-app frame in a 1:1 chat, already checked (`apps/1`, WISP 1200 § In a chat); never stored. */
+  onAppFrame?(linkId: string, event: AppFrameEvent): void;
   /**
    * The device state changed so that this engine may no longer run (WISP 06): another device took the turn. The state
    * is written; the pages show the standby screen and start again into the gate.
@@ -4088,6 +4098,62 @@ export class GhostlyNode implements EngineImplementation {
     return { error: null };
   }
 
+  /** Mini-apps are on in this build (`APPS_ENABLED`) or for this engine (`apps`). */
+  private get appsOn(): boolean { return this.options.apps ?? APPS_ENABLED; }
+
+  /** A paired 1:1 chat and the chat app id of `ref` in it, from the two pinned participation keys (WISP 1200 § In a chat). */
+  private appChat(linkId: string, ref: string): { live: LiveLink; app: string } {
+    if (!this.appsOn) throw new Error("Apps are unavailable in this release");
+    const live = typeof linkId === "string" ? this.links.get(linkId) : undefined;
+    if (!live || live.stored.group || !live.stored.profile) throw new Error("No such chat");
+    if (!isAppRef(ref)) throw new Error("Not an app reference");
+    const { participationSeed, pairedPeerKey } = live.stored;
+    if (!participationSeed || !pairedPeerKey) throw new Error("This chat is not paired yet");
+    return { live, app: chatAppId(identityFromSeedB64(participationSeed).publicKey, publicKeyFromZ32(pairedPeerKey), ref) };
+  }
+
+  /** The chat app id of an app in a paired chat: how the contact's frames name it. */
+  appId({ linkId, ref }: { linkId: string; ref: string }): { app: string } {
+    return { app: this.appChat(linkId, ref).app };
+  }
+
+  /**
+   * This side opened an app in a paired chat, or updated it: `open` goes to the contact now when the session is live,
+   * and again on every session that comes back while it stays open.
+   */
+  appOpen({ linkId, ref, version }: { linkId: string; ref: string; version: string }): { app: string } {
+    const { live, app } = this.appChat(linkId, ref);
+    if (!isAppVersion(version)) throw new Error("Not an app version");
+    const open = live.appsOpen ??= new Map();
+    if (live.link) live.link.openApp(app, version);
+    else open.set(app, version);
+    return { app };
+  }
+
+  /** This side closed an app in a paired chat: `close` goes now when the session is live. */
+  appClose({ linkId, ref }: { linkId: string; ref: string }): void {
+    const { live, app } = this.appChat(linkId, ref);
+    if (live.link) live.link.closeApp(app);
+    else live.appsOpen?.delete(app);
+  }
+
+  /** One data frame of an app open on both sides, on the live session only; nothing is kept to send later. */
+  appSend({ linkId, ref, data }: { linkId: string; ref: string; data: unknown }): { error: AppSendError | null } {
+    const { live, app } = this.appChat(linkId, ref);
+    if (!live.appsOpen?.has(app)) return { error: "not-open" };
+    return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
+  }
+
+  /** Every page went away: no app runs here any more, so each open one is closed (`close` goes where it can). */
+  appsCloseAll(): void {
+    for (const live of this.links.values()) {
+      for (const app of [...live.appsOpen?.keys() ?? []]) {
+        if (live.link) live.link.closeApp(app);
+        else live.appsOpen?.delete(app);
+      }
+    }
+  }
+
   /** Keeps a pin of a 1:1 chat when it is newer than the chat's; `out`: mine, to say until the contact confirms it. */
   private async keepLinkPin(linkId: string, pin: StoredPin, out?: WirePin): Promise<void> {
     const live = this.links.get(linkId);
@@ -6170,6 +6236,9 @@ export class GhostlyNode implements EngineImplementation {
       // 1:1 chats only: back after an absence over a relay at once, then to a direct path on the session (WISP 100).
       upgradeSupport: true,
       peerUpgrades: () => !!live.caps?.peer?.capabilities.includes(UPGRADE_CAPABILITY),
+      // 1:1 chats only, behind the apps flag: what this side has open outlives the link, so a restarted one says it again.
+      appsSupport: this.appsOn,
+      appsOpen: this.appsOn ? (live.appsOpen ??= new Map()) : undefined,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
@@ -6414,6 +6483,7 @@ export class GhostlyNode implements EngineImplementation {
         onPin: async pin => { await this.keepLinkPin(linkId, await this.pinCame(linkId, "peer", pin)); return true; },
         onPinReceipt: n => this.pinReceipt(linkId, n),
         onPinSupport: supported => { if (supported) this.flushPin(linkId); },
+        onAppFrame: this.appsOn ? event => this.events.onAppFrame?.(linkId, event) : undefined,
         // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
         onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
         onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),
