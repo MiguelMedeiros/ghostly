@@ -216,6 +216,18 @@ describe("the standby screen", () => {
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
   });
 
+  it("a device that released the profile and has not heard back: the step it waits at, and Use here all the same", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === DESKTOP, active: device.key === PHONE })) }));
+    fakeEngine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "switching", bytes: 0, total: 0 }) satisfies HandoffView);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "iPhone" }} />);
+    expect(await screen.findByTestId("handoff-progress")).toHaveAttribute("data-step", "switching");
+    const useHere = await screen.findByTestId("handoff-use-here");
+    expect(useHere).toHaveTextContent("Use here");
+    await user.click(useHere);
+    expect(screen.getByTestId("handoff-use-here-dialog")).toBeInTheDocument();
+  });
+
   it("a move whose copy stopped: the line read out at once, and Try again in place of Use here", async () => {
     fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP })) }));
     fakeEngine.on("deviceHandoffView", () => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "failed", bytes: 0, total: 0, failure: "stalled" }) satisfies HandoffView);

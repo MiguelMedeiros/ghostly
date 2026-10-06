@@ -820,6 +820,22 @@ describe("Try again on the active device after a move that stopped", () => {
     expect(w.giver.view()).toBeNull();
     expect(w.giverRecords.record.handoff).toBeUndefined();
   });
+
+  it("a standby that released and never heard `handoff-done` learns from a turn read that names the taker's record", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-done" ? null : frame);
+    await fullPull(w);
+    await settle();
+    expect(w.giver.view()?.step).toBe("switching");
+    // Not the taker, or not past the turn the handoff started at: nothing changes.
+    await w.giver.turnTaken(C, N + 1);
+    await w.giver.turnTaken(B, N);
+    expect(w.giver.view()?.step).toBe("switching");
+    await w.giver.turnTaken(B, N + 1);
+    expect(w.giver.view()).toBeNull();
+    expect(w.giverRecords.record.handoff).toBeUndefined();
+  });
 });
 
 describe("refusals before a byte is copied", () => {
