@@ -1,6 +1,6 @@
 {
   "name": "@ghostlytools/sdk",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "type": "module",
   "description": "Build a wallet source, an identity proof or a client for Ghostly without reading its internals: the adapter contracts, their fakes and contract test suites, and the plugin registry.",
   "license": "MIT",
