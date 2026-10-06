@@ -15,9 +15,12 @@ import { ghostly, home, localRelay, ok, Running } from "./support/cli";
  * Each daemon keeps a link trace (`GHOSTLY_LINK_TRACE`): a run over the bound prints the steps of the edges' way to
  * live, without which a CI failure said only how long it took.
  *
- * Each daemon refuses one in two answers to its offers (`GHOSTLY_TEST_REFUSE_DATA_ANSWERS`), as libdatachannel 0.24.5
+ * The joiner refuses one in two answers to its offers (`GHOSTLY_TEST_REFUSE_DATA_ANSWERS`), as libdatachannel 0.24.5
  * now and then does in its race: the dial after one goes at once. It waited for its backoff and its next look, and a
- * member let in was up with another member 72 s after its welcome (CI, 2026-10-06).
+ * member let in was up with another member 72 s after its welcome (CI, 2026-10-06). The joiner only: it offers on at
+ * most its two edges at once, so no edge has more refused than it offers again for at once (`ANSWER_REFUSED_REDIALS`).
+ * Every daemon refusing, the admin's and the first member's links before the welcome each signaled twice over the slow
+ * relays, and once on CI they were not up in 180 s.
  */
 const RELAY_MS = 2_500;
 let relays: { url: string; server: Server }[] = [];
@@ -29,7 +32,7 @@ async function until<T>(what: string, read: () => Promise<T>, done: (value: T) =
   const end = Date.now() + ms;
   let value = await read();
   while (!done(value)) {
-    if (Date.now() > end) throw new Error(`${what}: not done in ${ms / 1000} s; last ${JSON.stringify(value).slice(0, 800)}`);
+    if (Date.now() > end) throw new Error(`${what}: not done in ${ms / 1000} s; last ${JSON.stringify(value).slice(0, 800)}\n${steps(end - ms)}`);
     await new Promise((r) => setTimeout(r, every));
     value = await read();
   }
@@ -67,7 +70,7 @@ describe("a private group's edges signal through members", { timeout: 300_000 },
     for (const [dir, name] of [[admin, "Admin"], [member, "Member"], [joiner, "Joiner"]]) {
       ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((relay) => relay.url))));
       ok(await as(dir, "profile", "set", "--name", name));
-      const daemon = new Running(["--home", dir, "daemon"], { GHOSTLY_LINK_TRACE: join(dir, "link-trace.jsonl"), GHOSTLY_TEST_REFUSE_DATA_ANSWERS: "2" });
+      const daemon = new Running(["--home", dir, "daemon"], { GHOSTLY_LINK_TRACE: join(dir, "link-trace.jsonl"), ...(dir === joiner ? { GHOSTLY_TEST_REFUSE_DATA_ANSWERS: "2" } : {}) });
       running.push(daemon);
       await daemon.waitFor((l) => l.daemon === "ready");
     }
