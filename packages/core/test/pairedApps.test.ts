@@ -95,7 +95,7 @@ describe("app-chat vectors", () => {
     expect(new Set(file.ids.map(v => v.id)).size).toBe(3);
     for (const v of file.ids) expect(isChatAppId(v.id)).toBe(true);
     for (const v of file.valid) {
-      const { a, d } = v.frame as { a: string; d: unknown };
+      const { a, d } = v.frame as unknown as { a: string; d: unknown };
       const reads = "reads" in v ? v.reads : { a, d };
       expect(readAppFrame(v.frame), v.name).toEqual({ ok: true, frame: { t: APP_FRAME, ...reads } });
       if ("dataBytes" in v) expect(appDataBytes(d), v.name).toBe(v.dataBytes);

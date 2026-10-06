@@ -141,7 +141,8 @@ export function readAppFrame(frame: Record<string, unknown>): { ok: true; frame:
   const refuse = (refusal: AppFrameRefusal) => ({ ok: false as const, refusal });
   if (frame?.t !== APP_FRAME) return refuse("not-app");
   if (!isChatAppId(frame.a)) return refuse("bad-a");
-  const hasO = Object.hasOwn(frame, "o"), hasD = Object.hasOwn(frame, "d");
+  const own = (key: string) => Object.prototype.hasOwnProperty.call(frame, key);
+  const hasO = own("o"), hasD = own("d");
   if (hasO && hasD) return refuse("o-and-d");
   if (!hasO && !hasD) return refuse("no-o-or-d");
   if (hasD) return appDataBytes(frame.d) <= APP_DATA_MAX_BYTES ? { ok: true, frame: { t: APP_FRAME, a: frame.a, d: frame.d } } : refuse("too-large");
