@@ -3629,7 +3629,7 @@ export class GhostLink {
    * than after the wait between failed attempts. `network`: the device's network just came back.
    */
   wake(params: { network?: boolean } = {}): void {
-    if (params.network) this.networkBack();
+    if (params.network) { this.dht?.networkBack(); this.networkBack(); }
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     this.session.pollNow();
