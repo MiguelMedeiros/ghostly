@@ -212,7 +212,7 @@ try {
   });
 
   // The `ghostly-file` scheme (file_stream.rs): a stored video, read in ranges and played by the WebView.
-  await measure("files", "ghostly-file range request", async () => {
+  await measure("files", "ghostly-file", async () => {
     const video = readFileSync(resolve("e2e/support/video-fixtures/ghosts-h264.mp4"));
     const space = "android-probe";
     const id = "probe-video";
@@ -227,11 +227,17 @@ try {
     }, [space, id]);
     record("files", "file_bytes_append (JSON bytes over postMessage) + file_bytes_read", read.length === 16, read);
     const opened = await invoke("file_bytes_stream_open", { space, id, mime: "video/mp4" });
+    // From the page: the scheme is another origin (http://ghostly-file.localhost), so a fetch needs CORS, which a
+    // media element does not. Recorded, not required.
     const r = await page.evaluate(async (url) => {
-      const response = await fetch(url, { headers: { Range: "bytes=0-99" } });
-      return { url, status: response.status, contentRange: response.headers.get("content-range"), length: (await response.arrayBuffer()).byteLength };
+      try {
+        const response = await fetch(url, { headers: { Range: "bytes=0-99" } });
+        return { url, status: response.status, contentRange: response.headers.get("content-range"), length: (await response.arrayBuffer()).byteLength };
+      } catch (error) {
+        return { url, error: String(error) };
+      }
     }, opened.url);
-    record("files", "ghostly-file range request", r.status === 206 && r.length === 100, r);
+    record("files", "ghostly-file fetch with Range from the page", r.status === 206 ? true : null, r);
     const played = await page.evaluate(
       (url) =>
         new Promise((done) => {
@@ -254,6 +260,9 @@ try {
       opened.url,
     );
     record("files", "<video> from ghostly-file (metadata + seek)", played.what === "seeked", played);
+    // What the scheme answered the media player (MainActivity sets GHOSTLY_STREAM_LOG in a debug e2e start).
+    const served = adb("shell", "run-as", PKG, "cat", "files/ghostly-file.log").trim().split("\n").filter(Boolean);
+    record("files", "ghostly-file range requests (206)", served.some((l) => / -> 206 /.test(l)), served.slice(0, 6).join(" / ") || "no request reached the scheme");
   });
 
   // Timers with the screen off: an emulator's answer only. A phone (Doze, the maker's battery rules) can differ.

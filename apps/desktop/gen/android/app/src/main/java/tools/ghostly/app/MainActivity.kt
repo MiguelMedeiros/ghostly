@@ -14,6 +14,8 @@ class MainActivity : TauriActivity() {
     // set a process's environment, so the activity does. A release build ignores the extra.
     if (BuildConfig.DEBUG && intent?.getBooleanExtra("ghostly_e2e", false) == true) {
       Os.setenv("GHOSTLY_E2E", "1", true)
+      // Each `ghostly-file` request, its range and answer (file_stream.rs), for the smoke test to read back.
+      Os.setenv("GHOSTLY_STREAM_LOG", "${filesDir.path}/ghostly-file.log", true)
     }
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
