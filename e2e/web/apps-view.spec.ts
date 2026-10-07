@@ -38,7 +38,7 @@ async function install(peer: Peer, store: TestStore): Promise<void> {
 }
 
 /** Ana and Bob, named, paired, with Chess (or a full-screen app) installed on Ana's side. */
-async function setUp(peer: (name: string) => Promise<Peer>, options: { view?: AppViewMode; title?: string } = {}): Promise<[Peer, Peer]> {
+async function setUp(peer: (name: string) => Promise<Peer>, options: { view?: AppViewMode; title?: string; tagline?: string } = {}): Promise<[Peer, Peer]> {
   const store = await testStore(options);
   const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
   await serveStore(ana.context, store);
@@ -188,7 +188,7 @@ test("a chat app's Open on the Apps page asks which chat, and opens it there, ne
 });
 
 test("a full-screen app opens alone from the Apps page: modal, Close has the focus, Escape closes it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
-  const store = await testStore({ view: "full", title: "Browser" });
+  const store = await testStore({ view: "full", title: "Browser", tagline: "Look up Pkarr records" });
   const ana = await peer("ana");
   await serveStore(ana.context, store);
   await install(ana, store);
@@ -211,7 +211,7 @@ test("a full-screen app opens alone from the Apps page: modal, Close has the foc
 });
 
 test("a full-screen app opened from a chat covers the whole chat on a wide screen, with Back to it, never beside it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
-  const [ana] = await setUp(peer, { view: "full", title: "Browser" });
+  const [ana] = await setUp(peer, { view: "full", title: "Browser", tagline: "Look up Pkarr records" });
   await ana.page.setViewportSize({ width: 1280, height: 800 });
   await openChess(ana);
 
@@ -255,7 +255,7 @@ test("a full-screen app opened from a chat covers the whole chat on a wide scree
 });
 
 test("a full-screen app opened from a chat on a phone covers the screen, with Back to the chat", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
-  const [ana] = await setUp(peer, { view: "full", title: "Browser" });
+  const [ana] = await setUp(peer, { view: "full", title: "Browser", tagline: "Look up Pkarr records" });
   await ana.page.setViewportSize({ width: 375, height: 812 });
   await openChess(ana);
 
