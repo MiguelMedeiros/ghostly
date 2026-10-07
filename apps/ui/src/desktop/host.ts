@@ -34,6 +34,7 @@ import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appComman
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
 import { setAppBadgeTarget } from "../lib/appBadge";
+import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
 import { dockBadge } from "./dockBadge";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
@@ -230,6 +231,15 @@ export function macPeerBudget(agent = typeof navigator === "undefined" ? "" : na
 }
 
 /**
+ * How the sounds let go of the audio output between sounds (apps/ui/src/lib/sounds.ts). WebKitGTK (Linux) holds the
+ * page for seconds inside an `AudioContext.resume()` that follows a `suspend()`, so there the context is closed and a
+ * new one made for the next sound. WKWebView (macOS) and WebView2 (Windows) resume at once and keep one.
+ */
+export function soundsRelease(agent = typeof navigator === "undefined" ? "" : navigator.userAgent): SoundsRelease {
+  return /Linux/.test(agent) && !/Android/.test(agent) ? "close" : "suspend";
+}
+
+/**
  * New Chat and Settings from outside the page. On a Mac they are the app menu's items (Cmd+N, Cmd+,), which Rust
  * sends as `app-command` (apps/desktop/src/app_window.rs). Linux and Windows have no menu bar: there the page takes
  * Ctrl+N and Ctrl+, itself. The Mac leaves the keys to the menu, so a press runs once.
@@ -270,6 +280,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
   listenForAppCommands();
+  setSoundsRelease(soundsRelease());
   // A new profile asks for a name; never under an e2e suite, which runs no automated browser here (desktopUnderTest).
   setNameStepUnderTest(desktopUnderTest);
   // Files sent and received are real files in the app's data folder, written and read through Rust.
