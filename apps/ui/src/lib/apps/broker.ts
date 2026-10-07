@@ -231,6 +231,16 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
   };
 }
 
+/**
+ * The runner an app runs in, from what the person granted (`launch.permissions`, the engine's record), never from what
+ * the app says: the network runner only for `internet`. Throws where this client has no network runner.
+ */
+export function runnerFor(host: AppsPlatform, launch: Pick<AppLaunch, "permissions">): string {
+  if (!launch.permissions.includes("internet")) return host.runnerUrl;
+  if (!host.netRunnerUrl) throw new Error("Apps with internet access cannot run in this app");
+  return host.netRunnerUrl;
+}
+
 export interface RunningApp {
   readonly frame: HTMLIFrameElement;
   readonly phase: AppPhase;
@@ -249,6 +259,7 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
   onStop?: (reason: AppStopReason) => void;
   startTimeoutMs?: number;
 }): RunningApp {
+  const runner = runnerFor(host, launch);
   const frame = document.createElement("iframe");
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("referrerpolicy", "no-referrer");
@@ -284,7 +295,7 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
   }
 
   frame.addEventListener("load", loaded);
-  frame.src = host.runnerUrl;
+  frame.src = runner;
   container.appendChild(frame);
   return {
     frame,

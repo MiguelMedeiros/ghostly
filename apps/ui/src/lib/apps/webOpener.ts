@@ -3,7 +3,7 @@
  * then the app full screen in its sandboxed frame, with the client's own bar above it (the app's name and Close),
  * outside the frame. The Apps page and the chat card (the next step) may give it a place of their own instead.
  */
-import { startApp, type AppStopReason } from "./broker";
+import { runnerFor, startApp, type AppStopReason } from "./broker";
 import { runnerAvailable } from "./runnerCheck";
 import type { AppOpener } from "./open";
 import type { AppsPlatform } from "../platform";
@@ -21,8 +21,10 @@ export function webOpener({ apps, closeLabel, nameIn, onStop }: WebOpenerOptions
   return async (ref, linkId) => {
     const host = apps();
     if (!host) throw new Error("Apps cannot run in this app");
-    if (!(await runnerAvailable(host.runnerUrl))) throw new Error("This server does not send the policy apps run under");
     const entry = await host.entry(ref);
+    // The runner from what the person granted; its server must send that runner's policy.
+    const internet = entry.permissions.includes("internet");
+    if (!(await runnerAvailable(runnerFor(host, entry), fetch, internet))) throw new Error("This server does not send the policy apps run under");
 
     const overlay = document.createElement("div");
     overlay.setAttribute("role", "dialog");

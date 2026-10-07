@@ -16,9 +16,10 @@ engine.onAppFrame((linkId, frame) => {
 });
 
 /** The mini-app broker's way to the engine (WISP 1200), for a host that frames apps in its runner at `runnerUrl`. */
-export function engineApps(runnerUrl: string): AppsPlatform {
+export function engineApps(runnerUrl: string, netRunnerUrl?: string): AppsPlatform {
   return {
     runnerUrl,
+    ...(netRunnerUrl ? { netRunnerUrl } : {}),
     entry: (ref, runAnyway) => engine.call("appEntry", { ref, ...(runAnyway ? { runAnyway } : {}) }),
     file: (ref, path) => engine.call("appFile", { ref, path }),
     storage: {

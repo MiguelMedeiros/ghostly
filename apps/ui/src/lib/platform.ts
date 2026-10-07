@@ -411,6 +411,11 @@ export interface WalletPlatform {
 export interface AppsPlatform {
   /** The runner page apps are framed in, served with the runner's policy as a header (`/app-frame.html` on the web). */
   runnerUrl: string;
+  /**
+   * The runner for an app the person granted `internet`: the same page under a policy that allows HTTPS and WSS
+   * (`/app-frame-net.html` on the web). Absent where this client cannot give an app the internet: such an app does not run.
+   */
+  netRunnerUrl?: string;
   /** The entry of an installed app, checked again: refused when revoked, or removed unless `runAnyway`. */
   entry(ref: string, runAnyway?: boolean): Promise<AppEntry>;
   /** One file of an installed app's bundle. */

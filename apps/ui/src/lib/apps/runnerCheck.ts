@@ -14,28 +14,43 @@ function directives(policy: string): Map<string, string[]> {
   return out;
 }
 
-/** Whether a policy sandboxes the runner as the WISP asks: scripts only, an opaque origin, no network, no frames. */
-export function isRunnerPolicy(policy: string): boolean {
+/**
+ * Whether a policy sandboxes the runner as the WISP asks: scripts only, an opaque origin, no frames, and no network,
+ * or (`internet`, the network runner) HTTPS and WSS only, for fetches, images, media and fonts.
+ */
+export function isRunnerPolicy(policy: string, internet = false): boolean {
   const d = directives(policy);
   const only = (name: string, ...sources: string[]) => {
     const got = d.get(name);
     return !!got && got.length === sources.length && sources.every((s) => got.includes(s));
   };
-  return only("sandbox", "allow-scripts") && only("default-src", "'none'") && only("connect-src", "'none'") && only("frame-src", "'none'")
-    && only("worker-src", "'none'") && only("form-action", "'none'") && only("frame-ancestors", "'self'");
+  const network = internet
+    ? only("connect-src", "https:", "wss:") && only("img-src", "data:", "blob:", "https:") && only("media-src", "data:", "blob:", "https:") && only("font-src", "data:", "https:")
+    : only("connect-src", "'none'");
+  return network && only("sandbox", "allow-scripts") && only("default-src", "'none'") && only("frame-src", "'none'")
+    && only("worker-src", "'none'") && only("form-action", "'none'") && only("frame-ancestors", "'self'")
+    && only("script-src", "'unsafe-inline'", "'wasm-unsafe-eval'");
 }
 
-let checked: Promise<boolean> | null = null;
+const checked = new Map<string, Promise<boolean>>();
 
-/** Whether the runner at `url` comes with its policy as a header. Asked once per page; false when it cannot be read. */
-export function runnerAvailable(url: string, fetcher: typeof fetch = fetch): Promise<boolean> {
-  checked ??= fetcher(url, { cache: "no-store", credentials: "omit", redirect: "error" })
-    .then((response) => response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? ""))
-    .catch(() => false);
-  return checked;
+/**
+ * Whether the runner at `url` comes with its policy as a header (`internet`: the network runner's). Asked once per
+ * page and runner; false when it cannot be read.
+ */
+export function runnerAvailable(url: string, fetcher: typeof fetch = fetch, internet = false): Promise<boolean> {
+  const key = `${internet ? "net" : "plain"} ${url}`;
+  let answer = checked.get(key);
+  if (!answer) {
+    answer = fetcher(url, { cache: "no-store", credentials: "omit", redirect: "error" })
+      .then((response) => response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? "", internet))
+      .catch(() => false);
+    checked.set(key, answer);
+  }
+  return answer;
 }
 
 /** For tests: ask again. */
 export function forgetRunnerCheck(): void {
-  checked = null;
+  checked.clear();
 }

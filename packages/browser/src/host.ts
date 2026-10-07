@@ -40,6 +40,8 @@ export interface BrowserHost {
    * out where it runs none (the extension, until it gets its own runner).
    */
   appRunner?: string;
+  /** The runner for apps granted `internet` (WISP 1200 · Permissions), under a policy that allows HTTPS and WSS. */
+  appNetRunner?: string;
   features: {
     /** Can this host reach web apps on the user's machine? A web page only can if they allow it with CORS. */
     shareLocalServices: boolean;

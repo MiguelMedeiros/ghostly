@@ -31,7 +31,7 @@ export interface MemoryHost extends AppsPlatform {
 /** The chat app id this host gives an app in a chat: not the real derivation, just one per chat and app. */
 export const memoryAppId = (linkId: string, ref: string) => btoa(`${linkId}|${ref}`).replace(/[^A-Za-z0-9]/g, "").padEnd(22, "A").slice(0, 22);
 
-export function memoryHost(runnerUrl = "/app-frame.html"): MemoryHost {
+export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string | null = "/app-frame-net.html"): MemoryHost {
   const calls: MemoryHostCall[] = [];
   const files = new Map<string, Map<string, Uint8Array>>();
   const stored = new Map<string, Map<string, MiniAppJson>>();
@@ -46,6 +46,7 @@ export function memoryHost(runnerUrl = "/app-frame.html"): MemoryHost {
   };
   const host: MemoryHost = {
     runnerUrl,
+    ...(netRunnerUrl ? { netRunnerUrl } : {}),
     calls,
     files,
     stored,

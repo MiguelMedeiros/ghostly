@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "vite";
 import { expect, test, type Page } from "@playwright/test";
-import { ESCAPES, RTC_PROBES, appEntry, hitTags, startListeners, type Listeners, type ProbeTargets } from "../support/appsSandbox";
+import { ESCAPES, PRECONNECT_PROBES, RTC_PROBES, appEntry, hitTags, startListeners, type Listeners, type ProbeTargets } from "../support/appsSandbox";
 import { RUNNER_CSP } from "../../apps/web/runnerPolicy";
 
 /**
  * The security floor of mini-apps on the web (WISP 1200 § Before phase 1 ships): a malicious app in the runner
  * (apps/web/public/app-frame.html) and the broker (apps/ui/src/lib/apps/broker.ts) tries every way out it knows, and
- * listeners in this process count what reaches them: an HTTP listener, a TCP one for preconnect, and a STUN (UDP) and
+ * listeners in this process count what reaches them: an HTTP listener, a TCP one per preconnect way, and a STUN (UDP) and
  * TURN (TCP) listener per WebRTC way. The same app with no runner around it is the control, so a 0 here means
  * something.
  *
@@ -30,7 +30,7 @@ test.beforeAll(async () => { listeners = await startListeners(); });
 test.afterAll(async () => { await listeners?.close(); });
 
 interface Hook {
-  open(launch: { ref: string; version: string; title: string; permissions: string[]; entry: string; chat?: { linkId: string } | null }): number;
+  open(launch: { ref: string; version: string; title: string; permissions: string[]; entry: string; chat?: { linkId: string } | null; unguarded?: boolean }): number;
   status(handle: number): { phase: string; stopped: string | null };
   stored(ref: string, scope: string): Record<string, unknown>;
   calls(): { op: string; ref: string; scope?: string; key?: string }[];
@@ -55,8 +55,8 @@ async function appPage(page: Page): Promise<void> {
   });
 }
 
-async function open(page: Page, ref: string, entry: string, extra: { permissions?: string[]; chat?: { linkId: string } } = {}): Promise<number> {
-  return page.evaluate(({ ref, entry, extra }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.open({ ref, version: "1.0.0", title: ref, permissions: extra.permissions ?? [], entry, chat: extra.chat ?? null }), { ref, entry, extra });
+async function open(page: Page, ref: string, entry: string, extra: { permissions?: string[]; chat?: { linkId: string }; unguarded?: boolean } = {}): Promise<number> {
+  return page.evaluate(({ ref, entry, extra }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.open({ ref, version: "1.0.0", title: ref, permissions: extra.permissions ?? [], entry, chat: extra.chat ?? null, unguarded: extra.unguarded }), { ref, entry, extra });
 }
 
 const stored = (page: Page, ref: string, scope = "alone") => page.evaluate(({ ref, scope }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.stored(ref, scope), { ref, scope });
@@ -100,7 +100,7 @@ test("a malicious app reaches nothing: no request, no WebRTC from any frame it m
   testInfo.annotations.push({ type: `runner hits (${browserName})`, description: JSON.stringify(table(listeners.hits)) });
   testInfo.annotations.push({ type: `readings (${browserName})`, description: JSON.stringify(report.readings) });
 
-  // Nothing reached any listener: every HTTP way, preconnect, and WebRTC in the runner and in every frame.
+  // Nothing reached any listener: every HTTP way, every preconnect way, and WebRTC in the runner and in every frame.
   expect(table(listeners.hits)).toEqual({});
 
   const r = report.readings;
@@ -135,6 +135,32 @@ test("a malicious app reaches nothing: no request, no WebRTC from any frame it m
   const heard = await page.evaluate(() => (window as unknown as { __heard: { channel?: string; origin?: string }[] }).__heard);
   expect(heard.filter((h) => h.channel)).toEqual([]);
   expect(heard.every((h) => h.origin === "null")).toBe(true);
+});
+
+test("the nonce lock alone (the runner without its hint guard): no frame the app makes reaches WebRTC; in WebKit preconnect still connects", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page, browserName }, testInfo) => {
+  // The hint guard keeps the app's frames out before the lock is reached. The e2e build also serves the runner
+  // without it, so this measures the lock (and what is left without the guard) on its own.
+  await appPage(page);
+  listeners.reset();
+  const ref = "evilpublisherkey/lock-alone";
+  await open(page, ref, appEntry("net", { ...listeners.targets, victim: VICTIM }), { unguarded: true });
+  await expect.poll(() => stored(page, ref), { timeout: 30_000 }).toHaveProperty("report");
+  await page.waitForTimeout(4_000);
+  const report = (await stored(page, ref)).report as { readings: Record<string, unknown> };
+  testInfo.annotations.push({ type: `lock alone hits (${browserName})`, description: JSON.stringify(table(listeners.hits)) });
+  testInfo.annotations.push({ type: `lock alone readings (${browserName})`, description: JSON.stringify(report.readings) });
+  const preconnect = new Set<string>(PRECONNECT_PROBES);
+  // Every frame kind was made (the guard is off), and none ran a script: 0 WebRTC hits, 0 HTTP hits, no nonce.
+  expect(table(new Map([...listeners.hits].filter(([tag]) => !preconnect.has(tag))))).toEqual({});
+  expect(report.readings.found).toEqual([]);
+  expect(report.readings.guesses).toBe(0);
+  expect(report.readings.blankWrite).toBe("no access");
+  // What the guard is for: WebKit, and only WebKit, connects for <link rel=preconnect> under every policy.
+  const preconnected = hitTags(listeners.hits).filter((tag) => preconnect.has(tag));
+  if (browserName === "webkit") expect(preconnected.length).toBeGreaterThan(0);
+  else expect(preconnected).toEqual([]);
 });
 
 test("ways out that take the page with them reach nothing, and a load the broker did not expect tears the app down", {
@@ -235,4 +261,41 @@ test("Chess, as it is built, runs under the runner's lock", {
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
+});
+
+test.describe("an app granted internet", () => {
+  // The HTTPS listener has a throwaway certificate.
+  test.use({ ignoreHTTPSErrors: true });
+
+  test("runs in the network runner: HTTPS and WSS go out; plain HTTP, remote script, frames, forms and WebRTC do not", {
+    tag: ["@feature:apps.web-sandbox"],
+  }, async ({ page, browserName }, testInfo) => {
+    await appPage(page);
+    listeners.reset();
+    const ref = "netpublisherkey/weather";
+    await open(page, ref, appEntry("internet", listeners.targets), { permissions: ["internet"] });
+    await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveAttribute("src", "/app-frame-net.html");
+    await expect.poll(() => stored(page, ref), { timeout: 30_000 }).toHaveProperty("report");
+    await page.waitForTimeout(1_500);
+    const report = (await stored(page, ref)).report as Record<string, string>;
+    testInfo.annotations.push({ type: `internet app (${browserName})`, description: JSON.stringify({ report, hits: table(listeners.hits) }) });
+    expect(report.fetch).toBe("x");
+    expect(report.http).toMatch(/^refused/);
+    expect(report.rtc).toBe("none");
+    expect(hitTags(listeners.hits)).toEqual(["net-fetch", "net-img", "net-wss"]);
+  });
+
+  test("an app not granted it, in the same browser, reaches the HTTPS listener no more than any other", {
+    tag: ["@feature:apps.web-sandbox"],
+  }, async ({ page }) => {
+    await appPage(page);
+    listeners.reset();
+    const ref = "netpublisherkey/no-grant";
+    await open(page, ref, appEntry("internet", listeners.targets), { permissions: [] });
+    await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveAttribute("src", "/app-frame.html");
+    await expect.poll(() => stored(page, ref), { timeout: 30_000 }).toHaveProperty("report");
+    await page.waitForTimeout(1_500);
+    expect((await stored(page, ref)).report).toMatchObject({ fetch: expect.stringMatching(/^refused/), rtc: "none" });
+    expect(table(listeners.hits)).toEqual({});
+  });
 });

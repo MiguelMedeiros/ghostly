@@ -55,9 +55,10 @@ describe("what goes to the network untouched, and is never stored", () => {
 
   // covers: apps.web-sandbox
   it("the mini-app runner, always from the server with its sandbox header, even when a build put it in the cache", () => {
-    const precached = new Set([...PRECACHED, "/app-frame.html"]);
-    for (const mode of [undefined, "navigate"]) expect(classify({ method: "GET", url: ORIGIN + "/app-frame.html", mode }, ORIGIN, precached)).toBe("pass");
-    expect(precacheList(["index.html", "app-frame.html", "assets/main-abc.js"])).toEqual(["/", "/assets/main-abc.js"]);
+    const runners = ["/app-frame.html", "/app-frame-net.html", "/app-frame-unguarded.html"];
+    const precached = new Set([...PRECACHED, ...runners]);
+    for (const runner of runners) for (const mode of [undefined, "navigate"]) expect(classify({ method: "GET", url: ORIGIN + runner, mode }, ORIGIN, precached), runner).toBe("pass");
+    expect(precacheList(["index.html", ...runners.map((r) => r.slice(1)), "assets/main-abc.js"])).toEqual(["/", "/assets/main-abc.js"]);
   });
 
   it("anything but GET, except the share target's POST", () => {

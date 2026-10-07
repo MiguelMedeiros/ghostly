@@ -2,12 +2,17 @@
  * The malicious mini-app of e2e/web/apps-sandbox.spec.ts (WISP 1200 § Before phase 1 ships): listeners in the test
  * process that count every way a frame could reach them, and apps that try each of those ways.
  *
- * Each way has a tag. HTTP ways ask `/<tag>` of one HTTP listener; `<link rel=preconnect>` dials a TCP listener of its
+ * Each way has a tag. HTTP ways ask `/<tag>` of one HTTP listener; each `<link rel=preconnect>` way dials a TCP listener of its
  * own; every WebRTC way has its own STUN (UDP) and TURN (TCP) listener, so a hit names the way that got out.
  */
+import { execFileSync } from "node:child_process";
 import dgram from "node:dgram";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /** Ways out over HTTP: the probe asks `/<tag>`. */
 export const HTTP_PROBES = [
@@ -25,6 +30,11 @@ export const RTC_PROBES = [
   "re-policy",
 ] as const;
 
+/** `<link rel=preconnect>`, which no policy governs in WebKit: from the entry's markup, from script, in a frame. */
+export const PRECONNECT_PROBES = [
+  "preconnect-static", "preconnect-shadow", "preconnect-markup", "preconnect-element", "preconnect-adjacent", "preconnect-srcdoc",
+] as const;
+
 /** Ways out that take the app's page away, or try to: each in an app of its own. */
 export const ESCAPES = [
   "nav-self", "nav-meta", "nav-link", "nav-form", "nav-form-blank", "nav-top", "nav-open", "nav-link-blank", "nav-ping",
@@ -36,8 +46,10 @@ export type Escape = (typeof ESCAPES)[number];
 export interface ProbeTargets {
   /** The HTTP listener, `http://127.0.0.1:<port>`. */
   http: string;
-  /** The preconnect listener. */
-  preconnect: string;
+  /** A preconnect listener per way. */
+  preconnect: Record<string, string>;
+  /** An HTTPS listener (a throwaway certificate: the context ignores HTTPS errors), `https://127.0.0.1:<port>`. */
+  https: string;
   /** STUN and TURN ports per WebRTC probe. */
   rtc: Record<string, { stun: number; turn: number }>;
   host: string;
@@ -45,7 +57,7 @@ export interface ProbeTargets {
 
 export interface Listeners {
   targets: ProbeTargets;
-  /** Hits per tag (`/<tag>` for HTTP, `<tag>:stun` and `<tag>:turn` for WebRTC, `preconnect`). */
+  /** Hits per tag (`/<tag>` for HTTP, `<tag>:stun` and `<tag>:turn` for WebRTC, the preconnect way's tag). */
   hits: Map<string, number>;
   reset(): void;
   /** Serves `html` at `<http>/__control`. */
@@ -75,8 +87,21 @@ export async function startListeners(): Promise<Listeners> {
   });
   web.on("upgrade", (request, socket) => { hit(new URL(request.url ?? "/", "http://x").pathname.split("/")[1] || "/"); socket.destroy(); });
   const webPort = await listen(web);
-  const preconnect = net.createServer((socket) => { hit("preconnect"); socket.destroy(); });
-  const preconnectPort = await listen(preconnect);
+  const preconnect: Record<string, string> = {};
+  for (const tag of PRECONNECT_PROBES) preconnect[tag] = `http://${host}:${await listen(net.createServer((socket) => { hit(tag); socket.on("error", () => {}); socket.destroy(); }))}`;
+
+  // HTTPS, for apps granted `internet` (and to show the others reach it no more than plain HTTP).
+  const work = mkdtempSync(join(tmpdir(), "ghostly-apps-tls-"));
+  execFileSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", "1",
+    "-subj", `/CN=${host}`, "-addext", `subjectAltName=IP:${host}`, "-keyout", join(work, "key.pem"), "-out", join(work, "cert.pem")], { stdio: "ignore" });
+  const tls = https.createServer({ key: readFileSync(join(work, "key.pem")), cert: readFileSync(join(work, "cert.pem")) }, (request, response) => {
+    hit(new URL(request.url ?? "/", "https://x").pathname.split("/")[1] || "/");
+    response.setHeader("access-control-allow-origin", "*");
+    response.end("x");
+  });
+  rmSync(work, { recursive: true, force: true });
+  tls.on("upgrade", (request, socket) => { hit(new URL(request.url ?? "/", "https://x").pathname.split("/")[1] || "/"); socket.destroy(); });
+  const tlsPort = await listen(tls);
 
   const rtc: ProbeTargets["rtc"] = {};
   for (const tag of RTC_PROBES) {
@@ -88,7 +113,7 @@ export async function startListeners(): Promise<Listeners> {
     rtc[tag] = { stun: udp.address().port, turn };
   }
   return {
-    targets: { http: `http://${host}:${webPort}`, preconnect: `http://${host}:${preconnectPort}`, rtc, host },
+    targets: { http: `http://${host}:${webPort}`, preconnect, https: `https://${host}:${tlsPort}`, rtc, host },
     hits,
     reset: () => hits.clear(),
     setControl: (html) => { control = html; },
@@ -146,13 +171,19 @@ function netProbes(P: any) {
   // (b) Every way to the network that keeps the page.
   attempt("fetch", () => { fetch(url("fetch"), { mode: "no-cors" }).catch(() => {}); });
   attempt("fetch-keepalive", () => { fetch(url("fetch-keepalive"), { mode: "no-cors", keepalive: true, method: "POST", body: "x" }).catch(() => {}); });
+  attempt("https-fetch", () => { fetch(P.https + "/https-fetch", { mode: "no-cors" }).catch(() => {}); });
+  attempt("https-img", () => { new Image().src = P.https + "/https-img"; });
+  attempt("wss", () => { new WebSocket(P.https.replace("https:", "wss:") + "/wss"); });
   attempt("xhr", () => { const x = new XMLHttpRequest(); x.open("GET", url("xhr")); x.send(); });
   attempt("img", () => { new Image().src = url("img"); });
   add(`<img srcset="${url("img-srcset")} 1x"><picture><source srcset="${url("picture-source")}"><img></picture><video poster="${url("video-poster")}"></video>`);
   add(`<style>body{background:url(${url("css-background")})}</style><style>@import url(${url("css-import")});</style><style>html{background-image:image-set("${url("css-image-set")}" 1x)}</style><div style="background:url(${url("style-attribute")})">x</div>`);
   add(`<style>@font-face{font-family:probe;src:url(${url("font")})}</style><span style="font-family:probe">x</span>`);
   add(`<link rel="stylesheet" href="${url("link-stylesheet")}"><link rel="prefetch" href="${url("link-prefetch")}"><link rel="preload" as="image" href="${url("link-preload")}"><link rel="modulepreload" href="${url("link-modulepreload")}"><link rel="icon" href="${url("link-icon")}"><link rel="prerender" href="${url("link-prerender")}">`);
-  add(`<link rel="preconnect" href="${P.preconnect}"><link rel="dns-prefetch" href="${P.preconnect}">`);
+  add(`<link rel="preconnect" href="${P.preconnect["preconnect-markup"]}"><link rel="dns-prefetch" href="${P.preconnect["preconnect-markup"]}">`);
+  attempt("preconnect-element", () => { const l = document.createElement("link"); l.rel = "preconnect"; l.href = P.preconnect["preconnect-element"]; document.head.appendChild(l); });
+  attempt("preconnect-adjacent", () => document.body.insertAdjacentHTML("beforeend", `<link rel="preconnect" href="${P.preconnect["preconnect-adjacent"]}">`));
+  frame((f) => { f.srcdoc = `<link rel="preconnect" href="${P.preconnect["preconnect-srcdoc"]}">`; });
   attempt("speculation-rules", () => { const s = document.createElement("script"); s.type = "speculationrules"; s.textContent = JSON.stringify({ prefetch: [{ source: "list", urls: [url("speculation-rules")] }] }); document.head.appendChild(s); });
   attempt("script-src", () => { const s = document.createElement("script"); s.src = url("script-src"); document.head.appendChild(s); });
   attempt("import", () => { (0, eval)("1"); });
@@ -221,10 +252,30 @@ function escapeProbe(P: any) {
     "nav-link-blank": () => { (add(`<a target="_blank" href="${url("nav-link-blank")}">x</a>`).querySelector("a") as HTMLAnchorElement).click(); },
     "nav-ping": () => { (add(`<a ping="${url("nav-ping")}" href="${url("nav-ping-href")}">x</a>`).querySelector("a") as HTMLAnchorElement).click(); },
     "nav-reload": () => { location.reload(); },
-    "nav-document-open": () => { document.open(); document.write("<iframe srcdoc=\"<p>replaced</p>\"></iframe>"); document.close(); },
+    // document.write is refused to apps; open and close alone are a new document, and a load.
+    "nav-document-open": () => { document.open(); try { document.write("<iframe srcdoc=\"<p>replaced</p>\"></iframe>"); } catch (e) { /* refused */ } document.close(); },
     "nav-frame-top": () => { const f = document.createElement("iframe"); f.srcdoc = "<script>top.location.href='" + url("nav-frame-top") + "'<" + "/script>"; document.body.appendChild(f); },
   };
   G.storage.set("started", true).then(() => setTimeout(go[P.escape]!, 100));
+}
+
+/** An app granted `internet`: HTTPS and WSS go out; plain HTTP, remote script, frames and WebRTC do not. */
+function internetApp(P: any) {
+  const G: any = (window as any).ghostly;
+  const add = (html: string) => { const d = document.createElement("div"); d.innerHTML = html; document.body.appendChild(d); };
+  const report: any = {};
+  (async () => {
+    try { report.fetch = (await (await fetch(P.https + "/net-fetch")).text()); } catch (e: any) { report.fetch = "refused: " + e.name; }
+    try { await fetch(P.http + "/net-http", { mode: "no-cors" }); report.http = "fetched"; } catch (e: any) { report.http = "refused: " + e.name; }
+    new Image().src = P.https + "/net-img";
+    try { new WebSocket(P.https.replace("https:", "wss:") + "/net-wss"); } catch (e: any) { report.wss = "threw " + e.name; }
+    add(`<img src="${P.http}/net-http-img"><iframe src="${P.https}/net-frame"></iframe>`);
+    try { const s = document.createElement("script"); s.src = P.https + "/net-script"; document.head.appendChild(s); } catch (e) { /* refused */ }
+    try { const f = document.createElement("form"); f.method = "post"; f.action = P.https + "/net-form"; document.body.appendChild(f); f.submit(); } catch (e) { /* refused */ }
+    report.rtc = Object.getOwnPropertyNames(window).filter((n) => /RTC/.test(n)).join(",") || "none";
+    await new Promise((r) => setTimeout(r, 1500));
+    await G.storage.set("report", report);
+  })();
 }
 
 /** An honest app with something to keep: what the impostor tries to read. */
@@ -246,7 +297,7 @@ function floodApp() {
 }
 /* eslint-enable */
 
-const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp } as const;
+const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp, internet: internetApp } as const;
 
 /** An app's entry: the probe's source, given its targets. */
 export function appEntry(kind: keyof typeof SOURCES, targets: object = {}): string {
@@ -258,7 +309,9 @@ export function appEntry(kind: keyof typeof SOURCES, targets: object = {}): stri
     const code = (tag: string) => `try{var pc=new RTCPeerConnection({iceServers:[{urls:'stun:${P.host}:${rtc[tag]!.stun}'},{urls:'turn:${P.host}:${rtc[tag]!.turn}?transport=tcp',username:'u',credential:'p'}]});pc.createDataChannel('x');pc.createOffer().then(function(o){return pc.setLocalDescription(o)});}catch(e){}`;
     const attr = (text: string) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
     const script = (tag: string) => `<script>${code(tag)}</script>`;
-    return `<iframe srcdoc="${attr(script("srcdoc-static"))}"></iframe><iframe srcdoc="${attr(`<iframe srcdoc="${attr(script("srcdoc-nested"))}"></iframe>`)}"></iframe>`
+    const pre = P.preconnect as Record<string, string>;
+    return `<link rel="preconnect" href="${pre["preconnect-static"]}"><div><template shadowrootmode="open"><link rel="preconnect" href="${pre["preconnect-shadow"]}"></template></div>`
+      + `<iframe srcdoc="${attr(script("srcdoc-static"))}"></iframe><iframe srcdoc="${attr(`<iframe srcdoc="${attr(script("srcdoc-nested"))}"></iframe>`)}"></iframe>`
       + `<script type="module">{const f=document.createElement("iframe");f.srcdoc=${JSON.stringify(script("srcdoc-module")).replace(/<\//g, "<\\/")};document.body.appendChild(f);}</script>`;
   })() : "";
   return `<!doctype html><html><head><meta charset="utf-8"><title>${kind}</title></head><body><p>Nothing to see here.</p>${staticFrames}<script>${source}</script></body></html>`;

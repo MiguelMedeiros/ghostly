@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, isJsonValue, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, isJsonValue, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -276,4 +276,20 @@ it("isJsonValue takes plain JSON only", () => {
   let deep: unknown = 1;
   for (let i = 0; i < 100; i++) deep = [deep];
   expect(isJsonValue(deep)).toBe(false);
+});
+
+describe("the runner, from what the person granted", () => {
+  it("the network runner only for an app granted internet, and none where the client has no network runner", () => {
+    const host = memoryHost();
+    expect(runnerFor(host, { permissions: [] })).toBe("/app-frame.html");
+    expect(runnerFor(host, { permissions: ["chat", "name"] })).toBe("/app-frame.html");
+    expect(runnerFor(host, { permissions: ["internet"] })).toBe("/app-frame-net.html");
+    expect(() => runnerFor(memoryHost("/app-frame.html", null), { permissions: ["internet"] })).toThrow(/internet/);
+  });
+
+  it("an app cannot ask its way into the network: nothing it sends changes the runner it is in", async () => {
+    const { run, ask } = setup({ permissions: [] });
+    run();
+    for (const type of ["internet", "permissions", "runner"]) expect(await ask(type, ["internet"])).toMatchObject({ ok: false, error: "unknown-type" });
+  });
 });

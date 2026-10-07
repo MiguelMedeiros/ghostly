@@ -40,6 +40,155 @@
   const setNonce = nonceProperty && nonceProperty.set;
   if (typeof setNonce !== "function") return stop("nonce");
   const parser = new DOMParser();
+  const documentWrite = Document.prototype.write;
+  const documentClose = Document.prototype.close;
+  const reflectApply = Reflect.apply;
+  const replaceWithNode = Element.prototype.replaceWith;
+  const removeElement = Element.prototype.remove;
+  const makeElement = Document.prototype.createElement;
+  const appendTo = Node.prototype.appendChild;
+  const headOf = Object.getOwnPropertyDescriptor(Document.prototype, "head").get;
+  const rootOf = Object.getOwnPropertyDescriptor(Document.prototype, "documentElement").get;
+  const httpEquiv = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "httpEquiv").set;
+  const metaContent = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "content").set;
+  // ghostly:hint-guard:start
+  // Defence in depth for what no policy governs in WebKit: a <link rel=preconnect> connects from here there, even in
+  // a srcdoc frame (measured). No <link>, frame, object or embed of the entry is written, and one the app makes is
+  // left out as it goes in, or taken out as it is seen. Not a stop: the app runs in this realm, so this is a fence it
+  // may find a way past (the threats table keeps the line); the nonce lock is the stop for frames. Installed only
+  // once the lock is checked, so the runner's own probe frame goes in. An e2e build also makes the runner without
+  // this block (apps/web/runnerPolicy.ts), so the lock is tested alone.
+  const hintGuard = (() => {
+    const apply = Reflect.apply;
+    const DROP = new Set(["link", "iframe", "frame", "object", "embed", "portal", "fencedframe"]);
+    const SELECTOR = Array.from(DROP).join(",");
+    const removeNode = Element.prototype.remove;
+    const addedNodesOf = Object.getOwnPropertyDescriptor(MutationRecord.prototype, "addedNodes").get;
+    const targetOf = Object.getOwnPropertyDescriptor(MutationRecord.prototype, "target").get;
+    const elementFind = Element.prototype.querySelectorAll;
+    const fragmentFind = DocumentFragment.prototype.querySelectorAll;
+    const localNameOf = Object.getOwnPropertyDescriptor(Element.prototype, "localName").get;
+    const nodeTypeOf = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
+    const parentOf = Object.getOwnPropertyDescriptor(Node.prototype, "parentNode").get;
+    const observe = MutationObserver.prototype.observe;
+    const attachShadow = Element.prototype.attachShadow;
+    const createText = Document.prototype.createTextNode;
+    const createElement = Document.prototype.createElement;
+    const createRange = Document.prototype.createRange;
+    const selectNodeContents = Range.prototype.selectNodeContents;
+    const createContextualFragment = Range.prototype.createContextualFragment;
+    const replaceChildren = Element.prototype.replaceChildren;
+    const replaceWith = Element.prototype.replaceWith;
+    const fragmentAppend = DocumentFragment.prototype.append;
+    const fragmentReplaceChildren = DocumentFragment.prototype.replaceChildren;
+    const insertAdjacentHTML = Element.prototype.insertAdjacentHTML;
+    const insertAdjacentElement = Element.prototype.insertAdjacentElement;
+    const innerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+    const outerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "outerHTML");
+    const shadowInner = typeof ShadowRoot === "function" && Object.getOwnPropertyDescriptor(ShadowRoot.prototype, "innerHTML");
+
+    const nameOf = (node) => { try { return apply(nodeTypeOf, node, []) === 1 ? apply(localNameOf, node, []) : null; } catch (e) { return null; } };
+    const dropped = (node) => DROP.has(nameOf(node));
+    const drop = (node) => { if (dropped(node)) { try { apply(removeNode, node, []); } catch (e) { /* gone */ } } };
+    const dropUnder = (node) => {
+      drop(node);
+      try {
+        const type = apply(nodeTypeOf, node, []);
+        const found = type === 1 ? apply(elementFind, node, [SELECTOR]) : type === 11 ? apply(fragmentFind, node, [SELECTOR]) : [];
+        for (let i = 0; i < found.length; i++) drop(found[i]);
+      } catch (e) { /* gone */ }
+    };
+    const watcher = new MutationObserver((records) => {
+      for (let r = 0; r < records.length; r++) {
+        const added = apply(addedNodesOf, records[r], []);
+        for (let i = 0; i < added.length; i++) dropUnder(added[i]);
+        drop(apply(targetOf, records[r], []));
+      }
+    });
+    const watch = (root) => apply(observe, watcher, [root, { childList: true, subtree: true, attributes: true, attributeFilter: ["rel", "href", "src", "srcdoc", "data"] }]);
+    /** The arguments without what is dropped: a node passed itself goes in as an empty text node instead. */
+    const cleanArgs = (args) => {
+      for (let i = 0; i < args.length; i++) {
+        const node = args[i];
+        if (!node || typeof node !== "object") continue;
+        if (dropped(node)) args[i] = apply(createText, document, [""]);
+        else dropUnder(node);
+      }
+      return args;
+    };
+    const guardNodes = (proto, names) => {
+      for (const name of names) {
+        const original = proto && proto[name];
+        if (typeof original !== "function") continue;
+        Object.defineProperty(proto, name, { configurable: true, writable: true, value: function (...args) {
+          const first = args[0];
+          const result = apply(original, this, cleanArgs(args));
+          // appendChild and insertBefore hand back the node they were given: the app's own, as if it went in.
+          return name === "appendChild" || name === "insertBefore" ? first : result;
+        } });
+      }
+    };
+    /** Markup parsed where it goes (`context`), without what is dropped. */
+    const fragmentFor = (context, html) => {
+      const range = apply(createRange, document, []);
+      apply(selectNodeContents, range, [context]);
+      const fragment = apply(createContextualFragment, range, [String(html)]);
+      dropUnder(fragment);
+      return fragment;
+    };
+    const isElement = (node) => { try { return apply(nodeTypeOf, node, []) === 1; } catch (e) { return false; } };
+    const strip = (root) => {
+      for (const node of Array.from(root.querySelectorAll(SELECTOR))) node.remove();
+      for (const template of Array.from(root.querySelectorAll("template"))) strip(template.content);
+    };
+
+    return {
+      /** The entry, before it is written: what is dropped goes, declarative shadow roots included. */
+      strip,
+      /** From now on, for the app. */
+      install() {
+        watch(document);
+        Element.prototype.attachShadow = function (init) { const root = apply(attachShadow, this, [init]); watch(root); return root; };
+        guardNodes(Node.prototype, ["appendChild", "insertBefore", "replaceChild"]);
+        guardNodes(Element.prototype, ["append", "prepend", "before", "after", "replaceWith", "replaceChildren", "insertAdjacentElement"]);
+        guardNodes(DocumentFragment.prototype, ["append", "prepend", "replaceChildren"]);
+        guardNodes(Document.prototype, ["append", "prepend", "replaceChildren"]);
+        guardNodes(CharacterData.prototype, ["before", "after", "replaceWith"]);
+        guardNodes(Range.prototype, ["insertNode", "surroundContents"]);
+        Object.defineProperty(Element.prototype, "innerHTML", { configurable: true, get: innerHTML.get, set(html) {
+          if (nameOf(this) === "template") return apply(innerHTML.set, this, [html]); // inert until cloned in, which is guarded
+          apply(replaceChildren, this, [fragmentFor(this, html)]);
+        } });
+        Object.defineProperty(Element.prototype, "outerHTML", { configurable: true, get: outerHTML.get, set(html) {
+          const parent = apply(parentOf, this, []);
+          if (!isElement(parent)) return apply(outerHTML.set, this, [html]);
+          apply(replaceWith, this, [fragmentFor(parent, html)]);
+        } });
+        Object.defineProperty(Element.prototype, "insertAdjacentHTML", { configurable: true, writable: true, value: function (where, html) {
+          const place = String(where).toLowerCase();
+          const parent = place === "beforebegin" || place === "afterend" ? apply(parentOf, this, []) : this;
+          if (!isElement(parent)) return apply(insertAdjacentHTML, this, [where, html]);
+          const anchor = apply(createElement, document, ["template"]);
+          apply(insertAdjacentElement, this, [where, anchor]);
+          apply(replaceWith, anchor, [fragmentFor(parent, html)]);
+        } });
+        // As innerHTML: the markup's dropped elements never go in (a declarative shadow root in it stays a <template>).
+        for (const proto of [Element.prototype, typeof ShadowRoot === "function" && ShadowRoot.prototype]) {
+          if (proto && typeof proto.setHTMLUnsafe === "function") Object.defineProperty(proto, "setHTMLUnsafe", { configurable: true, writable: true, value: function (html) {
+            const fragment = fragmentFor(isElement(this) ? this : document.body || document.documentElement, html);
+            if (isElement(this)) apply(replaceChildren, this, [fragment]);
+            else { apply(fragmentReplaceChildren, this, []); apply(fragmentAppend, this, [fragment]); }
+          } });
+        }
+        if (shadowInner && shadowInner.set) Object.defineProperty(ShadowRoot.prototype, "innerHTML", { configurable: true, get: shadowInner.get, set(html) {
+          const fragment = fragmentFor(document.body || document.documentElement, html);
+          apply(fragmentReplaceChildren, this, []);
+          apply(fragmentAppend, this, [fragment]);
+        } });
+      },
+    };
+  })();
+  // ghostly:hint-guard:end
   const nonce = (() => {
     const bytes = crypto.getRandomValues(new Uint8Array(24));
     let text = "";
@@ -51,11 +200,11 @@
   // A policy for this document from now on. Taking the <meta> out again leaves the policy in place, so the nonce is
   // never in the page for the app to read.
   const lock = (policy) => {
-    const meta = document.createElement("meta");
-    meta.httpEquiv = "Content-Security-Policy";
-    meta.content = policy;
-    (document.head || document.documentElement).appendChild(meta);
-    meta.remove();
+    const meta = reflectApply(makeElement, document, ["meta"]);
+    reflectApply(httpEquiv, meta, ["Content-Security-Policy"]);
+    reflectApply(metaContent, meta, [policy]);
+    reflectApply(appendTo, reflectApply(headOf, document, []) || reflectApply(rootOf, document, []), [meta]);
+    reflectApply(removeElement, meta, []);
   };
   lock("script-src 'nonce-" + nonce + "' 'wasm-unsafe-eval'");
 
@@ -100,11 +249,13 @@
   const prepare = (entry) => {
     const doc = parser.parseFromString(entry, "text/html");
     const scripts = [];
+    if (hintGuard) hintGuard.strip(doc);
     for (const script of Array.from(doc.getElementsByTagName("script"))) {
       if (script.namespaceURI !== "http://www.w3.org/1999/xhtml") { script.remove(); continue; }
       const type = (script.getAttribute("type") || "").trim().toLowerCase();
       const module = type === "module";
       const classic = type === "" || /^(text|application)\/(x-)?(java|ecma)script$/.test(type);
+      if (type === "speculationrules") { script.remove(); continue; } // Prefetch rules: a resource hint too.
       if (!module && !classic) continue; // A data block (JSON, templates): never run, kept as it is.
       if (script.hasAttribute("src")) { script.remove(); continue; } // A file: the policy refuses it anyway.
       scripts.push({ module, text: script.textContent || "" });
@@ -117,19 +268,35 @@
 
   const write = ({ html, scripts }) => {
     document.open();
-    document.write(html);
+    if (hintGuard) hintGuard.install();
+    reflectApply(documentWrite, document, [html]);
+    // The app writes no markup into the page while it is parsed: it would go in past the guard and the broker's
+    // load count both. After the parse, a write is a document.open, a load, and the app's end.
+    for (const name of ["write", "writeln"]) Object.defineProperty(Document.prototype, name, { configurable: true, writable: true, value: () => { throw new DOMException("document.write is not available to apps", "NotSupportedError"); } });
+    // Every script is made before the first one goes in: from then on the app's code runs between insertions and can
+    // change any prototype, so what the runner does after that only goes through functions it took at its start.
     const attribute = "data-ghostly-script-" + token;
+    const placed = [];
     for (const placeholder of Array.from(document.querySelectorAll("template[" + attribute + "]"))) {
       const script = scripts[Number(placeholder.getAttribute(attribute))];
-      if (!script) { placeholder.remove(); continue; }
-      const element = document.createElement("script");
-      if (script.module) element.type = "module";
-      element.async = false;
-      setNonce.call(element, nonce);
-      element.textContent = script.text;
-      placeholder.replaceWith(element);
+      let element = null;
+      if (script) {
+        element = document.createElement("script");
+        if (script.module) element.type = "module";
+        element.async = false;
+        reflectApply(setNonce, element, [nonce]);
+        element.textContent = script.text;
+      }
+      placed.push([placeholder, element]);
     }
-    document.close();
+    // An index loop: a for-of or a destructuring would ask Array.prototype, which the app's first script may have changed.
+    const count = placed.length;
+    for (let i = 0; i < count; i++) {
+      const pair = placed[i];
+      if (pair[1]) reflectApply(replaceWithNode, pair[0], [pair[1]]);
+      else reflectApply(removeElement, pair[0], []);
+    }
+    reflectApply(documentClose, document, []);
     lock("script-src 'wasm-unsafe-eval'");
   };
 

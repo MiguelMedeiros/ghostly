@@ -10,7 +10,7 @@ import { runnerAvailable } from "./runnerCheck";
 
 export interface AppsTestHook {
   /** Runs an app; its frame goes in a box of its own on the page. Returns its handle. */
-  open(launch: Omit<AppLaunch, "chat"> & { chat?: AppLaunch["chat"]; files?: Record<string, string> }): number;
+  open(launch: Omit<AppLaunch, "chat"> & { chat?: AppLaunch["chat"]; files?: Record<string, string>; unguarded?: boolean }): number;
   /** Where an app is, and why it stopped. */
   status(handle: number): { phase: RunningApp["phase"]; stopped: AppStopReason | null };
   stop(handle: number): void;
@@ -32,7 +32,7 @@ export function installAppsTestHook(): void {
   const host = memoryHost();
   const apps: { app: RunningApp; stopped: AppStopReason | null }[] = [];
   const hook: AppsTestHook = {
-    open({ files, chat, ...launch }) {
+    open({ files, chat, unguarded, ...launch }) {
       host.files.set(launch.ref, new Map(Object.entries(files ?? {}).map(([path, text]) => [path, new TextEncoder().encode(text)])));
       const box = document.createElement("div");
       box.setAttribute("data-testid", "mini-app");
@@ -43,7 +43,8 @@ export function installAppsTestHook(): void {
       apps.push(entry);
       entry.app = startApp({
         container: box,
-        host,
+        // The runner without its hint guard (the e2e build's own copy): the nonce lock alone.
+        host: unguarded ? { ...host, runnerUrl: "/app-frame-unguarded.html" } : host,
         launch: { ...launch, chat: chat ?? null },
         view: { theme: () => "dark", locale: () => "pt-BR" },
         onStop: (reason) => { entry.stopped = reason; box.remove(); },
@@ -58,7 +59,7 @@ export function installAppsTestHook(): void {
     sent: () => host.sent.map((s) => ({ ...s })),
     receive: (linkId, frame) => host.receive(linkId, frame),
     appId: memoryAppId,
-    runnerAvailable: () => runnerAvailable(host.runnerUrl),
+    runnerAvailable: () => Promise.all([runnerAvailable(host.runnerUrl), runnerAvailable(host.netRunnerUrl!, fetch, true)]).then(([plain, net]) => plain && net),
   };
   (window as unknown as { __ghostlyApps: AppsTestHook }).__ghostlyApps = hook;
 }
