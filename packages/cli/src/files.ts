@@ -1,5 +1,5 @@
 import { openAsBlob } from "node:fs";
-import { open, rm, stat } from "node:fs/promises";
+import { access, constants, open, rm, stat } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
@@ -146,6 +146,8 @@ export const FILE_METHODS: Record<string, Method> = {
     let info;
     try { info = await stat(path); } catch { throw new CliError("not_found", `No file ${path}`); }
     if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file`);
+    // A file this user may not read: refused with its path (errors.ts), not the engine's "The blob could not be read" later.
+    await access(path, constants.R_OK);
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
