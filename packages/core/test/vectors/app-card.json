@@ -1,0 +1,448 @@
+{
+  "about": {
+    "pins": "The app card of WISP 405 (§ An app) and its fallback text: what a reader keeps, and the cards it drops",
+    "wisp": "WISP 405, An app; WISP 1200, Apps sent in a chat and Test vectors",
+    "test": "packages/core/test/appCard.test.ts (APPS_VECTORS_WRITE=1 writes this file again)"
+  },
+  "inputs": {
+    "keys": {
+      "publisher": {
+        "label": "publisher",
+        "key": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo"
+      }
+    }
+  },
+  "valid": [
+    {
+      "name": "a shared card",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "text": "🧩 Chess 1.2.0 (Ghostly app)\nhttps://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+    },
+    {
+      "name": "an opened card",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp",
+        "opened": true
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp",
+        "opened": true
+      },
+      "text": "🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\nhttps://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+    },
+    {
+      "name": "a shared card without url",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0"
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0"
+      },
+      "text": "🧩 Chess 1.2.0 (Ghostly app)"
+    },
+    {
+      "name": "an opened card without url",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "opened": true
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "opened": true
+      },
+      "text": "🧩 Opened Chess 1.2.0 in this chat (Ghostly app)"
+    },
+    {
+      "name": "a card without version",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "text": "🧩 Chess (Ghostly app)\nhttps://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+    },
+    {
+      "name": "sequence 0",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 0,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 0,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "text": "🧩 Chess 1.2.0 (Ghostly app)\nhttps://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+    },
+    {
+      "name": "the largest sequence",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 9007199254740991,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 9007199254740991,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "text": "🧩 Chess 1.2.0 (Ghostly app)\nhttps://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+    },
+    {
+      "name": "a url that is not https is left out",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "http://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0"
+      },
+      "text": "🧩 Chess 1.2.0 (Ghostly app)"
+    },
+    {
+      "name": "opened other than true reads as absent",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp",
+        "opened": "yes"
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "text": "🧩 Chess 1.2.0 (Ghostly app)\nhttps://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+    },
+    {
+      "name": "a title past 40 characters is cut",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "reads": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      },
+      "text": "🧩 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC 1.2.0 (Ghostly app)\nhttps://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "no id",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "no ref",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "no digest",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "no sequence",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "no title",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "a ref whose key is not 52 z-base32 characters",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiego/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "a ref whose key has a letter outside z-base32",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegol/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "a ref whose name is not one",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/Chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "an id that does not match the ref",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "checkers.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "a digest that is not 43 base64url characters",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "xPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "a sequence below 0",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": -1,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "a sequence past 2^53 - 1",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 9007199254740992,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "a sequence that is not whole",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 1.5,
+        "title": "Chess",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    },
+    {
+      "name": "an empty title",
+      "refusal": "dropped",
+      "card": {
+        "kind": "app",
+        "id": "chess.yz7moxucbd4u8aqt",
+        "ref": "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess",
+        "digest": "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4",
+        "sequence": 7,
+        "title": " ",
+        "version": "1.2.0",
+        "url": "https://raw.githubusercontent.com/ghostly-vectors/chess/HEAD/app.ghostlyapp"
+      }
+    }
+  ]
+}

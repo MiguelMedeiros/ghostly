@@ -359,6 +359,7 @@
     "sharingMany": "你共享了 {{count}} 个应用",
     "sharingOne": "你共享了 1 个应用",
     "title": "与 {{name}} 共享的应用",
+    "titleShared": "与 {{name}} 的共享服务",
     "yours": "你的应用"
   },
   "setName": "设置名称...",

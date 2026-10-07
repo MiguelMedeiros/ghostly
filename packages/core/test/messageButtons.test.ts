@@ -70,7 +70,7 @@ describe("buttons as a sender may send them", () => {
       [ask({ chosen: "maybe" }), /chosen/],
       [ask({ closed: false }), /closed/],
       [ask({ links: [{ url: "https://example.com" }] }), /no links/],
-      [ask({ kind: "poll" }), /task, routine or buttons/],
+      [ask({ kind: "poll" }), /task, routine, buttons or app/],
     ];
     for (const [raw, error] of cases) expect(checkStatusCard(raw, NOW)).toEqual({ error: expect.stringMatching(error) });
   });
