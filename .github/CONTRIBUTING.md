@@ -133,7 +133,7 @@ Lists that every feature adds to are kept sorted, one entry per line, so two pul
 | A string | `apps/ui/src/locales/<language>/<area>.json`, below | `npm run locales:sort`, the i18n tests |
 | A release note | a file in `docs/changelog/unreleased/` | `node tools/scripts/changes.mjs` |
 | A WISP change | a file in `docs/wisps/changes/<wisp>/` | `npm run sync:references` in `apps/website/` |
-| A Desktop command | its alphabetical place in `apps/desktop/src/main.rs` (`commands!`), `apps/desktop/build.rs` (`COMMANDS`) and `apps/desktop/capabilities/default.json` (`allow-*`) | `cargo test` in `apps/desktop` |
+| A Desktop command | its alphabetical place in `apps/desktop/src/lib.rs` (`commands!`), `apps/desktop/build.rs` (`COMMANDS`) and `apps/desktop/capabilities/default.json` (`allow-*`) | `cargo test` in `apps/desktop` |
 | A CLI command | its alphabetical place in `packages/cli/src/commands/<area>.ts`, and its row in the command table of `packages/cli/README.md` | the CLI's `commands` and `readme` tests |
 
 Not committed, so regenerate them when you need them: `apps/website/lib/*.json` (`npm run sync:references` in `apps/website/`, once after a checkout; its `dev` and `build` do it themselves), `apps/desktop/gen/schemas/` (any Desktop build), and the test map (`npm run test:map:write` writes `docs/test-map.md`).

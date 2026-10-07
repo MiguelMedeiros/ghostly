@@ -3,6 +3,12 @@ name = "ghostly"
 version = "1.1.4"
 edition = "2021"
 
+# The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
+# library. Its own name, so the Windows .dll and .pdb do not collide with the binary's.
+[lib]
+name = "ghostly_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [features]
 # The macOS end-to-end tests' driver (src/e2e_driver.rs): debug builds only, never shipped.
 e2e-driver = []
