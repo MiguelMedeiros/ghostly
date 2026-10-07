@@ -10,6 +10,6 @@ npm run dev -w @ghostly/web                # Vite dev server
 docker compose -f infra/docker-compose.yml up --build -d   # from the root: the image (apps/web/Dockerfile, nginx), on 127.0.0.1:8080
 ```
 
-`GHOSTLY_WEB_BIND` moves the port; `GHOSTLY_BUILD` names the commit `/version.json` reports, which is how
-open tabs learn about a deploy ([docs/RELEASING.md](../../docs/RELEASING.md#5-deploy)). End-to-end tests:
+`GHOSTLY_WEB_BIND` moves the port; `GHOSTLY_BUILD` names the commit `/version.json` reports; open tabs are
+offered a reload only when the version number goes up ([docs/RELEASING.md](../../docs/RELEASING.md#5-deploy)). End-to-end tests:
 `e2e/web/` ([e2e/README.md](../../e2e/README.md)).

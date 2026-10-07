@@ -144,6 +144,42 @@ describe("TypingSender", () => {
     sender.reset();
     expect(sender.stopped()).toBeNull();
   });
+
+  it("says a standing start again on the next session while the person is still at it, never one that stopped", () => {
+    let now = 1_000;
+    const sender = new TypingSender(() => now);
+    expect(sender.resume()).toBeNull();
+    expect(sender.typing({ kind: "recording" })).toEqual(typingFrame("start", { kind: "recording" }));
+    // Already said on this session.
+    expect(sender.resume()).toBeNull();
+    // The session ends (a switch): the next one hears the same word, once.
+    sender.reset(); now += 1_000;
+    expect(sender.resume()).toEqual(typingFrame("start", { kind: "recording" }));
+    expect(sender.resume()).toBeNull();
+    // A keystroke between two sessions (nothing could carry it) goes on the next one.
+    sender.reset(); now += 100; sender.want({ kind: "thinking", status: "Reading" });
+    now += 100; expect(sender.resume()).toEqual(typingFrame("start", { kind: "thinking", status: "Reading" }));
+    // Stopped between two sessions: nothing is said again.
+    sender.reset(); expect(sender.stopped()).toBeNull();
+    expect(sender.resume()).toBeNull();
+    // Nothing from the person for as long as the contact would have shown it: not said again either.
+    sender.typing(); sender.reset(); now += TYPING_TIMEOUT_MS;
+    expect(sender.resume()).toBeNull();
+    sender.want(); sender.reset(); now += TYPING_TIMEOUT_MS - 1;
+    expect(sender.resume()).toEqual(typingFrame("start"));
+  });
+
+  it("counts its rate window across sessions, as the contact's reader does", () => {
+    let now = 0;
+    const sender = new TypingSender(() => now);
+    for (let i = 0; i < TYPING_SEND_LIMIT; i++) { now += 10; expect(sender.typing({ kind: "thinking", status: `step ${i}` })).not.toBeNull(); }
+    // A switch: the reader's window still holds these, so the start said again waits for room.
+    sender.reset(); now += 10;
+    expect(sender.resume()).toBeNull();
+    now += TYPING_RATE_WINDOW_MS;
+    sender.want({ kind: "thinking", status: "step 6" });
+    expect(sender.resume()).toEqual(typingFrame("start", { kind: "thinking", status: "step 6" }));
+  });
 });
 
 describe("TypingReceiver", () => {
@@ -317,7 +353,7 @@ describe("typing on a paired session (typing/1)", () => {
   it("A types, B sees it; A sends, it ends; the contact's message clears it too", async () => {
     const published = vi.fn(async () => {});
     const { a, b } = pair({ a: { transport: { publish: published, resolve: async () => null, describe: () => ({ protocol: "memory", relays: [] }) } } });
-    // Not live: nothing is said, not even on the DHT.
+    // Not live: nothing is said, not even on the DHT (it goes once a session can carry it, if still that recent).
     a.link.setTyping(true);
     await live(a, b);
     await vi.waitFor(() => expect(a.link.supportsTyping && b.link.supportsTyping).toBe(true));

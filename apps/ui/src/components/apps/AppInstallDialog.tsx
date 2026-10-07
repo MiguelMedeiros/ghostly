@@ -7,7 +7,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { appErrorText } from "../../lib/apps/errors";
+import { appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -89,6 +89,11 @@ function InfoLine({ children, info, testId, className = "text-xs text-text-secon
       {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border">{info}</p>}
     </div>
   );
+}
+
+/** An error's line, with its ⓘ when it has a longer story (a browser that keeps no app files). */
+function ErrorLine({ error, testId }: { error: AppErrorView; testId?: string }) {
+  return <div role="alert"><InfoLine testId={testId} info={error.info} className="text-xs text-danger whitespace-pre-line">{error.text}</InfoLine></div>;
 }
 
 /** What the app may do: always its own data on this device (not on an update), then each permission it asks for. */
@@ -186,7 +191,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   const { t } = useI18n();
   const titleId = useId();
   const [preview, setPreview] = useState<AppPreview | null>(fetched ?? null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppErrorView | null>(null);
   const [busy, setBusy] = useState(false);
   const key = JSON.stringify(source);
   const have = !!fetched;
@@ -197,7 +202,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     if (have) return;
     let live = true;
     setPreview(null); setError(null);
-    engine.call("appPreview", JSON.parse(key) as AppSource).then((p) => { if (live) setPreview(p); }, (e: unknown) => { if (live) setError(appErrorText(e, tr.current)); });
+    engine.call("appPreview", JSON.parse(key) as AppSource).then((p) => { if (live) setPreview(p); }, (e: unknown) => { if (live) setError(appErrorView(e, tr.current)); });
     return () => { live = false; };
   }, [key, have]);
 
@@ -209,7 +214,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       await refreshInstalledApps();
       onInstalled?.(app);
       onClose();
-    } catch (e) { setError(appErrorText(e, t)); } finally { setBusy(false); }
+    } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
   };
 
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
@@ -230,7 +235,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} />
         </>
       )}
-      {error && <Line tone="danger" testId="app-install-error">{error}</Line>}
+      {error && <ErrorLine error={error} testId="app-install-error" />}
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>{t("common.cancel")}</Button>
         {preview && !blocked && (
@@ -252,12 +257,12 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
 export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledAppView; onClose: () => void; onOpen: (app: InstalledAppView, options?: OpenAppOptions) => void }) {
   const { t } = useI18n();
   const titleId = useId();
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppErrorView | null>(null);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState(false);
   const act = async (work: () => Promise<unknown>, close = false) => {
     setBusy(true); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorText(e, t)); } finally { setBusy(false); }
+    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
   };
   const why = runLine(app.run, t);
   const canRun = app.run.status === "ok";
@@ -266,7 +271,7 @@ export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledApp
       <Shell titleId={titleId} onClose={onClose} testId="app-uninstall">
         <h2 id={titleId} className="text-lg font-medium text-text-primary">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
-        {error && <Line tone="danger">{error}</Line>}
+        {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
           <Button onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
           <Button data-testid="app-export" disabled={busy} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExport", { ref: app.ref })))}>{t("apps.app.export")}</Button>
@@ -293,7 +298,7 @@ export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledApp
       )}
       {!app.pending && <Permissions asks={app.permissions} update={false} />}
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
-      {error && <Line tone="danger" testId="app-details-error">{error}</Line>}
+      {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
         <Button variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }))}>{t("apps.app.fetchFiles")}</Button>}
