@@ -303,7 +303,7 @@
     "sessionDropped": "Se cortó la conexión"
   },
   "profile": {
-    "arkBackup": "No se pudo leer la billetera Ark para la copia de seguridad: {{reason}}",
+    "arkBackup": "No se pudo leer la billetera Ark para la copia de seguridad",
     "backupTooLarge": "Esta copia es demasiado grande para restaurarla aquí.",
     "damagedBackup": "Esta copia está dañada",
     "damagedBackupNext": "Prueba otra copia del archivo.",

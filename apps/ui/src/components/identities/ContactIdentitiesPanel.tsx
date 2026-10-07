@@ -24,7 +24,7 @@ import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
 import { deckArrows } from "../deck/arrows";
-import { errorText } from "../../lib/errorText";
+import { problemLine } from "../../lib/problemText";
 
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
@@ -89,7 +89,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
             ? <TheirCards t={t} entries={entries} link={link} links={state?.links ?? []} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
             : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
         </section>
-        {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{link.identities.error}</p>}
+        {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
         <p className="contact-panel-note" data-testid="chat-identities-share-yours">{t("identities.contact.shareYours")}</p>
       </div>
     </aside>
@@ -185,7 +185,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
   const { r, card } = entry;
   const provider = providerOf(r.provider);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
-  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(errorText(e, t))).finally(() => setBusy("")); };
+  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };
   const ok = card.status === "verified" || card.status === "expiring";
   const canCheck = r.status !== "withdrawn" && r.status !== "revoked" && r.status !== "previous-key";
   return (
@@ -216,7 +216,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? t("identities.contact.unconfirmedWhy", { status: card.statusLabel, error: r.error }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? t("identities.contact.unconfirmedWhy", { status: card.statusLabel, error: problemLine(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">

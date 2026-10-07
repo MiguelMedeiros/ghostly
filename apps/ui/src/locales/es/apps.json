@@ -54,7 +54,7 @@
     "notSigned": "Firma no válida. Ghostly no la instalará.",
     "offline": "Estás sin conexión.",
     "otherApp": "El enlace tiene otra app.",
-    "refused": "Ghostly no la instalará: {{reason}}",
+    "refused": "Ghostly no la instalará",
     "removed": "Una tienda que añadiste retiró esta app.",
     "revoked": "Su editor revocó esta versión.",
     "rollback": "El enlace tiene una versión más antigua.",

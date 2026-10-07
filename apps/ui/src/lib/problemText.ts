@@ -70,6 +70,9 @@ export function problemText(cause: unknown, t: Translate = english, fallback: Pr
   const parts = knownErrorParts(raw, t) ?? (raw && !raw.endsWith(".") ? knownErrorParts(`${raw}.`, t) : null);
   if (parts) return { tone: "error", ...parts };
   if (raw && readable(raw) && !PROTOCOL.some((p) => p.test(raw))) return { tone: "error", title: raw };
+  // "Not a relay address: ftp://x": the words before the first colon say it, the rest goes behind the ⓘ.
+  const head = raw.split(/:\s/)[0]!;
+  if (head !== raw && head.length >= 8 && readable(head) && !PROTOCOL.some((p) => p.test(head))) return { tone: "error", title: head, detail: raw };
   return { tone: "error", title: t(fallback === "connect" ? "errors.problem.connectFailed" : "errors.generic"), ...(raw && { detail: raw }) };
 }
 

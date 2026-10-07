@@ -303,7 +303,7 @@
     "sessionDropped": "接続が切れました"
   },
   "profile": {
-    "arkBackup": "バックアップ用に Ark ウォレットを読み込めませんでした: {{reason}}",
+    "arkBackup": "バックアップ用に Ark ウォレットを読み込めませんでした",
     "backupTooLarge": "このバックアップは大きすぎて、ここでは復元できません。",
     "damagedBackup": "このバックアップは破損しています",
     "damagedBackupNext": "別のコピーを試してください。",

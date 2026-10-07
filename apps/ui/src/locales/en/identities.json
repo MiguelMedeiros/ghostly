@@ -139,7 +139,9 @@
     "showQr": "Show QR code",
     "title": "Public DID",
     "updating": "Publishing the change…",
-    "warning": "Anything listed here is public to everyone, for good: anyone with your DID sees it, and some resolvers keep copies even after you take it out. Chats never need it. Leave these off to share each identity with one contact at a time."
+    "warning": "Public to everyone, for good",
+    "warningInfo": "Anyone with your DID sees what is listed here, and some resolvers keep copies even after you take it out.",
+    "warningNext": "Chats never need it. Leave it off to share one contact at a time."
   },
   "face": {
     "hint": "Name and photo in your chat list. Only on this device.",
