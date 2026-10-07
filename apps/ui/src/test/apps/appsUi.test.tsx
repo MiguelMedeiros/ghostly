@@ -33,7 +33,7 @@ const CARD: AppCard = { kind: "app", id: appCardId(REF), ref: REF, digest: DIGES
 
 const installed = (patch: Partial<InstalledAppView> = {}): InstalledAppView => ({
   ref: REF, name: "chess", publisher: KEY, fingerprint: "yz7m oxuc bd4u 8aqt", title: "Chess", tagline: "Play chess with a contact",
-  version: "1.2.0", sequence: 7, digest: DIGEST, permissions: ["chat"], from: URL_, icon: false, installedAt: 1, updatedAt: 1,
+  version: "1.2.0", sequence: 7, digest: DIGEST, permissions: ["chat"], view: "chat", from: URL_, icon: false, installedAt: 1, updatedAt: 1,
   run: { status: "ok" }, listedBy: [], unknownPublisher: true, ...patch,
 });
 const preview = (patch: Partial<AppPreview> = {}): AppPreview => ({
