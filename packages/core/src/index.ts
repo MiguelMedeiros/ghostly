@@ -96,6 +96,7 @@ export * from "./groupHubs";
 export * from "./groupSignals";
 export * from "./groupMeta";
 export * from "./groupTyping";
+export * from "./groupFiles";
 export * from "./pairingProgress";
 export * from "./directPath";
 export * from "./clockWatch";

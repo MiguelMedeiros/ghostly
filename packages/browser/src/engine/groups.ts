@@ -1,6 +1,7 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
+  GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
@@ -12,6 +13,7 @@ import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTim
 import { MESH_HUB_TIMINGS, MeshHubs, removalEpoch, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
 import { MeshSignals } from "./meshSignals";
+import { GroupFileDesk, groupFileText, groupOfFile, type GroupFileMembership, type GroupFilesHost } from "./groupFiles";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
 /**
@@ -139,6 +141,11 @@ export interface GroupsHost {
    * links of every other group hold. Undefined when the app has no budget (WISP 902 · Group Mesh § Hubs, Budget).
    */
   peerRoom?(groupId: string): number | undefined;
+  /**
+   * Files and voice messages in groups (WISP 503): where they are kept, their transfers' views, the profile's settings
+   * for them, and an edge's files/3 frames. Absent: this app fetches and serves no group file (a file's text still shows).
+   */
+  groupFiles?: GroupFilesHost;
 }
 
 /** The key an edit of message `id` goes by in `FramesTaken`. */
@@ -404,12 +411,28 @@ export class Groups {
   private readonly typings: GroupTypings;
   /** Edge signaling through members (WISP 902 · Group Mesh § Signaling through members). */
   private readonly signals: MeshSignals;
+  /** Files and voice messages in every group, private or community (WISP 503 · Group Files). */
+  readonly files?: GroupFileDesk;
 
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
     this.communities = new Communities(host, store, communityTimings, random);
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
     this.signals = new MeshSignals(host, { session: id => this.sessions.get(id), stored: id => this.stored.get(id), now: () => this.now() });
+    const files = host.groupFiles;
+    if (files) {
+      this.files = new GroupFileDesk({
+        ...files,
+        send: (linkId, frame) => { try { host.sendOnLink(linkId, frame); return true; } catch { return false; } },
+        edges: groupId => host.edges(groupId),
+        ready: linkId => host.linkReady(linkId, GROUP_VERSION_FILES),
+        membership: groupId => this.fileMembership(groupId),
+        sendApp: (groupId, frame) => this.communities.sendApp(groupId, frame),
+        changed: () => host.emit(),
+        now: () => this.now(),
+      });
+      this.communities.files = this.files;
+    }
   }
 
   async load(): Promise<void> {
@@ -430,6 +453,7 @@ export class Groups {
       if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
+    await this.files?.load(all.map(g => g.id));
     // An admission in flight did not survive the restart: its joiner knocks again. A joiner keeps its side.
     for (const group of this.stored.values()) for (const [, linkId] of this.host.entries(group.id)) {
       if (!group.invitation?.entry || group.invitation.linkId !== linkId) await this.host.closeEdge(linkId);
@@ -604,6 +628,50 @@ export class Groups {
     // Sent: whatever this side was typing is done (the members clear it on the message too).
     this.typings.say(session, false);
     return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
+  }
+
+  /**
+   * Announces a file or voice message of mine (WISP 503): `text` is its caption, or the line older apps show
+   * (`groupFileFallback`), `file` its description with the digest of the bytes kept under `fileId`, which this device
+   * then holds and serves. `messageId` is the announcement's.
+   */
+  async sendFile(groupId: string, text: string, file: GroupFileMeta, fileId: string, reply?: WireReply, forwarded?: number): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
+    if (!this.files) return { error: "This app takes no group files", refused: true };
+    const paced = this.files.mayAnnounce(groupId);
+    if (paced) return { error: paced };
+    this.files.outgoing(groupId, fileId, file);
+    let result: { error: string | null; messageId?: string; refused?: boolean };
+    if (this.isCommunity(groupId)) result = await this.communities.send(groupId, text, [], reply, forwarded, undefined, file);
+    else {
+      const session = this.sessions.get(groupId);
+      const sent = session ? await session.sendText(text, Date.now(), [], reply, forwarded, undefined, file) : { error: "You are not in this group yet" };
+      if (session) this.typings.say(session, false);
+      result = "error" in sent ? { error: sent.error } : { error: null, messageId: sent.id };
+    }
+    if (result.error) this.files.notSent(groupId, file);
+    return result;
+  }
+
+  /** The person asks for a group file this device did not fetch by itself, or asks again for one that stopped coming. */
+  downloadFile(fileId: string): Promise<void> {
+    const groupId = groupOfFile(fileId, [...this.stored.keys(), ...this.communities.ids()]);
+    if (!groupId || !this.files) throw new Error("No such file");
+    return this.files.download(fileId);
+  }
+
+  /** An edge's files/3 session opened or closed (WISP 503: the bytes of a group's files go over it). */
+  fileSession(groupId: string, peerKey: string, linkId: string, open: boolean): void { this.files?.session(groupId, peerKey, linkId, open); }
+  /** A files/3 frame on an edge, from the member it is pinned to. */
+  filesFrame(groupId: string, peerKey: string, linkId: string, frame: Record<string, unknown>): Promise<void> {
+    return this.files?.filesFrame(groupId, peerKey, linkId, frame) ?? Promise.resolve();
+  }
+
+  /** Me in a group I am active in, for its files: who is in it, and who could read one of its messages. */
+  private fileMembership(groupId: string): GroupFileMembership | undefined {
+    if (this.isCommunity(groupId)) return this.communities.fileMembership(groupId);
+    const session = this.sessions.get(groupId);
+    if (session?.status !== "active") return undefined;
+    return { me: session.myKey, community: false, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId) => session.couldRead(key, messageId) };
   }
 
   /**
@@ -808,7 +876,7 @@ export class Groups {
   }
 
   async forget(groupId: string): Promise<void> {
-    if (this.isCommunity(groupId)) return this.communities.forget(groupId);
+    if (this.isCommunity(groupId)) { await this.communities.forget(groupId); await this.files?.drop(groupId); return; }
     const session = this.sessions.get(groupId);
     if (session?.status === "active") { try { await this.leave(groupId); } catch { /* the admin cannot leave a group with members: forgetting it is still allowed */ } }
     this.sessions.delete(groupId);
@@ -834,6 +902,7 @@ export class Groups {
     this.signals.forget(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
+    await this.files?.drop(groupId);
     this.host.historyGone?.(groupId);
     this.host.membersChanged?.(groupId);
     this.host.emit();
@@ -947,6 +1016,7 @@ export class Groups {
       this.meshTick(now);
       await this.communities.tick(now);
       await this.hubsTick(now);
+      this.files?.tick();
     } finally { this.ticking = false; }
   }
 
@@ -1246,6 +1316,13 @@ export class Groups {
 
   /** A `group-*` frame on an edge: from the member the edge is pinned to. */
   async handleEdgeFrame(groupId: string, peerKey: string, frame: unknown): Promise<void> {
+    // Asking for a group file and saying who holds one (WISP 503): between the two ends of the edge, never passed on.
+    const t = frame && typeof frame === "object" ? (frame as { t?: unknown }).t : undefined;
+    if (t === GROUP_WANT_FRAME || t === GROUP_WANT_NO_FRAME || t === GROUP_HAVE_FRAME) {
+      const linkId = this.host.edges(groupId).get(peerKey);
+      if (linkId && !this.stored.get(groupId)?.left) await this.files?.frame(groupId, peerKey, linkId, frame as Record<string, unknown>);
+      return;
+    }
     if (this.isCommunity(groupId)) return this.communities.handleEdgeFrame(groupId, peerKey, frame);
     const left = this.stored.get(groupId)?.left;
     if (left) {
@@ -1277,7 +1354,6 @@ export class Groups {
       return;
     }
     if (!session) return;
-    const t = frame && typeof frame === "object" ? (frame as { t?: unknown }).t : undefined;
     if (t === GROUP_REACTION_FRAME || t === GROUP_REACTED_FRAME) { await this.reaction(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (t === GROUP_TYPING_FRAME) { this.typings.heard(session, peerKey, frame); return; }
     if (t === GROUP_PIN_FRAME) {
@@ -1335,7 +1411,7 @@ export class Groups {
 
   /** An edge came up with groups on both sides: both sides say where they are. */
   edgeReady(groupId: string, peerKey: string, linkId: string): void {
-    if (this.isCommunity(groupId)) { this.communities.edgeReady(groupId, peerKey, linkId); return; }
+    if (this.isCommunity(groupId)) { this.communities.edgeReady(groupId, peerKey, linkId); this.files?.edgeReady(groupId, peerKey, linkId); return; }
     const left = this.stored.get(groupId)?.left;
     if (left) {
       // The admin was away when I left: now it hears it (and a hub carries it, signed, to an admin I have no edge with).
@@ -1362,6 +1438,7 @@ export class Groups {
     this.announceHere(groupId, session, peerKey);
     // This member may reach the ones whose edges are still down: my packets for those go through it.
     this.signals.edgeReady(groupId, session, peerKey, linkId);
+    this.files?.edgeReady(groupId, peerKey, linkId);
     this.host.edgeUp?.(groupId, peerKey);
     this.host.emit();
   }
@@ -1570,8 +1647,10 @@ export class Groups {
         // so neither the history nor the list of groups follows a member's clock.
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) };
+        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
+        const file = m.file && this.files ? await this.files.announced(state.id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
+        const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 902 · Group Mesh § Catch-up).
         const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));

@@ -162,10 +162,16 @@ export interface StoredFile {
    * live session, and no byte is here yet. Gone once the offer came (`wireId` and `wire3` then).
    */
   announced?: string;
+  /**
+   * A file of a group (WISP 503), its `linkId` `group:<id>`: the message that announced it and its author, whether this
+   * device fetched it without asking (it counts toward the group's automatic limit), and whether its person asked for it.
+   * `digest` is the author's, which the bytes are checked against.
+   */
+  group?: { message: string; author: string; auto?: boolean; asked?: boolean };
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
-type FileStateFields = Partial<Pick<StoredFile, "bytes" | "digest" | "transfer" | "wire3">>;
+type FileStateFields = Partial<Pick<StoredFile, "bytes" | "digest" | "transfer" | "wire3" | "group">>;
 type FileState = { id: string } & FileStateFields;
 
 let dbPromise: Promise<IDBDatabase> | null = null;

@@ -392,6 +392,8 @@ export interface FileTransferView {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
+  /** A group file (WISP 503) waiting, `waiting`: why, in a few words ("Nobody you are connected to has this file yet"). */
+  note?: string;
 }
 
 /** Ecash held by this peer. One row per proof; `reserved` while an operation is using it. */
@@ -1209,6 +1211,16 @@ export interface Settings {
    * nothing is said, and a contact's typing is still shown.
    */
   sendTyping?: boolean;
+  /**
+   * Whether files are downloaded without asking where the rules allow it (WISP 503: a group's voice messages, and its
+   * files up to 8 MiB within 256 MiB a group). Absent means on; off, each waits for a Download.
+   */
+  autoDownloads?: boolean;
+  /**
+   * Whether this device sends the group files it keeps to members who ask (WISP 503 § Serving limits). Absent means
+   * on; off, it answers that it is busy and does not say it holds them.
+   */
+  serveFiles?: boolean;
   /**
    * Where items are held for away contacts (WISP 404): the profile's S3 storage and its random space
    * (WISP 1000/1002), as set up under Profile → Backups. Kept here for the peer, which may run outside the
