@@ -27,6 +27,8 @@ export class FakeTrack extends EventTarget {
   readonly id = `track-${++trackIds}`;
   enabled = true;
   readyState: "live" | "ended" = "live";
+  /** The source gives nothing for now (the system took the microphone away), as `pause` and `resume` set it. */
+  muted = false;
   contentHint = "";
   onended: (() => void) | null = null;
   readonly stop = vi.fn(() => {
@@ -39,6 +41,18 @@ export class FakeTrack extends EventTarget {
   }
 
   getSettings() { return { deviceId: this.deviceId }; }
+
+  /** The system pauses the source (an iPhone's Home Screen app whose screen locks): `muted`, with a `mute` event. */
+  pause() {
+    this.muted = true;
+    this.dispatchEvent(new Event("mute"));
+  }
+
+  /** The system gives the source back: `unmute`. */
+  resume() {
+    this.muted = false;
+    this.dispatchEvent(new Event("unmute"));
+  }
 
   /** The device was unplugged: the track ends, as browsers end it. */
   unplug() {

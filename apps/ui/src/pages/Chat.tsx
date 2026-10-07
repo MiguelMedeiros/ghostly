@@ -598,6 +598,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}
         </div>
       )}
+      {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
+          contact hears nothing until Ghostly is back on screen, and the call is still on. */}
+      {webrtc.micPaused && !webrtc.mediaProblem && (
+        <div role="status" data-testid="call-mic-paused"
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+          {t("calls.micPaused")}
+        </div>
+      )}
       {/* Chat Header. On a phone every button can be there at once (the connection, a call, a video call, a bot's Tasks,
           ⋮): the back button, the avatar, the buttons' sides and the gaps are a little narrower there, so the name keeps
           eight characters on a 375px phone (it had a letter or two). The buttons stay as tall, and touch each other. */}
