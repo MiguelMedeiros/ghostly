@@ -1,4 +1,5 @@
 import DHT from 'hyperdht'
+import { redial } from './redial.mjs'
 
 export const MAX_FRAME = 60 * 1024
 const PREFACE = 'ghostly/paired-chat/1'
@@ -15,7 +16,8 @@ export async function createHyperEndpoint(seed, options = {}) {
   const waiting = []
   const descriptor = { publicKey: keyPair.publicKey.toString('hex') }
 
-  async function attach(socket) {
+  /** `onChannel`: hears the channel as soon as it counts against the limit (a dial that stalls is dropped from it). */
+  async function attach(socket, onChannel) {
     if (stopped || channels.size >= 2) { socket.destroy(); throw new Error('Native connection limit reached') }
     let reader = null
     let closeHandler = null
@@ -50,6 +52,7 @@ export async function createHyperEndpoint(seed, options = {}) {
       close() { socket.destroy() },
     }
     channels.add(channel)
+    onChannel?.(channel)
     socket.on('error', error => rejectOpen(error))
     socket.on('close', () => {
       closed = true; pending = []; clearTimeout(timer); channels.delete(channel)
@@ -102,7 +105,15 @@ export async function createHyperEndpoint(seed, options = {}) {
     set onConnection(value) { incomingHandler = value; if (value) for (const bound of waiting.splice(0)) value(bound) },
     async connect(address) {
       if (stopped || !address || !/^[a-f0-9]{64}$/.test(address.publicKey)) throw new Error('Invalid HyperDHT endpoint')
-      return attach(node.connect(Buffer.from(address.publicKey, 'hex'), { keyPair }))
+      const remote = Buffer.from(address.publicKey, 'hex')
+      // A dial whose stream opened and carried nothing is made again (`redial.mjs`): it is dropped from the limit at
+      // once, so the next one has its place even while another channel is live.
+      return redial(() => {
+        const socket = node.connect(remote, { keyPair })
+        let counted = null
+        const ready = attach(socket, channel => { counted = channel })
+        return { opened: socket.opened, ready, close() { if (counted) channels.delete(counted); socket.destroy() } }
+      })
     },
     async close() { stopped = true; for (const channel of channels) channel.close(); waiting.length = 0; await server.close(); await node.destroy() },
   }
