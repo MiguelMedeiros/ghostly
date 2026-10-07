@@ -212,8 +212,8 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
 export const servicesPlatform: ServicesPlatform | null = {
   // Mini-apps (WISP 1200) where the host frames them: the web app. Nothing reaches this while the feature is off.
   get apps() {
-    const { appRunner, appNetRunner } = getBrowserHost();
-    return appRunner ? engineApps(appRunner, appNetRunner) : null;
+    const { appRunner, appNetRunner, appRunnerServed } = getBrowserHost();
+    return appRunner ? engineApps(appRunner, appNetRunner, appRunnerServed) : null;
   },
 
   subscribe: (listener) => {

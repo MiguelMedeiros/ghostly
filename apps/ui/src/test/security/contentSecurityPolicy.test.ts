@@ -139,6 +139,9 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
     expect(net!.body).not.toContain("ghostly-headers.conf");
     expect(header(net!.body, "Content-Security-Policy")).toBe(NET_RUNNER_CSP);
     expect(NET_RUNNER_HEADERS["Content-Security-Policy"]).toBe(NET_RUNNER_CSP);
+    // Desktop's `ghostly-app` scheme serves the same policy to an app window granted internet.
+    const desktop = /pub const NET_RUNNER_CSP: &str = "([^"]*)";/.exec(read("apps/desktop/src/app_sandbox.rs"))![1]!.replace(/\\\n/g, "");
+    expect(desktop).toBe(NET_RUNNER_CSP);
     for (const name of ["X-Content-Type-Options", "Referrer-Policy", "Permissions-Policy", "X-DNS-Prefetch-Control", "Strict-Transport-Security"]) expect(header(net!.body, name), name).toBe(header(runner!.body, name));
     const plain = directives(RUNNER_CSP);
     const wide = directives(NET_RUNNER_CSP);
