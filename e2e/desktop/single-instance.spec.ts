@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { desktopBinary, desktopHome, expect, homeEnv, openDesktop, privateBus, test } from "../support/desktop";
+import { desktopTestNetworkEnv } from "../../packages/cli/test/support/network";
 
 /**
  * One Ghostly per profile (apps/desktop/src/single_instance.rs). Started twice on one profile, two peers ran with the
@@ -12,7 +13,7 @@ import { desktopBinary, desktopHome, expect, homeEnv, openDesktop, privateBus, t
 
 /** Starts the app the way a person does, with no driver: the process, and whether (and how) it has exited. */
 function launch(env: Record<string, string>): { app: ChildProcess; exited: Promise<number | null> } {
-  const app = spawn(desktopBinary(), [], { stdio: "ignore", env: { ...process.env, GHOSTLY_E2E: "1", GHOSTLY_FAKE_MEDIA: "1", ...env } });
+  const app = spawn(desktopBinary(), [], { stdio: "ignore", env: desktopTestNetworkEnv({ GHOSTLY_E2E: "1", GHOSTLY_FAKE_MEDIA: "1" }, env) });
   return { app, exited: new Promise((done) => app.once("exit", (code) => done(code))) };
 }
 

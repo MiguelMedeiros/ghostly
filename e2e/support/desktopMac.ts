@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DesktopApp } from "./desktop";
+import { desktopTestNetworkEnv } from "../../packages/cli/test/support/network";
 
 /**
  * Ghostly Desktop on a Mac, driven without a WebDriver (WKWebView has none).
@@ -306,15 +307,15 @@ export async function openMacDesktop(options: MacDesktopOptions): Promise<MacDes
   const log: string[] = [];
   const child: ChildProcess = spawn(executable, [], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
+    // This machine only: a dead Pkarr relay (and so no Mainline DHT), HyperDHT bootstrap and Iroh relay unless the
+    // test brings its own on loopback (packages/cli/test/support/network.ts; GHOSTLY_TEST_PUBLIC_NET=1 opts out).
+    env: desktopTestNetworkEnv({
       // Never a new profile's default Mainnet wallets (#682), as the e2e bundle id already says.
       GHOSTLY_E2E: "1",
       GHOSTLY_PROFILE: options.profile ?? `e2e-${options.name}`,
       GHOSTLY_E2E_DRIVER: String(options.port),
       GHOSTLY_E2E_DRIVER_TOKEN: token,
-      ...options.env,
-    },
+    }, options.env),
   });
   for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
   let exited: number | null | undefined;

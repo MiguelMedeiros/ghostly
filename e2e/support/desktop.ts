@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { desktopTestNetworkEnv } from "../../packages/cli/test/support/network";
 
 export { expect };
 
@@ -256,15 +257,15 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
       // A test must never open the person's own chats: its own profile, its own storage. Nor the machine's camera
       // and microphone: a test picture and a test tone for calls on Linux (debug builds), as Chromium's fake devices.
       // GHOSTLY_E2E: never a new profile's default Mainnet wallets (#682): this build has the real bundle id.
-      env: {
-        ...process.env,
+      // Nor a public network: a dead Pkarr relay (and so no Mainline DHT), HyperDHT bootstrap and Iroh relay unless the
+      // test brings its own on loopback (packages/cli/test/support/network.ts; GHOSTLY_TEST_PUBLIC_NET=1 opts out).
+      env: desktopTestNetworkEnv({
         GHOSTLY_E2E: "1",
         GHOSTLY_FAKE_MEDIA: "1",
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
         ...(bus ? { DBUS_SESSION_BUS_ADDRESS: bus.address } : {}),
-        ...options.env,
-      },
+      }, options.env),
     },
   );
   const log: string[] = [];

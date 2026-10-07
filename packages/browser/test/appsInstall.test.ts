@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalJsonBytes } from "@ghostly/core";
 import { fileBytes } from "../src/shared/fileBytes";
 import {
@@ -19,6 +19,21 @@ beforeEach(async () => {
   await emptyProfile();
   net = new FakeNet();
 });
+afterEach(() => { vi.restoreAllMocks(); });
+
+/**
+ * A browser that keeps no Blob in IndexedDB, as Safari's Private Browsing and WebKit's in-memory contexts: a piece of a
+ * file is refused with WebKit's own words, and every other record is stored.
+ */
+function privateBrowsing(): void {
+  const put = IDBObjectStore.prototype.put;
+  vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+    if (!((value as { data?: unknown })?.data instanceof Blob)) return put.call(this, value, key);
+    const request = { error: new DOMException("Error preparing Blob/File data to be stored in object store", "UnknownError") } as IDBRequest & { onerror: (() => void) | null };
+    setTimeout(() => request.onerror?.(), 0);
+    return request;
+  });
+}
 
 describe("install", () => {
   it("a pasted GitHub URL is read from raw.githubusercontent.com; nothing is kept before Install", async () => {
@@ -242,6 +257,38 @@ describe("before a run", () => {
     await files.append(id, 0, bytes);
     await files.flush(id);
     await expect(apps(net).entry({ ref: v1.ref })).rejects.toThrow(/^damaged/);
+  });
+});
+
+describe("a browser that keeps no app files (Safari's Private Browsing)", () => {
+  it("install fails as `storage`, with the browser's words kept after it, and keeps nothing", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    privateBrowsing();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(store.install({ digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^storage: .*UnknownError: Error preparing Blob\/File data/);
+    expect(warn).toHaveBeenCalledWith("[apps] storage:", expect.stringContaining("Error preparing Blob/File data"));
+    vi.restoreAllMocks();
+    expect(await appRows()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+  });
+
+  it("fetching a restored app's files again fails as `storage` too, not as missing files", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+    privateBrowsing();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(apps(net).fetchFiles({ ref: v1.ref })).rejects.toThrow(/^storage: /);
+    await expect(apps(net).entry({ ref: v1.ref })).rejects.toThrow(/^storage: /);
+    vi.restoreAllMocks();
+    expect(await bundleIds()).toEqual([]);
+    expect(await apps(net).runCheck({ ref: v1.ref })).toEqual({ status: "needs-files" });
   });
 });
 

@@ -23,12 +23,27 @@ const KEYS: Record<string, TranslationKey> = {
   "signature-key": "apps.errors.notSigned",
   "bad-signature-statement": "apps.errors.notSigned",
   "needs-files": "apps.errors.needsFiles",
+  storage: "apps.errors.storage",
+};
+
+/** The longer story behind an ⓘ beside an error's line, for the errors that have one. */
+const INFO: Record<string, TranslationKey> = {
+  storage: "apps.errors.storageInfo",
 };
 
 /** The code of an apps error, or null. */
 export function appErrorCode(error: unknown): string | null {
   const text = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   return /^([a-z][a-z-]*): /.exec(text)?.[1] ?? null;
+}
+
+/** An error as a dialog shows it: its line, and the ⓘ's text when it has one. */
+export interface AppErrorView { text: string; info?: string }
+
+export function appErrorView(error: unknown, t: Translate): AppErrorView {
+  const code = appErrorCode(error);
+  const info = code ? INFO[code] : undefined;
+  return { text: appErrorText(error, t), ...(info && { info: t(info) }) };
 }
 
 export function appErrorText(error: unknown, t: Translate): string {

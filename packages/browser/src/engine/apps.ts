@@ -7,7 +7,7 @@ import {
   type AppStoreView, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
-import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytesKind } from "../shared/fileBytes";
+import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { DEFAULT_APP_STORES } from "./appDefaults";
 
@@ -380,17 +380,33 @@ export class Apps {
 
   // ---------- bundle bytes ----------
 
+  /**
+   * Stores a bundle's bytes. A browser that keeps no files fails here: Safari's Private Browsing (and WebKit's in-memory
+   * contexts) refuses a Blob in IndexedDB with "Error preparing Blob/File data to be stored in object store". Any such
+   * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind.
+   */
   private async writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
-    const files = await fileBytes();
     const id = bundleId(digest);
     const expected = toBase64Url(sha256(bytes));
-    const size = await files.size(id);
-    if (size === bytes.length && (await files.digest(id)) === expected) return files.kind;
-    if (size !== null) await files.remove(id);
-    for (let at = 0; at < bytes.length; at += FILE_BYTES_STEP) await files.append(id, at, bytes.subarray(at, at + FILE_BYTES_STEP));
-    await files.flush(id);
-    await files.close(id);
-    if ((await files.digest(id)) !== expected) {
+    let files: FileBytes | undefined;
+    let stored: string | null;
+    try {
+      files = await fileBytes();
+      const size = await files.size(id);
+      if (size === bytes.length && (await files.digest(id)) === expected) return files.kind;
+      if (size !== null) await files.remove(id);
+      for (let at = 0; at < bytes.length; at += FILE_BYTES_STEP) await files.append(id, at, bytes.subarray(at, at + FILE_BYTES_STEP));
+      await files.flush(id);
+      await files.close(id);
+      stored = await files.digest(id);
+    } catch (e) {
+      await files?.close(id).catch(() => {});
+      await files?.remove(id).catch(() => {});
+      const words = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      console.warn("[apps] storage:", words);
+      fail("storage", `The app's files could not be stored on this device (${words})`);
+    }
+    if (stored !== expected) {
       await files.remove(id).catch(() => {});
       fail("storage", "The app's files could not be stored on this device");
     }

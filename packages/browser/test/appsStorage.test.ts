@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, createLink } from "@ghostly/core";
+import { DEFAULT_APP_STORES } from "../src/engine/appDefaults";
 import { APP_SCOPE_ALONE, APP_STORAGE_LIMITS, type Apps } from "../src/engine/apps";
 import { db } from "../src/engine/db";
 import { GhostlyNode } from "../src/engine/node";
@@ -239,7 +240,7 @@ describe("the engine", () => {
   it("on for a test engine: a chat of the profile is a scope, a group or an unknown id is not, and nothing is asked", async () => {
     const peer = await node({ apps: true });
     expect(await peer.appList()).toEqual([]);
-    expect(await peer.appStoreList()).toEqual([]);
+    expect((await peer.appStoreList()).map((s) => s.url)).toEqual(DEFAULT_APP_STORES.map((s) => s.url));
     expect(await peer.appCheckUpdates()).toEqual([]);
     const app = await bundle();
     net.put(BUNDLE_URL, app.bytes);

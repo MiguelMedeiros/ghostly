@@ -115,12 +115,15 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // Early on, while the relays' request budget is whole (WebRTC signals through them), and over WebRTC: over HyperDHT
     // on this loopback testnet a restarted daemon's own dial does not reach its contact, while a bare HyperDHT node
     // restarted the same way does (followed up apart).
+    const onWebrtc = async () => {
+      for (const [dir, chat] of [[alice, "bob"], [bob, "alice"]]) {
+        const until = Date.now() + 60_000;
+        while (Date.now() < until && ok(await as(dir, "chat", "show", chat)).transport !== "webrtc/1") await new Promise((r) => setTimeout(r, 300));
+        expect(ok(await as(dir, "chat", "show", chat))).toMatchObject({ live: true, transport: "webrtc/1" });
+      }
+    };
     ok(await as(alice, "chat", "transport", "bob", "webrtc"));
-    for (const [dir, chat] of [[alice, "bob"], [bob, "alice"]]) {
-      const until = Date.now() + 60_000;
-      while (Date.now() < until && ok(await as(dir, "chat", "show", chat)).transport !== "webrtc/1") await new Promise((r) => setTimeout(r, 300));
-      expect(ok(await as(dir, "chat", "show", chat))).toMatchObject({ live: true, transport: "webrtc/1" });
-    }
+    await onWebrtc();
     const restartBob = async () => {
       const daemon = new Running(["--home", bob, "daemon"], env);
       running.push(daemon);
@@ -173,18 +176,27 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     }
     expect(afterStop).toBeLessThan(10_000);
     expect(afterKill).toBeLessThan(RACE_DIRECT_MS + dial);
+    // Back over the race's HyperDHT, the chat moves to the WebRTC chosen above once the dead session has retired
+    // (SWITCH_RETIRE_MS, 3 s after). The next steps start from there, not from a move still to come.
+    await onWebrtc();
   }, 240_000);
 
   it("move a chat to native HyperDHT when asked", async () => {
+    // From WebRTC, on both sides. A side on the HyperDHT already (the restart step's race lands there) would read as
+    // moved before any move, and the chat would then go to WebRTC and back under the next steps, a typing frame said
+    // in between lost (CI run 37571224993).
+    for (const [dir, chat] of [[alice, "bob"], [bob, "alice"]]) expect(ok(await as(dir, "chat", "show", chat))).toMatchObject({ live: true, transport: "webrtc/1" });
     ok(await as(alice, "chat", "transport", "bob", "hyperdht"));
-    const until = Date.now() + 90_000;
-    let shown: Record<string, unknown> = {};
-    while (Date.now() < until) {
-      shown = ok(await as(bob, "chat", "show", "alice"));
-      if (shown.transport === "hyperdht/1") break;
-      await new Promise((r) => setTimeout(r, 500));
+    for (const [dir, chat] of [[bob, "alice"], [alice, "bob"]]) {
+      const until = Date.now() + 90_000;
+      let shown: Record<string, unknown> = {};
+      while (Date.now() < until) {
+        shown = ok(await as(dir, "chat", "show", chat));
+        if (shown.transport === "hyperdht/1") break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      expect(shown).toMatchObject({ live: true, transport: "hyperdht/1" });
     }
-    expect(shown).toMatchObject({ live: true, transport: "hyperdht/1" });
   });
 
   it("carry messages both ways, with events a bot can act on", async () => {
