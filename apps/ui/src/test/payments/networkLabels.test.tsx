@@ -82,14 +82,14 @@ describe("a request of a network this profile has no wallet on", () => {
   it("says test money is asked for, offers no Review, and still lets another wallet pay it", () => {
     const onchain = target({ method: "bitcoin", network: "signet", provider: "onchain", address: "tb1qpayee" });
     show(incomingRequest({ amount: 5_000, network: "testnet", target: onchain }), { wallet: { mints: [mint(REAL_MINT, 1_000)] } });
-    expect(screen.getByTestId("payment-network-missing")).toHaveTextContent("Test money is asked for (test sats), and you have no Testnet wallet to pay it from. Make one under Wallets, or ask for real money instead.");
+    expect(screen.getByTestId("payment-network-missing")).toHaveTextContent("You have no Testnet wallet to pay this" + "Make one in Wallets, or ask for real money.");
     expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pay with another wallet" })).toBeInTheDocument();
   });
 
   it("says real money is asked for when only a Testnet wallet is there", () => {
     show(incomingRequest({ amount: 5_000, network: "mainnet", mints: [REAL_MINT] }), { wallet: { mints: [mint(TEST_MINT, 1_000)] } });
-    expect(screen.getByTestId("payment-network-missing")).toHaveTextContent("Real money is asked for (sats), and you have no Mainnet wallet to pay it from.");
+    expect(screen.getByTestId("payment-network-missing")).toHaveTextContent("You have no Mainnet wallet to pay this" + "Make one in Wallets, or ask for test money.");
     expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
   });
 

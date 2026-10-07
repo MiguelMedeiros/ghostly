@@ -49,6 +49,6 @@ describe("Open in wallet on a payment in a message", () => {
     fakeEngine.openPaymentLink = vi.fn(async () => { throw new Error("Not a payment link"); });
     bubble(BIP21);
     click(await screen.findByTestId("onchain-open-wallet"));
-    expect(await screen.findByTestId("onchain-open-wallet-error")).toHaveTextContent("Could not open a wallet: Not a payment link");
+    expect(await screen.findByTestId("onchain-open-wallet-error")).toHaveTextContent("Couldn't open a wallet" + "Copy the text or scan the code instead.");
   });
 });

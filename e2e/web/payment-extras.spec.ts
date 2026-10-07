@@ -393,7 +393,7 @@ test("a payment from ecash spent somewhere else ends with that reason, and the b
   for (const p of [alice, bob]) await openChat(p);
   const review = await prepareSend(alice, 21);
   await review.getByRole("button", { name: "Approve payment" }).click();
-  await expect(alice.page.getByText(/already spent somewhere else/).first()).toBeVisible();
+  await expect(alice.page.getByText(/already spent (?:somewhere else|elsewhere)/).first()).toBeVisible();
   await expect(chat(bob).getByTestId("payment-bubble"), "nothing reached the contact").toHaveCount(0);
 
   // Nothing is held for it, and the wallet holds what the mint says: nothing.

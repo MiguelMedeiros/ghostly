@@ -17,7 +17,8 @@ import { OpenInWallet } from "./OpenInWallet";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 const button =
   "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
@@ -173,7 +174,7 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
   const [fee, setFee] = useState(defaultFee);
   const [review, setReview] = useState<Review | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   // Typed the person's way ("1.000,5" in Portuguese); `amount` and `fee` are what they mean, or "" while unclear.
   const amountField = useAmountText(amount, setAmount, t.language ?? "en", decimals, t);
   const feeField = useAmountText(fee, setFee, t.language ?? "en", feeDecimals, t);
@@ -198,9 +199,9 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
           disabled={busy || !(value > 0) || !fee}
           data-testid="money-review"
           onClick={async () => {
-            setBusy(true); setError("");
+            setBusy(true); setError(null);
             try { setReview(await prepare(value, Number(fee))); }
-            catch (e) { setError(errorText(e, t)); }
+            catch (e) { setError(problemText(e, t)); }
             finally { setBusy(false); }
           }}
         >
@@ -208,7 +209,7 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
         </button>
         <button className={quiet} disabled={busy} onClick={() => setOpen(false)}>{t("common.cancel")}</button>
       </div>
-      {error && <p className="text-danger-ink text-xs m-0" role="alert" data-testid="money-pay-error">{error}</p>}
+      {error && <Notice problem={error} testId="money-pay-error" className="text-xs m-0" ink />}
     </div>
   );
 }

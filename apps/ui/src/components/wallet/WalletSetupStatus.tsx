@@ -3,7 +3,7 @@ import type { WalletPlatform, WalletSetupView, WalletType } from "../../lib/plat
 import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice } from "./ui";
 import { failedBecause, walletLabel } from "./names";
-import { errorText } from "../../lib/errorText";
+import { problemText, type Problem } from "../../lib/problemText";
 
 
 /**
@@ -14,10 +14,10 @@ import { errorText } from "../../lib/errorText";
 export function WalletSetupStatus({ wallet, setup, showProgress }: { wallet: WalletPlatform; setup: WalletSetupView; showProgress: boolean }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState<WalletType | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Problem | null>(null);
   const act = async (type: WalletType, work: () => Promise<void>) => {
     setBusy(type); setError(null);
-    try { await work(); } catch (e) { setError(errorText(e, t)); } finally { setBusy(null); }
+    try { await work(); } catch (e) { setError(problemText(e, t)); } finally { setBusy(null); }
   };
   if (!setup.failed.length && !(showProgress && setup.running)) return null;
   return (
@@ -26,7 +26,7 @@ export function WalletSetupStatus({ wallet, setup, showProgress }: { wallet: Wal
       {setup.failed.length > 0 && <p className="text-sm font-medium text-text-primary">{t("wallet.setup.title")}</p>}
       {setup.failed.map((f) => (
         <div key={f.type} className="space-y-2" data-testid={`wallet-setup-failed-${f.type}`}>
-          <Notice tone="error" testId={`wallet-setup-error-${f.type}`}>{t("wallet.setup.failed", { wallet: walletLabel(f.type, f.network), reason: failedBecause(f.reason, t) })}</Notice>
+          <Notice tone="error" testId={`wallet-setup-error-${f.type}`} details={problemText(f.reason, t).detail}>{t("wallet.setup.failed", { wallet: walletLabel(f.type, f.network), reason: failedBecause(f.reason, t) })}</Notice>
           <div className="flex flex-wrap gap-2">
             <Button data-testid={`wallet-setup-retry-${f.type}`} disabled={!!busy || setup.running} onClick={() => void act(f.type, () => wallet.setupRetry(f.type))}>
               {busy === f.type || setup.running ? t("wallet.first.creating") : t("wallet.setup.retry", { wallet: walletLabel(f.type, f.network) })}
@@ -35,7 +35,7 @@ export function WalletSetupStatus({ wallet, setup, showProgress }: { wallet: Wal
           </div>
         </div>
       ))}
-      {error && <Notice tone="error" testId="wallet-setup-action-error">{error}</Notice>}
+      {error && <Notice problem={error} testId="wallet-setup-action-error" />}
     </section>
   );
 }

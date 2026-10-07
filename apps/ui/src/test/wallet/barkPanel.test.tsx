@@ -34,11 +34,12 @@ describe("the Bark panel", () => {
   it("says what it could not read, or why it is still connecting, in the app's language", () => {
     const stale = onNetwork("mainnet", { bark: barkReady({ ...MAINNET, error: "Could not read the balance, history from the Bark server. Last values may be stale." }) });
     const { unmount } = renderApp(<BarkWalletPanel wallet={{} as never} state={stale} />, { language: "pt" });
-    expect(screen.getByText("Não foi possível ler o saldo, o histórico do servidor Bark. Os últimos valores podem estar desatualizados.")).toBeInTheDocument();
+    expect(screen.getByText("Não foi possível ler o saldo, o histórico do servidor Bark")).toBeInTheDocument();
+    expect(screen.getByText("Os valores mostrados podem estar desatualizados.")).toBeInTheDocument();
     unmount();
     const connecting = onNetwork("mainnet", { bark: barkReady({ ...MAINNET, locked: true, error: "Connecting to Bark… The Bark server is not answering" }) });
     renderApp(<BarkWalletPanel wallet={{} as never} state={connecting} />, { language: "pt" });
-    expect(screen.getByTestId("bark-connecting")).toHaveTextContent("Conectando ao Bark… O servidor Bark não está respondendo");
+    expect(screen.getByTestId("bark-connecting")).toHaveTextContent("Conectando ao Bark…" + "O servidor Bark não está respondendo");
   });
 
   it("with no coin yet, says how long coins last and nothing about a next expiry", () => {

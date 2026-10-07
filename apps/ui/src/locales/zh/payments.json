@@ -46,8 +46,10 @@
     "maxGas": "最高 gas（ETH）",
     "noSharedMint": "没有共同配置的铸币厂",
     "noWallet": {
-      "mainnet": "对方请求真实资金（{{unit}}），而你没有可用于支付的 Mainnet 钱包。请在钱包中创建一个，或改为请求测试资金。",
-      "testnet": "对方请求测试资金（{{unit}}），而你没有可用于支付的 Testnet 钱包。请在钱包中创建一个，或改为请求真实资金。"
+      "mainnet": "你没有可用于支付的 Mainnet 钱包",
+      "mainnetNext": "在钱包中创建一个，或请求测试币。",
+      "testnet": "你没有可用于支付的 Testnet 钱包",
+      "testnetNext": "在钱包中创建一个，或请求真钱。"
     },
     "off": "此付款方式在本聊天中已关闭。",
     "payElsewhere": "用其他钱包支付",
@@ -92,9 +94,12 @@
     "chooseOther": "选择其他人",
     "continue": "继续",
     "error": {
-      "noAnswer": "你的联系人的应用没有响应。它可能已离线或需要更新；对方可以改为向你发送请求。",
-      "noFederation": "你和 {{name}} 没有共同的联邦，且其请求没有 Lightning 发票。",
-      "noFederationInvoice": "你和 {{name}} 没有共同的联邦：请在聊天中对其请求使用“查看付款”，通过 Lightning 支付。",
+      "noAnswer": "你的联系人的应用没有响应",
+      "noAnswerNext": "对方可以改为向你发送请求。",
+      "noFederation": "你和 {{name}} 没有共同的联邦",
+      "noFederationInvoice": "你和 {{name}} 没有共同的联邦",
+      "noFederationInvoiceNext": "请在聊天中通过 Lightning 支付其请求。",
+      "noFederationNext": "其请求也没有 Lightning 发票。",
       "noMint": "请先添加一个 Cashu 铸币所",
       "prepare": "无法准备付款",
       "request": "无法准备请求"
@@ -151,7 +156,8 @@
     "copied": "已复制",
     "copyError": "无法复制。请选中文本自行复制。",
     "open": "打开钱包",
-    "openError": "无法打开钱包：{{error}}。请改为复制文本或扫描二维码。",
+    "openError": "无法打开钱包",
+    "openErrorNext": "请改为复制文本或扫描二维码。",
     "openTitle": "在此设备上的钱包中打开",
     "paid": "我已付款",
     "paidTitle": "会请联系人的钱包立即查看。只有看到这笔钱后，它才会把请求标记为已付款。",

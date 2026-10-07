@@ -13,7 +13,7 @@ import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
-import { errorText } from "../lib/errorText";
+import { problemText } from "../lib/problemText";
 
 /** The most the person accepts to pay in fees unless they change it; the review shows the real fee. */
 const DEFAULT_FEE_CAP = 2_000;
@@ -54,14 +54,18 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
               {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: formatAt(bt.balanceAt, { dateStyle: "medium", timeStyle: "short" }, t.language) }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
             </p>
           )}
-          {bt.error && <Notice tone={bt.status === "error" ? "error" : "warning"} testId="bitcoin-connect-error">{bt.status === "connecting" ? t("wallet.bitcoin.retrying", { error: errorText(bt.error, t) }) : errorText(bt.error, t)}</Notice>}
+          {bt.error && (() => {
+            const said = problemText(bt.error, t);
+            return <Notice tone={bt.status === "error" ? "error" : "warning"} testId="bitcoin-connect-error" details={said.detail}
+              title={bt.status === "connecting" ? t("wallet.bitcoin.retrying", { error: said.title }) : said.title} next={said.next} />;
+          })()}
           {(bt.status === "error" || !!bt.failures) && (
             <div className="flex flex-wrap justify-center gap-2">
               <Button disabled={busy} data-testid="bitcoin-retry" onClick={() => void run(() => wallet.bitcoinRetrySource())}>{t("wallet.bitcoin.retry")}</Button>
               {changeableFields(bt).length > 0 && <Button disabled={busy} data-testid="bitcoin-change-server" onClick={() => setChanging(true)}>{t("wallet.bitcoin.changeServer")}</Button>}
             </div>
           )}
-          {error && <Notice tone="error" testId="bitcoin-error">{error}</Notice>}
+          {error && <Notice problem={error} testId="bitcoin-error" />}
         </div>
       ) : (
         <div className="space-y-4">
@@ -105,7 +109,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           )}
           {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
           {intents.map((i) => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
-          {error && <Notice tone="error" testId="bitcoin-error">{error}</Notice>}
+          {error && <Notice problem={error} testId="bitcoin-error" />}
         </div>
       )}
       {bt && <SourcePicker kind="onchain" view={bt} onSet={(id, values) => wallet.bitcoinSetSource(id, values)} onClear={() => wallet.bitcoinClearSource()}

@@ -6,7 +6,7 @@ import { fillNodes } from "../../lib/fillNodes";
 import { WalletMark } from "../WalletCards";
 import { Button, Notice } from "./ui";
 import { WALLET_NAME as NAME } from "./names";
-import { errorText } from "../../lib/errorText";
+import { problemText, type Problem } from "../../lib/problemText";
 
 /** What the first setup makes: payments over Lightning (Cashu) and a dollar token, each ready in one click. */
 const FIRST: WalletType[] = ["cashu", "usdt"];
@@ -33,7 +33,7 @@ export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
   const { t } = useI18n();
   const [busy, setBusy] = useState<WalletNetwork | null>(null);
   const [made, setMade] = useState<string[]>([]);
-  const [failed, setFailed] = useState<{ type: WalletType; network: WalletNetwork; text: string }[]>([]);
+  const [failed, setFailed] = useState<{ type: WalletType; network: WalletNetwork; problem: Problem }[]>([]);
 
   const start = async (network: WalletNetwork, types: WalletType[] = firstKinds(network, offers)) => {
     setBusy(network); setFailed([]); onStart();
@@ -41,7 +41,7 @@ export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
     // One after the other: each is whole or not there at all, and a failure says which.
     for (const type of types) {
       try { done.push((await wallet.create({ type, network })).id); }
-      catch (e) { problems.push({ type, network, text: errorText(e, t) }); }
+      catch (e) { problems.push({ type, network, problem: problemText(e, t) }); }
     }
     setBusy(null); setMade((m) => [...m, ...done]); setFailed(problems);
     if (done.length && !problems.length) onMade(done[0]);
@@ -64,7 +64,7 @@ export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
       {busy && <Notice testId="wallet-first-progress">{t("wallet.first.progress")}</Notice>}
       {failed.map((f) => (
         <div key={f.type} className="flex flex-wrap items-center gap-2">
-          <Notice tone="error" testId={`wallet-first-error-${f.type}`}>{f.text}</Notice>
+          <Notice problem={f.problem} testId={`wallet-first-error-${f.type}`} />
           <Button data-testid={`wallet-first-retry-${f.type}`} disabled={!!busy} onClick={() => void start(f.network, [f.type])}>{t("wallet.first.retry", { wallet: NAME[f.type] })}</Button>
         </div>
       ))}

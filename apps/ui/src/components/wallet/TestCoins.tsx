@@ -9,7 +9,7 @@ import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { formatAmount } from "../../lib/amount";
-import { errorText } from "../../lib/errorText";
+import { problemText, type Problem } from "../../lib/problemText";
 
 /**
  * Where a Testnet wallet's test coins come from. `ask`: Ghostly asks the faucet itself, on one press (`coin`: what it
@@ -88,7 +88,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
   const { t } = useI18n();
   const [asking, setAsking] = useState(false);
   const [got, setGot] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Problem | null>(null);
   const faucet = faucetFor(rail, network, state);
   if (!faucet) return null;
   const ask = async () => {
@@ -100,7 +100,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
       const words = { amount: formatAmount(result.amount, t.language), unit };
       setGot(result.pending ? t("wallet.testCoins.gotPending", words) : t("wallet.testCoins.got", words));
     } catch (e) {
-      setError(errorText(e, t));
+      setError(problemText(e, t));
     } finally { setAsking(false); }
   };
   const label = <span className="inline-flex flex-wrap items-center gap-2">{t("wallet.testCoins.title")} <NetworkTag network="testnet" testId="test-coins-network" /></span>;
@@ -114,7 +114,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
         {got && <Block><Notice tone="success" testId="test-coins-result">{got}</Notice></Block>}
         {error && <Block>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <Notice tone="error" testId="test-coins-error">{error}</Notice>
+            <Notice problem={error} testId="test-coins-error" />
             <Button data-testid="test-coins-retry" disabled={asking} onClick={() => void ask()}>{t("wallet.testCoins.retry")}</Button>
           </div>
         </Block>}

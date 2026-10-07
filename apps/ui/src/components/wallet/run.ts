@@ -1,16 +1,20 @@
 import { useState } from "react";
-import { errorText } from "../../lib/errorText";
+import { problemText, type Problem } from "../../lib/problemText";
 import { useT } from "../../contexts/I18nContext";
 import { saveMade } from "../../lib/fileDownload";
 import { servicesPlatform } from "../../lib/platform";
 
-/** Runs one wallet operation at a time and keeps its error. */
+/**
+ * Runs one wallet operation at a time and keeps its error, as a notice says it (lib/problemText.ts): a few words, the
+ * engine's English behind the ⓘ. `setError` takes a line of the app's own ("" clears it).
+ */
 export function useRun() {
   const t = useT();
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [error, setProblem] = useState<Problem | null>(null);
+  const setError = (text: string) => setProblem(text ? { tone: "error", title: text } : null);
   const run = async (work: () => Promise<unknown>) => {
-    setBusy(true); setError("");
-    try { await work(); } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); }
+    setBusy(true); setProblem(null);
+    try { await work(); } catch (e) { setProblem(problemText(e, t)); } finally { setBusy(false); }
   };
   return { busy, error, setError, run };
 }

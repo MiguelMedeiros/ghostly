@@ -15,7 +15,8 @@ import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { paymentIsTest, paymentTitle, railLine } from "./paymentWords";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
-import { errorText } from "../lib/errorText";
+import { problemLine, problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
 const mintLabel = (m: { url: string; name: string }) => {
@@ -54,7 +55,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const [mint,setMint] = useState("");
   const [feeCap,setFeeCap] = useState<string|null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [external, setExternal] = useState(false);
 
   // Feedback for what happens while you watch: a payment landing, a request coming in, a confirmation.
@@ -79,12 +80,12 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   if (!wallet || !payment) return <span className="text-[14.2px] leading-[19px]">{fallbackText}</span>;
 
   const run = async (task: () => Promise<void>) => {
-    setError("");
+    setError(null);
     setBusy(true);
     try {
       await task();
     } catch (e) {
-      setError(errorText(e, t));
+      setError(problemText(e, t));
     } finally {
       setBusy(false);
     }
@@ -173,14 +174,14 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         data-testid="payment-state"
       >
         {payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending") : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation") : payment.closed ? t("payments.bubble.state.closed") : stateLabel}
-        {payment.error && payment.state !== "settled" ? ` · ${errorText(payment.error, t)}` : ""}
+        {payment.error && payment.state !== "settled" ? ` · ${problemLine(payment.error, t)}` : ""}
       </p>
 
       {isRequest && !outgoing && !payment.closed && paymentsOff && (payment.state === "pending" || payment.state === "failed") && (
         <p className="text-xs text-text-primary/65 mt-2" data-testid="payment-off">{t("payments.bubble.off")}</p>
       )}
       {isRequest && !outgoing && !payment.closed && !paymentsOff && noWallet && (payment.state === "pending" || payment.state === "failed") && (
-        <p className="text-xs text-text-primary/65 mt-2" data-testid="payment-network-missing">{t(`payments.bubble.noWallet.${network}`, { unit: (tokenPayment ? payment.target?.asset : undefined) ?? sats })}</p>
+        <p className="text-xs text-text-primary/65 mt-2" data-testid="payment-network-missing">{t(`payments.bubble.noWallet.${network}`)}<span className="block">{t(`payments.bubble.noWallet.${network}Next`)}</span></p>
       )}
       {isRequest && !outgoing && !payment.closed && !paymentsOff && (payment.state === "pending" || payment.state === "failed") && !payment.lightningPending && (
         <div className="flex flex-col gap-2 mt-2">
@@ -237,7 +238,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </button>
       )}
       {/* What went wrong with an attempt here: gone once the request is paid, however it was paid. */}
-      {error && payment.state !== "settled" && <p className="text-danger-ink text-[11px] m-0 mt-1">{error}</p>}
+      {error && payment.state !== "settled" && <Notice problem={error} className="text-[11px] m-0 mt-1" ink />}
     </div>
   );
 }

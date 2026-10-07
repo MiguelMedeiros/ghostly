@@ -31,7 +31,7 @@ export function WalletAway({ wallet, platform }: { wallet: Pick<WalletInstanceVi
       {platform && PHRASE.has(wallet.type) && <>
         <p className="text-xs text-text-muted" data-testid="wallet-away-backup">{t("wallet.away.backup", { device })}</p>
         <BackupRows name={WALLET_NAME[wallet.type]} busy={backup.busy} run={backup.run} reveal={() => reveal(platform, wallet.type)} exportBackup={(password) => exportBackup(platform, wallet.type, password)} />
-        {backup.error && <Notice tone="error">{backup.error}</Notice>}
+        {backup.error && <Notice problem={backup.error} />}
       </>}
     </div>
   );

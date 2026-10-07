@@ -26,7 +26,7 @@ export function LightningCardSettings({ wallet, state }: { wallet: WalletPlatfor
           <input aria-label={t("wallet.lightning.card.name")} data-testid="lightning-card-name" className={input} maxLength={32} value={name} onChange={(e) => setName(e.target.value)} />
           <Button type="submit" data-testid="lightning-card-rename" disabled={busy || !changed}>{t("wallet.lightning.card.rename")}</Button>
         </InputGroup>
-        {error && <Notice tone="error" testId="lightning-card-error">{error}</Notice>}
+        {error && <Notice problem={error} testId="lightning-card-error" />}
       </Block>
     </Section>
   );

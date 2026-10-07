@@ -13,12 +13,24 @@ import { english } from "./english";
 type Params = Record<string, string | number>;
 interface Rule {
   match: RegExp;
+  /** The title: what happened, in a few words. */
   key: TranslationKey;
   /** What goes into the translation, from the match's named groups (all of them, as they are, by default). */
   params?: (groups: Record<string, string>, t: Translate) => Params;
+  /** The next line under the title: what to do, or what is safe ("Nothing was sent"). */
+  next?: TranslationKey;
+  /**
+   * Where a nested `reason` group goes: the next line ("next"), or the title when it is known ("title"; `key` is then
+   * the title when it is not). Said in the language when known, as it came when a person can read it, else only in
+   * the detail behind the ⓘ: never English engine text inside a translated sentence.
+   */
+  reason?: "next" | "title";
 }
 
-const exact = (text: string, key: TranslationKey): Rule => ({ match: new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), key });
+/** An error in three parts: a title, maybe a next line, and the English behind the ⓘ when part of it is not said. */
+export interface ErrorParts { title: string; next?: string; detail?: string }
+
+const exact = (text: string, key: TranslationKey, next?: TranslationKey): Rule => ({ match: new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), key, ...(next && { next }) });
 
 /** A payment method as the engine names it ("on-chain Bitcoin", "USDT support", ...): a name, but for the words. */
 const railName = (rail: string, t: Translate) =>
@@ -85,22 +97,22 @@ const RULES: readonly Rule[] = [
   exact("Mints must use https", "errors.cashu.mintHttps"),
   exact("Enter an amount in sats", "errors.cashu.enterAmount"),
   { match: /^Amounts above (?<max>[\d.,\s\u00a0\u202f]+) sats are not supported$/, key: "errors.cashu.amountTooHigh" },
-  { match: new RegExp(`^Could not reach ${HOST}\\. Check the address: it should be a Cashu mint\\.$`), key: "errors.cashu.unreachable" },
-  { match: new RegExp(`^${HOST} has not paid its test coins yet: they show up here once it does$`), key: "errors.cashu.testCoinsPending" },
+  { match: new RegExp(`^Could not reach ${HOST}\\. Check the address: it should be a Cashu mint\\.$`), key: "errors.cashu.unreachable", next: "errors.cashu.unreachableNext" },
+  { match: new RegExp(`^${HOST} has not paid its test coins yet: they show up here once it does$`), key: "errors.cashu.testCoinsPending", next: "errors.cashu.testCoinsPendingNext" },
   { match: new RegExp(`^Ecash from ${HOST} is not accepted$`), key: "errors.cashu.mintNotAccepted" },
   { match: new RegExp(`^${HOST} did not answer$`), key: "errors.cashu.noAnswer" },
   exact("No mint configured", "errors.cashu.noMint"),
-  { match: /^No mint could create an invoice: (?<reason>[\s\S]+)$/, key: "errors.cashu.noInvoice", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^No mint could create an invoice: (?<reason>[\s\S]+)$/, key: "errors.cashu.noInvoice", reason: "next" },
   exact("This wallet has no test mint to ask for test coins", "errors.cashu.noTestMint"),
   exact("Select a configured mint", "errors.cashu.selectMint"),
   exact("That is not a valid ecash token", "errors.cashu.badToken"),
   exact("Add a mint in Settings first", "errors.cashu.addMint"),
   exact("Not enough sats in your wallet", "errors.cashu.notEnough"),
   exact("This invoice is already being paid", "errors.cashu.alreadyPaying"),
-  exact("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.", "errors.cashu.inFlight"),
+  exact("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.", "errors.cashu.inFlight", "errors.cashu.inFlightNext"),
   // A failed payment and what came back: "<why> The sats are back in your wallet[, less N sats the mint kept as its fee]."
-  { match: /^(?<reason>[\s\S]+?) The sats are back in your wallet, less (?<fee>\d+) sats? the mint kept as its fee\.$/, key: "errors.cashu.backInWalletLessFee", params: ({ reason, fee }, t) => ({ reason: errorText(reason, t), fee }) },
-  { match: /^(?<reason>[\s\S]+?) The sats are back in your wallet\.$/, key: "errors.cashu.backInWallet", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^(?<reason>[\s\S]+?) The sats are back in your wallet, less (?<fee>\d+) sats? the mint kept as its fee\.$/, key: "errors.cashu.notPaid", reason: "title", next: "errors.cashu.backInWalletLessFee" },
+  { match: /^(?<reason>[\s\S]+?) The sats are back in your wallet\.$/, key: "errors.cashu.notPaid", reason: "title", next: "errors.cashu.backInWallet" },
   // With its period on its own (wallet.ts), without it as a chat request's line (payments.ts).
   { match: /^The Lightning payment did not go through\.?$/, key: "errors.cashu.lightningFailed" },
 
@@ -115,7 +127,7 @@ const RULES: readonly Rule[] = [
   { match: new RegExp(`^${NETWORK} (?<method>.+) is off in this chat$`), key: "errors.pay.offHere", params: ({ network, method }, t) => ({ network, method: railName(method, t) }) },
   { match: /^(?<method>Cashu|Lightning) is not allowed by both of you here$/, key: "errors.pay.notBoth" },
   exact("Your contact allowed neither Cashu nor Lightning in this chat", "errors.pay.contactAllowsNeither"),
-  exact("Your contact took no Cashu or Lightning last time. Try again once the chat is live", "errors.pay.contactTookNone"),
+  exact("Your contact took no Cashu or Lightning last time. Try again once the chat is live", "errors.pay.contactTookNone", "errors.pay.contactTookNoneNext"),
   exact("Cashu and Lightning are off in this chat", "errors.pay.bothOff"),
   exact("A request to the group is paid in Cashu or over Lightning", "errors.pay.groupRails"),
   exact("Unknown payment request", "errors.pay.unknownRequest"),
@@ -126,9 +138,9 @@ const RULES: readonly Rule[] = [
   exact("Already paid by another member of the group", "errors.pay.paidByOther"),
   exact("The payment was refused", "errors.pay.refused"),
   // A refused send whose ecash came back (payments.ts refusedLine): why, and what came back, less the mint's fee.
-  { match: /^Refused: (?<reason>[\s\S]+?)\. (?<amount>\d+) sats? came back; the mint kept (?<fee>\d+) as its fee\.$/, key: "errors.pay.refusedLessFee", params: ({ reason, amount, fee }, t) => ({ reason: errorText(reason, t).replace(/\.$/, ""), amount: formatAmount(Number(amount), t.language ?? "en"), fee: formatAmount(Number(fee), t.language ?? "en") }) },
-  { match: /^Refused: (?<reason>[\s\S]+?)\. All (?<amount>\d+) sats? came back\.$/, key: "errors.pay.refusedAllBack", params: ({ reason, amount }, t) => ({ reason: errorText(reason, t).replace(/\.$/, ""), amount: formatAmount(Number(amount), t.language ?? "en") }) },
-  { match: /^Refused: (?<reason>[\s\S]+?)\. The sats came back\.$/, key: "errors.pay.refusedBack", params: ({ reason }, t) => ({ reason: errorText(reason, t).replace(/\.$/, "") }) },
+  { match: /^Refused: (?<reason>[\s\S]+?)\. (?<amount>\d+) sats? came back; the mint kept (?<fee>\d+) as its fee\.$/, key: "errors.pay.refused", reason: "next", next: "errors.pay.refusedLessFee", params: ({ amount, fee }, t) => ({ amount: formatAmount(Number(amount), t.language ?? "en"), fee: formatAmount(Number(fee), t.language ?? "en") }) },
+  { match: /^Refused: (?<reason>[\s\S]+?)\. All (?<amount>\d+) sats? came back\.$/, key: "errors.pay.refused", reason: "next", next: "errors.pay.refusedAllBack", params: ({ amount }, t) => ({ amount: formatAmount(Number(amount), t.language ?? "en") }) },
+  { match: /^Refused: (?<reason>[\s\S]+?)\. The sats came back\.$/, key: "errors.pay.refused", reason: "next", next: "errors.pay.refusedBack" },
   exact("This request cannot be paid over Lightning in this chat", "errors.pay.noLightningHere"),
   exact("No way of paying this request is allowed in this chat", "errors.pay.noWayHere"),
   exact("The invoice does not match the requested amount", "errors.pay.invoiceMismatch"),
@@ -139,10 +151,10 @@ const RULES: readonly Rule[] = [
   { match: /^Your contact does not accept (?<method>.+) in this chat$/, key: "errors.pay.contactRefuses", params: ({ method }, t) => ({ method: railName(method, t) }) },
   exact("This request cannot be paid from another wallet", "errors.pay.notFromOtherWallet"),
   exact("You are offline", "errors.pay.offline"),
-  exact("This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", "errors.pay.wrongNetworkMainnet"),
-  exact("This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", "errors.pay.wrongNetworkTestnet"),
-  { match: /^This pays with real money: confirm it with Send real money first\. Nothing was sent\.$/, key: "errors.pay.confirmRealFirst", params: (_, t) => ({ button: t("payments.confirmReal.send") }) },
-  { match: /^Could not create the (?<label>.+?) wallet: (?<reason>[\s\S]+)\. Nothing was saved; try again\.$/, key: "errors.pay.createFailed", params: ({ label, reason }, t) => ({ label: railName(label, t), reason: nestedError(reason, t).replace(/\.$/, "") }) },
+  exact("This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", "errors.pay.wrongNetworkMainnet", "errors.pay.wrongNetworkMainnetNext"),
+  exact("This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", "errors.pay.wrongNetworkTestnet", "errors.pay.wrongNetworkTestnetNext"),
+  { match: /^This pays with real money: confirm it with Send real money first\. Nothing was sent\.$/, key: "errors.pay.confirmRealFirst", next: "errors.pay.confirmRealFirstNext", params: (_, t) => ({ button: t("payments.confirmReal.send") }) },
+  { match: /^Could not create the (?<label>.+?) wallet: (?<reason>[\s\S]+)\. Nothing was saved; try again\.$/, key: "errors.pay.createFailed", reason: "next", next: "errors.pay.createFailedNext", params: ({ label }, t) => ({ label: railName(label, t) }) },
 
   // What a Lightning source, another rail or a Lightning address answered when a payment failed (paymentAdapters/**, core/lnurl.ts), and what a chat payment was refused or closed with.
   exact("No route to the recipient within the fee limit", "errors.lightning.noRoute"),
@@ -150,27 +162,27 @@ const RULES: readonly Rule[] = [
   exact("The node gave up finding a route", "errors.lightning.gaveUp"),
   exact("The recipient refused the payment (unknown or already paid invoice)", "errors.lightning.recipientRefused"),
   exact("The payment failed", "errors.lightning.failed"),
-  { match: /^The payment failed: (?<reason>[\s\S]+)$/, key: "errors.lightning.failedBecause", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^The payment failed: (?<reason>[\s\S]+)$/, key: "errors.lightning.failedBecause", reason: "next" },
   exact("The payment was canceled", "errors.lightning.canceled"),
   exact("The node did not answer in time", "errors.lightning.nodeTimedOut"),
   exact("The payment did not go through", "errors.lightning.didNotGoThrough"),
   exact("No answer from the source. It is being checked; nothing is paid again.", "errors.lightning.noAnswerChecking"),
-  exact("No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again.", "errors.lightning.noAnswerUnaskable"),
+  exact("No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again.", "errors.lightning.noAnswerUnaskable", "errors.lightning.noAnswerUnaskableNext"),
   exact("Interrupted. It is being checked; nothing is paid again.", "errors.lightning.interrupted"),
   exact("This invoice is already paid", "errors.lightning.alreadyPaid"),
-  { match: /^That invoice is for (?<network>\S+), a test network: pay it from a Testnet wallet$/, key: "errors.lightning.testInvoiceOnMainnet" },
-  exact("This is a Bitcoin invoice (real money): test sats pay one only through the public test mint. Nothing was sent.", "errors.lightning.realInvoiceOnTestnet"),
+  { match: /^That invoice is for (?<network>\S+), a test network: pay it from a Testnet wallet$/, key: "errors.lightning.testInvoiceOnMainnet", next: "errors.lightning.testInvoiceOnMainnetNext" },
+  exact("This is a Bitcoin invoice (real money): test sats pay one only through the public test mint. Nothing was sent.", "errors.lightning.realInvoiceOnTestnet", "errors.lightning.realInvoiceOnTestnetNext"),
   exact("This quote is no longer valid: check the invoice again", "errors.lightning.quoteGone"),
   exact("The Lightning source changed: check the invoice again", "errors.lightning.sourceChanged"),
   exact("That is not a Lightning invoice", "errors.lightning.notInvoice"),
   exact("Invoices without an amount are not supported", "errors.lightning.noAmount"),
-  { match: /^The wallet refused the payment: (?<reason>[\s\S]+)$/, key: "errors.lightning.walletRefused", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
-  { match: /^The payment did not reach the wallet: (?<reason>[\s\S]+)$/, key: "errors.lightning.notReached", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
-  { match: /^The wallet said the payment failed \((?<reason>[\s\S]+)\), and cannot confirm it yet$/, key: "errors.lightning.failedUnconfirmed", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^The wallet refused the payment: (?<reason>[\s\S]+)$/, key: "errors.lightning.walletRefused", reason: "next" },
+  { match: /^The payment did not reach the wallet: (?<reason>[\s\S]+)$/, key: "errors.lightning.notReached", reason: "next" },
+  { match: /^The wallet said the payment failed \((?<reason>[\s\S]+)\), and cannot confirm it yet$/, key: "errors.lightning.failedUnconfirmed", reason: "next", next: "errors.lightning.failedUnconfirmedNext" },
   exact("Could not reach the wallet's relay", "errors.lightning.relayUnreachable"),
   exact("The wallet's relay did not answer", "errors.lightning.relaySilent"),
   exact("The wallet's relay closed the connection", "errors.lightning.relayClosed"),
-  { match: /^The browser wallet did not pay: (?<reason>[\s\S]+)$/, key: "errors.lightning.browserDidNotPay", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^The browser wallet did not pay: (?<reason>[\s\S]+)$/, key: "errors.lightning.browserDidNotPay", reason: "next" },
   { match: /^Not enough in the browser wallet \((?<amount>\d+) sats\)$/, key: "errors.lightning.browserNotEnough", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
   { match: /^The Lightning fee \((?<fee>\d+) sats\) is above your limit \((?<max>\d+)\)$/, key: "errors.lightning.feeAboveLimit", params: ({ fee, max }, t) => ({ fee: sats(fee, t), max: sats(max, t) }) },
   { match: /^Not enough sats in the Breez wallet \((?<have>\d+); (?<need>\d+) needed\)$/, key: "errors.lightning.breezNotEnough", params: ({ have, need }, t) => ({ have: sats(have, t), need: sats(need, t) }) },
@@ -189,13 +201,13 @@ const RULES: readonly Rule[] = [
   exact("USDT RPC rejected the operation", "errors.rails.usdtRejected"),
   exact("Token or gas balance changed. Create a new review", "errors.rails.usdtBalanceChanged"),
   exact("Account nonce changed. Create a new review", "errors.rails.usdtNonceChanged"),
-  { match: /^Not enough confirmed sats: (?<available>\d+) available, (?<needed>\d+) needed with the fee$/, key: "errors.rails.bitcoinNotEnough", params: ({ available, needed }, t) => ({ available: sats(available, t), needed: sats(needed, t) }) },
+  { match: /^Not enough confirmed sats: (?<available>\d+) available, (?<needed>\d+) needed with the fee$/, key: "errors.rails.bitcoinNotEnough", next: "errors.rails.bitcoinNotEnoughNext", params: ({ available, needed }, t) => ({ available: sats(available, t), needed: sats(needed, t) }) },
   { match: /^The fee \((?<fee>\d+) sats\) is above your limit of (?<max>\d+)$/, key: "errors.rails.bitcoinFeeAboveLimit", params: ({ fee, max }, t) => ({ fee: sats(fee, t), max: sats(max, t) }) },
-  { match: /^The node refused the transaction: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeRefusedTx" },
+  { match: /^The node refused the transaction: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeRefusedTx", reason: "next" },
   exact("Your node cannot estimate a fee yet. Nothing was sent.", "errors.rails.noFeeEstimate"),
-  { match: /^Your node did not send it: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeDidNotSend" },
+  { match: /^Your node did not send it: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeDidNotSend", reason: "next" },
   exact("Another transaction spent these coins: this payment can never confirm", "errors.rails.conflicted"),
-  exact("The Bitcoin source that prepared this payment is not connected. Nothing was sent.", "errors.rails.sourceGone"),
+  exact("The Bitcoin source that prepared this payment is not connected. Nothing was sent.", "errors.rails.sourceGone", "errors.rails.sourceGoneNext"),
   exact("This payment was never approved: nothing was sent", "errors.rails.neverApproved"),
   { match: /^Not enough in this federation: (?<have>[\d.,\s\u00a0\u202f]+) sats$/, key: "errors.rails.federationHas", params: ({ have }, t) => ({ have: sats(have, t) }) },
   exact("Not enough in this federation any more", "errors.rails.federationNotEnoughNow"),
@@ -216,7 +228,7 @@ const RULES: readonly Rule[] = [
   exact("These notes were already redeemed", "errors.pay.notesRedeemed"),
   exact("The server took too long to answer", "errors.lnurl.tooSlow"),
   exact("No way to reach the network here", "errors.lnurl.noNetwork"),
-  { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) refused: (?<reason>[\s\S]+)$/, key: "errors.lnurl.refused" },
+  { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) refused: (?<reason>[\s\S]+)$/, key: "errors.lnurl.refused", reason: "next" },
   { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) answered HTTP (?<status>\d+)$/, key: "errors.lnurl.http" },
   { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) did not answer with JSON$/, key: "errors.lnurl.noJson" },
   { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) did not answer with JSON \(HTTP (?<status>\d+)\)$/, key: "errors.lnurl.noJsonStatus" },
@@ -281,28 +293,28 @@ const RULES: readonly Rule[] = [
   { match: /^No Lightning source runs on (?<network>Mainnet|Testnet) here yet$/, key: "errors.wallet.noLightningSource" },
   { match: /^No on-chain wallet runs on (?<network>Mainnet|Testnet) here yet$/, key: "errors.wallet.noOnchain" },
   exact("The Bark server is not answering", "errors.wallet.barkSilent"),
-  exact("Could not join the federation: its guardians did not answer, or the invite code is not valid", "errors.wallet.joinFederation"),
+  exact("Could not join the federation: its guardians did not answer, or the invite code is not valid", "errors.wallet.joinFederation", "errors.wallet.joinFederationNext"),
   { match: /^That Ark provider runs on (?<actual>\S+), not (?<expected>\S+)$/, key: "errors.wallet.arkProviderNetwork" },
   { match: /^That Bark server does not run on (?<network>\S+)$/, key: "errors.wallet.barkServerNetwork" },
   { match: /^(?<chain>\S+) is a (?<network>Mainnet|Testnet) network: this is the (?<wallet>Mainnet|Testnet) (?<kind>Ark|Bark|Spark|USDT) wallet$/, key: "errors.wallet.wrongChain" },
-  { match: /^Could not connect to (?<label>[^:]+): (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotConnect", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
-  { match: /^Could not read the balance: (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotReadBalance", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^Could not connect to (?<label>[^:]+): (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotConnect", reason: "next" },
+  { match: /^Could not read the balance: (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotReadBalance", reason: "next" },
   { match: /^(?<id>\S+) is not available in this version of Ghostly$/, key: "errors.wallet.notInThisVersion" },
   { match: /^the Esplora server at (?<host>\S+) did not answer in (?<seconds>\d+) s$/, key: "errors.wallet.esploraSlow" },
-  { match: /^the Esplora server at (?<host>\S+) did not answer \((?<reason>[\s\S]+)\)$/, key: "errors.wallet.esploraSilent" },
+  { match: /^the Esplora server at (?<host>\S+) did not answer \((?<reason>[\s\S]+)\)$/, key: "errors.wallet.esploraSilent", reason: "next" },
   { match: /^nothing answers at (?<host>\S+): the local Esplora server is not running$/, key: "errors.wallet.esploraLocal" },
   { match: /^the Esplora server at (?<host>\S+) answered (?<status>\d+): it is down or busy$/, key: "errors.wallet.esploraBusy" },
-  { match: /^no public (?<network>\S+) Esplora server answered \((?<hosts>[^)]*)\): (?<reason>[\s\S]+)$/, key: "errors.wallet.esploraNonePublic", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^no public (?<network>\S+) Esplora server answered \((?<hosts>[^)]*)\): (?<reason>[\s\S]+)$/, key: "errors.wallet.esploraNonePublic", reason: "next" },
   { match: /^wrong network: the Esplora server at (?<host>\S+) is on (?<actual>.+), not (?<network>\S+)$/, key: "errors.wallet.esploraWrongNetwork" },
   { match: /^Connecting to (?<what>Ark|Bark|Spark|Ethereum)…$/, key: "errors.wallet.connecting" },
-  { match: /^Connecting to (?<what>Ark|Bark|Spark|Ethereum)… (?<reason>[\s\S]+)$/, key: "errors.wallet.connectingBecause", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
-  { match: /^Could not read the (?<parts>.+) from the Ark provider\. Last values may be stale\.$/, key: "errors.wallet.readFailedArk", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
-  { match: /^Could not read the (?<parts>.+) from the Bark server\. Last values may be stale\.$/, key: "errors.wallet.readFailedBark", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
-  { match: /^Could not read the (?<parts>.+) from Spark\. Last values may be stale\.$/, key: "errors.wallet.readFailedSpark", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  { match: /^Connecting to (?<what>Ark|Bark|Spark|Ethereum)… (?<reason>[\s\S]+)$/, key: "errors.wallet.connectingBecause", reason: "next" },
+  { match: /^Could not read the (?<parts>.+) from the Ark provider\. Last values may be stale\.$/, key: "errors.wallet.readFailedArk", next: "errors.wallet.readFailedNext", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  { match: /^Could not read the (?<parts>.+) from the Bark server\. Last values may be stale\.$/, key: "errors.wallet.readFailedBark", next: "errors.wallet.readFailedNext", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
+  { match: /^Could not read the (?<parts>.+) from Spark\. Last values may be stale\.$/, key: "errors.wallet.readFailedSpark", next: "errors.wallet.readFailedNext", params: ({ parts }, t) => ({ parts: readParts(parts, t) }) },
   exact("RPC unavailable. Balance may be stale.", "errors.wallet.rpcStale"),
   exact("Rate limited: the faucet is busy. Try again in a minute.", "errors.wallet.faucetBusy"),
-  { match: /^The faucet did not answer: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetSilent", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
-  { match: /^The faucet did not pay: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetDidNotPay", params: (groups, t) => ({ ...groups, reason: nestedError(groups.reason, t) }) },
+  { match: /^The faucet did not answer: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetSilent", reason: "next" },
+  { match: /^The faucet did not pay: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetDidNotPay", reason: "next" },
 
   // Profiles, backups and pictures (apps/ui/src/lib).
   exact("Give the profile a name", "errors.profile.giveName"),
@@ -387,6 +399,21 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
 };
+/** The next line of an engine error that has one: what to do, or what is safe. */
+const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
+  cannotSubmitAgain: "errors.engine.cannotSubmitAgainNext",
+  fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnetNext",
+  fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
+  groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
+  lastMint: "errors.engine.lastMintNext",
+  lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
+  parkedSigned: "errors.engine.parkedSignedNext",
+  requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
+  reviewedEcashSpent: "errors.engine.reviewedEcashSpentNext",
+  reviewedSatsGone: "errors.engine.reviewedSatsGoneNext",
+  sentAfterReview: "errors.engine.sentAfterReviewNext",
+  testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
+};
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 
@@ -404,20 +431,68 @@ export function errorText(cause: unknown, t: Translate = english): string {
   return knownErrorText(cause, t) ?? rawError(cause);
 }
 
-/** `cause` said in `t`'s language when it is a known error, else null (lib/problemText.ts gives it a generic title). */
+/** `cause` said in `t`'s language, its title and next line as one, when it is a known error; else null. */
 export function knownErrorText(cause: unknown, t: Translate = english): string | null {
+  const parts = knownErrorParts(cause, t);
+  return parts ? sentences(parts.title, parts.next, t) : null;
+}
+
+/** A title and its next line as one text: a stop between them when the title has none. */
+function sentences(title: string, next: string | undefined, t: Translate): string {
+  if (!next) return title;
+  if (/[.!?…。！？]$/.test(title)) return `${title} ${next}`;
+  return t.language === "ja" || t.language === "zh" ? `${title}。${next}` : `${title}. ${next}`;
+}
+
+/**
+ * An English line a person can read as it is ("The code changed", "Relay refused"): short, one sentence, no address,
+ * no error name, no chain of causes, no code ("insufficient_balance", "INTERNAL", "402 Payment Required").
+ */
+export function readable(raw: string): boolean {
+  const words = raw.replace(/\b(?:USDT|LNURL|BOLT|BIP\d*|HTTPS?|DHT|RPC|CORS|TURN|STUN)\b/g, "");
+  // One plain word reads too ("refused", "timeout"); a code does not ("insufficient_balance", "INTERNAL").
+  return raw.length <= 120 && (/\s/.test(raw.trim()) || /^[a-z]{3,20}$/.test(raw.trim()))
+    && !/(?:https?|wss?):\/\/|\b[A-Z]\w*Error\b|Error:|[{}[\]<>_]|\b[0-9a-f]{16,}\b|\b[a-z0-9]{32,}\b|^\s*\d{3}\b/i.test(words)
+    && !/\b[A-Z]{4,}\b/.test(words)
+    && (raw.match(/:/g)?.length ?? 0) <= 1 && raw.split(/[.;]\s+\S/).length <= 2;
+}
+
+/** A nested reason as a line: in the language when known, as it came when readable (first letter up), else none. */
+function reasonLine(reason: string, t: Translate): string | undefined {
+  const line = knownNested(reason, t) ?? (readable(reason) ? reason : undefined);
+  // Its first letter up, as a line of its own: not a host's ("mint.example did not answer").
+  return line && (/^[^\s]*[.:]\S/.test(line) ? line : line.charAt(0).toUpperCase() + line.slice(1));
+}
+
+/** `reason` known, with or without the final period the message around it may have taken (see nestedError). */
+function knownNested(reason: string, t: Translate): string | null {
+  return knownErrorText(reason, t) ?? (reason.endsWith(".") ? null : knownErrorText(`${reason}.`, t));
+}
+
+/** `cause` in three parts when it is a known error (see ErrorParts), else null (lib/problemText.ts gives it a generic title). */
+export function knownErrorParts(cause: unknown, t: Translate = english): ErrorParts | null {
   const raw = rawError(cause);
   for (const rule of RULES) {
     const found = raw.match(rule.match);
     if (!found) continue;
     const groups = { ...found.groups };
-    return t(rule.key, rule.params ? rule.params(groups, t) : groups);
+    const params = rule.params ? rule.params(groups, t) : groups;
+    const fixed = rule.next ? t(rule.next, params) : undefined;
+    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }) };
+    const reason = reasonLine(groups.reason ?? "", t);
+    const detail = reason === undefined ? { detail: raw } : {};
+    if (rule.reason === "title" && reason) return { title: reason, ...(fixed && { next: fixed }) };
+    const said = rule.reason === "next" ? reason : undefined;
+    const next = said && fixed ? sentences(said, fixed, t) : said ?? fixed;
+    return { title: t(rule.key, params), ...(next && { next }), ...detail };
   }
   const known = parseEngineError(raw);
   const key = known && ENGINE[known.code];
   if (known && key) {
     const amount = (value: string) => { const digits = value.replace(/\D/g, ""); return digits ? formatAmount(Number(digits), t.language ?? "en") : value; };
-    return t(key, Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value])));
+    const values = Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value]));
+    const next = ENGINE_NEXT[known.code];
+    return { title: t(key, values), ...(next && { next: t(next, values) }) };
   }
   return null;
 }

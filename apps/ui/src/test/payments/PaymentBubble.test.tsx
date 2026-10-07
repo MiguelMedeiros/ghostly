@@ -94,7 +94,7 @@ describe("what the bubble says", () => {
 
   it.each([
     ["No route to the recipient within the fee limit", "Nenhuma rota até o destinatário dentro do limite de taxa"],
-    ["The wallet refused the payment: Not enough sats in your wallet", "A carteira recusou o pagamento: Sats insuficientes na sua carteira"],
+    ["The wallet refused the payment: Not enough sats in your wallet", "A carteira recusou o pagamento. Sats insuficientes na sua carteira"],
     ["Insufficient token balance", "Saldo de tokens insuficiente"],
     ["The mint did not confirm the ecash", "O mint não confirmou o ecash"],
   ])("says why a payment failed in the app's language: %s", (reason, said) => {
@@ -271,7 +271,7 @@ describe("paying a request with Cashu", () => {
 
   it("cannot pay a Testnet request from a Mainnet mint, even one it names: it says test money is asked for, and offers no Review", () => {
     show(incomingRequest({ network: "testnet", mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
-    expect(screen.getByTestId("payment-network-missing")).toHaveTextContent("Test money is asked for (test sats), and you have no Testnet wallet to pay it from");
+    expect(screen.getByTestId("payment-network-missing")).toHaveTextContent("You have no Testnet wallet to pay this" + "Make one in Wallets, or ask for real money.");
     expect(screen.queryByRole("combobox", { name: "Cashu mint" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
   });

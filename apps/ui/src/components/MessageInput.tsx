@@ -65,8 +65,8 @@ interface MessageInputProps {
     /** Who the chat is with, as the chat shows them. */
     contact?: string;
     /** `network`: the card's; a card of one network never pays the other's. */
-    onSend: (amount: number, memo: string, network?: import("../lib/platform").WalletNetwork) => Promise<string | null>;
-    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: import("./walletCardTypes").ChatRail, network?: import("../lib/platform").WalletNetwork) => Promise<string | null>;
+    onSend: (amount: number, memo: string, network?: import("../lib/platform").WalletNetwork) => Promise<string | import("../lib/problemText").Problem | null>;
+    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: import("./walletCardTypes").ChatRail, network?: import("../lib/platform").WalletNetwork) => Promise<string | import("../lib/problemText").Problem | null>;
     /** Why paying is not possible now (a request still is): shown on the Pay side. */
     sendUnavailable?: string;
     /** Saves which ways of paying this chat accepts, from the composer's Accept side. */

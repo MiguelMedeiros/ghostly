@@ -3,7 +3,9 @@ import { QRCodeSVG } from "qrcode.react";
 import { qrText } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
-import { errorText } from "../lib/errorText";
+import { rawError } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /**
  * Paying, or being paid, with a wallet that is not Ghostly: the invoice or address as a QR code, as text
@@ -33,19 +35,19 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
   const [copied, setCopied] = useState(false);
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const copy = async () => {
-    setError("");
+    setError(null);
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
       clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 1500);
     } catch {
-      setError(t("payments.external.copyError"));
+      setError({ tone: "error", title: t("payments.external.copyError") });
     }
   };
   const button = "px-3 py-1.5 min-h-9 max-md:min-h-11 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
@@ -70,8 +72,8 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
               const opened = platform?.openPaymentLink(uri);
               if (!opened) return;
               event.preventDefault();
-              setError("");
-              opened.catch((cause: unknown) => setError(t("payments.external.openError", { error: errorText(cause, t) })));
+              setError(null);
+              opened.catch((cause: unknown) => setError({ tone: "error", title: t("payments.external.openError"), next: t("payments.external.openErrorNext"), detail: rawError(cause) }));
             }}
           >
             {t("payments.external.open")}
@@ -79,8 +81,8 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
           {actions}
           {onPaid && (
             <button type="button" className={`${button} bg-black/20 hover:bg-black/30`} data-testid={`${testId}-paid`} disabled={busy} title={t("payments.external.paidTitle")} onClick={() => {
-              setBusy(true); setError("");
-              onPaid().then(() => setChecked(true), (cause: unknown) => setError(errorText(cause, t))).finally(() => setBusy(false));
+              setBusy(true); setError(null);
+              onPaid().then(() => setChecked(true), (cause: unknown) => setError(problemText(cause, t))).finally(() => setBusy(false));
             }}>
               {busy ? t("payments.external.asking") : checked ? t("payments.external.checking") : t("payments.external.paid")}
             </button>
@@ -88,7 +90,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
         </div>
         {checked && <p className="text-[11px] m-0 opacity-70" data-testid={`${testId}-checking`}>{t("payments.external.checkingNote")}</p>}
         {note && <p className="text-[11px] m-0 opacity-70">{note}</p>}
-        {error && <p className="text-[11px] m-0 text-danger-ink" role="alert">{error}</p>}
+        {error && <Notice problem={error} className="text-[11px] m-0" ink />}
       </div>
     </div>
   );

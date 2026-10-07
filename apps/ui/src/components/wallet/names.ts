@@ -1,7 +1,7 @@
 import type { WalletNetwork, WalletType } from "../../lib/platform";
 import type { Translate } from "../../contexts/I18nContext";
 import { english } from "../../lib/english";
-import { errorText, nestedError } from "../../lib/errorText";
+import { problemText } from "../../lib/problemText";
 
 /** Each kind of wallet's name, as its card says it. */
 export const WALLET_NAME: Record<WalletType, string> = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin", fedimint: "Fedimint", usdt: "USDT" };
@@ -13,11 +13,10 @@ export const walletLabel = (type: WalletType, network: WalletNetwork) => `${NETW
 export const shortReason = (reason: string) => reason.split(/(?<=\.)\s/)[0];
 /**
  * Why making a kind failed, in a line for its card, in `t`'s language: the engine's reason without "Could not create the
- * … wallet:" around it, its first sentence ("Could not reach testnut.cashu.space."). `text` is the engine's English
- * (a reason it does not know stays as it came). The whole message stays where there is room.
+ * … wallet:" around it, in a few words ("Can't reach testnut.cashu.space"). `text` is the engine's English.
  */
 export const failedBecause = (text: string, t: Translate = english) => {
   const made = /^Could not create the .+? wallet: ([\s\S]+?)\. Nothing was saved; try again\.$/.exec(text);
-  const said = made ? nestedError(made[1], t) : errorText(text, t);
-  return shortReason(made && !/[.!?。]$/.test(said) ? `${said}.` : said);
+  // A few words (lib/problemText.ts): the reason's title, never the engine's English in the line.
+  return problemText(made ? made[1] : text, t).title;
 };
