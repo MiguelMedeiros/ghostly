@@ -75,7 +75,7 @@
     "perm": {
       "chat": "Parlare con la stessa app dal lato del tuo contatto",
       "internet": "Usare internet",
-      "internetInfo": "L'app può contattare server su internet. L'app e quei server vedono il tuo indirizzo IP e quello che invia loro.",
+      "internetInfo": "L'app e i server con cui parla possono sapere il tuo indirizzo IP e cosa fai nell'app.",
       "name": "Vedere il tuo nome in questa chat",
       "storage": "Tenere i propri dati su questo dispositivo"
     },
@@ -89,7 +89,7 @@
     "unknownPublisher": "Editore sconosciuto",
     "unknownPublisherInfo": "Chiunque può firmare un'app con una chiave nuova. Solo uno store che hai aggiunto può garantire chi l'ha fatta. Confronta la chiave con quella pubblicata dall'autore.",
     "update": "Aggiorna",
-    "webkit": "Su Safari, qualsiasi app può raggiungere altri server.",
+    "webkit": "In questo browser, un'app può comunque contattare altri server.",
     "webkitInfo": "Safari, e ogni browser su iPhone e iPad, lascia che un'app apra connessioni che Ghostly non può bloccare, anche senza il permesso internet. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca."
   },
   "page": {

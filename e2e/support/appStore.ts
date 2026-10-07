@@ -5,7 +5,7 @@
  */
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { BrowserContext } from "@playwright/test";
-import { buildAppBundle, seedSigner, signAppStore, toZ32, utf8Encode, type AppStoreIndex, type Signer } from "@ghostly/core";
+import { buildAppBundle, seedSigner, signAppStore, toZ32, utf8Encode, type AppPermission, type AppStoreIndex, type Signer } from "@ghostly/core";
 
 const signer = (label: string): Signer => seedSigner(sha256(utf8Encode(`ghostly apps e2e: ${label}`)));
 
@@ -20,14 +20,14 @@ export interface TestStore {
   storeName: string;
 }
 
-/** A curated store listing one app, "Chess", that asks for `chat`. */
-export async function testStore(): Promise<TestStore> {
+/** A curated store listing one app, "Chess", that asks for `chat` (and whatever else `permissions` says). */
+export async function testStore(options: { permissions?: AppPermission[] } = {}): Promise<TestStore> {
   const publisher = signer("publisher"), store = signer("store");
   const title = "Chess", storeName = "E2E store";
   const entry = `<!doctype html><meta charset=utf-8><title>${title}</title><body style="font:16px system-ui"><h1>${title}</h1>`;
   const made = await buildAppBundle({
     name: "chess", version: "1.2.0", sequence: 1, kind: "mini-app", title, tagline: "Play chess with a contact",
-    description: "Chess for two, move by move, in your chat.", entry: "index.html", permissions: ["chat"],
+    description: "Chess for two, move by move, in your chat.", entry: "index.html", permissions: options.permissions ?? ["chat"],
     runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT",
   }, [{ path: "index.html", bytes: utf8Encode(entry) }], publisher);
   const ref = `${toZ32(publisher.publicKey)}/chess`;

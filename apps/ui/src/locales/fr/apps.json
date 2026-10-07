@@ -75,7 +75,7 @@
     "perm": {
       "chat": "Échanger avec la même app chez votre contact",
       "internet": "Utiliser Internet",
-      "internetInfo": "L'app peut contacter des serveurs sur Internet. L'app et ces serveurs apprennent votre adresse IP et ce qu'elle leur envoie.",
+      "internetInfo": "L'app et les serveurs avec lesquels elle échange peuvent apprendre votre adresse IP et ce que vous y faites.",
       "name": "Voir votre nom dans cette discussion",
       "storage": "Garder ses propres données sur cet appareil"
     },
@@ -89,7 +89,7 @@
     "unknownPublisher": "Éditeur inconnu",
     "unknownPublisherInfo": "N'importe qui peut signer une app avec une nouvelle clé. Seule une boutique que vous avez ajoutée peut garantir qui l'a faite. Comparez la clé avec celle que publie son auteur.",
     "update": "Mettre à jour",
-    "webkit": "Sur Safari, toute app peut joindre d'autres serveurs.",
+    "webkit": "Dans ce navigateur, une app peut quand même contacter d'autres serveurs.",
     "webkitInfo": "Safari, et tout navigateur sur iPhone et iPad, laisse une app ouvrir des connexions que Ghostly ne peut pas bloquer, même sans la permission Internet. Ces serveurs apprennent votre adresse IP. L'app de bureau les bloque."
   },
   "page": {

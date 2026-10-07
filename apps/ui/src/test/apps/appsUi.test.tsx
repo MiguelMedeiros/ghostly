@@ -242,13 +242,13 @@ describe("with the apps flag on", () => {
   });
 
   it("shows the internet permission with what it means behind ⓘ, and an update that adds it asks again", async () => {
-    const internet = ["chat", "internet"] as unknown as AppPreview["asks"];
+    const internet: AppPreview["asks"] = ["chat", "internet"];
     fakeEngine.on("appPreview", () => preview({ asks: internet, manifest: { ...preview().manifest, permissions: internet } }));
     const { user, unmount } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
     const line = await screen.findByTestId("app-permission-internet");
     expect(line).toHaveTextContent("Use the internet");
     await user.click(within(line).getByTestId("app-permission-internet-info"));
-    expect(screen.getByTestId("app-permission-internet-text")).toHaveTextContent("The app and those servers learn your IP address and whatever it sends them.");
+    expect(screen.getByTestId("app-permission-internet-text")).toHaveTextContent("The app and the servers it talks to can learn your IP address and what you do in it.");
     // An app that may use the internet is not told it has none.
     await user.click(screen.getByTestId("app-ip-line-info"));
     expect(screen.getByTestId("app-ip-line-text")).not.toHaveTextContent("no internet access");
@@ -256,20 +256,20 @@ describe("with the apps flag on", () => {
 
     fakeEngine.on("appUpdateAccept", () => installed()).on("appList", () => []);
     renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
-      app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["internet"] as unknown as AppPreview["asks"] } })} />);
+      app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["internet"] } })} />);
     const update = await screen.findByTestId("app-update");
     expect(within(update).getByTestId("app-permissions")).toHaveTextContent("This update also asks to");
     expect(within(update).getByTestId("app-permission-internet")).toHaveTextContent("Use the internet");
     expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([]);
   });
 
-  it("says on Safari, and only there, that any app can reach other servers", async () => {
+  it("says in Safari, and only there, that an app can still contact other servers", async () => {
     const safari = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(safari);
     fakeEngine.on("appPreview", () => preview());
     const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
     const line = await screen.findByTestId("app-webkit-line");
-    expect(line).toHaveTextContent("On Safari, any app can reach other servers.");
+    expect(line).toHaveTextContent("In this browser, an app can still contact other servers.");
     await user.click(within(line).getByTestId("app-webkit-line-info"));
     expect(screen.getByTestId("app-webkit-line-text")).toHaveTextContent("The desktop app blocks them.");
   });

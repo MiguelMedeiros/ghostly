@@ -75,7 +75,7 @@
     "perm": {
       "chat": "Talk to the same app on your contact's side",
       "internet": "Use the internet",
-      "internetInfo": "The app can contact servers on the internet. The app and those servers learn your IP address and whatever it sends them.",
+      "internetInfo": "The app and the servers it talks to can learn your IP address and what you do in it.",
       "name": "See your name in this chat",
       "storage": "Keep its own data on this device"
     },
@@ -89,7 +89,7 @@
     "unknownPublisher": "Unknown publisher",
     "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added can vouch for who made it. Compare the key with the one the maker publishes.",
     "update": "Update",
-    "webkit": "On Safari, any app can reach other servers.",
+    "webkit": "In this browser, an app can still contact other servers.",
     "webkitInfo": "Safari, and every browser on iPhone and iPad, lets an app open connections Ghostly cannot block, even without the internet permission. Those servers learn your IP address. The desktop app blocks them."
   },
   "page": {
