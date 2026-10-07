@@ -327,6 +327,8 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
     await store.addStore({ url: STORE_URL });
     await cutOff(store, v1.ref);
+    // Its icon is still read for the Apps page (this bundle has none: "no-file", not "stopped").
+    await expect(store.file({ ref: v1.ref, path: "icon.png" })).rejects.toThrow(/^no-file/);
     expect(await store.exportData({ ref: v1.ref })).toEqual([{ ghostlyAppData: 1, app: v1.ref, scope: "chat-1", entries: { game: [1] } }]);
   });
 

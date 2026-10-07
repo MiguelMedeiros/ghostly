@@ -852,7 +852,8 @@ export class Apps {
 
   /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). */
   async file({ ref, path }: { ref: string; path: string }): Promise<Uint8Array> {
-    const app = await this.runningOrFail(ref);
+    // Its icon still shows on the Apps page and in chats once it is stopped: a picture the publisher signed, nothing more.
+    const app = path === "icon.png" ? await this.installedOrFail(ref) : await this.runningOrFail(ref);
     const bundle = await this.verifiedBundle(app);
     if (typeof path !== "string" || !bundle.files.has(path)) fail("no-file", "No such file in this app");
     return bundle.files.get(path)!.slice();
