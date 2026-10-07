@@ -258,10 +258,10 @@ jobs:
             test-results
           retention-days: 14
 
-  # The current web app against a real v0.4.0, built from its tag (e2e-compat.yml, about 4 minutes): a contact
-  # still on 0.4 must keep working with the release (WISP 402).
+  # The current web app against a real v0.4.0 and a real v1.1.4, built from their tags (e2e-compat.yml): a contact
+  # still on 0.4 must keep working with the release (WISP 402), and one on 1.1 gets an app card as its text (WISP 1200).
   compat:
-    name: Compatibility with v0.4.0
+    name: Compatibility with v0.4.0 and v1.1.4
     # The deployed-web-app run tests the web app alone.
     if: ${{ !inputs.web_url }}
     uses: ./.github/workflows/e2e-compat.yml
