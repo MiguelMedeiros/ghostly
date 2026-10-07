@@ -2,7 +2,8 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APP_CHECK_TIMINGS } from "../src/engine/apps";
 import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, boundedAppFetch, isAppFetchUrl } from "../src/engine/appFetch";
-import { DEFAULT_APP_STORES } from "../src/engine/appDefaults";
+import { DEFAULT_APP_STORES, DEFAULT_STORE_KEY, DEFAULT_STORE_URL } from "../src/engine/appDefaults";
+import { isAppKey } from "@ghostly/core";
 import {
   BUNDLE_URL, FakeNet, NOW_S, PINNED_URL, SIG_URL, STORE_KEY, STORE_URL, apps, bundle, emptyProfile, keyOf, listing, signer, storeFiles,
 } from "./appsSupport";
@@ -128,8 +129,29 @@ describe("no request with nothing installed", () => {
     store.stop();
   });
 
+  it("the official store is read from its repository at HEAD, and stays off while its key is empty", async () => {
+    expect(DEFAULT_STORE_URL).toBe("https://raw.githubusercontent.com/MiguelMedeiros/ghostly-store/HEAD/ghostly-store.json");
+    expect(isAppFetchUrl(DEFAULT_STORE_URL)).toBe(true);
+    if (DEFAULT_STORE_KEY) {
+      expect(isAppKey(DEFAULT_STORE_KEY), "the store's public key, 52 z-base32 characters").toBe(true);
+      expect(DEFAULT_APP_STORES).toEqual([{ url: DEFAULT_STORE_URL, key: DEFAULT_STORE_KEY }]);
+      return;
+    }
+    // No key yet (the owner makes it offline): no default store, and a profile starts with none.
+    expect(DEFAULT_APP_STORES).toEqual([]);
+    const store = apps(net);
+    await store.start();
+    store.stop();
+    expect(await store.listStores()).toEqual([]);
+    // A default whose key is empty is skipped, never added unpinned.
+    const unpinned = apps(net, { defaults: [{ url: DEFAULT_STORE_URL, key: "" }] });
+    await unpinned.start();
+    unpinned.stop();
+    expect(await unpinned.listStores()).toEqual([]);
+    expect(net.fetch).not.toHaveBeenCalled();
+  });
+
   it("a preloaded default store is kept without a request, and once removed it stays removed", async () => {
-    expect(DEFAULT_APP_STORES, "no default store until the owner makes its repository").toEqual([]);
     const defaults = [{ url: STORE_URL, key: keyOf(STORE_KEY) }];
     const store = apps(net, { defaults });
     await store.start();
