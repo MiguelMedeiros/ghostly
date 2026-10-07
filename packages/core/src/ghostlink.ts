@@ -3737,7 +3737,7 @@ export class GhostLink {
   }
   /**
    * Resolves once the contact's app handled every frame sent on this session so far: it answers a ping in the order
-   * frames come (since 0.5, `ping/1`), so the pong to one sent now says so, however slowly it handles them. A group
+   * frames come (every app since 1.0), so the pong to one sent now says so, however slowly it handles them. A group
    * member's catch-up answer goes a slice at a time on it (`GroupSessionHooks.handled`). `false` when it cannot tell:
    * no session, a contact that answers no ping, or no answer within `HANDLED_WAIT_MS`.
    */

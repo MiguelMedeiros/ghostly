@@ -15,7 +15,7 @@ import { createChannelPair } from "./helpers";
  * one session, an app that holds 64 frames waiting (every app before 2026-10-07) ended that session mid catch-up:
  * "Session receive limit exceeded" on a phone, 113 frames from one member (bh13). The answer now goes a slice at a time
  * (`GROUP_LIMITS.catchUpSlice`), each once the member's app handled the last: it answers a ping in the order frames
- * come, so the pong says so (`GhostLink.handled`). No new frame: apps since 0.5 answer pings.
+ * come, so the pong says so (`GhostLink.handled`). No new frame: apps since 1.0 answer pings so.
  */
 
 type Internal = { attach(channel: FrameChannel): void };
@@ -112,7 +112,7 @@ async function catchUp(each: number, options: { paced: boolean; perFrameMs: numb
 }
 
 describe("a member's catch-up answer goes a slice at a time", { timeout: 120_000 }, () => {
-  it("a phone that holds 64 frames waiting keeps its session through an answer of over a hundred (2026-10-07)", async () => {
+  it("an answer of over a hundred never has more than two slices waiting on the member's app, which an app that holds 64 takes (2026-10-07)", async () => {
     const run = await catchUp(30, { paced: true, perFrameMs: 3 });
     expect(run.sentGroup).toBeGreaterThan(113);
     expect(run.link.b.isDataLinkOpen).toBe(true);
