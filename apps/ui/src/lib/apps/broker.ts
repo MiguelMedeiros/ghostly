@@ -90,6 +90,19 @@ export function isJsonValue(value: unknown, depth = 0): value is MiniAppJson {
 class Refusal extends Error {}
 const refuse = (code: string): never => { throw new Refusal(code); };
 
+/**
+ * The engine's refusals an app is told by their code (its errors cross the RPC as "<code>: words", engine/apps.ts):
+ * `full` (its storage in this scope holds 5 MiB), `no-file` (no such file in its bundle), and the bounds the broker
+ * checks too. Any other failure is `failed`, without the words.
+ */
+const ENGINE_REFUSALS: ReadonlySet<string> = new Set(["full", "no-file", "too-large", "bad-key"]);
+
+function refusalOf(error: unknown): string {
+  if (error instanceof Refusal) return error.message;
+  const code = error instanceof Error ? /^([a-z][a-z-]*): /.exec(error.message)?.[1] : undefined;
+  return code && ENGINE_REFUSALS.has(code) ? code : "failed";
+}
+
 function storageKey(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || utf8Bytes(value) > MINI_APP_LIMITS.storageKeyBytes) refuse("bad-key");
   return value as string;
@@ -215,7 +228,7 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
       post(value === undefined ? { id, ok: true } : { id, ok: true, value }, transfer);
     }, (error: unknown) => {
       if (phase === "stopped") return;
-      fail(error instanceof Refusal ? error.message : "failed");
+      fail(refusalOf(error));
     });
   };
 
