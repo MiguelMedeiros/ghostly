@@ -20,6 +20,16 @@ import { encodeMessage, MAX_PLIES, parseMessage, UCI, type Colour, type DrawOpti
 import { commitment, cryptoRandom, deal, newSalt, type Random } from "./toss.ts";
 
 /** The game in a chat, as storage keeps it under "game". */
+
+/**
+ * A value as the broker takes it: strict JSON, made by a round trip through JSON. The broker refuses a value with an
+ * `undefined` member (a JSON value has none), and a game record spread with `d: undefined` has one: its save and its
+ * move were refused, so a move was never sent nor kept. JSON drops such a member, as it does here.
+ */
+function plain(value: unknown): MiniAppJson {
+  return JSON.parse(JSON.stringify(value)) as MiniAppJson;
+}
+
 export interface SavedGame {
   v: 1;
   /** Game id, from both salts. */
@@ -154,7 +164,9 @@ export class ChessController {
   /** The peer's game id when the two sides hold different games. */
   private stepPeerGame: string | null = null;
   private chess = new Chess();
-  private queue: Promise<void> = Promise.resolve();
+  /** Every task in order; held until `start` has read the saved game, so what arrives meanwhile waits for it. */
+  private queue: Promise<void>;
+  private loaded!: () => void;
   private lastResync = -Infinity;
   private readonly listeners = new Set<() => void>();
   private readonly noticeListeners = new Set<(notice: Notice) => void>();
@@ -164,6 +176,11 @@ export class ChessController {
     this.api = api;
     this.random = options.random ?? cryptoRandom;
     this.now = options.now ?? (() => Date.now());
+    this.queue = new Promise<void>((resolve) => (this.loaded = resolve));
+    // Listening from the first moment: the broker hands over an event once, as it comes, and one that came while the
+    // app was still loading (the contact opening Chess, their first seek) would be lost, leaving this side waiting.
+    this.unsubscribe.push(api.chat.on("message", (data) => void this.enqueue(() => this.receive(data))));
+    this.unsubscribe.push(api.chat.on("peer", (peer) => void this.enqueue(() => this.peerChanged(peer))));
   }
 
   // ---------- life ----------
@@ -179,8 +196,6 @@ export class ChessController {
       const chess = this.game && replay(this.game.m);
       if (!chess) this.game = null;
       this.chess = chess ?? new Chess();
-      this.unsubscribe.push(this.api.chat.on("message", (data) => this.enqueue(() => this.receive(data))));
-      this.unsubscribe.push(this.api.chat.on("peer", (peer) => this.enqueue(() => this.peerChanged(peer))));
     } else {
       const moves = this.readMoves(await this.api.storage.get(KEY_LOCAL));
       const chess = replay(moves);
@@ -188,6 +203,7 @@ export class ChessController {
       this.local = { v: 1, m: chess ? moves : [] };
     }
     this.phaseLoaded = true;
+    this.loaded();
     if (this.inChat && this.peerOpen) await this.enqueue(() => this.hello());
     this.changed();
   }
@@ -270,7 +286,7 @@ export class ChessController {
       }
       if (!this.inChat) {
         this.local = { v: 1, m: [...(this.local?.m ?? []), uci] };
-        await this.api.storage.set(KEY_LOCAL, this.local as unknown as MiniAppJson);
+        await this.api.storage.set(KEY_LOCAL, plain(this.local));
         this.changed();
         return true;
       }
@@ -319,7 +335,7 @@ export class ChessController {
       if (!this.inChat) {
         this.chess = new Chess();
         this.local = { v: 1, m: [] };
-        await this.api.storage.set(KEY_LOCAL, this.local as unknown as MiniAppJson);
+        await this.api.storage.set(KEY_LOCAL, plain(this.local));
         this.changed();
         return;
       }
@@ -385,7 +401,7 @@ export class ChessController {
     } else {
       this.flip = { ...this.flip, peer: peerCommit };
     }
-    await this.api.storage.set(KEY_FLIP, this.flip as unknown as MiniAppJson);
+    await this.api.storage.set(KEY_FLIP, plain(this.flip));
     this.changed();
     // Our seek again before the reveal: the peer can check a reveal only against a commitment it has.
     await this.send({ k: "seek", c: commitment(this.flip.salt), a: this.flip.a });
@@ -515,7 +531,7 @@ export class ChessController {
   /** A new toss with a fresh salt, giving up these games. */
   private async startToss(abandons: string[]): Promise<void> {
     this.flip = { v: 1, salt: newSalt(this.random), a: abandons.slice(0, 2) };
-    await this.api.storage.set(KEY_FLIP, this.flip as unknown as MiniAppJson);
+    await this.api.storage.set(KEY_FLIP, plain(this.flip));
     this.changed();
     await this.send({ k: "seek", c: commitment(this.flip.salt), a: this.flip.a });
   }
@@ -548,7 +564,7 @@ export class ChessController {
   private async send(message: Message): Promise<void> {
     if (!this.peerOpen) return;
     try {
-      await this.api.chat.send(encodeMessage(message));
+      await this.api.chat.send(plain(encodeMessage(message)));
     } catch {
       // The peer closed or the chat dropped: the sync on its next open carries this.
       this.notice("send-failed");
@@ -556,7 +572,7 @@ export class ChessController {
   }
 
   private async saveGame(): Promise<void> {
-    if (this.game) await this.api.storage.set(KEY_GAME, this.game as unknown as MiniAppJson);
+    if (this.game) await this.api.storage.set(KEY_GAME, plain(this.game));
   }
 
   private readGame(value: MiniAppJson | undefined): SavedGame | null {

@@ -82,10 +82,11 @@ export function desktopOpener({ apps, invoke, listen, nameIn, onStop, view = def
     if (broker.phase === "writing") broker.load();
   }
 
-  return async (ref, linkId) => {
+  return async (ref, linkId, options) => {
     const host = apps();
     if (!host) throw new Error("Apps cannot run in this app");
-    const entry = await host.entry(ref);
+    // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
+    const entry = await host.entry(ref, options?.runAnyway === true);
     // Throws where this client has no runner for what the person granted.
     runnerFor(host, entry);
     const label = await invoke<string>("app_open", {

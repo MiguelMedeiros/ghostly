@@ -59,6 +59,16 @@ describe("opening an app on Desktop", () => {
     expect(host.calls.find((c) => c.op === "chat.open")).toEqual({ op: "chat.open", ref: REF, linkId: LINK });
   });
 
+  it("asks for the entry with Run anyway only when the person chose it (a version a store removed)", async () => {
+    const { host, open } = setup();
+    const asked: (boolean | undefined)[] = [];
+    const entry = host.entry;
+    host.entry = async (ref, runAnyway) => { asked.push(runAnyway); return entry(ref, runAnyway); };
+    await open(REF, LINK);
+    await open(REF, LINK, { runAnyway: true });
+    expect(asked).toEqual([false, true]);
+  });
+
   it("opens an app granted internet in the network runner's window", async () => {
     const { calls, open } = setup({ permissions: ["internet"] });
     await open(REF, null);

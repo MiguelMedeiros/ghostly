@@ -231,6 +231,27 @@ describe("the receiver's limits", () => {
     expect(apps.sessionEnded()).toEqual([]);
   });
 
+  it("a session that ends or is replaced holds what the peer had open: an open on the next one takes it back, with no close first", () => {
+    const { apps } = sessions();
+    apps.open.set(id, "1.0.0");
+    apps.receive(wire(appOpenFrame(id, "1.0.0")));
+    apps.receive(wire(appOpenFrame(other, "2.0.0")));
+    apps.sessionSuspended();
+    expect(apps.peerOpen.size).toBe(0);
+    expect(apps.holding).toBe(true);
+    // Nothing goes to a held app, and nothing from it is taken, until it says open again.
+    expect(apps.canSend(id, 1)).toBe("peer-closed");
+    expect(apps.receive(wire(appDataFrame(id, 1)))).toBeNull();
+    expect(apps.receive(wire(appOpenFrame(id, "1.0.0")))).toEqual({ app: id, o: "open", v: "1.0.0" });
+    expect(apps.canSend(id, 1)).toBeNull();
+    // One the peer closed meanwhile is closed now; the grace closes the rest, with offline, once.
+    apps.sessionSuspended();
+    expect(apps.receive(wire(appCloseFrame(id)))).toEqual({ app: id, o: "close" });
+    expect(apps.heldExpired()).toEqual([{ app: other, o: "close", offline: true }]);
+    expect(apps.heldExpired()).toEqual([]);
+    expect(apps.holding).toBe(false);
+  });
+
   it("the sender says why a frame cannot go, and keeps under the receiver's rate", () => {
     const { apps, clock } = sessions();
     expect(apps.canSend(id, 1)).toBe("not-open");
@@ -365,31 +386,36 @@ describe("apps on a paired session (apps/1)", () => {
     expect(a.link.sendAppData(app, 1)).toBe("peer-closed");
   });
 
-  it("a contact that leaves closes its apps here with offline", async () => {
-    const { a, b, app } = pair();
+  it("a contact that leaves closes its apps here with offline, once the grace is over", async () => {
+    const { a, b, app } = pair({ a: { appResumeGraceMs: 300 } });
     await live(a, b);
     await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps).toBe(true));
     a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
     await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
     await b.link.stop(false);
+    await vi.waitFor(() => expect(a.link.isDataLinkOpen).toBe(false));
+    expect(a.events).not.toContainEqual({ app, o: "close", offline: true });
     await vi.waitFor(() => expect(a.events.at(-1)).toEqual({ app, o: "close", offline: true }));
     expect(a.link.sendAppData(app, 1)).toBe("offline");
     expect(a.link.peerApps.size).toBe(0);
   });
 
-  it("says open again when the session comes back over a new connection", async () => {
+  it("says open again when the session comes back over a new connection, and the apps never hear a close", async () => {
     const { a, b, app } = pair();
     await live(a, b);
     await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps).toBe(true));
     a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
     await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
-    // The connection drops under both: each side hears the other closed, offline.
+    const [before, beforeB] = [a.events.length, b.events.length];
+    // The connection drops under both and a new session follows (a resume, a re-dial, a switch of transport). Before,
+    // each app heard "closed" in between: Chess showed the contact gone and refused moves while the chat was Connected.
     (a.link as unknown as { channel: FrameChannel }).channel.close();
-    await vi.waitFor(() => expect(a.events).toContainEqual({ app, o: "close", offline: true }));
-    await vi.waitFor(() => expect(b.events).toContainEqual({ app, o: "close", offline: true }));
+    await vi.waitFor(() => expect(a.link.isDataLinkOpen || b.link.isDataLinkOpen).toBe(false));
     await live(a, b);
-    // Both said open again, unprompted, and can talk.
+    // Both said open again, unprompted, and can talk; each app heard that open (its cue to catch up), and no close.
     await vi.waitFor(() => expect(a.link.peerApps.get(app) && b.link.peerApps.get(app)).toBe("1.0.0"));
+    await vi.waitFor(() => expect(a.events.slice(before)).toEqual([{ app, o: "open", v: "1.0.0" }]));
+    await vi.waitFor(() => expect(b.events.slice(beforeB)).toEqual([{ app, o: "open", v: "1.0.0" }]));
     expect(appSent(a).filter(data => data.includes('"o":"open"'))).toHaveLength(2);
     expect(a.link.sendAppData(app, "again")).toBeNull();
     await vi.waitFor(() => expect(b.events.at(-1)).toEqual({ app, d: "again" }));

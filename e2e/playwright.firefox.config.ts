@@ -13,7 +13,7 @@ const deployed = process.env.E2E_WEB_URL;
 
 export default defineConfig({
   testDir: "./web",
-  testMatch: ["apps-sandbox.spec.ts"],
+  testMatch: ["apps-sandbox.spec.ts", "apps-chess.spec.ts"],
   outputDir: "../test-results/firefox",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

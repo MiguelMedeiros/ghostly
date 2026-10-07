@@ -47,7 +47,7 @@ import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
 import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
-import { APP_DATA_MAX_BYTES, APP_FRAME, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
+import { APP_DATA_MAX_BYTES, APP_FRAME, APP_RESUME_GRACE_MS, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
@@ -525,6 +525,8 @@ export interface GhostLinkOptions {
    * Each new session says `open` for each. Without it the link keeps its own.
    */
   appsOpen?: Map<string, string>;
+  /** How long the contact's open apps are held across a session change (`APP_RESUME_GRACE_MS`); tests shorten it. */
+  appResumeGraceMs?: number;
   /** The contact's capability record, as last read, says `upgrade/1` (WISP 03). */
   peerUpgrades?: () => boolean;
   /**
@@ -1409,6 +1411,8 @@ export class GhostLink {
     if (this.waiting?.timer) clearTimeout(this.waiting.timer);
     await this.dht?.stop();
     this.disconnect();
+    // This link is over: the contact's apps it held are closed now, not after the grace.
+    this.appsEnded();
     await Promise.allSettled([...this.endpoints.values()].map(endpoint => endpoint.close()));
     this.endpoints.clear();
     await this.session.stop(announce);
@@ -2964,9 +2968,24 @@ export class GhostLink {
     if (refused) return refused;
     try { this.channel.send(JSON.stringify(appDataFrame(app, data))); return null; } catch { return "offline"; }
   }
-  /** What the contact had open is gone (the session ended, or `apps/1` is no longer agreed): each app hears it. */
+  /** What the contact had open is gone (`apps/1` is no longer agreed, or this link stopped): each app hears it now. */
   private appsEnded(): void {
+    if (this.appsGrace) { clearTimeout(this.appsGrace); this.appsGrace = null; }
     for (const event of this.apps.sessionEnded()) this.options.events?.onAppFrame?.(event);
+  }
+  private appsGrace: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The session ended or a new one took its place (a transport switch, a resume, a re-dial): what the contact had open
+   * is held for `APP_RESUME_GRACE_MS` (WISP 1200 § In a chat). The next session's `open` takes each back, and the app
+   * hears only that open, not a close first; one not said again by then is closed with `offline`.
+   */
+  private appsSuspended(): void {
+    this.apps.sessionSuspended();
+    if (!this.apps.holding || this.appsGrace) return;
+    this.appsGrace = setTimeout(() => {
+      this.appsGrace = null;
+      for (const event of this.apps.heldExpired()) this.options.events?.onAppFrame?.(event);
+    }, this.options.appResumeGraceMs ?? APP_RESUME_GRACE_MS);
   }
   /** Whether files/3 was agreed on the session open now; kept to say when that changes. */
   private filesOpen = false;
@@ -3322,7 +3341,7 @@ export class GhostLink {
           this.peerHoldOverride = null;
           this.sessionCapabilities.reset();
           this.typingSender.reset(); this.typingReceiver.clear();
-          this.appsEnded();
+          this.appsSuspended();
           this.pairedHttp?.close();
           this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch);
           this.emitPairingState();
@@ -3866,7 +3885,7 @@ export class GhostLink {
     this.peerNickOverride = null;
     this.sessionCapabilities.reset();
     this.typingSender.reset(); this.typingReceiver.clear();
-    this.appsEnded();
+    this.appsSuspended();
     this.emitFilesSession();
     if (this.peerGroupVersions) { this.peerGroupVersions = null; this.options.events?.onGroupsSupport?.(false); }
     this.session.setDataLinkOpen(false);

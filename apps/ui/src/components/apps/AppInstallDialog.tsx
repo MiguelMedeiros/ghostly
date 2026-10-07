@@ -11,6 +11,7 @@ import { appErrorText } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
+import type { OpenAppOptions } from "../../lib/apps/open";
 
 /*
  * The install screen (WISP 1200 § Permissions, § Apps sent in a chat, § Takedowns): what the checked bundle says,
@@ -244,9 +245,11 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
 
 /**
  * An installed app's screen, from the Apps page: what it is, what it was granted, its state (a waiting update that asks
- * for more, a version a store removed or its publisher revoked, files to fetch again), Open and Uninstall.
+ * for more, a version a store removed or its publisher revoked, files to fetch again), Open and Uninstall. A version a
+ * store removed stays stopped unless the person presses "Run anyway" here (WISP 1200 § Takedowns); a revoked one has no
+ * such button.
  */
-export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledAppView; onClose: () => void; onOpen: (app: InstalledAppView) => void }) {
+export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledAppView; onClose: () => void; onOpen: (app: InstalledAppView, options?: OpenAppOptions) => void }) {
   const { t } = useI18n();
   const titleId = useId();
   const [error, setError] = useState<string | null>(null);
@@ -294,7 +297,8 @@ export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledApp
       <div className="flex flex-wrap justify-end gap-2">
         <Button variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }))}>{t("apps.app.fetchFiles")}</Button>}
-        {!canRun && app.run.status !== "needs-files" && <Button onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
+        {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
+        {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
         {canRun && <Button variant="primary" data-testid="app-open" onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}
       </div>
     </Shell>

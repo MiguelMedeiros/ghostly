@@ -49,7 +49,7 @@ export async function testStore(options: { permissions?: AppPermission[]; entry?
 }
 
 /** Serves the store's files from GitHub's raw host in `context` (404 for the rest of it); returns what it asked, in order. */
-export async function serveStore(context: BrowserContext, store: TestStore): Promise<string[]> {
+export async function serveStore(context: BrowserContext, store: Pick<TestStore, "files">): Promise<string[]> {
   const asked: string[] = [];
   await context.route(/^https:\/\/(raw\.githubusercontent\.com|cdn\.jsdelivr\.net)\//, (route) => {
     const url = route.request().url();
