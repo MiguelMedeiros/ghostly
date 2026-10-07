@@ -155,6 +155,11 @@
     "unnamed": "Membre {{key}}",
     "unreachable": "Injoignable · {{seen}}",
     "viaHub": "Via un hub",
+    "why": {
+      "other": "Connexion impossible",
+      "relays": "Relais injoignables, nouvel essai…",
+      "session": "Connexion perdue, nouvel essai…"
+    },
     "you": "Vous"
   },
   "members": {
