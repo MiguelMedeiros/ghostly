@@ -410,6 +410,8 @@ stored Blobs and files differently, so the specs that depend on that also run th
 the device signing key (`web/device-signing-key.spec.ts`: a non-extractable Ed25519 key, WISP 06, made by the app's
 own module, refuses export and wrap and signs after a reload, a browser restart and in a worker). The Desktop's own
 WKWebView, which Playwright's WebKit is not, runs the same check in `desktop-macos/device-signing-key.spec.ts`.
+Installing a mini-app in a context that lives in memory, as Safari's Private Browsing, which keeps no Blob in
+IndexedDB, says to try a normal window rather than WebKit's own error (`web/apps-private-storage.spec.ts`).
 
 ```bash
 npx playwright install webkit      # once
