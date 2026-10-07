@@ -1,0 +1,173 @@
+name: Android e2e
+
+# The native Android app's end-to-end specs (e2e/android, e2e/android/playwright.config.ts): the x86_64 debug APK on
+# an Android 15 emulator (KVM), driven over adb inside its WebView by Playwright's `_android`, with a web peer (Chromium
+# on the runner, the built web app) as its contact. Nothing public: the Pkarr relay lives in the test process and an
+# Iroh relay in Docker, both reached from the emulator through `adb reverse`. One device, so one worker.
+# - apk: the x86_64 debug APK, built here as android-native.yml builds it (its own run of that lane may still be going
+#   for the same commit, and a run of one workflow cannot wait on another's artifact reliably).
+# - e2e: the specs. The report, each test's screenshots and logcat, and the whole run's logcat are an artifact.
+# The specs about the Android host (A1) skip while the APK has none (e2e/android/support/android.ts).
+# On pull requests that touch the Desktop crate, the Android specs or this lane, and by hand.
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "e2e/android/**"
+      - ".github/workflows/android-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-e2e-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # As android-native.yml: the runner image's NDK, named, and a smaller debug library.
+  NDK_VERSION: 27.3.13750724
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  apk:
+    name: Debug APK (x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: x86_64-linux-android
+
+      - name: Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "ndk;$NDK_VERSION" >/dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # The same debug key as android-native.yml (its cache): an APK from either lane installs over the other's.
+      - name: Debug key
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
+      - name: Build
+        run: npm run tauri -- android build --debug --apk --target x86_64
+
+      - name: Name the APK
+        run: |
+          out=apps/desktop/gen/android/app/build/outputs/apk
+          find "$out" -name '*.apk' -print
+          mkdir -p "$RUNNER_TEMP/apk"
+          cp "$(find "$out" -name '*.apk' | head -n1)" "$RUNNER_TEMP/apk/ghostly-debug-x86_64.apk"
+          (cd "$RUNNER_TEMP/apk" && ls -l && sha256sum ./*.apk)
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ghostly-android-e2e-apk-x86_64
+          path: ${{ runner.temp }}/apk/ghostly-debug-x86_64.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  e2e:
+    name: Android e2e (API 35, x86_64)
+    needs: apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      # All of it: the web peer is the built web app in Chromium.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium
+        uses: ./.github/actions/playwright-chromium
+
+      - name: Download the APK
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ghostly-android-e2e-apk-x86_64
+          path: ${{ runner.temp }}/apk
+
+      # The e2e infra's Iroh relay (e2e/infra/docker-compose.yml), alone, as the Desktop e2e job starts it: both the
+      # app and the web peer home on it instead of n0's. The emulator reaches it through `adb reverse`.
+      - name: Start an Iroh relay
+        run: docker run -d --name ghostly-iroh-relay -p 127.0.0.1:47085:3340 n0computer/iroh-relay:v1.3.0 --dev
+
+      # The web peer's app, built and served before the emulator boots, so its minutes do not wait on the build.
+      - name: Build and serve the web app
+        run: |
+          npm run build:web
+          nohup npx vite preview apps/web --port 4173 --strictPort > "$RUNNER_TEMP/preview.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:4173/ && echo "web app up" && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/preview.log"; exit 1
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The emulator as android-native.yml's smoke test boots it. One line: the run's logcat is kept whatever the
+      # specs did, and their exit status is the step's.
+      - name: Android e2e
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          E2E_ANDROID_APK: ${{ runner.temp }}/apk/ghostly-debug-x86_64.apk
+          E2E_WEB_URL: http://localhost:4173
+          GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: mkdir -p test-results/android-run; npx playwright test -c e2e/android/playwright.config.ts --workers 1; status=$?; adb logcat -d -v time > test-results/android-run/logcat.txt; adb exec-out screencap -p > test-results/android-run/device.png; exit $status
+
+      - name: Upload the results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-e2e
+          path: |
+            test-results/android
+            test-results/android-report
+            test-results/android-run
+          retention-days: 14
