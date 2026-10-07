@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { checkAppsTestFlag } from "../../../apps/web/appsTestFlag";
@@ -43,4 +43,27 @@ it("the e2e build's unguarded runner is the runner with only its hint guard take
     expect(() => new Function(code)).not.toThrow();
   }
   expect(() => withoutHintGuard("<script></script>")).toThrow(/hint-guard/);
+});
+
+it("only an e2e build emits the unguarded runner: a production build (no VITE_APPS_TEST) has none, and none comes from public/", async () => {
+  const { runnerHeaders, UNGUARDED_RUNNER_PATH } = await import("../../../apps/web/runnerPolicy");
+  const emitted = (env: string | undefined) => {
+    const before = process.env.VITE_APPS_TEST;
+    const build = process.env.GHOSTLY_BUILD;
+    if (env === undefined) delete process.env.VITE_APPS_TEST; else process.env.VITE_APPS_TEST = env;
+    delete process.env.GHOSTLY_BUILD;
+    try {
+      const files: string[] = [];
+      const hook = runnerHeaders().generateBundle as unknown as (this: { emitFile(file: { fileName: string }): void }) => void;
+      hook.call({ emitFile: (file) => files.push(file.fileName) });
+      return files;
+    } finally {
+      if (before === undefined) delete process.env.VITE_APPS_TEST; else process.env.VITE_APPS_TEST = before;
+      if (build !== undefined) process.env.GHOSTLY_BUILD = build;
+    }
+  };
+  expect(emitted(undefined)).toEqual([]);
+  expect(emitted("")).toEqual([]);
+  expect(emitted("1")).toEqual([UNGUARDED_RUNNER_PATH.slice(1)]);
+  expect(existsSync(join(import.meta.dirname, "../../../apps/web/public", UNGUARDED_RUNNER_PATH.slice(1)))).toBe(false);
 });
