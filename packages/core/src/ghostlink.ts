@@ -188,6 +188,8 @@ const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paire
  * `disconnected`) otherwise went on until its consent checks gave up, 27 s after the crash (CI run 36741701666).
  */
 export const PONG_WAIT_MS = 4_000;
+/** How long `handled` waits for the contact to answer its ping before it says it cannot tell. */
+export const HANDLED_WAIT_MS = 10_000;
 /**
  * Back in front after an absence (`wake`), a live session that ends this soon after it was lost while the app was
  * away (a phone that put it to sleep): the chat resumes as after a restart, not as a session the contact closed.
@@ -726,6 +728,16 @@ export class GhostLink {
   /** The contact's transport policy as last seen on this session, to tell its explicit choices apart. */
   private peerPolicySeen: { intent: number } | null = null;
   private unansweredPings = 0;
+  /**
+   * Pings sent on this session and pongs heard on it, counted from its start: the contact answers each ping in the order
+   * frames come, so the pong to ping n says it handled everything sent before it (`handled`).
+   */
+  private pingsSent = 0;
+  private pongsHeard = 0;
+  /** The liveness ping whose pong measures the round trip: its number in `pingsSent`. */
+  private rttPing = 0;
+  /** `handled` callers, each waiting for the pong to its ping. */
+  private handledWaiters: { ping: number; done: (exact: boolean) => void }[] = [];
   /** The last ping's `PONG_WAIT_MS`: running until something comes back from the contact. */
   private pongWait: ReturnType<typeof setTimeout> | null = null;
   /** The last ping's wait ran out with nothing back, and nothing came since (`restartedRedial`). */
@@ -3419,7 +3431,9 @@ export class GhostLink {
           if (frame?.t === "paired-ping") { try { channel.send(JSON.stringify({ t: "paired-pong" })); } catch { /* closing */ } return; }
           if (frame?.t === "paired-pong") {
             this.peerAnswersPings = true;
-            if (this.pingSentAt) { this.rtt = Date.now() - this.pingSentAt; this.pingSentAt = 0; this.options.events?.onRtt?.(this.rtt); }
+            const answered = ++this.pongsHeard;
+            if (this.pingSentAt && answered >= this.rttPing) { this.rtt = Date.now() - this.pingSentAt; this.pingSentAt = 0; this.options.events?.onRtt?.(this.rtt); }
+            for (const waiter of this.handledWaiters.filter(w => w.ping <= answered)) waiter.done(true);
             return;
           }
           if (frame?.t === "paired-bye") { if (paired.state.status === "ready") this.peerDeparted(channel); return; }
@@ -3684,7 +3698,7 @@ export class GhostLink {
     this.peerAnswersPings = peerAnswersPings;
     // One ping at the open, not counted as missed: the round trip is known at once, not 15 s later.
     const ping = () => {
-      this.pingSentAt = Date.now(); channel.send(JSON.stringify({ t: "paired-ping" }));
+      this.sendPing(channel, true);
       // An app that never answers pings (an older one) would cost a read of the relays at each.
       if (!this.peerAnswersPings || this.pongWait) return;
       this.pongWait = setTimeout(() => {
@@ -3711,6 +3725,39 @@ export class GhostLink {
     this.peerAnswersPings = false;
     this.pingSentAt = 0;
     this.rtt = undefined;
+    this.pingsSent = this.pongsHeard = this.rttPing = 0;
+    for (const waiter of [...this.handledWaiters]) waiter.done(false);
+  }
+  /** `live`: a liveness ping, whose pong measures the round trip. */
+  private sendPing(channel: FrameChannel, live: boolean): void {
+    if (live) this.pingSentAt = Date.now();
+    channel.send(JSON.stringify({ t: "paired-ping" }));
+    this.pingsSent++;
+    if (live) this.rttPing = this.pingsSent;
+  }
+  /**
+   * Resolves once the contact's app handled every frame sent on this session so far: it answers a ping in the order
+   * frames come (since 0.5, `ping/1`), so the pong to one sent now says so, however slowly it handles them. A group
+   * member's catch-up answer goes a slice at a time on it (`GroupSessionHooks.handled`). `false` when it cannot tell:
+   * no session, a contact that answers no ping, or no answer within `HANDLED_WAIT_MS`.
+   */
+  handled(): Promise<boolean> {
+    const channel = this.channel;
+    if (!channel || !this.peerAnswersPings || this.paired?.state.status !== "ready") return Promise.resolve(false);
+    try { this.sendPing(channel, false); } catch { return Promise.resolve(false); }
+    return new Promise(resolve => {
+      const waiter = {
+        ping: this.pingsSent,
+        done: (exact: boolean) => {
+          clearTimeout(timer);
+          const at = this.handledWaiters.indexOf(waiter);
+          if (at >= 0) this.handledWaiters.splice(at, 1);
+          resolve(exact);
+        },
+      };
+      const timer = setTimeout(() => waiter.done(false), HANDLED_WAIT_MS);
+      this.handledWaiters.push(waiter);
+    });
   }
   /** Something came back on the session: the ping's wait is over. */
   private heardFromPeer(): void {
@@ -3881,7 +3928,7 @@ export class GhostLink {
   private probeAfterWake(channel: FrameChannel): void {
     if (!this.peerAnswersPings || this.paired?.state.status !== "ready") return;
     this.unansweredPings++;
-    try { this.pingSentAt = Date.now(); channel.send(JSON.stringify({ t: "paired-ping" })); } catch { this.dropDeadSession(channel); return; }
+    try { this.sendPing(channel, true); } catch { this.dropDeadSession(channel); return; }
     if (this.pongWait) clearTimeout(this.pongWait);
     this.pongWait = setTimeout(() => {
       this.pongWait = null;

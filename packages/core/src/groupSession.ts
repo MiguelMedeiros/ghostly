@@ -75,6 +75,14 @@ export const GROUP_LIMITS = {
   syncWindowMs: 60_000,
   /** Messages delivered from a copy that was not whole, remembered until a whole copy completes them. */
   provisional: 256,
+  /**
+   * Frames of one catch-up answer in a slice (`GroupSessionHooks.handled`), two slices at most not handled yet by the
+   * member's app: the next goes once it handled the one before the last. An app holds 64 frames waiting at most before
+   * 2026-10-07 (more ends the session), and a member back in a busy group was handed over a hundred at once.
+   */
+  catchUpSlice: 16,
+  /** Between two slices, when the member's app cannot say it handled one (`handled` resolves `false`). */
+  catchUpPauseMs: 500,
 } as const;
 
 /** What every member should know about who can read what, in the words the apps show. */
@@ -192,6 +200,12 @@ export interface GroupSessionHooks {
    * copy it replaced may have used, so the other members do not drop its frames as already seen.
    */
   seqFloor?(): number;
+  /**
+   * Resolves once the member's app handled every frame sent to it so far (it answers a ping in the order frames come),
+   * or `false` when it cannot tell (no session, or an app that answers no ping): a catch-up answer then waits
+   * `GROUP_LIMITS.catchUpPauseMs` between slices. Absent: an answer goes all at once, as before 2026-10-07.
+   */
+  handled?(to: string): Promise<boolean>;
   /**
    * Whether this device may sign commits for the group (WISP 06 § Forced takeover): false after a forced takeover or a
    * restore, until the person turns on "Manage groups from this device" there. Then no commit is signed, the automatic
@@ -360,6 +374,8 @@ export class GroupSession {
   private passOn: GroupEdgeFrame[] | null = null;
   /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
+  /** Catch-up answers still going out, per member: what is left of each (`handOut`). */
+  private handingOut = new Map<string, GroupEdgeFrame[]>();
   /**
    * Messages delivered from a copy that was not whole (handed on without its author's whole signature): not seen, so
    * a sync still asks for them and a whole copy completes them. Oldest first, saved as `GroupState.provisional`, so a
@@ -1242,16 +1258,18 @@ export class GroupSession {
       this.hooks.send(from, { t: "group-commit", g: this.id, commit: this.state.chain[frame.e] });
       return;
     }
+    // The answer, in this order, goes out a slice at a time (`handOut`).
+    const answer: GroupEdgeFrame[] = [];
     // Commits they lack, each with its secret sealed for them when they were in that roster and I still hold it.
     for (let e = frame.e + 1; e <= this.epoch; e++) {
       const commit = this.state.chain[e], secret = this.secret(e);
-      this.hooks.send(from, { t: "group-commit", g: this.id, commit, ...(secret && rosterHas(commit.m, from) ? { secret: sealSecret(from, secret, secretAad(this.id, e, from)) } : {}) });
+      answer.push({ t: "group-commit", g: this.id, commit, ...(secret && rosterHas(commit.m, from) ? { secret: sealSecret(from, secret, secretAad(this.id, e, from)) } : {}) });
     }
     // Secrets of epochs they were in but do not hold, sixteen to a frame (what apps from before revision 0.9 take).
     const theirs = new Set(Array.isArray(frame.secrets) ? frame.secrets.filter(n => Number.isSafeInteger(n)) : []);
     const secrets = this.readableEpochs.filter(e => e <= frame.e && !theirs.has(e) && rosterHas(this.state.chain[e].m, from))
       .map(e => ({ e, s: sealSecret(from, this.secret(e)!, secretAad(this.id, e, from)) }));
-    for (let i = 0; i < secrets.length; i += GROUP_LIMITS.secretsPerFrame) this.hooks.send(from, { t: "group-secrets", g: this.id, secrets: secrets.slice(i, i + GROUP_LIMITS.secretsPerFrame) });
+    for (let i = 0; i < secrets.length; i += GROUP_LIMITS.secretsPerFrame) answer.push({ t: "group-secrets", g: this.id, secrets: secrets.slice(i, i + GROUP_LIMITS.secretsPerFrame) });
     // Messages they have not seen, for epochs they were in: my own, from my bounded log, and those of the members they
     // asked me for (whose edges to them are down), from what I received. Signed by their authors, so nothing to trust me for.
     const lacks = missingIn(frame, from);
@@ -1259,14 +1277,53 @@ export class GroupSession {
     const kept = asked.size ? (this.state.relay ?? []).filter(f => asked.has(f.s) && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from) && lacks(f)) : [];
     // In the order they were written, as far as two logs can say: the receiver places each where it arrives, and my own
     // first then the others' showed it a conversation as all my lines, then all of theirs.
-    for (const next of asWritten(this.ownLacked(from, frame), kept)) this.hooks.send(from, next);
+    answer.push(...asWritten(this.ownLacked(from, frame), kept));
     // Their latest edits too, after the messages they change (a sync says nothing of edits: one they have changes nothing).
     for (const author of asked) {
       const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from));
-      for (const edit of edits.slice(-GROUP_LIMITS.handOnEdits)) this.hooks.send(from, edit);
+      answer.push(...edits.slice(-GROUP_LIMITS.handOnEdits));
     }
     // The group's picture, when theirs is older (after the commits and secrets above, which it may need).
-    this.offerMeta(from, frame.mt);
+    const meta = this.metaFor(from, frame.mt);
+    if (meta) answer.push(meta);
+    this.handOut(from, answer);
+  }
+
+  /**
+   * A catch-up answer, a slice at a time (`GROUP_LIMITS.catchUpSlice`), with two slices at most not handled yet by the
+   * member's app (`hooks.handled`): the next once it handled the one before the last, so the slices follow each other
+   * without a round trip between them. All at once, a member back in a busy group was handed over a hundred frames on
+   * one session, and an app that holds 64 waiting ended that session mid catch-up ("Session receive limit exceeded",
+   * 2026-10-07). The first two slices go now, the rest without holding this group's other frames back. A newer answer
+   * to the same member takes the place of what is left of the last; a frame the edge did not take ends it (the member
+   * asks again when its edge opens).
+   */
+  private handOut(to: string, frames: GroupEdgeFrame[]): void {
+    const handled = this.hooks.handled;
+    if (!handled) { for (const frame of frames) this.hooks.send(to, frame); return; }
+    const going = this.handingOut.get(to);
+    if (going) { going.splice(0, going.length, ...frames); return; }
+    const rest = [...frames], told: Promise<boolean>[] = [];
+    const next = () => {
+      if (!this.sendSlice(to, rest)) return false;
+      if (rest.length) told.push(handled(to).catch(() => false));
+      return true;
+    };
+    if (!next() || !next() || !rest.length) return;
+    this.handingOut.set(to, rest);
+    void (async () => {
+      try {
+        while (rest.length) {
+          if (!await told.shift()!) await new Promise(resolve => setTimeout(resolve, GROUP_LIMITS.catchUpPauseMs));
+          if (this.state.status !== "active" || !next()) break;
+        }
+      } finally { this.handingOut.delete(to); }
+    })();
+  }
+  /** The next slice of `rest` to `to`: false, and nothing left, when the edge did not take one. */
+  private sendSlice(to: string, rest: GroupEdgeFrame[]): boolean {
+    for (const frame of rest.splice(0, GROUP_LIMITS.catchUpSlice)) if (this.hooks.send(to, frame) === false) { rest.length = 0; return false; }
+    return true;
   }
 
   /** My own messages a member's sync says it lacks, from my bounded log, for the epochs it was a member of. */
@@ -1335,10 +1392,14 @@ export class GroupSession {
 
   /** My statement, to a member whose sync says it holds an older one (or none); nothing to an app that says nothing. */
   private offerMeta(to: string, theirTag: unknown): void {
+    const frame = this.metaFor(to, theirTag);
+    if (frame) this.hooks.send(to, frame);
+  }
+  private metaFor(to: string, theirTag: unknown): GroupEdgeFrame | null {
     const meta = this.state.meta, theirs = parseGroupMetaTag(theirTag);
-    if (!meta || theirs === null || !groupMetaNewer(meta, theirs) || !rosterHas(this.roster, to)) return;
+    if (!meta || theirs === null || !groupMetaNewer(meta, theirs) || !rosterHas(this.roster, to)) return null;
     const secret = this.secret(this.epoch);
-    if (secret) this.hooks.send(to, wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message));
+    return secret ? wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message) : null;
   }
 
   /**
