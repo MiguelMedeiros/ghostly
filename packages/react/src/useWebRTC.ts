@@ -264,6 +264,12 @@ export function useWebRTC({
     if (problem) setMediaProblemShown(problem);
   }, []);
 
+  /**
+   * The system paused our microphone in a call (its track is muted, not by the person): an iPhone or iPad does this
+   * to a Home Screen web app while its screen is locked or another app is in front. Nothing is sent while it lasts.
+   */
+  const [micPaused, setMicPaused] = useState(false);
+
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const lastProcessedSignalRef = useRef<number>(0);
@@ -1314,6 +1320,37 @@ export function useWebRTC({
     };
   }, []);
 
+  // The page out of sight, and the system pausing our microphone, while a call is on. An iPhone or iPad mutes the
+  // microphone of a Home Screen web app while its screen is locked or another app is in front, and the page can do
+  // nothing about it (no web API keeps it on). The call stays up and the contact hears silence; the call window says
+  // why (`micPaused`), and both go in the diagnostic log, so a call that "stopped working" can be told apart from one
+  // that ended. Locking the screen fires no `pagehide` there, so the hang-up on leaving above does not run. Back on
+  // screen, WebKit unmutes the track by itself (a microphone that ended instead is the call window's to replace).
+  useEffect(() => {
+    const track = localStream?.getAudioTracks()[0];
+    if (!track || !ON_A_CALL.has(callState)) {
+      setMicPaused(false);
+      return;
+    }
+    const page = () => (typeof document === "undefined" ? "visible" : document.visibilityState);
+    setMicPaused(track.muted === true);
+    const paused = () => { setMicPaused(true); traceLink("call", "call-mic", { mic: "paused", page: page() }); };
+    const resumed = () => { setMicPaused(false); traceLink("call", "call-mic", { mic: "resumed", page: page() }); };
+    const ended = () => traceLink("call", "call-mic", { mic: "ended", page: page() });
+    const shown = () =>
+      traceLink("call", "call-page", { page: page(), mic: track.readyState === "ended" ? "ended" : track.muted ? "paused" : "live" });
+    track.addEventListener?.("mute", paused);
+    track.addEventListener?.("unmute", resumed);
+    track.addEventListener?.("ended", ended);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", shown);
+    return () => {
+      track.removeEventListener?.("mute", paused);
+      track.removeEventListener?.("unmute", resumed);
+      track.removeEventListener?.("ended", ended);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", shown);
+    };
+  }, [localStream, callState]);
+
   // A call that neither connects nor fails (neither side's ICE ever found a pair) ends, instead of saying
   // "Connecting..." forever; the other side is told with a hang-up.
   useEffect(() => {
@@ -1404,6 +1441,11 @@ export function useWebRTC({
     /** Our last call rang out with no answer, for a few seconds. */
     noAnswer,
     mediaProblem: mediaProblemShown,
+    /**
+     * The system paused our microphone while the call is on (an iPhone's Home Screen web app with its screen locked):
+     * the contact hears nothing until it comes back. Not the person's own mute (`isMuted`).
+     */
+    micPaused,
     callStartedAt,
     /**
      * The connected call lost its path (a network change) and is getting it back: the call window says
