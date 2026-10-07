@@ -48,6 +48,12 @@ describe("problemText: an error in a few words, its English behind the ⓘ", () 
     expect(problemText("Session frame too large", english, "connect")).toEqual({ tone: "error", title: "Couldn't connect", detail: "Session frame too large" });
   });
 
+  it("says a Reconnect that timed out as a wait in the language, its English behind the ⓘ (the app keeps dialling)", () => {
+    const timedOut = "Timed out connecting to the peer";
+    expect(problemText(timedOut, english, "connect")).toEqual({ tone: "wait", title: "Couldn't connect", next: "Trying again…", detail: timedOut });
+    expect(problemText(new Error(timedOut), pt, "connect")).toEqual({ tone: "wait", title: pt("errors.problem.connectFailed"), next: pt("errors.problem.retrying"), detail: timedOut });
+  });
+
   it("says a known error in the language, whole, with no English beside it", () => {
     expect(problemText("Lost the Ghostly peer", english)).toEqual({ tone: "error", title: "Lost the Ghostly peer" });
     expect(problemText(new Error("Lost the Ghostly peer"), pt)).toEqual({ tone: "error", title: pt("errors.app.lostPeer") });
@@ -71,7 +77,7 @@ describe("problemText: an error in a few words, its English behind the ⓘ", () 
 
   it.each(LANGUAGES.filter((l) => l !== "en"))("says every kind in %s, not in English, and fills every value", (language) => {
     const t = translateWith(LOCALES[language], language);
-    for (const text of [PHONE, "Could not read discovery: timeout", "Session receive queue full", "Session frame too large", "TypeError: Failed to fetch (https://a.test)"]) {
+    for (const text of [PHONE, "Could not read discovery: timeout", "Session receive queue full", "Session frame too large", "TypeError: Failed to fetch (https://a.test)", "Timed out connecting to the peer"]) {
       const said = problemText(text, t, "connect"), en = problemText(text, english, "connect");
       expect(said.title).not.toBe(en.title);
       expect(`${said.title} ${said.next ?? ""}`).not.toContain("{{");
