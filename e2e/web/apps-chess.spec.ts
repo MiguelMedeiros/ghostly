@@ -218,7 +218,7 @@ test("a lower sequence is not installed over a newer one", { tag: ["@feature:app
 
   // The store going back to the older one changes nothing: the newer stays installed.
   publisher.signStore({ apps: [older] });
-  await ana.page.getByTestId("app-store").getByTestId("app-store-refresh").click();
+  await ana.page.getByTestId("app-store").filter({ hasText: STORE_NAME }).getByTestId("app-store-refresh").click();
   await ana.page.goto("/#/");
   await ana.page.goto("/#/apps");
   await expect(ana.page.getByTestId("installed-app")).toContainText("1.3.0");
@@ -234,7 +234,7 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
   await installFromStore(ana.page);
 
   publisher.signStore({ apps: [chess], removed: [{ app: chess, reason: "Sends your moves to a server" }] });
-  await ana.page.getByTestId("app-store").getByTestId("app-store-refresh").click();
+  await ana.page.getByTestId("app-store").filter({ hasText: STORE_NAME }).getByTestId("app-store-refresh").click();
   const row = ana.page.getByTestId("installed-app");
   await expect(row.getByTestId("installed-app-hint")).toHaveText("Stopped");
   await expect(row.getByTestId("installed-app-open")).toHaveCount(0);

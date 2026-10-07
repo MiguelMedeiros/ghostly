@@ -1,6 +1,6 @@
 {
   "name": "chess",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "kind": "mini-app",
   "title": "Chess",
   "tagline": "Play chess with a contact, live in your chat",
