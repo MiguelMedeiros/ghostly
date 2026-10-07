@@ -15,6 +15,8 @@ const fake = vi.hoisted(() => ({
     calls: [] as [string, unknown][],
     answers: {} as Record<string, unknown>,
     subscribe: (_listener: () => void) => () => {},
+    appListeners: [] as ((linkId: string, frame: unknown) => void)[],
+    onAppFrame(listener: (linkId: string, frame: unknown) => void) { fake.engine.appListeners.push(listener); return () => {}; },
     linkByPeer(peer: string) { return (fake.engine.state as { links: { peerPubKeyZ32: string }[] } | null)?.links.find((l) => l.peerPubKeyZ32 === peer); },
     async call(method: string, params?: unknown) {
       fake.engine.calls.push([method, params]);
@@ -355,5 +357,40 @@ describe("the RPC contract", () => {
     expect(called.length).toBeGreaterThan(50);
     const missing = called.filter((method) => typeof (GhostlyNode.prototype as unknown as Record<string, unknown>)[method] !== "function");
     expect(missing).toEqual([]);
+  });
+});
+
+// covers: apps.web-sandbox
+describe("mini-apps: the broker's way to the engine (WISP 1200)", () => {
+  it("maps each call to the engine's, with the app the broker names", async () => {
+    const { engineApps } = await import("../src/platform/apps");
+    const apps = engineApps("/app-frame.html");
+    fake.engine.calls.length = 0;
+    fake.engine.answers.appStorageGet = { value: { n: 1 } };
+    fake.engine.answers.appSend = { error: "offline" };
+    fake.engine.answers.appOpen = { app: "A".repeat(22) };
+    expect(apps.runnerUrl).toBe("/app-frame.html");
+    expect(await apps.storage.get("pub/chess", "link-1", "k")).toEqual({ value: { n: 1 } });
+    fake.engine.answers.appStorageGet = null;
+    expect(await apps.storage.get("pub/chess", "alone", "k")).toBeNull();
+    expect(await apps.chat.send("link-1", "pub/chess", { move: "e2e4" })).toBe("offline");
+    expect(await apps.chat.open("link-1", "pub/chess", "1.0.0")).toEqual({ app: "A".repeat(22) });
+    expect(fake.engine.calls).toEqual([
+      ["appStorageGet", { ref: "pub/chess", scope: "link-1", key: "k" }],
+      ["appStorageGet", { ref: "pub/chess", scope: "alone", key: "k" }],
+      ["appSend", { linkId: "link-1", ref: "pub/chess", data: { move: "e2e4" } }],
+      ["appOpen", { linkId: "link-1", ref: "pub/chess", version: "1.0.0" }],
+    ]);
+  });
+
+  it("remembers the contact's open apps from the start, until they close", async () => {
+    const { engineApps } = await import("../src/platform/apps");
+    const apps = engineApps("/app-frame.html");
+    const app = "B".repeat(22);
+    for (const listener of fake.engine.appListeners) listener("link-1", { app, o: "open", v: "2.0.0" });
+    expect(apps.chat.peer("link-1", app)).toEqual({ version: "2.0.0" });
+    expect(apps.chat.peer("link-2", app)).toBeNull();
+    for (const listener of fake.engine.appListeners) listener("link-1", { app, o: "close", offline: true });
+    expect(apps.chat.peer("link-1", app)).toBeNull();
   });
 });

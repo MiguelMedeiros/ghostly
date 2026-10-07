@@ -57,6 +57,6 @@ export default defineConfig({
         reuseExistingServer: !process.env.CI,
         timeout: 5 * 60_000,
         // The same build the suite tests: the local OIDC issuer and the SDK example's adapters.
-        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts" },
+        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1" },
       },
 });

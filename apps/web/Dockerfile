@@ -25,6 +25,8 @@ COPY apps/android-twa/twa-manifest.json apps/android-twa/
 # tab compares it to know a deploy happened. There is no git in this stage.
 ARG GHOSTLY_BUILD=""
 ENV GHOSTLY_BUILD=$GHOSTLY_BUILD
+# The e2e suite's mini-app hook never goes into an image (apps/web/appsTestFlag.ts).
+ENV VITE_APPS_TEST=
 RUN npm run build -w @ghostly/web
 
 FROM nginx:1.30-alpine

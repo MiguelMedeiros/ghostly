@@ -35,6 +35,13 @@ export interface BrowserHost {
   notice?: string;
   /** Left out where this client has no way to learn about new versions. */
   updates?: UpdateSource;
+  /**
+   * Where this host frames mini-apps (WISP 1200): its runner page, served with the runner's policy as a header. Left
+   * out where it runs none (the extension, until it gets its own runner).
+   */
+  appRunner?: string;
+  /** The runner for apps granted `internet` (WISP 1200 · Permissions), under a policy that allows HTTPS and WSS. */
+  appNetRunner?: string;
   features: {
     /** Can this host reach web apps on the user's machine? A web page only can if they allow it with CORS. */
     shareLocalServices: boolean;

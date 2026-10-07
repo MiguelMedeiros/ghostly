@@ -21,6 +21,9 @@ describe("updates", () => {
     expect(planAppUpdate({ ...v(1), permissions: ["chat", "name"] }, { ...v(2), permissions: ["chat"] })).toEqual({ action: "install" });
     expect(planAppUpdate({ ...v(1), permissions: [] }, { ...v(2), permissions: ["chat", "name"] })).toEqual({ action: "ask", added: ["chat", "name"] });
     expect(planAppUpdate({ ...v(1), permissions: ["chat"] }, { ...v(2), permissions: ["name", "chat"] })).toEqual({ action: "ask", added: ["name"] });
+    // The internet is asked for again like any other: an app that had no network never gets it by an update alone.
+    expect(planAppUpdate({ ...v(1), permissions: ["chat"] }, { ...v(2), permissions: ["chat", "internet"] })).toEqual({ action: "ask", added: ["internet"] });
+    expect(planAppUpdate({ ...v(1), permissions: ["internet", "chat"] }, { ...v(2), permissions: ["chat"] })).toEqual({ action: "install" });
     expect(addedAppPermissions(["chat"], ["chat"])).toEqual([]);
   });
 
