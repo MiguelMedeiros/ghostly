@@ -35,6 +35,8 @@ export class NativeWorld {
    * whose HyperDHT dial did not reach its contact on the loopback testnet: CI run 36741701666).
    */
   dialsLost = new Set<string>();
+  /** Apps asleep (a phone that put a backgrounded app to sleep): dials to them do not reach them, and fail after `dialFailMs`. */
+  asleep = new Set<string>();
   idleMs = 30_000;
   /**
    * Apps whose next dial connects and then carries nothing: the handshake went through, and no frame or close crosses
@@ -63,7 +65,7 @@ export class NativeWorld {
       connect: async (to: unknown): Promise<BoundChannel> => {
         const d = to as { id?: string; publicKey?: string };
         const remote = this.find(d.id ?? d.publicKey ?? "");
-        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection || this.dialsLost.has(name)) {
+        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection || this.dialsLost.has(name) || this.asleep.has(remote.name)) {
           this.dialFailures++;
           await after(this.dialFailMs);
           throw new Error(`${transport}: the contact's endpoint did not answer`);
