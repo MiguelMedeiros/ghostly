@@ -2083,7 +2083,7 @@ dependencies = [
 
 [[package]]
 name = "ghostly"
-version = "1.1.4"
+version = "1.1.5"
 dependencies = [
  "arboard",
  "async-trait",
@@ -2098,12 +2098,15 @@ dependencies = [
  "gstreamer",
  "gstreamer-app",
  "iroh",
+ "jni 0.21.1",
  "libc",
  "mainline",
+ "ndk-context",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-user-notifications",
+ "objc2-web-kit",
  "pkarr",
  "png 0.18.1",
  "rand 0.10.3",
@@ -2111,6 +2114,7 @@ dependencies = [
  "reqwest",
  "rtc",
  "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sha2 0.11.0",

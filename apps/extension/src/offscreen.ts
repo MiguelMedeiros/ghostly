@@ -55,6 +55,8 @@ chrome.runtime.onConnect.addListener((port) => {
     port.disconnect();
     return;
   }
+  // TODO(apps, WISP 1200 § Per client, Extension): this port carries JSON, so the app calls that answer bytes (`appFile`,
+  // `appPreview`'s `icon`) need another shape before the extension runs apps. The extension is out of phase 1.
   const client: EngineClientSink = { post: (message) => port.postMessage(message) };
   // Listeners go on at once, so nothing a page sends while the peer waits for its lock is lost.
   withPeer((s) => s.attach(client));

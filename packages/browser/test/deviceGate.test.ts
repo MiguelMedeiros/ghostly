@@ -22,6 +22,7 @@ vi.mock("../src/engine/node", () => ({
     async start() { this.started++; (await import("../src/shared/idb")).openDb(); }
     getState() { return { links: [] }; }
     setActiveLink() {}
+    appsCloseAll() {}
     echo(params: unknown) { return params; }
   },
 }));
@@ -150,15 +151,18 @@ describe.each(["standby", "releasing", "taking", "superseded", "moving", "remove
     const { host: inPage, onServer } = host();
     const posted: Posted[] = [];
     const connection = await inPage.connect((m) => posted.push(m), () => {});
+    // A `releasing` device whose pass 2 cannot run here (no handoff host in this test) never signed a release: it is
+    // the active device again, and the pages start again into the gate (part 5). That second word comes once `active`
+    // is written, a read and a write later: waited for, not a fixed pause (5 ms was short on a busy CI runner).
+    const gates = [{ kind: "device-gate", gate: { state, activeDevice: "MacBook" } }, ...(state === "releasing" ? [{ kind: "device-gate", gate: { state: "releasing", reload: true } }] : [])];
+    await vi.waitFor(() => expect(posted).toEqual(gates), { timeout: 10_000 });
     await flush();
 
     expect(fake.nodes).toHaveLength(0);
     expect(onServer).not.toHaveBeenCalled();
     expect(opened).not.toContain(databaseName());
     expect(await databases()).not.toContain(databaseName());
-    // A `releasing` device whose pass 2 cannot run here (no handoff host in this test) never signed a release: it is
-    // the active device again, and the pages start again into the gate (part 5).
-    expect(posted).toEqual([{ kind: "device-gate", gate: { state, activeDevice: "MacBook" } }, ...(state === "releasing" ? [{ kind: "device-gate", gate: { state: "releasing", reload: true } }] : [])]);
+    expect(posted).toEqual(gates);
     if (state === "releasing") {
       const { readDeviceRecord } = await import("../src/devices/store");
       expect((await readDeviceRecord(databaseName()))?.state).toBe("active");
@@ -170,8 +174,7 @@ describe.each(["standby", "releasing", "taking", "superseded", "moving", "remove
     connection.send(request("sendMessage", { linkId: "a", text: "hello" }, 7));
     connection.send(request("walletPay", {}, 8));
     connection.send(request("peekProfile", { profile: "x", dbName: "ghostly_x" }, 9));
-    await flush();
-    expect(posted.slice(state === "releasing" ? 2 : 1)).toEqual([7, 8, 9].map((id) => ({ kind: "response", id, error: DEVICE_GATED_ERROR })));
+    await vi.waitFor(() => expect(posted.slice(gates.length)).toEqual([7, 8, 9].map((id) => ({ kind: "response", id, error: DEVICE_GATED_ERROR }))), { timeout: 10_000 });
     expect(fake.nodes).toHaveLength(0);
     expect(await databases()).not.toContain(databaseName());
 

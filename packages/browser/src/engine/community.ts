@@ -2,7 +2,7 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Roster,
+  type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -122,6 +122,11 @@ const ENTRY_UNANSWERED_MS = 90_000;
  * before the turn ends. A paired session over Pkarr can take the better part of a minute to come up.
  */
 const KNOCK_SLOT_MS = 2 * 60_000;
+/**
+ * A knock the relays have not taken yet (their budget refused it) is tried again this soon: within `WRITE_FIRST_MS`
+ * of the refusal, while the budget still keeps the next request it frees for that write.
+ */
+export const UNKNOCKED_RETRY_MS = 3_000;
 const KNOCK_SLOT_OPEN_MS = 20_000;
 /** How long a hub missing from the beacon still counts as one for the edges already up. */
 const HUB_GRACE_MS = 3 * 60_000;
@@ -133,6 +138,14 @@ const HUB_GRACE_MS = 3 * 60_000;
 const CUT_OFF_STEP_UP_MS = 15_000;
 /** A lobby request this recent is from a member still looking fast for my side of the edge: mine opens expecting it. */
 const LOBBY_EXPECT_MS = 30_000;
+/**
+ * A lobby is one record every member asking a hub writes, each reading it and writing it back with its own request: two
+ * members writing at once (both cut off by the same leave, in the same second) each write what they read, and the later
+ * write drops the earlier request. So a member reads the lobby back this long after its write (plus up to `LOBBY_CHECK_JITTER_MS`, so
+ * the members who wrote together do not read and write together again) and asks again at once if its request is gone.
+ */
+const LOBBY_CHECK_MS = 2_000;
+const LOBBY_CHECK_JITTER_MS = 3_000;
 const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_LINGER_MS = 20_000;
 const RELAYED_KEPT = 4096;
@@ -206,6 +219,8 @@ interface Live {
   /** As a member: the hubs I want, and when I last wrote in each one's lobby. */
   myHubs: string[];
   lobbyWrites: Map<string, number>;
+  /** As a member: the lobby requests to read back (`LOBBY_CHECK_MS`): hub → when, and the time my request said. */
+  lobbyChecks?: Map<string, { at: number; ts: number }>;
   lastKnockPoll: number;
   /** Joiners with an entry session open: key → since; knocks first seen: key → when, and with which hubs at the door. */
   pendingEntries: Map<string, number>;
@@ -279,6 +294,8 @@ export class Communities {
   private readonly knockAt = new Map<string, number>();
   /** Joiners: how many others had a knock still being refreshed in the record I last read (they wait with me). */
   private readonly knockingWith = new Map<string, number>();
+  /** Joiners: the knock record a knock read whose write the relays refused, and when it was read (`knock`). */
+  private readonly knockRead = new Map<string, { n: number; knocks: Knock[]; at: number }>();
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
   private readonly frames = new FramesTaken();
   private readonly carriers = new Map<string, string>();
@@ -406,7 +423,7 @@ export class Communities {
 
   /** `check`: a member, as far as this device knows, asking the door whether it still is (`joinByLink`). */
   private async startJoining(link: GroupEntryLink, seedB64: string, since: number, check = false): Promise<void> {
-    this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g);
+    this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g); this.knockRead.delete(link.g);
     const before = this.stored.get(link.g)?.joining;
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     if (before && before.linkId !== linkId) await this.host.closeEdge(before.linkId);
@@ -425,7 +442,7 @@ export class Communities {
     if (!joining) return;
     delete group.joining;
     this.lastKnock.delete(group.id); this.knocked.delete(group.id); this.knockAt.delete(group.id);
-    this.knockingWith.delete(group.id);
+    this.knockingWith.delete(group.id); this.knockRead.delete(group.id);
     await this.host.closeEdge(joining.linkId);
     await this.store.putGroup(group);
     this.host.emit();
@@ -547,6 +564,7 @@ export class Communities {
     this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
     this.knockingWith.delete(groupId);
+    this.knockRead.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     this.host.historyGone?.(groupId);
@@ -571,7 +589,8 @@ export class Communities {
         // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
         if (!this.knocking(group, live) && waited > CHECK_MS) await this.endCheck(group);
         // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.
-        else if (!this.host.linkReady(group.joining.linkId, 2) && !this.host.linkSeen?.(group.joining.linkId) && now - (this.lastKnock.get(group.id) ?? 0) >= every) await this.knock(group, now).catch(() => {});
+        else if (!this.host.linkReady(group.joining.linkId, 2) && !this.host.linkSeen?.(group.joining.linkId)
+          && now - (this.lastKnock.get(group.id) ?? 0) >= (this.knocked.has(group.id) ? every : Math.min(every, UNKNOCKED_RETRY_MS))) await this.knock(group, now).catch(() => {});
         if (!live) continue;
       }
       if (!live) continue;
@@ -787,7 +806,13 @@ export class Communities {
       live.forceHub = !kept.length && others.length < COMMUNITY_TOPOLOGY.maxHubs;
       for (const hub of kept) {
         const id = edges.get(hub);
-        if (id && this.host.linkReady(id, 2)) continue;
+        if (id && this.host.linkReady(id, 2)) { live.lobbyChecks?.delete(hub); continue; }
+        // My request may have been written over by another member's, written at the same moment: asked again now.
+        const check = live.lobbyChecks?.get(hub);
+        if (check && now >= check.at) {
+          live.lobbyChecks!.delete(hub);
+          if (await this.lobbyLost(groupId, live, hub, check.ts)) live.lobbyWrites.delete(hub);
+        }
         // A request the relays held back (the budget, while a link of mine signals) goes again in a moment, not at the
         // next refresh: the hub cannot open an edge for a member it never saw ask (a member cut off by a hub that left
         // waited 20 s more for each refused write, CLI daemons on local relays, 2026-10-03).
@@ -1062,7 +1087,24 @@ export class Communities {
     // Dated by the hub's clock, where mine differs: the hub reads its lobby by its own, and so do the members that write there.
     const theirs = now - live.hubClocks.ahead(hub);
     await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: theirs }, theirs)), true, true);
+    // The lobby keeps whole seconds: my request reads back as the second it was written in.
+    (live.lobbyChecks ??= new Map()).set(hub, { at: now + LOBBY_CHECK_MS + Math.floor(this.random() * LOBBY_CHECK_JITTER_MS), ts: Math.floor(theirs / 1000) * 1000 });
     traceJoin(groupId, "lobby.written");
+  }
+
+  /**
+   * My request is not in the hub's lobby any more, and the lobby has room for it: another member's write, made from a
+   * reading from before mine, dropped it (`LOBBY_CHECK_MS`). A full lobby that pushed it out is left as it is: asking
+   * again there would push out someone else. A read that fails says nothing, and the usual refresh asks again.
+   */
+  private async lobbyLost(groupId: string, live: Live, hub: string, ts: number): Promise<boolean> {
+    const keys = lobbyKeys(live.session.state.rv, groupId, hub);
+    const records = await this.host.resolve(keys.identity.pubKeyZ32, true, true).catch(() => undefined);
+    if (records === undefined) return false;
+    const entries = readLobby(keys, records ?? []);
+    const lost = !entries.some(e => e.key === live.session.myKey && e.ts >= ts) && entries.length < COMMUNITY_TOPOLOGY.lobbyEntries;
+    if (lost) traceJoin(groupId, "lobby.lost");
+    return lost;
   }
 
   private async pollLobby(groupId: string, live: Live, now: number): Promise<void> {
@@ -1198,10 +1240,12 @@ export class Communities {
     if (live.doors !== doorSig) { if (door === s.myKey && live.doors) live.knocksScanned = false; live.doors = doorSig; }
     const records = this.knockRecordsToRead(live, door === s.myKey, busy, now);
     if (!records.length) return;
+    let failed = 0;
     const read = await Promise.all(records.map(async n => {
       const record = knockRecord(link, n);
-      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true, door === s.myKey && n === KNOCK_BELL).catch(() => null)) ?? []);
+      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true, door === s.myKey && n === KNOCK_BELL).catch(() => { failed++; return null; })) ?? []);
     }));
+    traceJoin(groupId, "knock.read", { records: records.length, knocks: read.flat().length, ...(failed ? { failed } : {}) });
     const bell = records.indexOf(KNOCK_BELL);
     if (bell >= 0 && read[bell].filter(k => now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) live.crowdUntil = now + CROWD_MS;
     // A joiner that moved from the bell to its own record is in both for a while: its newest knock counts.
@@ -1264,10 +1308,16 @@ export class Communities {
    * Leaves (or refreshes) my knock: in the bell while it has room, in my own record once a crowd has
    * filled it. The first one goes out at once; refreshes are background requests, and keep my side of
    * the entry session looking fast while I still expect a member to answer soon.
+   *
+   * "The first" is the first of this run that the relays took (`knocked`), not the first tried: a knock the relays'
+   * budget refused is tried again as one, every `UNKNOCKED_RETRY_MS`. Taken for a refresh, it went as a background
+   * request, every `knockMs`, and background requests are held to a few a minute while a link of this app signals: its
+   * own entry session, looking fast for the door's answer. A CLI that was the door of another community, its budget
+   * spent, never knocked at all (groupCompat, with the budget scaled down to 12 requests a minute).
    */
   private async knock(group: StoredGroup, now = this.now()): Promise<void> {
     const joining = group.joining!;
-    const first = !this.lastKnock.has(group.id);
+    const first = !this.knocked.has(group.id);
     this.lastKnock.set(group.id, now);
     // The first knock of this run too: after a restart the entry session starts again at the background pace, and the
     // door's side, opened on this knock, waited up to half a minute for its answer.
@@ -1275,11 +1325,29 @@ export class Communities {
     const me = identityFromSeedB64(joining.seedB64).pubKeyZ32, link = { g: group.id, host: joining.host };
     const started = Date.now();
     const read = async (n: number) => { const record = knockRecord(link, n); return { record, knocks: readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, !first)) ?? []) }; };
-    let n = this.knockAt.get(group.id) ?? KNOCK_BELL, { record, knocks } = await read(n);
-    if (n === KNOCK_BELL && !knocks.some(k => k.key === me) && knocks.filter(k => k.key !== me && now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) ({ record, knocks } = await read(n = ownKnockRecord(me)));
-    await this.host.publish(knockIdentity(record), knockRecords(record, mergeKnocks(knocks, { key: me, ts: now }, now)), !first);
+    // The write of the last knock was refused (the relays' budget): this one writes what that one read. The budget keeps
+    // the next request it frees for that write (`WRITE_FIRST_MS`) and holds reads back meanwhile, so a read first was
+    // refused, the knock with it, and the write went a retry later, or later still if a read took the request it waited for.
+    const kept = this.knockRead.get(group.id);
+    this.knockRead.delete(group.id);
+    const reuse = kept && now - kept.at < this.timings.knockMs ? kept : undefined;
+    let n: number, record: GroupEntryLink, knocks: Knock[];
+    if (reuse) {
+      n = reuse.n; knocks = reuse.knocks;
+      record = knockRecord(link, n);
+    } else {
+      n = this.knockAt.get(group.id) ?? KNOCK_BELL;
+      ({ record, knocks } = await read(n));
+      if (n === KNOCK_BELL && !knocks.some(k => k.key === me) && knocks.filter(k => k.key !== me && now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) ({ record, knocks } = await read(n = ownKnockRecord(me)));
+    }
+    try {
+      await this.host.publish(knockIdentity(record), knockRecords(record, mergeKnocks(knocks, { key: me, ts: now }, now)), !first);
+    } catch (error) {
+      this.knockRead.set(group.id, { n, knocks, at: reuse?.at ?? now });
+      throw error;
+    }
     this.knockAt.set(group.id, n);
-    traceJoin(group.id, "knock.published", { ms: Date.now() - started, record: n });
+    traceJoin(group.id, "knock.published", { ms: Date.now() - started, record: n, ...(reuse && { kept: true as const }) });
     // Who else is knocking in my record (their knock refreshed lately, as a hub counts it): the joining card says so,
     // since a wait behind others is not a link that stopped working.
     const others = knocks.filter(k => k.key !== me && now - k.ts < 2 * this.timings.slowKnockMs).length;
@@ -1403,6 +1471,7 @@ export class Communities {
         this.knocked.delete(g);
         this.knockAt.delete(g);
         this.knockingWith.delete(g);
+        this.knockRead.delete(g);
         await this.host.closeEdge(linkId);
         await this.reconcile(g, live, now);
         this.host.emit();

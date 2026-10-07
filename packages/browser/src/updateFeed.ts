@@ -8,7 +8,7 @@ import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
  */
 export interface VersionFeed {
   version: string;
-  /** The exact build, where the publisher marks one. Web deploys move without the version changing. */
+  /** The exact build, where the publisher marks one. Kept on the update; never a reason for one. */
   build?: string;
 }
 
@@ -32,13 +32,14 @@ function readFeed(text: string): VersionFeed | null {
 
 /**
  * Asks a published version file what the newest version is. Returns null when
- * this client already runs it, and throws when the answer never came — the
+ * this client already runs it or a newer one (by version number, whatever the
+ * build), and throws when the answer never came — the
  * caller shows neither as an update.
  */
 export async function checkVersionFeed(options: {
   url: string;
   currentVersion: string;
-  /** The build running now, where the client knows it. */
+  /** The build running now, where the client knows it. Never a reason for an update on its own. */
   currentBuild?: string;
   /** What the UI will offer once there is an update. */
   apply: "reload" | "manual";
@@ -54,15 +55,9 @@ export async function checkVersionFeed(options: {
   const feed = readFeed(await response.text());
   if (!feed) throw new Error("The update check answered with something else");
 
-  const newerVersion = isNewerVersion(feed.version, options.currentVersion);
-  // Same version, different build: a deploy this client has not picked up yet.
-  const newerBuild =
-    !newerVersion &&
-    feed.version === options.currentVersion &&
-    !!feed.build &&
-    !!options.currentBuild &&
-    feed.build !== options.currentBuild;
-
-  if (!newerVersion && !newerBuild) return null;
+  // Versions only, compared as numbers. A new build of the same version is not an update: the banner names a
+  // version, and "Ghostly 1.1.4 is available" on 1.1.4 reads as a bug. The service worker picks a redeploy up once
+  // no tab of the app is left.
+  if (!isNewerVersion(feed.version, options.currentVersion)) return null;
   return { version: feed.version, build: feed.build, apply: options.apply };
 }

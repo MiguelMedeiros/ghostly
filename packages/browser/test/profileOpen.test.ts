@@ -139,9 +139,9 @@ describe("the engine over a profile it cannot open", () => {
 });
 
 describe("the version step of devices (WISP 06 § Compatibility and rollout)", () => {
-  it("a database at 12 (1.0.3) opens at 13 with its stores and rows kept, and a build at 12 then reads it as newer", async () => {
+  it("a database at 12 (1.0.3) opens at the current version (13 and on) with its stores and rows kept, and a build at 12 then reads it as newer", async () => {
     const idb = await fresh("profile-twelve");
-    expect(idb.DB_VERSION).toBe(13);
+    expect(idb.DB_VERSION).toBeGreaterThanOrEqual(13);
     // As 1.0.3 left it: every store of 12, one record in settings and one swap.
     const twelve = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open("profile-twelve", 12);
@@ -159,11 +159,11 @@ describe("the version step of devices (WISP 06 § Compatibility and rollout)", (
     twelve.close();
 
     const db = await idb.openDb();
-    expect(db.version).toBe(13);
+    expect(db.version).toBe(idb.DB_VERSION);
     expect([...db.objectStoreNames]).toEqual(expect.arrayContaining(["settings", "swaps", "messages", "files", "fileState"]));
     expect(await idb.wrap(db.transaction("swaps").objectStore("swaps").get("swap-1"))).toEqual({ id: "swap-1", mint: "https://mint.example" });
     db.close();
-    expect(await now("profile-twelve")).toEqual({ version: 13, settings: { nick: "Kept" } });
+    expect(await now("profile-twelve")).toEqual({ version: idb.DB_VERSION, settings: { nick: "Kept" } });
 
     // A build that reads up to 12 (the released 1.0.3) gets a version error: it never starts a copy written from here.
     const older = await new Promise<unknown>((resolve) => { const r = indexedDB.open("profile-twelve", 12); r.onsuccess = () => { r.result.close(); resolve(null); }; r.onerror = () => resolve(r.error); });

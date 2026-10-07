@@ -57,8 +57,9 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     // Under the code, where it stands and the time left on it.
     expect(screen.getByTestId("device-add-status")).toHaveTextContent("Waiting for your other device…");
     expect(screen.getByTestId("device-add-left")).toHaveTextContent(/^(10:00|9:5\d) left$/);
-    // The lock is on, with the new password.
-    expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true });
+    // The lock is on, with the new password. The settings reach storage in an effect after the render that turned
+    // the lock on, which can land after the code shows on a busy runner: waited for, not read once.
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true }));
   });
 
   it("a password stored with the lock turned off: typing it turns the lock on before the code is made", async () => {
@@ -69,8 +70,11 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     engine.on("deviceHandoffVerifier", () => undefined);
     await user.type(screen.getByTestId("device-add-password"), "a long password");
     await user.click(screen.getByTestId("device-add-next"));
-    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(1));
-    expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true });
+    // The stored password is checked first (PBKDF2, 600,000 rounds): more than waitFor's 1 s on a busy runner.
+    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(1), { timeout: 10_000 });
+    // The lock is turned on before the code is asked for; storage follows in the effect after that render, which a
+    // busy runner can run after the call is seen (the code is asked for in the same task): waited for, not read once.
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true }));
   }, 20_000);
 
   it("Settings keeps 8 characters while it does not know the profile has no device set (loading, or the call failed)", async () => {

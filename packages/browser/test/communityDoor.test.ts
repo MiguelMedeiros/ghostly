@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DiscoveryBudgetError, EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, beaconKeys, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readBeacon, readKnocks, type GroupEntryLink } from "@ghostly/core";
-import { COMMUNITY_TIMINGS, KNOCK_SHARDS, dialedKey } from "../src/engine/community";
+import { COMMUNITY_TIMINGS, KNOCK_SHARDS, UNKNOCKED_RETRY_MS, dialedKey } from "../src/engine/community";
 import { otherEndSeen } from "../src/engine/groups";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.community.join, groups.protocol.community-topology
@@ -192,6 +192,69 @@ describe("a community's door", { timeout: 120_000 }, () => {
     // Once the budget lets it, its entry is listed, as any hub's.
     await world.run(heldUntil - world.now + 10_000, 500);
     expect(readBeacon(beacon, world.pkarr.get(beacon.identity.pubKeyZ32) ?? []).map(h => h.key)).toContain(alice.groups.communities.session(id)!.myKey);
+  });
+
+  it("a joiner whose knock the relays' budget refused knocks again within seconds, as a first knock, not a background refresh", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const alice = world.add("alice");
+    const { id, link, entry } = await community(world, alice);
+    const bob = world.add("bob");
+    // Its budget spent elsewhere (the door of another community, say): its knocks are refused for 20 s.
+    const bell = recordKey(entry, 0), heldUntil = world.now + 20_000, publish = bob.host.publish;
+    const tries: { at: number; background: boolean }[] = [];
+    bob.host.publish = async (identity, records, background, door) => {
+      if (identity.pubKeyZ32 === bell) {
+        tries.push({ at: world.now, background: !!background });
+        if (world.now < heldUntil) throw new DiscoveryBudgetError(heldUntil - world.now);
+      }
+      return publish(identity, records, background, door);
+    };
+    await bob.groups.joinByLink(link);
+    await world.until(() => tries.some(t => t.at >= heldUntil), 60_000, 500);
+    const out = tries.find(t => t.at >= heldUntil)!;
+    // Every try until one went out was a first knock, a few seconds apart. As background refreshes every 10 s, the
+    // budget held them back further while the joiner's entry session looked fast for an answer.
+    expect(tries.filter(t => t.at <= out.at).map(t => t.background)).toEqual(tries.filter(t => t.at <= out.at).map(() => false));
+    expect(out.at - heldUntil).toBeLessThanOrEqual(UNKNOCKED_RETRY_MS + 1_000);
+    expect(world.view(bob, id)?.invitation?.stage).not.toBe("knocking");
+    await world.until(() => world.member(bob, id), 60_000, 500);
+  });
+
+  it("a knock the relays' budget refused goes again first, from the bell it read, not after a read of its own", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const alice = world.add("alice");
+    const { id, link, entry } = await community(world, alice);
+    const bob = world.add("bob");
+    // Its first knock read the bell, and the write after it was refused. The relays' budget keeps the next request it
+    // frees for that write (`WRITE_FIRST_MS`): a group read is held back meanwhile.
+    const bell = recordKey(entry, 0), ops: { at: number; op: string }[] = [];
+    const publish = bob.host.publish, resolve = bob.host.resolve;
+    let refusedAt: number | undefined;
+    // The relays' rule, kept here: the world's own `writeWaiting` ends with any write of the app (its entry session's),
+    // as the relays' group lane does (`RelayTransport`), so it would let this read through.
+    const writeFirst = () => refusedAt !== undefined && !ops.some(o => o.op === "write") && world.now - refusedAt < RELAY_NETWORK.writeFirstMs;
+    bob.host.resolve = async (key, background, door) => {
+      if (key !== bell) return resolve(key, background, door);
+      if (writeFirst()) { ops.push({ at: world.now, op: "read refused" }); throw new DiscoveryBudgetError(refusedAt! + RELAY_NETWORK.writeFirstMs - world.now); }
+      const found = await resolve(key, background, door);
+      ops.push({ at: world.now, op: "read" });
+      return found;
+    };
+    bob.host.publish = async (identity, records, background, door) => {
+      if (identity.pubKeyZ32 === bell && refusedAt === undefined) {
+        refusedAt = world.now; ops.push({ at: world.now, op: "write refused" });
+        throw new DiscoveryBudgetError(RELAY_NETWORK.writeFirstMs);
+      }
+      await publish(identity, records, background, door);
+      if (identity.pubKeyZ32 === bell) ops.push({ at: world.now, op: "write" });
+    };
+    await bob.groups.joinByLink(link);
+    await world.until(() => ops.some(o => o.op === "write"), 60_000, 500);
+    // The write goes at the first retry, with no read before it. Before, that retry read the bell first: the read was
+    // held back for the write's turn, the knock failed with it, and the write went only at the retry after (6 s).
+    expect(ops.map(o => `${o.op} +${o.at - refusedAt!}`)).toEqual(["read +0", "write refused +0", `write +${UNKNOCKED_RETRY_MS}`]);
+    expect(knocksIn(world, entry, 0)).toContain(guestKey(bob));
+    await world.until(() => world.member(bob, id), 60_000, 500);
   });
 
   it("the member let in gets its edge from both sides at once, each looking fast, without the lobby; it is a hub only later", async () => {

@@ -285,10 +285,9 @@ async fn ask_to_share<R: tauri::Runtime>(
     }
     #[cfg(not(feature = "e2e-driver"))]
     {
-        use tauri::Manager;
         use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
         let (title, text) = local_access::dialog_text(&origin, reason);
-        let mut dialog = app
+        let dialog = app
             .dialog()
             .message(text)
             .title(title)
@@ -297,9 +296,15 @@ async fn ask_to_share<R: tauri::Runtime>(
                 "Allow".into(),
                 "Don't allow".into(),
             ));
-        if let Some(main) = app.get_webview_window("main") {
-            dialog = dialog.parent(&main);
-        }
+        // A dialog of the Ghostly window's own; a mobile app has one window, which the dialog always covers.
+        #[cfg(desktop)]
+        let dialog = {
+            use tauri::Manager;
+            match app.get_webview_window("main") {
+                Some(main) => dialog.parent(&main),
+                None => dialog,
+            }
+        };
         tauri::async_runtime::spawn_blocking(move || dialog.blocking_show())
             .await
             .unwrap_or(false)
@@ -460,6 +465,12 @@ pub(crate) fn launch(url: &str) -> Result<(), String> {
     let result = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
         .spawn();
+    // Android and iOS: no opener process; the mobile host opens links through the system (Tauri's opener plugin).
+    #[cfg(mobile)]
+    let result: std::io::Result<std::process::Child> = Err(std::io::Error::other(format!(
+        "No opener on this platform for {}",
+        url.split(':').next().unwrap_or_default()
+    )));
     // The opener exits at once; waiting for it keeps no zombie behind until the app quits.
     result
         .map(|mut child| drop(std::thread::spawn(move || child.wait())))

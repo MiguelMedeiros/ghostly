@@ -92,7 +92,7 @@ describe("a card as a sender may send it", () => {
   it("refuses what a reader would drop or cut, saying why", () => {
     const cases: [unknown, RegExp][] = [
       [task({ status: "paused" }), /status is one of/],
-      [task({ kind: "poll" }), /kind is task, routine or buttons/],
+      [task({ kind: "poll" }), /kind is task, routine, buttons or app/],
       [task({ id: "-x" }), /id is/],
       [task({ title: "t".repeat(121) }), /title is at most 120/],
       [task({ progress: 101 }), /progress/],

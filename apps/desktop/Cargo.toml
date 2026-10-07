@@ -1,7 +1,13 @@
 [package]
 name = "ghostly"
-version = "1.1.4"
+version = "1.1.5"
 edition = "2021"
+
+# The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
+# library. Its own name, so the Windows .dll and .pdb do not collide with the binary's.
+[lib]
+name = "ghostly_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 # The macOS end-to-end tests' driver (src/e2e_driver.rs): debug builds only, never shipped.
@@ -13,8 +19,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 ghostly-transports = { path = "../../native/transports" }
 iroh = "=1.3.0"
-tauri = { version = "2", features = [] }
-tauri-plugin-updater = "2"
+# `macos-proxy`: the sandbox spike's proxy that goes nowhere (src/app_sandbox.rs, test driver only).
+tauri = { version = "2", features = ["macos-proxy"] }
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -32,8 +38,7 @@ cookie = "0.18"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
 tauri-plugin-notification = "2"
-# `image-data`: a picture on the clipboard, for a paste of files (clipboard.rs); `png` writes it out.
-arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
+# `png` writes a pasted picture out (clipboard.rs).
 png = "0.18"
 tauri-plugin-dialog = "2"
 sha2 = "0.11"
@@ -44,6 +49,20 @@ tauri = { version = "2", features = ["test"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net"] }
+
+# Desktop only (Android and iOS have neither): the updater plugin, and the system clipboard.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+# `image-data`: a picture on the clipboard, for a paste of files (clipboard.rs).
+arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
+
+# Android: HTTPS from Rust (reqwest, so the Pkarr relays, link previews and push) checks certificates with Android's
+# own verifier, which needs the JVM and the app's context before the first request (src/lib.rs `android_tls`). Its
+# Kotlin half comes from the crate's Maven folder (gen/android/app/build.gradle.kts).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+rustls-platform-verifier = "0.6"
 
 # Calls on Linux (src/native_call), whose WebKitGTK is built without WebRTC: WebRTC in Rust, media in GStreamer.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -72,3 +91,6 @@ objc2-user-notifications = "0.3"
 # `NSApplication` and `NSDockTile`: the test driver reads the Dock icon's badge (src/e2e_driver.rs).
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSView", "NSSharingService"] }
 block2 = "0.6"
+# An installed app's window (src/app_sandbox.rs): its own WKWebViewConfiguration, with a content rule list and
+# WebKit's preconnect, DNS prefetch and WebRTC switched off.
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKContentRuleList", "WKContentRuleListStore", "WKPreferences", "WKUserContentController", "WKWebViewConfiguration"] }

@@ -62,13 +62,19 @@ export const BUTTONS_CAPABILITY = "buttons/1";
 export const UPGRADE_CAPABILITY = "upgrade/1";
 
 /**
+ * Mini-apps in a 1:1 chat: `paired-app` frames on this session, live only (WISP 1200 § In a chat: `apps/1`,
+ * `pairedApps.ts`). Offered only while the apps feature is on.
+ */
+export const APPS_CAPABILITY = "apps/1";
+
+/**
  * What only a device link offers (WISP 06, `deviceLink.ts`): the frames between a person's own devices. They are in
  * the type so a device link can announce them, and not in `KNOWN_SESSION_CAPABILITIES`: no chat knows them.
  */
-export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY | typeof UPGRADE_CAPABILITY;
+export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY | typeof UPGRADE_CAPABILITY | typeof APPS_CAPABILITY;
 
 /** Every capability this app knows on a session: what `receive` reports changes of. */
-export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY];
+export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY];
 
 export const SESSION_CAPABILITIES_FRAME = "paired-capabilities";
 

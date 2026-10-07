@@ -3,6 +3,10 @@
 /// for any page it considers local, and that includes the `ghostly-svc://`
 /// windows that show a contact's web app.
 const COMMANDS: &[&str] = &[
+    "app_broker",
+    "app_close",
+    "app_open",
+    "app_post",
     "bitcoind_rpc",
     "create_keypair",
     "decrypt_text",

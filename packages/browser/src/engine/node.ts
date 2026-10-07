@@ -22,7 +22,8 @@ import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/provid
 import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
-import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
 import { IdentityProofs } from './identities';
 import { setOwnDidSource } from '../proofs/providers/did';
 import { ProfileDid } from './did';
@@ -108,6 +109,8 @@ import {
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
+import { Apps, type AppDataExport, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type InstalledAppView } from "./apps";
+import { boundedAppFetch } from "./appFetch";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
 import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
 import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
@@ -289,6 +292,8 @@ interface LiveLink {
   carried?: CarriedTransport;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
+  /** The mini-apps this side has open in this chat (chat app id to version), for this run (`apps/1`, WISP 1200). */
+  appsOpen?: Map<string, string>;
 }
 
 /** What one peer has sent us, so it can neither fill the disk nor reuse an id. */
@@ -400,13 +405,28 @@ export interface NodeOptions {
    * (WISP 102). It loads when a chat first starts an endpoint, not with the app.
    */
   irohWeb?: boolean;
+  /**
+   * The only Iroh relays the in-page Iroh homes on, whatever the settings say: a private network or a test (the CLI's
+   * `GHOSTLY_IROH_RELAYS`). Absent: the settings' relays, else the public defaults.
+   */
+  irohRelays?: readonly string[];
   /** Reactions on 1:1 chats (`react/1`, WISP 401 § Reactions). Default on; off only stands in for an older app in tests. */
   reactions?: boolean;
+  /**
+   * Mini-apps in 1:1 chats (`apps/1`, WISP 1200 § In a chat): offered on paired sessions, and the `app*` calls. Default:
+   * `APPS_ENABLED` (off until the feature ships); tests turn it on here.
+   */
+  apps?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
   /** How to reach a shared local web app. Default: `fetch`, which needs the app's or the browser's consent. */
   localFetch?: LocalFetch;
+  /**
+   * How mini-apps and their stores are read (WISP 1200 § Stores), under the hosts and caps of `appFetch.ts`, which hold
+   * whatever is passed here. Default: `fetch`. Tests pass their own.
+   */
+  appFetch?: typeof fetch;
   /** Create and connect the Ark, Bark, Spark and USDT wallets at start. Default: on; tests without a network turn it off. */
   automaticWallets?: boolean;
   /**
@@ -487,6 +507,10 @@ export interface NodeEvents {
   /** Only what changed in a chat's or group's history; without it, `onMessages` gets the whole history on each change. */
   onMessageChanges?(linkId: string, changes: MessageChanges): void;
   onCallSignal(linkId: string, signal: string): void;
+  /** A contact's mini-app frame in a 1:1 chat, already checked (`apps/1`, WISP 1200 § In a chat); never stored. */
+  onAppFrame?(linkId: string, event: AppFrameEvent): void;
+  /** An update check of the installed mini-apps ran (WISP 1200 § Updates): the pages read them again, and stop those it stopped. */
+  onAppsChecked?(): void;
   /**
    * The device state changed so that this engine may no longer run (WISP 06): another device took the turn. The state
    * is written; the pages show the standby screen and start again into the gate.
@@ -1518,6 +1542,8 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
     if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
+    // Mini-apps (WISP 1200): the default stores preloaded, and the update check, which asks nothing with no app installed.
+    if (this.appsOn) void this.appStore.start().catch(() => {});
     // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
     // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
     if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
@@ -1906,6 +1932,7 @@ export class GhostlyNode implements EngineImplementation {
     const quiet = options.quiet === true || this.gatedOut;
     this.shuttingDown = true;
     if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
+    this.appShelf?.stop();
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     if (!quiet) this.depart();
     this.directPath.close();
@@ -1973,6 +2000,40 @@ export class GhostlyNode implements EngineImplementation {
     await this.shutdown();
     await clearProfileStores();
   }
+
+  // ---------- mini-apps: installed apps, stores and app storage (WISP 1200; `apps.ts`) ----------
+
+  private appShelf?: Apps;
+  /** The installed apps and stores, refused while the apps feature is off. */
+  private get appStore(): Apps {
+    if (!this.appsOn) throw new Error("Apps are unavailable in this release");
+    return this.appShelf ??= new Apps({
+      fetch: boundedAppFetch({ fetcher: this.options.appFetch, online: () => this.networkOn }),
+      isChat: (scope) => { const stored = this.links.get(scope)?.stored; return !!stored && !stored.group && !!stored.profile && !!stored.pairedPeerKey; },
+      online: () => this.networkOn && !this.shuttingDown,
+      checked: () => this.events.onAppsChecked?.(),
+    });
+  }
+  appList(): Promise<InstalledAppView[]> { return this.appStore.list(); }
+  appStoreList(): Promise<AppStoreSummary[]> { return this.appStore.listStores(); }
+  appStorePreview(params: { url: string }): Promise<AppStorePreview> { return this.appStore.previewStore(params); }
+  appStoreAdd(params: { url: string; key?: string }): Promise<AppStoreSummary> { return this.appStore.addStore(params); }
+  appStoreRemove(params: { key: string }): Promise<void> { return this.appStore.removeStore(params); }
+  appStoreRefresh(params: { key?: string } = {}): Promise<AppStoreSummary[]> { return this.appStore.refreshStores(params); }
+  appPreview(params: AppSource): Promise<AppPreview> { return this.appStore.preview(params); }
+  appInstall(params: { digest: string; grant: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
+  appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
+  appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
+  appUninstall(params: { ref: string }): Promise<void> { return this.appStore.uninstall(params); }
+  appRunCheck(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.runCheck(params); }
+  appFetchFiles(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.fetchFiles(params); }
+  appEntry(params: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> { return this.appStore.entry(params); }
+  appFile(params: { ref: string; path: string }): Promise<Uint8Array> { return this.appStore.file(params); }
+  appStorageGet(params: { ref: string; scope: string; key: string }): Promise<{ value: import("@ghostly/core").JsonValue } | null> { return this.appStore.storageGet(params); }
+  appStorageSet(params: { ref: string; scope: string; key: string; value: unknown }): Promise<void> { return this.appStore.storageSet(params); }
+  appStorageDelete(params: { ref: string; scope: string; key: string }): Promise<void> { return this.appStore.storageDelete(params); }
+  appStorageKeys(params: { ref: string; scope: string }): Promise<string[]> { return this.appStore.storageKeys(params); }
+  appDataExport(params: { ref: string }): Promise<AppDataExport[]> { return this.appStore.exportData(params); }
 
   getState(): EngineState {
     const groups = this.groups.views();
@@ -4088,6 +4149,65 @@ export class GhostlyNode implements EngineImplementation {
     return { error: null };
   }
 
+  /** Mini-apps are on in this build (`APPS_ENABLED`) or for this engine (`apps`). */
+  private get appsOn(): boolean { return this.options.apps ?? APPS_ENABLED; }
+
+  /** A paired 1:1 chat and the chat app id of `ref` in it, from the two pinned participation keys (WISP 1200 § In a chat). */
+  private appChat(linkId: string, ref: string): { live: LiveLink; app: string } {
+    if (!this.appsOn) throw new Error("Apps are unavailable in this release");
+    const live = typeof linkId === "string" ? this.links.get(linkId) : undefined;
+    if (!live || live.stored.group || !live.stored.profile) throw new Error("No such chat");
+    if (!isAppRef(ref)) throw new Error("Not an app reference");
+    const { participationSeed, pairedPeerKey } = live.stored;
+    if (!participationSeed || !pairedPeerKey) throw new Error("This chat is not paired yet");
+    return { live, app: chatAppId(identityFromSeedB64(participationSeed).publicKey, publicKeyFromZ32(pairedPeerKey), ref) };
+  }
+
+  /** The chat app id of an app in a paired chat: how the contact's frames name it. */
+  appId({ linkId, ref }: { linkId: string; ref: string }): { app: string } {
+    return { app: this.appChat(linkId, ref).app };
+  }
+
+  /**
+   * This side opened an app in a paired chat, or updated it: `open` goes to the contact now when the session is live,
+   * and again on every session that comes back while it stays open.
+   */
+  async appOpen({ linkId, ref, version }: { linkId: string; ref: string; version: string }): Promise<{ app: string }> {
+    const { live, app } = this.appChat(linkId, ref);
+    if (!isAppVersion(version)) throw new Error("Not an app version");
+    // A version removed or revoked since it started says nothing more to the contact (WISP 1200 § Takedowns).
+    await this.appStore.chatRunnable({ ref });
+    const open = live.appsOpen ??= new Map();
+    if (live.link) live.link.openApp(app, version);
+    else open.set(app, version);
+    return { app };
+  }
+
+  /** This side closed an app in a paired chat: `close` goes now when the session is live. */
+  appClose({ linkId, ref }: { linkId: string; ref: string }): void {
+    const { live, app } = this.appChat(linkId, ref);
+    if (live.link) live.link.closeApp(app);
+    else live.appsOpen?.delete(app);
+  }
+
+  /** One data frame of an app open on both sides, on the live session only; nothing is kept to send later. */
+  async appSend({ linkId, ref, data }: { linkId: string; ref: string; data: unknown }): Promise<{ error: AppSendError | null }> {
+    const { live, app } = this.appChat(linkId, ref);
+    if (!live.appsOpen?.has(app)) return { error: "not-open" };
+    await this.appStore.chatRunnable({ ref });
+    return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
+  }
+
+  /** Every page went away: no app runs here any more, so each open one is closed (`close` goes where it can). */
+  appsCloseAll(): void {
+    for (const live of this.links.values()) {
+      for (const app of [...live.appsOpen?.keys() ?? []]) {
+        if (live.link) live.link.closeApp(app);
+        else live.appsOpen?.delete(app);
+      }
+    }
+  }
+
   /** Keeps a pin of a 1:1 chat when it is newer than the chat's; `out`: mine, to say until the contact confirms it. */
   private async keepLinkPin(linkId: string, pin: StoredPin, out?: WirePin): Promise<void> {
     const live = this.links.get(linkId);
@@ -4984,7 +5104,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     this.settings = { ...this.settings, ...settings };
     if (!this.settings.irohRelays?.length) delete this.settings.irohRelays;
-    if (irohRelaysChanged) void this.rehomeIroh();
+    // Pinned relays (`options.irohRelays`) stay whatever the setting says.
+    if (irohRelaysChanged && !this.options.irohRelays?.length) void this.rehomeIroh();
     if (settings.relays) {
       this.relays?.setRelays(settings.relays);
       if (this.relays) this.settings.relays = this.relays.describe().relays;
@@ -6170,6 +6291,9 @@ export class GhostlyNode implements EngineImplementation {
       // 1:1 chats only: back after an absence over a relay at once, then to a direct path on the session (WISP 100).
       upgradeSupport: true,
       peerUpgrades: () => !!live.caps?.peer?.capabilities.includes(UPGRADE_CAPABILITY),
+      // 1:1 chats only, behind the apps flag: what this side has open outlives the link, so a restarted one says it again.
+      appsSupport: this.appsOn,
+      appsOpen: this.appsOn ? (live.appsOpen ??= new Map()) : undefined,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
@@ -6414,6 +6538,7 @@ export class GhostlyNode implements EngineImplementation {
         onPin: async pin => { await this.keepLinkPin(linkId, await this.pinCame(linkId, "peer", pin)); return true; },
         onPinReceipt: n => this.pinReceipt(linkId, n),
         onPinSupport: supported => { if (supported) this.flushPin(linkId); },
+        onAppFrame: this.appsOn ? event => this.events.onAppFrame?.(linkId, event) : undefined,
         // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
         onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
         onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),
@@ -6568,7 +6693,10 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** The host runs Iroh itself and homes it on the relays it is given (the Desktop). */
   private get ownIrohRelays(): boolean { return !!this.options.nativeIrohRelays && !!this.options.nativeTransports?.["iroh/1"]; }
-  private get irohRelays(): string[] { return this.settings.irohRelays?.length ? this.settings.irohRelays : [...DEFAULT_IROH_RELAYS]; }
+  private get irohRelays(): string[] {
+    if (this.options.irohRelays?.length) return [...this.options.irohRelays];
+    return this.settings.irohRelays?.length ? this.settings.irohRelays : [...DEFAULT_IROH_RELAYS];
+  }
 
   /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
   private async rehomeIroh(): Promise<void> {

@@ -142,8 +142,8 @@ describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 
     expect(ok(await as("status")).discovery).toEqual({ protocol: "Pkarr relays (HTTP)", relays: [url] });
     ok(await as("settings", "set", "relays", JSON.stringify(["http://127.0.0.1:49504"])));
     expect(ok(await as("status")).discovery).toEqual({ protocol: "Pkarr relays (HTTP)", relays: [url] });
-    // Unset, the profile's own setting is back.
-    expect((ok(await ghostly(["--home", dir, "status"])).discovery as { relays: string[] }).relays).toEqual(["http://127.0.0.1:49504"]);
+    // Unset (empty), the profile's own setting is back.
+    expect((ok(await ghostly(["--home", dir, "status"], { env: { GHOSTLY_PKARR_RELAYS: "" } })).discovery as { relays: string[] }).relays).toEqual(["http://127.0.0.1:49504"]);
     error(await ghostly(["--home", dir, "status"], { env: { GHOSTLY_PKARR_RELAYS: "relay.lan" } }), "usage", 2);
   });
 });
@@ -159,7 +159,7 @@ describe("two daemons whose only relay answers 500 to everything", { timeout: 30
   afterAll(async () => { await Promise.all(running.map((r) => r.stop())); relay?.close(); }, 60_000);
 
   it("a private group is joined by its link and carries a message, all through the Mainline DHT", async () => {
-    const env = { GHOSTLY_DHT: "1", GHOSTLY_DHT_BOOTSTRAP: bootstrap };
+    const env = { GHOSTLY_DHT: "1", GHOSTLY_DHT_BOOTSTRAP: bootstrap, GHOSTLY_PKARR_RELAYS: url };
     const [admin, joiner] = [home("dht-admin"), home("dht-joiner")];
     const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
     for (const dir of [admin, joiner]) {

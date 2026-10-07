@@ -1,4 +1,4 @@
-# WISP 405: Status Cards for Bots
+# WISP 405: Status Cards for Bots and Apps
 
 | Field | Value |
 |---|---|
@@ -7,10 +7,10 @@
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [404 store-and-forward](404-store-and-forward.md), [902 group mesh](902-group-mesh.md), [903 group community](903-group-community.md), [1100](1100-headless.md) |
-| Implementation | The `sc` field on every text wire of 400 (`packages/core/src/statusCards.ts`), the engine's messages and edits, `ghostly task send` and `task update` in the headless CLI (`task send|update`, `routine send|update`); the task and routine cards and the Tasks button in web, extension and desktop (`apps/ui/src/components/chat/StatusCard.tsx`, `RoutineCard.tsx`, `TasksButton.tsx`); the Tasks board (`apps/ui/src/pages/Tasks.tsx`, `apps/ui/src/lib/taskBoard.ts`) over the engine's card index (`statusCardIndex`) |
+| Implementation | The `sc` field on every text wire of 400 (`packages/core/src/statusCards.ts`), the engine's messages and edits, `ghostly task send` and `task update` in the headless CLI (`task send|update`, `routine send|update`); the task and routine cards and the Tasks button in web, extension and desktop (`apps/ui/src/components/chat/StatusCard.tsx`, `RoutineCard.tsx`, `TasksButton.tsx`); the Tasks board (`apps/ui/src/pages/Tasks.tsx`, `apps/ui/src/lib/taskBoard.ts`) over the engine's card index (`statusCardIndex`). The `app` kind is read, checked and written as text in `packages/core/src/statusCards.ts` (vectors in `packages/core/test/vectors/app-card.json`), and drawn in a 1:1 chat by the web app behind the apps flag (`apps/ui/src/components/apps/AppCardView.tsx`), with [1200](1200-marketplace.md) for release 1.2 |
 | Summary | A bot's task or routine shows as a small card with its progress, and stays current as the bot updates it. |
 | Availability | Available |
-| Notes | Sent by bots through the headless CLI only; people never create them in the app. Every app, old or new, shows a readable text. |
+| Notes | Task and routine cards are sent by bots through the headless CLI; people never fill one in the app. The app card, which a person's app makes when they share or open a mini-app, is planned for 1.2. Every app, old or new, shows a readable text. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -18,16 +18,22 @@
 
 People run bots in their chats: a coordinator that opens pull requests, agents that work through a list, routines that run every night. Today a bot says what it is doing with texts, or rewrites one status text with edits ([400](400-chat.md#edits)). A text is hard to scan: where is the task, how far along, is there a pull request, did last night's run pass.
 
-A **status card** is a message a bot sends with a small structured payload beside its text. An app that knows cards shows the card: a title, a thin progress bar, a status, a pull request's size, and more on a tap. Every other reader shows the text. The bot keeps the card current by editing its message. There are two kinds:
+A **status card** is a message a bot sends with a small structured payload beside its text. An app that knows cards shows the card: a title, a thin progress bar, a status, a pull request's size, and more on a tap. Every other reader shows the text. The bot keeps the card current by editing its message. A bot's cards are of two kinds:
 
 - **task**: one piece of work with a status, progress, the step it is on, a short list of steps or log lines, and optionally the pull request it produced.
 - **routine**: something that runs on a schedule, with its state, its last run and result, the next run and a few recent runs.
 
-Cards are **display only**. Nothing on a card runs anything, on either side: no buttons that act, no links other than https ones the reader chooses to open. A third kind, `buttons`, puts answers under a bot's question; it is defined in [406 · Message Buttons](406-message-buttons.md), and a press sends a reply, nothing else.
+A third kind is made by a person's app rather than by a bot:
+
+- **app** (revision 2026-10-06, planned with [1200](1200-marketplace.md#apps-sent-in-a-chat)): a mini-app the person shared in the chat, or opened in it, with what a contact needs to install the same app and check it.
+
+Cards are **display only**. Nothing on a card runs anything, on either side: no buttons that act, no links other than https ones the reader chooses to open. An app card's one control, Install (or Play, once the app is installed), opens the reader's own install screen or the installed app; nothing is fetched to show the card, and nothing installs or runs until the person confirms on that screen ([1200](1200-marketplace.md#apps-sent-in-a-chat)). A third kind, `buttons`, puts answers under a bot's question; it is defined in [406 · Message Buttons](406-message-buttons.md), and a press sends a reply, nothing else.
 
 ## Who sends them
 
-Only bots. The headless runtime ([1100](1100-headless.md)) and any SDK built on the same engine expose sending and updating cards; the app never offers to create one. Any app shows them. This keeps the feature what it is for (a bot telling people how its work goes) and keeps the composer free of a form nobody asked for.
+**Task and routine cards: only bots.** The headless runtime ([1100](1100-headless.md)) and any SDK built on the same engine expose sending and updating them; the app never offers to create one. Any app shows them. This keeps the feature what it is for (a bot telling people how its work goes) and keeps the composer free of a form nobody asked for.
+
+**App cards: a person's app, by itself.** When the person shares an installed mini-app or opens one in a chat, their app makes the card from the app it installed and checked ([1200](1200-marketplace.md#apps-sent-in-a-chat)). The person never fills in a card, and an app makes no app card for an app it has not installed. A bot may send one too.
 
 Nothing on the wire says a card came from a bot, and nothing needs to: a card is a message of its author, authenticated as any message is. A person could script one through the CLI; it shows as theirs.
 
@@ -52,6 +58,8 @@ The card is a JSON object in a field named **`sc`**, next to the message's text,
 | A community | `sc` inside the sealed payload, and on the `edit` application frame | [community](903-group-community.md#status-cards) |
 | A compatibility chat | Refused: it carries text only | [402](402-legacy-chat.md) |
 
+An app card rides the same paths. In release 1.2 a person's app sends one only in a 1:1 chat, where `apps/1` is ([1200](1200-marketplace.md#in-a-chat-apps1)); a reader on any path applies the reader's rule to it.
+
 An example task, as it rides beside its text:
 
 ```json
@@ -73,7 +81,7 @@ And a routine:
 
 | Field | Meaning |
 |---|---|
-| `kind` | `task` or `routine`. A reader MUST treat a kind it does not know as no card: the message shows its text. |
+| `kind` | `task`, `routine` or `app` here (and `buttons`, [406](406-message-buttons.md)). A reader MUST treat a kind it does not know as no card: the message shows its text. |
 | `id` | The sender's id for the card, stable across its updates: 1 to 64 characters of `A-Z a-z 0-9 _ . : -`, not starting with `-`. It names the card to the bot and groups a card's messages in the Tasks panel; it is not a message id and the reader trusts nothing because of it. |
 | `links` | Optional, at most 4: `{url, label?}`, the url https only, the label at most 40 characters. |
 
@@ -109,6 +117,32 @@ And a routine:
 
 A routine is something the bot runs. The app keeps no schedule, runs nothing and says nothing when a run is late: it shows what the bot last said.
 
+### An app
+
+Revision 2026-10-06, planned with [1200](1200-marketplace.md#apps-sent-in-a-chat) for release 1.2. A mini-app the sender shared, or opened in this chat, as its text and card ride together:
+
+```json
+{"kind":"app","id":"chess.qxpcpfeicwzt193s","ref":"qxpcpfeicwzt193sifp188drnkwkht4qyt11m3brsa6dpqbzoheo/chess",
+ "digest":"GhiaSji7DoIKh80Cu6MaB8SXWDw9tEImUgh2FSZ6mhU","sequence":7,"title":"Chess","version":"1.2.0",
+ "url":"https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp","opened":true}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | Required, as on every card, and made from `ref`: the app's name, a dot, then the first 16 characters of the publisher key (`chess.qxpcpfeicwzt193s`), the folder name a store gives the app. A reader drops a card whose id is not that. |
+| `ref` | Required. The app reference: the publisher key in z-base32 (52 characters), `/`, then the app's name (`^[a-z][a-z0-9-]{0,31}$`). |
+| `digest` | Required. The SHA-256 of the version's canonical manifest, base64url without padding (43 characters). |
+| `sequence` | Required. The version's `sequence`: a whole number from 0 to 9,007,199,254,740,991 (2^53 - 1). |
+| `title` | Required. At most 40 characters, as the manifest's. |
+| `version` | Optional. The version as people read it, at most 32 characters. |
+| `url` | Optional. Where the bundle is fetched on Install: https only, at most 512 characters, held to the rules of a card's links. Which hosts a client fetches from is [1200](1200-marketplace.md#apps-sent-in-a-chat)'s rule (in phase 1, `raw.githubusercontent.com`, and `cdn.jsdelivr.net` pinned to a commit): a reader keeps any https url, and its client refuses to fetch from another host. A card without one shows no Install, and says to ask the sender for the app. |
+| `opened` | Optional. `true` when the sender opened the app in this chat ("Ana opened Chess"); absent when the sender only shared it ("Ana shared Chess"). Any other value reads as absent. |
+
+Every field is the sender's claim, unsigned. The reader shows the title and version as the sender's, a generic icon, the publisher's fingerprint from `ref` and "Not checked yet", until Install fetches the bundle and checks it ([1200](1200-marketplace.md#apps-sent-in-a-chat)): it must be the app `ref` names; with the card's `sequence` it must have the card's `digest`; a higher `sequence` is a newer version and fine; a lower one is refused.
+
+- **Not updated.** A person's app sends an app card once and never edits it. An edit that carries one is read as any card edit is: the card of the latest version.
+- **Not a task.** The Tasks button, panel and board list task and routine cards only; an app card counts in none of them.
+
 ## Bounds
 
 | Bound | Value | Why |
@@ -118,6 +152,7 @@ A routine is something the bot runs. The app keeps no schedule, runs nothing and
 | Title, name | 120 characters | |
 | Items, links, runs | 20, 4, 10 | |
 | Tags | 3, of 24 characters each | Chips on a card: a few short words |
+| An app card | Title 40 characters, version 32; `ref`, `digest` and `id` by their formats | The manifest's bounds, so a card never claims more than a bundle can hold |
 | Counts | 0 to 1,000,000,000 | |
 | Times | A received time no later than 5 minutes past the reader's clock (as a message's, [400](400-chat.md) requirement 10); a next run no later than a year | A peer must not pin a card to "just now" forever; a next run is ahead by nature |
 | Edits of a card message | **5,000** | A bot updates a long task often; a text keeps its 100 ([400](400-chat.md#edits)) |
@@ -125,7 +160,7 @@ A routine is something the bot runs. The app keeps no schedule, runs nothing and
 
 ## The reader's rule
 
-A reader MUST keep the message whatever its card says. It MUST drop the card, and show the text, when the card is not an object, its JSON passes 8 KiB, its kind is unknown, or its id, title or name, status, schedule or state does not hold. Every other field that does not hold is left out, lists are cut to their bound, numbers clamped into their range, and every string cleaned as a name is ([401](401-paired-chat.md#name-and-picture)): runs of space and line breaks become one space, control, invisible and direction characters go, and it is cut to its bound. An item's unknown state reads as `pending`. Ghostly keeps this rule in `readStatusCard` (`packages/core/src/statusCards.ts`).
+A reader MUST keep the message whatever its card says. It MUST drop the card, and show the text, when the card is not an object, its JSON passes 8 KiB, its kind is unknown, or its id, title or name, status, schedule or state does not hold; for an app card, when its id, `ref`, `digest`, `sequence` or title does not hold, or its id is not the one made from its `ref`. Every other field that does not hold is left out, lists are cut to their bound, numbers clamped into their range, and every string cleaned as a name is ([401](401-paired-chat.md#name-and-picture)): runs of space and line breaks become one space, control, invisible and direction characters go, and it is cut to its bound. An item's unknown state reads as `pending`. Ghostly keeps this rule in `readStatusCard` (`packages/core/src/statusCards.ts`).
 
 A reader MUST show a card's strings as plain text, never through the message renderer ([400](400-chat.md#message-text)): no Markdown, no mentions, no parser cards, no link found in a line. Links are only the card's own https ones, each shown with its host.
 
@@ -161,6 +196,15 @@ Next run: 2026-09-30 01:00 UTC
 
 A pull request's state and checks follow it in brackets, only when the card says them; the tags and the parent's id are lines of their own, `Tags:` and `Part of:`. A task's first line starts with its status: ⏳ queued, 🔄 running, ⛔ blocked, ✅ done, ❌ failed, 🚫 cancelled. The `Now:` line is there only while the task is active: a done, failed or cancelled task's last step is not what it does now, and the card does not show it either. There is no drawn bar: characters that draw one read badly in right-to-left text and in a one-line preview. Times are in UTC, since the text does not know the reader's zone. An app that shows the card does not show this text.
 
+An app card's text names the app on its first line and puts the url on a line of its own, so an older app shows it as a link:
+
+```
+🧩 Opened Chess 1.2.0 in this chat (Ghostly app)
+https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp
+```
+
+A shared app's first line is `🧩 Chess 1.2.0 (Ghostly app)`; a card without a url ends after its first line.
+
 ## Updates are edits
 
 A bot updates a card by editing its message ([400](400-chat.md#edits)): the whole new text and the whole new card. Everything edits already say holds: only the author edits, the highest edit number wins whatever order edits arrive in, an edit is not a new message (no sound, no unread, no move in the list), and the author sends only the latest version of each message.
@@ -178,31 +222,33 @@ A bot updates a card by editing its message ([400](400-chat.md#edits)): the whol
 - **In the chat.** A card is compact: the title, a thin progress bar, a status dot and word, and for a task with a pull request "+123 −45 · PR #612". A routine is one line, as a bot may post ten: its name, schedule, next run as a relative time ("in 3 h") and a mark for how its last run went (✓ or ✕). Three or more routine cards in a row from one sender fold into one row ("↻ 10 routines · next in 4 min · ✕ 1 failed") that opens on a tap, and opens by itself when something jumps to one of them. A tap, a click or Enter opens it in place (a sheet on a phone) with the steps or recent runs, the current step, the times and the links.
 - **The Tasks button.** A chat or group with at least one card shows a Tasks button in its header, with the number of active tasks. It opens a panel with a line saying how many tasks are active and how many routines there are. In a group it has a section per sender, the one with the most tasks going first: its active tasks with their progress, then its routines folded into one line ("10 routines · next in 4 min · ✓ all OK") that opens on a tap to one line per routine. In a 1:1 chat it is one section without a name. Finished tasks come last, folded under "Finished (n)". The panel drops from the button on a wide screen and is a sheet on a phone; it is never taller than the window and scrolls on its own. An item scrolls to its card. The latest message of each card id per author stands for it.
 - **The Tasks board.** One page gathers every task card of the profile, from all its chats and groups: the latest message of each card id per author and chat stands for it, as in a chat's panel. The tasks are in columns by status, each with its count: Queued, Running, Blocked, Done, and Stopped, which holds the failed and the cancelled ones. A line says how many tasks are active. A card has two lines: the title on one line (whole on hover, and unfolded while the keyboard is on it) with how long ago it last changed, then at most three chips (the sender, the chat or group, and "PR #612 +123 −45", a link that opens outside the app), with its progress as a thin bar along its foot; the rest (the current step, the steps done, the branch, the files, when it was updated) is behind Details. A click, a tap or Enter opens the card's chat on its message. A finished task stays for a day after its last update; older ones come with "Show older". A column draws fifty cards, with "Show more" for the rest. The board can be grouped by bot or by chat instead, a column each, and filtered by text. With the optional fields: a **Review** column, between Blocked and Done, holds a task that is queued or running while its pull request is `open`; it is there once some task says its pull request's state, and it is not a status (a blocked task stays in Blocked, and a `merged` pull request moves nothing until the bot marks the task done). The pull request's chip carries its checks as a small mark with a text alternative (✓ passing, ✕ failing, ● pending), and its state in its name and in Details. Tags are chips after the others (three chips in all; every tag is in Details), and the board can be filtered by a tag. A task's parts (the tasks that name it as `parent`, however deep) are stacked under it instead of standing in columns of their own, with a summary on it ("2 of 10 done") that opens to a line per part; a part whose parent is not there stands on its own. Routines are not tasks: they are on their own tab of the page, a line each. On a phone the columns are tabs with their counts, one column on screen, and a swipe moves between them. The arrow keys move between cards and columns. The board is read only: there is no drag between columns, and the bot that owns a task changes its status. The way to it is a line above the chat list that is there only while the profile has a card, with the number of active tasks; a profile without bots never sees it. Ghostly reads the cards for it from an index of the messages that carry a card, never from the chats' histories, so it costs the same however long the chats are, and it follows the messages by itself: an update, a deleted message, a deleted chat.
+- **An app card.** One row in the chat: a generic icon, the title and version, "<contact> shared it" or "<contact> opened it here", the publisher's fingerprint, "Not checked yet", and Install (Play when the app is installed). After Install it shows what [1200](1200-marketplace.md#apps-sent-in-a-chat) says: the checked publisher, the permissions, the stores that list it.
 - **Everywhere.** Theme colors, a phone's width, right-to-left text and the keyboard, like every message. Short words; details behind ⓘ.
 
 ## Compatibility
 
 An app that shows cards but came before `pr.state`, `pr.checks`, `tags` and `parent` (Ghostly up to 1.0.1) ignores them: its reader builds the card from the fields it knows and drops a card only for the reasons of the reader's rule, none of which an unknown field is. It shows the same card as without them, and no Review column, chips or stacks; the fallback text carries them in words. The tests keep that reader as shipped and feed it such cards.
 
+An app that shows cards but not the `app` kind (every app before release 1.2) drops an app card as a kind it does not know and shows its text: the app's name and version, and the url, which it shows as a link. An app from before cards shows the same text.
+
 An app from before cards ignores `sc` on every path and shows the text: a card message reads as a short status text, and updates as that text edited in place. It does not list `status-card/1`, so a 1:1 author stops editing it at the hundredth edit; the text it shows is the last it took. In a private group a card's box is covered by the author's signature over the whole frame after the other boxes, only when there is one, so what an older app signs and checks for other messages stays the same; an older member handing on a card message drops the card box, and a newer reader of that copy shows the text until a whole copy arrives, as with a reply ([mesh](902-group-mesh.md#status-cards)).
 
 ## Security and privacy
 
 - A card is the author's claim, like its text. Nothing on it is checked against anything outside the chat: a pull request's numbers, a routine's last run and a task's status are what the bot said.
-- Display only: a card has no action, and a reader runs nothing because of one.
+- Display only: a card has no action, and a reader runs nothing because of one. An app card's Install opens the reader's own install screen; it fetches nothing to show the card, so a card cannot be a tracker, and nothing is installed from it without the checks of [1200](1200-marketplace.md#apps-sent-in-a-chat).
 - Links are https only, shown with their host before they are opened, and opened like any external link of the app. A card's other strings are plain text.
 - Every string and list is bounded, and the whole card is 8 KiB at most: a peer cannot make a card cost more to keep or draw than a text.
 - A card rides inside what already seals a message on each path: the live session, a mesh epoch key, a community epoch key. The DHT floor and a hold never carry one.
 
 ## Conformance
 
-A card of each kind with every field round-trips on each path; a pull request's unknown state or checks is left out, tags past three or 24 characters are cut, a parent that is no id or the task's own is left out, and a sender is refused each; the reader of Ghostly 1.0.1 shows a card with those fields exactly as without them; a card with an unknown kind, a missing title, a status out of the list, or past 8 KiB is dropped and the text shown; oversized lines are cut and lists capped; a non-https link is left out; a received time far ahead is clamped, a next run beyond a year left out; an edit numbered past 100 without a card is ignored, with one it is shown; a 1:1 edit past 100 is not sent to a contact without `status-card/1`; a card's update waits for the live session; an older app shows the text and its edits up to 100; a mesh card handed on by a member keeps its box only with the author's whole signature. Tests: `packages/core/test/statusCards.test.ts`, `packages/core/test/statusCardFields.test.ts`.
+A card of each kind with every field round-trips on each path; a pull request's unknown state or checks is left out, tags past three or 24 characters are cut, a parent that is no id or the task's own is left out, and a sender is refused each; the reader of Ghostly 1.0.1 shows a card with those fields exactly as without them; a card with an unknown kind, a missing title, a status out of the list, or past 8 KiB is dropped and the text shown; oversized lines are cut and lists capped; a non-https link is left out; a received time far ahead is clamped, a next run beyond a year left out; an edit numbered past 100 without a card is ignored, with one it is shown; a 1:1 edit past 100 is not sent to a contact without `status-card/1`; a card's update waits for the live session; an older app shows the text and its edits up to 100; a mesh card handed on by a member keeps its box only with the author's whole signature. An app card with each field round-trips; one with a missing or bad `ref`, `digest`, `sequence` or title, or an id not made from its `ref`, is dropped and the text shown; a url that is not https is left out; a reader without the `app` kind shows the fallback text with its link; an app card counts in no Tasks view. Tests: `packages/core/test/statusCards.test.ts`, `packages/core/test/statusCardFields.test.ts`, and the vectors of [1200](1200-marketplace.md#test-vectors) (`app-card.json`).
 
 ## Open decisions
 
-- The number of this WISP.
 - An SDK with the same calls as the CLI, for bots that do not run the headless runtime.
-- More kinds (a poll's results, a deployment): each is a new `kind`, which older readers show as text. Proposed in [12xx](12xx-marketplace.md#apps-sent-in-a-chat): `app` and `store`, sent by people's apps and not only by bots, with the same 8 KiB bound and text fallback; display only, and nothing is fetched until the person presses Install or Add.
+- More kinds (a poll's results, a deployment): each is a new `kind`, which older readers show as text. Proposed in [1200](1200-marketplace.md#apps-sent-in-a-chat): `store`, sent by people's apps and not only by bots, with the same 8 KiB bound and text fallback; display only, and nothing is fetched until the person presses Add. (`app` is defined above.)
 - Whether a card id should bind across messages (today the latest message of an id stands for it in the panel, and nothing stops two messages from naming the same id).
 
 ## Revision log

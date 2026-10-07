@@ -17,6 +17,7 @@ vi.mock("../src/engine/node", () => ({
     getState() { return { links: [] }; }
     async getMessages() { return []; }
     setActiveLink() {}
+    appsCloseAll() {}
     setCallOn({ on }: { on: boolean }) { this.said.push(on); }
   },
 }));

@@ -16,7 +16,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "withdrawIdentityProof", "recheckIdentityProof", "lookupIdentityDisplay", "loadPublicProfile", "loadPublicPosts",
   "loadPublicGraph", "loadPublicPostImage", "clearProfileData", "setDidListed", "nostrLoadContact", "nostrForgetContact", "nostrLoadOwn",
   "nostrLookup", "nostrDraft", "nostrPublish", "createLink", "takeInvite", "joinLink", "ensureLink", "confirmPair",
-  "pollNow", "removeLink", "renameLink", "setActiveLink", "sendMessage", "editMessage", "retryMessage", "react", "pinMessage", "messageDetails",
+  "pollNow", "removeLink", "renameLink", "setActiveLink", "sendMessage", "editMessage", "retryMessage", "react", "pinMessage", "appId", "appOpen", "appClose", "appSend", "messageDetails",
   "deleteMessage", "exportLinks", "sendFile", "forwardMessages", "fileAction", "setDeliveryMode", "setTransportPreference",
   "setChatTransport", "setChatPaymentMethods", "setChatHold", "connect", "walletAddMint", "walletCreate",
   "walletRemove", "walletTestCoins", "walletSetupRetry", "walletSetupDismiss", "wake", "peekProfile", "walletSetPrimaryMint", "walletRemoveMint", "walletReceiveLightning",
@@ -35,6 +35,9 @@ export const ENGINE_METHODS: readonly string[] = [
   "deviceEnrollRemove", "deviceSet", "devicePing", "deviceHandoffVerifier", "deviceHandoffPush", "deviceHandoffPull", "deviceHandoffAccept",
   "deviceHandoffSettle", "deviceHandoffCancel", "deviceHandoffView", "deviceHandoffAllow", "deviceTakeoverInfo", "deviceTakeover", "deviceTurnPeek", "deviceForkDiscard", "deviceRestoreStartOwn",
   "deviceRemove", "deviceNewSecret", "deviceSecretOfferDismiss", "deviceSetNoticeSeen", "deviceTurnCheck", "devicePushState", "devicePushSet",
+  "appList", "appStoreList", "appStorePreview", "appStoreAdd", "appStoreRemove", "appStoreRefresh", "appPreview", "appInstall",
+  "appUpdateAccept", "appCheckUpdates", "appUninstall", "appRunCheck", "appFetchFiles", "appEntry", "appFile", "appStorageGet", "appStorageSet",
+  "appStorageDelete", "appStorageKeys", "appDataExport",
 ];
 
 /** Reads the hosts use outside `EngineApi`: the whole state, and one chat's stored messages. */

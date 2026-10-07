@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { desktopTestNetworkEnv } from "../../packages/cli/test/support/network";
 
 export { expect };
 
@@ -157,12 +158,36 @@ class Driver {
     return (await this.call("GET", "/title")) as string;
   }
 
+  /** The handles of every window the driver sees (the Ghostly window, and an app's own window when one is open). */
+  async windows(): Promise<string[]> {
+    return (await this.call("GET", "/window/handles")) as string[];
+  }
+
+  /** The window commands go to now. */
+  async window(): Promise<string> {
+    return (await this.call("GET", "/window")) as string;
+  }
+
+  /** Sends the next commands to another window (`windows`). */
+  async switchTo(handle: string): Promise<void> {
+    await this.call("POST", "/window", { handle });
+  }
+
   async close(): Promise<void> {
     await this.call("DELETE", "").catch(() => {});
   }
 }
 
 export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
+
+/** Going from window to window (an app's own window, WISP 1200): WebDriver's, which the macOS driver has no part of. */
+export type DesktopWindows = Pick<Driver, "windows" | "window" | "switchTo">;
+
+/** `app`'s windows, where its driver is WebDriver's (Linux and Windows). */
+export function desktopWindows(app: DesktopApp): DesktopWindows {
+  if (!(app instanceof Driver)) throw new Error("Only WebDriver goes from window to window");
+  return app;
+}
 
 /**
  * Chooses in a `Select` (apps/ui/src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
@@ -232,15 +257,15 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
       // A test must never open the person's own chats: its own profile, its own storage. Nor the machine's camera
       // and microphone: a test picture and a test tone for calls on Linux (debug builds), as Chromium's fake devices.
       // GHOSTLY_E2E: never a new profile's default Mainnet wallets (#682): this build has the real bundle id.
-      env: {
-        ...process.env,
+      // Nor a public network: a dead Pkarr relay (and so no Mainline DHT), HyperDHT bootstrap and Iroh relay unless the
+      // test brings its own on loopback (packages/cli/test/support/network.ts; GHOSTLY_TEST_PUBLIC_NET=1 opts out).
+      env: desktopTestNetworkEnv({
         GHOSTLY_E2E: "1",
         GHOSTLY_FAKE_MEDIA: "1",
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
         ...(bus ? { DBUS_SESSION_BUS_ADDRESS: bus.address } : {}),
-        ...options.env,
-      },
+      }, options.env),
     },
   );
   const log: string[] = [];

@@ -238,12 +238,22 @@ jobs:
 
       # `tauri build` and not `cargo build`: a plain cargo debug build points the
       # WebView at the dev server. `--debug` keeps the compile short; `--no-bundle`
-      # skips the installers, since the test runs the binary itself.
+      # skips the installers, since the test runs the binary itself. VITE_APPS_TEST: the e2e suite's build, with
+      # mini-apps on and their test store (e2e/desktop/apps.spec.ts), as the web suites build it; never shipped.
       - name: Build the Desktop app
         run: npm run tauri -- build --debug --no-bundle
+        env:
+          VITE_APPS_TEST: "1"
+
+      # The apps under test reach no public network (e2e/support/desktop.ts): their Iroh homes on this relay, the same
+      # one the e2e infra runs (e2e/infra/docker-compose.yml), instead of n0's.
+      - name: Start an Iroh relay
+        run: docker run -d --name ghostly-iroh-relay -p 127.0.0.1:47085:3340 n0computer/iroh-relay:v1.3.0 --dev
 
       - name: Run Desktop end-to-end tests
         run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
+        env:
+          GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
 
       - name: Upload report
         if: ${{ !cancelled() }}
@@ -255,10 +265,10 @@ jobs:
             test-results
           retention-days: 14
 
-  # The current web app against a real v0.4.0, built from its tag (e2e-compat.yml, about 4 minutes): a contact
-  # still on 0.4 must keep working with the release (WISP 402).
+  # The current web app against a real v0.4.0 and a real v1.1.4, built from their tags (e2e-compat.yml): a contact
+  # still on 0.4 must keep working with the release (WISP 402), and one on 1.1 gets an app card as its text (WISP 1200).
   compat:
-    name: Compatibility with v0.4.0
+    name: Compatibility with v0.4.0 and v1.1.4
     # The deployed-web-app run tests the web app alone.
     if: ${{ !inputs.web_url }}
     uses: ./.github/workflows/e2e-compat.yml

@@ -1,18 +1,18 @@
 {
   "name": "ghostly",
   "private": true,
-  "version": "1.1.4",
+  "version": "1.1.5",
   "type": "module",
   "scripts": {
     "dev": "vite apps/ui",
     "build": "tsc -b && vite build apps/ui",
     "preview": "vite preview apps/ui",
     "tauri": "tauri",
-    "lint": "eslint apps/ui/src packages apps/extension/src apps/extension/test/*.ts apps/web/src e2e",
-    "lint:fix": "eslint apps/ui/src packages apps/extension/src apps/extension/test/*.ts apps/web/src e2e --fix",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e && npm run typecheck -w @ghostly/core -w @ghostly/browser -w @ghostlytools/sdk -w @ghostly/extension -w @ghostly/web -w @ghostlytools/cli",
+    "lint": "eslint apps/ui/src packages apps/extension/src apps/extension/test/*.ts apps/web/src apps/mini e2e",
+    "lint:fix": "eslint apps/ui/src packages apps/extension/src apps/extension/test/*.ts apps/web/src apps/mini e2e --fix",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e && npm run typecheck -w @ghostly/core -w @ghostly/browser -w @ghostlytools/sdk -w @ghostly/extension -w @ghostly/web -w @ghostlytools/cli -w @ghostly/mini-chess",
     "test": "npm run test:packages && npm run test:app",
-    "test:packages": "npm run test -w @ghostly/core -w @ghostly/browser -w @ghostlytools/sdk -w @ghostly/extension -w @ghostlytools/cli",
+    "test:packages": "npm run test -w @ghostly/core -w @ghostly/browser -w @ghostlytools/sdk -w @ghostly/extension -w @ghostlytools/cli -w @ghostly/mini-chess",
     "test:app": "npm run test:ui && npm run test:matrix && npm run test:scripts",
     "test:affected": "node tools/scripts/test-affected.mjs",
     "test:ui": "vitest run -c apps/ui/vitest.ui.config.ts",
@@ -102,6 +102,7 @@
   "workspaces": [
     "packages/*",
     "apps/extension",
+    "apps/mini/*",
     "apps/web"
   ],
   "overrides": {

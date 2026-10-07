@@ -88,6 +88,7 @@
   --attach-payment: #ffbc38;
   --attach-identity: #21c7b0;
   --attach-services: #6fd36b;
+  --attach-apps: #ff8a3d;
   --attach-document: #a28bff;
   --attach-media: #4fa3ff;
   --attach-camera: #ff5c8d;
@@ -99,6 +100,7 @@
   --attach-payment: #a15f00;
   --attach-identity: #00786a;
   --attach-services: #2c7a1f;
+  --attach-apps: #b04a00;
   --attach-document: #5b3fe0;
   --attach-media: #005fc4;
   --attach-camera: #c8124f;
@@ -116,6 +118,7 @@
 .composer-menu-icon[data-action="payment"] { color: var(--attach-payment); }
 .composer-menu-icon[data-action="identity"] { color: var(--attach-identity); }
 .composer-menu-icon[data-action="services"] { color: var(--attach-services); }
+.composer-menu-icon[data-action="apps"] { color: var(--attach-apps); }
 .composer-menu-icon[data-action="document"] { color: var(--attach-document); }
 .composer-menu-icon[data-action="media"] { color: var(--attach-media); }
 .composer-menu-icon[data-action="camera"] { color: var(--attach-camera); }

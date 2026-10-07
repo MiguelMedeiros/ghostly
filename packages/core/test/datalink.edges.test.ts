@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, STALLED_EVIDENCE_MS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
+import { ANSWER_REFUSED_REDIALS, DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, STALLED_EVIDENCE_MS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_FUTURE_MS, RTC_SIGNAL_MAX_AGE_MS, offerIsFresh, parseRtcSignal, type RtcSignal, type SignalSight } from "../src/signal";
 
 // covers: transport.webrtc, core.frames, chat.paired.clock-skew
@@ -426,6 +426,40 @@ describe("DataLink failures and teardown", () => {
     await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + 1, s: "active" }), o: NOW }));
     expect(a.dl.state).toBe("idle");
     expect(a.pc().closed).toBe(true);
+  });
+
+  it("offers again at once when the peer's answer is refused as it goes in, a few times until one opens", async () => {
+    // libdatachannel 0.24.5's race: the answerer's handshake ends inside setRemoteDescription, which throws (or the
+    // connection fails while it runs). The answerer is there: the dial after it must not wait for its backoff.
+    const onAnswerReplaced = vi.fn();
+    const a = link("aaaa", "bbbb", () => {}, { onAnswerReplaced });
+    const refuse = async (how: "throws" | "fails") => {
+      await a.dl.connect();
+      const pc = a.pc(), offer = parseRtcSignal(a.lastSignal())!;
+      if (how === "throws") pc.failRemote = true;
+      else pc.setRemoteDescription = async () => { pc.setConnectionState("failed"); };
+      await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: offer.ts + 1, s: "active" }), o: offer.ts }));
+      expect(a.dl.state).toBe("idle");
+      expect(pc.closed).toBe(true);
+      vi.advanceTimersByTime(1_000);
+    };
+    for (let n = 1; n <= ANSWER_REFUSED_REDIALS; n++) {
+      await refuse(n % 2 ? "throws" : "fails");
+      expect(onAnswerReplaced).toHaveBeenCalledTimes(n);
+    }
+    // Past them, the caller's own pace: an answer that never goes in must not become a stream of offers.
+    await refuse("throws");
+    expect(onAnswerReplaced).toHaveBeenCalledTimes(ANSWER_REFUSED_REDIALS);
+    // A connection that opens counts them again from none.
+    await a.dl.connect();
+    const offer = parseRtcSignal(a.lastSignal())!;
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: offer.ts + 1, s: "active" }), o: offer.ts }));
+    a.pc().channel.open();
+    expect(a.dl.state).toBe("open");
+    a.dl.close();
+    vi.advanceTimersByTime(1_000);
+    await refuse("throws");
+    expect(onAnswerReplaced).toHaveBeenCalledTimes(ANSWER_REFUSED_REDIALS + 1);
   });
 
   it("gives up on a connection that does not open in time", async () => {

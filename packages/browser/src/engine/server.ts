@@ -51,6 +51,10 @@ export class EngineServer implements PeerServer {
           else this.offers.delete(linkId);
           this.broadcast({ kind: "call-signal", linkId, signal });
         },
+        // A contact's mini-app frame (WISP 1200 § In a chat): to the pages, where the app runs. Never stored.
+        onAppFrame: (linkId, event) => this.broadcast({ kind: "app-frame", linkId, event }),
+        // An update check of the installed apps ran: the pages read them again, and stop one it stopped.
+        onAppsChecked: () => this.broadcast({ kind: "apps-checked" }),
         // Another device took the turn (WISP 06): the pages show the standby screen and start again into the gate.
         onDeviceGate: (gate) => this.broadcast({ kind: "device-gate", gate }),
       },
@@ -96,7 +100,11 @@ export class EngineServer implements PeerServer {
   detach(client: EngineClientSink): void {
     this.clients.delete(client);
     this.histories.delete(client);
-    if (this.clients.size === 0) this.node.setActiveLink({ linkId: null });
+    if (this.clients.size === 0) {
+      this.node.setActiveLink({ linkId: null });
+      // Apps run in the pages: with none left, none runs, and the contacts hear so.
+      this.node.appsCloseAll();
+    }
     if (this.onCall.delete(client)) this.node.setCallOn({ on: this.onCall.size > 0 });
   }
 

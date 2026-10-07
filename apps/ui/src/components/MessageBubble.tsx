@@ -18,7 +18,7 @@ import { RichText } from "./rich/RichText";
 import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
 import { CardTime, StatusCardView } from "./chat/StatusCard";
-import { STATUS_TONE, cardLabel, showsCard } from "../lib/statusCards";
+import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
@@ -41,6 +41,8 @@ import { PinIcon } from "./PinIcon";
 import { copyText } from "../lib/shareLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
+import { AppCardView } from "./apps/AppCardView";
+import { useAppsAvailable } from "../lib/apps/flag";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -702,6 +704,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const pressed = !!compactPress && isButtonPress(message);
   const money = useMemo(() => (message.paymentId || message.file || pressed || showsCard(message.card) ? null : findMoney(message.text)), [message.paymentId, message.file, pressed, message.card, message.text]);
   const [details, setDetails] = useState(false);
+  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
+  const appsOn = useAppsAvailable();
+  const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
   const rowRef = useRef<HTMLDivElement>(null);
   const openDetails = () => setDetails(true);
   // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
@@ -858,14 +863,15 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
   );
 
-  if (showsCard(message.card)) {
-    // A bot's task or routine (WISP 405 · Status Cards): not a bubble but a card of its own, standing for the text
-    // (its fallback). Updates are its normal life, so no "edited": when it last changed, in the card.
-    const card = message.card;
+  if (showsCard(message.card) || appCard) {
+    // A bot's task or routine (WISP 405 · Status Cards), or an app a person opened or shared here: not a bubble but a
+    // card of its own, standing for the text (its fallback). Updates are its normal life, so no "edited": when it last
+    // changed, in the card.
+    const card = message.card!;
     const time = <CardTime sent={shownTime(message)} changed={message.edit?.at} />;
     const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} /> : undefined;
     const edge = card.kind === "task" ? STATUS_TONE[card.status].bar
-      : card.state === "paused" ? "bg-text-muted" : card.lastRun?.result === "failed" ? "bg-danger" : undefined;
+      : card.kind !== "routine" ? undefined : card.state === "paused" ? "bg-text-muted" : card.lastRun?.result === "failed" ? "bg-danger" : undefined;
     return (
       <div
         {...rowProps}
@@ -893,7 +899,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             ref={bubbleRef}
             data-message-card
             role="group"
-            aria-label={cardLabel(t, card)}
+            aria-label={appCard ? t("apps.card.label", { title: appCard.title }) : cardLabel(t, card as ShownCard)}
             className={`status-card-surface w-full text-text-primary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
             style={swipe.dx > 0 ? { transform: `translateX(${swipe.offset}px)` } : undefined}
           >
@@ -901,7 +907,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
                 last run failed (red) or it is paused (muted), as ten routines going well need no colour each. */}
             {edge && <span aria-hidden="true" data-testid="status-card-edge" className={`absolute inset-y-2 start-1 w-[3px] rounded-full opacity-80 ${edge}`} />}
             {quote && <div className="px-2 pt-2"><ReplyQuote quote={quote} /></div>}
-            <StatusCardView card={card} time={time} marks={marks} end={message.edit?.at ?? message.timestamp} />
+            {appCard
+              ? <AppCardView card={appCard} mine={isMe} contact={contactName || peerNick || t("common.anonymous")} linkId={linkId!} peerKey={peerPubKey} time={time} marks={marks} />
+              : <StatusCardView card={card as ShownCard} time={time} marks={marks} end={message.edit?.at ?? message.timestamp} />}
           </div>
           <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
         </div>

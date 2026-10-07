@@ -373,7 +373,7 @@ describe("capability record: publishing and reading", () => {
     staleReads = Infinity;
     bSide.peerRev(3); await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(bSide.peer).toMatchObject({ rev: 2 });
-    expect(reads() - settled, "one read and four more").toBe(5);
+    expect(reads() - settled, "one read and five more").toBe(6);
     await aSide.stop(); await bSide.stop();
   });
 
@@ -425,19 +425,40 @@ describe("capability record: publishing and reading", () => {
     web.start(); await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(reads()).toBe(1);
     await web.stop();
-    // A Desktop: four reads more, then it waits for an envelope.
+    // A Desktop: five reads more (three in its first 7 s), then it waits for an envelope.
     const desktop = new CapsExchange({ params: link.invite, credentials: bCreds, transport, local: () => content(), save: async () => {} });
     desktop.start(); await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(reads()).toBe(1 + 1 + 4);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(1 + 1 + 5);
     await desktop.stop();
     // A Desktop whose own endpoints come up after it read the record: it reads again from then on.
     let mine = content({ descriptors: {} });
     const late = new CapsExchange({ params: link.invite, credentials: bCreds, transport, local: () => mine, save: async () => {} });
     late.start(); await vi.advanceTimersByTimeAsync(60_000);
-    expect(reads()).toBe(6 + 1);
+    expect(reads()).toBe(7 + 1);
     mine = content(); await late.update(); await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(reads()).toBe(7 + 4);
+    expect(reads()).toBe(8 + 5);
     await late.stop(); await aSide.stop();
+  });
+
+  it("a contact's record with no descriptor yet is read again within seconds: its next revision has them", async () => {
+    // Two Desktops DHT direct with Iroh's relay out of reach: each first record lists Iroh and HyperDHT with no descriptor
+    // (the endpoints were starting), the next one, a second or two on, has them. Read again 5 s and then 20 s after, the
+    // pair went live 11 to 28 s after the chats opened; now it is 1, 3 and 7 s.
+    vi.useFakeTimers();
+    const { link, a, b } = pair(), { transport } = exchange();
+    const aCreds: PairingCredentials = { seedB64: a.seedB64, peerKey: b.pubKeyZ32 }, bCreds: PairingCredentials = { seedB64: b.seedB64, peerKey: a.pubKeyZ32 };
+    let aContent = content({ descriptors: {} });
+    const aSide = new CapsExchange({ params: link.mine, credentials: aCreds, transport, local: () => aContent, save: async () => {} });
+    const bSide = new CapsExchange({ params: link.invite, credentials: bCreds, transport, local: () => content(), save: async () => {} });
+    aSide.start(); await vi.advanceTimersByTimeAsync(0);
+    bSide.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(bSide.peer).toMatchObject({ rev: 1, descriptors: {} });
+    await vi.advanceTimersByTimeAsync(1_500);
+    aContent = content(); await aSide.update();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(bSide.peer, "3.5 s after its first read").toMatchObject({ rev: 2, descriptors: { "iroh/1": expect.anything(), "hyperdht/1": expect.anything() } });
+    await aSide.stop(); await bSide.stop();
   });
 
   it("merges reads asked for close together", async () => {

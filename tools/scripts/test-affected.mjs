@@ -102,7 +102,7 @@ const inventory = JSON.parse(readFileSync(join(ROOT, "e2e/features.json"), "utf8
 const e2eFiles = sources("e2e");
 // Tests import across workspaces by relative path (packages/browser/test → apps/ui/src/, e2e/matrix → packages/browser/),
 // so the plan reads every workspace's imports.
-const codeFiles = { ...sources("packages", "apps/ui/src", "apps/extension", "apps/web/src", "tools/scripts", "apps/website"), ...e2eFiles };
+const codeFiles = { ...sources("packages", "apps/ui/src", "apps/extension", "apps/web/src", "apps/mini", "tools/scripts", "apps/website"), ...e2eFiles };
 const p = makePlan({ changed, inventory, e2eFiles, codeFiles });
 
 // ---------- the plan, printed ----------
@@ -254,7 +254,7 @@ async function runE2e() {
   let preview = null;
   // The suite's build: the local OIDC issuer and the SDK example's adapters (see e2e/playwright.config.ts).
   const issuer = /OIDC_TEST_ISSUER\s*=.*?"([^"]+)"/.exec(readFileSync(join(ROOT, "e2e/support/oidcIssuer.ts"), "utf8"))?.[1];
-  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts" };
+  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1" };
   // Extension specs pair with the web app too (interop), so a build is served whatever was picked.
   if (!url) {
     // Something already answering there is another session's build: testing it would test the wrong app.

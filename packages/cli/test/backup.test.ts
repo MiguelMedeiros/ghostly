@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { seal } from "@ghostly/browser/backup/envelope";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
-import { BIN, error, ghostly, home, ok } from "./support/cli";
+import { BIN, error, ghostly, home, ok, testEnv } from "./support/cli";
 // covers: headless.backup, backup.light
 
 const PASS = { GHOSTLY_BACKUP_PASSPHRASE: "correct horse battery staple" };
@@ -122,7 +122,7 @@ it("a restore stopped while it writes leaves no profile, and the next one is who
 
   // Killed the moment its folder appears beside the profiles: nothing of the file is in it yet, or only a part.
   const profiles = join(dir, "profiles");
-  const child = spawn(process.execPath, [BIN, "--home", dir, "profile", "restore", file, "copy"], { env: { ...process.env, ...PASS }, stdio: "ignore" });
+  const child = spawn(process.execPath, [BIN, "--home", dir, "profile", "restore", file, "copy"], { env: testEnv(PASS), stdio: "ignore" });
   const gone = new Promise<void>((done) => child.once("exit", () => done()));
   while (child.exitCode === null && child.signalCode === null && readdirSync(profiles).length < 2) await new Promise((r) => setImmediate(r));
   child.kill("SIGKILL");

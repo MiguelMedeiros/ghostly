@@ -1,0 +1,24 @@
+{
+  "name": "@ghostly/mini-chess",
+  "private": true,
+  "version": "1.1.5",
+  "type": "module",
+  "description": "Chess for two in a chat: a Ghostly mini-app that builds to one self-contained HTML file.",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "dev": "vite",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ghostly/core": "*",
+    "@noble/hashes": "2.4.0",
+    "chess.js": "1.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}

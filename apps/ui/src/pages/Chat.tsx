@@ -12,6 +12,9 @@ import { FaceCorner, IdentityStack } from "../components/identities/ContactMarks
 import { shownContactName, useChosenProfile, useContactFace } from "../components/identities/contactFace";
 import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
+import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
+import { useAppsAvailable } from "../lib/apps/flag";
+import { appsComposerHint } from "../lib/apps/availability";
 import { PinIcon } from "../components/PinIcon";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { openOnArrow } from "../lib/menuButton";
@@ -93,6 +96,7 @@ import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
 import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
+import { showChatOnScreen } from "../lib/appBadge";
 import { errorText } from "../lib/errorText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
@@ -377,6 +381,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   /** One of mine tapped in the timeline: the composer's picker opens on it. */
   const [myIdentity, setMyIdentity] = useState<{ id: string; at: number }>();
   const [showServices, setShowServices] = useState(false);
+  // Mini-apps in this 1:1 chat (WISP 1200), where Apps shows: + → Apps.
+  const appsOn = useAppsAvailable();
+  const [showApps, setShowApps] = useState(false);
   /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   // Opened from the Tasks board: on the card's message, once it is here.
@@ -494,6 +501,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => {
     if (visible && pageShown) markSessionAsRead(sessionId);
   }, [visible, pageShown, sessionId, messages.length]);
+  // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
+  useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop;
@@ -593,6 +602,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
           className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
           {t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}
+        </div>
+      )}
+      {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
+          contact hears nothing until Ghostly is back on screen, and the call is still on. */}
+      {webrtc.micPaused && !webrtc.mediaProblem && (
+        <div role="status" data-testid="call-mic-paused"
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+          {t("calls.micPaused")}
         </div>
       )}
       {/* Chat Header. On a phone every button can be there at once (the connection, a call, a video call, a bot's Tasks,
@@ -935,6 +952,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         linkPreviews={paired && settings.linkPreviews}
         // The apps this contact and you share, chosen per chat: always reachable here, even before anything is shared.
         services={composerServices(t, platform, params.peerPubKeyB64, shownName, () => setShowServices(true))}
+        apps={appsOn && paired && chatLink ? { onOpen: () => setShowApps(true), hint: appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t) ?? undefined } : undefined}
       />
       </div>
 
@@ -985,6 +1003,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         />
       )}
 
+      {showApps && appsOn && chatLink && params && (
+        <ChatAppsDialog linkId={chatLink.id} name={shownName} onClose={() => setShowApps(false)}
+          waiting={appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t)} />
+      )}
       {showServices && params && (
         <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowServices(false)} />
       )}

@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { IMAGE_HOSTS, IMAGE_REDIRECTS } from "@ghostly/browser/profiles/public";
+import { NET_RUNNER_CSP, NET_RUNNER_HEADERS, RUNNER_CSP, RUNNER_HEADERS } from "../../../../web/runnerPolicy";
 
 // covers: files.voice.play
 
@@ -92,6 +93,70 @@ describe("the Content-Security-Policy of every shell", () => {
     expect(allowed("default-src 'self'; img-src blob:", "media-src")).toEqual(["'self'"]);
     expect(allowed("img-src blob:", "media-src")).toBe("anything");
     expect(allowed("default-src 'self'; media-src 'self' blob:; media-src 'none'", "media-src")).toEqual(["'self'", "blob:"]);
+  });
+});
+
+// covers: apps.web-sandbox
+describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
+  const nginx = read("apps/web/nginx.conf");
+  /** nginx's `location` blocks: what each matches, and what is inside. */
+  const locations = [...nginx.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)].map(([, match, body]) => ({ match: match!.trim(), body: body! }));
+  const runner = locations.find((l) => l.match === "= /app-frame.html");
+  const header = (body: string, name: string) => new RegExp(`add_header ${name} "([^"]+)" always;`).exec(body)?.[1];
+
+  it("the web page may frame only its own origin", () => {
+    expect(directives(policies.web()).get("frame-src")).toEqual(["'self'"]);
+    expect(directives(policies.web()).get("frame-ancestors")).toEqual(["'none'"]);
+  });
+
+  it("the runner's location sends the runner's policy, the same on the web, in Vite's servers and on Desktop", () => {
+    expect(runner, "a location for /app-frame.html").toBeDefined();
+    expect(header(runner!.body, "Content-Security-Policy")).toBe(RUNNER_CSP);
+    expect(RUNNER_HEADERS["Content-Security-Policy"]).toBe(RUNNER_CSP);
+    const desktop = /pub const RUNNER_CSP: &str = "([^"]*)";/.exec(read("apps/desktop/src/app_sandbox.rs"))![1]!.replace(/\\\n/g, "");
+    expect(desktop).toBe(RUNNER_CSP);
+    const d = directives(RUNNER_CSP);
+    expect(d.get("sandbox")).toEqual(["allow-scripts"]);
+    expect(d.get("frame-ancestors")).toEqual(["'self'"]);
+    for (const name of ["default-src", "connect-src", "frame-src", "worker-src", "form-action", "base-uri"]) expect(d.get(name), name).toEqual(["'none'"]);
+    expect(d.get("script-src")).toEqual(["'unsafe-inline'", "'wasm-unsafe-eval'"]);
+  });
+
+  it("does not carry the page's policy (two policies intersect), and repeats every other header itself", () => {
+    expect(runner!.body).not.toContain("ghostly-headers.conf");
+    const common = read("apps/web/nginx-headers.conf");
+    for (const name of ["X-Content-Type-Options", "Referrer-Policy", "Strict-Transport-Security"]) {
+      expect(header(runner!.body, name), name).toBe(header(common, name));
+    }
+    expect(header(runner!.body, "Permissions-Policy")).toBe(RUNNER_HEADERS["Permissions-Policy"]);
+    for (const name of ["X-Content-Type-Options", "Referrer-Policy", "Permissions-Policy", "X-DNS-Prefetch-Control"]) expect(RUNNER_HEADERS[name], name).toBe(header(runner!.body, name));
+  });
+
+  it("the network runner (apps granted internet) is the same file under a policy that adds HTTPS and WSS, and nothing else", () => {
+    const net = locations.find((l) => l.match === "= /app-frame-net.html");
+    expect(net, "a location for /app-frame-net.html").toBeDefined();
+    expect(net!.body).toContain("try_files /app-frame.html =404;");
+    expect(net!.body).not.toContain("ghostly-headers.conf");
+    expect(header(net!.body, "Content-Security-Policy")).toBe(NET_RUNNER_CSP);
+    expect(NET_RUNNER_HEADERS["Content-Security-Policy"]).toBe(NET_RUNNER_CSP);
+    // Desktop's `ghostly-app` scheme serves the same policy to an app window granted internet.
+    const desktop = /pub const NET_RUNNER_CSP: &str = "([^"]*)";/.exec(read("apps/desktop/src/app_sandbox.rs"))![1]!.replace(/\\\n/g, "");
+    expect(desktop).toBe(NET_RUNNER_CSP);
+    for (const name of ["X-Content-Type-Options", "Referrer-Policy", "Permissions-Policy", "X-DNS-Prefetch-Control", "Strict-Transport-Security"]) expect(header(net!.body, name), name).toBe(header(runner!.body, name));
+    const plain = directives(RUNNER_CSP);
+    const wide = directives(NET_RUNNER_CSP);
+    expect(wide.get("connect-src")).toEqual(["https:", "wss:"]);
+    for (const name of ["img-src", "media-src", "font-src"]) expect(wide.get(name), name).toEqual([...plain.get(name)!, "https:"]);
+    for (const [name, sources] of plain) if (!["connect-src", "img-src", "media-src", "font-src"].includes(name)) expect(wide.get(name), name).toEqual(sources);
+    expect([...wide.keys()].sort()).toEqual([...plain.keys()].sort());
+  });
+
+  it("every other location keeps the page's policy, and with it frame-ancestors 'none'", () => {
+    const net = locations.find((l) => l.match === "= /app-frame-net.html");
+    for (const location of locations.filter((l) => l !== runner && l !== net)) {
+      if (/^\s*return\s/.test(location.body.trim())) continue; // a redirect, no page
+      expect(location.body, location.match).toContain("include /etc/nginx/ghostly-headers.conf;");
+    }
   });
 });
 

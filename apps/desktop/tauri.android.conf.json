@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "identifier": "tools.ghostly.app",
+  "build": {
+    "beforeBuildCommand": "npm run build"
+  },
+  "bundle": {
+    "resources": null,
+    "android": {
+      "minSdkVersion": 26
+    }
+  }
+}
