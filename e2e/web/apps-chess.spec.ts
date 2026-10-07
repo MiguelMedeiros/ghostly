@@ -1,7 +1,7 @@
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
-import { CHESS_REPO, CHESS_STORE_URL, ChessPublisher, STORE_NAME, chessFrame, colourOf, installFromStore, miniApp, move } from "../support/chessApp";
+import { CHESS_REPO, CHESS_STORE_URL, ChessPublisher, openPeers, STORE_NAME, chessFrame, colourOf, installFromStore, miniApp, move } from "../support/chessApp";
 
 /*
  * Chess end to end (WISP 1200; WISP 405 § An app), on the e2e suite's build (VITE_APPS_TEST): the real Chess, built
@@ -44,12 +44,12 @@ const SCHOLARS_MATE: [string, string][] = [["e2", "e4"], ["e7", "e5"], ["f1", "c
 
 test("two people install Chess, play Scholar's mate in their chat, and the game is back after a reload", {
   tag: ["@feature:apps.chess.web", "@feature:apps.chess", "@feature:apps.chat.card", "@feature:apps.chat.wire"],
-}, async ({ peer }) => {
+}, async ({ peer, browserName }) => {
   test.setTimeout(6 * 60_000);
   const publisher = new ChessPublisher();
   const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
   publisher.signStore({ apps: [chess] });
-  const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
+  const [ana, bob] = await openPeers(peer, browserName, "ana", "bob");
   const [, bobAsked] = await Promise.all([publisher.serve(ana.context), publisher.serve(bob.context)]);
   await setNickname(ana, "Ana");
   await setNickname(bob, "Bob");
@@ -125,11 +125,11 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
 
 test("both have Chess: one opens it and waits, the other opens it from the card later; they toss, play, close and reopen", {
   tag: ["@feature:apps.chess.web", "@feature:apps.chess", "@feature:apps.chat.wire"],
-}, async ({ peer }) => {
+}, async ({ peer, browserName }) => {
   test.setTimeout(6 * 60_000);
   const publisher = new ChessPublisher();
   publisher.signStore({ apps: [publisher.publish({ version: "1.2.0", sequence: 1 })] });
-  const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
+  const [ana, bob] = await openPeers(peer, browserName, "ana", "bob");
   await Promise.all([publisher.serve(ana.context), publisher.serve(bob.context)]);
   await setNickname(ana, "Ana");
   await setNickname(bob, "Bob");
@@ -162,7 +162,7 @@ test("both have Chess: one opens it and waits, the other opens it from the card 
   await boardsShow([[ana, anaColour], [bob, bobColour]], [["f3", /♞/], ["g1", /^$/]]);
 });
 
-test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", "@feature:apps.bundle"] }, async ({ peer }) => {
+test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", "@feature:apps.bundle"] }, async ({ peer, browserName }) => {
   const publisher = new ChessPublisher();
   const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
   publisher.signStore({ apps: [chess] });
@@ -170,7 +170,7 @@ test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", 
   const tampered = chess.bytes.slice();
   tampered[tampered.length - 200] ^= 0x01;
   publisher.files.set(chess.url, tampered);
-  const ana = await peer("ana");
+  const [ana] = await openPeers(peer, browserName, "ana");
   await publisher.serve(ana.context);
 
   await ana.page.goto("/#/apps");
@@ -197,12 +197,12 @@ test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", 
   await expect(ana.page.getByTestId("apps-none")).toBeVisible();
 });
 
-test("a lower sequence is not installed over a newer one", { tag: ["@feature:apps.chess.web", "@feature:apps.updates"] }, async ({ peer }) => {
+test("a lower sequence is not installed over a newer one", { tag: ["@feature:apps.chess.web", "@feature:apps.updates"] }, async ({ peer, browserName }) => {
   const publisher = new ChessPublisher();
   const older = publisher.publish({ version: "1.2.0", sequence: 1, path: "v1/app.ghostlyapp" });
   const newer = publisher.publish({ version: "1.3.0", sequence: 2, path: "v2/app.ghostlyapp" });
   publisher.signStore({ apps: [newer] });
-  const ana = await peer("ana");
+  const [ana] = await openPeers(peer, browserName, "ana");
   await publisher.serve(ana.context);
   await installFromStore(ana.page);
   await expect(ana.page.getByTestId("installed-app")).toContainText("1.3.0");
@@ -225,11 +225,11 @@ test("a lower sequence is not installed over a newer one", { tag: ["@feature:app
   await expect(ana.page.getByTestId("installed-app-open")).toBeVisible();
 });
 
-test("a version a store removed stays stopped until Run anyway", { tag: ["@feature:apps.chess.web", "@feature:apps.engine.installed", "@feature:apps.page"] }, async ({ peer }) => {
+test("a version a store removed stays stopped until Run anyway", { tag: ["@feature:apps.chess.web", "@feature:apps.engine.installed", "@feature:apps.page"] }, async ({ peer, browserName }) => {
   const publisher = new ChessPublisher();
   const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
   publisher.signStore({ apps: [chess] });
-  const ana = await peer("ana");
+  const [ana] = await openPeers(peer, browserName, "ana");
   await publisher.serve(ana.context);
   await installFromStore(ana.page);
 
@@ -253,11 +253,11 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
   await expect(chessFrame(ana.page).locator(".status")).toHaveText("White to move");
 });
 
-test("a version its publisher revoked never runs", { tag: ["@feature:apps.chess.web", "@feature:apps.engine.installed", "@feature:apps.page"] }, async ({ peer }) => {
+test("a version its publisher revoked never runs", { tag: ["@feature:apps.chess.web", "@feature:apps.engine.installed", "@feature:apps.page"] }, async ({ peer, browserName }) => {
   const publisher = new ChessPublisher();
   const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
   publisher.signStore({ apps: [chess] });
-  const ana = await peer("ana");
+  const [ana] = await openPeers(peer, browserName, "ana");
   await publisher.serve(ana.context);
   await installFromStore(ana.page);
   await expect(ana.page.getByTestId("installed-app-open")).toBeVisible();

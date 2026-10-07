@@ -12,7 +12,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { BrowserContext, FrameLocator, Page } from "@playwright/test";
-import { expect } from "./fixtures";
+import { expect, type Peer, type PeerOptions } from "./fixtures";
 import { serveStore } from "./appStore";
 
 const ROOT = resolve(import.meta.dirname, "../..");
@@ -143,4 +143,29 @@ export async function move(mover: Page, watcher: Page, from: string, to: string)
     await expect(chessFrame(page).locator(`[data-square="${to}"]`)).toHaveClass(/\blast\b/);
     await expect(chessFrame(page).locator(`[data-square="${from}"]`)).toHaveText("");
   }
+}
+
+/**
+ * The peers of a test. In WebKit each gets a browser profile on disk, as a person's Safari has: WebKit's in-memory
+ * contexts keep no Blob in IndexedDB and have no origin-private file system, so an app's bundle could not be stored
+ * ("Error preparing Blob/File data to be stored in object store"). Playwright's WebKit keeps one origin-private file
+ * system for all of them, so it is emptied before the first opens, and they open one after another.
+ */
+export async function openPeers(peer: (name: string, options?: PeerOptions) => Promise<Peer>, browserName: string, ...names: string[]): Promise<Peer[]> {
+  if (browserName !== "webkit") return Promise.all(names.map((name) => peer(name)));
+  const out: Peer[] = [];
+  for (const [i, name] of names.entries()) out.push(await peer(name, { persistent: true, ...(i === 0 ? { beforeOpen: emptyFileStorage } : {}) }));
+  return out;
+}
+
+async function emptyFileStorage(context: BrowserContext): Promise<void> {
+  const page = await context.newPage();
+  await page.goto("/version.json");
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const names: string[] = [];
+    for await (const name of (root as unknown as { keys(): AsyncIterable<string> }).keys()) names.push(name);
+    for (const name of names) await root.removeEntry(name, { recursive: true });
+  });
+  await page.close();
 }
