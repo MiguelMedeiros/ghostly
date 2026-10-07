@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame } from "../src/groupSession";
 import { CommunitySession, type CommunityFrame, type CommunityIncomingMessage } from "../src/groupCommunity";
-import { GROUP_FILE_LIMITS, fetchesByItself, groupFileFallback, readGroupFileMeta, type GroupFileMeta } from "../src/groupFiles";
+import { GROUP_FILE_LIMITS, fetchesByItself, groupFileFallback, isGroupMessageId, readGroupFileMeta, readGroupHave, readGroupWant, readGroupWantNo, type GroupFileMeta } from "../src/groupFiles";
 // covers: groups.files.wire
 
 /*
@@ -46,6 +46,40 @@ describe("what an older app shows, and what downloads by itself", () => {
     expect(fetchesByItself({ size: GROUP_FILE_LIMITS.autoBytes + 1 }, 0)).toBe(false);
     expect(fetchesByItself({ size: 1024 }, GROUP_FILE_LIMITS.autoBytesPerGroup - 1023)).toBe(false);
     expect(fetchesByItself({ size: 1024 }, 0, { autoBytes: 512, autoBytesPerGroup: 1e9 })).toBe(false);
+  });
+});
+
+describe("asking for a file and saying who holds one", () => {
+  const G = "g".repeat(22);
+  const mesh = `${"a".repeat(52)}:3:7`, community = `${"b".repeat(52)}:2:0123456789abcdef:4`;
+
+  it("names a message of either profile, and nothing else", () => {
+    expect(isGroupMessageId(mesh)).toBe(true);
+    expect(isGroupMessageId(community)).toBe(true);
+    for (const bad of ["", "x:1:2", `${"a".repeat(52)}:1`, `${"A".repeat(52)}:1:2`, `${"a".repeat(52)}:1:2:3:4`, 7, null]) expect(isGroupMessageId(bad)).toBe(false);
+  });
+
+  it("group-want: the group's, with a message id", () => {
+    expect(readGroupWant({ t: "group-want", g: G, id: mesh }, G)).toEqual({ id: mesh });
+    expect(readGroupWant({ t: "group-want", g: "other", id: mesh }, G)).toBeNull();
+    expect(readGroupWant({ t: "group-want", g: G, id: "../x" }, G)).toBeNull();
+    expect(readGroupWant({ t: "group-have", g: G, id: mesh }, G)).toBeNull();
+  });
+
+  it("group-want-no: gone, busy or refused; a reason it does not know reads as busy", () => {
+    for (const why of ["gone", "busy", "refused"]) expect(readGroupWantNo({ t: "group-want-no", g: G, id: mesh, why }, G)).toEqual({ id: mesh, why });
+    expect(readGroupWantNo({ t: "group-want-no", g: G, id: mesh, why: "later" }, G)).toEqual({ id: mesh, why: "busy" });
+    expect(readGroupWantNo({ t: "group-want-no", g: G, why: "gone" }, G)).toBeNull();
+  });
+
+  it(`group-have: 1 to ${GROUP_FILE_LIMITS.haveIds} message ids, each once; on an edge the group's, in a community without g`, () => {
+    const ids = Array.from({ length: GROUP_FILE_LIMITS.haveIds }, (_, i) => `${"c".repeat(52)}:1:${i}`);
+    expect(readGroupHave({ t: "group-have", g: G, ids }, G)).toEqual(ids);
+    expect(readGroupHave({ t: "group-have", ids: [community, community] })).toEqual([community]);
+    expect(readGroupHave({ t: "group-have", g: G, ids: [...ids, mesh] }, G)).toBeNull();
+    expect(readGroupHave({ t: "group-have", g: G, ids: [] }, G)).toBeNull();
+    expect(readGroupHave({ t: "group-have", g: G, ids: [mesh, "nope"] }, G)).toBeNull();
+    expect(readGroupHave({ t: "group-have", g: "other", ids: [mesh] }, G)).toBeNull();
   });
 });
 
@@ -136,6 +170,21 @@ describe("a file in a private group", () => {
     await reader.handle(alice.myKey, whole);
     expect(heard.at(-1)).toMatchObject({ file: voice, completes: true });
   });
+
+  it("could be read by the members of its epoch still in the group: not one let in later, not one removed", async () => {
+    const net = mesh();
+    const alice = net.add(GroupSession.create("Ghosts"));
+    const bob = await net.admit(alice), carol = await net.admit(alice);
+    const { id } = await alice.sendText("the report", Date.now(), [], undefined, undefined, undefined, pdf) as { id: string };
+    await net.settle();
+    const dave = await net.admit(alice);
+    expect(alice.couldRead(bob.myKey, id)).toBe(true);
+    expect(alice.couldRead(dave.myKey, id)).toBe(false);
+    await alice.remove(carol.myKey);
+    await net.settle();
+    expect(alice.couldRead(carol.myKey, id)).toBe(false);
+    expect(bob.couldRead(alice.myKey, id)).toBe(true);
+  });
 });
 
 /** Community members on one network where every broadcast reaches everyone. */
@@ -183,5 +232,19 @@ describe("a file in a community", () => {
     await net.settle();
     expect(net.inbox.get(alice.myKey)!.at(-1)).toMatchObject({ id: sent.id, text: groupFileFallback(voice), file: voice });
     expect(await bob.sendText("x", "Bot", Date.now(), [], undefined, undefined, undefined, { ...voice, d: "bad" })).toEqual({ error: "That file cannot go to a group" });
+  });
+
+  it("could be read by the members of its epoch still in the group, not by one let in later", async () => {
+    const net = community();
+    const alice = net.push(CommunitySession.create("Ghosts"));
+    const bob = await net.admit(alice);
+    await net.settle();
+    const { id } = await alice.sendText("the report", "Alice", Date.now(), [], undefined, undefined, undefined, pdf) as { id: string };
+    await net.settle();
+    const carol = await net.admit(alice);
+    await net.settle();
+    expect(alice.couldRead(bob.myKey, id)).toBe(true);
+    expect(alice.couldRead(carol.myKey, id)).toBe(false);
+    expect(alice.couldRead(bob.myKey, `${bob.myKey}:9:ffffffffffffffff:1`)).toBe(false);
   });
 });

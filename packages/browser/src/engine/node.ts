@@ -24,6 +24,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
 import { setOwnDidSource } from '../proofs/providers/did';
 import { ProfileDid } from './did';
@@ -134,9 +135,10 @@ import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
 import { lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
-import { fileBytes } from "../shared/fileBytes";
+import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
+import { groupFileId, storedGroupFiles } from "./groupFiles";
 import { DEFAULT_MINTS, TEST_MINT, mintNetwork } from "../shared/mints";
 import type {
   EngineState,
@@ -1195,6 +1197,14 @@ export class GhostlyNode implements EngineImplementation {
     // My latest edits, again, to a member whose edge opened: a private group has no catch-up for them. The group's pin too.
     edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); this.sendGroupPinFrame(groupId, peer); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
+    // Files in groups (WISP 503): kept where a chat's are, their bytes over the edges' files/3.
+    groupFiles: {
+      store: storedGroupFiles,
+      transfers: this.transfers,
+      settings: () => ({ autoDownloads: this.settings.autoDownloads !== false, serveFiles: this.settings.serveFiles !== false }),
+      sendFiles: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
+      writable: linkId => this.links.get(linkId)?.link?.filesWritable(),
+    },
   });
 
   /**
@@ -3476,7 +3486,13 @@ export class GhostlyNode implements EngineImplementation {
     return offered;
   }
 
-  fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void {
+  fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void | Promise<void> {
+    // A group's file (WISP 503): asked for (Download), or asked for again; its transfers are the group's to run.
+    if (typeof linkId === "string" && linkId.startsWith("group:")) {
+      if (action !== "accept" && action !== "request") throw new Error("A group's file is downloaded (accept) or asked for again (request)");
+      if (!fileId.startsWith(`group-${linkId.slice("group:".length)}-`)) throw new Error("No such file in this group");
+      return this.groups.downloadFile(fileId);
+    }
     const live = this.links.get(linkId);
     if (!live) throw new Error("No such chat");
     if (!["accept", "decline", "pause", "resume", "cancel", "resend", "request"].includes(action)) throw new Error("Unknown file action");
@@ -3936,6 +3952,29 @@ export class GhostlyNode implements EngineImplementation {
     if (!sent.error) this.wakeMentioned(groupId, text, named);
     return sent;
   }
+  /**
+   * Announces a file or voice message in a group (WISP 503 · Group Files): its bytes are in the files store under
+   * `file.id` (`group-<group>-out-…`), put there by the caller as a chat's file is (`sendFile`). The message carries its
+   * description and the SHA-256 of those bytes; its text is `caption`, or the line apps from before show. This device
+   * is its first holder: members fetch it from here, then from each other.
+   */
+  async sendGroupFile({ groupId, file, caption, replyTo, forwarded: hops }: { groupId: string; file: MessageFile; caption?: string; replyTo?: string; forwarded?: number }): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
+    if (typeof groupId !== "string" || !file || typeof file.id !== "string" || !file.id.startsWith(`group-${groupId}-out-`)) return { error: "Invalid file id", refused: true };
+    if (file.size > GROUP_FILE_LIMITS.maxBytes) return { error: `A group takes files of up to ${formatFileSize(GROUP_FILE_LIMITS.maxBytes)}`, refused: true };
+    const stored = await fileStore.get(file.id);
+    if (!stored?.metadata || stored.linkId !== `group:${groupId}` || stored.direction !== "out") return { error: "The file is gone", refused: true };
+    if (storedSize(stored) !== file.size) return { error: "The file is not all here", refused: true };
+    // The digest the caller wrote down when it copied the bytes in, or read back now.
+    const digest = stored.digest ?? (stored.blob ? await blobDigest(stored.blob) : await (await fileBytesOf(stored.bytes!))!.digest(file.id));
+    if (!stored.digest) await fileStore.patch(file.id, { digest });
+    const meta = readGroupFileMeta({ name: file.name, mime: file.mime, size: file.size, d: digest, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }) });
+    if (!meta) return { error: "That file cannot go to a group", refused: true };
+    if (file.voice && !meta.voice) return { error: "That recording cannot be sent as a voice message", refused: true };
+    const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);
+    if (typeof reply === "string") return { error: reply };
+    const text = typeof caption === "string" && caption.trim() ? caption : groupFileFallback(meta);
+    return this.groups.sendFile(groupId, text, meta, file.id, reply && { i: reply.id, s: reply.snippet, f: reply.member! }, readForwarded(hops));
+  }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
 
   /**
@@ -4011,7 +4050,15 @@ export class GhostlyNode implements EngineImplementation {
             if (sent.error) note(sent.error); else if (sent.messageId) result.messageIds.push(sent.messageId);
             continue;
           }
-          if (groupId) { note("Groups take no files yet"); continue; }
+          if (groupId) {
+            // A new announcement by me (WISP 503 § Forwards), my own copy its first holder.
+            const original = message.file!, file: MessageFile = { id: groupFileId(groupId, "out"), name: original.name, size: original.size, mime: original.mime,
+              ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
+            await copyForForward(original.id, { linkId: to, wireId: file.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file });
+            const sent = await this.sendGroupFile({ groupId, file, forwarded: hops });
+            if (sent.error) { await removeStored(file.id).catch(() => {}); note(sent.error); } else if (sent.messageId) result.messageIds.push(sent.messageId);
+            continue;
+          }
           if (!live!.link) { note("You are offline"); continue; }
           const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
           const file: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
@@ -5155,6 +5202,13 @@ export class GhostlyNode implements EngineImplementation {
       await db.putSettings(this.settings);
       if (settings.sendTyping === false) { for (const live of this.links.values()) live.link?.setTyping(false); this.groups.stopTyping(); }
     }
+    // Automatic downloads and serving group files (WISP 503): absent means on, as kept.
+    for (const key of ["autoDownloads", "serveFiles"] as const) {
+      if (settings[key] === undefined) continue;
+      if (settings[key] !== false) delete this.settings[key];
+      else this.settings[key] = false;
+      await db.putSettings(this.settings);
+    }
     // Load public profiles: absent means on; turned off, nothing read before is kept.
     if (settings.publicProfiles !== undefined) {
       if (settings.publicProfiles !== false) delete this.settings.publicProfiles;
@@ -6130,6 +6184,8 @@ export class GhostlyNode implements EngineImplementation {
       arkPaymentsSupport: !entry,
       usdtPaymentsSupport: !entry,
       barkPaymentsSupport: !entry,
+      // An edge carries the bytes of the group's files between its two members (WISP 503); an entry session does not.
+      largeFilesSupport: !entry,
       params: stored,
       rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId),
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
@@ -6197,6 +6253,9 @@ export class GhostlyNode implements EngineImplementation {
           onPaymentResult: (result: PaymentResult) => member() ? this.desk.onPaymentResult(linkId, result) : undefined,
           // The member says its name on every session over the edge, and an empty one when it removed it.
           onPeerNick: (nick: string | null) => this.groups.edgeNick(group, peer, nick ?? undefined),
+          // A group file's bytes (WISP 503): they belong to the group's message, never to the edge as a chat.
+          onFilesFrame: (frame: Record<string, unknown>) => member() ? this.groups.filesFrame(group, peer, linkId, frame) : undefined,
+          onFilesSession: (open: boolean) => this.groups.fileSession(group, peer, linkId, open),
         }),
         onPresence: presence => {
           if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
@@ -6981,13 +7040,15 @@ export class GhostlyNode implements EngineImplementation {
   private async completeGroupMessage(message: StoredMessage): Promise<void> {
     if (!(await db.hasMessage(message.linkId, message.id))) return this.storeMessage(message);
     const whole = await this.resolveReply(message);
+    // A file it announces (WISP 503) comes only with the whole copy, which also says what the row shows for it.
     const added: Partial<StoredMessage> = { ...(whole.mentions && { mentions: whole.mentions }), ...(whole.mentioned && { mentioned: true }),
-      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }), ...(whole.card && { card: whole.card }), ...(whole.press && { press: whole.press }) };
+      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }), ...(whole.card && { card: whole.card }), ...(whole.press && { press: whole.press }),
+      ...(whole.file && { file: whole.file, text: whole.text }) };
     if (!Object.keys(added).length) return;
     // A card belongs to its version: an edit taken meanwhile keeps its own.
     const patched = await db.patchMessage(message.linkId, message.id, stored => {
       if (stored.member !== message.member || stored.sender !== message.sender) return null;
-      const { card: _card, ...rest } = added;
+      const { card: _card, text: _text, ...rest } = added;
       return stored.edit ? rest : added;
     });
     if (!patched) return;

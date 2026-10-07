@@ -1015,6 +1015,7 @@
     "packages/browser/src/engine/did.ts": ["did.*"],
     "packages/browser/src/engine/fileDesk.ts": ["files.*"],
     "packages/browser/src/engine/groupEdits.ts": ["groups.edit","groups.protocol.edits"],
+    "packages/browser/src/engine/groupFiles.ts": ["groups.files","groups.files.wire"],
     "packages/browser/src/engine/groupPayments.ts": ["groups.payments.*","groups.community.payments.*"],
     "packages/browser/src/engine/hold.ts": ["delivery.hold.*","chat.paired.offline-send"],
     "packages/browser/src/engine/identities.ts": ["proofs.*","sdk.plugin.identity"],

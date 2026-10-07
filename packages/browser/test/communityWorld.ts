@@ -245,6 +245,21 @@ export class CommunityWorld {
     return found.length === 1 && same.length === 1 ? found[0] : undefined;
   }
 
+  /**
+   * A files/3 frame on an edge (the bytes of a group's files, WISP 503), delivered as a group frame is; false when the
+   * edge is down. A test that runs group files gives its peers a `groupFiles` host whose `sendFiles` calls this.
+   */
+  sendFiles(peer: Peer, linkId: string, frame: Record<string, unknown>): boolean {
+    const edge = peer.links.get(linkId), there = edge && this.counterpart(edge);
+    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there.peer)) return false;
+    const data = JSON.stringify(frame);
+    peer.sent.frames++; peer.sent.bytes += data.length;
+    const copy = JSON.parse(data) as Record<string, unknown>;
+    if (this.drop?.(peer, there.peer, copy)) return true;
+    this.pending.push(there.peer.groups.filesFrame(edge.g, edge.me, there.linkId, copy));
+    return true;
+  }
+
   /** Both ends online and reachable, and (with a `NetworkModel`) signaling done on both sides. */
   private up(peer: Peer, edge: Edge, there: Peer): boolean {
     if (!peer.online || !there.online || !this.sameSide(peer, there)) return false;
@@ -310,9 +325,13 @@ export class CommunityWorld {
         const up = !!there && this.up(peer, edge, there.peer);
         if (up && !edge.announced) {
           edge.announced = true;
-          if (edge.kind === "edge") peer.groups.edgeReady(edge.g, edge.peer, linkId);
+          // An edge's session agrees files/3 as it agrees groups (group files, WISP 503).
+          if (edge.kind === "edge") { peer.groups.fileSession(edge.g, edge.peer, linkId, true); peer.groups.edgeReady(edge.g, edge.peer, linkId); }
           else if (edge.kind === "host") peer.groups.entryReady(edge.g, linkId, edge.peer);
-        } else if (!up) edge.announced = false;
+        } else if (!up) {
+          if (edge.announced && edge.kind === "edge") peer.groups.fileSession(edge.g, edge.peer, linkId, false);
+          edge.announced = false;
+        }
       }
     }
   }

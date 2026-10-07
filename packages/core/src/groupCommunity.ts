@@ -563,6 +563,15 @@ export class CommunitySession {
     for (const roster of this.rosters.values()) if (rosterHas(roster, key)) return true;
     return false;
   }
+  /**
+   * Whether `key` could read message `messageId` (`<s>:<e>:<h>:<n>`) and still can: a member of the roster it was sealed
+   * for, and of the roster now. A holder serves a group file only to such a member (WISP 503 § Asking).
+   */
+  couldRead(key: string, messageId: string): boolean {
+    const [, e, h] = messageId.split(":");
+    const found = h === undefined ? undefined : this.commitByShort(Number(e), h);
+    return !!found && rosterHas(this.rosterAt(found.hash) ?? [], key) && rosterHas(this.roster, key);
+  }
   /** Someone the chain took out (removed or left) and who is not back in. */
   wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
   /** When the chain took them out (the commit's time, by its signer's clock), if it did and they are not back in. */

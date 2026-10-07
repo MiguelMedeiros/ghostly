@@ -26,9 +26,20 @@ export const GROUP_FILE_LIMITS = {
   announceWindowMs: 10 * 60_000,
   /** Holders remembered per file. */
   holders: 8,
+  /**
+   * Message ids a `group-have` named before their message came (a member back from away hears who holds what as its
+   * catch-up begins), remembered with their holders for when it does.
+   */
+  heardAhead: 256,
   /** Message ids in one `group-have`. */
   haveIds: 32,
-  /** How long a want waits for an offer before the next holder is asked. */
+  /** A private group's `group-have` goes on an edge at most this often; a community's, from a member, every `communityHaveEveryMs`. */
+  haveEveryMs: 10_000,
+  communityHaveEveryMs: 60_000,
+  /**
+   * How long a want waits for an offer before the next holder is asked; a transfer that does not move for as long is
+   * left for the next holder too.
+   */
   wantWaitMs: 30_000,
   /** A file session closes this long after its last transfer ends. */
   sessionIdleMs: 60_000,
@@ -42,6 +53,50 @@ export const GROUP_FILE_LIMITS = {
 
 /** The `paired-groups` version an app announces when it takes group files: it answers wants and takes `group-have`. */
 export const GROUP_VERSION_FILES = 6;
+
+/**
+ * The frames of WISP 503 § Getting the bytes, on an edge between two apps that announced `GROUP_VERSION_FILES`:
+ * `group-want {g, id}` asks a holder for the file of message `id`; `group-want-no {g, id, why}` is a holder's no;
+ * `group-have {g, ids}` says which files a member keeps (in a community, an application frame `{t, ids}` instead).
+ */
+export const GROUP_WANT_FRAME = "group-want";
+export const GROUP_WANT_NO_FRAME = "group-want-no";
+export const GROUP_HAVE_FRAME = "group-have";
+export type GroupWantRefusal = "gone" | "busy" | "refused";
+const REFUSALS: readonly string[] = ["gone", "busy", "refused"];
+
+/** A group message's id, as a private group (`<s>:<e>:<n>`) or a community (`<s>:<e>:<h>:<n>`) names it. */
+const MESSAGE_ID = /^[a-z0-9]{52}:\d{1,15}(:[A-Za-z0-9_-]{1,64})?:\d{1,15}$/;
+export const isGroupMessageId = (value: unknown): value is string => typeof value === "string" && MESSAGE_ID.test(value);
+
+function frameOf(value: unknown, t: string, groupId?: string): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const f = value as Record<string, unknown>;
+  return f.t === t && (groupId === undefined || f.g === groupId) ? f : null;
+}
+
+/** A `group-want` of group `groupId`: the message whose file is asked for, or null. */
+export function readGroupWant(value: unknown, groupId: string): { id: string } | null {
+  const f = frameOf(value, GROUP_WANT_FRAME, groupId);
+  return f && isGroupMessageId(f.id) ? { id: f.id } : null;
+}
+
+/** A holder's `group-want-no` of group `groupId`, or null. A reason this app does not know reads as `busy`. */
+export function readGroupWantNo(value: unknown, groupId: string): { id: string; why: GroupWantRefusal } | null {
+  const f = frameOf(value, GROUP_WANT_NO_FRAME, groupId);
+  if (!f || !isGroupMessageId(f.id)) return null;
+  return { id: f.id, why: typeof f.why === "string" && REFUSALS.includes(f.why) ? f.why as GroupWantRefusal : "busy" };
+}
+
+/**
+ * The message ids of a `group-have`: of group `groupId` on an edge, or (no `groupId`) a community's application frame.
+ * At most `haveIds` message ids; a frame with more, or anything else, is null.
+ */
+export function readGroupHave(value: unknown, groupId?: string): string[] | null {
+  const f = frameOf(value, GROUP_HAVE_FRAME, groupId);
+  if (!f || !Array.isArray(f.ids) || !f.ids.length || f.ids.length > GROUP_FILE_LIMITS.haveIds || !f.ids.every(isGroupMessageId)) return null;
+  return [...new Set(f.ids as string[])];
+}
 
 /** A group file's description as the author's app puts it in the message (WISP 503 § The announcement). */
 export interface GroupFileMeta {

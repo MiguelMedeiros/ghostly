@@ -711,14 +711,21 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const saved = ok(await as(bob, "file", "save", copy.file.id, "--path", join(bob, "ghost-forwarded.png")));
     expect(sha(saved.path as string)).toBe(sha(picture));
 
-    // Into the group: the text goes, a file is refused (groups take texts only), a message not in the chat is not found.
+    // Into the group: the text goes, and the file as a new announcement of Alice's (WISP 503); a message not in the chat is not found.
     const inGroup = await listenTo(bob, "--type", "group.message");
     const toGroup = ok(await as(alice, "forward", "bob", theirs.id, "--to", "Bot crew", "--wait", "sent"));
     expect(toGroup).toMatchObject({ results: [{ kind: "group", error: null }] });
     // By its text: a message said in the group just before may still be arriving.
     expect(await inGroup.waitFor((e) => e.type === "group.message" && (e.message as { text?: string }).text === "pass **this** on", 60_000)).toMatchObject({ message: { forwarded: 1 } });
     await inGroup.stop();
-    expect(error(await as(alice, "forward", "bob", fileMessage.id, "--to", "Bot crew"), "refused", 1).message).toMatch(/Groups take no files yet/);
+    // Her own copy is its first holder: Bob's app fetches it from hers, the same bytes.
+    const filesIn = await listenTo(bob, "--type", "group.message");
+    expect(ok(await as(alice, "forward", "bob", fileMessage.id, "--to", "Bot crew", "--wait", "sent"))).toMatchObject({ results: [{ kind: "group", error: null }] });
+    const filed = await filesIn.waitFor((e) => e.type === "group.message" && (e.message as { file?: { name?: string } }).file?.name === "ghost.png", 60_000);
+    await filesIn.stop();
+    const inGroupFile = (filed.message as { file: { id: string } }).file.id;
+    const fetched = ok(await as(bob, "file", "save", inGroupFile, "--path", join(bob, "ghost-in-group.png"), "--wait", "--timeout", "120"));
+    expect(sha(fetched.path as string)).toBe(sha(picture));
     error(await as(alice, "forward", "bob", "no-such-message", "--to", "bob"), "not_found", 3);
     error(await as(alice, "forward", "bob", theirs.id), "bad_request", 1);
   });

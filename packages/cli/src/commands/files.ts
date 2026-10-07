@@ -1,13 +1,14 @@
+import { GROUP_FILE_LIMITS } from "@ghostly/core";
 import { type Command, here, reply } from "./shared";
 
 /** Files: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
-  "file accept": { method: "file.action", usage: "file accept [<chat>] <file>", summary: "Take a file the contact offers", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
+  "file accept": { method: "file.action", usage: "file accept [<chat>] <file>", summary: "Take a file the contact offers, or download a group's file that did not come by itself (<chat> may be the group)", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
   "file cancel": { method: "file.action", usage: "file cancel [<chat>] <file>", summary: "Cancel a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "cancel" }) },
   "file decline": { method: "file.action", usage: "file decline [<chat>] <file>", summary: "Refuse a file the contact offers", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "decline" }) },
-  "file list": { method: "file.list", usage: "file list <chat>", summary: "A chat's files and their transfers", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "file list": { method: "file.list", usage: "file list <chat|group>", summary: "A chat's or a group's files and their transfers", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "file pause": { method: "file.action", usage: "file pause [<chat>] <file>", summary: "Pause a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "pause" }) },
-  "file request": { method: "file.action", usage: "file request [<chat>] <file>", summary: "Ask again for a file that stopped arriving: it goes on from what is here", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "request" }) },
+  "file request": { method: "file.action", usage: "file request [<chat>] <file>", summary: "Ask again for a file that stopped arriving: it goes on from what is here (a group's file: asked of whoever holds it)", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "request" }) },
   "file resend": { method: "file.action", usage: "file resend [<chat>] <file>", summary: "Send again a file that stopped moving or failed: it goes on from what the contact holds", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resend" }) },
   "file resume": { method: "file.action", usage: "file resume [<chat>] <file>", summary: "Resume a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resume" }) },
   "file save": {
@@ -23,8 +24,8 @@ export const commands: Record<string, Command> = {
     }),
   },
   "file send": {
-    method: "file.send", usage: "file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>]", summary: "Send a file (or, with --voice, a voice note), as a reply with --reply",
-    args: ["chat", "path"], options: { name: { type: "string", description: "The name the contact sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply },
+    method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,
+    args: ["chat", "path"], options: { name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply },
     params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, voice: options.voice, peaks: typeof options.peaks === "string" ? options.peaks.split(",") : undefined, reply: options.reply }),
   },
   "file wait": {

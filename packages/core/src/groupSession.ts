@@ -467,6 +467,15 @@ export class GroupSession {
   get status(): GroupStatus { return this.state.status; }
   /** Members other than me, in the current roster. */
   get others(): string[] { return this.roster.map(([k]) => k).filter(k => k !== this.myKey); }
+  /**
+   * Whether `key` could read message `messageId` (`<s>:<e>:<n>`) and still can: in the roster of its epoch, and in the
+   * roster now. A holder serves a group file only to such a member (WISP 503 § Asking).
+   */
+  couldRead(key: string, messageId: string): boolean {
+    const e = Number(messageId.split(":")[1]);
+    const then = this.state.chain.find(c => c.e === e);
+    return !!then && rosterHas(then.m, key) && rosterHas(this.roster, key);
+  }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
   get picture(): string | undefined { return groupMetaPicture(this.state.meta); }

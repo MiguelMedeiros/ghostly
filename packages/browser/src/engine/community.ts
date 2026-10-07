@@ -2,13 +2,15 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
+  GROUP_HAVE_FRAME,
+  type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
 import { FramesTaken, arrivalNow, cameAt, cameOrWritten, editKey, eventTime, mentionAt, mentionFields, noteCame, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
+import { groupFileText, type GroupFileDesk, type GroupFileMembership } from "./groupFiles";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
 export const pictureText = (name: string, set: boolean) => `${name} ${set ? "changed" : "removed"} the group's picture`;
@@ -316,8 +318,18 @@ export class Communities {
   private time = 0;
   private now(): number { return this.time || Date.now(); }
 
+  /** Files and voice messages (WISP 503), the desk `Groups` keeps for every group. */
+  files?: GroupFileDesk;
+
   has(groupId: string): boolean { return this.stored.has(groupId); }
+  ids(): string[] { return [...this.stored.keys()]; }
   session(groupId: string): CommunitySession | undefined { return this.live.get(groupId)?.session; }
+  /** Me in a community I am a member of, for its files: who is in it, and who could read one of its messages. */
+  fileMembership(groupId: string): GroupFileMembership | undefined {
+    const session = this.live.get(groupId)?.session;
+    if (!session?.isMember) return undefined;
+    return { me: session.myKey, community: true, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId) => session.couldRead(key, messageId) };
+  }
   /** Is this device a hub of the group? (tests and the load harness) */
   isHub(groupId: string): boolean { const live = this.live.get(groupId); return !!live?.hub && live.session.status === "active"; }
 
@@ -448,7 +460,7 @@ export class Communities {
     this.host.emit();
   }
 
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard, file?: GroupFileMeta): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
     const live = this.live.get(groupId);
     if (!live) return { error: "You are not in this group yet", refused: true };
     // Not a member (removed, the history forked, an admission that lost): refused, not something to try again.
@@ -458,7 +470,7 @@ export class Communities {
     // times against the frame's. Dated by the wall clock, a frame read as written before admissions it came after
     // whenever the two differ (on headless engines, minutes): the members let in meanwhile never got it (2026-10-03).
     const now = this.now();
-    const result = card ? await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded, card) : await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded);
+    const result = card || file ? await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded, card, file) : await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded);
     return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
   }
 
@@ -1586,8 +1598,10 @@ export class Communities {
         // so neither the history nor the list of groups follows a member's clock.
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) });
+        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
+        const file = m.file && this.files ? await this.files.announced(id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
+        const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }) });
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, came));
@@ -1595,7 +1609,8 @@ export class Communities {
         noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
-      app: m => this.deliver(id, () => this.host.communityApp?.(id, m.sender, m.frame)),
+      // Who holds which files (WISP 503) is the file desk's; anything else the engine's.
+      app: m => this.deliver(id, () => m.frame.t === GROUP_HAVE_FRAME ? this.files?.communityApp(id, m.sender, m.frame) : this.host.communityApp?.(id, m.sender, m.frame)),
       pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
       metaChanged: (by, change, at) => {

@@ -255,7 +255,9 @@ export class EventHub {
       this.transfers.set(id, shape);
       if (quiet || before === shape) continue;
       const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
-      const fields = { chat, file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
+      // A group's file (WISP 503) names its group.
+      const group = chat ? undefined : state.groups.find((g) => id.startsWith(`group-${g.id}-`))?.id;
+      const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
       let emit: ((messageId: string | null) => void) | null = null;
       if (transfer.state === "done") { const key = `file.done:${id}`; emit = (messageId) => this.emit("file.done", key, { ...fields, messageId }); }
       else if (transfer.state === "failed") { const key = `file.failed:${id}:${this.now()}`; emit = (messageId) => this.emit("file.failed", key, { ...fields, messageId, retry: !!transfer.retry }); }
