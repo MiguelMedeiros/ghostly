@@ -5,6 +5,8 @@
  * arrives inside a packet that is signed by the peer's key and encrypted with
  * the link key, which is what binds the WebRTC connection to the peer identity.
  */
+import { isGlobalIpv4Host } from "./callSignal";
+
 export interface RtcSignal {
   t: "o" | "a";
   ts: number;
@@ -71,13 +73,17 @@ const CANDIDATE_TYPE_NAME: Record<string, string> = { h: "host", s: "srflx", r: 
  * sends a packet for its own public address back in (2026-10-02). So host candidates go in this order of preference:
  * those a server reflexive candidate was gathered from (`raddr`: an interface with a way out, the network a contact
  * nearby shares), then the others, and in each case those the browser marks as costly last (`network-cost` 50 or
- * more: a VPN, or an interface it does not know), as a call's candidates do (`pickCallCandidates`). With no
- * reflexive candidate, or none that says where it came from, the order is the browser's, as before.
+ * more: a VPN, or an interface it does not know), as a call's candidates do (`pickCallCandidates`). A host on a
+ * global IPv4 address has a way out too: it gets no reflexive candidate (Chromium drops one equal to a host), and the
+ * gathering wait ends on it (`isGlobalIpv4Host`). That wait ends 400 ms after the first reflexive candidate, so only
+ * the interfaces whose STUN answer came by then are known to have a way out. With no reflexive candidate, or none
+ * that says where it came from, the order is the browser's, as before.
  */
 function hostRank(parts: string[], reflexiveBases: ReadonlySet<string>): number {
   const cost = Number(parts[parts.indexOf("network-cost") + 1]);
   const costly = parts.includes("network-cost") && cost >= 50;
-  return (costly ? 2 : 0) + (reflexiveBases.has(parts[4]) ? 0 : 1);
+  const wayOut = reflexiveBases.has(parts[4]) || isGlobalIpv4Host(parts.join(" "));
+  return (costly ? 2 : 0) + (wayOut ? 0 : 1);
 }
 
 export function extractRtcParams(sdp: string): Pick<RtcSignal, "u" | "p" | "f" | "s" | "c"> {
