@@ -225,7 +225,8 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop/call-devices.spec.ts` | Linux: the microphone, camera and speaker chosen in Settings (PulseAudio null sources and sinks stand in for named devices) are the ones a call uses, the call's menu switches them live, an unplugged microphone falls back and is offered back, and Settings meters the microphone and plays the test tone through Rust. Skips without PulseAudio |
 | `desktop/video-stream.spec.ts` | a 100 MB video plays and seeks from the stored file in WebKitGTK (HTTP on 127.0.0.1) and WebView2 (`http://ghostly-file.localhost/<token>`), each answer a range of at most 4 MiB; video full screen. Run by `desktop-media.yml` |
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
-| `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with v0.4](#compatibility-with-v04) |
+| `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with older releases](#compatibility-with-older-releases) |
+| `compat/v11.spec.ts` | the current app (mini-apps on) with a real v1.1.4, which has no apps/1: an app card reaches it as its text with the bundle URL a link, the chat goes on both ways, and + → Apps says the contact's app can't run apps. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT. See [Desktop on macOS](#desktop-on-macos) |
 | `desktop-macos/external-links.spec.ts` | macOS only: a link in a message and Settings → About → GitHub go to the system browser (`open_web_link`), not to a dropped new window |
 | `desktop-macos/headless-call.spec.ts` | macOS only: the Desktop app and a headless bot (`packages/cli`) call each other both ways, tones checked on the bot's audio socket and in the app's stats |
@@ -271,7 +272,7 @@ mounted over: `node_modules` must be Linux's), then `npm ci`, `npm run tauri -- 
 
 `openDesktop({ profile, home, env })` opens one more app: `profile` is its `GHOSTLY_PROFILE`, `home` a directory of
 its own for `HOME` and the XDG directories (`desktopHome(name)` makes one; two apps on one machine otherwise
-share one WebKit store), and `env` whatever else it should start with. The app reads three variables for its network,
+share one WebKit store), and `env` whatever else it should start with. The app reads these variables for its network,
 for a private network as much as for tests:
 
 | | |
@@ -280,6 +281,13 @@ for a private network as much as for tests:
 | `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`apps/desktop/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
 | `GHOSTLY_DHT` | `0` keeps the headless CLI off the Mainline DHT (relays only); the e2e helpers and the CLI's own tests set it unless a test runs its own DHT testnet (`GHOSTLY_DHT_BOOTSTRAP`) |
 | `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native/transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
+| `GHOSTLY_IROH_RELAYS` | comma-separated Iroh relay URLs instead of n0's public ones, unless the profile names its own in Settings (`apps/desktop/src/paired_transport.rs`) |
+
+Every driver (`support/desktop.ts`, `support/desktopMac.ts`, `support/streamCheck.ts`) starts the app on this machine
+only: a dead Pkarr relay (and so no Mainline DHT), a dead HyperDHT bootstrap and an Iroh relay that is the e2e infra's
+(`GHOSTLY_IROH_RELAY_URL`) or a dead one, each unless the test or the shell names its own on loopback
+(`desktopTestNetworkEnv` in `packages/cli/test/support/network.ts`). A public host there is refused;
+`GHOSTLY_TEST_PUBLIC_NET=1` allows the app's own networks. The WebView's public STUN servers have no knob on Desktop.
 
 `DesktopApp` clicks, types (`type`, with `\uE007` for Enter), reads text and attributes, and runs a script in the
 page (`execute`): enough for `matrix/people.ts` to drive a chat.
@@ -381,26 +389,30 @@ job of their own on ubuntu-22.04, then one report with the matrix in the run's s
 hand, `gh workflow run e2e-full.yml --ref <branch> -f jobs=desktop` runs only the Desktop job and the report. It serves its own
 build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
 
-## Compatibility with v0.4
+## Compatibility with older releases
 
 A contact still on v0.4.0 can only make the old kind of chat, with a prefix-less invite, and cannot read a `ghostly1`
 one (WISP 402). `compat/v04.spec.ts` checks that against v0.4.0 itself rather than a stand-in
-(`web/compat-chat.spec.ts` plays the 0.4 side with a prefix-less session in the current app).
+(`web/compat-chat.spec.ts` plays the 0.4 side with a prefix-less session in the current app). A contact on v1.1.4, the
+last release with no mini-apps, gets an app card as its text and never offers `apps/1` (WISP 1200, WISP 405 § An app):
+`compat/v11.spec.ts` checks that, and what + → Apps says about such a contact.
 
 ```bash
-npm run test:e2e:compat                                        # builds v0.4.0 the first time (about a minute)
-E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports (defaults 4183 and 4184)
+npm run test:e2e:compat                                        # builds v0.4.0 and v1.1.4 the first time (a few minutes)
+E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 npm run test:e2e:compat  # other ports (defaults 4183, 4184, 4185)
 ```
 
-- **The old build.** The release attaches no web build, so `tools/scripts/build-compat-web.mjs` exports the tag with
-  `git archive` (nothing is checked out here), runs its own `npm ci` and `build:web`, and keeps its `web/dist` in
-  `~/.cache/ghostly/compat/v0.4.0` (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it,
-  `--force` rebuilds. `--serve <port>` serves it with a small static server: the export keeps no `node_modules`.
-- **The config.** `playwright.compat.config.ts` starts both servers (the current build and v0.4.0) and hands the old
-  one's address to the spec as `config.metadata.compatURL`. Both apps meet on the test's Pkarr relay, as everywhere.
-- **In CI** `e2e-compat.yml` (about 4 minutes, the v0.4.0 build cached by tag) runs nightly on `dev`, as a job of
-  the E2E workflow (so before every release), and by hand. Not on pull requests, like the rest of the app's e2e:
-  v0.4.0 never changes, only `dev` can break it, and a night is soon enough to hear about it.
+- **The old builds.** A release attaches no web build, so `tools/scripts/build-compat-web.mjs` exports the tag with
+  `git archive` (nothing is checked out here), runs its own `npm ci` and `build:web`, and keeps the built app (from
+  `web/dist` or, after the 2026-09-30 layout, `apps/web/dist`) in `~/.cache/ghostly/compat/<tag>/dist`
+  (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it, `--force` rebuilds. `--serve <port>`
+  serves it with a small static server: the export keeps no `node_modules`.
+- **The config.** `playwright.compat.config.ts` starts three servers (the current build, with mini-apps on as in the
+  main suite, v0.4.0 and v1.1.4) and hands the old ones' addresses to the specs as `config.metadata.compatURL` and
+  `compat11URL`. The apps meet on the test's Pkarr relay, as everywhere.
+- **In CI** `e2e-compat.yml` (both old builds cached by tag) runs nightly on `dev`, as a job of the E2E workflow (so
+  before every release), and by hand. Not on pull requests, like the rest of the app's e2e: the old releases never
+  change, only `dev` can break them, and a night is soon enough to hear about it.
 
 ## WebKit
 
@@ -410,6 +422,8 @@ stored Blobs and files differently, so the specs that depend on that also run th
 the device signing key (`web/device-signing-key.spec.ts`: a non-extractable Ed25519 key, WISP 06, made by the app's
 own module, refuses export and wrap and signs after a reload, a browser restart and in a worker). The Desktop's own
 WKWebView, which Playwright's WebKit is not, runs the same check in `desktop-macos/device-signing-key.spec.ts`.
+Installing a mini-app in a context that lives in memory, as Safari's Private Browsing, which keeps no Blob in
+IndexedDB, says to try a normal window rather than WebKit's own error (`web/apps-private-storage.spec.ts`).
 
 ```bash
 npx playwright install webkit      # once
@@ -433,7 +447,7 @@ The app's e2e suites do not run on pull requests: they would hold up every merge
 | Web and extension (`E2E`, `e2e.yml`) | before every release (`release.yml` runs it first; no draft release and no web image unless it passes), and by hand (Actions → E2E → Run workflow, optionally with the URL of a deployed web app) |
 | Desktop specs on Linux (`e2e/desktop/`) | a job of its own in `E2E` (a Rust build never holds up the browser tests), and nightly after the Desktop scenarios of E2E (full) |
 | Everything, gated suites included (`E2E (full)`, `npm run e2e:full`) | nightly on `dev`, and by hand |
-| Compatibility with v0.4.0 | nightly, before every release, and by hand ([Compatibility with v0.4](#compatibility-with-v04)) |
+| Compatibility with v0.4.0 and v1.1.4 | nightly, before every release, and by hand ([Compatibility with older releases](#compatibility-with-older-releases)) |
 | Desktop on macOS | on every pull request and push, as part of CI (required), nightly, and by hand ([Desktop on macOS](#desktop-on-macos)) |
 
 `npm run check:desktop-bundle` also runs on every pull request (Frontend builds): it takes seconds.

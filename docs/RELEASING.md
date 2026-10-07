@@ -97,7 +97,7 @@ The website's download panel asks GitHub for the latest published release (at mo
 
 Only after publishing.
 
-- **app.ghostly.tools** serves `main`. To move it to the release, from the checkout's root: `docker compose -f infra/docker-compose.yml --env-file .env pull`, then the same with `up -d`, or build from the checkout with `GHOSTLY_BUILD=$(git rev-parse --short HEAD) docker compose -f infra/docker-compose.yml --env-file .env up -d --build` (`--env-file .env` keeps reading the root `.env`, where the server sets `GHOSTLY_WEB_BIND`). Without `GHOSTLY_BUILD` the image cannot say which commit it serves, and tabs already open are not told about the deploy.
+- **app.ghostly.tools** serves `main`. To move it to the release, from the checkout's root: `docker compose -f infra/docker-compose.yml --env-file .env pull`, then the same with `up -d`, or build from the checkout with `GHOSTLY_BUILD=$(git rev-parse --short HEAD) docker compose -f infra/docker-compose.yml --env-file .env up -d --build` (`--env-file .env` keeps reading the root `.env`, where the server sets `GHOSTLY_WEB_BIND`). Without `GHOSTLY_BUILD` the image cannot say which commit it serves. Tabs already open are offered a reload when the version number goes up, never for a new build of the same version.
 - **ghostly.tools**: rebuild the `apps/website/` container. Its `/latest.json` answers with the version in `apps/website/lib/release.ts`, which is how the extension learns about the release.
 
 How each client picks it up:

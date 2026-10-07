@@ -11,6 +11,8 @@ import { sanitizeDisplayText } from "./text";
  * DHT, never stored, never counted as unread, no message id (older apps drop it). While the person keeps typing,
  * `start` is said again at most every `TYPING_REFRESH_MS`; the receiver shows it until `stop`, a message from that
  * contact, the end of the session, or `TYPING_TIMEOUT_MS` without a new `start` (so a dropped link never leaves it on).
+ * A start standing when a session ends (a transport switch, a reconnect) is said again once the next one agreed
+ * `typing/1`, if the person's last word is still that recent.
  *
  * A `start` may say what the contact is doing (`kind`: typing, recording a voice note, thinking) and, for bots, a
  * short `status` line. Both are optional: an app that knows neither shows "typing…", and so does a kind it does not
@@ -95,11 +97,20 @@ export function parseTypingActivity(frame: Record<string, unknown>): TypingActiv
 
 const sameActivity = (a: TypingActivity | null, b: TypingActivity | null) => a?.kind === b?.kind && a?.status === b?.status;
 
-/** This side's word: when to say `start` again, and whether a `stop` is owed. One per session. */
+/**
+ * This side's word: when to say `start` again, and whether a `stop` is owed. One per chat; what was said is per session
+ * (`reset`), what the person is doing is not: a new session (a transport switch, a reconnect) says a standing start
+ * again (`resume`), since the contact's reader cleared it when the old session ended.
+ *
+ * The rate window is not per session: the reader's is per chat too (it is not cleared when a session ends), so a
+ * window that started afresh on each session could put a start past the reader's limit just after a switch.
+ */
 export class TypingSender {
   private startedAt = 0;
   private standing: TypingActivity | null = null;
   private recent: number[] = [];
+  /** What the person is doing, and when it last said so: kept across sessions, until it stops. */
+  private wanted: { activity: TypingActivity; at: number } | null = null;
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -110,6 +121,30 @@ export class TypingSender {
   typing(activity: TypingActivity = { kind: "typing" }): TypingFrame | null {
     const now = this.now();
     const word = typingActivity(activity.kind, activity.status);
+    this.wanted = { activity: word, at: now };
+    return this.say(word, now);
+  }
+
+  /**
+   * The person typed while nothing can be said (no session, or `typing/1` not agreed on it yet): kept, so the start
+   * goes once a session can carry it (`resume`).
+   */
+  want(activity: TypingActivity = { kind: "typing" }): void {
+    this.wanted = { activity: typingActivity(activity.kind, activity.status), at: this.now() };
+  }
+
+  /**
+   * A new session agreed `typing/1`: the `start` to say on it when the person was still at it, its last word less than
+   * `TYPING_TIMEOUT_MS` ago (as long as the contact would still have shown it). Null otherwise, when a start already
+   * went on this session, or when the window is full (the person's next keystroke says it).
+   */
+  resume(): TypingFrame | null {
+    const wanted = this.wanted, now = this.now();
+    if (!wanted || this.startedAt || now - wanted.at >= TYPING_TIMEOUT_MS) return null;
+    return this.say(wanted.activity, now);
+  }
+
+  private say(word: TypingActivity, now: number): TypingFrame | null {
     if (this.startedAt && now - this.startedAt < TYPING_REFRESH_MS && sameActivity(this.standing, word)) return null;
     this.recent = this.recent.filter(at => now - at < TYPING_RATE_WINDOW_MS);
     if (this.recent.length >= TYPING_SEND_LIMIT) return null;
@@ -119,8 +154,12 @@ export class TypingSender {
     return typingFrame("start", word);
   }
 
-  /** The person stopped (cleared the text, sent it, left the chat): a `stop`, only when a `start` is standing. */
+  /**
+   * The person stopped (cleared the text, sent it, left the chat): a `stop`, only when a `start` is standing on this
+   * session. Nothing is said again on the next one either way.
+   */
   stopped(): TypingFrame | null {
+    this.wanted = null;
     if (!this.startedAt) return null;
     this.recent.push(this.now());
     this.startedAt = 0;
@@ -131,7 +170,7 @@ export class TypingSender {
   /** A `start` is standing on this session. */
   get active(): boolean { return this.startedAt !== 0; }
 
-  /** The session ended: nothing is standing on the next one. */
+  /** The session ended: nothing is standing on the next one until `resume` (or the next keystroke) says it. */
   reset(): void { this.startedAt = 0; this.standing = null; }
 }
 

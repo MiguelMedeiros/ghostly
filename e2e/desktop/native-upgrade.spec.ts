@@ -23,8 +23,9 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * took 50 s to over 5 minutes then; about 40 s now, so two minutes is the budget.
  *
  * Nothing leaves the machine: both apps read and publish on the test's Pkarr relay (GHOSTLY_PKARR_RELAYS) and
- * find each other on a HyperDHT testnet in this process (GHOSTLY_HYPERDHT_BOOTSTRAP). Iroh keeps n0's relays, so
- * on a runner with no network the pair settles on HyperDHT; either native transport passes.
+ * find each other on a HyperDHT testnet in this process (GHOSTLY_HYPERDHT_BOOTSTRAP). Iroh homes on the e2e infra's
+ * relay where the run has one (GHOSTLY_IROH_RELAY_URL), else on a dead one, and the pair settles on HyperDHT; either
+ * native transport passes.
  */
 
 /**

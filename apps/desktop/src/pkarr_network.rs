@@ -130,6 +130,15 @@ const DHT_NO_NODES_RETRY_AFTER: Duration = Duration::from_secs(1);
 const DHT_NO_NODES_RETRIES: usize = 3;
 const DHT_STARTING: Duration = Duration::from_secs(60);
 
+/// While a put of a key is under way, the Mainline node refuses a newer packet of the same key put without a CAS ("conflict
+/// risk", which pkarr reports as "packet is not the most recent"). A chat's capability record goes out as the chat starts
+/// and again a moment later with its native endpoints' descriptors: the second was refused, the first stayed on the DHT,
+/// and a contact that reads the DHT alone never learned how to dial (two Linux Desktops DHT direct with Iroh's relay out
+/// of reach, 2026-10-07; a relay homing a few seconds later used to put a third). So the newest packet of a key is put
+/// again, this often, once the one before it is done; an older one gives way; after `DHT_NEWER_PUT_FOR` it gives up.
+const DHT_NEWER_PUT_EVERY: Duration = Duration::from_millis(250);
+const DHT_NEWER_PUT_FOR: Duration = Duration::from_secs(30);
+
 /// Lookups in a row that heard from no DHT node at all before reads go to the relays too (see the module's notes).
 const DHT_SILENT_LOOKUPS: u32 = 2;
 
@@ -147,7 +156,12 @@ pub enum Dht {
 /// DNS query for each of four, before the call returns: made in `main` it held the app before its window, up to 55 s
 /// where the resolver was slow (Linux under Xvfb, 2026-10-06). Reads and writes wait for it instead.
 #[derive(Clone)]
-pub struct MainlineNode(watch::Receiver<Option<Result<DhtClient, String>>>, Instant);
+pub struct MainlineNode(
+    watch::Receiver<Option<Result<DhtClient, String>>>,
+    Instant,
+    /// The newest packet asked to be put, per key, while its put runs (`DHT_NEWER_PUT_EVERY`).
+    Arc<Mutex<HashMap<PublicKey, pkarr::Timestamp>>>,
+);
 
 impl MainlineNode {
     /// Starts making the node with `build` on a thread of its own, and returns at once.
@@ -163,7 +177,7 @@ impl MainlineNode {
                 let _ = made.send(Some(result));
             })
             .expect("a thread for the DHT node");
-        MainlineNode(node, Instant::now())
+        MainlineNode(node, Instant::now(), Arc::default())
     }
 
     /// The node, once it is made.
@@ -207,8 +221,32 @@ impl Dht {
                 } else {
                     0
                 };
-                put_once_nodes_known(|| dht.publish(packet), retries, DHT_NO_NODES_RETRY_AFTER)
-                    .await
+                let (key, at) = (packet.public_key(), packet.timestamp());
+                {
+                    let mut newest = node.2.lock().unwrap();
+                    if newest.get(&key).is_none_or(|known| *known < at) {
+                        newest.insert(key.clone(), at);
+                    }
+                }
+                let is_newest = || node.2.lock().unwrap().get(&key) == Some(&at);
+                let result = put_once_nodes_known(
+                    || {
+                        put_newest(
+                            || dht.publish(packet),
+                            is_newest,
+                            DHT_NEWER_PUT_EVERY,
+                            DHT_NEWER_PUT_FOR,
+                        )
+                    },
+                    retries,
+                    DHT_NO_NODES_RETRY_AFTER,
+                )
+                .await;
+                let mut newest = node.2.lock().unwrap();
+                if newest.get(&key) == Some(&at) {
+                    newest.remove(&key);
+                }
+                result
             }
             Dht::StandIn(client) => client
                 .publish(packet)
@@ -270,6 +308,32 @@ where
                 tokio::time::sleep(after).await;
             }
             Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
+/// A DHT put of the newest packet of its key, tried again (`every` apart, for `give_up` at most) while the node refuses it
+/// for a put of the same key still under way (`DHT_NEWER_PUT_EVERY`). An older packet, or a newer one asked for since,
+/// gives way at once: its error stands.
+async fn put_newest<T, F, Fut>(
+    mut put: F,
+    newest: impl Fn() -> bool,
+    every: Duration,
+    give_up: Duration,
+) -> Result<T, pkarr::dht::PublishError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, pkarr::dht::PublishError>>,
+{
+    let started = Instant::now();
+    loop {
+        match put().await {
+            Err(pkarr::dht::PublishError::NotMostRecent)
+                if newest() && started.elapsed() < give_up =>
+            {
+                tokio::time::sleep(every).await;
+            }
+            result => return result,
         }
     }
 }
@@ -2087,6 +2151,89 @@ mod direct {
                 .is_err()
         );
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// A put refused while another of the same key runs is tried again only while it is the newest asked for, and not
+    /// for ever.
+    #[tokio::test]
+    async fn a_newer_put_refused_for_one_under_way_goes_once_that_one_is_done() {
+        use pkarr::dht::PublishError;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let every = Duration::from_millis(5);
+        let attempts = AtomicUsize::new(0);
+        let put = || {
+            let n = attempts.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n < 3 {
+                    Err(PublishError::NotMostRecent)
+                } else {
+                    Ok(())
+                }
+            }
+        };
+        assert!(put_newest(put, || true, every, Duration::from_secs(5))
+            .await
+            .is_ok());
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+
+        // An older packet (or one a newer has replaced since) gives way.
+        let attempts = AtomicUsize::new(0);
+        let put = || {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            async { Err::<(), _>(PublishError::NotMostRecent) }
+        };
+        assert!(put_newest(put, || false, every, Duration::from_secs(5))
+            .await
+            .is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+
+        // Bounded.
+        let started = Instant::now();
+        let put = || async { Err::<(), _>(PublishError::NotMostRecent) };
+        assert!(put_newest(put, || true, every, Duration::from_millis(100))
+            .await
+            .is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
+
+        // Any other error is not this one's to retry.
+        let attempts = AtomicUsize::new(0);
+        let put = || {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            async { Err::<(), _>(PublishError::Timeout) }
+        };
+        assert!(put_newest(put, || true, every, Duration::from_secs(5))
+            .await
+            .is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    /// A chat's capability record, then the same record with its endpoints a moment later, while the first put still
+    /// runs: the DHT ends up with the second, the one a contact needs to dial (before: the second was refused, and a reader
+    /// of the DHT got the first for good).
+    #[tokio::test]
+    async fn the_newest_of_two_quick_publishes_is_the_one_on_the_dht() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let bootstrap: Vec<SocketAddrV4> = testnet
+            .bootstrap
+            .iter()
+            .map(|node| node.parse().unwrap())
+            .collect();
+        let dht = Dht::mainline(Some(bootstrap)).unwrap();
+        let keypair = Keypair::random();
+        let first = packet(&keypair, "1");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let second = packet(&keypair, "2");
+        assert!(second.timestamp() > first.timestamp());
+        let one = {
+            let (dht, first) = (dht.clone(), first.clone());
+            tokio::spawn(async move { dht.publish(&first).await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let two = dht.publish(&second).await;
+        assert!(two.is_ok(), "the newer put: {two:?}");
+        let _ = one.await.unwrap();
+        let (found, _) = dht.resolve(&keypair.public_key(), |_| {}).await;
+        assert_eq!(found.map(|p| p.timestamp()), Some(second.timestamp()));
     }
 
     /// Right after a start the node knows no other: here its one bootstrap node comes up after the first put found

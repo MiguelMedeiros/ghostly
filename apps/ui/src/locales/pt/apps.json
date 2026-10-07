@@ -59,6 +59,8 @@
     "revoked": "O publicador revogou esta versão.",
     "rollback": "O link tem uma versão mais antiga.",
     "status": "Nada encontrado nesse link.",
+    "storage": "Este navegador não consegue guardar apps aqui (navegação privada?). Tente uma janela normal.",
+    "storageInfo": "O Ghostly guarda os arquivos de cada app neste dispositivo. Janelas privadas, como a Navegação Privada do Safari, não deixam, e um disco cheio também impede. Abra o Ghostly numa janela normal e instale o app lá.",
     "storeKey": "Essa loja é assinada por outra chave.",
     "tooLarge": "Grande demais."
   },

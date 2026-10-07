@@ -26,3 +26,16 @@ export function appsUnavailable(peer: PeerLinkState | null | undefined, title: s
     default: return null;
   }
 }
+
+/**
+ * The composer's + → Apps: "Apps need you both online", or that the contact's app can't run apps (an older Ghostly, or
+ * one with apps off), or null. Opening an app still works: it sends the card, which an older app shows as its text.
+ */
+export function appsComposerHint(peer: PeerLinkState | null | undefined, name: string, t: Translate): string | null {
+  switch (appsBlock(peer)) {
+    case "not-live": return t("apps.composer.needsOnline");
+    case "contact-older":
+    case "contact-cannot": return t("apps.card.contactCannot", { name });
+    default: return null;
+  }
+}

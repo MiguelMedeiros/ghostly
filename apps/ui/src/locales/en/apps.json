@@ -59,6 +59,8 @@
     "revoked": "Its publisher revoked this version.",
     "rollback": "The link holds an older version.",
     "status": "Nothing found at that link.",
+    "storage": "This browser can't keep apps here (private browsing?). Try a normal window.",
+    "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too. Open Ghostly in a normal window and install the app there.",
     "storeKey": "That store is signed by a different key.",
     "tooLarge": "Too large."
   },
