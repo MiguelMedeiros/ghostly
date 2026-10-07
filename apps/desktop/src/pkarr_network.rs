@@ -523,7 +523,67 @@ enum RelayAnswer {
 }
 
 /// One write of a packet, to a relay or the DHT, and how it went.
-type Write = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>;
+type Write = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), WriteError>> + Send>>;
+
+/// Why a write did not go in, as packages/core's `RelayTransport.putEverywhere` tells them apart (#1422).
+#[derive(Debug, Clone, PartialEq)]
+enum WriteError {
+    /// Held back for the relay's rate limit (a 429 now, its rest after one, or its breaker tripped by 429s): nothing
+    /// went out, and it goes once the relay takes requests again, in about `retry`. A wait, as `DiscoveryBudgetError`.
+    Held { retry: Duration, why: String },
+    /// A relay left alone for failing (its breaker): nothing was asked of it now, and its outage was said when it began.
+    LeftAlone(String),
+    /// Asked, and it failed: no connection, a server error, a refusal; or the DHT's put failed.
+    Failed(String),
+}
+
+impl std::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WriteError::Held { why, .. } => f.write_str(why),
+            WriteError::LeftAlone(why) | WriteError::Failed(why) => f.write_str(why),
+        }
+    }
+}
+
+/// How a publish that no write took ends: an error that says a wait (`PUBLISH_HELD_BACK`, as the WebView reads it)
+/// when every relay held the packet back for its rate limit, or held it back beside relays left alone for failing,
+/// and nothing failed now; "Publish error" when any write failed (the DHT's included) or every relay was left alone.
+fn publish_failure(errors: &[(String, WriteError)]) -> String {
+    let reasons = errors
+        .iter()
+        .map(|(name, e)| format!("{name}: {e}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let waits: Vec<Duration> = errors
+        .iter()
+        .filter_map(|(_, e)| match e {
+            WriteError::Held { retry, .. } => Some(*retry),
+            _ => None,
+        })
+        .collect();
+    let failed = errors
+        .iter()
+        .any(|(_, e)| matches!(e, WriteError::Failed(_)));
+    match waits.iter().min() {
+        None if errors.is_empty() => "Publish error: nowhere to publish".into(),
+        Some(soonest) if !failed => {
+            let which = if waits.len() == errors.len() {
+                "every relay"
+            } else {
+                "every relay not left alone"
+            };
+            format!(
+                "{PUBLISH_HELD_BACK} on {which}; retry in {} ms: {reasons}",
+                soonest.as_millis().max(1)
+            )
+        }
+        _ => format!("Publish error: {reasons}"),
+    }
+}
+
+/// The start of a publish error that is a wait (`publish_failure`): packages/core's `heldBackError` reads it.
+pub const PUBLISH_HELD_BACK: &str = "Publish held back";
 
 fn short(key: &PublicKey) -> String {
     key.to_z32().chars().take(6).collect()
@@ -824,7 +884,8 @@ impl Pkarr {
                 let packet = packet.clone();
                 (
                     "dht".to_string(),
-                    Box::pin(async move { dht.publish(&packet).await }) as _,
+                    Box::pin(async move { dht.publish(&packet).await.map_err(WriteError::Failed) })
+                        as _,
                 )
             }))
             .collect();
@@ -849,9 +910,9 @@ impl Pkarr {
                         }
                         Err(e) => {
                             // Not `brief`: a relay's error carries its cause after a colon.
-                            let why: String = e.chars().take(140).collect();
+                            let why: String = e.to_string().chars().take(140).collect();
                             report.push(format!("{name}=err@{at}ms({why})"));
-                            errors.push(format!("{name}: {e}"));
+                            errors.push((name, e));
                         }
                     }
                 }
@@ -862,10 +923,8 @@ impl Pkarr {
                 ));
                 let _ = outcome_tx.send(Some(if ok {
                     Ok(())
-                } else if errors.is_empty() {
-                    Err("Publish error: nowhere to publish".into())
                 } else {
-                    Err(format!("Publish error: {}", errors.join("; ")))
+                    Err(publish_failure(&errors))
                 }));
             });
         }
@@ -1291,22 +1350,45 @@ impl Pkarr {
     /// One PUT at a relay, telling it which packet of ours it replaces (`If-Match`): a relay refuses
     /// (428) to replace a packet whose DHT put is still in flight unless told, and a link publishes in
     /// bursts (its presence, then its offer). 412 means it never got the one named: insist without.
-    async fn relay_put(&self, url: &Url, packet: &SignedPacket) -> Result<(), String> {
+    /// Held back (a wait) while the relay rests after its rate limit or its breaker was tripped by it; left alone while
+    /// its breaker was tripped by failures; failed when asked and it did not take the packet (`WriteError`).
+    async fn relay_put(&self, url: &Url, packet: &SignedPacket) -> Result<(), WriteError> {
         let key = packet.public_key();
         let now = Instant::now();
         let previous = {
             let mut state = self.inner.state.lock().unwrap();
             let every = self.inner.all_down_probe_every;
             let Some(index) = state.relays.iter().position(|relay| relay.url == *url) else {
-                return Err("no longer in Settings".into());
+                return Err(WriteError::Failed("no longer in Settings".into()));
             };
+            // Its rate limit said wait (a 429 not long ago): asked now, it says 429 again and counts against it.
+            if let Some(until) = state.relays[index]
+                .budget
+                .resting_until
+                .filter(|until| *until > now)
+            {
+                return Err(WriteError::Held {
+                    retry: until - now,
+                    why: "rate limited (429); resting".into(),
+                });
+            }
+            let breaker = &state.relays[index].budget.breaker;
+            if breaker.blocked(now) && breaker.kind == Some(Failure::Throttled) {
+                return Err(WriteError::Held {
+                    retry: breaker
+                        .open_until
+                        .map_or(Duration::ZERO, |until| until.saturating_duration_since(now))
+                        .max(Duration::from_secs(1)),
+                    why: "throttling this address; retry shortly".into(),
+                });
+            }
             if state.relays[index].budget.breaker.blocked(now) {
                 // Every relay left alone: one of them is asked anyway, now and then (`all_down_probe`).
                 if state.all_down_probe(now, every) != Some(index) {
                     let again = state.asked_again_in(index, now, every).as_secs().max(1);
-                    return Err(format!(
+                    return Err(WriteError::LeftAlone(format!(
                         "left alone after failing; asked again in {again} s"
-                    ));
+                    )));
                 }
                 state.last_all_down_probe = Some(now);
                 state.relays[index].budget.breaker.probing = true;
@@ -1340,7 +1422,7 @@ impl Pkarr {
             } else {
                 self.breaker(url, Some((Failure::Error, "no answer")));
             }
-            request_error(&e)
+            WriteError::Failed(request_error(&e))
         };
         let mut response = send(previous).await.map_err(failed)?;
         self.note_rate_limit(url, &response);
@@ -1379,10 +1461,16 @@ impl Pkarr {
         }
         match response.status().as_u16() {
             200..=299 => Ok(()),
-            429 => Err("rate limited".into()),
-            409 => Err("relay has a more recent packet".into()),
-            428 => Err("relay is still putting another packet".into()),
-            status => Err(format!("status {status}")),
+            // Its rate limit: this packet did not go in, and goes once the relay's rest is over.
+            429 => Err(WriteError::Held {
+                retry: REST,
+                why: "rate limited".into(),
+            }),
+            409 => Err(WriteError::Failed("relay has a more recent packet".into())),
+            428 => Err(WriteError::Failed(
+                "relay is still putting another packet".into(),
+            )),
+            status => Err(WriteError::Failed(format!("status {status}"))),
         }
     }
 
@@ -2594,6 +2682,110 @@ mod direct {
             BREAKER_THRESHOLD as usize + 1,
             "still written to"
         );
+    }
+
+    /// As packages/core's `putEverywhere` (#1422): relays held back for their rate limit beside relays left alone for
+    /// failing, and nothing failing now, is a wait for the soonest held one, not "Publish error"; a write that fails
+    /// now (a relay's, or the DHT's) still makes it one, and so does every relay left alone with none held.
+    #[test]
+    fn a_publish_no_write_took_is_a_wait_only_when_nothing_failed_now() {
+        let held = |ms| WriteError::Held {
+            retry: Duration::from_millis(ms),
+            why: "rate limited".into(),
+        };
+        let alone =
+            || WriteError::LeftAlone("left alone after failing; asked again in 40 s".into());
+        let failed = || WriteError::Failed("status 503".into());
+        let named = |errors: Vec<WriteError>| -> Vec<(String, WriteError)> {
+            errors
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| (format!("r{i}"), e))
+                .collect()
+        };
+        let all_held = publish_failure(&named(vec![held(9_000), held(4_000)]));
+        assert!(
+            all_held.starts_with("Publish held back on every relay; retry in 4000 ms: "),
+            "{all_held}"
+        );
+        let mixed = publish_failure(&named(vec![alone(), held(15_000), alone()]));
+        assert!(
+            mixed.starts_with(
+                "Publish held back on every relay not left alone; retry in 15000 ms: r0: left alone"
+            ),
+            "{mixed}"
+        );
+        for error in [
+            publish_failure(&named(vec![held(1_000), failed()])),
+            publish_failure(&named(vec![alone(), held(1_000), failed()])),
+            publish_failure(&named(vec![alone(), alone()])),
+        ] {
+            assert!(error.starts_with("Publish error: "), "{error}");
+        }
+        let dht_failed = publish_failure(&[
+            ("relay".into(), held(1_000)),
+            ("dht".into(), WriteError::Failed("no nodes".into())),
+        ]);
+        assert!(dht_failed.starts_with("Publish error: "), "{dht_failed}");
+        assert_eq!(publish_failure(&[]), "Publish error: nowhere to publish");
+    }
+
+    /// Miguel's phone, 2026-10-07, on Desktop's own relay client: one relay left alone after failing, the other
+    /// answering 429. The packet waits for the second relay's rest; it is not a failure the app shows in red.
+    #[tokio::test]
+    async fn a_relay_held_back_for_its_rate_limit_beside_one_left_alone_is_a_wait() {
+        let (down, limited, failing) = (
+            pkarr_relay().await,
+            pkarr_relay().await,
+            pkarr_relay().await,
+        );
+        *down.broken.lock().unwrap() = true;
+        *limited.limited.lock().unwrap() = true;
+        let pkarr = Pkarr::new(
+            None,
+            &[down.url.parse().unwrap(), limited.url.parse().unwrap()],
+        )
+        .unwrap();
+        let keypair = Keypair::random();
+        // A relay failing now beside the held one: a failure, as before.
+        let first = pkarr.publish(&packet(&keypair, "0")).await.unwrap_err();
+        assert!(first.starts_with("Publish error: "), "{first}");
+        // The rate-limited relay rests: asked no more until its rest is over, and that is a wait.
+        let limited_puts = requests(&limited, "PUT");
+        for i in 1..BREAKER_THRESHOLD {
+            let error = pkarr
+                .publish(&packet(&keypair, &i.to_string()))
+                .await
+                .unwrap_err();
+            assert!(error.starts_with("Publish error: "), "{error}");
+        }
+        assert_eq!(requests(&limited, "PUT"), limited_puts, "resting");
+        let status = pkarr.status();
+        assert_eq!(status.relays[0].state, "failing");
+        // Now one is left alone for failing and the other held back: a wait for the held one.
+        let error = pkarr.publish(&packet(&keypair, "wait")).await.unwrap_err();
+        assert!(
+            error.starts_with(&format!(
+                "{PUBLISH_HELD_BACK} on every relay not left alone; retry in "
+            )),
+            "{error}"
+        );
+        let retry: u64 = error
+            .split("retry in ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|ms| ms.parse().ok())
+            .unwrap();
+        assert!(retry > 0 && retry <= REST.as_millis() as u64, "{error}");
+
+        // The left-alone relay beside one that fails now: a failure.
+        *failing.broken.lock().unwrap() = true;
+        pkarr.configure(
+            vec![down.url.parse().unwrap(), failing.url.parse().unwrap()],
+            true,
+        );
+        let error = pkarr.publish(&packet(&keypair, "fails")).await.unwrap_err();
+        assert!(error.starts_with("Publish error: "), "{error}");
     }
 
     /// A relay that refuses the connection is down, not slow: it trips as before.

@@ -5,6 +5,7 @@ import {
   GhostlyHttpError,
   fromBase64,
   fromBase64Url,
+  heldBackError,
   toBase64,
   toBase64Url,
   type Identity,
@@ -74,11 +75,13 @@ export function createTauriTransport(): PkarrTransport {
     }).catch(() => {});
   };
   return {
+    // A publish Rust held back for the relays' rate limits (beside relays left alone for failing) is a wait, as the
+    // browser clients' (`heldBackError`): links and groups try again then, and show nothing wrong meanwhile.
     async publish(identity: Identity, records: GhostRecord[]) {
-      try { await invoke("publish_records", { seedB64: identity.seedB64, records }); } finally { refresh(); }
+      try { await invoke("publish_records", { seedB64: identity.seedB64, records }); } catch (error) { throw heldBackError(error); } finally { refresh(); }
     },
     async publishPayload(pubKeyZ32: string, payload: Uint8Array) {
-      await invoke("publish_signed_packet", { publicKeyZ32: pubKeyZ32, payloadB64: toBase64Url(payload) });
+      await invoke("publish_signed_packet", { publicKeyZ32: pubKeyZ32, payloadB64: toBase64Url(payload) }).catch((error: unknown) => { throw heldBackError(error); });
     },
     async resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null> {
       // A look that can wait goes to the DHT alone and waits for its lookup.

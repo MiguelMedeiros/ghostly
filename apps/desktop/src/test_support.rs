@@ -110,6 +110,8 @@ pub struct Relay {
     pub putting: Arc<Mutex<bool>>,
     /// The relay is broken: every request gets a 503.
     pub broken: Arc<Mutex<bool>>,
+    /// The relay's rate limit for this address is spent: every request gets a 429.
+    pub limited: Arc<Mutex<bool>>,
     /// The relay honours `If-Match` (412 when it names another packet). Off, as pkarr-relay 2.1.0 and the
     /// public relays were measured to behave: the header is ignored.
     pub if_match: Arc<Mutex<bool>>,
@@ -135,6 +137,8 @@ pub async fn pkarr_relay() -> Relay {
     let headers = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let putting = Arc::new(Mutex::new(false));
     let broken = Arc::new(Mutex::new(false));
+    let limited = Arc::new(Mutex::new(false));
+    let spent = limited.clone();
     let if_match_honoured = Arc::new(Mutex::new(false));
     let honours = if_match_honoured.clone();
     let old_relay = Arc::new(Mutex::new(false));
@@ -159,6 +163,7 @@ pub async fn pkarr_relay() -> Relay {
             );
             let honours = honours.clone();
             let old = old.clone();
+            let spent = spent.clone();
             let slow_puts = slow_puts.clone();
             tokio::spawn(async move {
                 let Some((head, body)) = read_request(&mut stream).await else {
@@ -188,6 +193,9 @@ pub async fn pkarr_relay() -> Relay {
                     .collect();
                 if *down.lock().unwrap() {
                     return respond(&mut stream, "503 Service Unavailable", &extra, b"").await;
+                }
+                if *spent.lock().unwrap() {
+                    return respond(&mut stream, "429 Too Many Requests", &extra, b"").await;
                 }
                 if *old.lock().unwrap() && target.contains('?') {
                     return respond(&mut stream, "400 Bad Request", &extra, b"").await;
@@ -249,6 +257,7 @@ pub async fn pkarr_relay() -> Relay {
         headers,
         putting,
         broken,
+        limited,
         if_match: if_match_honoured,
         old: old_relay,
     }
