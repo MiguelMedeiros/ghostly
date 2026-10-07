@@ -102,10 +102,7 @@ async function join(rtcAvailable: boolean, firstPublish?: "after-first-poll"): P
   const firstPut = await until(() => (pkarr.publishesByKey.get(key) ?? 0) > 0, 10_000);
   const seen = await until(() => inviter.progress.some(p => p.peerSeen), 30_000) + firstPut;
   await run(20_000 - (Date.now() - joined));
-  const result = { firstPut, seen, joinerPuts: pkarr.publishesByKey.get(key) ?? 0, puts: pkarr.publishes - puts };
-  await closeWorld();
-  useFakeWorld();
-  return result;
+  return { firstPut, seen, joinerPuts: pkarr.publishesByKey.get(key) ?? 0, puts: pkarr.publishes - puts };
 }
 
 describe("a joiner's first link packet", () => {
