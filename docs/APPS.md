@@ -65,7 +65,7 @@ covers a clock that is late. Past `expires`, apps still install and the Apps pag
 clone of ghostly-store, with the keys at hand:
 
 ```sh
-node scripts/build-index.mjs --out /tmp/ghostly-store.draft.json
+npm ci && npm run build-index -- --out /tmp/ghostly-store.draft.json
 node <ghostly>/packages/cli/dist/ghostly.mjs store sign /tmp/ghostly-store.draft.json --key ~/ghostly-keys/store.key --out .
 GHOSTLY=<ghostly> scripts/check.sh
 ```
