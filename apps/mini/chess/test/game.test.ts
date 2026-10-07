@@ -55,6 +55,29 @@ const saved = (side: Side) => JSON.parse(side.broker.stored.get("game")!) as Sav
 const SCHOLARS_MATE = ["e2e4", "e7e5", "f1c4", "b8c6", "d1h5", "g8f6", "h5f7"];
 
 describe("the colour toss", () => {
+  it("starts when the contact's side was open before this app listened (an event while loading is not lost)", async () => {
+    // The client answered `context` before its chat open had (peer: null), then said the contact is open, and the
+    // contact's seek came, all while this app was still loading: it waited for a contact who was there.
+    class LateBroker extends MockBroker {
+      override async context() { return { ...(await super.context()), peer: null }; }
+    }
+    const a = new MockBroker("ana"), b = new LateBroker("bob");
+    a.peer = b;
+    b.peer = a;
+    const ana = await open(a);
+    expect(ana.game.view().phase).toBe("toss");
+    const game = new ChessController(b);
+    b.launch();
+    b.emitPeer({ open: true, version: a.version });
+    for (let i = 0; i < 10 || b.inFlight || a.inFlight; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    await game.start();
+    const bob: Side = { broker: b, game, notices: [] };
+    await settle(ana, bob);
+    expect(ana.game.view().phase).toBe("playing");
+    expect(bob.game.view().phase).toBe("playing");
+    expect(bob.game.view().peerOpen).toBe(true);
+  });
+
   it("gives the two sides one game and opposite colours", async () => {
     const { ana, bob } = await start();
     const a = ana.game.view();

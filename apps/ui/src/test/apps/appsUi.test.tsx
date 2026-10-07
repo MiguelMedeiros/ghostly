@@ -208,7 +208,7 @@ describe("with the apps flag on", () => {
     await user.click(within(screenEl).getByRole("button", { name: "Install and open" }));
     expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat"] }]);
     // Installing from a card opens it in that chat.
-    await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1"));
+    await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
     expect(fetches).toEqual([]);
   });
 
@@ -305,6 +305,70 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("apps-add-error")).not.toHaveTextContent("Apps come only from GitHub");
     // Not read again as a store: the same link is no store either.
     expect(tried).toEqual(["app"]);
+  });
+
+  it("a version a store removed stays stopped: Run anyway in its details opens it, Keep it stopped does not", async () => {
+    const onOpen = vi.fn();
+    const removed = installed({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } });
+    const { user } = renderApp(<InstalledAppDialog app={removed} onClose={() => {}} onOpen={onOpen} />);
+    expect(await screen.findByTestId("app-run-line")).toHaveTextContent("Removed by Ghostly: Malware");
+    expect(screen.queryByTestId("app-open")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("app-keep-stopped"));
+    expect(onOpen).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("app-run-anyway"));
+    expect(onOpen).toHaveBeenCalledWith(removed, { runAnyway: true });
+  });
+
+  it("a revoked version has no Run anyway and no Open", async () => {
+    renderApp(<InstalledAppDialog app={installed({ run: { status: "revoked" } })} onClose={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByTestId("app-run-line")).toHaveTextContent("Its publisher revoked this version.");
+    expect(screen.queryByTestId("app-run-anyway")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("app-open")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-keep-stopped")).toBeInTheDocument();
+  });
+
+  it("the card of a removed app says so when Open is refused, and Run anyway opens it in that chat", async () => {
+    fakeEngine.on("appList", () => [installed()]);
+    const opener = vi.fn(async (_ref: string, _linkId: string | null, options?: { runAnyway?: boolean }) => {
+      if (!options?.runAnyway) throw new Error("removed: Removed by Ghostly: Malware");
+    });
+    setAppOpener(opener);
+    const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await user.click(await screen.findByTestId("app-card-open"));
+    expect(await screen.findByTestId("app-card-error")).toHaveTextContent("A store you added removed this app.");
+    expect(opener).toHaveBeenLastCalledWith(REF, "link-1", { runAnyway: false });
+    await user.click(screen.getByTestId("app-card-run-anyway"));
+    expect(opener).toHaveBeenLastCalledWith(REF, "link-1", { runAnyway: true });
+    await waitFor(() => expect(screen.queryByTestId("app-card-error")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
+  });
+
+  it("a revoked app's card offers no Run anyway", async () => {
+    fakeEngine.on("appList", () => [installed()]);
+    setAppOpener(vi.fn(async () => { throw new Error("revoked: Its publisher revoked this version"); }));
+    const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await user.click(await screen.findByTestId("app-card-open"));
+    expect(await screen.findByTestId("app-card-error")).toHaveTextContent("Its publisher revoked this version.");
+    expect(screen.queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
+  });
+
+  it("a store read again that removed an installed app stops it on the page at once", async () => {
+    const removedRun = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
+    let refreshed = false;
+    const store = () => ({ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+      name: "Ghostly", kind: "curated" as const, sequence: refreshed ? 2 : 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+      apps: [{ ref: REF, sequence: 7, digest: DIGEST, urls: [URL_], title: "Chess", tagline: "Play chess with a contact" }],
+      removed: refreshed ? [{ ref: REF, digest: DIGEST, reason: "Malware", at: 1 }] : [] });
+    fakeEngine.on("appList", () => [installed(refreshed ? { run: removedRun } : {})]).on("appStoreList", () => [store()]).on("appCheckUpdates", () => [])
+      .on("appStoreRefresh", () => { refreshed = true; return [store()]; });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByTestId("installed-app-open")).toBeInTheDocument();
+    await user.click(screen.getByTestId("app-store-refresh"));
+    await waitFor(() => expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Stopped"));
+    expect(within(row).queryByTestId("installed-app-open")).not.toBeInTheDocument();
   });
 
   it("lists installed apps and stores; uninstall offers an export first", async () => {
