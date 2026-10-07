@@ -4,6 +4,46 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.1.5
+
+Ghostly 1.1.5 gets chats live sooner: two Desktop apps that only find each other on the DHT go live even when Iroh's relay is blocked, a chat is live again in about a second after the app was in the background, and joining a community no longer stalls while your relays are busy.
+
+### Fixed
+
+**Chat**
+
+- The app icon's badge no longer blinks 1 for each message that comes into the chat you are reading. It was counted for a moment before the chat marked it read.
+- Two apps that can only reach each other on the DHT and a native transport go live seconds sooner: a contact's record that does not yet say how to dial it is read again after 1, 2 and 4 seconds, not after 5 and 15.
+- Desktop: a contact on the DHT alone now goes live even when Iroh's relay is unreachable. A newer record written right after an older one was refused by the DHT while the older one was still being written, so the contact could not learn how to reach the app until something made it write the record again.
+- Desktop: a Pkarr relay that takes more than 10 seconds to confirm a write is no longer treated as down and skipped for minutes, which made New slow right after a start. A DHT write in the first seconds after a start, before the app knows other DHT nodes, is tried again instead of failing.
+- Choosing a connection (WebRTC, Iroh, HyperDHT) right after choosing WebRTC no longer moves the chat twice. A move back to WebRTC waits a few seconds for the old WebRTC connection to close; a choice made in that wait now replaces it, where before the chat went to WebRTC first and then moved again.
+- Your contact keeps seeing that you are typing when the chat moves to another connection (WebRTC, Iroh, HyperDHT) or reconnects. Before, the indicator went off at the move and came back only with your next keystroke, and a bot's one-shot `ghostly typing` never came back.
+- Coming back to the app after it was in the background (a phone that put it to sleep) puts the chat live again in about a second, as after a restart. Before, it waited for the contact to look again, up to 30 s or more when the contact's chat was not on its screen.
+
+**Groups**
+
+- Joining a community while your relays are busy (for example while you keep the door of another community) no longer stalls. If the relays turned down your request to join, it is sent again within seconds at full priority. Before, it went again only every 10 s as a low-priority request, and it could wait for minutes.
+- Joining a community while your relays are busy gets your request to the door sooner. When the relays turned your request down, it is sent again without first reading the door's list once more, so it no longer waits behind that read.
+- When a community's only hub leaves (most often the admin), every member is back in the group within seconds. Before, a member whose request to the next hub crossed another member's could wait 20 seconds more.
+- A group member, or a chat, whose live connection failed to come up tries again as soon as its wait between attempts ends. Before, it also waited for its next look at the contact, up to 30 s more. A connection attempt made while the relays were down no longer makes the next one wait once they answer again.
+- A chat or group member whose WebRTC connection fails just as it starts (a rare race in the CLI's WebRTC library) tries again at once. Before, it waited about 40 s, and a member let in to a group could take over a minute to reach another member.
+
+**Everywhere**
+
+- The update banner no longer says "Ghostly 1.1.4 is available" on 1.1.4 after a redeploy: only a newer version number counts as an update.
+
+### For users
+
+**Calls**
+
+- On an iPhone or iPad, a call in the Home Screen app says when the system paused your microphone (iOS does this while the screen is locked or another app is in front). The call stays on, and your microphone comes back when Ghostly is on screen again.
+
+### For developers
+
+**CLI**
+
+- `GHOSTLY_IROH_RELAYS=https://…,…` pins the CLI's Iroh relays, as `GHOSTLY_PKARR_RELAYS` pins its Pkarr relays, and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of its WebRTC, so a private network reaches nothing public. The CLI's tests and the web e2e's headless bots now stay on this machine by default (local or dead relays, loopback HyperDHT, no public STUN); `GHOSTLY_TEST_PUBLIC_NET=1` lets a run reach the public networks.
+
 ## 1.1.4
 
 Ghostly 1.1.4 makes adding your phone to your profile one screen, shows who is calling on the lock screen, and gets chats live sooner. Moving a profile between devices is steadier, and Ghostly Desktop opens its window at once on a slow network.
