@@ -32,7 +32,7 @@
   <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/hero-phone-dark.webp">
   <source media="(max-width: 600px)" srcset="docs/assets/readme/hero-phone-light.webp">
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/hero-dark.webp">
-  <img src="docs/assets/readme/hero-light.webp" alt="Ghostly on a computer and a phone: a chat with Casper, with a voice message, a photo sent straight from his app and a reply" width="100%">
+  <img src="docs/assets/readme/hero-light.webp" alt="A Ghostly chat with Casper: a voice message, a photo sent straight from his app, and a reply" width="100%">
 </picture>
 
 ## Features
