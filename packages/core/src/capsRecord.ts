@@ -49,8 +49,13 @@ const CAPS_READ_SPACING_MS = 15_000;
  * already knows and looks the key up behind it, and a lookup that started before the publication landed finds the old
  * one; a relay may serve an old copy for a while too. The envelope names each revision once, so one read was the last
  * until the next envelope, minutes away, and the chat stayed on the DHT with no descriptors to dial.
+ *
+ * The first ones come soon: a contact's record that lists a native transport with no descriptor is the "Peer native
+ * address unavailable" a dial ends with, and its revision with the descriptors is usually out a second or two after the
+ * first (its endpoints were starting). Read 5 s, then 20 s after, two Desktops DHT direct with Iroh's relay out of reach
+ * went live 11 to 28 s after their chats opened (2026-10-07). One read more than before, three in the first 7 s.
  */
-const CAPS_READ_RETRY_MS = [5_000, 15_000, 30_000, 60_000] as const;
+const CAPS_READ_RETRY_MS = [1_000, 2_000, 4_000, 15_000, 60_000] as const;
 const NATIVE = ["iroh/1", "hyperdht/1"] as const;
 /** The native transports a record says how to dial. */
 const described = (content: CapsContent) => NATIVE.filter(t => !!content.descriptors[t]);
