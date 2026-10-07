@@ -20,7 +20,9 @@ import { ConnectionHistory } from "./TransportTimeline";
 import { DiscoveryHealth } from "./DiscoveryHealth";
 import { DirectBlockedHint } from "./DirectBlockedHint";
 import { ClockOffHint } from "./ClockOffHint";
-import { errorText } from "../lib/errorText";
+import { rawError } from "../lib/errorText";
+import { problemText } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 import { useWindowAway } from "../lib/windowAway";
 import { useOnline } from "../hooks/useOnline";
 
@@ -72,10 +74,14 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const connectionFailure = error || (online ? pair?.transitionError || (pair?.status === "error" ? pair.error : "") || ((dht || textDht) ? link?.dhtDelivery?.error : "") : "");
   const discoveryFailure = !ready && online ? link?.discoveryError : "";
   const failure = connectionFailure || discoveryFailure;
+  const { t, language } = useI18n();
+  // The failure in a few words (lib/problemText.ts): the engine's English, relay addresses and codes go behind an ⓘ.
+  // One the app retries by itself (the relays' budget, a session dropped) is a wait: never red.
+  const problem = failure ? problemText(failure, t, "connect") : undefined;
+  const failing = !!failure && problem?.tone !== "wait";
   const preferred = link?.preferredTransport ?? "webrtc/1";
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
-  const { t, language } = useI18n();
   const clock = (at: number) => clockTime(at, language);
   const contact = link?.peerNick || t("pairing.contact");
   // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may
@@ -141,7 +147,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     }
   })();
   const kind: ConnectionKind = !paired ? (/^Connected/.test(rawStatus) ? "connected" : /issue|unavailable|mismatch/.test(rawStatus) ? "failure" : rawStatus === "Offline" ? "offline" : "waiting")
-    : !online ? "offline" : failure ? "failure" : labelState === "pairing" ? (pairingFailed ? "failure" : "waiting") : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht || labelState === "onDht" ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
+    : !online ? "offline" : failing ? "failure" : failure ? "waiting" : labelState === "pairing" ? (pairingFailed ? "failure" : "waiting") : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht || labelState === "onDht" ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
   const connecting = kind === "waiting" && (labelState === "connecting" || !!pair?.transitionTarget);
   // On the DHT while a live link is tried underneath: the DHT mark, with a dot that breathes.
   const retrying = kind === "dht" && labelState === "onDht" && !(stage === "on-dht" && progress?.reason === "chosen");
@@ -162,7 +168,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   useOutsideDismiss(root, menuOpen, close);
   async function run(action: () => Promise<unknown>) {
     setBusy(true); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("connection.panel.updateFailed")); }
+    // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
+    try { await action(); } catch (e) { setError(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }
     finally { setBusy(false); }
   }
   // The header shows only the icon: the label is in its tooltip, its accessible name and the panel.
@@ -193,7 +200,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
         {pairing?.onShow && <button type="button" data-testid="connection-show-pairing" className={`-mx-1 min-h-9 rounded-md px-1 text-accent hover:bg-surface-hover ${focus}`}
           onClick={() => { close(); pairing.onShow?.(); }}>{t("pairing.showProgress")}</button>}
       </div>}
-      {failure && <p role="alert" className="mt-1.5 break-words px-1 text-danger">{failure}</p>}
+      {problem && <Notice problem={problem} testId="connection-failure" className="mt-1.5 px-1" />}
       {paired && online && !dht && state?.transport?.directBlocked && <DirectBlockedHint />}
       {online && state?.transport?.clockOffMs !== undefined && <ClockOffHint ms={state.transport.clockOffMs} />}
       {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
@@ -242,7 +249,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
               <dt>{t("connection.detail.why")}</dt><dd className="min-w-0 break-words text-text-primary">{summary.why}</dd>
             </dl>}
             <DiscoveryHealth status={state?.transport?.discovery} />
-            {!dht && Object.entries(link?.transportErrors ?? {}).map(([transport, reason]) => <p key={transport}>{t("connection.line.withReason", { text: name(transport as PairedTransport), reason })}</p>)}
+            {!dht && Object.entries(link?.transportErrors ?? {}).map(([transport, reason]) => {
+              const said = problemText(reason, t, "connect");
+              return <Notice key={transport} testId="connection-transport-error" className="" title={t("connection.line.withReason", { text: name(transport as PairedTransport), reason: said.title })} details={said.detail} />;
+            })}
             {(pinned || pair?.keyMismatch) && <div data-testid="pair-trust">
               {pair?.keyMismatch ? <p role="alert" className="text-danger">{t("connection.panel.keyMismatch")}</p> : <>
                 <div className="flex min-h-9 items-center justify-between gap-2">
@@ -289,7 +299,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     {label}{elapsed && ` · ${elapsed}`}{summary && !failure && <span data-testid="connection-tooltip-detail" className="mt-0.5 block text-text-secondary">{summary.detail}</span>}
     {slow && <span className="mt-0.5 block text-text-secondary">{slow}</span>}
     {onDhtWhy && <span className="mt-0.5 block text-text-secondary">{onDhtWhy}</span>}
-    {failure && failure !== label && <span className="mt-0.5 block break-words text-danger">{failure}</span>}
+    {problem && problem.title !== label && <span className={`mt-0.5 block break-words ${failing ? "text-danger" : "text-text-secondary"}`}>{problem.title}</span>}
     {pairingReason && !failure && <span className="mt-0.5 block break-words text-danger">{pairingReason}</span>}
   </span>
   <span className="sr-only" aria-live="polite">{label}</span>

@@ -38,14 +38,16 @@ describe("edgeView: how a group's edge to one member is doing", () => {
   it("sums the error up for a short status: the relays, a session dropped, or else (2026-10-07)", () => {
     const pairing = (error: string) => edgeView(live({ pairing: { status: "error", error } })).cause;
     expect(pairing("Could not publish connection details: Publish failed on every relay: Error: https://a.test responded 500. Retrying in 60 s.")).toBe("relays");
-    expect(pairing("Session receive limit exceeded")).toBe("session");
+    expect(pairing("Session receive queue full")).toBe("session");
+    // A frame over the maximum breaks the protocol: not a drop to dial again past (packages/core pairedSession.ts).
+    expect(pairing("Session frame too large")).toBe("other");
     expect(pairing("The peer did not finish authentication. Reconnect to try again.")).toBe("session");
     expect(pairing("Invalid session negotiation")).toBe("session");
     expect(pairing("Saved contact key mismatch. This invite is already paired with another participation key.")).toBe("other");
     expect(pairing("No common available transport")).toBe("other");
     expect(edgeView(live({ discoveryError: "Could not publish discovery: Publish failed on every relay: Error: https://a.test responded 500" })).cause).toBe("relays");
     // The pairing's error says more than the relays' when there are both.
-    expect(edgeView(live({ pairing: { status: "error", error: "Session receive limit exceeded" }, discoveryError: "Could not read discovery: x" })).cause).toBe("session");
+    expect(edgeView(live({ pairing: { status: "error", error: "Session receive queue full" }, discoveryError: "Could not read discovery: x" })).cause).toBe("session");
   });
 
   it("an open edge hides an old discovery error: what matters is that it works", () => {

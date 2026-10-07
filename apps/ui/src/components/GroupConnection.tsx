@@ -1,13 +1,15 @@
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { GroupView } from "@ghostly/browser/shared/types";
+import type { GroupEdgeView, GroupView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
-import { edgeDot, edgeLabel, groupTransports, memberName } from "../lib/groups";
+import { edgeDot, edgeLabel, edgeWaits, groupTransports, memberName } from "../lib/groups";
 import { dots, focus, type ConnectionKind } from "../lib/connection";
 import { ConnectionIcon } from "./ConnectionIcon";
-import { useI18n } from "../contexts/I18nContext";
+import { useI18n, type Translate } from "../contexts/I18nContext";
 import { agoIn } from "../lib/relativeTime";
-import { errorText } from "../lib/errorText";
+import { rawError } from "../lib/errorText";
+import { problemText, relayCause, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 import { useOnline } from "../hooks/useOnline";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -39,7 +41,8 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const linked = community ? others.filter(m => m.edge) : others;
   // Reachable over an edge of mine, or through a hub (a group past 16 members): as the header line and the dots count it.
   const reachable = linked.filter(m => m.edge?.state === "open" || m.viaHub).length;
-  const failing = linked.some(m => m.edge?.state === "error");
+  // A member the app is waiting on by itself (the relays' budget, a dropped session) is no failure (lib/groups edgeWaits).
+  const failing = linked.some(m => m.edge?.state === "error" && !edgeWaits(m.edge));
   const connecting = linked.some(m => m.edge?.state === "connecting");
   // Group links go over WebRTC, or a native transport where one side has none: an app with neither reaches no member,
   // however long it tries. (Ghostly Desktop on Linux has no WebRTC, and runs Iroh and HyperDHT.)
@@ -59,7 +62,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
   useOutsideDismiss(root, menuOpen, () => setMenuOpen(false));
   const reconnect = async (linkId: string) => {
     setBusy(linkId); setError("");
-    try { await engine.call("connect", { linkId }); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.connection.reconnectFailed")); } finally { setBusy(""); }
+    try { await engine.call("connect", { linkId }); } catch (e) { setError(e instanceof Error ? rawError(e) || t("group.connection.reconnectFailed") : t("group.connection.reconnectFailed")); } finally { setBusy(""); }
   };
   const now = Date.now();
   return <div ref={root} className="relative shrink-0" data-testid="group-connection" data-open={menuOpen || undefined} onKeyDown={e => {
@@ -97,12 +100,15 @@ export function GroupConnection({ group }: { group: GroupView }) {
                   className={`min-h-8 shrink-0 rounded-md px-2 text-accent hover:bg-surface-alt disabled:opacity-40 ${focus}`}>{busy === m.edge!.linkId ? t("group.connection.trying") : t("group.connection.reconnect")}</button>}
               </div>
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) stays out of the list. */}
-              {m.edge?.state === "error" && m.edge.error && <p data-testid="group-connection-member-why" data-cause={m.edge.cause ?? "other"} className="mt-0.5 break-words text-[11px] text-danger">{t(`group.member.why.${m.edge.cause ?? "other"}`)}</p>}
+              {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) only behind the ⓘ. */}
+              {m.edge?.state === "error" && m.edge.error && <div data-testid="group-connection-member-why" data-cause={m.edge.cause ?? "other"} className="mt-0.5">
+                <Notice problem={memberProblem(m.edge, t)} testId="group-connection-member-problem" className="text-[11px] leading-4" />
+              </div>}
             </li>;
           })}
           {others.length === 0 && <li className="text-[11px]">{t("group.connection.nobodyElse")}</li>}
         </ul>
-        {error && <p role="alert" className="mt-2 break-words text-danger">{error}</p>}
+        {error && <Notice problem={problemText(error, t, "connect")} testId="group-connection-error" className="mt-2" />}
         <p className="mt-3 border-t border-border pt-2 text-[11px]" data-testid="group-connection-note">
           {community ? t("group.connection.communityNote") : t("group.connection.note")}
         </p>
@@ -112,4 +118,20 @@ export function GroupConnection({ group }: { group: GroupView }) {
     </span>
     <span className="sr-only" aria-live="polite">{label}</span>
   </div>;
+}
+
+/**
+ * Why a member's edge is down, as the list says it: the engine's cause (packages/browser groupEdges.ts) picks the words.
+ * The relays holding back and a session dropped are waits the app gets past by itself, never red; anything else is
+ * "Couldn't connect", never the engine's English in the line.
+ */
+function memberProblem(edge: GroupEdgeView, t: Translate): Problem {
+  const detail = edge.error;
+  if (edge.cause === "relays") {
+    const relays = relayCause(detail ?? "");
+    const said = problemText(detail ?? "", t);
+    return relays ? said : { tone: "error", title: t("errors.problem.relaysUnreachable"), next: t("errors.problem.retrying"), detail };
+  }
+  if (edge.cause === "session") return { tone: "wait", title: t("errors.problem.sessionDropped"), next: t("errors.problem.retrying"), detail };
+  return { tone: "error", title: t("group.member.why.other"), detail };
 }

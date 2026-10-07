@@ -6,6 +6,9 @@ import { useAmountText } from "../../hooks/useAmountText";
 
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
 export { Section, Row, Block } from "../layout/Section";
+// The app's one notice (components/ui/Notice.tsx): the wallet's panels were its first users.
+import { Notice } from "../ui/Notice";
+export { Notice };
 
 const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-border-bright"}`;
 const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"}`} />;
@@ -117,7 +120,4 @@ export function Amount({ value, onChange, unit, decimals = 0, testId, autoFocus 
   );
 }
 
-export function Notice({ tone = "muted", children, testId }: { tone?: "muted" | "error" | "success" | "warning"; children: ReactNode; testId?: string }) {
-  const color = { muted: "text-text-muted", error: "text-danger", success: "text-accent", warning: "text-yellow-500" }[tone];
-  return <p role={tone === "error" ? "alert" : undefined} data-testid={testId} className={`text-xs ${color}`}>{children}</p>;
-}
+
