@@ -11,6 +11,7 @@ import { MobileTabBar } from "../../components/MobileTabBar";
 import { ChatServicesDialog } from "../../components/ChatServicesDialog";
 import { InstalledAppDialog, AppInstallDialog } from "../../components/apps/AppInstallDialog";
 import { Apps } from "../../pages/Apps";
+import { AddAppDialog } from "../../components/apps/AddAppDialog";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { setAppOpener } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
@@ -291,6 +292,19 @@ describe("with the apps flag on", () => {
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
     expect(await screen.findByTestId("app-install-blocked")).toHaveTextContent("Removed by Ghostly: Malware");
     expect(screen.queryByTestId("app-install-confirm")).not.toBeInTheDocument();
+  });
+
+  it("a github.com page that is not an app says so, and asks for a repository or file link, never that GitHub is off the list", async () => {
+    const tried: string[] = [];
+    fakeEngine.on("appPreview", () => { tried.push("app"); throw new Error("github-link: Paste the repository's link, or the link to its app file"); })
+      .on("appStorePreview", () => { tried.push("store"); throw new Error("github-link: Paste the repository's link, or the link to its app file"); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://github.com/ana/chess/issues/3");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("That GitHub page is not an app. Paste the repository's link, or the link to its app file.");
+    expect(screen.getByTestId("apps-add-error")).not.toHaveTextContent("Apps come only from GitHub");
+    // Not read again as a store: the same link is no store either.
+    expect(tried).toEqual(["app"]);
   });
 
   it("lists installed apps and stores; uninstall offers an export first", async () => {

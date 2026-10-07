@@ -6,6 +6,7 @@ import type { Translate, TranslationKey } from "../../contexts/I18nContext";
  */
 const KEYS: Record<string, TranslationKey> = {
   host: "apps.errors.host",
+  "github-link": "apps.errors.githubLink",
   offline: "apps.errors.offline",
   status: "apps.errors.status",
   network: "apps.errors.network",

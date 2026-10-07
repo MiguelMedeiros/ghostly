@@ -106,6 +106,8 @@ const NAME = /^[A-Za-z0-9_.-]+$/;
  * The URL a pasted address reads `file` from (WISP 1200 § Paste a URL), or null when it is not one this client reads:
  * - `https://github.com/<owner>/<repo>`, or `/tree/<ref>`: `raw.githubusercontent.com/<owner>/<repo>/<ref or HEAD>/<file>`,
  *   with no request to `github.com` or `api.github.com`;
+ * - a file as GitHub shows it, `https://github.com/<owner>/<repo>/blob/<ref>/<path>` (or `/raw/`), naming a `.ghostlyapp`
+ *   or `.json` file: `raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>`, again with no request to `github.com`;
  * - a URL of the list that names a file (`….ghostlyapp`, `….json`): itself;
  * - a URL of the list that names a folder: `<file>` in it.
  */
@@ -121,9 +123,15 @@ export function appPasteUrl(input: string, file: "app.ghostlyapp" | "ghostly-sto
     if (!NAME.test(owner) || !NAME.test(repo)) return null;
     let ref = "HEAD";
     if (parts.length > 2) {
-      if (parts[2] !== "tree" || parts.length < 4) return null;
       const rest = parts.slice(3);
-      if (!rest.every((p) => NAME.test(p))) return null;
+      if (!rest.length || !rest.every((p) => NAME.test(p) && p !== "." && p !== "..")) return null;
+      if (parts[2] === "blob" || parts[2] === "raw") {
+        // `<ref>/<path>`: raw.githubusercontent.com takes the two joined the same way github.com does.
+        if (rest.length < 2 || !/\.(ghostlyapp|json)$/.test(rest[rest.length - 1]!)) return null;
+        const raw = `https://raw.githubusercontent.com/${owner}/${repo}/${rest.join("/")}`;
+        return isAppFetchUrl(raw) ? raw : null;
+      }
+      if (parts[2] !== "tree") return null;
       ref = rest.join("/");
     }
     const raw = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${file}`;
@@ -132,6 +140,14 @@ export function appPasteUrl(input: string, file: "app.ghostlyapp" | "ghostly-sto
   const last = url.pathname.split("/").pop() ?? "";
   const named = /\.(ghostlyapp|json)$/.test(last) ? url.href : new URL(`${url.pathname.replace(/\/?$/, "/")}${file}`, url).href;
   return isAppFetchUrl(named) ? named : null;
+}
+
+/** A page of github.com (any scheme): a link `appPasteUrl` could not read is still GitHub, and is answered as such. */
+export function isGitHubPage(input: string): boolean {
+  try {
+    const host = new URL(input.trim()).hostname.toLowerCase();
+    return host === "github.com" || host === "www.github.com";
+  } catch { return false; }
 }
 
 /** A file beside another (`ghostly-store.sig` beside the index, `ghostly-revoke.json` beside a bundle). */
