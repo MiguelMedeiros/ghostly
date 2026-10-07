@@ -83,6 +83,7 @@ function StoreBlock({ store, installed, onInstall, onChanged, onError }: {
           {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
         </button>
         <div className="flex items-center gap-2">
+          {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again. */}
           <Button data-testid="app-store-refresh" disabled={busy} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }))}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
           <Button variant="danger" data-testid="app-store-remove" disabled={busy} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }))}>{t("apps.store.remove")}</Button>
         </div>
@@ -149,7 +150,7 @@ export function Apps() {
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
             : stores.map((store) => <StoreBlock key={store.key} store={store} installed={installed ?? []} onError={fail}
-              onChanged={() => void reloadStores()} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
+              onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} />}
       {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} />}
