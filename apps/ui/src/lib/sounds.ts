@@ -131,7 +131,7 @@ const playing = new Set<() => void>();
 let listening = false;
 /** Stops the sounds following the speaker chosen in Settings (where the engine can send Web Audio to one). */
 let unfollowSpeaker: (() => void) | null = null;
-/** A person's gesture has started the context once: from then on it may be resumed for a sound without one. */
+/** A person's gesture has started the context once: from then on it may be resumed (or made again) for a sound without one. */
 let unlocked = false;
 /** Calls ringing (`startRinging`): the output stays open between their rings. */
 let ringing = 0;
@@ -144,6 +144,28 @@ let idleTimer: ReturnType<typeof setTimeout> | undefined;
  */
 export const SOUNDS_IDLE_MS = 5_000;
 
+/**
+ * How the output is let go of between sounds. "suspend": the one context is suspended, and resumed for the next sound.
+ * "close": it is closed, and the next sound makes a new one. WebKitGTK (the Linux Desktop) holds the page inside a
+ * `resume()` that follows a `suspend()`: half a second the first time, then 5 to 10 s, so the whole app froze at a new
+ * chat's first sound. A new context starts there in milliseconds and a closed one costs nothing, so the Linux Desktop
+ * closes it (`setSoundsRelease`). Elsewhere a new context may need a gesture of its own (Safari), so one is kept.
+ */
+export type SoundsRelease = "suspend" | "close";
+let release: SoundsRelease = "suspend";
+export function setSoundsRelease(mode: SoundsRelease): void { release = mode; }
+
+/** The sounds' context: made again when the last one was closed. Null where this engine has no audio. */
+function output(): AudioContext | null {
+  if (!context) {
+    try {
+      context = new AudioContext();
+      unfollowSpeaker = followSpeaker(context).stop;
+    } catch { return null; }
+  }
+  return context;
+}
+
 /** Nothing plays and no call rings: the output is let go of after `SOUNDS_IDLE_MS`. */
 function idleLater(): void {
   clearTimeout(idleTimer);
@@ -152,7 +174,12 @@ function idleLater(): void {
   const ctx = context;
   idleTimer = setTimeout(() => {
     idleTimer = undefined;
-    if (ctx === context && !playing.size && !ringing && ctx.state === "running") void ctx.suspend?.().catch(() => {});
+    if (ctx !== context || playing.size || ringing || ctx.state !== "running") return;
+    if (release === "suspend") { void ctx.suspend?.().catch(() => {}); return; }
+    context = null;
+    unfollowSpeaker?.();
+    unfollowSpeaker = null;
+    void ctx.close?.().catch(() => {});
   }, SOUNDS_IDLE_MS);
 }
 
@@ -169,10 +196,15 @@ function load(name: SoundName): Promise<AudioBuffer> | undefined {
   if (!context || !url) return;
   if (!decoded.has(name)) {
     const ctx=context;
-    decoded.set(name,fetch(url).then(response => {
+    // A decoded sound plays in any context, also one made after this one closed. A failed one is tried again later.
+    const decoding: Promise<AudioBuffer> = fetch(url).then(response => {
       if (!response.ok) throw new Error("Sound unavailable");
       return response.arrayBuffer();
-    }).then(bytes=>ctx.decodeAudioData(bytes)));
+    }).then(bytes=>ctx.decodeAudioData(bytes)).catch((error: unknown) => {
+      if (decoded.get(name) === decoding) decoded.delete(name);
+      throw error;
+    });
+    decoded.set(name,decoding);
   }
   return decoded.get(name);
 }
@@ -182,18 +214,14 @@ export function installAudioGestures(): () => void {
   if (listening) return () => {};
   listening = true;
   const unlock = () => {
-    try {
-      context ??= new AudioContext();
-      unfollowSpeaker ??= followSpeaker(context).stop;
-      // Only the first gesture starts it; later ones leave a let-go output alone until a sound needs it.
-      if (!unlocked) {
-        const ctx = context;
-        const started = () => { if (ctx.state === "running") { unlocked = true; idleLater(); } };
-        if (ctx.state === "running") started();
-        else void ctx.resume().then(started).catch(()=>{});
-      }
-      for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
-    } catch { /* no audio device */ }
+    // Only the first gesture starts it; later ones leave a let-go output alone (suspended or closed) until a sound needs it.
+    if (unlocked) return;
+    const ctx = output();
+    if (!ctx) return;
+    const started = () => { if (ctx.state === "running") { unlocked = true; idleLater(); } };
+    if (ctx.state === "running") started();
+    else void ctx.resume().then(started).catch(()=>{});
+    for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
   };
   const mute = () => { if (!loadSettings().notifications.soundEnabled) for (const stop of [...playing]) stop(); };
   document.addEventListener("pointerdown",unlock,true);
@@ -215,8 +243,10 @@ export function installAudioGestures(): () => void {
 }
 
 export function playSound(name: SoundName): () => void {
-  if (!loadSettings().notifications.soundEnabled || !context || !unlocked) return () => {};
-  const ctx=context, started=Date.now();
+  if (!loadSettings().notifications.soundEnabled || !unlocked) return () => {};
+  const ctx=output();
+  if (!ctx) return () => {};
+  const started=Date.now();
   let cancelled=false;
   const sources: (AudioBufferSourceNode | OscillatorNode)[]=[];
   let expiry: ReturnType<typeof setTimeout> | undefined;
