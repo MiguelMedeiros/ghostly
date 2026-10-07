@@ -259,7 +259,7 @@ describe("paired session teardown", () => {
     await vi.waitFor(() => expect(t.b.groupsSupport).toBe(true));
     for (let i = 0; i <= SESSION_RECEIVE_PENDING.frames; i++) t.toB({ t: "group-msg", g: "g", n: i });
     await vi.waitFor(() => expect(t.b.isDataLinkOpen).toBe(false));
-    expect(onPairingState).toHaveBeenCalledWith(expect.objectContaining({ status: "error", error: "Session receive limit exceeded" }));
+    expect(onPairingState).toHaveBeenCalledWith(expect.objectContaining({ status: "error", error: "Session receive queue full" }));
     // Not a security rejection: no "unauthenticated" stop of the DHT layer, and a later session reports as any other.
     expect((t.b as unknown as { securityRejected: boolean }).securityRejected).toBe(false);
   });
@@ -270,7 +270,7 @@ describe("paired session teardown", () => {
     await t.ready();
     t.toB("x".repeat(61 * 1024));
     await vi.waitFor(() => expect(t.b.isDataLinkOpen).toBe(false));
-    expect(onPairingState).toHaveBeenLastCalledWith(expect.objectContaining({ status: "error", error: "Session receive limit exceeded" }));
+    expect(onPairingState).toHaveBeenLastCalledWith(expect.objectContaining({ status: "error", error: "Session frame too large" }));
     expect(t.b.textDelivery).toBe("unavailable");
     expect(t.b.canSendText).toBe(false);
     await vi.waitFor(() => expect(t.a.isDataLinkOpen).toBe(false));

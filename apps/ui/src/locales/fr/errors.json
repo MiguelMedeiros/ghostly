@@ -254,6 +254,15 @@
     "unreadable": "Cette image ne peut pas être lue ici",
     "unreadableTryJpeg": "Cette image ne peut pas être lue ici. Essayez un JPEG ou un PNG."
   },
+  "problem": {
+    "checkConnection": "Nouvel essai. Vérifiez votre connexion.",
+    "connectFailed": "Connexion impossible",
+    "relaysUnreachable": "Relais injoignables",
+    "relaysWait": "En attente des relais",
+    "retryIn": "Nouvel essai dans {{s}} s",
+    "retrying": "Nouvel essai…",
+    "sessionDropped": "Connexion perdue"
+  },
   "profile": {
     "arkBackup": "Impossible de lire le portefeuille Ark pour la sauvegarde : {{reason}}",
     "backupTooLarge": "Cette sauvegarde est trop volumineuse pour être restaurée ici.",
@@ -303,6 +312,11 @@
     "usdtBalanceChanged": "Le solde de jetons ou de gas a changé. Créez une nouvelle vérification",
     "usdtNonceChanged": "Le nonce du compte a changé. Créez une nouvelle vérification",
     "usdtRejected": "Le RPC USDT a refusé l'opération"
+  },
+  "transport": {
+    "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",
+    "listenerGiven": "En pause pour une discussion plus active. Ouvrez celle-ci pour reprendre.",
+    "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre."
   },
   "wallet": {
     "alreadyHave": "Vous avez déjà un portefeuille {{kind}} {{network}}",

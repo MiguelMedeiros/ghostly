@@ -254,6 +254,15 @@
     "unreadable": "لا يمكن قراءة هذه الصورة هنا",
     "unreadableTryJpeg": "لا يمكن قراءة هذه الصورة هنا. جرّب JPEG أو PNG."
   },
+  "problem": {
+    "checkConnection": "تتم إعادة المحاولة. تحقق من اتصالك.",
+    "connectFailed": "تعذر الاتصال",
+    "relaysUnreachable": "تعذر الوصول إلى المرحّلات",
+    "relaysWait": "بانتظار المرحّلات",
+    "retryIn": "إعادة المحاولة خلال {{s}} ث",
+    "retrying": "تتم إعادة المحاولة…",
+    "sessionDropped": "انقطع الاتصال"
+  },
   "profile": {
     "arkBackup": "تعذّرت قراءة محفظة Ark للنسخ الاحتياطي: {{reason}}",
     "backupTooLarge": "هذه النسخة أكبر من أن تُستعاد هنا.",
@@ -303,6 +312,11 @@
     "usdtBalanceChanged": "تغيّر رصيد الرموز أو الغاز. أنشئ مراجعة جديدة",
     "usdtNonceChanged": "تغيّر الـ nonce الخاص بالحساب. أنشئ مراجعة جديدة",
     "usdtRejected": "رفض RPC الخاص بـ USDT العملية"
+  },
+  "transport": {
+    "adapterFailed": "تعذر البدء. أعد فتح هذه الدردشة للمحاولة مجددًا.",
+    "listenerGiven": "متوقف مؤقتًا لصالح دردشة أنشط. افتح هذه الدردشة للاستئناف.",
+    "listenerReleased": "متوقف مؤقتًا لصالح دردشة أخرى. افتح هذه الدردشة للاستئناف."
   },
   "wallet": {
     "alreadyHave": "لديك بالفعل محفظة {{kind}} {{network}}",

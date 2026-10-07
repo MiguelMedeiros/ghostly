@@ -37,7 +37,8 @@ export function edgeView(live: EdgeLive, now = Date.now(), noSlot = false): Grou
  * A pairing error the session ends with when nothing is wrong with the member: an attempt dialled again. Their
  * English is `PairedSession`'s and `GhostLink`'s (packages/core).
  */
-const SESSION_DROPS = [/^Session receive limit exceeded$/, /^The peer did not finish authentication\b/, /^Invalid session negotiation$/];
+// "Session frame too large" is no drop: the member's app broke the protocol (an `other`).
+const SESSION_DROPS = [/^Session receive queue full$/, /^The peer did not finish authentication\b/, /^Invalid session negotiation$/];
 
 /** What an edge's pairing error comes down to: the relays (its signal could not go out), a session dropped, or else. */
 export function edgeErrorCause(error: string): GroupEdgeCause {

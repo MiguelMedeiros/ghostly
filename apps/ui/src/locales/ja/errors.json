@@ -254,6 +254,15 @@
     "unreadable": "この画像はここでは読み込めません",
     "unreadableTryJpeg": "この画像はここでは読み込めません。JPEG か PNG をお試しください。"
   },
+  "problem": {
+    "checkConnection": "再試行中。接続を確認してください。",
+    "connectFailed": "接続できませんでした",
+    "relaysUnreachable": "リレーに接続できません",
+    "relaysWait": "リレーを待っています",
+    "retryIn": "{{s}} 秒後に再試行",
+    "retrying": "再試行中…",
+    "sessionDropped": "接続が切れました"
+  },
   "profile": {
     "arkBackup": "バックアップ用に Ark ウォレットを読み込めませんでした: {{reason}}",
     "backupTooLarge": "このバックアップは大きすぎて、ここでは復元できません。",
@@ -303,6 +312,11 @@
     "usdtBalanceChanged": "トークンまたはガスの残高が変わりました。新しい確認を作成してください",
     "usdtNonceChanged": "アカウントの nonce が変わりました。新しい確認を作成してください",
     "usdtRejected": "USDT の RPC が操作を拒否しました"
+  },
+  "transport": {
+    "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",
+    "listenerGiven": "より活発なチャットのため一時停止中。このチャットを開くと再開します。",
+    "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。"
   },
   "wallet": {
     "alreadyHave": "{{network}} の {{kind}} ウォレットはすでにあります",
