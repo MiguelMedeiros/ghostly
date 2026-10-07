@@ -151,6 +151,8 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
   let chatOpened = false;
   let peer: { version: string } | null = null;
   let unsubscribe: (() => void) | null = null;
+  /** Settles once the chat open has answered (the chat app id, the contact's side as last heard): `context` waits for it. */
+  let opened: Promise<void> = Promise.resolve();
 
   const event = (name: "chat.message" | "chat.peer", data: MiniAppJson | MiniAppPeerEvent) => {
     if (phase === "writing" || phase === "running") post({ event: name, data });
@@ -166,7 +168,7 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
       else { peer = null; event("chat.peer", { open: false }); }
     });
     chatOpened = true;
-    void host.chat.open(linkId, launch.ref, launch.version).then(({ app }) => {
+    opened = host.chat.open(linkId, launch.ref, launch.version).then(({ app }) => {
       if (phase === "stopped") return;
       appId = app;
       peer = host.chat.peer(linkId, app);
@@ -186,6 +188,9 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
   const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[] }> => {
     switch (type as MiniAppRequestType) {
       case "context": {
+        // After the chat open answered: before it, a contact whose app is already open would read as not open, and the
+        // event saying it is open could reach the app before it listens.
+        await opened;
         const context: MiniAppContext = { version: launch.version, inChat: !!launch.chat, peer: chatAllowed ? peer : null, theme: view.theme(), locale: view.locale() };
         if (launch.chat?.name !== undefined && launch.permissions.includes("name")) context.name = launch.chat.name;
         return { value: context as unknown as MiniAppJson };

@@ -115,7 +115,8 @@ export class MockBroker implements MiniAppApi {
     });
   }
 
-  private emitPeer(event: MiniAppPeerEvent): void {
+  /** The contact's app opened or closed, as the broker says it (tests may say it at a chosen moment). */
+  emitPeer(event: MiniAppPeerEvent): void {
     this.inFlight++;
     this.incoming = this.incoming.then(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));

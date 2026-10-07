@@ -28,6 +28,8 @@ function standIn(): MiniAppApi {
 async function main(): Promise<void> {
   const root = document.getElementById("app")!;
   const api = (window as { ghostly?: MiniAppApi }).ghostly ?? standIn();
+  // Made before anything is awaited: it listens to the chat from the start (see ChessController's constructor).
+  const game = new ChessController(api);
   const context = await api.context();
   const dark = context.theme ? context.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -36,7 +38,6 @@ async function main(): Promise<void> {
   document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
   const strings = stringsFor(language);
   document.title = strings.title;
-  const game = new ChessController(api);
   mountChess(root, game, strings);
   try {
     await game.start();

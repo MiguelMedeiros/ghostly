@@ -240,6 +240,15 @@ describe("chat", () => {
     expect(host.sent).toEqual([{ linkId: LINK, ref: REF, data: { move: "e2e4" } }]);
   });
 
+  it("answers context only once the chat open has: a contact already open reads as open from the first call", async () => {
+    // The contact opened the app before this side did (heard before this app ran). Before, `context` answered at once,
+    // ahead of the chat open, with peer null: Chess waited for a contact who was there.
+    const { host, run, ask } = setup();
+    host.receive(LINK, { app: memoryAppId(LINK, REF), o: "open", v: "1.2.0" });
+    run();
+    expect((await ask("context")).value).toMatchObject({ peer: { version: "1.2.0" } });
+  });
+
   it("takes a value as JSON.stringify writes it: undefined members left out, undefined in a list as null", async () => {
     // Chess saved and sent `{ ...game, d: undefined }`: refused, so no move was ever sent or kept.
     const { host, run, ask } = setup();

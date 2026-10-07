@@ -164,7 +164,9 @@ export class ChessController {
   /** The peer's game id when the two sides hold different games. */
   private stepPeerGame: string | null = null;
   private chess = new Chess();
-  private queue: Promise<void> = Promise.resolve();
+  /** Every task in order; held until `start` has read the saved game, so what arrives meanwhile waits for it. */
+  private queue: Promise<void>;
+  private loaded!: () => void;
   private lastResync = -Infinity;
   private readonly listeners = new Set<() => void>();
   private readonly noticeListeners = new Set<(notice: Notice) => void>();
@@ -174,6 +176,11 @@ export class ChessController {
     this.api = api;
     this.random = options.random ?? cryptoRandom;
     this.now = options.now ?? (() => Date.now());
+    this.queue = new Promise<void>((resolve) => (this.loaded = resolve));
+    // Listening from the first moment: the broker hands over an event once, as it comes, and one that came while the
+    // app was still loading (the contact opening Chess, their first seek) would be lost, leaving this side waiting.
+    this.unsubscribe.push(api.chat.on("message", (data) => void this.enqueue(() => this.receive(data))));
+    this.unsubscribe.push(api.chat.on("peer", (peer) => void this.enqueue(() => this.peerChanged(peer))));
   }
 
   // ---------- life ----------
@@ -189,8 +196,6 @@ export class ChessController {
       const chess = this.game && replay(this.game.m);
       if (!chess) this.game = null;
       this.chess = chess ?? new Chess();
-      this.unsubscribe.push(this.api.chat.on("message", (data) => this.enqueue(() => this.receive(data))));
-      this.unsubscribe.push(this.api.chat.on("peer", (peer) => this.enqueue(() => this.peerChanged(peer))));
     } else {
       const moves = this.readMoves(await this.api.storage.get(KEY_LOCAL));
       const chess = replay(moves);
@@ -198,6 +203,7 @@ export class ChessController {
       this.local = { v: 1, m: chess ? moves : [] };
     }
     this.phaseLoaded = true;
+    this.loaded();
     if (this.inChat && this.peerOpen) await this.enqueue(() => this.hello());
     this.changed();
   }
