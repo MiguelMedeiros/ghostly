@@ -39,6 +39,9 @@ export function mountChess(root: HTMLElement, game: ChessController, t: Strings)
   const board = el("div", "board");
   board.setAttribute("role", "grid");
   board.setAttribute("aria-label", t.board);
+  // A chessboard is never mirrored: a1 stays at white's bottom left in a right-to-left language too (the page takes
+  // the language's direction, and the board's grid would follow it).
+  board.dir = "ltr";
   const promote = el("div", "row promote");
   promote.hidden = true;
   const actions = el("div", "row actions");
