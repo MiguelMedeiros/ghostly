@@ -1,10 +1,11 @@
 import { decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
 import { getPrefix } from "./storage";
-import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
+import type { GroupEdgeView, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { publicKeyLabel } from "./publicKeyLabel";
 import { transportName } from "./connection";
 import { ago } from "./time";
 import { english } from "./english";
+import { relayCause } from "./problemText";
 import type { Translate } from "../contexts/I18nContext";
 
 /** How a member is named in a group: their announced name, or their key. `t`: the interface's words ("You"). */
@@ -54,7 +55,7 @@ export function edgeLabel(member: GroupMemberView, now = Date.now(), t: Translat
   if (edge.noSlot) return t("group.member.noSlot");
   if (edge.state === "connecting") return t("group.member.connecting");
   const seen = edge.lastSeenAt ? t("group.member.lastSeen", { time: since(edge.lastSeenAt / 1000, now / 1000) }) : t("group.member.notSeen");
-  return edge.state === "error" ? t("group.member.issue", { seen }) : t("group.member.unreachable", { seen });
+  return edge.state === "error" && !edgeWaits(edge) ? t("group.member.issue", { seen }) : t("group.member.unreachable", { seen });
 }
 
 /**
@@ -74,8 +75,18 @@ export function groupTransports(members: GroupMemberView[], t: Translate = engli
   return { line: t("group.transports.mixed", { head, list: [...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`).join(", ") }) };
 }
 
+/**
+ * An edge down for a reason the app gets past by itself: the relays holding back (their budget, one cooling down) or a
+ * session dropped (dialled again). Said as a wait, not red (lib/problemText.ts).
+ */
+export function edgeWaits(edge: GroupEdgeView | undefined): boolean {
+  if (edge?.state !== "error") return false;
+  return edge.cause === "session" || (edge.cause === "relays" && relayCause(edge.error ?? "")?.kind === "wait");
+}
+
 /** The dot beside a member: reachable, on its way, failed, or away. */
 export const edgeDot = (member: GroupMemberView) => member.me || member.edge?.state === "open" || member.viaHub ? "bg-accent"
+  : edgeWaits(member.edge) ? "bg-text-muted motion-safe:animate-pulse"
   : member.edge?.state === "error" ? "bg-danger" : member.edge?.state === "connecting" ? "bg-text-muted motion-safe:animate-pulse" : "bg-text-muted/50";
 
 /** Where a private group lives in the app: by its id. */

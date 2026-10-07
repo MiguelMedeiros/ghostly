@@ -156,9 +156,7 @@
     "unreachable": "Non raggiungibile · {{seen}}",
     "viaHub": "Tramite un hub",
     "why": {
-      "other": "Impossibile connettersi",
-      "relays": "Relay non raggiungibili, nuovo tentativo…",
-      "session": "Connessione persa, nuovo tentativo…"
+      "other": "Impossibile connettersi"
     },
     "you": "Tu"
   },

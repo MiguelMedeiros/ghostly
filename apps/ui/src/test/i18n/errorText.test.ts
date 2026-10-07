@@ -26,6 +26,9 @@ const CODES = "packages/core/src/engineErrors.ts";
 /** [message as thrown, the file that throws it, the part of the message written there as it is]. */
 const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The Ghostly peer did not start. Reopen the extension to retry.", "apps/extension/src/background.ts"],
+  ["Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
+  ["Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
+  ["Native adapter could not start. Reopen this chat to retry.", "packages/browser/src/engine/node.ts"],
   ["The Ghostly peer is unavailable. Reopen the extension to retry.", "apps/extension/src/host.ts"],
   ["Switching profiles…", "apps/extension/src/host.ts"],
   ["Ghostly needs the sign-in permission for this.", "apps/extension/src/oidc.ts"],

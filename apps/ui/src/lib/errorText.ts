@@ -75,6 +75,11 @@ const RULES: readonly Rule[] = [
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
 
+  // A chat's native transport (packages/browser/src/engine/node.ts): its listener lent to another chat, or not started.
+  exact("Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "errors.transport.listenerGiven"),
+  exact("Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "errors.transport.listenerReleased"),
+  exact("Native adapter could not start. Reopen this chat to retry.", "errors.transport.adapterFailed"),
+
   // Cashu and Lightning in the wallet (packages/browser/src/engine/wallet.ts).
   exact("That is not a valid mint URL", "errors.cashu.badMintUrl"),
   exact("Mints must use https", "errors.cashu.mintHttps"),
@@ -396,6 +401,11 @@ export function rawError(cause: unknown): string {
 
 /** `cause` said in `t`'s language when it is a known error, else as it came (see above). */
 export function errorText(cause: unknown, t: Translate = english): string {
+  return knownErrorText(cause, t) ?? rawError(cause);
+}
+
+/** `cause` said in `t`'s language when it is a known error, else null (lib/problemText.ts gives it a generic title). */
+export function knownErrorText(cause: unknown, t: Translate = english): string | null {
   const raw = rawError(cause);
   for (const rule of RULES) {
     const found = raw.match(rule.match);
@@ -409,7 +419,7 @@ export function errorText(cause: unknown, t: Translate = english): string {
     const amount = (value: string) => { const digits = value.replace(/\D/g, ""); return digits ? formatAmount(Number(digits), t.language ?? "en") : value; };
     return t(key, Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value])));
   }
-  return raw;
+  return null;
 }
 
 /**

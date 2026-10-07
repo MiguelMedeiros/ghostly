@@ -254,6 +254,15 @@
     "unreadable": "此处无法读取这张图片",
     "unreadableTryJpeg": "此处无法读取这张图片。请试试 JPEG 或 PNG。"
   },
+  "problem": {
+    "checkConnection": "正在重试。请检查网络连接。",
+    "connectFailed": "无法连接",
+    "relaysUnreachable": "无法连接中继",
+    "relaysWait": "正在等待中继",
+    "retryIn": "{{s}} 秒后重试",
+    "retrying": "正在重试…",
+    "sessionDropped": "连接已断开"
+  },
   "profile": {
     "arkBackup": "无法读取用于备份的 Ark 钱包:{{reason}}",
     "backupTooLarge": "此备份太大，无法在此恢复。",
@@ -303,6 +312,11 @@
     "usdtBalanceChanged": "代币或 gas 余额已变化。请重新审核",
     "usdtNonceChanged": "账户 nonce 已变化。请重新审核",
     "usdtRejected": "USDT RPC 拒绝了这个操作"
+  },
+  "transport": {
+    "adapterFailed": "无法启动。重新打开此聊天以重试。",
+    "listenerGiven": "已为更活跃的聊天暂停。打开此聊天即可恢复。",
+    "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。"
   },
   "wallet": {
     "alreadyHave": "你已经有一个 {{network}} {{kind}} 钱包",

@@ -156,9 +156,7 @@
     "unreachable": "无法连接 · {{seen}}",
     "viaHub": "通过中继节点",
     "why": {
-      "other": "无法连接",
-      "relays": "无法连接中继,正在重试…",
-      "session": "连接已断开,正在重试…"
+      "other": "无法连接"
     },
     "you": "你"
   },

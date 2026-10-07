@@ -114,7 +114,7 @@ export const SESSION_FRAME_MAX = 60 * 1024;
  * each awaited (a group frame is decrypted, checked and stored before the next), and the peer sends at the network's
  * pace. A member back in a group answers a sync with a burst: a commit per epoch, its kept messages, the ones it hands
  * on, edits, reactions. With a bound of 64 frames a phone handling them a few milliseconds each failed its session
- * mid catch-up ("Session receive limit exceeded", 2026-10-07). The size bound keeps the old worst case in memory
+ * mid catch-up ("Session receive limit exceeded" then, "Session receive queue full" now, 2026-10-07). The size bound keeps the old worst case in memory
  * (64 frames of 60 KiB); the count only bounds a flood of tiny frames.
  */
 export const SESSION_RECEIVE_PENDING = { frames: 1024, bytes: 64 * SESSION_FRAME_MAX } as const;
@@ -213,10 +213,12 @@ export class PairedSession {
     this.channel.onMessage = data => {
       if (this.stopped) return;
       const size = data.length;
-      if (size > SESSION_FRAME_MAX) return this.fail("Session receive limit exceeded");
+      // Two limits, two texts: a frame over the maximum is the peer breaking the protocol (a refused session), too much
+      // waiting is a flood or a slow side (a dropped one, dialled again). The app tells them apart by these words.
+      if (size > SESSION_FRAME_MAX) return this.fail("Session frame too large");
       if (++this.pending > SESSION_RECEIVE_PENDING.frames || (this.pendingBytes += size) > SESSION_RECEIVE_PENDING.bytes) {
         this.overloaded = true;
-        return this.fail("Session receive limit exceeded");
+        return this.fail("Session receive queue full");
       }
       this.queue = this.queue.then(async () => {
         if (this.stopped) return;

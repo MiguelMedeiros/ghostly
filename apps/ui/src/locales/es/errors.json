@@ -254,6 +254,15 @@
     "unreadable": "Esta imagen no se puede leer aquí",
     "unreadableTryJpeg": "Esta imagen no se puede leer aquí. Prueba con un JPEG o PNG."
   },
+  "problem": {
+    "checkConnection": "Reintentando. Revisa tu conexión.",
+    "connectFailed": "No se pudo conectar",
+    "relaysUnreachable": "No se llega a los relays",
+    "relaysWait": "Esperando a los relays",
+    "retryIn": "Reintento en {{s}} s",
+    "retrying": "Reintentando…",
+    "sessionDropped": "Se cortó la conexión"
+  },
   "profile": {
     "arkBackup": "No se pudo leer la billetera Ark para la copia de seguridad: {{reason}}",
     "backupTooLarge": "Esta copia es demasiado grande para restaurarla aquí.",
@@ -303,6 +312,11 @@
     "usdtBalanceChanged": "El saldo de tokens o de gas cambió. Crea una nueva revisión",
     "usdtNonceChanged": "El nonce de la cuenta cambió. Crea una nueva revisión",
     "usdtRejected": "El RPC de USDT rechazó la operación"
+  },
+  "transport": {
+    "adapterFailed": "No se inició. Vuelve a abrir este chat para reintentar.",
+    "listenerGiven": "En pausa por un chat más activo. Abre este chat para reanudar.",
+    "listenerReleased": "En pausa por otro chat. Abre este chat para reanudar."
   },
   "wallet": {
     "alreadyHave": "Ya tienes una billetera {{kind}} {{network}}",

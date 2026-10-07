@@ -156,9 +156,7 @@
     "unreachable": "Inacessível · {{seen}}",
     "viaHub": "Por um hub",
     "why": {
-      "other": "Não foi possível conectar",
-      "relays": "Sem acesso aos relays, tentando de novo…",
-      "session": "A conexão caiu, tentando de novo…"
+      "other": "Não foi possível conectar"
     },
     "you": "Você"
   },

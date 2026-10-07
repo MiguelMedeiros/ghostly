@@ -77,9 +77,9 @@ describe("paired session: refusing to start on a bad binding", () => {
 describe("paired session: receive limits", () => {
   it("fails on a frame over 60 KiB, text or binary", async () => {
     const text = lone(); text.inject("x".repeat(60 * 1024 + 1));
-    expect(text.s.state.error).toMatch(/receive limit/);
+    expect(text.s.state.error).toBe("Session frame too large");
     const binary = lone(); binary.inject(new Uint8Array(60 * 1024 + 1));
-    expect(binary.s.state.error).toMatch(/receive limit/);
+    expect(binary.s.state.error).toBe("Session frame too large");
     const edge = lone(); edge.inject(new Uint8Array(60 * 1024)); await tick();
     expect(edge.s.state.status).toBe("negotiating");
   });
@@ -89,17 +89,19 @@ describe("paired session: receive limits", () => {
     for (let i = 0; i < SESSION_RECEIVE_PENDING.frames; i++) h.inject(`frame ${i}`);
     expect(h.s.state.status).toBe("negotiating");
     h.inject("one too many");
-    expect(h.s.state.error).toMatch(/receive limit/);
+    // Another text than an oversized frame's: a flood, not a frame that breaks the protocol.
+    expect(h.s.state.error).toBe("Session receive queue full");
     expect(h.s.overloaded).toBe(true);
     const big = lone(), frames = SESSION_RECEIVE_PENDING.bytes / SESSION_FRAME_MAX;
     for (let i = 0; i < frames; i++) big.inject(new Uint8Array(SESSION_FRAME_MAX));
     expect(big.s.state.status).toBe("negotiating");
     big.inject(new Uint8Array(1));
-    expect(big.s.state.error).toMatch(/receive limit/);
+    expect(big.s.state.error).toBe("Session receive queue full");
     expect(big.s.overloaded).toBe(true);
     // One frame too big breaks the protocol: no overload.
     const over = lone(); over.inject("x".repeat(SESSION_FRAME_MAX + 1));
     expect(over.s.overloaded).toBe(false);
+    expect(over.s.state.error).toBe("Session frame too large");
   });
 
   it("refuses a negotiation frame one byte over 4096, and reads one at the limit", async () => {

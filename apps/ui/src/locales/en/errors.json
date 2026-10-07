@@ -254,6 +254,15 @@
     "unreadable": "This picture cannot be read here",
     "unreadableTryJpeg": "This picture cannot be read here. Try a JPEG or PNG."
   },
+  "problem": {
+    "checkConnection": "Trying again. Check your connection.",
+    "connectFailed": "Couldn't connect",
+    "relaysUnreachable": "Can't reach the relays",
+    "relaysWait": "Waiting for the relays",
+    "retryIn": "Retrying in {{s}} s",
+    "retrying": "Trying again…",
+    "sessionDropped": "Connection dropped"
+  },
   "profile": {
     "arkBackup": "Could not read the Ark wallet for the backup: {{reason}}",
     "backupTooLarge": "This backup is too large to restore here.",
@@ -303,6 +312,11 @@
     "usdtBalanceChanged": "Token or gas balance changed. Create a new review",
     "usdtNonceChanged": "Account nonce changed. Create a new review",
     "usdtRejected": "USDT RPC rejected the operation"
+  },
+  "transport": {
+    "adapterFailed": "Couldn't start. Reopen this chat to retry.",
+    "listenerGiven": "Paused for a busier chat. Open this chat to resume.",
+    "listenerReleased": "Paused for another chat. Open this chat to resume."
   },
   "wallet": {
     "alreadyHave": "You already have a {{network}} {{kind}} wallet",
