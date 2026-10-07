@@ -55,7 +55,13 @@ export function webOpener({ apps, closeLabel, nameIn, onStop }: WebOpenerOptions
         theme: () => (document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"),
         locale: () => document.documentElement.lang || navigator.language,
       },
-      onStop: (reason) => { overlay.remove(); onStop?.(ref, reason); },
+      onStop: (reason) => {
+        overlay.remove();
+        // An app the person did not close (its frame navigated, broke the protocol, or never started) says why in the
+        // console: the only trace of it, since the app's own frame is gone.
+        if (reason !== "closed" && reason !== "stopped") console.warn(`[apps] ${entry.title} stopped: ${reason}`);
+        onStop?.(ref, reason);
+      },
     });
     close.addEventListener("click", () => running.stop());
   };

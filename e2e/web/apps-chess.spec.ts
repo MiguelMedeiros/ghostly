@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
@@ -172,6 +173,121 @@ test("both have Chess: one opens it and waits, the other opens it from the card 
   await move(black.page, white.page, "b8", "c6");
   await move(white.page, black.page, "f1", "c4");
   await boardsShow([[ana, anaColour], [bob, bobColour]], [["c6", /♞/], ["c4", /♝/], ["b8", /^$/], ["f1", /^$/]]);
+});
+
+/** Two people with Chess open in their chat, colours tossed: [white, black]. */
+async function playing(peer: (name: string) => Promise<Peer>, browserName: string): Promise<{ ana: Peer; bob: Peer; white: Peer; black: Peer }> {
+  const publisher = new ChessPublisher();
+  publisher.signStore({ apps: [publisher.publish({ version: "1.2.0", sequence: 1 })] });
+  const [ana, bob] = await openPeers(peer, browserName, "ana", "bob");
+  await Promise.all([publisher.serve(ana.context), publisher.serve(bob.context)]);
+  await installFromStore(ana.page);
+  await installFromStore(bob.page);
+  await ana.page.goto("/#/");
+  await bob.page.goto("/#/");
+  await pair(ana, bob);
+  await (await composerRow(ana.page, "composer-apps")).click();
+  await ana.page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
+  await chat(bob).getByTestId("app-card").getByTestId("app-card-open").click();
+  const anaColour = await colourOf(ana.page);
+  await colourOf(bob.page);
+  const [white, black] = anaColour === "w" ? [ana, bob] : [bob, ana];
+  return { ana, bob, white, black };
+}
+
+/** Every status line a side's Chess shows, read once a second until `stop`. */
+function watchStatus(side: Peer): { seen: Set<string>; stop: () => Promise<void> } {
+  const seen = new Set<string>();
+  let on = true;
+  const loop = (async () => {
+    while (on) {
+      const text = await chessFrame(side.page).locator(".status").textContent({ timeout: 5_000 }).catch(() => null);
+      if (text) seen.add(text);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  })();
+  return { seen, stop: async () => { on = false; await loop; } };
+}
+
+const CLOSED = "Your contact closed Chess. The game waits here.";
+
+/**
+ * The page as the browser has it with its tab in the background: `document.visibilityState` "hidden", with the
+ * `visibilitychange` and `blur` a real switch sends (headless Chromium keeps every page visible, whatever is in front).
+ */
+async function setHidden(page: Page, hidden: boolean): Promise<void> {
+  await page.evaluate((hidden) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event(hidden ? "blur" : "focus"));
+  }, hidden);
+}
+
+test("a tab in the background keeps Chess open: a move made meanwhile is there when it comes back", {
+  tag: ["@feature:apps.chess.web", "@feature:apps.chat.wire"],
+}, async ({ peer, browserName }) => {
+  test.setTimeout(6 * 60_000);
+  const { white, black } = await playing(peer, browserName);
+  const watching = watchStatus(white);
+
+  // Black's tab goes to the background for a minute; white moves after 20 s.
+  await setHidden(black.page, true);
+  await white.page.waitForTimeout(20_000);
+  await move(white.page, black.page, "e2", "e4");
+  await white.page.waitForTimeout(40_000);
+  await setHidden(black.page, false);
+  await move(black.page, white.page, "e7", "e5");
+  await move(white.page, black.page, "g1", "f3");
+  await watching.stop();
+  expect([...watching.seen], "white never saw black's Chess close").not.toContain(CLOSED);
+});
+
+test("a page frozen for a minute (the session dropped meanwhile) catches up on the move it missed", {
+  tag: ["@feature:apps.chess.web", "@feature:apps.chat.wire"],
+}, async ({ peer, browserName }) => {
+  test.skip(browserName !== "chromium", "freezing a page is Chromium's DevTools protocol");
+  test.setTimeout(6 * 60_000);
+  const { white, black } = await playing(peer, browserName);
+  await move(white.page, black.page, "e2", "e4");
+  await move(black.page, white.page, "e7", "e5");
+
+  // Black's page is frozen (as a browser may freeze a tab long in the background): no script, no answer to pings.
+  const cdp = await black.context.newCDPSession(black.page);
+  await cdp.send("Page.setWebLifecycleState", { state: "frozen" });
+  await white.page.waitForTimeout(5_000);
+  // White moves while black is frozen, before its session is given up for dead.
+  const board = chessFrame(white.page);
+  await expect(board.locator(".status")).toHaveText(/^Your move/);
+  await board.locator('[data-square="g1"]').click();
+  await board.locator('[data-square="f3"]').click();
+  await expect(board.locator('[data-square="f3"]')).toHaveText(/♞/);
+  await white.page.waitForTimeout(55_000);
+  await cdp.send("Page.setWebLifecycleState", { state: "active" });
+
+  // Back: the chat comes back, and the move black missed is there, by the frame or the catch-up.
+  await expect(chessFrame(black.page).locator('[data-square="f3"]')).toHaveText(/♞/, { timeout: 120_000 });
+  await move(black.page, white.page, "b8", "c6");
+  await boardsShow([[white, "w"], [black, "b"]], [["e4", /♟/], ["e5", /♟/], ["f3", /♞/], ["c6", /♞/]]);
+});
+
+test("a long game: both keep Chess open for minutes, a move every 12 s, and every move arrives", {
+  tag: ["@feature:apps.chess.web", "@feature:apps.chat.wire"],
+}, async ({ peer, browserName }) => {
+  test.setTimeout(8 * 60_000);
+  const { white, black } = await playing(peer, browserName);
+  const watching = [watchStatus(white), watchStatus(black)];
+  // The Italian game, both castled: 12 plies.
+  const plies: [string, string][] = [["e2", "e4"], ["e7", "e5"], ["g1", "f3"], ["b8", "c6"], ["f1", "c4"], ["f8", "c5"],
+    ["c2", "c3"], ["g8", "f6"], ["d2", "d3"], ["d7", "d6"], ["e1", "g1"], ["e8", "g8"]];
+  for (const [i, [from, to]] of plies.entries()) {
+    await white.page.waitForTimeout(12_000);
+    const [mover, watcher] = i % 2 === 0 ? [white, black] : [black, white];
+    await move(mover.page, watcher.page, from, to);
+  }
+  await boardsShow([[white, "w"], [black, "b"]], [["g1", /♚/], ["f1", /♜/], ["g8", /♚/], ["f8", /♜/]]);
+  for (const w of watching) await w.stop();
+  for (const w of watching) expect([...w.seen], "neither side saw the other's Chess close").not.toContain(CLOSED);
 });
 
 test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", "@feature:apps.bundle"] }, async ({ peer, browserName }) => {
