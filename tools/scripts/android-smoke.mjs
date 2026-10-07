@@ -2,7 +2,8 @@
 // engine starts, then the probe measures what the native app depends on, from inside its own WebView:
 // - the WebView itself (version), WebCrypto Ed25519 and X25519, WebRTC and its permissions (no microphone is opened);
 // - native Iroh: an endpoint binds, gets an address, and a second endpoint connects to it (netwatch on Android);
-// - Pkarr over UDP: a packet written to and read from the Mainline DHT only (no relay);
+// - Pkarr over UDP: a packet written to and read from the Mainline DHT only (no relay), then through the relays;
+// - HTTPS from Rust, which checks certificates with Android's own verifier;
 // - the `ghostly-file` scheme: a range request, and a <video> playing from it;
 // - JavaScript timers while the screen is off (an emulator's answer, which a phone has to confirm).
 // Every result goes to $ANDROID_SMOKE_OUT/results.json and results.md, with screenshots and the logs. Only the smoke
@@ -77,18 +78,24 @@ try {
     tauri: "__TAURI_INTERNALS__" in window,
     origin: location.origin,
     secure: window.isSecureContext,
+    coarse: matchMedia("(any-pointer: coarse)").matches,
+    fine: matchMedia("(any-pointer: fine)").matches,
+    viewport: `${innerWidth}x${innerHeight}@${devicePixelRatio}`,
   }));
+  // The UI leaves the composer unfocused (no keyboard) only on a touch-only screen (apps/ui/src/lib/touchOnly.ts).
+  record("webview", "touch only (no autofocus, no keyboard on open)", env.coarse && !env.fine, `any-pointer coarse ${env.coarse}, fine ${env.fine}; viewport ${env.viewport}`);
   record("webview", "version", env.tauri, `${env.userAgent.match(/Chrome\/[\d.]+/)?.[0] ?? env.userAgent}; ${env.origin}; secure context ${env.secure}`);
 
   // The engine started with the Desktop host: only apps/ui/src/desktop/host.ts describes Pkarr this way.
   await measure("smoke", "engine starts (Desktop host, direct DHT)", async () => {
-    await page.locator('[title="Settings"]').first().click();
+    // Settings, Network, by its address (the phone layout reaches it through the tab bar and the section list).
+    await page.evaluate(() => { location.hash = "#/settings/network"; });
     const protocol = page.locator('[data-testid="network-protocol"]').first();
     await protocol.waitFor({ state: "attached", timeout: 60_000 });
     const text = (await protocol.textContent())?.trim();
     record("smoke", "engine starts (Desktop host, direct DHT)", /Direct UDP/.test(text ?? ""), text);
     await page.screenshot({ path: resolve(out, "settings.png") }).catch(() => {});
-    await page.goBack().catch(() => {});
+    await page.evaluate(() => { location.hash = "#/"; });
   });
 
   // From here on, the page's own Tauri bridge: what the app's code would call.
@@ -190,6 +197,20 @@ try {
     record("pkarr", "status", null, await invoke("pkarr_status"));
   });
 
+  // HTTPS from Rust: reqwest checks certificates with Android's verifier (rustls-platform-verifier, `android_tls`).
+  await measure("https", "HTTPS from Rust (link preview GET)", async () => {
+    const t = Date.now();
+    const page_ = await invoke("link_preview_fetch", { url: "https://example.com/", kind: "page" });
+    record("https", "HTTPS from Rust (link preview GET)", !!page_?.bodyB64, `${Date.now() - t} ms, ${page_?.contentType}`);
+  });
+  await measure("pkarr", "relay write (HTTPS)", async () => {
+    await invoke("set_pkarr_relays", { relays: ["https://pkarr.pubky.org", "https://pkarr.pubky.app"], readRelays: true });
+    const seedB64 = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+    const t = Date.now();
+    await invoke("publish_records", { seedB64, records: [{ label: "_probe", value: `android-relay-${Date.now()}`, ttl: 300 }] });
+    record("pkarr", "relay write (HTTPS)", true, { ms: Date.now() - t, status: await invoke("pkarr_status") });
+  });
+
   // The `ghostly-file` scheme (file_stream.rs): a stored video, read in ranges and played by the WebView.
   await measure("files", "ghostly-file range request", async () => {
     const video = readFileSync(resolve("e2e/support/video-fixtures/ghosts-h264.mp4"));
@@ -200,6 +221,11 @@ try {
       await window.__TAURI_INTERNALS__.invoke("file_bytes_append", bytes, { headers: { "x-space": space, "x-id": id, "x-offset": "0" } });
       await window.__TAURI_INTERNALS__.invoke("file_bytes_close", { space, id });
     }, [video.toString("base64"), space, id]);
+    const read = await page.evaluate(async ([space, id]) => {
+      const answer = await window.__TAURI_INTERNALS__.invoke("file_bytes_read", { space, id, offset: 0, length: 16 });
+      return { type: Object.prototype.toString.call(answer), length: answer?.byteLength ?? answer?.length };
+    }, [space, id]);
+    record("files", "file_bytes_append (JSON bytes over postMessage) + file_bytes_read", read.length === 16, read);
     const opened = await invoke("file_bytes_stream_open", { space, id, mime: "video/mp4" });
     const r = await page.evaluate(async (url) => {
       const response = await fetch(url, { headers: { Range: "bytes=0-99" } });
@@ -252,7 +278,10 @@ try {
   try {
     const logcat = adb("logcat", "-d", "-v", "time");
     writeFileSync(resolve(out, "logcat.txt"), logcat);
-    const netlink = logcat.split("\n").filter((l) => /netlink|netwatch|EACCES|Permission denied|avc: denied/i.test(l));
+    const pid = adb("shell", "pidof", PKG).trim();
+    const ours = logcat.split("\n").filter((l) => pid && l.includes(`(${pid.padStart(5)})`));
+    writeFileSync(resolve(out, "logcat-app.txt"), ours.join("\n"));
+    const netlink = ours.filter((l) => /netlink|netwatch|EACCES|Permission denied|avc: denied/i.test(l));
     record("iroh", "netlink / netwatch in logcat", netlink.length === 0 ? true : null, netlink.length ? netlink.slice(0, 5).join(" / ").slice(0, 600) : "no netlink, netwatch or permission errors");
     const crash = logcat.split("\n").filter((l) => /FATAL EXCEPTION|panicked at|SIGSEGV|SIGABRT/.test(l));
     record("smoke", "no crash in logcat", crash.length === 0, crash.slice(0, 3).join(" / ").slice(0, 600) || "none");
@@ -262,8 +291,9 @@ try {
   }
   try {
     writeFileSync(resolve(out, "app-files.txt"), adb("shell", "run-as", PKG, "find", ".", "-maxdepth", "4"));
-    const logs = adb("shell", "run-as", PKG, "find", ".", "-name", "*.log").trim().split("\n").filter(Boolean);
-    for (const [i, file] of logs.entries()) writeFileSync(resolve(out, `app-log-${i}.txt`), adb("shell", "run-as", PKG, "cat", file.trim()));
+    // The app's own log (diagnostics.rs), not the WebView's storage files.
+    const logs = adb("shell", "run-as", PKG, "find", ".", "-name", "'*.log'", "-not", "-path", "'./app_webview/*'").trim().split("\n").filter(Boolean);
+    for (const [i, file] of logs.entries()) writeFileSync(resolve(out, `app-log-${i}.txt`), adb("shell", "run-as", PKG, "cat", `'${file.trim()}'`));
   } catch (error) {
     record("smoke", "app log", null, String(error).slice(0, 200));
   }

@@ -1,3 +1,4 @@
+import groovy.json.JsonSlurper
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -69,7 +70,31 @@ rust {
     rootDirRel = "../../../"
 }
 
+// HTTPS from Rust checks certificates with Android's own verifier (rustls-platform-verifier). Its Kotlin half ships
+// inside the crate as a Maven folder, found through `cargo metadata` (the crate's own instructions).
+val rustlsPlatformVerifierMaven: String = run {
+    val metadata = providers.exec {
+        workingDir = file("../../..")
+        commandLine(
+            "cargo", "metadata", "--format-version", "1",
+            "--filter-platform", "aarch64-linux-android", "--manifest-path", "Cargo.toml",
+        )
+    }.standardOutput.asText.get()
+    @Suppress("UNCHECKED_CAST")
+    val packages = (JsonSlurper().parseText(metadata) as Map<String, Any>)["packages"] as List<Map<String, Any>>
+    val manifest = packages.first { it["name"] == "rustls-platform-verifier-android" }["manifest_path"] as String
+    File(File(manifest).parentFile, "maven").path
+}
+
+repositories {
+    maven {
+        url = uri(rustlsPlatformVerifierMaven)
+        metadataSources { artifact() }
+    }
+}
+
 dependencies {
+    implementation("rustls:rustls-platform-verifier:0.1.1")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")

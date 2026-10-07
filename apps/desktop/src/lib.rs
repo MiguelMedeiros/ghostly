@@ -273,6 +273,12 @@ pub fn run() {
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
+            #[cfg(target_os = "android")]
+            if let Err(error) = android_tls() {
+                diagnostics::log(&format!(
+                    "tls: Android's certificate verifier is not ready: {error}"
+                ));
+            }
             notifications::install(app.handle());
             // Files sent and received in chats, one folder per profile.
             // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
@@ -329,6 +335,20 @@ pub fn run() {
         .build(context)
         .expect("error while running tauri application")
         .run(on_run_event);
+}
+
+/// Android: rustls-platform-verifier checks every HTTPS certificate with Android's own verifier, through the JVM, and
+/// panics on a request made before it knows the JVM and the app's context. Tao has both by now (`setup` runs after the
+/// activity's `onCreate`).
+#[cfg(target_os = "android")]
+fn android_tls() -> Result<(), String> {
+    let android = ndk_context::android_context();
+    // SAFETY: the pointers are the process's JavaVM and the application context, which tao keeps as a global
+    // reference for the life of the process.
+    let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) }.map_err(|e| e.to_string())?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+    let context = unsafe { jni::objects::JObject::from_raw(android.context().cast()) };
+    rustls_platform_verifier::android::init_with_env(&mut env, context).map_err(|e| e.to_string())
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.

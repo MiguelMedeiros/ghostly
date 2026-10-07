@@ -2,7 +2,10 @@ package tools.ghostly.app
 
 import android.os.Bundle
 import android.system.Os
+import android.view.View
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -14,5 +17,15 @@ class MainActivity : TauriActivity() {
     }
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    // Edge to edge is enforced from Android 15 (target SDK 35 and up), so the page would draw under the status bar,
+    // the gesture bar and the keyboard. The page sits between them instead: the content view is padded by the system
+    // bars, the display cutout and the keyboard, and the WebView inside it sees no insets of its own.
+    val content = findViewById<View>(android.R.id.content)
+    ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+      val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+      val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
+      view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard.bottom))
+      WindowInsetsCompat.CONSUMED
+    }
   }
 }

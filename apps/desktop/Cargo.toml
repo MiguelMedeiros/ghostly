@@ -56,6 +56,14 @@ tauri-plugin-updater = "2"
 # `image-data`: a picture on the clipboard, for a paste of files (clipboard.rs).
 arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
 
+# Android: HTTPS from Rust (reqwest, so the Pkarr relays, link previews and push) checks certificates with Android's
+# own verifier, which needs the JVM and the app's context before the first request (src/lib.rs `android_tls`). Its
+# Kotlin half comes from the crate's Maven folder (gen/android/app/build.gradle.kts).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+rustls-platform-verifier = "0.6"
+
 # Calls on Linux (src/native_call), whose WebKitGTK is built without WebRTC: WebRTC in Rust, media in GStreamer.
 [target.'cfg(target_os = "linux")'.dependencies]
 gstreamer = "0.25"
