@@ -188,6 +188,11 @@ const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paire
  * `disconnected`) otherwise went on until its consent checks gave up, 27 s after the crash (CI run 36741701666).
  */
 export const PONG_WAIT_MS = 4_000;
+/**
+ * Back in front after an absence (`wake`), a live session that ends this soon after it was lost while the app was
+ * away (a phone that put it to sleep): the chat resumes as after a restart, not as a session the contact closed.
+ */
+export const WAKE_LOST_MS = 10_000;
 
 export interface IncomingMessage {
   id?: string;
@@ -810,6 +815,10 @@ export class GhostLink {
   private resuming: PairedTransport | undefined;
   /** Until then, a dial waits for the native endpoint `resuming` names to start (it is knocked on as it does). */
   private resumeWaitUntil = 0;
+  /** What the last live session ran on, kept after it ended: a wake resumes on it (`resumeAfterAbsence`). */
+  private lastLiveOn: PairedTransport | undefined;
+  /** Until then, a session that ends was lost while the app was away (`WAKE_LOST_MS`). */
+  private wokeUntil = 0;
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
@@ -3685,6 +3694,7 @@ export class GhostLink {
   private peerLost(why: string): void {
     if (this.stopped || this.leaving || this.yielding) return;
     traceLink(this.myPubKeyZ32, "peer-lost", { why });
+    if (Date.now() < this.wokeUntil) { this.wokeUntil = 0; this.resumeAfterAbsence(); }
     this.lostUntil = Date.now() + WATCH_PEER_MS;
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
@@ -3759,7 +3769,13 @@ export class GhostLink {
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     this.session.pollNow();
-    if (!this.channel) {
+    if (this.channel) {
+      // The session may have died while the app was away, and its transport not have noticed yet: its end, now or in
+      // the next seconds (a ping it does not answer), is the absence's, and the chat resumes as after a restart.
+      this.wokeUntil = Date.now() + WAKE_LOST_MS;
+      this.probeAfterWake(this.channel);
+    } else {
+      this.resumeAfterAbsence();
       // The side that does not dial makes sure the other one sees it here, fresh — unless it just did:
       // a second packet right behind the first is one relays hold back for seconds.
       if (!this.session.publishedRecently(RECENTLY_PUBLISHED_MS)) void this.session.refreshAdvertisement();
@@ -3767,7 +3783,53 @@ export class GhostLink {
     }
   }
 
+  /**
+   * Back in front with no session, after one was live: the contact likely did not notice this app go (a phone puts a
+   * backgrounded app to sleep without a word), and reads this chat at its slow pace (30 s on the relays in the
+   * background), so an offer or a fresh packet of this side's waited about that long for it. The chat resumes as after a
+   * restart (WISP 100, "Back after a restart"): this side dials whatever its key, on the transport it was live on, and
+   * knocks on the contact's other transports as its offer goes out, which reaches the contact at once.
+   */
+  private resumeAfterAbsence(): void {
+    const transport = this.lastLiveOn;
+    // A contact that said it was going did notice: it dials or offers when it is back, as after any goodbye.
+    if (!transport || this.resuming || this.departed || !this.options.pairing?.credentials.peerKey || !this.options.params.profile || this.deliveryMode === "dht") return;
+    this.lastLiveOn = undefined;
+    this.resuming = transport;
+    traceLink(this.myPubKeyZ32, "wake-resume", { transport });
+    if (transport !== "webrtc/1") { this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS; return; }
+    // The session's close was heard just before the wake, and this side answers the contact's offer already: it knocks
+    // meanwhile, as an app back after a restart does.
+    if (this.dataLink.state === "answering" && this.answeringEpoch === this.connectionEpoch) {
+      const epoch = this.connectionEpoch;
+      setTimeout(() => this.maybeKnockAnswering(epoch), 0);
+      return;
+    }
+    // Or it dialled at that close: its offer is out already, and becomes the resume's, so its knock goes now.
+    const offered = this.offered;
+    if (!offered || offered.resume || offered.epoch !== this.connectionEpoch || !this.offerOut && !this.dialing) return;
+    this.resuming = undefined;
+    offered.resume = true;
+    // Still gathering: the race is scheduled once it is out, and knocks then (`scheduleRace`).
+    if (!this.dialing) setTimeout(() => this.maybeKnockEarly(offered.epoch), 0);
+  }
+
+  /** A ping on the session right after a wake, with `PONG_WAIT_MS` for its answer: none, and the session is dead. */
+  private probeAfterWake(channel: FrameChannel): void {
+    if (!this.peerAnswersPings || this.paired?.state.status !== "ready") return;
+    this.unansweredPings++;
+    try { this.pingSentAt = Date.now(); channel.send(JSON.stringify({ t: "paired-ping" })); } catch { this.dropDeadSession(channel); return; }
+    if (this.pongWait) clearTimeout(this.pongWait);
+    this.pongWait = setTimeout(() => {
+      this.pongWait = null;
+      if (this.channel !== channel || this.stopped) return;
+      traceLink(this.myPubKeyZ32, "wake-unanswered", {});
+      this.dropDeadSession(channel);
+    }, PONG_WAIT_MS);
+  }
+
   private detach(): void {
+    if (this.channel && this.paired?.state.status === "ready") this.lastLiveOn = this.activeBinding?.transport ?? "webrtc/1";
     this.stopLiveness();
     const wasNative = !!this.activeBinding;
     this.applicationOpen = false;
