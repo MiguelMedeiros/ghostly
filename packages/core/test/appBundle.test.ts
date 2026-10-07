@@ -81,6 +81,7 @@ async function build(): Promise<Vectors> {
     ...DRAFT, version: "1.2.0-beta.1+build.7", sequence: 7, permissions: ["chat", "name"], runtime: { host: ">=1.2.0", clients: ["web", "desktop", "extension"] },
     license: "(MIT OR Apache-2.0) AND LicenseRef-chess-art", description: "Chess for two.\nMoves are checked on both sides.",
     sources: [RAW, PINNED], proofs: [], homepage: "https://example.org/chess", support: "https://example.org/chess/issues", releaseNotes: "Castling fixed.",
+    view: "full",
   }, [ENTRY, file("icon.png", ICON), file("screenshots/1.png", SCREENSHOT), file("screenshots/2.jpg", fill(32, 7)), file("data/openings.json", "[\"e4\",\"d4\"]")], publisher)).bytes);
   addValid("every bound at its limit: 64 files, a 128-byte path, a 256 KiB icon, 8 screenshots, the longest texts and 8 sources", (await buildAppBundle({ ...DRAFT, ...LIMIT_FIELDS }, limitFiles(), publisher)).bytes);
   addValid("an app that asks for the internet", (await buildAppBundle({ ...DRAFT, permissions: ["internet"] }, [ENTRY], publisher)).bytes);
@@ -138,6 +139,7 @@ async function build(): Promise<Vectors> {
   no("release notes one character too long", "bad-field", "501 code points", await hand({ releaseNotes: text(APP_BUNDLE_LIMITS.releaseNotes + 1) }));
   no("an unknown permission", "bad-field", "`network` is a later phase's", await hand({ permissions: ["chat", "network"] }));
   no("a permission twice", "bad-field", "Unique", await hand({ permissions: ["chat", "chat"] }));
+  no("an unknown view", "bad-field", "`chat` or `full`", await hand({ view: "popup" }));
   no("a runtime with no client", "bad-field", "At least one of web, desktop, extension", await hand({ runtime: { host: ">=1.2", clients: [] } }));
   no("a host range that is not >=", "bad-field", "^1.2", await hand({ runtime: { host: "^1.2", clients: ["web"] } }));
   no("a licence that is not an SPDX expression", "bad-field", "MIT AND", await hand({ license: "MIT AND" }));

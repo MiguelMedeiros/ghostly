@@ -109,6 +109,11 @@
     "open": "Apri",
     "stores": "Store"
   },
+  "pick": {
+    "hint": "Funziona in una chat, con il tuo contatto.",
+    "none": "Ancora nessuna chat. Prima collegati a un contatto.",
+    "title": "Apri {{title}} in una chat"
+  },
   "store": {
     "count": "{{count}} app",
     "countOne": "1 app",

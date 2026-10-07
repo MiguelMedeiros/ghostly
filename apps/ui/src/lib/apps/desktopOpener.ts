@@ -92,7 +92,8 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     // Throws where this client has no runner for what the person granted.
     runnerFor(host, entry);
     const label = await invoke<string>("app_open", {
-      request: { app: entry.ref, title: windowTitle(entry.title, linkId), entry: entry.entry, internet: entry.permissions.includes("internet") },
+      // A full-screen app's window opens at the Ghostly window's size; a chat app's is smaller, as it sits beside it.
+      request: { app: entry.ref, title: windowTitle(entry.title, linkId), entry: entry.entry, internet: entry.permissions.includes("internet"), view: entry.view ?? "chat" },
     });
     let timer: ReturnType<typeof setTimeout> | null = null;
     // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).

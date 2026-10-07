@@ -109,6 +109,11 @@
     "open": "Ouvrir",
     "stores": "Boutiques"
   },
+  "pick": {
+    "hint": "Elle fonctionne dans une discussion, avec votre contact.",
+    "none": "Aucune discussion pour l'instant. Associez-vous d'abord à un contact.",
+    "title": "Ouvrir {{title}} dans une discussion"
+  },
   "store": {
     "count": "{{count}} apps",
     "countOne": "1 app",

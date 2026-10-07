@@ -2,11 +2,14 @@ import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { STORE_URL, serveStore, testStore, type TestStore } from "../support/appStore";
+import type { AppViewMode } from "@ghostly/core";
 
 /*
  * Where a mini-app runs in a 1:1 chat (WISP 1200 § Per client, web), on the e2e suite's build (VITE_APPS_TEST): Ana
  * installs Chess from a store routed in the test, pairs with Bob and opens it in their chat. On a wide screen it sits
- * beside the chat, which stays usable; on a phone it covers the chat, and Back keeps it running.
+ * beside the chat, which stays usable; on a phone it covers the chat, and Back keeps it running. Its manifest's `view`
+ * decides the rest: a chat app (the default) opens from the Apps page in a chat picked there, never alone; a full-screen
+ * app opens alone there, and from a chat covers the whole chat with Back to it, never beside it.
  */
 
 async function setNickname(peer: Peer, nick: string): Promise<void> {
@@ -15,7 +18,7 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/");
 }
 
-/** Ana installs the store's Chess from the Apps page. */
+/** Ana installs the store's app (Chess unless said) from the Apps page. */
 async function install(peer: Peer, store: TestStore): Promise<void> {
   await peer.page.getByTestId("account-apps").click();
   await peer.page.getByTestId("apps-add").click();
@@ -34,9 +37,9 @@ async function install(peer: Peer, store: TestStore): Promise<void> {
   await peer.page.goto("/#/");
 }
 
-/** Ana and Bob, named, paired, with Chess installed on Ana's side. */
-async function setUp(peer: (name: string) => Promise<Peer>): Promise<[Peer, Peer]> {
-  const store = await testStore();
+/** Ana and Bob, named, paired, with Chess (or a full-screen app) installed on Ana's side. */
+async function setUp(peer: (name: string) => Promise<Peer>, options: { view?: AppViewMode; title?: string; tagline?: string } = {}): Promise<[Peer, Peer]> {
+  const store = await testStore(options);
   const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
   await serveStore(ana.context, store);
   await setNickname(ana, "Ana");
@@ -46,6 +49,7 @@ async function setUp(peer: (name: string) => Promise<Peer>): Promise<[Peer, Peer
   return [ana, bob];
 }
 
+/** + → Apps → Open: the app installed (Chess, or the full-screen one). */
 async function openChess(ana: Peer): Promise<void> {
   await (await composerRow(ana.page, "composer-apps")).click();
   await ana.page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
@@ -159,8 +163,32 @@ test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@
   expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
 });
 
-test("opened alone, the app is modal: Close has the focus, Escape closes it, and the focus comes back", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
-  const store = await testStore();
+test("a chat app's Open on the Apps page asks which chat, and opens it there, never alone", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  const [ana, bob] = await setUp(peer);
+  await ana.page.setViewportSize({ width: 1280, height: 800 });
+  await ana.page.getByTestId("account-apps").click();
+  await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+
+  // The chats it can open in: Bob's, the one paired chat.
+  const picker = ana.page.getByRole("dialog", { name: "Open Chess in a chat" });
+  await expect(picker).toBeVisible();
+  await expect(ana.page.getByTestId("mini-app")).toHaveCount(0);
+  const chats = picker.getByTestId("app-chat-picker-chat");
+  await expect(chats).toHaveCount(1);
+  await expect(chats).toContainText("Bob");
+  await chats.click();
+
+  // In that chat, beside it, as + → Apps opens it; Bob gets the card.
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toHaveAttribute("data-place", "beside");
+  await expect(app).toHaveAttribute("data-view", "chat");
+  await expect(app.getByTestId("mini-app-with")).toHaveText("with Bob");
+  await expect(ana.page.getByTestId("chat-name")).toBeVisible();
+  await expect(chat(bob).getByTestId("app-card")).toContainText("Ana opened it here");
+});
+
+test("a full-screen app opens alone from the Apps page: modal, Close has the focus, Escape closes it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  const store = await testStore({ view: "full", title: "Browser", tagline: "Look up Pkarr records" });
   const ana = await peer("ana");
   await serveStore(ana.context, store);
   await install(ana, store);
@@ -169,11 +197,78 @@ test("opened alone, the app is modal: Close has the focus, Escape closes it, and
   const open = ana.page.getByTestId("installed-app").getByTestId("installed-app-open");
   await open.focus();
   await ana.page.keyboard.press("Enter");
+  await expect(ana.page.getByTestId("app-chat-picker")).toHaveCount(0);
   const app = ana.page.getByTestId("mini-app");
   await expect(app).toHaveAttribute("data-place", "alone");
   await expect(app).toHaveAttribute("aria-modal", "true");
+  await expect(app.getByTestId("mini-app-title")).toHaveText("Browser");
+  const box = (await app.boundingBox())!;
+  expect(box.width).toBe(ana.page.viewportSize()!.width);
   await expect(app.getByRole("button", { name: "Close" })).toBeFocused();
   await ana.page.keyboard.press("Escape");
   await expect(app).toHaveCount(0);
   await expect(open).toBeFocused();
+});
+
+test("a full-screen app opened from a chat covers the whole chat on a wide screen, with Back to it, never beside it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  const [ana] = await setUp(peer, { view: "full", title: "Browser", tagline: "Look up Pkarr records" });
+  await ana.page.setViewportSize({ width: 1280, height: 800 });
+  await openChess(ana);
+
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toHaveAttribute("data-place", "full");
+  await expect(app).toHaveAttribute("data-view", "full");
+  await expect(app.getByTestId("mini-app-title")).toHaveText("Browser");
+  await expect(app.getByTestId("mini-app-with")).toHaveText("with Bob");
+  await expect(app.getByTestId("app-connection-options")).toHaveAccessibleName(/Connected · /);
+  // Never beside the chat: no Full width / Show the chat, and the chat is behind it.
+  await expect(app.getByTestId("mini-app-wide")).toHaveCount(0);
+  await expect(ana.page.getByTestId("chat-name")).toBeHidden();
+  const pane = (await ana.page.locator(".chat-pane").filter({ has: app }).boundingBox())!, box = (await app.boundingBox())!;
+  expect(Math.round(box.width)).toBe(Math.round(pane.width));
+  await expect(app.getByTestId("mini-app-back")).toBeFocused();
+  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Browser");
+  const frame = chessFrame(ana);
+  await frame.evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
+
+  // Back: the chat, with the app one tap away and still running; Escape goes Back too.
+  await app.getByTestId("mini-app-back").click();
+  await expect(app).toBeHidden();
+  await expect(ana.page.getByTestId("chat-name")).toBeVisible();
+  const resume = ana.page.getByTestId("mini-app-resume");
+  await expect(resume).toHaveText("Back to Browser");
+  await resume.click();
+  await expect(app).toHaveAttribute("data-place", "full");
+  expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
+  await app.getByTestId("mini-app-back").focus();
+  await ana.page.keyboard.press("Escape");
+  await expect(app).toBeHidden();
+  await expect(resume).toBeFocused();
+  expect(frame.isDetached()).toBe(false);
+
+  // Close stops it.
+  await resume.click();
+  await app.getByRole("button", { name: "Close" }).click();
+  await expect(app).toBeHidden();
+  await expect(app.locator("iframe")).toHaveCount(0);
+  await expect(resume).toHaveCount(0);
+});
+
+test("a full-screen app opened from a chat on a phone covers the screen, with Back to the chat", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  const [ana] = await setUp(peer, { view: "full", title: "Browser", tagline: "Look up Pkarr records" });
+  await ana.page.setViewportSize({ width: 375, height: 812 });
+  await openChess(ana);
+
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toHaveAttribute("data-place", "phone");
+  await expect(app).toHaveAttribute("data-view", "full");
+  const box = (await app.boundingBox())!;
+  expect(box.width).toBe(375);
+  expect(box.height).toBe(812);
+  await expect(app.getByTestId("mini-app-with")).toHaveText("with Bob");
+  await expect(app.getByTestId("mini-app-wide")).toHaveCount(0);
+  await expect(app.getByTestId("mini-app-back")).toBeFocused();
+  await app.getByTestId("mini-app-back").click();
+  await expect(app).toBeHidden();
+  await expect(ana.page.getByTestId("mini-app-resume")).toHaveText("Back to Browser");
 });

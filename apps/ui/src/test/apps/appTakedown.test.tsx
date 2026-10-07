@@ -40,7 +40,7 @@ const host = {
 let run: InstalledAppView["run"] = { status: "ok" };
 const installed = (): InstalledAppView => ({
   ref: REF, name: "chess", publisher: REF.split("/")[0]!, fingerprint: "yz7m oxuc bd4u 8aqt", title: "Chess", tagline: "Play chess", version: "1.2.0",
-  sequence: 7, digest: "d", permissions: ["chat"], from: "https://raw.githubusercontent.com/a/chess/HEAD/app.ghostlyapp", icon: false, installedAt: 1, updatedAt: 1,
+  sequence: 7, digest: "d", permissions: ["chat"], view: "chat", from: "https://raw.githubusercontent.com/a/chess/HEAD/app.ghostlyapp", icon: false, installedAt: 1, updatedAt: 1,
   run, listedBy: [], unknownPublisher: false,
 });
 

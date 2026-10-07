@@ -3,7 +3,8 @@
  * then the app in its sandboxed frame. In a 1:1 chat it runs in that chat's panel (`running.ts`, ChatAppPanel.tsx):
  * beside the chat on a wide screen, over it on a phone, with the contact and the connection in its header. Opened
  * again in the same chat, it is shown as it was. Opened alone (the Apps page), it is full screen with the client's own
- * bar above it (the app's name and Close), outside the frame.
+ * bar above it (the app's name and Close), outside the frame. Its manifest's `view` says which: a `full` app covers the
+ * whole chat too, never beside it; a `chat` app opens in a chat only (the Apps page asks which one).
  *
  * Each app it runs is registered (`registerRunningApp`): a version found revoked, or removed without Run anyway, is
  * stopped there, and its place says why until the person closes it (WISP 1200 § Takedowns).
@@ -67,13 +68,13 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
           unregister();
           const mine = !running || chatApp(linkId)?.running === running;
           // Taken down: the panel stays, shown, and says why until the person closes it.
-          if (mine && takenDown) setChatApp(linkId, { ref, title: entry.title, shown: true, wide: chatApp(linkId)?.wide ?? false, running: running!, stopped: takenDown });
+          if (mine && takenDown) setChatApp(linkId, { ref, title: entry.title, shown: true, wide: chatApp(linkId)?.wide ?? false, view: entry.view ?? "chat", running: running!, stopped: takenDown });
           else if (mine) setChatApp(linkId, null);
           warnStop(entry.title, reason);
           onStop?.(ref, reason);
         },
       });
-      setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, running });
+      setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, view: entry.view ?? "chat", running });
       return;
     }
 

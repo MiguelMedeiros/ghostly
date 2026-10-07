@@ -14,7 +14,9 @@ import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
-import { useChatApp } from "../lib/apps/running";
+import { takeOpenRequest, useChatApp, useOpenRequested } from "../lib/apps/running";
+import { openAppInChat } from "../lib/apps/installed";
+import { appErrorText } from "../lib/apps/errors";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { appsComposerHint } from "../lib/apps/availability";
 import { PinIcon } from "../components/PinIcon";
@@ -386,9 +388,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Mini-apps in this 1:1 chat (WISP 1200), where Apps shows: + → Apps.
   const appsOn = useAppsAvailable();
   const [showApps, setShowApps] = useState(false);
-  // The app open in this chat, if one is: beside the chat, or over its whole width (ChatAppPanel.tsx).
+  // The app open in this chat, if one is: beside the chat, or over its whole width (ChatAppPanel.tsx; a full-screen
+  // app always is).
   const appHere = paired && appsOn && chatLink?.id ? chatLink.id : undefined;
   const chatApp = useChatApp(appHere);
+  // An app the person opened here from the Apps page (its chat picker): opened once this chat shows, as + → Apps opens
+  // one. What went wrong shows in + → Apps.
+  const [appsError, setAppsError] = useState<string | null>(null);
+  const openRequested = useOpenRequested(appHere);
+  useEffect(() => {
+    if (!visible || !appHere || !openRequested) return;
+    const request = takeOpenRequest(appHere);
+    if (!request) return;
+    void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => { setAppsError(appErrorText(e, t)); setShowApps(true); });
+  }, [visible, appHere, openRequested, t]);
   /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   // Opened from the Tasks board: on the card's message, once it is here.
@@ -587,7 +600,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
     <PinMoveNote text={pinNote} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
-    <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && chatApp.wide ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
+    <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && (chatApp.wide || chatApp.view === "full") ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {(wakeCall.waking || wakeCall.gaveUp) && (
         <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
           className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
@@ -1010,7 +1023,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {showApps && appsOn && chatLink && params && (
-        <ChatAppsDialog linkId={chatLink.id} name={shownName} onClose={() => setShowApps(false)}
+        <ChatAppsDialog linkId={chatLink.id} name={shownName} error={appsError} onClose={() => { setShowApps(false); setAppsError(null); }}
           waiting={appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t)} />
       )}
       {showServices && params && (

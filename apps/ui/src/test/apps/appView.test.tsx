@@ -8,7 +8,11 @@ import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import { setAppOpener } from "../../lib/apps/open";
 import type { AppOpener } from "../../lib/apps/open";
-import { appWithContact, chatApp } from "../../lib/apps/running";
+import { appWithContact, chatApp, requestOpenInChat, takeOpenRequest } from "../../lib/apps/running";
+import { saveSession } from "../../lib/storage";
+import type { ChatSession } from "../../lib/types";
+import type { InstalledAppView } from "@ghostly/browser/engine/apps";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { webOpener } from "../../lib/apps/webOpener";
 import type { AppsPlatform } from "../../lib/platform";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -33,9 +37,11 @@ vi.mock("../../lib/apps/broker", async (actual) => ({
 }));
 
 const REF = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess";
+/** Where the next app opened shows, as its manifest says (absent: in a chat). */
+let view: "chat" | "full" | undefined;
 const host = {
   runnerUrl: "/app-frame.html",
-  entry: async () => ({ ref: REF, version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<!doctype html>" }),
+  entry: async () => ({ ref: REF, version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<!doctype html>", ...(view && { view }) }),
 } as unknown as AppsPlatform;
 
 /** Ana's chat: live over Iroh, or not. */
@@ -48,6 +54,7 @@ const ana = (live: boolean): LinkView => linkView({
 let open: AppOpener;
 beforeEach(() => {
   started.length = 0;
+  view = undefined;
   open = webOpener({ apps: () => host, closeLabel: () => "Close" });
 });
 afterEach(() => {
@@ -154,6 +161,56 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(frame.isConnected).toBe(true);
   });
 
+  it("a full-screen app covers the whole chat at every width, with Back to it, and never sits beside it", async () => {
+    windowIs(false);
+    view = "full";
+    const { user } = panel();
+    await act(() => open(REF, "link-1"));
+    const app = screen.getByTestId("mini-app");
+    expect(app).toHaveAttribute("data-place", "full");
+    expect(app).toHaveAttribute("data-view", "full");
+    // The chat's look stays: the contact and the connection.
+    expect(within(app).getByTestId("mini-app-with")).toHaveTextContent("with Ana");
+    expect(within(app).getByTestId("app-connection-options")).toBeInTheDocument();
+    // No way to put it beside the chat; Back has the focus.
+    expect(within(app).queryByTestId("mini-app-wide")).not.toBeInTheDocument();
+    const back = within(app).getByTestId("mini-app-back");
+    expect(back).toHaveFocus();
+    expect(chatApp("link-1")?.view).toBe("full");
+
+    // Back: the chat, with the app one tap away and still running.
+    await user.click(back);
+    expect(app).not.toBeVisible();
+    expect(started[0]!.stop).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("mini-app-resume"));
+    expect(app).toHaveAttribute("data-place", "full");
+    // Escape goes Back too, never closes it.
+    await user.keyboard("{Escape}");
+    expect(app).not.toBeVisible();
+    expect(started[0]!.stop).not.toHaveBeenCalled();
+    expect(screen.getByTestId("mini-app-resume")).toHaveFocus();
+  });
+
+  it("a full-screen app on a phone is as any app there: over the chat, with Back", async () => {
+    windowIs(true);
+    view = "full";
+    panel();
+    await act(() => open(REF, "link-1"));
+    const app = screen.getByTestId("mini-app");
+    expect(app).toHaveAttribute("data-place", "phone");
+    expect(app).toHaveAttribute("data-view", "full");
+    expect(within(app).getByTestId("mini-app-back")).toHaveFocus();
+    expect(within(app).queryByTestId("mini-app-wide")).not.toBeInTheDocument();
+  });
+
+  it("an app whose manifest names no view is a chat app", async () => {
+    windowIs(false);
+    panel();
+    await act(() => open(REF, "link-1"));
+    expect(chatApp("link-1")?.view).toBe("chat");
+    expect(screen.getByTestId("mini-app")).toHaveAttribute("data-place", "beside");
+  });
+
   it("stops the app when its chat closes", async () => {
     windowIs(false);
     const { unmount } = panel();
@@ -252,6 +309,68 @@ describe("keys and focus in a mini-app", () => {
     expect(button).toHaveFocus();
     page.remove();
     lock.remove();
+  });
+});
+
+describe("opening an app from the Apps page", () => {
+  const DIGEST = "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4";
+  const installed = (appView: "chat" | "full"): InstalledAppView => ({
+    ref: REF, name: "chess", publisher: REF.split("/")[0]!, fingerprint: "yz7m oxuc bd4u 8aqt", title: "Chess", tagline: "Play chess", version: "1.2.0",
+    sequence: 7, digest: DIGEST, permissions: ["chat"], view: appView, from: "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp", icon: false,
+    installedAt: 1, updatedAt: 1, run: { status: "ok" }, listedBy: [], unknownPublisher: false,
+  });
+  let opener: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    forgetAppsAvailable();
+    forgetInstalledApps();
+    vi.stubEnv("VITE_APPS_TEST", "1");
+    fakeEngine.appRunner = "/app-frame.html";
+    opener = vi.fn(async () => {});
+    setAppOpener(opener as unknown as AppOpener);
+    saveSession({ id: "chat-ana", mySeedB64: "s", peerPubKeyB64: "peer", encKeyB64: "e", nick: "Ana", profile: "paired-chat/1", createdAt: 1, messages: [] } as unknown as ChatSession);
+    // A chat that never paired: no app can open there.
+    saveSession({ id: "chat-bo", mySeedB64: "s", peerPubKeyB64: "peer-bo", encKeyB64: "e", nick: "Bo", createdAt: 1, messages: [] } as unknown as ChatSession);
+    fakeEngine.update({ links: [ana(true), linkView({ id: "link-bo", peerPubKeyZ32: "peer-bo" })] });
+    fakeEngine.on("appStoreList", () => [] as never).on("appCheckUpdates", () => []);
+  });
+  afterEach(() => { vi.unstubAllEnvs(); setAppOpener(null); takeOpenRequest("link-1"); });
+
+  function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
+
+  it("a chat app asks which chat, lists only paired 1:1 chats, and opens there: never alone", async () => {
+    fakeEngine.on("appList", () => [installed("chat")] as never);
+    const { user } = renderApp(<Routes><Route path="/apps" element={<Apps />} /><Route path="*" element={<Where />} /></Routes>, { route: "/apps" });
+    await user.click(await screen.findByTestId("installed-app-open"));
+    const picker = screen.getByRole("dialog", { name: "Open Chess in a chat" });
+    const chats = within(picker).getAllByTestId("app-chat-picker-chat");
+    expect(chats).toHaveLength(1);
+    expect(chats[0]).toHaveTextContent("Ana");
+    expect(opener).not.toHaveBeenCalled();
+    await user.click(chats[0]!);
+    // To that chat, which opens it once it shows (Chat.tsx).
+    expect(screen.getByTestId("where")).toHaveTextContent("chat-ana");
+    expect(opener).not.toHaveBeenCalled();
+    expect(takeOpenRequest("link-1")?.app.ref).toBe(REF);
+  });
+
+  it("a full-screen app opens alone from the Apps page", async () => {
+    fakeEngine.on("appList", () => [installed("full")] as never);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("installed-app-open"));
+    expect(screen.queryByTestId("app-chat-picker")).not.toBeInTheDocument();
+    expect(opener).toHaveBeenCalledWith(REF, null, {});
+  });
+
+  it("an open request not taken within a minute is dropped", () => {
+    vi.useFakeTimers();
+    try {
+      requestOpenInChat("link-1", { app: installed("chat") });
+      vi.advanceTimersByTime(61_000);
+      expect(takeOpenRequest("link-1")).toBeUndefined();
+      requestOpenInChat("link-1", { app: installed("chat"), options: { runAnyway: true } });
+      expect(takeOpenRequest("link-1")).toMatchObject({ options: { runAnyway: true } });
+      expect(takeOpenRequest("link-1")).toBeUndefined();
+    } finally { vi.useRealTimers(); }
   });
 });
 

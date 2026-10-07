@@ -109,6 +109,11 @@
     "open": "Open",
     "stores": "Stores"
   },
+  "pick": {
+    "hint": "It runs in a chat, with your contact.",
+    "none": "No chats yet. Pair with a contact first.",
+    "title": "Open {{title}} in a chat"
+  },
   "store": {
     "count": "{{count}} apps",
     "countOne": "1 app",

@@ -15,15 +15,16 @@ const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", s
  * A mini-app in a 1:1 chat (WISP 1200 § Per client, web): beside the chat on a wide screen, over it on a phone, with
  * the chat's own look in its header: the app's name, "with" the contact and their picture, and the chat's connection
  * control. Wide: Close, and the whole chat's width or back beside it. Phone: Back to the chat (the app keeps running;
- * `ChatAppResume` or opening it again brings it back) and Close.
+ * `ChatAppResume` or opening it again brings it back) and Close. A full-screen app (its manifest's `view` is `full`)
+ * never sits beside the chat: it covers the whole chat at every width, with Back to it and Close.
  *
  * The frame box is always here while the chat is, hidden when no app shows: a frame that moved would reload. The
  * header is drawn only while the app shows.
  *
  * Keys: opening moves the focus in (Back on a phone, the panel itself beside the chat), and closing or going Back
  * gives it back (to what opened it, "Back to Chess" after Back, else the message field). On a phone the panel is
- * modal: Tab stays in it and the chat under it is inert. Escape, with the focus in the panel, goes Back on a phone,
- * back beside the chat from full width, and closes it beside the chat.
+ * modal: Tab stays in it and the chat under it is inert. Escape, with the focus in the panel, goes Back on a phone and
+ * for a full-screen app, back beside the chat from full width, and closes it beside the chat.
  */
 export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status }: {
   linkId: string;
@@ -51,7 +52,10 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   useEffect(() => () => registerAppSlot(linkId, null), [linkId]);
 
   const shown = !!app?.shown;
-  const wide = !phone && !!app?.wide;
+  const full = app?.view === "full";
+  // Back to the chat: on a phone, and for a full-screen app at every width.
+  const withBack = phone || full;
+  const wide = !phone && (full || !!app?.wide);
   const title = app?.title ?? "";
   const modal = shown && phone;
 
@@ -66,14 +70,14 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   }, [modal]);
 
   // Shown: the focus goes in, and comes back where it was when it goes. Read once per showing, not per resize.
-  const phoneNow = useRef(phone); phoneNow.current = phone;
+  const backNow = useRef(withBack); backNow.current = withBack;
   useEffect(() => {
     if (!shown) return;
     const panel = root.current;
     const was = document.activeElement as HTMLElement | null;
     // Back in from "Back to Chess" (gone by now, the focus with it): what opened it first is still the way back.
     if (was && was !== document.body && !panel?.contains(was) && was.dataset.testid !== "mini-app-resume") opener.current = was;
-    (phoneNow.current ? back.current : panel)?.focus({ preventScroll: true });
+    (backNow.current ? back.current : panel)?.focus({ preventScroll: true });
     return () => {
       const active = document.activeElement;
       // Never pulled from where the person went meanwhile (the chat beside it, another page).
@@ -92,18 +96,18 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || e.defaultPrevented || !app) return;
     e.preventDefault();
-    if (phone && !app.stopped) updateChatApp(linkId, { shown: false });
-    else if (wide) updateChatApp(linkId, { wide: false });
+    if (withBack && !app.stopped) updateChatApp(linkId, { shown: false });
+    else if (wide && !full) updateChatApp(linkId, { wide: false });
     else close();
   };
   return (
-    <section ref={root} tabIndex={-1} onKeyDown={onKeyDown} data-testid="mini-app" data-place={phone ? "phone" : wide ? "wide" : "beside"} hidden={!shown}
+    <section ref={root} tabIndex={-1} onKeyDown={onKeyDown} data-testid="mini-app" data-place={phone ? "phone" : full ? "full" : wide ? "wide" : "beside"} data-view={app?.view} hidden={!shown}
       role={modal ? "dialog" : undefined} aria-modal={modal || undefined}
       aria-label={app ? t("apps.view.with", { title, name }) : undefined} className="chat-app-panel outline-none" data-wide={wide || undefined}>
       {modal && <TabTrap root={root} />}
       {/* The header only while the app shows: the chat's own header is the only one otherwise. */}
       {shown && <div className="chat-app-head h-14 header-safe flex items-center gap-2 max-md:gap-1 px-3 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
-        {phone && (
+        {withBack && (
           <button ref={back} type="button" data-testid="mini-app-back" onClick={() => (app?.stopped ? setChatApp(linkId, null) : updateChatApp(linkId, { shown: false }))}
             aria-label={t("apps.view.back")} title={t("apps.view.back")}
             className="w-9 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0">
@@ -126,7 +130,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         <div className="flex items-center gap-0.5 shrink-0">
           {/* The chat's connection control, the same as in its header. */}
           <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" />
-          {!phone && (
+          {!withBack && (
             <button type="button" data-testid="mini-app-wide" aria-pressed={wide} onClick={() => updateChatApp(linkId, { wide: !wide })}
               aria-label={t(wide ? "apps.view.beside" : "apps.view.full")} title={t(wide ? "apps.view.beside" : "apps.view.full")}
               className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">

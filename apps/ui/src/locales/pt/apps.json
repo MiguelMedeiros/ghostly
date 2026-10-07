@@ -109,6 +109,11 @@
     "open": "Abrir",
     "stores": "Lojas"
   },
+  "pick": {
+    "hint": "Ele roda em uma conversa, com seu contato.",
+    "none": "Nenhuma conversa ainda. Conecte-se a um contato primeiro.",
+    "title": "Abrir {{title}} em uma conversa"
+  },
   "store": {
     "count": "{{count}} apps",
     "countOne": "1 app",
