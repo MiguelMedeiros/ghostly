@@ -58,7 +58,12 @@ describe("the hosts", () => {
     expect(appPasteUrl("https://github.com/ghostly/store", "ghostly-store.json")).toBe(STORE_URL);
     expect(appPasteUrl("https://raw.githubusercontent.com/ana/chess/HEAD", "app.ghostlyapp")).toBe(BUNDLE_URL);
     expect(appPasteUrl(PINNED_URL, "app.ghostlyapp")).toBe(PINNED_URL);
-    for (const bad of ["https://github.com/ana", "https://github.com/ana/chess/blob/HEAD/x", "https://example.com/app.ghostlyapp", "not a url", "http://github.com/ana/chess"]) {
+    // A file as GitHub shows it (or its raw link there): the same file at that ref on raw.githubusercontent.com.
+    expect(appPasteUrl("https://github.com/ana/chess/blob/HEAD/app.ghostlyapp", "app.ghostlyapp")).toBe(BUNDLE_URL);
+    expect(appPasteUrl("https://github.com/ana/chess/blob/v2/dist/app.ghostlyapp", "app.ghostlyapp")).toBe("https://raw.githubusercontent.com/ana/chess/v2/dist/app.ghostlyapp");
+    expect(appPasteUrl("https://github.com/ana/chess/raw/main/app.ghostlyapp?download=1", "app.ghostlyapp")).toBe("https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp");
+    expect(appPasteUrl("https://github.com/ghostly/store/blob/HEAD/ghostly-store.json", "ghostly-store.json")).toBe(STORE_URL);
+    for (const bad of ["https://github.com/ana", "https://github.com/ana/chess/blob/HEAD/x", "https://github.com/ana/chess/blob/HEAD", "https://github.com/ana/chess/blob/HEAD/../app.ghostlyapp", "https://github.com/ana/chess/issues", "https://example.com/app.ghostlyapp", "not a url", "http://github.com/ana/chess"]) {
       expect(appPasteUrl(bad, "app.ghostlyapp"), bad).toBeNull();
     }
     expect(besideUrl(STORE_URL, "ghostly-store.sig")).toBe(SIG_URL);
@@ -270,6 +275,12 @@ describe("stores", () => {
   it("stores off the list are refused with no request", async () => {
     await expect(apps(net).addStore({ url: "https://stores.example/ghostly-store.json" })).rejects.toThrow(/^host/);
     await expect(apps(net).preview({ url: "https://apps.example/app.ghostlyapp" })).rejects.toThrow(/^host/);
+    // A github.com page that is not a repository or a file of one: the person is told to paste one, never that GitHub
+    // is not a host Ghostly reads (it is, through raw.githubusercontent.com). Nothing is asked.
+    for (const page of ["https://github.com/ana/chess/issues/3", "https://github.com/ana", "https://github.com/ana/chess/blob/HEAD/README.md", "http://github.com/ana/chess"]) {
+      await expect(apps(net).preview({ url: page }), page).rejects.toThrow(/^github-link: /);
+      await expect(apps(net).previewStore({ url: page }), page).rejects.toThrow(/^github-link: /);
+    }
     expect(net.fetch).not.toHaveBeenCalled();
   });
 

@@ -45,6 +45,7 @@
   "errors": {
     "equivocation": "このリンクには、お持ちのバージョンの別のコピーがあります。Ghostly はお持ちのものを残しました。",
     "expired": "時間がかかりすぎました。もう一度アプリを確認してください。",
+    "githubLink": "その GitHub のページはアプリではありません。リポジトリのリンクか、アプリのファイルのリンクを貼り付けてください。",
     "host": "アプリは GitHub（raw.githubusercontent.com）またはコミット固定の jsDelivr からのみ入手できます。",
     "needsFiles": "ファイルがまだこのデバイスにありません。",
     "network": "ホストに接続できませんでした。",

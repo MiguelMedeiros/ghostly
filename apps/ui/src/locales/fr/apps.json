@@ -45,6 +45,7 @@
   "errors": {
     "equivocation": "Ce lien contient une autre copie d'une version que vous avez. Ghostly a gardé la vôtre.",
     "expired": "C'était trop long. Vérifiez l'app à nouveau.",
+    "githubLink": "Cette page GitHub n'est pas une app. Collez le lien du dépôt ou celui du fichier de l'app.",
     "host": "Les apps viennent seulement de GitHub (raw.githubusercontent.com) ou de jsDelivr à un commit.",
     "needsFiles": "Ses fichiers ne sont pas encore sur cet appareil.",
     "network": "Impossible de joindre le serveur.",

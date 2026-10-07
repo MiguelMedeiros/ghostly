@@ -10,8 +10,8 @@ import { appErrorCode, appErrorText } from "../../lib/apps/errors";
 import { date } from "../../lib/identities";
 
 /*
- * Add, on the Apps page (WISP 1200 § Paste a URL): a link to an app or a store. A GitHub repository, a raw file or a
- * jsDelivr file at a commit; any other host is refused before a request. A link to `ghostly-store.json` (or a `.json`)
+ * Add, on the Apps page (WISP 1200 § Paste a URL): a link to an app or a store. A GitHub repository or a file on it, a
+ * raw file or a jsDelivr file at a commit; any other host is refused before a request. A link to `ghostly-store.json` (or a `.json`)
  * is read as a store; anything else as an app first, then as a store when it holds no app. Nothing is installed or
  * added before the person confirms on the next screen.
  */
@@ -44,7 +44,7 @@ export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; o
           return;
         } catch (e) {
           // No app there (a 404, or not a bundle): it may be a store. A link to a host off the list stops here.
-          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || appErrorCode(e) === "host") throw e;
+          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || appErrorCode(e) === "host" || appErrorCode(e) === "github-link") throw e;
         }
       }
       setStore(await engine.call("appStorePreview", { url: link }));
