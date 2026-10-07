@@ -237,6 +237,9 @@ export function normalizeRelayUrl(input: string): string | null {
   }
 }
 
+/** A relay the breaker leaves alone for failing (`RelayBreaker`): nothing was asked of it now. */
+class RelayLeftAloneError extends Error {}
+
 export class RelayTransport implements PkarrTransport {
   private relays: string[];
   private readonly timeoutMs: number;
@@ -537,9 +540,16 @@ export class RelayTransport implements PkarrTransport {
         }
         // Every relay held it back for its budget (this client's, or the relay's rate limit): a wait for the first
         // of them to free a request, not a failure.
+        // So is a mix of relays held back and relays left alone for failing before (`RelayLeftAloneError`): nothing was
+        // asked of those now, their outage was said when it began, and the packet goes once a held one frees a request.
+        // Shown as a failure, it put "Could not publish discovery: … budget reached …" on a phone's group panel for
+        // as long as the budget kept the other two relays waiting (2026-10-07).
         const held = results.map((r) => (r.status === "rejected" && isDiscoveryBudgetError(r.reason) ? r.reason : null));
+        const leftAlone = (r: PromiseSettledResult<void>) => r.status === "rejected" && r.reason instanceof RelayLeftAloneError;
+        const waits = held.filter((e): e is DiscoveryBudgetError => e !== null);
         const reasons = results.map((r) => (r.status === "rejected" ? String(r.reason) : "")).join("; ");
-        if (held.every((e) => e !== null)) reject(new DiscoveryBudgetError(Math.min(...held.map((e) => e!.retryInMs)), `Publish held back on every relay: ${reasons}`));
+        if (waits.length === results.length) reject(new DiscoveryBudgetError(Math.min(...waits.map((e) => e.retryInMs)), `Publish held back on every relay: ${reasons}`));
+        else if (waits.length && results.every((r, i) => held[i] !== null || leftAlone(r))) reject(new DiscoveryBudgetError(Math.min(...waits.map((e) => e.retryInMs)), `Publish held back on every relay not left alone: ${reasons}`));
         else reject(new Error(`Publish failed on every relay: ${reasons}`));
       });
     });
@@ -816,7 +826,7 @@ export class RelayTransport implements PkarrTransport {
     const blocked = probe ? 0 : this.breaker.blockedFor(relay);
     if (blocked > 0) {
       if (this.breaker.blockedKind(relay) === "throttled") throw new DiscoveryBudgetError(blocked, "Discovery relay is throttling this address; retry shortly");
-      throw new Error(`${relay} is left alone after failing; asked again in ${Math.max(1, Math.ceil(this.breaker.askedAgainIn(relay, this.relays) / 1000))} s`);
+      throw new RelayLeftAloneError(`${relay} is left alone after failing; asked again in ${Math.max(1, Math.ceil(this.breaker.askedAgainIn(relay, this.relays) / 1000))} s`);
     }
     if (!this.take(relay, who, pubKeyZ32)) throw new DiscoveryBudgetError(this.heldFor(relay, who));
     if (probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
