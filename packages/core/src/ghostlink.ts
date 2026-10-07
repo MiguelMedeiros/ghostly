@@ -3804,6 +3804,9 @@ export class GhostLink {
     this.lastLiveOn = undefined;
     this.resuming = transport;
     this.resumingWoke = true;
+    // A knock goes once per attempt (`knockedEarly`, by epoch), and a session that the contact closed leaves the epoch
+    // as it was: the knock of an earlier return would count for this one, and none went from the second on.
+    this.knockedEarly = -1;
     traceLink(this.myPubKeyZ32, "wake-resume", { transport });
     if (transport !== "webrtc/1") { this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS; return; }
     // The session's close was heard just before the wake, and this side answers the contact's offer already: it knocks
