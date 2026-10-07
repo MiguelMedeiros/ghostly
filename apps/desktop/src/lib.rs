@@ -1,7 +1,9 @@
 //! The Ghostly app: the same body for Desktop (`main.rs` calls [`run`]) and for mobile, where Tauri's
 //! generated project loads this crate as a library and enters at [`run`].
 
+#[cfg(desktop)]
 mod app_sandbox;
+#[cfg(desktop)]
 mod app_window;
 mod bitcoind_rpc;
 mod clipboard;
@@ -15,14 +17,20 @@ mod diagnostics;
 mod e2e_driver;
 mod file_store;
 mod file_stream;
+#[cfg(desktop)]
 mod fullscreen;
+#[cfg(desktop)]
 mod hyperdht;
+#[cfg(desktop)]
 mod keep_awake;
 mod link_preview;
 mod lnd;
 mod local_access;
 mod local_fetch;
 mod microphone;
+// Android and iOS: the Desktop-only modules' commands, refusing (`commands!` is one list for every platform).
+#[cfg(mobile)]
+mod mobile;
 mod native_call;
 mod notifications;
 mod oidc;
@@ -32,6 +40,7 @@ mod pkarr_network;
 mod pubky_session;
 mod push_send;
 mod records;
+#[cfg(desktop)]
 mod share;
 #[cfg(target_os = "linux")]
 mod single_instance;
@@ -41,11 +50,15 @@ mod turn_network;
 #[cfg(test)]
 mod turn_record;
 mod types;
+#[cfg(desktop)]
 mod viewer;
 
 use commands::AppState;
+#[cfg(mobile)]
+use mobile::{app_sandbox, hyperdht, keep_awake, share, viewer};
 use pkarr_network::Pkarr;
 use tauri::Manager;
+#[cfg(desktop)]
 use viewer::ViewerState;
 
 /// Only the Ghostly window may call commands. The capabilities already say so;
@@ -209,18 +222,48 @@ pub fn run() {
 
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
+    // Updating is always the user's doing: the plugin only looks and downloads
+    // when the UI asks, and the release it takes has to carry our signature. Desktop only: an APK updates otherwise.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    // A contact's app (`viewer`) and an installed app (`app_sandbox`) open in windows of their own: Desktop only.
+    #[cfg(desktop)]
+    let builder = builder
+        .manage(ViewerState::default())
+        .manage(app_sandbox::AppSandboxState::default())
+        .manage(hyperdht::HyperState::default())
+        .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let label = ctx.webview_label().to_string();
+            tauri::async_runtime::spawn(async move {
+                responder.respond(viewer::handle(app, label, request).await);
+            });
+        })
+        // An installed app's window (WISP 12xx): the runner, under its own policy.
+        .register_uri_scheme_protocol(app_sandbox::SCHEME, |ctx, request| {
+            app_sandbox::handle(ctx.app_handle(), ctx.webview_label(), &request)
+        })
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Destroyed => {
+                viewer::forget_window(window.app_handle(), window.label());
+                app_sandbox::forget_window(window.app_handle(), window.label());
+            }
+            // Closing the Ghostly window on a Mac hides it: the app runs on until Cmd+Q.
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                app_window::on_close_requested(window, api)
+            }
+            _ => {}
+        })
+        .on_menu_event(|app, event| {
+            app_window::on_menu_event(app, event.id().as_ref());
+        });
+
     builder
-        // Updating is always the user's doing: the plugin only looks and downloads
-        // when the UI asks, and the release it takes has to carry our signature.
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { pkarr })
-        .manage(ViewerState::default())
-        .manage(app_sandbox::AppSandboxState::default())
         .manage(paired_transport::TransportState::default())
-        .manage(hyperdht::HyperState::default())
         .manage(oidc::OidcState::default())
         .manage(clipboard_source())
         .manage(paste_source())
@@ -243,6 +286,7 @@ pub fn run() {
             // A video's Full screen button works in the Ghostly window (WKWebView has it off, WebView2 fills only
             // the webview).
             if let Some(main) = app.get_webview_window("main") {
+                #[cfg(desktop)]
                 fullscreen::install(&main);
                 // A voice message's microphone: WebKitGTK denies it unless the app answers.
                 microphone::install(&main);
@@ -281,31 +325,6 @@ pub fn run() {
                 });
             },
         )
-        .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
-            let app = ctx.app_handle().clone();
-            let label = ctx.webview_label().to_string();
-            tauri::async_runtime::spawn(async move {
-                responder.respond(viewer::handle(app, label, request).await);
-            });
-        })
-        // An installed app's window (WISP 12xx): the runner, under its own policy.
-        .register_uri_scheme_protocol(app_sandbox::SCHEME, |ctx, request| {
-            app_sandbox::handle(ctx.app_handle(), ctx.webview_label(), &request)
-        })
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::Destroyed => {
-                viewer::forget_window(window.app_handle(), window.label());
-                app_sandbox::forget_window(window.app_handle(), window.label());
-            }
-            // Closing the Ghostly window on a Mac hides it: the app runs on until Cmd+Q.
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                app_window::on_close_requested(window, api)
-            }
-            _ => {}
-        })
-        .on_menu_event(|app, event| {
-            app_window::on_menu_event(app, event.id().as_ref());
-        })
         .invoke_handler(only_main(commands!()))
         .build(context)
         .expect("error while running tauri application")

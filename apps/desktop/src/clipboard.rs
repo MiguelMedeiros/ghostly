@@ -16,6 +16,15 @@ pub const MAX_CLIPBOARD_BYTES: usize = 64 * 1024;
 pub struct ClipboardSource(Arc<dyn Fn() -> Result<String, String> + Send + Sync>);
 
 impl ClipboardSource {
+    /// Android and iOS: no arboard; the page reads the clipboard itself until the mobile host has a native one.
+    #[cfg(mobile)]
+    pub fn system() -> Self {
+        Self(Arc::new(|| {
+            Err("No native clipboard on this platform".into())
+        }))
+    }
+
+    #[cfg(desktop)]
     #[cfg_attr(feature = "e2e-driver", allow(dead_code))]
     pub fn system() -> Self {
         Self(Arc::new(|| match arboard::Clipboard::new() {
@@ -77,6 +86,7 @@ enum Ready {
 }
 
 /// What a paste of files can bring: files copied in a file manager (their paths), or a picture.
+#[cfg_attr(mobile, allow(dead_code))]
 pub enum Pasted {
     Files(Vec<PathBuf>),
     Image {
@@ -93,6 +103,13 @@ pub enum Pasted {
 pub struct PasteSource(Arc<dyn Fn() -> Result<Pasted, String> + Send + Sync>);
 
 impl PasteSource {
+    /// Android and iOS: nothing pasted natively (see [`ClipboardSource::system`]).
+    #[cfg(mobile)]
+    pub fn system() -> Self {
+        Self(Arc::new(|| Ok(Pasted::Nothing)))
+    }
+
+    #[cfg(desktop)]
     #[cfg_attr(feature = "e2e-driver", allow(dead_code))]
     pub fn system() -> Self {
         Self(Arc::new(|| {
