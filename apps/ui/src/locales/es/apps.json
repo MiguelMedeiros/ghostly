@@ -123,5 +123,15 @@
     "remove": "Quitar",
     "stale": "Desactualizada desde el {{date}}"
   },
-  "title": "Apps"
+  "title": "Apps",
+  "view": {
+    "back": "Volver al chat",
+    "beside": "Mostrar el chat",
+    "full": "Ancho completo",
+    "resume": "Volver a {{title}}",
+    "stoppedRemoved": "{{title}} se detuvo: {{store}} retiró esta versión",
+    "stoppedRevoked": "{{title}} se detuvo: su autor revocó esta versión",
+    "with": "{{title}} con {{name}}",
+    "withName": "con {{name}}"
+  }
 }

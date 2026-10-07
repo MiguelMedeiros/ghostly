@@ -123,5 +123,15 @@
     "remove": "Retirer",
     "stale": "Pas à jour depuis le {{date}}"
   },
-  "title": "Apps"
+  "title": "Apps",
+  "view": {
+    "back": "Retour à la discussion",
+    "beside": "Afficher la discussion",
+    "full": "Pleine largeur",
+    "resume": "Revenir à {{title}}",
+    "stoppedRemoved": "{{title}} a été arrêtée : {{store}} a retiré cette version",
+    "stoppedRevoked": "{{title}} a été arrêtée : son auteur a révoqué cette version",
+    "with": "{{title}} avec {{name}}",
+    "withName": "avec {{name}}"
+  }
 }

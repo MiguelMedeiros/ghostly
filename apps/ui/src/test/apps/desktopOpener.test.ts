@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
 import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, forIpc, toBase64 } from "../../lib/apps/desktopOpener";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
+import { stopTakenDown } from "../../lib/apps/open";
 import type { AppEntry } from "../../lib/platform";
 
 // covers: apps.desktop-sandbox
@@ -14,7 +15,7 @@ import type { AppEntry } from "../../lib/platform";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(entry: Partial<AppEntry> = {}) {
+function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, linkId: string | null) => string) {
   const host = memoryHost("ghostly-app://localhost/", "ghostly-app://localhost/");
   host.entry = async (ref) => ({ ref, digest: "d", version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<p>chess</p>", ...entry });
   const handlers = new Map<string, (event: { payload: unknown }) => void>();
@@ -32,7 +33,7 @@ function setup(entry: Partial<AppEntry> = {}) {
   }) as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
   const listen = async <T,>(event: string, handler: (event: { payload: T }) => void) => { handlers.set(event, handler as (event: { payload: unknown }) => void); return () => {}; };
   const stops: string[] = [];
-  const open = desktopOpener({ apps: () => host, invoke, listen, onStop: (_, reason) => stops.push(reason), view: { theme: () => "light", locale: () => "en" }, startTimeoutMs: 200 });
+  const open = desktopOpener({ apps: () => host, invoke, listen, windowTitle, onStop: (_, reason) => stops.push(reason), view: { theme: () => "light", locale: () => "en" }, startTimeoutMs: 200 });
   /** The app window `label` asks, as Rust hands it over. */
   const request = (label: string, message: unknown) => handlers.get(APP_REQUEST_EVENT)!({ payload: { label, request: message } });
   const posts = (label: string) => calls.filter((c) => c.command === "app_post" && c.args.label === label).map((c) => c.args.message as Record<string, unknown>);
@@ -44,6 +45,25 @@ function setup(entry: Partial<AppEntry> = {}) {
 }
 
 describe("opening an app on Desktop", () => {
+  it("closes an app's window when its version is found revoked, and not one run anyway after a removal", async () => {
+    const { calls, open } = setup();
+    await open(REF, LINK);
+    await open(REF, null, { runAnyway: true });
+    const removed = { status: "removed", by: [{ name: "Ghostly" }] };
+    stopTakenDown([{ ref: REF, run: removed }]);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1"]);
+    stopTakenDown([{ ref: REF, run: { status: "revoked" } }]);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1", "app-2"]);
+  });
+
+  it("names its window after the app and the contact in a chat, and the app alone outside one", async () => {
+    const { calls, open } = setup({}, (title, linkId) => (linkId ? `${title} with Ana` : title));
+    await open(REF, LINK);
+    await open(REF, null);
+    const titles = calls.filter((c) => c.command === "app_open").map((c) => (c.args.request as { title: string }).title);
+    expect(titles).toEqual(["Chess with Ana", "Chess"]);
+  });
+
   it("opens a window with the checked entry and what the person granted, and runs the web broker for it", async () => {
     const { calls, open, request, answer, host } = setup();
     await open(REF, LINK);

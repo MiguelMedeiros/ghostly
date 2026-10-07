@@ -13,6 +13,8 @@ import { shownContactName, useChosenProfile, useContactFace } from "../component
 import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
+import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
+import { useChatApp } from "../lib/apps/running";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { appsComposerHint } from "../lib/apps/availability";
 import { PinIcon } from "../components/PinIcon";
@@ -384,6 +386,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Mini-apps in this 1:1 chat (WISP 1200), where Apps shows: + → Apps.
   const appsOn = useAppsAvailable();
   const [showApps, setShowApps] = useState(false);
+  // The app open in this chat, if one is: beside the chat, or over its whole width (ChatAppPanel.tsx).
+  const appHere = paired && appsOn && chatLink?.id ? chatLink.id : undefined;
+  const chatApp = useChatApp(appHere);
   /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   // Opened from the Tasks board: on the card's message, once it is here.
@@ -582,7 +587,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
     <PinMoveNote text={pinNote} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
-    <div data-file-drop className="chat-column relative flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
+    <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && chatApp.wide ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {(wakeCall.waking || wakeCall.gaveUp) && (
         <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
           className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
@@ -796,6 +801,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       </div>
 
       <ChatSearchBar search={search} />
+      {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
@@ -1077,6 +1083,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       )}
     </div>
+    {/* A mini-app opened here (WISP 1200): beside the chat, over it on a phone. Always here while Apps is, so its frame
+        never moves. */}
+    {appHere && params && (
+      <ChatAppPanel linkId={appHere} sessionId={sessionId} contact={{ name: shownName, named: !isAnonymous }}
+        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} />
+    )}
     {showIdentities && params && (
       <ContactIdentitiesPanel key={identityCard ? `${identityCard.side}:${identityCard.id}` : "panel"} peerKey={params.peerPubKeyB64} name={shownName}
         card={identityCard} onClose={() => setShowIdentities(false)} />

@@ -123,5 +123,15 @@
     "remove": "إزالة",
     "stale": "غير محدّث منذ {{date}}"
   },
-  "title": "التطبيقات"
+  "title": "التطبيقات",
+  "view": {
+    "back": "العودة إلى المحادثة",
+    "beside": "إظهار المحادثة",
+    "full": "العرض الكامل",
+    "resume": "العودة إلى {{title}}",
+    "stoppedRemoved": "تم إيقاف {{title}}: أزال {{store}} هذا الإصدار",
+    "stoppedRevoked": "تم إيقاف {{title}}: ألغى صانعه هذا الإصدار",
+    "with": "{{title}} مع {{name}}",
+    "withName": "مع {{name}}"
+  }
 }

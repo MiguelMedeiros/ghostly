@@ -13,7 +13,7 @@
  * - The app stops when the broker says so (`app_close`) or when the person closes its window (`ghostly-app-closed`).
  */
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
-import type { AppOpener } from "./open";
+import { registerRunningApp, type AppOpener } from "./open";
 import type { AppsPlatform } from "../platform";
 
 /** Rust's events to the Ghostly window (apps/desktop/src/app_sandbox.rs). */
@@ -29,6 +29,8 @@ export interface DesktopOpenerOptions {
   listen: Listen;
   /** The person's name in a chat, for an app granted `name`. */
   nameIn?: (linkId: string) => string | undefined;
+  /** The app window's title: "Chess with Ana" in a chat (`appWithContact`), the app's name alone by default. */
+  windowTitle?: (title: string, linkId: string | null) => string;
   onStop?: (ref: string, reason: AppStopReason) => void;
   view?: AppView;
   startTimeoutMs?: number;
@@ -58,7 +60,7 @@ export function forIpc(message: unknown): unknown {
   return message;
 }
 
-export function desktopOpener({ apps, invoke, listen, nameIn, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS }: DesktopOpenerOptions): AppOpener {
+export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS }: DesktopOpenerOptions): AppOpener {
   const brokers = new Map<string, Broker>();
   const early = new Map<string, { at: number; requests: unknown[] }>();
   void listen<{ label: string; request: unknown }>(APP_REQUEST_EVENT, ({ payload }) => {
@@ -90,9 +92,11 @@ export function desktopOpener({ apps, invoke, listen, nameIn, onStop, view = def
     // Throws where this client has no runner for what the person granted.
     runnerFor(host, entry);
     const label = await invoke<string>("app_open", {
-      request: { app: entry.ref, title: entry.title, entry: entry.entry, internet: entry.permissions.includes("internet") },
+      request: { app: entry.ref, title: windowTitle(entry.title, linkId), entry: entry.entry, internet: entry.permissions.includes("internet") },
     });
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
+    const unregister = registerRunningApp({ ref, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped") });
     const broker = createBroker({
       host,
       launch: { ...entry, chat: linkId ? { linkId, name: nameIn?.(linkId) } : null },
@@ -100,6 +104,7 @@ export function desktopOpener({ apps, invoke, listen, nameIn, onStop, view = def
       post: (message) => { void invoke("app_post", { label, message: forIpc(message) }).catch(() => { /* the window went */ }); },
       stopped: (reason) => {
         if (timer) clearTimeout(timer);
+        unregister();
         brokers.delete(label);
         void invoke("app_close", { label }).catch(() => { /* already gone */ });
         onStop?.(ref, reason);
