@@ -2932,9 +2932,16 @@ export class GhostLink {
    */
   setTyping(typing: boolean, activity?: TypingActivity): void {
     if (!this.options.params.profile) return;
-    const frame = typing ? (this.supportsTyping ? this.typingSender.typing(activity) : null) : this.typingSender.stopped();
+    // Nothing can carry it now (between a switch's two sessions, or before typing/1 is agreed): kept for the next one.
+    if (typing && !this.supportsTyping) { this.typingSender.want(activity); return; }
+    const frame = typing ? this.typingSender.typing(activity) : this.typingSender.stopped();
     if (!frame || !this.channel || !this.supportsTyping) return;
     try { this.channel.send(JSON.stringify(frame)); } catch { /* the session is going; the contact's timeout ends it */ }
+  }
+  private resumeTyping(): void {
+    const frame = this.typingSender.resume();
+    if (!frame || !this.channel) return;
+    try { this.channel.send(JSON.stringify(frame)); } catch { /* the session is going; the next one says it again */ }
   }
   /** Both sides offer `apps/1` on the open session: mini-apps can talk (WISP 1200 § In a chat). */
   get supportsApps(): boolean { return !!this.options.params.profile && this.isDataLinkOpen && this.sessionCapabilities.agreed(APPS_CAPABILITY); }
@@ -3047,7 +3054,12 @@ export class GhostLink {
       const pending = this.pairedCalls.pending();
       if (pending) try { this.channel.send(JSON.stringify(pending)); } catch { /* the next session */ }
     }
-    if (changed.includes(TYPING_CAPABILITY) && !this.supportsTyping) { this.typingSender.reset(); this.typingReceiver.clear(); }
+    if (changed.includes(TYPING_CAPABILITY)) {
+      if (!this.supportsTyping) { this.typingSender.reset(); this.typingReceiver.clear(); }
+      // A new session (a transport switch, a reconnect): the contact's reader cleared what this side said on the old
+      // one, so a start still standing is said again (a frame said between the two sessions was lost).
+      else this.resumeTyping();
+    }
     if (changed.includes(REACTIONS_CAPABILITY)) this.options.events?.onReactionsSupport?.(this.supportsReactions);
     if (changed.includes(EDIT_CAPABILITY)) this.options.events?.onEditSupport?.(this.supportsEdits);
     if (changed.includes(PIN_CAPABILITY)) this.options.events?.onPinSupport?.(this.supportsPins);
