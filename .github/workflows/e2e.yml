@@ -253,7 +253,7 @@ jobs:
 
       - name: Run Desktop end-to-end tests (no sound server)
         continue-on-error: true
-        run: xvfb-run -a npm run test:e2e:desktop -- dht-direct --repeat-each 3 --retries 0
+        run: xvfb-run -a npm run test:e2e:desktop -- zz-r11k-audio --retries 0
         env:
           GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
       - name: Keep the first report
@@ -265,7 +265,7 @@ jobs:
           D=$(mktemp -d); export PULSE_SERVER=unix:$D/native
           HOME=$D XDG_RUNTIME_DIR=$D pulseaudio -n --daemonize=yes --exit-idle-time=-1 --use-pid-file=no -L "module-native-protocol-unix socket=$D/native auth-anonymous=1" -L module-null-sink
           sleep 2; pactl info | head -5
-          xvfb-run -a npm run test:e2e:desktop -- dht-direct --repeat-each 3 --retries 0
+          xvfb-run -a npm run test:e2e:desktop -- zz-r11k-audio --retries 0
         env:
           GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
       - name: Keep the second report
