@@ -1,4 +1,6 @@
-import { rankTransports, relayedTransports, transportOrder, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+// The switch as v1.1.4 shipped it (`git show v1.1.4:packages/core/src/transportSwitch.ts`), unchanged but for this
+// header and the import path: the contact's app a newer one still meets. Not to be edited to follow `src`.
+import { rankTransports, relayedTransports, transportOrder, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "../../src/pairedTransports";
 
 export interface TransportPolicy {
   revision: number;
@@ -49,14 +51,6 @@ export class TransportSwitch {
   private settled = "";
   private failed = "";
   private preparing = false;
-  /** The coordinator's dial for the pending plan has started (`dialing`): from then on a newer choice waits for it. */
-  private dialStarted = false;
-  /**
-   * The contact's `paired-policy` says `replaces`: its app reads a `paired-switch-keep` for a plan a newer choice
-   * replaced as that (`supersede`). An app before 1.1.5 reads it as its target missed and says the chat was kept on its
-   * transport; 1.1.5 reads it right but does not say so.
-   */
-  private remoteReplaces = false;
   /** This side chose while no session was open: the next one begins with it as a choice. */
   private apart = false;
   constructor(private readonly options: {
@@ -113,8 +107,7 @@ export class TransportSwitch {
     return this.options.key < this.options.peerKey ? `${local.revision}:${remote.revision}` : `${remote.revision}:${local.revision}`;
   }
   private send(frame: object): void { if (this.context) this.options.send({ ...frame, context: this.context }); }
-  /** Older apps read the policy's own fields only, and drop `replaces`. */
-  private announce(): void { this.send({ t: "paired-policy", policy: this.local(), replaces: true }); }
+  private announce(): void { this.send({ t: "paired-policy", policy: this.local() }); }
 
   /**
    * A session is ready. `migrated`: it is the one a plan dialled, so that plan is done, even on a fallback choice.
@@ -130,7 +123,7 @@ export class TransportSwitch {
     // A fresh session may be the contact's app started again, which counts its revisions from 0: its policy is heard
     // anew (it announces it on this session). One kept from the old session made every newer policy look older, and
     // no change ever moved the chat after a contact's crash and resume (`attachReplacement` stops nothing here).
-    if (!migrated) { this.failed = ""; this.remote = null; this.remoteReplaces = false; }
+    if (!migrated) { this.failed = ""; this.remote = null; }
     // A choice made while apart is a choice now: above the contact's last intent, as one made on a session would be.
     if (this.apart) { this.intent = Math.max(this.intent, this.lastRemote?.intent ?? 0) + 1; this.apart = false; }
     this.clearPlan();
@@ -145,7 +138,7 @@ export class TransportSwitch {
     if (userIntent === "automatic") { this.intent = 0; this.apart = false; }
     else if (userIntent) this.intent = Math.max(this.intent, this.remote?.intent ?? 0) + 1;
     this.failed = "";
-    this.announce(); this.supersede(); this.reconcile();
+    this.announce(); this.reconcile();
   }
   /**
    * This side's user chose the transport its policy now names. `again`: the one it named already. Choosing again
@@ -184,27 +177,10 @@ export class TransportSwitch {
     if (this.options.key > this.options.peerKey) { this.revision++; this.announce(); }
     this.reconcile();
   }
-  stop(): void { this.clearPlan(); this.context = ""; this.remote = null; this.remoteReplaces = false; }
+  stop(): void { this.clearPlan(); this.context = ""; this.remote = null; }
   private clearPlan(): void {
     if (this.timer) clearTimeout(this.timer);
-    this.timer = null; this.plan = null; this.preparing = false; this.dialStarted = false;
-  }
-  /** The coordinator starts dialling the pending plan (a move back to WebRTC first waits for the old session to retire). */
-  dialing(plan: SwitchPlan): void { if (this.plan === plan) this.dialStarted = true; }
-  /**
-   * A newer choice (this side's, or the contact's policy) while a plan both sides agreed has not started its dial: a
-   * move back to WebRTC waits for the WebRTC session it left to retire (`SWITCH_RETIRE_MS`), and nothing has been tried
-   * yet. The coordinator drops that plan, so the chat does not move there only to move again; the other side is told
-   * with `paired-switch-keep`, and whatever the newer policies call for is planned next. A plan already dialling goes
-   * on: a choice made then is planned once it ended (`replanIfMoved`). So does a plan the contact's app would take
-   * that keep for a target missed (its policy did not say `replaces`): the newer choice is planned once it landed.
-   */
-  private supersede(): void {
-    const plan = this.plan;
-    if (!plan || !this.preparing || this.dialStarted || !this.context || !this.remote || this.options.key > this.options.peerKey || !this.remoteReplaces) return;
-    if (this.choices(this.local(), this.remote)[0] === plan.choices[0]) return;
-    this.send({ t: "paired-switch-keep", id: plan.id });
-    this.clearPlan(); this.options.cancel(); this.options.state();
+    this.timer = null; this.plan = null; this.preparing = false;
   }
   fail(error: string): void {
     const target = this.plan?.choices[0], upgrade = !!this.plan?.upgrade;
@@ -303,9 +279,8 @@ export class TransportSwitch {
       if (!policy || (this.remote && (policy.revision < this.remote.revision ||
         (policy.revision === this.remote.revision && JSON.stringify(policy) !== JSON.stringify(this.remote))))) return true;
       const changed = !this.remote || policy.revision !== this.remote.revision;
-      this.remote = this.lastRemote = policy; this.remoteReplaces = frame.replaces === true; this.options.peer(policy);
+      this.remote = this.lastRemote = policy; this.options.peer(policy);
       if (changed && this.plan && !this.preparing) this.clearPlan();
-      else if (changed) this.supersede();
       this.reconcile(); return true;
     }
     if (frame.t === "paired-switch-plan") {
@@ -329,11 +304,6 @@ export class TransportSwitch {
       this.replanIfMoved(); return true;
     }
     if (frame.t === "paired-switch-keep") {
-      // The coordinator dropped a plan a newer choice replaced before anything was dialled (`supersede`): not a target
-      // missed, nothing to say. The newer policies are planned next.
-      if (this.preparing && this.remote && this.choices(this.local(), this.remote)[0] !== this.plan.choices[0]) {
-        this.clearPlan(); this.options.state(); this.reconcile(); return true;
-      }
       if (this.actual && this.plan.choices.includes(this.actual)) {
         if (this.plan.choices[0] !== this.actual && !this.plan.upgrade) this.options.kept?.(this.plan.choices[0]);
         this.settled = this.signature(this.plan.local, this.plan.remote);

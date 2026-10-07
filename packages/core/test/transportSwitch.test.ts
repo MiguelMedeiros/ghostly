@@ -1,12 +1,14 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { TransportSwitch, type TransportPolicy, type SwitchPlan } from "../src/transportSwitch";
+import { TransportSwitch as TransportSwitchV114 } from "./support/transportSwitchV114";
 // covers: transport.switch, transport.preference, transport.wait
 
 /**
  * Two switches wired to each other. The coordinator's dial starts as `prepare` asks for it (a native dial does), unless
  * `holdDial`: then it waits, as a move back to WebRTC waits for the session it left to retire, until `dial()` starts it.
+ * `old`: side 1 (not the coordinator) is the switch v1.1.4 shipped, whose policy does not say `replaces`.
  */
-function peers(options: { waits?: boolean; holdDial?: boolean } = {}) {
+function peers(options: { waits?: boolean; holdDial?: boolean; old?: boolean } = {}) {
   const policies: Omit<TransportPolicy, "revision" | "intent">[] = [0, 1].map(() => ({ preferred: "webrtc/1", fallback: true,
     available: ["webrtc/1", "iroh/1", "hyperdht/1"], descriptors: { "iroh/1": "iroh", "hyperdht/1": "hyper" } }));
   const queue: { side: number; frame: Record<string, unknown> }[] = [];
@@ -15,7 +17,7 @@ function peers(options: { waits?: boolean; holdDial?: boolean } = {}) {
   const switches: TransportSwitch[] = [];
   prepare[0].mockImplementation((plan: SwitchPlan, dial: boolean) => { if (!dial) return; if (options.holdDial) held = plan; else switches[0].dialing(plan); });
   const dial = () => { if (held) switches[0].dialing(held); held = null; };
-  switches.push(...[0, 1].map(i => new TransportSwitch({ key: String(i), peerKey: String(1-i),
+  switches.push(...[0, 1].map(i => new (i === 1 && options.old ? TransportSwitchV114 as unknown as typeof TransportSwitch : TransportSwitch)({ key: String(i), peerKey: String(1-i),
     policy: () => structuredClone(policies[i]), send: frame => queue.push({side: 1-i, frame: frame as Record<string, unknown>}),
     peer: vi.fn(), state: state[i], prepare: prepare[i], cancel: cancel[i], kept: kept[i], timeoutMs: 100, ...(options.waits ? { unreached: unreached[i] } : {}) })));
   const flush = () => { let steps = 0; while (queue.length) { if (++steps > 100) throw new Error("Negotiation loop"); const {side, frame} = queue.shift()!; switches[side].handle(frame); } };
@@ -243,6 +245,33 @@ it.each([0, 1])("a choice made on side %s before the planned move dialled replac
   h.dial();
   h.policies[side].preferred = "iroh/1"; h.switches[side].changed(); h.flush();
   expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  h.switches.forEach(s => s.stop());
+});
+/**
+ * A contact on v1.1.4 knows `paired-switch-keep` only as "the move did not connect, the chat stays here": for a move a
+ * newer choice had replaced, it said the target was missed (a "kept on" row), and with Fallback off it held the dropped
+ * plan until its timeout said the change failed. Its policy does not say `replaces`: the move goes on, and the newer
+ * choice is planned once it landed, as before.
+ */
+for (const fallback of [true, false]) it.each([0, 1])(`a choice made on side %s before the planned move dialled, with a v1.1.4 contact and fallback ${fallback}: no notice, the move lands, then the newer one`, side => {
+  vi.useFakeTimers();
+  const h = peers({ waits: true, holdDial: true, old: true });
+  h.policies.forEach(p => { p.preferred = "iroh/1"; }); h.policies[side].fallback = fallback;
+  h.switches.forEach(s => s.begin("session-2", "iroh/1")); h.flush();
+  h.policies[side].preferred = "webrtc/1"; h.switches[side].changed(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "webrtc/1")).toBe(true);
+  // Iroh again, before the dial: the v1.1.4 contact is not told the move was dropped, which it would read as missed.
+  h.policies[side].preferred = "iroh/1"; h.switches[side].changed(); h.flush();
+  vi.advanceTimersByTime(50);
+  [...h.kept, ...h.unreached].forEach(f => expect(f).not.toHaveBeenCalled());
+  expect(h.switches.every(s => s.pending?.choices[0] === "webrtc/1")).toBe(true);
+  h.dial(); h.switches.forEach(s => s.begin("session-3", "webrtc/1", true)); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "iroh/1")).toBe(true);
+  h.dial(); h.switches.forEach(s => s.begin("session-4", "iroh/1", true)); h.flush();
+  vi.advanceTimersByTime(1_000);
+  [...h.kept, ...h.unreached].forEach(f => expect(f).not.toHaveBeenCalled());
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  expect(h.switches.map(s => s.wanted()?.transport)).toEqual(["iroh/1", "iroh/1"]);
   h.switches.forEach(s => s.stop());
 });
 it("does not plan a failed move again by itself when nothing changed since (the owner's retry pace does)", () => {
