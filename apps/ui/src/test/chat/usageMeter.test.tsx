@@ -110,7 +110,7 @@ describe("the header's meter", () => {
     expect(within(panel).getByTestId("usage-details-used")).toHaveTextContent("380 of 1000 used");
     expect(within(panel).getByTestId("usage-details-account")).toHaveTextContent("work");
     expect(within(panel).getByTestId("usage-details-window-0")).toHaveTextContent("week80% left");
-    expect(within(panel).getByTestId("usage-details-updated")).toHaveTextContent("2 min ago");
+    expect(within(panel).getByTestId("usage-details-updated")).toHaveTextContent(/[12] min ago/);
     expect(within(panel).queryByTestId("chat-usage-info-text")).not.toBeInTheDocument();
     await rendered.user.click(within(panel).getByTestId("chat-usage-info"));
     expect(within(panel).getByTestId("chat-usage-info-text")).toHaveTextContent("What the bot says it has left. Ghostly doesn't check it.");

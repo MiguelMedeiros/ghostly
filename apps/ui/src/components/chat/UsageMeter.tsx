@@ -6,7 +6,7 @@ import { useOutsideDismiss, useTabTrap } from "../../hooks/useDismiss";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { agoIn } from "../../lib/relativeTime";
-import { formatAt } from "../../lib/time";
+import { untilIn } from "../../lib/statusCards";
 import { USAGE_TONE, resetTime, usageLevel, usageReadAt, type UsageEntry, type UsageLevel } from "../../lib/usage";
 import { InfoButton } from "../layout/Section";
 
@@ -69,7 +69,8 @@ export function UsageDetails({ entry, now }: { entry: UsageEntry; now: number })
   const { card } = entry;
   const level = usageLevel(entry, now);
   const ago = agoIn(language);
-  const when = (at: number) => `${resetTime(at, now, language)} (${formatAt(at, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }, language)})`;
+  // "18:00 · in 3 h": the time, and how long until then.
+  const when = (at: number) => `${resetTime(at, now, language)} · ${untilIn(language)(at, now)}`;
   const rows: [string, ReactNode, string][] = [
     [t("cards.usage.leftLabel"), <><span dir="ltr">{usageLeft(card)}%</span>{card.window && <> · <bdi>{card.window}</bdi></>}</>, "left"],
     ...(card.used !== undefined && card.limit !== undefined ? [[t("cards.usage.usedLabel"), t("cards.usage.used", { used: card.used, limit: card.limit }), "used"] as [string, ReactNode, string]] : []),
@@ -136,7 +137,7 @@ function UsagePanel({ entry, anchorRef, onClose }: { entry: UsageEntry; anchorRe
       </button>
     </div>
     {info && <p id={infoId} data-testid="chat-usage-info-text" className="m-0 px-3 pt-1 text-xs leading-relaxed text-text-secondary">{t("cards.usage.info")}</p>}
-    <div className={`px-3 pt-2 ${phone ? "pb-safe pb-4" : "pb-3"}`}><UsageDetails entry={entry} now={now} /></div>
+    <div className={phone ? "pb-safe" : ""}><div className={`px-3 pt-2 ${phone ? "pb-5" : "pb-3"}`}><UsageDetails entry={entry} now={now} /></div></div>
   </>;
   const common = { ref, role: "dialog", "aria-modal": true, "aria-labelledby": titleId, tabIndex: -1, "data-testid": "chat-usage-panel",
     onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } } } as const;
@@ -186,15 +187,20 @@ export function UsageView({ card, at, time, marks }: { card: UsageCard; at: numb
   const resets = level !== "stale" && card.resetsAt ? t("cards.usage.resets", { time: resetTime(card.resetsAt, now, language) }) : undefined;
   return (
     <div ref={ref} data-testid="status-card" data-kind="usage" data-card-id={card.id} data-level={level} data-left={left} data-open={open ? "" : undefined} className="w-full min-w-0 text-start">
+      {/* Two short lines, as a task's: the meter, the name and what is left; then when it resets, and the card's time. */}
       <button type="button" data-testid="status-card-toggle" data-press-through aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)}
-        className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-[9px] px-3.5 py-2 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
-        <UsageGauge left={left} level={level} className="!w-6 !h-2" />
-        <bdi data-testid="status-card-title" className="min-w-0 truncate text-[13px] font-semibold leading-5">{nameOf(card, t)}</bdi>
-        <span className={`shrink-0 text-[12px] font-medium leading-5 tabular-nums ${USAGE_TONE[level].text}`} dir="ltr">{t("cards.usage.left", { left })}</span>
-        {resets && <span className="min-w-0 truncate text-[11.5px] leading-5 text-text-secondary">{resets}</span>}
-        {(time || marks) && <span className="ms-auto flex shrink-0 items-center gap-[3px] text-[11px] text-text-secondary">{time}{marks}</span>}
+        className="block w-full cursor-pointer rounded-t-[9px] px-3.5 pt-2.5 pb-1 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+        <span className="flex min-w-0 items-center gap-2">
+          <UsageGauge left={left} level={level} className="!w-6 !h-2" />
+          <bdi data-testid="status-card-title" className="min-w-0 flex-1 truncate text-[13.5px] font-semibold leading-5">{nameOf(card, t)}</bdi>
+          <span className={`shrink-0 text-[12px] font-medium leading-5 tabular-nums ${USAGE_TONE[level].text}`}>{t("cards.usage.left", { left })}</span>
+        </span>
       </button>
-      {open && <div id={detailsId} className="mx-3.5 border-t border-text-primary/10 pb-2.5 pt-2"><UsageDetails entry={entry} now={now} /></div>}
+      {open && <div id={detailsId} className="mx-3.5 mt-1 border-t border-text-primary/10 pb-1 pt-2"><UsageDetails entry={entry} now={now} /></div>}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 px-3.5 pb-2 pt-1 text-[11.5px] leading-4 text-text-secondary">
+        {resets && <span data-testid="status-card-resets" className="min-w-0 truncate">{resets}</span>}
+        {(time || marks) && <span className="ms-auto flex shrink-0 items-center gap-[3px] text-[11px]">{time}{marks}</span>}
+      </div>
     </div>
   );
 }
