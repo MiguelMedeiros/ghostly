@@ -13,7 +13,7 @@ import { InstalledAppDialog, AppInstallDialog } from "../../components/apps/AppI
 import { Apps } from "../../pages/Apps";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { setAppOpener } from "../../lib/apps/open";
-import { forgetAppsAvailable } from "../../lib/apps/flag";
+import { appsAvailable, forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -71,6 +71,18 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   setAppOpener(null);
+});
+
+describe("appsAvailable, the one rule every screen asks", () => {
+  const on = { enabled: true, runner: "/app-frame.html", opener: async () => {}, runnerPolicy: true } as const;
+  it("is on only when the build, the client, the opener and the runner's header all say so", () => {
+    expect(appsAvailable(on)).toBe("on");
+    expect(appsAvailable({ ...on, enabled: false })).toBe("off");
+    expect(appsAvailable({ ...on, runner: null })).toBe("off");
+    expect(appsAvailable({ ...on, opener: null })).toBe("off");
+    expect(appsAvailable({ ...on, runnerPolicy: false })).toBe("off");
+    expect(appsAvailable({ ...on, runnerPolicy: undefined })).toBe("checking");
+  });
 });
 
 describe("with the apps flag off", () => {

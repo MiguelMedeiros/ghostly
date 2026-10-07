@@ -1,22 +1,44 @@
 /**
- * Whether the Apps feature shows (WISP 1200). Three things must hold, and while one does not, nothing of it shows: no
- * page, no place in the bar, no composer entry, no app card (a card reads as its text, as in an older app), and no
- * request at all:
- * - the feature is on in this build: `APPS_ENABLED`, or the e2e suite's build (`VITE_APPS_TEST=1`, fixed when the
- *   build is made, never at runtime);
- * - this client runs apps (`platform.apps`: the web app; the extension has none yet) and registered how (`openApp`);
- * - this server sends the runner's policy as a header (`runnerAvailable`, asked once of the runner page itself): a
- *   self-hosted server without it gets no apps.
+ * Whether the Apps feature shows (WISP 1200). While it does not, nothing of it shows: no page, no place in the bar, no
+ * composer entry, no app card (a card reads as its text, as in an older app), and no request at all.
+ *
+ * The rule is one function, `appsAvailable`, so a later rule (a browser apps are hidden or limited on) is added there
+ * and every screen follows. The screens ask it through `useAppsState` / `useAppsAvailable`.
  */
 import { useEffect, useState } from "react";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../platform";
-import { useAppOpener } from "./open";
+import { useAppOpener, type AppOpener } from "./open";
 import { runnerAvailable } from "./runnerCheck";
 
-/** The feature is on in this build. */
+/** The feature is on in this build: `APPS_ENABLED`, or the e2e suite's build (`VITE_APPS_TEST=1`, fixed at build time). */
 export function appsEnabled(): boolean {
   return APPS_ENABLED || import.meta.env?.VITE_APPS_TEST === "1";
+}
+
+export type AppsState = "on" | "off" | "checking";
+
+/** What the rule reads. */
+export interface AppsFacts {
+  /** The feature is on in this build (`appsEnabled`). */
+  enabled: boolean;
+  /** Where this client frames apps (`platform.apps.runnerUrl`), or null where it runs none (the extension, for now). */
+  runner: string | null;
+  /** An opener is registered (`setAppOpener`). */
+  opener: AppOpener | null;
+  /** This server sends the runner's policy as a header: undefined while it is being asked. */
+  runnerPolicy: boolean | undefined;
+}
+
+/**
+ * The one rule. Apps shows when the feature is on in this build, this client runs apps and registered how, and this
+ * server sends the runner's policy as a header (a self-hosted server without it gets no apps). `checking` while only
+ * the header check is still out. Extend here: every screen follows.
+ */
+export function appsAvailable(facts: AppsFacts): AppsState {
+  if (!facts.enabled || !facts.runner || !facts.opener) return "off";
+  if (facts.runnerPolicy === undefined) return "checking";
+  return facts.runnerPolicy ? "on" : "off";
 }
 
 /** What the runner check answered, per runner page: later screens know at once. */
@@ -27,27 +49,25 @@ export function forgetAppsAvailable(): void {
   answered.clear();
 }
 
-/** Whether Apps shows here now. False until the runner check has answered. */
-export function useAppsAvailable(): boolean {
-  return useAppsState() === "on";
-}
-
-/** `checking` while the runner check has not answered (a page waits, rather than sending the person away). */
-export function useAppsState(): "on" | "off" | "checking" {
+/** `appsAvailable` for this client now, asking the runner page once when the rest already holds. */
+export function useAppsState(): AppsState {
   const enabled = appsEnabled();
   // Read, not subscribed to: where apps run depends on the host, not on the engine's state, and every message bubble
   // asks (a subscription would draw each of them again on every change of state).
-  const apps = servicesPlatform?.apps;
+  const runner = servicesPlatform?.apps?.runnerUrl ?? null;
   const opener = useAppOpener();
-  const runner = enabled && apps && opener ? apps.runnerUrl : null;
+  const ask = enabled && opener ? runner : null;
   const [, setChecked] = useState(0);
   useEffect(() => {
-    if (!runner || answered.has(runner)) return;
+    if (!ask || answered.has(ask)) return;
     let live = true;
-    void runnerAvailable(runner).then((ok) => { answered.set(runner, ok); if (live) setChecked((n) => n + 1); });
+    void runnerAvailable(ask).then((ok) => { answered.set(ask, ok); if (live) setChecked((n) => n + 1); });
     return () => { live = false; };
-  }, [runner]);
-  if (!runner) return "off";
-  const ok = answered.get(runner);
-  return ok === undefined ? "checking" : ok ? "on" : "off";
+  }, [ask]);
+  return appsAvailable({ enabled, runner, opener, runnerPolicy: runner ? answered.get(runner) : undefined });
+}
+
+/** Whether Apps shows here now. False until the runner check has answered. */
+export function useAppsAvailable(): boolean {
+  return useAppsState() === "on";
 }
