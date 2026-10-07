@@ -112,7 +112,7 @@ export function mountChess(root: HTMLElement, game: ChessController, t: Strings)
       const last = view.lastMove && (view.lastMove.from === square || view.lastMove.to === square);
       button.classList.toggle("last", Boolean(last));
       button.classList.toggle("check", view.inCheck && piece?.type === "k" && piece.color === view.turn);
-      const parts = [square, piece ? `${piece.color === "w" ? t.white : t.black} ${t[`piece_${piece.type}`]}` : t.empty];
+      const parts = [square, piece ? t.piece.replace("{colour}", piece.color === "w" ? t.white : t.black).replace("{piece}", t[`piece_${piece.type}`]) : t.empty];
       if (square === selected) parts.push(t.selected);
       if (targetSet.has(square)) parts.push(t.canMoveHere);
       if (last) parts.push(t.lastMove);

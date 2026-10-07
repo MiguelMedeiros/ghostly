@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { boardEnding, replay } from "../src/game.ts";
 import { encodeMessage, jsonBytes, MAX_MESSAGE_BYTES, MAX_PLIES, parseMessage, type Message } from "../src/protocol.ts";
 import { commitment, deal, newSalt } from "../src/toss.ts";
-import { pickLanguage, stringsFor } from "../src/strings.ts";
+import { en, LANGUAGES, pickLanguage, stringsFor } from "../src/strings.ts";
 
 const g = "0123456789abcdef";
 
@@ -101,6 +101,19 @@ describe("strings", () => {
     expect(pickLanguage("zh_Hant")).toBe("zh");
     expect(pickLanguage("de-DE")).toBe("en");
     expect(pickLanguage(undefined)).toBe("en");
-    expect(stringsFor("ja").newGame).toBe("New game");
+    expect(stringsFor("de" as never).newGame).toBe("New game");
+  });
+
+  it("has every word in each of the 8 languages, not English in their place", () => {
+    for (const language of LANGUAGES) {
+      const words = stringsFor(language);
+      for (const key of Object.keys(en) as (keyof typeof en)[]) expect(words[key].trim(), `${language}.${key}`).not.toBe("");
+      if (language === "en") continue;
+      // Only the square names, which are the same everywhere, may match English.
+      const same = (Object.keys(en) as (keyof typeof en)[]).filter((key) => words[key] === en[key]);
+      expect(same, language).toEqual([]);
+    }
+    expect(stringsFor("pt").yourMove).toBe("Sua vez");
+    expect(stringsFor("ar").newGame).toBe("لعبة جديدة");
   });
 });
