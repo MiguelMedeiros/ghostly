@@ -339,7 +339,7 @@ const RULES: readonly Rule[] = [
   exact("Use at least 12 characters for the backup passphrase", "errors.profile.shortPassphrase"),
   exact("This device has no storage for files", "errors.profile.noFileStorage", "errors.profile.noFileStorageNext"),
   exact("This device has no room left for this backup. Free some space, then try again.", "errors.profile.noRoom", "errors.profile.noRoomNext"),
-  { match: /^Could not read the Ark wallet for the backup: (?<reason>[\s\S]+)$/, key: "errors.profile.arkBackup", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
+  { match: /^Could not read the Ark wallet for the backup: (?<reason>[\s\S]+)$/, key: "errors.profile.arkBackup", reason: "next" },
   exact("This wallet has no recovery phrase to show", "errors.profile.noPhrase"),
   exact("This wallet has no backup file", "errors.profile.noBackupFile"),
   exact("Choose a picture", "errors.picture.choose"),
@@ -458,8 +458,10 @@ export function readable(raw: string): boolean {
   // One plain word reads too ("refused", "timeout"); a code does not ("insufficient_balance", "INTERNAL").
   return raw.length <= 120 && (/\s/.test(raw.trim()) || /^[a-z]{3,20}$/.test(raw.trim()))
     && !/(?:https?|wss?):\/\/|\b[A-Z]\w*Error\b|Error:|[{}[\]<>_]|\b[0-9a-f]{16,}\b|\b[a-z0-9]{32,}\b|^\s*\d{3}\b/i.test(words)
-    && !/\b[A-Z]{4,}\b/.test(words)
-    && (raw.match(/:/g)?.length ?? 0) <= 1 && raw.split(/[.;]\s+\S/).length <= 2;
+    // A code in capitals leads it ("INTERNAL: ...") or joins words ("ERR_TIMEOUT"); a word in capitals inside a sentence
+    // ("from -----BEGIN SSH SIGNATURE-----") is no code.
+    && !/^\s*[A-Z]{4,}\b|\b[A-Z]+_[A-Z_]+\b|\bE[A-Z]{4,}\b|\b\d{1,3}(?:\.\d{1,3}){3}\b/.test(words)
+    && (raw.match(/:\s/g)?.length ?? 0) <= 1 && raw.split(/[.;]\s+\S/).length <= 2;
 }
 
 /** A nested reason as a line: in the language when known, as it came when readable (first letter up), else none. */

@@ -21,7 +21,7 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
 }
 
 /** What the person reads about a bundle changed after it was signed. */
-const TAMPERED = /^Ghostly won't install it: |^Not signed correctly/;
+const TAMPERED = /^Ghostly won't install it|^Not signed correctly/;
 
 /** Closes Chess (its header's Close, outside the frame: the chat's panel hides) and opens it again from the app card. */
 async function closeAndReopen(peer: Peer): Promise<void> {

@@ -303,7 +303,7 @@
     "sessionDropped": "连接已断开"
   },
   "profile": {
-    "arkBackup": "无法读取用于备份的 Ark 钱包:{{reason}}",
+    "arkBackup": "无法读取用于备份的 Ark 钱包",
     "backupTooLarge": "此备份太大，无法在此恢复。",
     "damagedBackup": "此备份已损坏",
     "damagedBackupNext": "请尝试该文件的另一份副本。",

@@ -303,7 +303,7 @@
     "sessionDropped": "Connexion perdue"
   },
   "profile": {
-    "arkBackup": "Impossible de lire le portefeuille Ark pour la sauvegarde : {{reason}}",
+    "arkBackup": "Impossible de lire le portefeuille Ark pour la sauvegarde",
     "backupTooLarge": "Cette sauvegarde est trop volumineuse pour être restaurée ici.",
     "damagedBackup": "Cette sauvegarde est endommagée",
     "damagedBackupNext": "Essayez une autre copie du fichier.",

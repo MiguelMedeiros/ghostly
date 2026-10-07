@@ -7,7 +7,7 @@ import { Button, Notice, input } from "../wallet/ui";
 import { Select } from "../ui/Select";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
-import { errorText } from "../../lib/errorText";
+import { problemLine } from "../../lib/problemText";
 
 
 /**
@@ -34,7 +34,7 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
 
   useEffect(() => {
     let cancelled = false;
-    engine.call("nostrDraft", request).then(d => { if (!cancelled) setDraft(d); }, e => { if (!cancelled) setError(errorText(e, t)); });
+    engine.call("nostrDraft", request).then(d => { if (!cancelled) setDraft(d); }, e => { if (!cancelled) setError(problemLine(e, t)); });
     return () => { cancelled = true; };
     // The request is the dialog's reason to exist: a new one is a new dialog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,7 +52,7 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
       const r = await engine.call("nostrPublish", { draftId: draft.draftId, event });
       setResult(r);
       onDone?.(r);
-    } catch (e) { if (!controller.signal.aborted) setError(errorText(e, t)); }
+    } catch (e) { if (!controller.signal.aborted) setError(problemLine(e, t)); }
     finally { setBusy(false); setProgress(""); setBunker(""); if (abort.current === controller) abort.current = null; }
   };
 

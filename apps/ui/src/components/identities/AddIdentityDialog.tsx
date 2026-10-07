@@ -14,7 +14,7 @@ import { SubjectPreviewFacts } from "./SubjectPreview";
 import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
-import { errorText } from "../../lib/errorText";
+import { problemLine } from "../../lib/problemText";
 
 const VALIDITY = [7, 30, 90, 180, 365];
 
@@ -84,7 +84,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     const ctx: SignerContext = { values, signal: controller.signal, onAuthUrl: setAuthUrl, onProgress: setProgress,
       onApproval: request => { if (!controller.signal.aborted) setApproval(request); } };
     try { await work(ctx); }
-    catch (e) { if (!controller.signal.aborted) setError(errorText(e, t)); setProgress(""); }
+    catch (e) { if (!controller.signal.aborted) setError(problemLine(e, t)); setProgress(""); }
     finally { setBusy(false); setApproval(null); if (abort.current === controller) abort.current = null; setValues(v => Object.fromEntries(Object.keys(v).map(k => [k, signer?.kind === "in-app" && signer.fields?.find(f => f.name === k)?.kind === "secret" ? "" : v[k]]))); }
   }
 
