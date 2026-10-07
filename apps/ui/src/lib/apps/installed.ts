@@ -15,6 +15,11 @@ const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
 
 /** Reads the list again. */
+// After any update check (the engine's scheduled one included), once a screen has read the list: a version found
+// removed or revoked shows as stopped.
+engine.onAppsChecked(() => { if (apps !== null) void refreshInstalledApps(); });
+
+/** Reads the list again. */
 export function refreshInstalledApps(): Promise<void> {
   loading = engine.call("appList").then((list) => { apps = list; tell(); }, () => { apps ??= []; tell(); }).finally(() => { loading = null; });
   return loading;

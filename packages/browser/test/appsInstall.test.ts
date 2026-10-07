@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalJsonBytes } from "@ghostly/core";
 import { fileBytes } from "../src/shared/fileBytes";
 import {
@@ -196,7 +196,7 @@ describe("before a run", () => {
     await store.checkUpdates();
     expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
     await expect(store.entry({ ref: v1.ref, runAnyway: true })).rejects.toThrow(/^revoked/);
-    await expect(store.file({ ref: v1.ref, path: "index.html" })).rejects.toThrow(/^revoked/);
+    await expect(store.file({ ref: v1.ref, path: "index.html" })).rejects.toThrow(/^stopped/);
   });
 
   it("a revocation by another key is not taken", async () => {
@@ -297,4 +297,74 @@ it("the publisher is shown by its fingerprint: 16 z-base32 characters in four gr
   net.put(BUNDLE_URL, v1.bytes);
   const preview = await apps(net).preview({ url: BUNDLE_URL });
   expect(preview.fingerprint).toBe(keyOf(PUBLISHER).slice(0, 16).match(/.{4}/g)!.join(" "));
+});
+
+describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
+  // The update check found a version removed or revoked while the app was already running: the page may never stop
+  // it (a frame left open, a check the page did not ask for), so the engine cuts it off. Before, a running app kept
+  // reading and writing its storage, and its files, after "Stopped" showed on the Apps page.
+  async function running() {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await store.entry({ ref: v1.ref });
+    await store.storageSet({ ref: v1.ref, scope: "chat-1", key: "game", value: [1] });
+    return { v1, store };
+  }
+  const cutOff = async (store: Awaited<ReturnType<typeof running>>["store"], ref: string) => {
+    await expect(store.storageGet({ ref, scope: "chat-1", key: "game" })).rejects.toThrow(/^stopped: /);
+    await expect(store.storageSet({ ref, scope: "chat-1", key: "game", value: [2] })).rejects.toThrow(/^stopped: /);
+    await expect(store.storageDelete({ ref, scope: "chat-1", key: "game" })).rejects.toThrow(/^stopped: /);
+    await expect(store.storageKeys({ ref, scope: "chat-1" })).rejects.toThrow(/^stopped: /);
+    await expect(store.file({ ref, path: "index.html" })).rejects.toThrow(/^stopped: /);
+    await expect(store.chatRunnable({ ref })).rejects.toThrow(/^stopped: /);
+  };
+
+  it("a store's removal cuts a running app off: storage, files and chat refuse with `stopped`; its data still exports", async () => {
+    const { v1, store } = await running();
+    await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.addStore({ url: STORE_URL });
+    await cutOff(store, v1.ref);
+    // Its icon is still read for the Apps page (this bundle has none: "no-file", not "stopped").
+    await expect(store.file({ ref: v1.ref, path: "icon.png" })).rejects.toThrow(/^no-file/);
+    expect(await store.exportData({ ref: v1.ref })).toEqual([{ ghostlyAppData: 1, app: v1.ref, scope: "chat-1", entries: { game: [1] } }]);
+  });
+
+  it("a run the person started with Run anyway keeps going after the removal", async () => {
+    const { v1, store } = await running();
+    await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.addStore({ url: STORE_URL });
+    await store.entry({ ref: v1.ref, runAnyway: true });
+    await store.storageSet({ ref: v1.ref, scope: "chat-1", key: "game", value: [2] });
+    expect(await store.storageGet({ ref: v1.ref, scope: "chat-1", key: "game" })).toEqual({ value: [2] });
+    await store.chatRunnable({ ref: v1.ref });
+  });
+
+  it("a publisher's revocation cuts it off, Run anyway or not", async () => {
+    const { v1, store } = await running();
+    await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.addStore({ url: STORE_URL });
+    await store.entry({ ref: v1.ref, runAnyway: true });
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v1.digest])]));
+    await store.checkUpdates();
+    await cutOff(store, v1.ref);
+  });
+
+  it("an app that is not installed here (a bot's reference) is not refused for chat", async () => {
+    const store = apps(net);
+    await store.chatRunnable({ ref: `${keyOf(PUBLISHER)}/other` });
+  });
+
+  it("every update check is told to the host, so the pages read the apps again", async () => {
+    const checked = vi.fn();
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net, { checked });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await store.checkUpdates();
+    expect(checked).toHaveBeenCalledTimes(1);
+  });
 });

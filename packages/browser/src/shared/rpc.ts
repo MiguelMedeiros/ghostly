@@ -575,6 +575,8 @@ export type EngineEvent =
   | { kind: "call-signal"; linkId: string; signal: string }
   /** A contact's mini-app frame in a 1:1 chat (`apps/1`, WISP 1200 § In a chat), already checked; never stored. */
   | { kind: "app-frame"; linkId: string; event: import("@ghostly/core").AppFrameEvent }
+  /** An update check of the installed mini-apps ran (WISP 1200 § Updates, § Takedowns): read them again. */
+  | { kind: "apps-checked" }
   /**
    * The peer did not start: the profile's database did not open (`shared/idb.ts`). Sent to every client in place of
    * its first state; no state follows, and every call fails with the same words.

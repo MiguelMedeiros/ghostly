@@ -35,6 +35,7 @@ class EngineClient {
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
   private readonly callListeners = new Set<(linkId: string, signal: string) => void>();
   private readonly appListeners = new Set<(linkId: string, event: AppFrameEvent) => void>();
+  private readonly appsCheckedListeners = new Set<() => void>();
   /**
    * The latest call offer per link, until something answers or ends it: a chat that is not open
    * when the call comes in is loaded because of it, and then reads the offer it would have missed.
@@ -76,6 +77,12 @@ class EngineClient {
   onAppFrame(listener: (linkId: string, event: AppFrameEvent) => void): () => void {
     this.appListeners.add(listener);
     return () => this.appListeners.delete(listener);
+  }
+
+  /** An update check of the installed mini-apps ran (the scheduled one too): what is installed, and may run, can have changed. */
+  onAppsChecked(listener: () => void): () => void {
+    this.appsCheckedListeners.add(listener);
+    return () => this.appsCheckedListeners.delete(listener);
   }
 
   onCallSignal(listener: (linkId: string, signal: string) => void): () => void {
@@ -162,6 +169,9 @@ class EngineClient {
       }
       case "app-frame":
         for (const listener of this.appListeners) listener(message.linkId, message.event);
+        break;
+      case "apps-checked":
+        for (const listener of this.appsCheckedListeners) listener();
         break;
       case "response": {
         const pending = this.pending.get(message.id);

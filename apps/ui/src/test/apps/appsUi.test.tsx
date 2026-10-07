@@ -371,6 +371,18 @@ describe("with the apps flag on", () => {
     expect(within(row).queryByTestId("installed-app-open")).not.toBeInTheDocument();
   });
 
+  it("reads the installed apps again after the engine's own update check, so a stopped version shows stopped", async () => {
+    let run: InstalledAppView["run"] = { status: "ok" };
+    fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    expect(await screen.findByTestId("installed-app-open")).toBeInTheDocument();
+    // The scheduled check (no page asked for it) found the version removed: the engine says a check ran.
+    run = { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] };
+    act(() => fakeEngine.emit({ kind: "apps-checked" }));
+    expect(await screen.findByTestId("installed-app-hint")).toHaveTextContent("Stopped");
+    expect(screen.queryByTestId("installed-app-open")).not.toBeInTheDocument();
+  });
+
   it("lists installed apps and stores; uninstall offers an export first", async () => {
     fakeEngine.on("appList", () => [installed({ unknownPublisher: false, listedBy: [{ key: "s", name: "Ghostly", kind: "curated" }] })])
       .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,

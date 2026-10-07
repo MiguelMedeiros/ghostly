@@ -346,9 +346,9 @@ The runner is a small page **shipped inside the client**, never fetched. One run
 |---|---|---|
 | (runner only) | `start` (Desktop), `writing` | The entry; the start of the write |
 | `ghostly.context()` | `context` | `{version, inChat, peer: {version} or null, name, theme, locale}` (`name` only with that permission; `theme` is `"light"` or `"dark"`, the client's; `locale` is the client's language as a BCP 47 tag, so the app can match both) |
-| `ghostly.file(path)` | `file` | The bytes of a file of the bundle, as an `ArrayBuffer`. Refused with `no-file` when the bundle has no such file |
-| `ghostly.storage.get(key)`, `.set(key, value)`, `.delete(key)`, `.keys()` | `storage.get`, `storage.set`, `storage.delete`, `storage.keys` | The app's storage in the current scope (this app, this chat or alone): keys up to 256 bytes, JSON values up to 64 KiB, 5 MiB in all. Refused with `bad-key` or `too-large` past those bounds, and with `full` when a write would pass 5 MiB, so the app can make room |
-| `ghostly.chat.send(value)` | `chat.send` | One `paired-app` data frame (`chat` permission, live chat, the peer open). Refused with `offline` while the session is not live, with `too-large` when `value` passes 32 KiB as JSON, with `peer-closed` while the peer has not opened the app (or its client does not offer `apps/1`), and with `too-fast` past 48 a second for this app ([In a chat](#in-a-chat-apps1)) |
+| `ghostly.file(path)` | `file` | The bytes of a file of the bundle, as an `ArrayBuffer`. Refused with `no-file` when the bundle has no such file, and with `stopped` once the version running is removed or revoked |
+| `ghostly.storage.get(key)`, `.set(key, value)`, `.delete(key)`, `.keys()` | `storage.get`, `storage.set`, `storage.delete`, `storage.keys` | The app's storage in the current scope (this app, this chat or alone): keys up to 256 bytes, JSON values up to 64 KiB, 5 MiB in all. Refused with `bad-key` or `too-large` past those bounds, with `full` when a write would pass 5 MiB, so the app can make room, and with `stopped` once the version running is removed or revoked ([Takedowns](#takedowns-and-malware-reports-with-no-authority)) |
+| `ghostly.chat.send(value)` | `chat.send` | One `paired-app` data frame (`chat` permission, live chat, the peer open). Refused with `offline` while the session is not live, with `too-large` when `value` passes 32 KiB as JSON, with `peer-closed` while the peer has not opened the app (or its client does not offer `apps/1`), with `too-fast` past 48 a second for this app ([In a chat](#in-a-chat-apps1)), and with `stopped` once the version running is removed or revoked |
 | `ghostly.chat.on("message" or "peer", f)` | events `chat.message`, `chat.peer` | A frame from the peer; the peer opened, closed or changed version, or the session went down or came back |
 | `ghostly.close()` | `close` | Ends the app |
 
@@ -524,7 +524,7 @@ This is what makes **the default store one source among many**: apps and stores 
 
 - **A store** removes an app with a `removed` entry and a reason.
 - **A publisher** revokes its own versions.
-- **The client** checks the stores the person added at every update check. When one marks an installed digest as removed for malware, the app is **stopped** and the person decides: "Remove", "Keep it stopped", or, behind "Details", "Run anyway". A publisher's revocation stops it with no "Run anyway".
+- **The client** checks the stores the person added at every update check. When one marks an installed digest as removed for malware, the app is **stopped** and the person decides: "Remove", "Keep it stopped", or, behind "Details", "Run anyway". A publisher's revocation stops it with no "Run anyway". **An app already running is stopped too**, whatever its frame does: from the check on, the client refuses its storage, its files and its frames to the contact (`open` and data) with `stopped`, and every update check, the scheduled one included, is told to the pages so they read the apps again and close its frame. A run the person started with "Run anyway" goes on after a removal; nothing goes on after a revocation. Exporting the app's data stays possible.
 - **Reports** (phase 2) are signed (`ghostly-report/1`) statements sent to an indexer service; the client never sends one the person did not write.
 
 A store the person did not add has no effect on their device.
