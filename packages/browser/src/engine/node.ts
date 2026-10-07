@@ -1952,6 +1952,13 @@ export class GhostlyNode implements EngineImplementation {
     this.appShelf?.stop();
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     if (!quiet) this.depart();
+    // Then every link stops, its record too, still before anything that waits: the leave packet is the last thing a link
+    // publishes. Stopped last, a daemon's link offered and published again 4 s after its goodbye, while the stop waited
+    // for the wallets (#1452).
+    const linksStopped = Promise.allSettled([...this.links.values()].map(async (live) => {
+      live.carried?.stop();
+      await Promise.all([live.link?.stop(!quiet), live.caps?.stop()]);
+    }));
     this.directPath.close();
     this.clock.close();
     this.clockOff?.();
@@ -1979,30 +1986,26 @@ export class GhostlyNode implements EngineImplementation {
     this.activeTurnTimer = null;
     if (this.restoreTimer) clearTimeout(this.restoreTimer);
     this.restoreTimer = null;
-    await links?.stop().catch(() => {});
     this.identities.stop();
     this.did.stop();
     this.nostrSocial.stop();
     this.publicProfiles.stop();
     this.publicActivity.clear();
-    for (const network of WALLET_NETWORKS) {
-      await this.arkWallets[network].stop();
-      await this.barkWallets[network].stop();
-      await this.fedimintWallets[network].stop();
-      await this.sparkWallets[network].stop();
-      await this.usdtWallets[network].stop();
-      await this.lightnings[network].stop();
-      await this.bitcoins[network].stop();
-    }
-    // The Cashu wallet too: its polls would otherwise go on writing after the stop.
-    await this.wallet.stop();
-    await this.nativeQueue;
-    await this.hold.stop();
-    await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
     for (const queue of this.editQueues.values()) queue.stop();
     this.groupEdits.stop();
     this.cardEdits.stop();
-    await Promise.allSettled([...this.links.values()].map(async (live) => { live.carried?.stop(); await live.link?.stop(!quiet); await live.caps?.stop(); }));
+    // What is still being written is waited for, side by side: one after another, a daemon's stop took 4 to 6 s.
+    await Promise.allSettled([
+      linksStopped,
+      links?.stop(),
+      ...WALLET_NETWORKS.flatMap((network) => [this.arkWallets, this.barkWallets, this.fedimintWallets, this.sparkWallets, this.usdtWallets, this.lightnings, this.bitcoins]
+        .map((wallets) => wallets[network].stop())),
+      // The Cashu wallet too: its polls would otherwise go on writing after the stop.
+      this.wallet.stop(),
+      this.nativeQueue,
+      // An outbox stopping may hand a message to the hold: the hold's writes are waited for after it.
+      Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop())).then(() => this.hold.stop()),
+    ]);
   }
 
   /**

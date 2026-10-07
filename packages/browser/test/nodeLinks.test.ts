@@ -475,10 +475,54 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
     const stopping = node.shutdown();
     // Said synchronously, as the page may be gone by the next tick.
     expect(link.depart).toHaveBeenCalledOnce();
-    expect(link.stop).not.toHaveBeenCalled();
     await stopping;
     expect(link.stop).toHaveBeenCalled();
+    expect(link.depart.mock.invocationCallOrder[0]).toBeLessThan(link.stop.mock.invocationCallOrder[0]);
   });
+
+  it("after the goodbye nothing more goes out: the links and their records stop at once, whatever else the stop still waits for", async () => {
+    const publish = vi.spyOn(fixture, "publish");
+    const chat = row({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const { node, linkOf } = await started(chat);
+    const caps = node["links"].get(chat.id)!.caps!;
+    const records = () => publish.mock.calls.filter(([identity]) => (identity as { pubKeyZ32: string }).pubKeyZ32 === caps.address).length;
+    await vi.waitFor(() => expect(records()).toBe(1));
+    // Held items still being written: the stop waits for them, and no longer than that.
+    const writing = new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+    vi.spyOn(node["hold"], "stop").mockImplementation(() => writing);
+    let done = false;
+    const stopping = node.shutdown().then(() => { done = true; });
+    await new Promise((r) => setTimeout(r, 20));
+    // The link's own stop sends its leave packet, the last word; nothing it would dial or offer next goes out.
+    expect(linkOf(chat.id).stop).toHaveBeenCalledWith(true);
+    // A record due again meanwhile (its content changed, past the spacing) is not published either.
+    (caps as unknown as { state: { publishedAt: number } }).state.publishedAt -= 60_000;
+    (linkOf(chat.id) as unknown as { setHoldSupport: () => void }).setHoldSupport = vi.fn();
+    await node.setChatHold({ linkId: chat.id, enabled: true }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(records()).toBe(1);
+    expect(done, "the hold's writes are waited for").toBe(false);
+    await stopping;
+    nodes.splice(nodes.indexOf(node), 1);
+  });
+
+  it("stops what it waits for side by side: slow wallets, the hold and the links take as long as the slowest, not their sum", async () => {
+    const chat = row({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const { node, linkOf } = await started(chat);
+    const slow = () => new Promise<void>((resolve) => setTimeout(resolve, 300));
+    for (const kind of ["arkWallets", "barkWallets", "fedimintWallets", "sparkWallets", "usdtWallets", "lightnings", "bitcoins"] as const) {
+      for (const wallet of Object.values(node[kind] as Record<string, { stop(): Promise<void> }>)) vi.spyOn(wallet, "stop").mockImplementation(slow);
+    }
+    vi.spyOn(node["wallet"], "stop").mockImplementation(slow);
+    vi.spyOn(node["hold"], "stop").mockImplementation(slow);
+    linkOf(chat.id).stop.mockImplementation(slow);
+    const began = Date.now();
+    await node.shutdown();
+    nodes.splice(nodes.indexOf(node), 1);
+    // One by one this was 17 waits of 300 ms (5 s); a daemon's stop is under a second.
+    expect(Date.now() - began).toBeLessThan(1_000);
+    expect(linkOf(chat.id).stop).toHaveBeenCalled();
+  }, 15_000);
 });
 
 describe("the capability record of a chat (WISP 03)", () => {
