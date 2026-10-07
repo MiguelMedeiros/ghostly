@@ -115,13 +115,15 @@ describe("RTP", () => {
 
 describe("a call's ICE servers", () => {
   it("the apps' STUN servers first, then the profile's TURN and STUN servers as libdatachannel takes them", () => {
-    expect(callIceServers()).toEqual(["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]);
+    expect(callIceServers([], {})).toEqual(["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]);
+    // GHOSTLY_STUN=0 (a private network, the tests): the profile's own only.
+    expect(callIceServers([{ urls: "stun:127.0.0.1:3478" }], { GHOSTLY_STUN: "0" })).toEqual(["stun:127.0.0.1:3478"]);
     expect(callIceServers([
       { urls: "turn:turn.example.org:3478 turn:turn.example.org:443?transport=tcp", username: "u", credential: "p" },
       { urls: "turns:relay.example.org", username: "u", credential: "p" },
       { urls: "stun:stun.example.org" },
       { urls: "https://not-ice" },
-    ]).slice(2)).toEqual([
+    ], {}).slice(2)).toEqual([
       { hostname: "turn.example.org", port: 3478, username: "u", password: "p", relayType: "TurnUdp" },
       { hostname: "turn.example.org", port: 443, username: "u", password: "p", relayType: "TurnTcp" },
       { hostname: "relay.example.org", port: 5349, username: "u", password: "p", relayType: "TurnTls" },

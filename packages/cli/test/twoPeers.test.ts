@@ -6,7 +6,7 @@ import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
-import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
+import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, testEnv } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
 
@@ -57,7 +57,7 @@ beforeAll(async () => {
   dht = await hyperdhtTestnet();
   // Calls bind their media to loopback: on some machines (a VPN on a Mac) UDP to the machine's own LAN address is dropped.
   trace = process.env.GHOSTLY_LINK_TRACE ?? join(home("trace"), "link.jsonl");
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1", GHOSTLY_LINK_TRACE: trace };
+  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_PKARR_RELAYS: relays.map((r) => r.url).join(","), GHOSTLY_CALL_BIND: "127.0.0.1", GHOSTLY_LINK_TRACE: trace };
 }, 30_000);
 
 afterAll(async () => {
@@ -314,7 +314,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const bobHeard: Buffer[] = [];
     const program = connect(placed.audio.socket);
     program.on("data", (d: Buffer) => bobHeard.push(d));
-    const pipe = spawn(process.execPath, [BIN, "--home", alice, "call", "pipe", "bob"], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const pipe = spawn(process.execPath, [BIN, "--home", alice, "call", "pipe", "bob"], { env: testEnv(env), stdio: ["pipe", "pipe", "pipe"] });
     const aliceHeard: Buffer[] = [];
     pipe.stdout.on("data", (d: Buffer) => aliceHeard.push(d));
     await new Promise((r) => setTimeout(r, 500));

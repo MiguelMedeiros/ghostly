@@ -6,12 +6,16 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { expect } from "vitest";
+import { testNetworkEnv } from "./network";
 
 /** The built CLI (test/support/build.ts builds it before the tests). */
 export const BIN = resolve(import.meta.dirname, "../../dist/ghostly.mjs");
 
-/** Tests stay off the public Mainline DHT unless one gives its own testnet (`GHOSTLY_DHT_BOOTSTRAP`) or turns it on. */
-const TEST_ENV: NodeJS.ProcessEnv = { GHOSTLY_DHT: "0" };
+/**
+ * The environment of every `ghostly` a test starts: on this machine only (./network.ts), its own over that. A test
+ * that needs Pkarr, the HyperDHT or the Mainline DHT to work starts them on loopback and gives their addresses here.
+ */
+export const testEnv = (...layers: (NodeJS.ProcessEnv | undefined)[]): NodeJS.ProcessEnv => testNetworkEnv(...layers);
 
 export interface Result { code: number; stdout: string; stderr: string; json: Record<string, unknown> }
 
@@ -19,7 +23,7 @@ export interface Result { code: number; stdout: string; stderr: string; json: Re
 /** `bin`: another build of the CLI (an older release, for compatibility tests); this one by default. */
 export function ghostly(args: string[], options: { env?: NodeJS.ProcessEnv; input?: string; bin?: string } = {}): Promise<Result> {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [options.bin ?? BIN, ...args], { env: { ...TEST_ENV, ...process.env, ...options.env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [options.bin ?? BIN, ...args], { env: testEnv(options.env), stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
@@ -52,7 +56,7 @@ export class Running {
   readonly child: ChildProcess;
   stderr = "";
   constructor(args: string[], env: NodeJS.ProcessEnv = {}, bin = BIN) {
-    this.child = spawn(process.execPath, [bin, ...args], { env: { ...TEST_ENV, ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    this.child = spawn(process.execPath, [bin, ...args], { env: testEnv(env), stdio: ["ignore", "pipe", "pipe"] });
     createInterface({ input: this.child.stdout! }).on("line", (line) => { try { this.lines.push(JSON.parse(line)); } catch { /* not JSON */ } });
     this.child.stderr!.on("data", (d) => (this.stderr += d));
   }
