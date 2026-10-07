@@ -103,7 +103,7 @@ print(f"  WebKitGTK {WebKit2.get_major_version()}.{WebKit2.get_minor_version()}.
 win = Gtk.Window(title="r11k audio probe"); win.set_default_size(300, 120)
 manager = WebKit2.UserContentManager(); manager.register_script_message_handler("r11k")
 if SETUP == "allow":
-    policies = WebKit2.WebsitePolicies.new_with_policies(autoplay=WebKit2.AutoplayPolicy.ALLOW)
+    policies = WebKit2.WebsitePolicies(autoplay=WebKit2.AutoplayPolicy.ALLOW)
     view = WebKit2.WebView(user_content_manager=manager, website_policies=policies)
 else:
     view = WebKit2.WebView(user_content_manager=manager)
