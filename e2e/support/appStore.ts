@@ -20,11 +20,14 @@ export interface TestStore {
   storeName: string;
 }
 
-/** A curated store listing one app, "Chess", that asks for `chat` (and whatever else `permissions` says). */
-export async function testStore(options: { permissions?: AppPermission[] } = {}): Promise<TestStore> {
+/**
+ * A curated store listing one app, "Chess", that asks for `chat` (and whatever else `permissions` says). `entry`: the
+ * app's HTML instead of a page with its title.
+ */
+export async function testStore(options: { permissions?: AppPermission[]; entry?: string } = {}): Promise<TestStore> {
   const publisher = signer("publisher"), store = signer("store");
   const title = "Chess", storeName = "E2E store";
-  const entry = `<!doctype html><meta charset=utf-8><title>${title}</title><body style="font:16px system-ui"><h1>${title}</h1>`;
+  const entry = options.entry ?? `<!doctype html><meta charset=utf-8><title>${title}</title><body style="font:16px system-ui"><h1>${title}</h1>`;
   const made = await buildAppBundle({
     name: "chess", version: "1.2.0", sequence: 1, kind: "mini-app", title, tagline: "Play chess with a contact",
     description: "Chess for two, move by move, in your chat.", entry: "index.html", permissions: options.permissions ?? ["chat"],

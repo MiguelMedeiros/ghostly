@@ -40,6 +40,7 @@ import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes"
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 import { setWindowThemeSink } from "../lib/windowTheme";
 import { setNameStepUnderTest } from "../lib/nameStep";
+import { appsTestFetch } from "./appsTestFetch";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -279,11 +280,18 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
+    // Mini-apps run in windows of their own on Rust's `ghostly-app` scheme, which serves the runner with its policy
+    // (apps/desktop/src/app_sandbox.rs; WISP 1200): one address, the policy chosen by what the person granted.
+    appRunner: "ghostly-app://localhost/",
+    appNetRunner: "ghostly-app://localhost/",
+    appRunnerServed: true,
     node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
       // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
       pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
       // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
       defaultWallets: defaultWalletsAllowed(desktopUnderTest),
+      // Mini-apps on in the e2e suite's build only (VITE_APPS_TEST, fixed when the build is made), reading its test store.
+      ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {}),
       ...macPeerBudget(), ...callOptions },
     callMedia,
     onServer: serveServiceWindows,

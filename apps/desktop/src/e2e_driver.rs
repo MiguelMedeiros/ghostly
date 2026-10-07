@@ -185,16 +185,19 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             let handled = crate::app_window::on_menu_event(app, &id);
             (200, handled.to_string())
         }
-        // An installed app's window (src/app_sandbox.rs), the only way to open one until the marketplace lands:
-        // `{"app", "entry", "guard"}`, where `guard` is `full` (as the app will) or, for the sandbox spike, the
-        // layers to keep (`Guard::parse`: `control` for none, or `header+lock+rules+prefs+proxy`). Answers the
-        // window's label.
+        // An installed app's window (src/app_sandbox.rs) with no broker behind it, for the sandbox's
+        // measurements (apps/desktop/fixtures/app-sandbox/measure.mjs): `{"app", "entry", "guard", "internet"}`,
+        // where `guard` is `full` (as apps run) or the layers to keep (`Guard::parse`: `control` for none, or
+        // `header+lock+rules+prefs+proxy`), and `internet` opens it as for an app granted `internet` (the
+        // network runner's policy and rule list). Answers the window's label.
         ("POST", "/app-open") => {
             #[derive(Deserialize)]
             struct Open {
                 app: String,
                 entry: String,
                 guard: Option<String>,
+                #[serde(default)]
+                internet: bool,
             }
             let open: Open = match serde_json::from_slice(&request.body) {
                 Ok(open) => open,
@@ -204,7 +207,8 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             let Some(guard) = crate::app_sandbox::Guard::parse(name) else {
                 return (400, error(&format!("no guard {name}")));
             };
-            match crate::app_sandbox::open_guarded(app, open.app, open.entry, guard) {
+            match crate::app_sandbox::open_guarded(app, open.app, open.entry, guard, open.internet)
+            {
                 Ok(label) => (200, serde_json::to_string(&label).unwrap_or_default()),
                 Err(e) => (400, error(&e)),
             }

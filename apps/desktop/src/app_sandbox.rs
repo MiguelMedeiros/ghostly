@@ -1,42 +1,74 @@
-//! Windows that run an installed mini-app (WISP 12xx, "Where it runs"). The spike for Ghostly 1.2's
-//! marketplace: nothing in the app opens one yet; only the macOS test driver does (`e2e_driver.rs`, debug
-//! builds with `--features e2e-driver`), so the sandbox can be measured before any feature leans on it.
+//! Windows that run an installed mini-app (WISP 1200, "Where it runs", Desktop row).
 //!
-//! - One window per app instance, labelled `app-<random>`. Rust keeps label → app; the app's identity is
-//!   that binding, never anything the page says.
-//! - The window loads the runner from the `ghostly-app` scheme, with the runner's CSP as an HTTP header: the
-//!   `sandbox` directive gives the page an opaque origin (`"null"`), no storage and no network.
+//! - One window per app instance, labelled `app-<random>`, opened by the Ghostly window (`app_open`) with the
+//!   entry the engine checked. Rust keeps label → app; the app's identity is that binding, never anything the
+//!   page says.
+//! - The window loads the runner from the `ghostly-app` scheme, with the runner's CSP as an HTTP header (the
+//!   network runner's for an app granted `internet`): the `sandbox` directive gives the page an opaque origin
+//!   (`"null"`), no storage and no network (HTTPS and WSS only, with `internet`).
 //! - The runner asks `app_broker` for the app's entry (`start`), says `writing`, and writes the entry into
-//!   itself. `app_broker` is the only command an `app-*` window may call (`only_main` in `main.rs`, and the
+//!   itself. `app_broker` is the only command an `app-*` window may call (`only_main` in `lib.rs`, and the
 //!   capability in `capabilities/app.json`).
+//! - Every other request is the web broker's (`apps/ui/src/lib/apps/broker.ts`), which runs in the Ghostly
+//!   window: Rust checks the caller, the size and the rate, hands the request to the Ghostly window with the
+//!   caller's label, and returns its answer as `app_broker`'s result. The broker's events go back to that window
+//!   alone (`app_post`), evaluated into the runner's receiver.
 //! - The window never leaves the runner: every navigation after the first load is refused, and new windows
 //!   are denied without opening the system browser (for an app, a link out is a way to send data out).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::http::{Request, Response, StatusCode};
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tokio::sync::oneshot;
 
 pub const SCHEME: &str = "ghostly-app";
 /// Every app window's label starts with this; nothing else may call `app_broker`.
 pub const LABEL_PREFIX: &str = "app-";
 
-/// The runner's policy (WISP 12xx, "The runner's CSP"), sent as a header so `sandbox` holds even if the page
+/// The runner's policy (WISP 1200, "The runner's CSP"), sent as a header so `sandbox` holds even if the page
 /// is opened some other way. Tauri's configured CSP is not added to a custom scheme's responses.
 pub const RUNNER_CSP: &str = "sandbox allow-scripts; default-src 'none'; \
 script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; \
 media-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; \
 form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
-/// The largest request an app may send the broker (WISP 12xx: 64 KiB).
-const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// The network runner's policy (WISP 1200, "The network runner's CSP"), for an app the person granted
+/// `internet`: HTTPS and WSS for fetches, sockets, images, media and fonts, and nothing else wider.
+pub const NET_RUNNER_CSP: &str = "sandbox allow-scripts; default-src 'none'; \
+script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob: https:; \
+media-src data: blob: https:; font-src data: https:; connect-src https: wss:; frame-src 'none'; \
+worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
-/// The runner, shipped inside the app, never fetched. It deletes the WebRTC constructors before any app
-/// code, refuses to start outside an `app-*` window or with an origin that is not opaque, then writes the
-/// entry `app_broker` hands it into itself.
+/// The largest request an app may send the broker (WISP 1200: 64 KiB), as JSON.
+const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// The most requests an app may send the broker in a second (WISP 1200: 50), every call counted.
+const MAX_REQUESTS_PER_SECOND: usize = 50;
+/// The largest id a request may carry: a safe integer in JavaScript.
+const MAX_ID: u64 = (1 << 53) - 1;
+/// How long a request waits for the Ghostly window's broker (a file read included).
+#[cfg(not(test))]
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(test)]
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// To the Ghostly window: a request of an app window, `{"label", "request"}`.
+pub const REQUEST_EVENT: &str = "ghostly-app-request";
+/// To the Ghostly window: an app window closed, its label.
+pub const CLOSED_EVENT: &str = "ghostly-app-closed";
+
+/// The runner, shipped inside the app, never fetched. Before any app code it deletes the WebRTC constructors,
+/// refuses to start outside an `app-*` window or with an origin that is not opaque, and defines the broker's
+/// event receiver and `window.ghostly` (the same API as the web runner, apps/web/public/app-frame.html); then
+/// it writes the entry `app_broker` hands it into itself.
+///
+/// Tauri's IPC object stays in the page: Tauri defines `window.__TAURI_INTERNALS__` as a property that cannot
+/// be deleted or replaced, and answers every call through `window.__TAURI_INTERNALS__.runCallback` (WISP 1200,
+/// threats: the capability and `only_main` are the gates).
 const RUNNER: &str = r#"<!doctype html>
 <html><head><meta charset="utf-8"><meta http-equiv="x-dns-prefetch-control" content="off"><title>Ghostly app</title>
 <script>
@@ -45,28 +77,81 @@ const RUNNER: &str = r#"<!doctype html>
   for (const name of Object.getOwnPropertyNames(window)) {
     if (/^(webkit)?RTC/.test(name)) { try { delete window[name]; } catch (e) {} }
   }
+  const stop = (why) => {
+    document.documentElement.textContent = "This app cannot run here.";
+    document.documentElement.setAttribute("data-ghostly-refused", why);
+  };
   const internals = window.__TAURI_INTERNALS__;
   const label = internals && internals.metadata && internals.metadata.currentWindow && internals.metadata.currentWindow.label;
-  if (self.origin !== "null" || !internals || typeof label !== "string" || !label.startsWith("app-")) {
-    document.documentElement.textContent = "This app cannot run here.";
-    return;
-  }
+  if (self.origin !== "null" || !internals || typeof label !== "string" || !/^app-[A-Za-z0-9]+$/.test(label)) return stop("origin");
+  if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
+
   const invoke = internals.invoke.bind(internals);
-  const broker = (type, args) => invoke("app_broker", { request: { type, args: args === undefined ? null : args } });
-  Object.defineProperty(window, "ghostly", { value: Object.freeze({
-    context: () => broker("context"),
-    close: () => broker("close"),
+  const broker = (request) => invoke("app_broker", { request });
+  const listeners = { message: new Set(), peer: new Set() };
+  // The broker's events, `{event, data}`, which Rust evaluates into this window alone (`app_post`).
+  Object.defineProperty(window, "__ghostlyEvent", { value: (message) => {
+    if (!message || typeof message !== "object") return;
+    const kind = message.event === "chat.message" ? "message" : message.event === "chat.peer" ? "peer" : null;
+    if (kind) for (const listener of Array.from(listeners[kind])) { try { listener(message.data); } catch (error) { setTimeout(() => { throw error; }); } }
+  } });
+  // What a request may carry, as the broker reads it: plain JSON, no deeper than 64.
+  const isJson = (value, depth) => {
+    if (depth > 64) return false;
+    if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+    if (typeof value === "number") return Number.isFinite(value);
+    if (Array.isArray(value)) return value.every((item) => isJson(item, depth + 1));
+    if (typeof value !== "object") return false;
+    const proto = Object.getPrototypeOf(value);
+    return (proto === Object.prototype || proto === null) && Object.values(value).every((item) => isJson(item, depth + 1));
+  };
+  const bytesOf = (text) => {
+    const raw = atob(text);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out.buffer;
+  };
+  let nextId = 1;
+  const send = (type, args) => {
+    if (!isJson(args, 0)) return Promise.reject(new TypeError("Not a JSON value"));
+    const id = nextId++;
+    return broker({ id, type, args }).then((answer) => {
+      if (!answer || typeof answer !== "object" || answer.id !== id) throw new Error("refused");
+      if (answer.ok !== true) throw new Error(typeof answer.error === "string" ? answer.error : "refused");
+      return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;
+    }, (error) => { throw new Error(typeof error === "string" ? error : "refused"); });
+  };
+  const call = (type) => (...args) => send(type, args);
+  Object.defineProperty(window, "ghostly", { enumerable: true, value: Object.freeze({
+    context: call("context"),
+    file: (path) => send("file", [path]),
+    storage: Object.freeze({
+      get: call("storage.get"),
+      set: call("storage.set"),
+      delete: call("storage.delete"),
+      keys: call("storage.keys"),
+    }),
+    chat: Object.freeze({
+      send: (value) => send("chat.send", [value]).then(() => undefined),
+      on: (event, listener) => {
+        const set = listeners[event];
+        if (!set || typeof listener !== "function") throw new TypeError("chat.on takes \"message\" or \"peer\" and a function");
+        set.add(listener);
+        return () => { set.delete(listener); };
+      },
+    }),
+    close: () => send("close", []).then(() => undefined),
   }) });
-  const fail = (error) => { document.documentElement.textContent = "This app could not start: " + error; };
+
   // On Linux the window's filter goes in just after it is made: until then the broker says "Not ready".
-  const begin = (tries) => broker("start").then((entry) => broker("writing").then(() => {
+  const begin = (tries) => broker({ type: "start" }).then((entry) => send("writing", []).then(() => {
     document.open();
     document.write(entry);
     document.close();
-  }), (error) => {
+  }, () => stop("broker")), (error) => {
     if (String(error).includes("Not ready") && tries < 400) setTimeout(() => begin(tries + 1), 25);
-    else fail(error);
-  }).catch(fail);
+    else stop("broker");
+  });
   begin(0);
 })();
 </script></head><body></body></html>"#;
@@ -187,7 +272,7 @@ pub fn caught() -> Vec<String> {
 }
 
 struct AppWindow {
-    /// The app this window runs: its reference (`<publisher>/<name>` once bundles exist).
+    /// The app this window runs: its reference (`<publisher>/<name>`).
     app: String,
     /// The verified entry, handed over once on `start`.
     entry: Option<String>,
@@ -196,8 +281,34 @@ struct AppWindow {
     /// filter goes into the window just after it is made (`webkitgtk`); elsewhere it is ready when made.
     ready: bool,
     guard: Guard,
+    /// The person granted the app `internet`: the network runner's policy and rule list.
+    internet: bool,
+    /// Opened by the Ghostly window (`app_open`), whose broker answers this window's requests. The test
+    /// driver's windows have none: only `start` and `writing` are answered there.
+    brokered: bool,
+    /// When the window's last requests came, for the rate.
+    recent: VecDeque<Instant>,
+    /// Requests the Ghostly window's broker has not answered yet, by the app's id.
+    pending: HashMap<u64, oneshot::Sender<Value>>,
     /// What the window was refused (navigations and new windows), for the spike's measurements.
     refused: Vec<String>,
+}
+
+impl AppWindow {
+    fn new(app: String, entry: String, guard: Guard, internet: bool, brokered: bool) -> AppWindow {
+        AppWindow {
+            app,
+            entry: Some(entry),
+            started: false,
+            ready: !cfg!(all(target_os = "linux", not(test))),
+            guard,
+            internet,
+            brokered,
+            recent: VecDeque::new(),
+            pending: HashMap::new(),
+            refused: Vec::new(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -237,28 +348,72 @@ pub fn is_runner(url: &url::Url) -> bool {
 }
 
 /// The window may go to the runner once, to load it, and nowhere after that: not a reload (a second start),
-/// not another page, not a frame of any kind. Before the first load, nothing else either.
+/// not another page, not a frame of any kind (`about:srcdoc` and `about:blank` included). Before the first
+/// load, nothing else either.
 fn may_navigate(url: &url::Url, started: bool) -> bool {
     !started && is_runner(url)
 }
 
-/// Opens an app in a window of its own and answers its label. Nothing calls it yet: the Apps screen will,
-/// from an async command (on macOS the window is built on the main thread, so this must not run there).
-#[allow(dead_code)]
-pub fn open<R: Runtime>(
-    app: &AppHandle<R>,
-    app_id: String,
+/// What the Ghostly window opens: an installed app's entry, as the engine checked it, and what the person
+/// granted it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenRequest {
+    /// `<publisher key in z-base32>/<name>`.
+    app: String,
+    /// The app's name, for the window's title (outside the page, where the app cannot change it).
+    title: String,
     entry: String,
-) -> Result<String, String> {
-    open_guarded(app, app_id, entry, Guard::FULL)
+    /// The person granted `internet` (the engine's record): the network runner.
+    #[serde(default)]
+    internet: bool,
 }
 
+/// Why apps do not open on Windows yet: WebView2 has no content rule list, and its equivalents (a request
+/// filter, its preconnect and WebRTC switches) are not measured. WISP 1200, Desktop row.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const WINDOWS_REFUSAL: &str =
+    "Apps do not run on Windows yet: the app window's protections are not measured there.";
+
+/// Opens an app for the Ghostly window's broker, in a window of its own, and answers its label. Not from the
+/// main thread (on macOS the window is built there, and this waits for it): `app_open` runs it off it.
+pub fn open<R: Runtime>(app: &AppHandle<R>, request: OpenRequest) -> Result<String, String> {
+    open_window(
+        app,
+        request.app,
+        &request.title,
+        request.entry,
+        Guard::FULL,
+        request.internet,
+        true,
+    )
+}
+
+/// The test driver's way: a window with the layers `guard` keeps and no broker behind it.
+#[cfg(any(test, feature = "e2e-driver"))]
 pub fn open_guarded<R: Runtime>(
     app: &AppHandle<R>,
     app_id: String,
     entry: String,
     guard: Guard,
+    internet: bool,
 ) -> Result<String, String> {
+    let title = app_id.clone();
+    open_window(app, app_id, &title, entry, guard, internet, false)
+}
+
+fn open_window<R: Runtime>(
+    app: &AppHandle<R>,
+    app_id: String,
+    title: &str,
+    entry: String,
+    guard: Guard,
+    internet: bool,
+    brokered: bool,
+) -> Result<String, String> {
+    if cfg!(target_os = "windows") {
+        return Err(WINDOWS_REFUSAL.into());
+    }
     let label = format!("{LABEL_PREFIX}{:016x}", rand::random::<u64>());
     app.state::<AppSandboxState>()
         .windows
@@ -266,18 +421,11 @@ pub fn open_guarded<R: Runtime>(
         .map_err(|_| "app state poisoned")?
         .insert(
             label.clone(),
-            AppWindow {
-                app: app_id.clone(),
-                entry: Some(entry),
-                started: false,
-                ready: !cfg!(all(target_os = "linux", not(test))),
-                guard,
-                refused: Vec::new(),
-            },
+            AppWindow::new(app_id, entry, guard, internet, brokered),
         );
-    let built = build_window(app, &label, &app_id, guard);
+    let built = build_window(app, &label, title, guard, internet);
     if let Err(e) = built {
-        forget_window(app, &label);
+        forget(app, &label);
         return Err(e);
     }
     Ok(label)
@@ -287,7 +435,7 @@ pub fn open_guarded<R: Runtime>(
 fn window_builder<'a, R: Runtime>(
     app: &'a AppHandle<R>,
     label: &str,
-    app_id: &str,
+    title: &str,
     guard: Guard,
 ) -> Result<WebviewWindowBuilder<'a, R, AppHandle<R>>, String> {
     let url = format!("{SCHEME}://localhost/")
@@ -297,7 +445,7 @@ fn window_builder<'a, R: Runtime>(
     let (new_app, new_label) = (app.clone(), label.to_string());
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
-        .title(format!("{app_id} (Ghostly)"))
+        .title(format!("{title} (Ghostly)"))
         .on_navigation(move |to| {
             nav_app
                 .state::<AppSandboxState>()
@@ -319,7 +467,7 @@ fn window_builder<'a, R: Runtime>(
                 });
             tauri::webview::NewWindowResponse::Deny
         })
-        .inner_size(480.0, 360.0);
+        .inner_size(560.0, 640.0);
     #[cfg(any(test, feature = "e2e-driver"))]
     if guard.proxy {
         let port = black_hole().ok_or("No proxy")?;
@@ -338,10 +486,11 @@ fn window_builder<'a, R: Runtime>(
 fn build_window<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
-    app_id: &str,
+    title: &str,
     guard: Guard,
+    _internet: bool,
 ) -> Result<(), String> {
-    window_builder(app, label, app_id, guard)?
+    window_builder(app, label, title, guard)?
         .build()
         .map(|_| ())
         .map_err(|e| format!("Window: {e}"))
@@ -354,10 +503,11 @@ fn build_window<R: Runtime>(
 fn build_window<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
-    app_id: &str,
+    title: &str,
     guard: Guard,
+    internet: bool,
 ) -> Result<(), String> {
-    let window = window_builder(app, label, app_id, guard)?
+    let window = window_builder(app, label, title, guard)?
         .build()
         .map_err(|e| format!("Window: {e}"))?;
     let store = app
@@ -369,7 +519,7 @@ fn build_window<R: Runtime>(
     window
         .with_webview(move |platform| {
             let webview = platform.inner();
-            webkitgtk::harden(&webview, guard, &store, move |result| {
+            webkitgtk::harden(&webview, guard, internet, &store, move |result| {
                 let state = handle.state::<AppSandboxState>();
                 match result {
                     Ok(()) => {
@@ -377,10 +527,10 @@ fn build_window<R: Runtime>(
                     }
                     Err(e) => {
                         crate::diagnostics::log(&format!("app window: not hardened ({e}), closed"));
-                        forget_window(&handle, &label);
                         if let Some(window) = handle.get_webview_window(&label) {
                             let _ = window.close();
                         }
+                        forget(&handle, &label);
                     }
                 }
             });
@@ -394,22 +544,24 @@ fn build_window<R: Runtime>(
 fn build_window<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
-    app_id: &str,
+    title: &str,
     guard: Guard,
+    internet: bool,
 ) -> Result<(), String> {
     if objc2_foundation::MainThreadMarker::new().is_some() {
         return Err("Open apps from a command, not the main thread".into());
     }
     if guard.rules {
-        webkit::compile_rules(app)?;
+        webkit::compile_rules(app, internet)?;
     }
     let (tx, rx) = std::sync::mpsc::channel();
-    let (handle, label, app_id) = (app.clone(), label.to_string(), app_id.to_string());
+    let (handle, label, title) = (app.clone(), label.to_string(), title.to_string());
     app.run_on_main_thread(move || {
         let built = (|| {
-            let mut builder = window_builder(&handle, &label, &app_id, guard)?;
+            let mut builder = window_builder(&handle, &label, &title, guard)?;
             if guard.rules || guard.prefs {
-                builder = builder.with_webview_configuration(webkit::configuration(guard)?);
+                builder =
+                    builder.with_webview_configuration(webkit::configuration(guard, internet)?);
             }
             builder
                 .build()
@@ -430,11 +582,20 @@ pub fn refused<R: Runtime>(app: &AppHandle<R>, label: &str) -> Option<Vec<String
         .with(label, |window| window.refused.clone())
 }
 
+/// Drops a window's state, and with it every request still waiting (each gets "No answer"). True when it had
+/// one.
+fn forget<R: Runtime>(app: &AppHandle<R>, label: &str) -> Option<bool> {
+    let state = app.try_state::<AppSandboxState>()?;
+    let window = state.windows.lock().ok()?.remove(label)?;
+    crate::diagnostics::log(&format!("app window {label} ({}) closed", window.app));
+    Some(window.brokered)
+}
+
+/// A window is gone (`WindowEvent::Destroyed`): its state goes, and the Ghostly window's broker hears it, so
+/// the app stops there too (its chat closed on the contact's side).
 pub fn forget_window<R: Runtime>(app: &AppHandle<R>, label: &str) {
-    if let Some(state) = app.try_state::<AppSandboxState>() {
-        if let Ok(mut windows) = state.windows.lock() {
-            windows.remove(label);
-        }
+    if forget(app, label) == Some(true) {
+        let _ = app.emit_to("main", CLOSED_EVENT, label);
     }
 }
 
@@ -447,16 +608,16 @@ fn plain(status: StatusCode, message: &str) -> Response<Vec<u8>> {
         .expect("static response")
 }
 
-/// The `ghostly-app` scheme: the runner, to an app window, at its one address. Nothing else is served; an
-/// app's files come through `app_broker`.
+/// The `ghostly-app` scheme: the runner, to an app window, at its one address, under the policy of what the
+/// person granted. Nothing else is served; an app's files come through `app_broker`.
 pub fn handle<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
     request: &Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
-    let Some(guard) = app
+    let Some((guard, internet)) = app
         .state::<AppSandboxState>()
-        .with(label, |window| window.guard)
+        .with(label, |window| (window.guard, window.internet))
         .filter(|_| is_app_label(label))
     else {
         return plain(StatusCode::FORBIDDEN, "Not an app window.");
@@ -470,9 +631,11 @@ pub fn handle<R: Runtime>(
         .header("content-type", "text/html; charset=utf-8")
         .header("x-content-type-options", "nosniff")
         .header("referrer-policy", "no-referrer")
+        .header("x-dns-prefetch-control", "off")
         .header("cache-control", "no-store");
     if guard.header {
-        response = response.header("content-security-policy", RUNNER_CSP);
+        let policy = if internet { NET_RUNNER_CSP } else { RUNNER_CSP };
+        response = response.header("content-security-policy", policy);
     }
     #[cfg(any(test, feature = "e2e-driver"))]
     let runner = if !guard.header {
@@ -487,55 +650,190 @@ pub fn handle<R: Runtime>(
         .expect("runner response")
 }
 
-#[derive(Debug, Deserialize)]
-pub struct BrokerRequest {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(default)]
-    args: Value,
+/// What `admit` makes of an app window's request.
+#[derive(Debug)]
+pub enum Admitted {
+    /// Answered here: the runner's own `start`.
+    Answer(Value),
+    /// For the Ghostly window's broker: its id, and where the answer comes.
+    Relay(u64, oneshot::Receiver<Value>),
 }
 
-/// What the broker answers an app window. `label` is the caller's, as Tauri knows it; the request carries no
-/// identity, and anything in it that looks like one is ignored.
-pub fn broker(
+/// Whether a request of the app window `label` goes on, at `now`. The caller is known by its label alone; the
+/// request carries no identity, and anything in it that looks like one is only passed on as the app's own
+/// data. Every call counts toward the rate, refused ones too, as the web broker counts them.
+pub fn admit(
     state: &AppSandboxState,
     label: &str,
-    request: BrokerRequest,
-) -> Result<Value, String> {
+    request: &Value,
+    now: Instant,
+) -> Result<Admitted, String> {
     if !is_app_label(label) {
         return Err("Not an app window".into());
     }
-    if serde_json::to_vec(&request.args).map_or(true, |args| args.len() > MAX_REQUEST_BYTES) {
-        return Err("Request too large".into());
-    }
     state
-        .with(label, |window| match request.kind.as_str() {
-            "start" if !window.ready => Err("Not ready".into()),
-            // The entry, once: a second start (a reload that got through) is refused.
-            "start" if !window.started => {
-                window.started = true;
-                window
-                    .entry
-                    .take()
-                    .map(Value::String)
-                    .ok_or("No entry".to_string())
+        .with(label, |window| {
+            window.recent.push_back(now);
+            while window
+                .recent
+                .front()
+                .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(1))
+            {
+                window.recent.pop_front();
             }
-            "start" => Err("Already started".into()),
-            "writing" if window.started => Ok(Value::Null),
-            "context" => Ok(json!({ "app": window.app, "window": label })),
-            _ => Err("Unknown request".into()),
+            if window.recent.len() > MAX_REQUESTS_PER_SECOND {
+                return Err("too-fast".to_string());
+            }
+            if serde_json::to_vec(request).map_or(true, |bytes| bytes.len() > MAX_REQUEST_BYTES) {
+                return Err("too-large".into());
+            }
+            let kind = request.get("type").and_then(Value::as_str);
+            match kind {
+                Some("start") if !window.ready => Err("Not ready".into()),
+                // The entry, once: a second start (a reload that got through) is refused.
+                Some("start") if !window.started => {
+                    window.started = true;
+                    // The runner's wait for the window ("Not ready", up to 40 asks a second on Linux) is not the
+                    // app's: the app's own second starts with its entry.
+                    window.recent.clear();
+                    window
+                        .entry
+                        .take()
+                        .map(|entry| Admitted::Answer(Value::String(entry)))
+                        .ok_or("No entry".to_string())
+                }
+                Some("start") => Err("Already started".into()),
+                Some(_) => {
+                    let id = request
+                        .get("id")
+                        .and_then(Value::as_u64)
+                        .filter(|id| *id <= MAX_ID)
+                        .ok_or("bad-request")?;
+                    if !window.started {
+                        return Err("Not started".into());
+                    }
+                    if !window.brokered {
+                        // The test driver's window: the runner may write its entry, and nothing else answers.
+                        return match kind {
+                            Some("writing") => {
+                                Ok(Admitted::Answer(json!({ "id": id, "ok": true })))
+                            }
+                            _ => Err("No broker".into()),
+                        };
+                    }
+                    if window.pending.contains_key(&id) {
+                        return Err("bad-request".into());
+                    }
+                    let (sender, receiver) = oneshot::channel();
+                    window.pending.insert(id, sender);
+                    Ok(Admitted::Relay(id, receiver))
+                }
+                None => Err("bad-request".into()),
+            }
         })
         .unwrap_or_else(|| Err("Not an app window".into()))
 }
 
-/// The one command an app window may call (`only_main` lets it through from `app-*` windows only).
+/// The one command an app window may call (`only_main` lets it through from `app-*` windows only). The
+/// request is `{"id", "type", "args"}`; the result is the broker's answer, `{"id", "ok", "value" | "error"}`
+/// (or `"bytes"`, base64, for a file).
 #[tauri::command]
-pub fn app_broker<R: Runtime>(
+pub async fn app_broker<R: Runtime>(
+    app: AppHandle<R>,
     webview: tauri::Webview<R>,
-    state: tauri::State<'_, AppSandboxState>,
-    request: BrokerRequest,
+    request: Value,
 ) -> Result<Value, String> {
-    broker(&state, webview.label(), request)
+    let label = webview.label().to_string();
+    let state = app.state::<AppSandboxState>();
+    let (id, receiver) = match admit(&state, &label, &request, Instant::now())? {
+        Admitted::Answer(answer) => return Ok(answer),
+        Admitted::Relay(id, receiver) => (id, receiver),
+    };
+    let sent = app.emit_to(
+        "main",
+        REQUEST_EVENT,
+        json!({ "label": label, "request": request }),
+    );
+    let answer = match sent {
+        Ok(()) => tokio::time::timeout(ANSWER_TIMEOUT, receiver).await.ok(),
+        Err(_) => None,
+    };
+    state.with(&label, |window| window.pending.remove(&id));
+    match answer {
+        Some(Ok(answer)) => Ok(answer),
+        _ => Err("No answer".into()),
+    }
+}
+
+/// What the Ghostly window's broker sends an app window (`post`): an answer (`{"id", …}`) goes to the request
+/// waiting for it, of that window only; an event (`{"event", "data"}`) is evaluated into that window's runner.
+pub fn post<R: Runtime>(app: &AppHandle<R>, label: &str, message: Value) -> Result<(), String> {
+    if !is_app_label(label) {
+        return Err("Not an app window".into());
+    }
+    let state = app.state::<AppSandboxState>();
+    if let Some(id) = message.get("id").and_then(Value::as_u64) {
+        let waiting = state
+            .with(label, |window| window.pending.remove(&id))
+            .ok_or("No app window")?;
+        // A request that waited too long, or a window that closed: nobody to tell.
+        if let Some(sender) = waiting {
+            let _ = sender.send(message);
+        }
+        return Ok(());
+    }
+    if message.get("event").and_then(Value::as_str).is_none() {
+        return Err("Neither an answer nor an event".into());
+    }
+    if state.with(label, |_| ()).is_none() {
+        return Err("No app window".into());
+    }
+    let script = event_script(&message)?;
+    app.get_webview_window(label)
+        .ok_or("No app window")?
+        .eval(script)
+        .map_err(|e| e.to_string())
+}
+
+/// The script that hands an event to the runner: the message as JSON, which is a JavaScript expression.
+fn event_script(message: &Value) -> Result<String, String> {
+    let json = serde_json::to_string(message).map_err(|e| e.to_string())?;
+    Ok(format!("window.__ghostlyEvent({json})"))
+}
+
+/// Opens an installed app in a window of its own (the Ghostly window only), off the main thread. Answers the
+/// window's label, which the Ghostly window's broker knows the app by.
+#[tauri::command]
+pub async fn app_open<R: Runtime>(
+    app: AppHandle<R>,
+    request: OpenRequest,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || open(&app, request))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// An answer or an event from the Ghostly window's broker to an app window (the Ghostly window only).
+#[tauri::command]
+pub fn app_post<R: Runtime>(
+    app: AppHandle<R>,
+    label: String,
+    message: Value,
+) -> Result<(), String> {
+    post(&app, &label, message)
+}
+
+/// Closes an app window (the Ghostly window only): the broker stopped the app.
+#[tauri::command]
+pub fn app_close<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), String> {
+    if !is_app_label(&label) {
+        return Err("Not an app window".into());
+    }
+    forget(&app, &label);
+    if let Some(window) = app.get_webview_window(&label) {
+        window.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// The content rule list of an app window on macOS and Linux: every load blocked but the runner's own scheme.
@@ -543,6 +841,23 @@ pub fn app_broker<R: Runtime>(
 const RULES_ID: &str = "ghostly-app-sandbox-1";
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 const RULES: &str = r#"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^ghostly-app:"},"action":{"type":"ignore-previous-rules"}}]"#;
+
+/// The rule list of a window whose app the person granted `internet`: the same, with HTTPS and WSS let through.
+/// Plain HTTP and WS stay blocked here as in the network runner's CSP, and WebRTC stays off.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+const NET_RULES_ID: &str = "ghostly-app-sandbox-net-1";
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+const NET_RULES: &str = r#"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^ghostly-app:"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^https:"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^wss:"},"action":{"type":"ignore-previous-rules"}}]"#;
+
+/// The rule list a window gets: its id and its JSON.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+fn rules_for(internet: bool) -> (&'static str, &'static str) {
+    if internet {
+        (NET_RULES_ID, NET_RULES)
+    } else {
+        (RULES_ID, RULES)
+    }
+}
 
 /// The WebKit features an app window has off on macOS: `<link rel=preconnect>` (and in Early Hints), DNS
 /// prefetch, `<link rel=prefetch>`, and WebRTC itself, which also reaches frames the runner never ran in.
@@ -575,17 +890,18 @@ mod webkit {
     use std::sync::OnceLock;
     use tauri::{AppHandle, Runtime};
 
-    use super::{OFF, RULES, RULES_ID};
+    use super::{rules_for, OFF};
 
     thread_local! {
-        /// Compiled once, on the main thread, where WebKit wants it.
-        static RULE_LIST: RefCell<Option<Retained<WKContentRuleList>>> = const { RefCell::new(None) };
+        /// Compiled once each, on the main thread, where WebKit wants them: [without, with] `internet`.
+        static RULE_LISTS: RefCell<[Option<Retained<WKContentRuleList>>; 2]> = const { RefCell::new([None, None]) };
     }
 
-    /// Compiles the rule list, once, and waits for it. Not on the main thread, where WebKit answers.
-    pub fn compile_rules<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-        static COMPILED: OnceLock<Result<(), String>> = OnceLock::new();
-        COMPILED
+    /// Compiles a window's rule list, once, and waits for it. Not on the main thread, where WebKit answers.
+    pub fn compile_rules<R: Runtime>(app: &AppHandle<R>, internet: bool) -> Result<(), String> {
+        static COMPILED: [OnceLock<Result<(), String>>; 2] = [OnceLock::new(), OnceLock::new()];
+        let (id, rules) = rules_for(internet);
+        COMPILED[usize::from(internet)]
             .get_or_init(|| {
                 let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
                 app.run_on_main_thread(move || {
@@ -600,7 +916,9 @@ mod webkit {
                     let done = block2::RcBlock::new(move |list: *mut WKContentRuleList, error: *mut NSError| {
                         let answer = match unsafe { Retained::retain(list) } {
                             Some(list) => {
-                                RULE_LIST.with(|slot| *slot.borrow_mut() = Some(list));
+                                RULE_LISTS.with(|slots| {
+                                    slots.borrow_mut()[usize::from(internet)] = Some(list)
+                                });
                                 Ok(())
                             }
                             None => Err(unsafe { error.as_ref() }
@@ -611,8 +929,8 @@ mod webkit {
                     });
                     unsafe {
                         store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
-                            Some(&NSString::from_str(RULES_ID)),
-                            Some(&NSString::from_str(RULES)),
+                            Some(&NSString::from_str(id)),
+                            Some(&NSString::from_str(rules)),
                             Some(&done),
                         );
                     }
@@ -657,12 +975,15 @@ mod webkit {
     }
 
     /// The window's configuration: made here, on the main thread, and handed to wry.
-    pub fn configuration(guard: Guard) -> Result<Retained<WKWebViewConfiguration>, String> {
+    pub fn configuration(
+        guard: Guard,
+        internet: bool,
+    ) -> Result<Retained<WKWebViewConfiguration>, String> {
         let mtm = MainThreadMarker::new().ok_or("not the main thread")?;
         let config = unsafe { WKWebViewConfiguration::new(mtm) };
         if guard.rules {
-            let list = RULE_LIST
-                .with(|slot| slot.borrow().clone())
+            let list = RULE_LISTS
+                .with(|slots| slots.borrow()[usize::from(internet)].clone())
                 .ok_or("rule list not compiled")?;
             unsafe { config.userContentController().addContentRuleList(&list) };
         }
@@ -690,7 +1011,7 @@ mod webkit {
 /// best effort). WebKitGTK has no switch for `<link rel=preconnect>`: the filter is what is measured for it.
 #[cfg(all(target_os = "linux", not(test)))]
 mod webkitgtk {
-    use super::{Guard, RULES, RULES_ID};
+    use super::{rules_for, Guard};
     use std::cell::RefCell;
     use std::path::Path;
     use webkit2gtk::glib::translate::{FromGlibPtrFull, ToGlibPtr};
@@ -700,8 +1021,8 @@ mod webkitgtk {
     struct Filter(*mut ffi::WebKitUserContentFilter);
 
     thread_local! {
-        /// Made once, on the GTK thread, where WebKitGTK answers.
-        static FILTER: RefCell<Option<Filter>> = const { RefCell::new(None) };
+        /// Made once each, on the GTK thread, where WebKitGTK answers: [without, with] `internet`.
+        static FILTERS: RefCell<[Option<Filter>; 2]> = const { RefCell::new([None, None]) };
     }
 
     type Done = Box<dyn FnOnce(Result<(), String>)>;
@@ -721,6 +1042,7 @@ mod webkitgtk {
     pub fn harden(
         webview: &webkit2gtk::WebView,
         guard: Guard,
+        internet: bool,
         store: &Path,
         done: impl FnOnce(Result<(), String>) + 'static,
     ) {
@@ -736,14 +1058,17 @@ mod webkitgtk {
         if !guard.rules {
             return done(Ok(()));
         }
-        if let Some(filter) = FILTER.with(|slot| slot.borrow().as_ref().map(|f| f.0)) {
+        let slot = usize::from(internet);
+        if let Some(filter) = FILTERS.with(|slots| slots.borrow()[slot].as_ref().map(|f| f.0)) {
             return done(add(webview, filter));
         }
+        let (rules_id, rules) = rules_for(internet);
         let _ = std::fs::create_dir_all(store);
         let path = std::ffi::CString::new(store.to_string_lossy().as_bytes()).unwrap_or_default();
-        let id = std::ffi::CString::new(RULES_ID).unwrap_or_default();
-        let source = glib::Bytes::from_static(RULES.as_bytes());
-        let pending: Box<(webkit2gtk::WebView, Done)> = Box::new((webview.clone(), Box::new(done)));
+        let id = std::ffi::CString::new(rules_id).unwrap_or_default();
+        let source = glib::Bytes::from_static(rules.as_bytes());
+        let pending: Box<(webkit2gtk::WebView, usize, Done)> =
+            Box::new((webview.clone(), slot, Box::new(done)));
         unsafe {
             let store = ffi::webkit_user_content_filter_store_new(path.as_ptr());
             ffi::webkit_user_content_filter_store_save(
@@ -764,7 +1089,8 @@ mod webkitgtk {
         result: *mut gio::ffi::GAsyncResult,
         pending: glib::ffi::gpointer,
     ) {
-        let (webview, done) = *Box::from_raw(pending as *mut (webkit2gtk::WebView, Done));
+        let (webview, slot, done) =
+            *Box::from_raw(pending as *mut (webkit2gtk::WebView, usize, Done));
         let mut error = std::ptr::null_mut();
         let filter =
             ffi::webkit_user_content_filter_store_save_finish(store as *mut _, result, &mut error);
@@ -776,7 +1102,7 @@ mod webkitgtk {
             };
             return done(Err(message));
         }
-        FILTER.with(|slot| *slot.borrow_mut() = Some(Filter(filter)));
+        FILTERS.with(|slots| slots.borrow_mut()[slot] = Some(Filter(filter)));
         done(add(&webview, filter));
     }
 }
@@ -807,11 +1133,39 @@ mod tests {
         url::Url::parse(value).unwrap()
     }
 
-    fn request(kind: &str, args: Value) -> BrokerRequest {
-        BrokerRequest {
-            kind: kind.into(),
-            args,
+    fn window(app: &str, ready: bool, brokered: bool) -> AppWindow {
+        let mut window = AppWindow::new(
+            app.into(),
+            format!("<p>{app}</p>"),
+            Guard::FULL,
+            false,
+            brokered,
+        );
+        window.ready = ready;
+        window
+    }
+
+    fn state(windows: &[(&str, &str)]) -> AppSandboxState {
+        let state = AppSandboxState::default();
+        for (label, app) in windows {
+            state
+                .windows
+                .lock()
+                .unwrap()
+                .insert((*label).into(), window(app, true, true));
         }
+        state
+    }
+
+    fn admitted(state: &AppSandboxState, label: &str, request: Value) -> Result<Admitted, String> {
+        admit(state, label, &request, Instant::now())
+    }
+
+    fn started(state: &AppSandboxState, label: &str) {
+        assert!(matches!(
+            admitted(state, label, json!({"type": "start"})),
+            Ok(Admitted::Answer(_))
+        ));
     }
 
     #[test]
@@ -861,6 +1215,8 @@ mod tests {
         }
     }
 
+    /// The navigation lock: nested frames (`about:srcdoc`, `about:blank`) never load, before the start or
+    /// after, so a frame never brings WebRTC of its own (WISP 1200, Desktop row).
     #[test]
     fn the_window_goes_to_the_runner_once_and_nowhere_else() {
         assert!(may_navigate(&url("ghostly-app://localhost/"), false));
@@ -871,6 +1227,7 @@ mod tests {
             "about:blank",
             "about:srcdoc",
             "https://example.com/",
+            "wss://example.com/",
             "http://127.0.0.1:4310/",
             "tauri://localhost/",
             "data:text/html,x",
@@ -883,40 +1240,37 @@ mod tests {
     #[test]
     fn the_runner_is_served_with_its_policy_to_an_app_window_only() {
         let app = app();
-        let label = "app-1";
-        app.state::<AppSandboxState>()
-            .windows
-            .lock()
-            .unwrap()
-            .insert(
-                label.into(),
-                AppWindow {
-                    app: "ana/chess".into(),
-                    entry: Some("<p>hi</p>".into()),
-                    started: false,
-                    ready: true,
-                    guard: Guard::FULL,
-                    refused: Vec::new(),
-                },
-            );
+        {
+            let state = app.state::<AppSandboxState>();
+            let mut windows = state.windows.lock().unwrap();
+            windows.insert("app-1".into(), window("ana/chess", true, true));
+            let mut net = window("ana/radio", true, true);
+            net.internet = true;
+            windows.insert("app-2".into(), net);
+        }
         let get = |label: &str, uri: &str| {
             let request = Request::builder().uri(uri).body(Vec::new()).unwrap();
             handle(app.handle(), label, &request)
         };
-        let served = get(label, "ghostly-app://localhost/");
+        let served = get("app-1", "ghostly-app://localhost/");
         assert_eq!(served.status(), StatusCode::OK);
         assert_eq!(served.headers()["content-security-policy"], RUNNER_CSP);
         assert_eq!(served.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(served.headers()["x-dns-prefetch-control"], "off");
         assert!(String::from_utf8_lossy(served.body()).contains("app_broker"));
+        // The app granted `internet` gets the network runner's policy: the same page.
+        let net = get("app-2", "ghostly-app://localhost/");
+        assert_eq!(net.headers()["content-security-policy"], NET_RUNNER_CSP);
+        assert_eq!(net.body(), served.body());
         assert_eq!(
-            get(label, "http://ghostly-app.localhost/").status(),
+            get("app-1", "http://ghostly-app.localhost/").status(),
             StatusCode::OK
         );
         assert_eq!(
-            get(label, "ghostly-app://localhost/x.js").status(),
+            get("app-1", "ghostly-app://localhost/x.js").status(),
             StatusCode::NOT_FOUND
         );
-        for other in ["main", "svc-1", "app-2"] {
+        for other in ["main", "svc-1", "app-3"] {
             assert_eq!(
                 get(other, "ghostly-app://localhost/").status(),
                 StatusCode::FORBIDDEN,
@@ -926,85 +1280,302 @@ mod tests {
     }
 
     #[test]
-    fn the_policy_is_the_wisps() {
-        for directive in [
-            "sandbox allow-scripts;",
-            "default-src 'none';",
-            "script-src 'unsafe-inline' 'wasm-unsafe-eval';",
-            "connect-src 'none';",
-            "frame-src 'none';",
-            "worker-src 'none';",
-            "form-action 'none';",
-            "base-uri 'none';",
-            "frame-ancestors 'self'",
-        ] {
-            assert!(RUNNER_CSP.contains(directive), "{directive}");
+    fn the_policies_are_the_wisps() {
+        for policy in [RUNNER_CSP, NET_RUNNER_CSP] {
+            for directive in [
+                "sandbox allow-scripts;",
+                "default-src 'none';",
+                "script-src 'unsafe-inline' 'wasm-unsafe-eval';",
+                "frame-src 'none';",
+                "worker-src 'none';",
+                "form-action 'none';",
+                "base-uri 'none';",
+                "frame-ancestors 'self'",
+            ] {
+                assert!(policy.contains(directive), "{directive}");
+            }
+            for wider in [
+                "allow-same-origin",
+                "allow-top-navigation",
+                "allow-popups",
+                "allow-forms",
+                "http:",
+                "ws:",
+                "*",
+            ] {
+                assert!(!policy.contains(wider), "{wider}");
+            }
         }
-        assert!(!RUNNER_CSP.contains("allow-same-origin"));
-        assert!(!RUNNER_CSP.contains("allow-top-navigation"));
-        assert!(!RUNNER_CSP.contains("allow-popups"));
-        assert!(!RUNNER_CSP.contains("allow-forms"));
+        assert!(RUNNER_CSP.contains("connect-src 'none';"));
+        assert!(NET_RUNNER_CSP.contains("connect-src https: wss:;"));
     }
 
     #[test]
     fn the_broker_knows_the_caller_by_its_window_and_hands_the_entry_over_once() {
-        let state = AppSandboxState::default();
-        for (label, app) in [("app-1", "ana/chess"), ("app-2", "bob/snake")] {
-            state.windows.lock().unwrap().insert(
-                label.into(),
-                AppWindow {
-                    app: app.into(),
-                    entry: Some(format!("<p>{app}</p>")),
-                    started: false,
-                    ready: true,
-                    guard: Guard::FULL,
-                    refused: Vec::new(),
-                },
-            );
+        let state = state(&[("app-1", "ana/chess"), ("app-2", "bob/snake")]);
+        // Nothing but `start` before the entry is handed over.
+        assert_eq!(
+            admitted(
+                &state,
+                "app-1",
+                json!({"id": 1, "type": "writing", "args": []})
+            )
+            .unwrap_err(),
+            "Not started"
+        );
+        match admitted(&state, "app-1", json!({"type": "start"})).unwrap() {
+            Admitted::Answer(entry) => assert_eq!(entry, json!("<p>ana/chess</p>")),
+            other => panic!("{other:?}"),
         }
-        // An app that names another app, or another window, is still itself.
-        let context = broker(
-            &state,
-            "app-1",
-            request("context", json!({"app": "bob/snake", "window": "app-2"})),
-        )
-        .unwrap();
-        assert_eq!(context, json!({"app": "ana/chess", "window": "app-1"}));
         assert_eq!(
-            broker(&state, "app-2", request("context", Value::Null)).unwrap()["app"],
-            "bob/snake"
-        );
-
-        assert_eq!(
-            broker(&state, "app-1", request("writing", Value::Null)).unwrap_err(),
-            "Unknown request"
-        );
-        assert_eq!(
-            broker(&state, "app-1", request("start", Value::Null)).unwrap(),
-            json!("<p>ana/chess</p>")
-        );
-        assert_eq!(
-            broker(&state, "app-1", request("start", Value::Null)).unwrap_err(),
+            admitted(&state, "app-1", json!({"type": "start"})).unwrap_err(),
             "Already started"
         );
-        assert!(broker(&state, "app-1", request("writing", Value::Null)).is_ok());
+        // An app that names another app, or another window, is still itself: its request waits in its own
+        // window, and an answer posted for the other window's request of the same id does not reach it.
+        started(&state, "app-2");
+        let forged =
+            json!({"id": 7, "type": "context", "args": [], "app": "bob/snake", "window": "app-2"});
+        let Admitted::Relay(id, mut receiver) = admitted(&state, "app-1", forged).unwrap() else {
+            panic!("relayed")
+        };
+        assert_eq!(id, 7);
+        assert!(state.with("app-1", |w| w.pending.contains_key(&7)).unwrap());
+        assert!(!state.with("app-2", |w| w.pending.contains_key(&7)).unwrap());
+        assert!(receiver.try_recv().is_err());
+        // The same id twice while the first waits is refused.
         assert_eq!(
-            broker(&state, "app-1", request("storage.get", json!("k"))).unwrap_err(),
-            "Unknown request"
+            admitted(
+                &state,
+                "app-1",
+                json!({"id": 7, "type": "context", "args": []})
+            )
+            .unwrap_err(),
+            "bad-request"
         );
 
         for label in ["main", "svc-1", "app-3", "app-"] {
             assert_eq!(
-                broker(&state, label, request("context", Value::Null)).unwrap_err(),
+                admitted(&state, label, json!({"id": 1, "type": "context"})).unwrap_err(),
                 "Not an app window",
                 "{label}"
             );
         }
-        let big = "x".repeat(MAX_REQUEST_BYTES);
+    }
+
+    #[test]
+    fn a_request_has_an_id_a_type_and_at_most_64_kib() {
+        let state = state(&[("app-1", "ana/chess")]);
+        started(&state, "app-1");
+        for request in [
+            json!({"type": "context", "args": []}),
+            json!({"id": -1, "type": "context", "args": []}),
+            json!({"id": 1.5, "type": "context", "args": []}),
+            json!({"id": "1", "type": "context", "args": []}),
+            json!({"id": MAX_ID + 1, "type": "context", "args": []}),
+            json!({"id": 1, "args": []}),
+            json!({"id": 1, "type": 3, "args": []}),
+            json!("context"),
+            Value::Null,
+        ] {
+            assert_eq!(
+                admitted(&state, "app-1", request.clone()).unwrap_err(),
+                "bad-request",
+                "{request}"
+            );
+        }
+        assert!(matches!(
+            admitted(
+                &state,
+                "app-1",
+                json!({"id": MAX_ID, "type": "context", "args": []})
+            ),
+            Ok(Admitted::Relay(MAX_ID, _))
+        ));
+        // The whole request, as JSON: 64 KiB passes, a byte more does not.
+        let request = |length: usize, id: u64| json!({"id": id, "type": "storage.set", "args": ["k", "x".repeat(length)]});
+        let fixed = serde_json::to_vec(&request(0, 2)).unwrap().len();
+        assert!(matches!(
+            admitted(&state, "app-1", request(MAX_REQUEST_BYTES - fixed, 2)),
+            Ok(Admitted::Relay(2, _))
+        ));
         assert_eq!(
-            broker(&state, "app-2", request("context", json!(big))).unwrap_err(),
-            "Request too large"
+            admitted(&state, "app-1", request(MAX_REQUEST_BYTES - fixed + 1, 3)).unwrap_err(),
+            "too-large"
         );
+    }
+
+    /// WISP 1200: 50 requests a second per app, every call counted, refused ones too; the 51st inside the
+    /// second is refused, and the window's next second is new. Another window has its own count.
+    #[test]
+    fn the_broker_takes_50_requests_a_second() {
+        let state = state(&[("app-1", "ana/chess"), ("app-2", "bob/snake")]);
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        assert!(matches!(
+            admit(&state, "app-1", &json!({"type": "start"}), at(0)),
+            Ok(Admitted::Answer(_))
+        ));
+        // A malformed request counts as well (the start does not: the app's second begins after it).
+        assert_eq!(
+            admit(&state, "app-1", &json!({"type": "context"}), at(1)).unwrap_err(),
+            "bad-request"
+        );
+        for id in 0..49 {
+            let request = json!({"id": id, "type": "context", "args": []});
+            assert!(
+                admit(&state, "app-1", &request, at(10 + id)).is_ok(),
+                "request {id}"
+            );
+        }
+        let request = json!({"id": 100, "type": "context", "args": []});
+        assert_eq!(
+            admit(&state, "app-1", &request, at(500)).unwrap_err(),
+            "too-fast"
+        );
+        // app-2 is not slowed by app-1.
+        assert!(admit(&state, "app-2", &json!({"type": "start"}), at(500)).is_ok());
+        // A second after the first ones, they no longer count.
+        assert!(admit(
+            &state,
+            "app-1",
+            &json!({"id": 101, "type": "context", "args": []}),
+            at(1_020)
+        )
+        .is_ok());
+        // Sustained flooding stays refused.
+        for ms in 0..60 {
+            let _ = admit(&state, "app-1", &json!({"type": "x"}), at(1_100 + ms));
+        }
+        assert_eq!(
+            admit(
+                &state,
+                "app-1",
+                &json!({"id": 200, "type": "context", "args": []}),
+                at(1_200)
+            )
+            .unwrap_err(),
+            "too-fast"
+        );
+    }
+
+    #[test]
+    fn the_test_drivers_windows_have_no_broker() {
+        let state = AppSandboxState::default();
+        state
+            .windows
+            .lock()
+            .unwrap()
+            .insert("app-1".into(), window("spike/malicious", true, false));
+        started(&state, "app-1");
+        match admitted(
+            &state,
+            "app-1",
+            json!({"id": 3, "type": "writing", "args": []}),
+        )
+        .unwrap()
+        {
+            Admitted::Answer(answer) => assert_eq!(answer, json!({"id": 3, "ok": true})),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            admitted(
+                &state,
+                "app-1",
+                json!({"id": 1, "type": "context", "args": []})
+            )
+            .unwrap_err(),
+            "No broker"
+        );
+    }
+
+    #[test]
+    fn an_answer_reaches_the_request_of_its_window_only() {
+        let app = app();
+        let state = app.state::<AppSandboxState>();
+        {
+            let mut windows = state.windows.lock().unwrap();
+            windows.insert("app-1".into(), window("ana/chess", true, true));
+            windows.insert("app-2".into(), window("bob/snake", true, true));
+        }
+        started(&state, "app-1");
+        started(&state, "app-2");
+        let request = json!({"id": 4, "type": "storage.keys", "args": []});
+        let Admitted::Relay(_, mut first) = admitted(&state, "app-1", request.clone()).unwrap()
+        else {
+            panic!("relayed")
+        };
+        let Admitted::Relay(_, mut second) = admitted(&state, "app-2", request).unwrap() else {
+            panic!("relayed")
+        };
+        post(
+            app.handle(),
+            "app-2",
+            json!({"id": 4, "ok": true, "value": ["b"]}),
+        )
+        .unwrap();
+        assert_eq!(
+            second.try_recv().unwrap(),
+            json!({"id": 4, "ok": true, "value": ["b"]})
+        );
+        assert!(first.try_recv().is_err(), "app-1's request still waits");
+        // Answered once: a second answer for the same id has nobody to go to.
+        post(app.handle(), "app-2", json!({"id": 4, "ok": true})).unwrap();
+        for label in ["main", "svc-1", "app-"] {
+            assert!(
+                post(app.handle(), label, json!({"id": 4, "ok": true})).is_err(),
+                "{label}"
+            );
+        }
+        assert_eq!(
+            post(app.handle(), "app-9", json!({"id": 4, "ok": true})).unwrap_err(),
+            "No app window"
+        );
+        assert!(post(app.handle(), "app-1", json!({"nothing": 1})).is_err());
+        // A window that goes drops what waits: the request is told at once.
+        forget_window(app.handle(), "app-1");
+        assert!(matches!(
+            first.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+    }
+
+    #[test]
+    fn an_event_is_handed_to_the_runners_receiver_as_json() {
+        let script =
+            event_script(&json!({"event": "chat.message", "data": {"m": "e4\u{2028}</script>"}}))
+                .unwrap();
+        assert_eq!(
+            script,
+            "window.__ghostlyEvent({\"data\":{\"m\":\"e4\u{2028}</script>\"},\"event\":\"chat.message\"})"
+        );
+        assert!(RUNNER.contains("Object.defineProperty(window, \"__ghostlyEvent\""));
+        // The receiver and `window.ghostly` are defined before the entry is written.
+        let receiver = RUNNER.find("__ghostlyEvent").unwrap();
+        let api = RUNNER.find("\"ghostly\"").unwrap();
+        let write = RUNNER.find("document.write(entry)").unwrap();
+        assert!(receiver < write && api < write);
+    }
+
+    /// The runner offers the web runner's `ghostly.*`, and nothing more: the same names and calls.
+    #[test]
+    fn the_runner_offers_the_web_api() {
+        let web = include_str!("../../web/public/app-frame.html");
+        for call in [
+            "context: call(\"context\")",
+            "file: (path) => send(\"file\", [path])",
+            "get: call(\"storage.get\")",
+            "set: call(\"storage.set\")",
+            "delete: call(\"storage.delete\")",
+            "keys: call(\"storage.keys\")",
+            "send: (value) => send(\"chat.send\", [value]).then(() => undefined)",
+            "close: () => send(\"close\", []).then(() => undefined)",
+            "chat.on takes \\\"message\\\" or \\\"peer\\\" and a function",
+        ] {
+            assert!(RUNNER.contains(call), "desktop: {call}");
+            assert!(web.contains(call), "web: {call}");
+        }
+        assert!(RUNNER.contains("delete window[name]"));
     }
 
     #[test]
@@ -1032,9 +1603,10 @@ mod tests {
     }
 
     /// Measured on WKWebView: the rule list alone stops every load the CSP stops and `<link rel=preconnect>`,
-    /// which the CSP does not; it must let the runner itself through.
+    /// which the CSP does not; it must let the runner itself through. With `internet`, HTTPS and WSS too, and
+    /// still not plain HTTP or WS.
     #[test]
-    fn the_rule_list_blocks_everything_but_the_runner() {
+    fn the_rule_lists_block_everything_but_the_runner_and_with_internet_https_and_wss() {
         let rules: Value = serde_json::from_str(RULES).unwrap();
         assert_eq!(
             rules,
@@ -1043,7 +1615,19 @@ mod tests {
                 {"trigger": {"url-filter": "^ghostly-app:"}, "action": {"type": "ignore-previous-rules"}},
             ])
         );
-        assert!(!RULES_ID.is_empty());
+        let net: Value = serde_json::from_str(NET_RULES).unwrap();
+        assert_eq!(
+            net,
+            json!([
+                {"trigger": {"url-filter": ".*"}, "action": {"type": "block"}},
+                {"trigger": {"url-filter": "^ghostly-app:"}, "action": {"type": "ignore-previous-rules"}},
+                {"trigger": {"url-filter": "^https:"}, "action": {"type": "ignore-previous-rules"}},
+                {"trigger": {"url-filter": "^wss:"}, "action": {"type": "ignore-previous-rules"}},
+            ])
+        );
+        assert_eq!(rules_for(false), (RULES_ID, RULES));
+        assert_eq!(rules_for(true), (NET_RULES_ID, NET_RULES));
+        assert_ne!(RULES_ID, NET_RULES_ID);
     }
 
     /// WebKit's switches are private, so a WebKit that renamed one would leave it on (`webkit::configuration`
@@ -1064,49 +1648,107 @@ mod tests {
         );
     }
 
+    /// The runner's "Not ready" asks do not count against the app: a slow filter leaves it its 50.
+    #[test]
+    fn the_runners_wait_leaves_the_app_its_50_requests() {
+        let state = AppSandboxState::default();
+        state
+            .windows
+            .lock()
+            .unwrap()
+            .insert("app-1".into(), window("ana/chess", false, true));
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        for ms in 0..40 {
+            assert_eq!(
+                admit(&state, "app-1", &json!({"type": "start"}), at(ms * 20)).unwrap_err(),
+                "Not ready"
+            );
+        }
+        state.with("app-1", |window| window.ready = true);
+        assert!(admit(&state, "app-1", &json!({"type": "start"}), at(800)).is_ok());
+        for id in 0..50 {
+            let request = json!({"id": id, "type": "context", "args": []});
+            assert!(admit(&state, "app-1", &request, at(801)).is_ok(), "{id}");
+        }
+        let request = json!({"id": 50, "type": "context", "args": []});
+        assert_eq!(
+            admit(&state, "app-1", &request, at(802)).unwrap_err(),
+            "too-fast"
+        );
+    }
+
     /// On Linux the filter goes into the window just after it is made: the entry waits for it.
     #[test]
     fn the_entry_waits_until_the_window_is_hardened() {
         let state = AppSandboxState::default();
-        state.windows.lock().unwrap().insert(
-            "app-1".into(),
-            AppWindow {
-                app: "ana/chess".into(),
-                entry: Some("<p>chess</p>".into()),
-                started: false,
-                ready: false,
-                guard: Guard::FULL,
-                refused: Vec::new(),
-            },
-        );
+        state
+            .windows
+            .lock()
+            .unwrap()
+            .insert("app-1".into(), window("ana/chess", false, true));
         for _ in 0..3 {
             assert_eq!(
-                broker(&state, "app-1", request("start", Value::Null)).unwrap_err(),
+                admitted(&state, "app-1", json!({"type": "start"})).unwrap_err(),
                 "Not ready"
             );
         }
-        // The runner's other requests do not wait; nothing was handed over.
-        assert!(broker(&state, "app-1", request("context", Value::Null)).is_ok());
-        state.with("app-1", |window| window.ready = true);
+        // Nothing else goes through while it waits: nothing was handed over.
         assert_eq!(
-            broker(&state, "app-1", request("start", Value::Null)).unwrap(),
-            json!("<p>chess</p>")
+            admitted(
+                &state,
+                "app-1",
+                json!({"id": 1, "type": "context", "args": []})
+            )
+            .unwrap_err(),
+            "Not started"
         );
+        state.with("app-1", |window| window.ready = true);
+        match admitted(&state, "app-1", json!({"type": "start"})).unwrap() {
+            Admitted::Answer(entry) => assert_eq!(entry, json!("<p>ana/chess</p>")),
+            other => panic!("{other:?}"),
+        }
         assert!(
-            RUNNER.contains("Not ready"),
-            "the runner asks again while the window is hardened"
+            RUNNER.contains("Not ready")
+                && RUNNER.contains("tries < 400")
+                && RUNNER.contains("25)"),
+            "the runner asks again every 25 ms while the window is hardened"
         );
     }
 
     #[test]
     fn opening_an_app_makes_an_app_window_on_the_runner() {
         let app = app();
-        let label = open(app.handle(), "ana/chess".into(), "<p>chess</p>".into()).unwrap();
+        let request = OpenRequest {
+            app: "ana/chess".into(),
+            title: "Chess".into(),
+            entry: "<p>chess</p>".into(),
+            internet: true,
+        };
+        let label = open(app.handle(), request).unwrap();
         assert!(is_app_label(&label), "{label}");
         let window = app.get_webview_window(&label).unwrap();
         assert!(is_runner(&window.url().unwrap()));
+        let state = app.state::<AppSandboxState>();
+        assert_eq!(
+            state.with(&label, |w| (w.app.clone(), w.internet, w.brokered)),
+            Some(("ana/chess".to_string(), true, true))
+        );
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);
         assert_eq!(refused(app.handle(), &label), None);
+    }
+
+    #[test]
+    fn an_open_request_is_what_the_ghostly_window_sends() {
+        let request: OpenRequest = serde_json::from_value(
+            json!({"app": "ana/chess", "title": "Chess", "entry": "<p>x</p>", "internet": true}),
+        )
+        .unwrap();
+        assert!(request.internet);
+        let plain: OpenRequest =
+            serde_json::from_value(json!({"app": "a/b", "title": "B", "entry": ""})).unwrap();
+        assert!(!plain.internet, "no grant, no network");
+        assert!(WINDOWS_REFUSAL.contains("Windows"));
     }
 }

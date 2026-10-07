@@ -55,8 +55,10 @@ export function useAppsState(): AppsState {
   // Read, not subscribed to: where apps run depends on the host, not on the engine's state, and every message bubble
   // asks (a subscription would draw each of them again on every change of state).
   const runner = servicesPlatform?.apps?.runnerUrl ?? null;
+  // Desktop serves its runner itself, with the policy: there is no server to ask.
+  const served = servicesPlatform?.apps?.runnerServed === true;
   const opener = useAppOpener();
-  const ask = enabled && opener ? runner : null;
+  const ask = enabled && opener && !served ? runner : null;
   const [, setChecked] = useState(0);
   useEffect(() => {
     if (!ask || answered.has(ask)) return;
@@ -64,7 +66,7 @@ export function useAppsState(): AppsState {
     void runnerAvailable(ask).then((ok) => { answered.set(ask, ok); if (live) setChecked((n) => n + 1); });
     return () => { live = false; };
   }, [ask]);
-  return appsAvailable({ enabled, runner, opener, runnerPolicy: runner ? answered.get(runner) : undefined });
+  return appsAvailable({ enabled, runner, opener, runnerPolicy: served || (runner ? answered.get(runner) : undefined) });
 }
 
 /** Whether Apps shows here now. False until the runner check has answered. */

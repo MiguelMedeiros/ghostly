@@ -95,6 +95,9 @@ macro_rules! commands {
     () => {
         tauri::generate_handler![
             app_sandbox::app_broker,
+            app_sandbox::app_close,
+            app_sandbox::app_open,
+            app_sandbox::app_post,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
@@ -621,6 +624,15 @@ mod tests {
             assert!(!may_call("app-1", command), "{command}");
             assert!(may_call("main", command), "{command}");
         }
+        // The Ghostly window's side of the broker: it opens app windows, answers them and closes them; an app
+        // window does none of that.
+        for command in ["app_open", "app_post", "app_close"] {
+            assert!(registered().iter().any(|c| c == command), "{command}");
+            assert!(may_call("main", command), "{command}");
+            for label in ["app-1", "app-0123456789abcdef", "svc-1"] {
+                assert!(!may_call(label, command), "{label} {command}");
+            }
+        }
     }
 
     /// Through the real IPC path: the broker answers an app window, which every other command refuses.
@@ -628,22 +640,32 @@ mod tests {
     fn an_app_window_reaches_the_broker_and_no_other_command() {
         // covers: apps.desktop-sandbox
         let app = app();
-        let label =
-            app_sandbox::open(app.handle(), "ana/chess".into(), "<p>chess</p>".into()).unwrap();
+        let request = serde_json::from_value(serde_json::json!({
+            "app": "ana/chess", "title": "Chess", "entry": "<p>chess</p>",
+        }))
+        .unwrap();
+        let label = app_sandbox::open(app.handle(), request).unwrap();
         let window = app.get_webview_window(&label).unwrap();
         let runner = format!("{}://localhost/", app_sandbox::SCHEME);
-        let context = invoke(
+        let entry = invoke(
             &window,
             &runner,
             "app_broker",
-            serde_json::json!({"request": {"type": "context", "args": {"app": "bob/snake"}}}),
+            serde_json::json!({"request": {"type": "start"}}),
         )
         .unwrap();
-        assert_eq!(
-            context["app"], "ana/chess",
-            "the window's app, not the one it named"
-        );
-        assert_eq!(context["window"], label.as_str());
+        assert_eq!(entry, "<p>chess</p>");
+        // Any other request goes to the Ghostly window's broker, under this window's label: here nobody
+        // answers it.
+        let error = invoke(
+            &window,
+            &runner,
+            "app_broker",
+            serde_json::json!({"request": {"id": 1, "type": "context", "args": [], "app": "bob/snake"}}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("No answer"), "{error}");
         for command in registered().iter().filter(|c| *c != "app_broker") {
             let error = invoke(&window, &runner, command, arguments())
                 .expect_err(command)

@@ -6,13 +6,14 @@
 // was refused.
 //
 //   node apps/desktop/fixtures/app-sandbox/measure.mjs --app <path to the ghostly binary> [--port-base 4300] [--out results.json]
-//     [--guards full,header+lock,header,control] [--groups net,nav-top,…]
+//     [--guards full,internet,header+lock,header,control] [--groups net,nav-top,…]
 //   Layers for --guards (Guard::parse): full, control, or header+lock+rules+prefs+proxy+webrtc (webrtc: Linux,
-//   WebRTC switched on, to show the nested-frame case closed by the other layers).
+//   WebRTC switched on, to show the nested-frame case closed by the other layers). `internet` is `full` for an app
+//   granted internet: the network runner's policy and the rule list that lets HTTPS and WSS through.
 //
 // `full` also sends the window's network to the app's own proxy that goes nowhere; what it caught is listed.
 // Ports, from --port-base: +0 the driver, +10 HTTP (fetch and the rest), +11 UDP (STUN), +12 TCP (preconnect),
-// +14 TCP (TURN). Everything it starts, it stops. The app's PID goes in --pid-file (default: next to --out).
+// +14 TCP (TURN), +15 TCP (HTTPS and WSS: a connection here is a TLS hello that got out). Everything it starts, it stops. The app's PID goes in --pid-file (default: next to --out).
 //
 // Build the app first (see the WISP change file docs/wisps/changes/1200-marketplace/*-desktop-sandbox-spike.md):
 //   mkdir -p apps/desktop/native-runtime
@@ -33,7 +34,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []));
 if (!args.app) throw new Error("--app <path to the ghostly binary built with --features e2e-driver>");
 const base = Number(args["port-base"] ?? 4300);
-const ports = { driver: base, http: base + 10, udp: base + 11, tcp: base + 12, turn: base + 14 };
+const ports = { driver: base, http: base + 10, udp: base + 11, tcp: base + 12, turn: base + 14, tls: base + 15 };
 const lan = Object.values(networkInterfaces()).flat().find((i) => i && i.family === "IPv4" && !i.internal)?.address ?? "127.0.0.1";
 const fixture = readFileSync(join(here, "malicious-app.html"), "utf8");
 const commands = [
@@ -60,6 +61,7 @@ httpServer.on("upgrade", (req, socket) => { hit("http", `UPGRADE ${req.url}`); s
 const raw = (kind) => net.createServer((socket) => { hit(kind, `connection from ${socket.remoteAddress}`); socket.destroy(); });
 const preconnect = raw("preconnect");
 const turn = raw("turn");
+const tls = raw("tls");
 const stun = dgram.createSocket("udp4");
 stun.on("message", (_, from) => hit("stun", `packet from ${from.address}`));
 
@@ -67,6 +69,7 @@ const listen = (server, port, host) => new Promise((resolve, reject) => { server
 await listen(httpServer, ports.http, "127.0.0.1");
 await listen(preconnect, ports.tcp, "0.0.0.0");
 await listen(turn, ports.turn, "0.0.0.0");
+await listen(tls, ports.tls, "127.0.0.1");
 await new Promise((resolve) => stun.bind(ports.udp, "0.0.0.0", resolve));
 
 // --- The app, with its driver.
@@ -87,12 +90,13 @@ const evalIn = async (window, script) => { const v = await driver("POST", "/eval
 
 async function run(group, guard) {
   const nonce = `m0${randomBytes(5).toString("hex")}`;
-  const probe = { group, nonce, host: "127.0.0.1", lan, http: ports.http, udp: ports.udp, tcp: ports.tcp, turn: ports.turn, dnsName: `${nonce}.local`, commands };
+  const probe = { group, nonce, host: "127.0.0.1", lan, http: ports.http, udp: ports.udp, tcp: ports.tcp, turn: ports.turn, tls: ports.tls, dnsName: `${nonce}.local`, commands };
   const entry = `<script>window.__PROBE = ${JSON.stringify(probe)};</script>\n${fixture}`;
   const before = new Set(await driver("GET", "/windows"));
   const startHits = hits.length;
   const caughtBefore = (await driver("GET", "/app-caught")).length;
-  const label = await driver("POST", "/app-open", { app: "spike/malicious", entry, guard });
+  const internet = guard === "internet";
+  const label = await driver("POST", "/app-open", { app: "spike/malicious", entry, guard: internet ? "full" : guard, internet });
   let results = null;
   for (let i = 0; i < (group === "net" ? 60 : 8); i++) {
     await sleep(500);
@@ -106,7 +110,7 @@ async function run(group, guard) {
   const after = await driver("GET", "/windows");
   const newWindows = after.filter((w) => !before.has(w) && w !== label);
   const sinceHits = hits.slice(startHits);
-  const mine = sinceHits.filter((h) => h.what.includes(nonce) || ["stun", "turn", "preconnect"].includes(h.kind));
+  const mine = sinceHits.filter((h) => h.what.includes(nonce) || ["stun", "turn", "preconnect", "tls"].includes(h.kind));
   const caught = (await driver("GET", "/app-caught")).slice(caughtBefore);
   await driver("POST", "/app-close", label).catch(() => {});
   return { group, guard, label, location, results, refused, newWindows, hits: mine, caught };

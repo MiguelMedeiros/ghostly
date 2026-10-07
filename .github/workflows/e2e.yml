@@ -238,9 +238,12 @@ jobs:
 
       # `tauri build` and not `cargo build`: a plain cargo debug build points the
       # WebView at the dev server. `--debug` keeps the compile short; `--no-bundle`
-      # skips the installers, since the test runs the binary itself.
+      # skips the installers, since the test runs the binary itself. VITE_APPS_TEST: the e2e suite's build, with
+      # mini-apps on and their test store (e2e/desktop/apps.spec.ts), as the web suites build it; never shipped.
       - name: Build the Desktop app
         run: npm run tauri -- build --debug --no-bundle
+        env:
+          VITE_APPS_TEST: "1"
 
       - name: Run Desktop end-to-end tests
         run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
