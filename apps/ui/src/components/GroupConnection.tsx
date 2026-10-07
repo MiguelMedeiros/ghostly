@@ -96,7 +96,8 @@ export function GroupConnection({ group }: { group: GroupView }) {
                 {down && online && !noLinks && <button disabled={busy !== ""} onClick={() => void reconnect(m.edge!.linkId)} data-testid="group-connection-reconnect"
                   className={`min-h-8 shrink-0 rounded-md px-2 text-accent hover:bg-surface-alt disabled:opacity-40 ${focus}`}>{busy === m.edge!.linkId ? t("group.connection.trying") : t("group.connection.reconnect")}</button>}
               </div>
-              {m.edge?.state === "error" && m.edge.error && <p className="mt-0.5 break-words text-[11px] text-danger">{m.edge.error}</p>}
+              {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) stays out of the list. */}
+              {m.edge?.state === "error" && m.edge.error && <p data-testid="group-connection-member-why" data-cause={m.edge.cause ?? "other"} className="mt-0.5 break-words text-[11px] text-danger">{t(`group.member.why.${m.edge.cause ?? "other"}`)}</p>}
             </li>;
           })}
           {others.length === 0 && <li className="text-[11px]">{t("group.connection.nobodyElse")}</li>}

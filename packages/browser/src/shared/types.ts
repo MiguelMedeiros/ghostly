@@ -227,8 +227,17 @@ export interface GroupEdgeView {
   noSlot?: true;
   /** When this device last heard from the member on this edge, in ms (0: never). */
   lastSeenAt: number;
+  /** The engine's own words for why the last attempt failed (English, for logs and details); `cause` sums it up. */
   error?: string;
+  /**
+   * What `error` comes down to, for a short status: `relays`, its packets could not go out or be read (the Pkarr relays
+   * failed); `session`, a connection opened and dropped in a way that says nothing about the member (it is dialled
+   * again); `other`, anything else (a refused key, no common transport...).
+   */
+  cause?: GroupEdgeCause;
 }
+
+export type GroupEdgeCause = "relays" | "session" | "other";
 
 /**
  * How far a join through a group's link got, as the joiner can know it: the knock is being left,

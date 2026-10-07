@@ -155,6 +155,11 @@
     "unnamed": "Miembro {{key}}",
     "unreachable": "No accesible · {{seen}}",
     "viaHub": "A través de un hub",
+    "why": {
+      "other": "No se pudo conectar",
+      "relays": "No se llega a los relays, reintentando…",
+      "session": "Se cortó la conexión, reintentando…"
+    },
     "you": "Tú"
   },
   "members": {

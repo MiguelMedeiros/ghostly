@@ -155,6 +155,11 @@
     "unnamed": "メンバー {{key}}",
     "unreachable": "到達できません · {{seen}}",
     "viaHub": "ハブ経由",
+    "why": {
+      "other": "接続できませんでした",
+      "relays": "リレーに接続できません。再試行中…",
+      "session": "接続が切れました。再試行中…"
+    },
     "you": "あなた"
   },
   "members": {
