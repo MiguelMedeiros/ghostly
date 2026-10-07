@@ -405,6 +405,11 @@ export interface NodeOptions {
    * (WISP 102). It loads when a chat first starts an endpoint, not with the app.
    */
   irohWeb?: boolean;
+  /**
+   * The only Iroh relays the in-page Iroh homes on, whatever the settings say: a private network or a test (the CLI's
+   * `GHOSTLY_IROH_RELAYS`). Absent: the settings' relays, else the public defaults.
+   */
+  irohRelays?: readonly string[];
   /** Reactions on 1:1 chats (`react/1`, WISP 401 § Reactions). Default on; off only stands in for an older app in tests. */
   reactions?: boolean;
   /**
@@ -5093,7 +5098,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     this.settings = { ...this.settings, ...settings };
     if (!this.settings.irohRelays?.length) delete this.settings.irohRelays;
-    if (irohRelaysChanged) void this.rehomeIroh();
+    // Pinned relays (`options.irohRelays`) stay whatever the setting says.
+    if (irohRelaysChanged && !this.options.irohRelays?.length) void this.rehomeIroh();
     if (settings.relays) {
       this.relays?.setRelays(settings.relays);
       if (this.relays) this.settings.relays = this.relays.describe().relays;
@@ -6681,7 +6687,10 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** The host runs Iroh itself and homes it on the relays it is given (the Desktop). */
   private get ownIrohRelays(): boolean { return !!this.options.nativeIrohRelays && !!this.options.nativeTransports?.["iroh/1"]; }
-  private get irohRelays(): string[] { return this.settings.irohRelays?.length ? this.settings.irohRelays : [...DEFAULT_IROH_RELAYS]; }
+  private get irohRelays(): string[] {
+    if (this.options.irohRelays?.length) return [...this.options.irohRelays];
+    return this.settings.irohRelays?.length ? this.settings.irohRelays : [...DEFAULT_IROH_RELAYS];
+  }
 
   /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
   private async rehomeIroh(): Promise<void> {

@@ -32,7 +32,7 @@ describe.skipIf(!MINT)("two bots pay each other (test coins)", { timeout: 240_00
     relay = await localRelay();
     dht = await hyperdhtTestnet();
     // The stack's mint is on loopback with a fake Lightning backend, and issues Bitcoin (lnbc) invoices: declared a test mint.
-    env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_TEST_MINTS: MINT };
+    env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_PKARR_RELAYS: relay.url, GHOSTLY_TEST_MINTS: MINT };
     for (const [dir, name] of [[alice, "Payer"], [bob, "Payee"]] as const) {
       ok(await as(dir, "settings", "set", "relays", JSON.stringify([relay.url])));
       ok(await as(dir, "profile", "set", "--name", name));
