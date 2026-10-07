@@ -3,7 +3,7 @@ import { createIdentity } from "../src/identity";
 import { createRelayPayload, RELAY_PAYLOAD_MAX_BYTES } from "../src/pkarr";
 import { didDhtDocument, encodeDidDhtPacket, signDidDhtPacket } from "../src/didDht";
 import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl, readRelayBody } from "../src/relay";
-import { DiscoveryBudgetError, isDiscoveryBudgetError } from "../src/transport";
+import { DiscoveryBudgetError, heldBackError, isDiscoveryBudgetError } from "../src/transport";
 import { BREAKER_THRESHOLD } from "../src/relayBreaker";
 
 // covers: core.relay-client
@@ -346,5 +346,21 @@ describe("publishing past a slow relay", () => {
     const error = await relay.publish(id, []).then(() => null, (e: unknown) => e);
     expect(isDiscoveryBudgetError(error)).toBe(false);
     expect((error as Error).message).toContain("Publish failed on every relay");
+  });
+});
+
+describe("a publish Ghostly Desktop's Rust held back (heldBackError)", () => {
+  it("reads the wait Rust says in words as a DiscoveryBudgetError; a failure stays one", () => {
+    // As Tauri rejects an invoke: the command's error string.
+    const mixed = heldBackError("Publish held back on every relay not left alone; retry in 15000 ms: a: left alone after failing; asked again in 40 s; b: rate limited");
+    expect(isDiscoveryBudgetError(mixed)).toBe(true);
+    expect((mixed as DiscoveryBudgetError).retryInMs).toBe(15_000);
+    const all = heldBackError(new Error("Publish held back on every relay; retry in 900 ms: a: rate limited"));
+    expect(isDiscoveryBudgetError(all)).toBe(true);
+    expect((all as DiscoveryBudgetError).retryInMs).toBe(900);
+    for (const failure of ["Publish error: a: left alone after failing; asked again in 40 s; b: status 503", "Publish error: nowhere to publish"]) {
+      expect(heldBackError(failure)).toBe(failure);
+      expect(isDiscoveryBudgetError(heldBackError(failure))).toBe(false);
+    }
   });
 });

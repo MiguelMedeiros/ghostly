@@ -1129,6 +1129,7 @@ export class GhostlyNode implements EngineImplementation {
       live.link.sendGroupFrame(frame);
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
+    linkHandled: linkId => this.links.get(linkId)?.link?.handled() ?? Promise.resolve(false),
     linkOpen: linkId => !!this.links.get(linkId)?.link?.isDataLinkOpen,
     myNick: () => this.sharedNick,
     // A copy started from older state sends above the copy it replaced, and manages no group until told to (WISP 06).
