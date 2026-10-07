@@ -32,22 +32,31 @@ export function isRunnerPolicy(policy: string, internet = false): boolean {
     && only("script-src", "'unsafe-inline'", "'wasm-unsafe-eval'");
 }
 
-const checked = new Map<string, Promise<boolean>>();
+const checked = new Map<string, Promise<boolean | null>>();
 
 /**
- * Whether the runner at `url` comes with its policy as a header (`internet`: the network runner's). Asked once per
- * page and runner; false when it cannot be read.
+ * Whether the runner at `url` comes with its policy as a header (`internet`: the network runner's), or null when the
+ * page could not be asked (offline, a dropped request). An answer is kept for the page's life; null is not, so the next
+ * ask goes out again.
  */
-export function runnerAvailable(url: string, fetcher: typeof fetch = fetch, internet = false): Promise<boolean> {
+export function runnerPolicy(url: string, fetcher: typeof fetch = fetch, internet = false): Promise<boolean | null> {
   const key = `${internet ? "net" : "plain"} ${url}`;
   let answer = checked.get(key);
   if (!answer) {
-    answer = fetcher(url, { cache: "no-store", credentials: "omit", redirect: "error" })
-      .then((response) => response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? "", internet))
-      .catch(() => false);
+    const asking: Promise<boolean | null> = fetcher(url, { cache: "no-store", credentials: "omit", redirect: "error" })
+      .then((response) => response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? "", internet), () => {
+        if (checked.get(key) === asking) checked.delete(key);
+        return null;
+      });
+    answer = asking;
     checked.set(key, answer);
   }
   return answer;
+}
+
+/** Whether the runner at `url` comes with its policy as a header: false when it does not, or could not be asked now. */
+export async function runnerAvailable(url: string, fetcher: typeof fetch = fetch, internet = false): Promise<boolean> {
+  return (await runnerPolicy(url, fetcher, internet)) === true;
 }
 
 /** For tests: ask again. */
