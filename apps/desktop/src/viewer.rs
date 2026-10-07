@@ -5,7 +5,7 @@
 //! is handed to the peer in the main window, travels over WebRTC to the contact
 //! and comes back the same way. The window cannot call Tauri commands: the app
 //! declares them in `build.rs`, so each call is checked against the
-//! capabilities, which only grant them to `main`, and `main.rs` refuses every
+//! capabilities, which only grant them to `main`, and `lib.rs` refuses every
 //! invoke from another window on top of that.
 
 use std::collections::HashMap;
