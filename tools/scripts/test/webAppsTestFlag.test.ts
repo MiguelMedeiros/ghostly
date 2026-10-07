@@ -37,6 +37,10 @@ it("the e2e build's unguarded runner is the runner with only its hint guard take
   expect(unguarded).not.toContain("ghostly:hint-guard");
   expect(unguarded).toContain("const hintGuard = null;");
   expect(runner.replace(/\n {2}\/\/ ghostly:hint-guard:start\n[\s\S]*?\n {2}\/\/ ghostly:hint-guard:end\n/, "")).toBe(unguarded.replace("\n  const hintGuard = null;\n", ""));
-  for (const page of [runner, unguarded]) expect(() => new Function(/<script>([\s\S]*)<\/script>/.exec(page)![1]!)).not.toThrow();
+  for (const page of [runner, unguarded]) {
+    // The runner's one inline script, between its tags (the file is ours: one lower-case <script>).
+    const code = page.slice(page.indexOf("<script>") + "<script>".length, page.lastIndexOf("</script>"));
+    expect(() => new Function(code)).not.toThrow();
+  }
   expect(() => withoutHintGuard("<script></script>")).toThrow(/hint-guard/);
 });

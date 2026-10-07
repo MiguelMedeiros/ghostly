@@ -9,7 +9,7 @@
 | Implementation | Accepted for release 1.2 on 2026-10-06; implementation is starting, behind a feature flag on `dev` until the web chess e2e passes. Nothing of it is in a release |
 | Summary | Install apps and games by others from a store, a pasted Git URL or a chat. Each is checked against its publisher's signature and runs in a sandbox. |
 | Availability | Planned |
-| Notes | Not in the app yet. Phase 1, for release 1.2, is free mini-apps, turn-based and light versus games included, played live in a 1:1 chat, on the web app and Desktop; the extension comes later. No payments; an app reaches the internet only with the `internet` permission, granted at install. |
+| Notes | Not in the app yet. Phase 1, for release 1.2, is free mini-apps, turn-based and light versus games included, played live in a 1:1 chat, on the web app and Desktop; the extension comes later. No payments; an app reaches the internet only with the internet permission, granted at install. |
 
 > This is a review draft. Candidate numbers and new record formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md) and [implementation evidence](IMPLEMENTATION.md).
 
