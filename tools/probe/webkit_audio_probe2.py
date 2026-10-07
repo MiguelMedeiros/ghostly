@@ -82,7 +82,6 @@ async function run() {
   log("DONE");
 }
 log("ready webkit " + navigator.userAgent);
-run();
 </script>"""
 
 def web_ticks():
@@ -116,6 +115,9 @@ def message(_m, result):
         mark.update(name=None if name == "end" else name, ticks=t, at=now)
         return
     print(f"  {now - start:6.2f}s {text}", flush=True)
+    if text.startswith("ready"):
+        # Started from the UI process: WebKitGTK runs it as a user gesture (activation), as a key press would be.
+        GLib.timeout_add(300, lambda: (view.evaluate_javascript("run()", -1, None, None, None, None, None), False)[1])
     if text == "DONE": GLib.timeout_add(200, Gtk.main_quit)
 manager.connect("script-message-received::r11k", message)
 view.load_html(PAGE.replace("@MODE@", MODE), "http://localhost/")
