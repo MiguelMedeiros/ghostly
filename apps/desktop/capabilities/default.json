@@ -9,7 +9,6 @@
     "core:window:allow-set-badge-count",
     "core:window:allow-set-fullscreen",
     "core:window:allow-set-theme",
-    "updater:default",
     "process:allow-restart",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",

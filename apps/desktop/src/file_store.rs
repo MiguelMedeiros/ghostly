@@ -417,15 +417,23 @@ pub async fn file_bytes_append<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: Request<'_>,
 ) -> Result<(), String> {
-    let InvokeBody::Raw(bytes) = request.body() else {
-        return Err("Expected raw bytes".into());
+    let bytes = match request.body() {
+        InvokeBody::Raw(bytes) => bytes.clone(),
+        // Android: its WebView cannot read a request's body, so Tauri's IPC goes through `postMessage` there, which
+        // carries the bytes as a JSON array of numbers.
+        #[cfg(mobile)]
+        InvokeBody::Json(serde_json::Value::Array(values)) => values
+            .iter()
+            .map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
+            .collect::<Option<Vec<u8>>>()
+            .ok_or("Expected raw bytes")?,
+        _ => return Err("Expected raw bytes".into()),
     };
     let space = header(&request, "x-space")?.to_string();
     let id = header(&request, "x-id")?.to_string();
     let offset: u64 = header(&request, "x-offset")?
         .parse()
         .map_err(|_| "Invalid offset")?;
-    let bytes = bytes.clone();
     let store = store(&app)?;
     let base = store.base.clone();
     tauri::async_runtime::spawn_blocking(move || {

@@ -546,17 +546,17 @@ pub mod loopback {
     }
 }
 
-/// Where a token is served: the scheme (`http://ghostly-file.localhost` on Windows, where WebView2 takes no custom
-/// scheme), or the loopback server on Linux.
+/// Where a token is served: the scheme (`http://ghostly-file.localhost` on Windows and Android, where WebView2 and
+/// Android's WebView take no custom scheme and Tauri serves it on that host), or the loopback server on Linux.
 #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
 fn stream_url(token: &str, loopback: Option<u16>) -> String {
     #[cfg(target_os = "linux")]
     if let Some(port) = loopback {
         return format!("http://127.0.0.1:{port}/{token}");
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "android"))]
     return format!("http://{SCHEME}.localhost/{token}");
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "android")))]
     format!("{SCHEME}://localhost/{token}")
 }
 
