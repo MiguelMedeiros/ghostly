@@ -85,6 +85,13 @@ export const WATCH_PEER_MS = 2 * 60_000;
  * past the 12 s such a connection is given (`DISCONNECT_GRACE_MS`), by when it is back or the session is gone.
  */
 export const STALLED_LOOK_MS = 15_000;
+/**
+ * For this long after its contact went away from a live session, a chat's reads of it say so (`PkarrRequestOptions.departed`):
+ * a few may go over the relays' budget (`DEPARTED_READS` in relay.ts). The fast window that follows a goodbye
+ * (`EXPECT_PEER_MS`): an app that restarts has its offer out well within it (2.5 to 10 s after its goodbye in the lab of
+ * #1441, on a loaded host), and past it the race's DHT dial has brought the chat back anyway.
+ */
+export const DEPARTED_READ_MS = EXPECT_PEER_MS;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
 /**
@@ -237,6 +244,8 @@ export class LinkSession {
   private watchUntil = 0;
   /** The time of the peer's packet read last when it went away (`watchPeer`): a newer one that advertises says it is back. */
   private watchFrom = 0;
+  /** Until when the reads of a contact that went away are its first ones (`DEPARTED_READ_MS`). */
+  private departedUntil = 0;
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private connected = false;
@@ -400,6 +409,7 @@ export class LinkSession {
   watchPeer(): void {
     this.watchUntil = Math.max(this.watchUntil, Date.now() + WATCH_PEER_MS);
     this.watchFrom = this.presence.lastPacketAt;
+    this.departedUntil = Date.now() + DEPARTED_READ_MS;
     this.expectPeer();
   }
 
@@ -671,7 +681,9 @@ export class LinkSession {
       // This side's offer is out, and this read looks for its answer: signaling (`PkarrRequestOptions.signal`).
       const signal = pace === "fast" && this.fastStepsAfter > 0 && this.rtcSignalOut !== null;
       const watch = !signal && this.watching();
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }) });
+      // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`).
+      const departed = watch && Date.now() < this.departedUntil;
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }) });
       if (!this.running) return;
       this.discoveryResult("read");
       const ms = Date.now() - started;
