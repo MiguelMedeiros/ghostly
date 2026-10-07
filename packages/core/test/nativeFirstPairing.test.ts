@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INVITER_DIAL_GRACE_MS, type GhostLink } from "../src/ghostlink";
 import type { NativeEndpoint, PairedTransport, TransportDescriptors } from "../src/pairedTransports";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitationWhere, open, run, useFakeWorld, type Opened } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitationWhere, open, run, useFakeWorld, type NetworkModel, type Opened } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
 
 // covers: chat.one-chat, chat.paired.pair-timing, core.dht-direct
@@ -82,5 +82,44 @@ describe("a first pairing with no WebRTC on either side", () => {
     const a = channelOf(inviter.side.link) as { peer?: unknown }, b = channelOf(joiner.side.link);
     expect(a?.peer, "one session, the same connection at both ends").toBe(b);
     expect(native.dials, "no dial after the crossing").toBe(2);
+  }, 60_000);
+});
+
+/**
+ * The local Mainline testnet of dht-direct.spec.ts once DHT puts stopped waiting for silent nodes (#1421): a key's
+ * first put lands in ~1.15 s, and the joiner's first read of the inviter returns after `DHT_ANSWER_WAIT` (1.5 s).
+ */
+const DHT_TESTNET: NetworkModel = { publishMs: 1_150, visibleAfterMs: 1_150, readMs: 1_500 };
+
+/** A fresh invite joined 3 s after it was made: when the joiner's link packet first goes out, and when the inviter sees it. */
+async function join(rtcAvailable: boolean, firstPublish?: "after-first-poll"): Promise<{ firstPut: number; seen: number; joinerPuts: number; puts: number }> {
+  const pkarr = new MemoryPkarr(DHT_TESTNET), made = invitationWhere("inviter");
+  const inviter = open(made.inviter, pkarr, { dht: true, link: { rtcAvailable } });
+  await run(3_000);
+  const joined = Date.now(), puts = pkarr.publishes;
+  const joiner = open(made.joiner, pkarr, { dht: true, link: { rtcAvailable, ...(firstPublish && { firstPublish }) } });
+  const key = joiner.link.session.identity.pubKeyZ32;
+  const firstPut = await until(() => (pkarr.publishesByKey.get(key) ?? 0) > 0, 10_000);
+  const seen = await until(() => inviter.progress.some(p => p.peerSeen), 30_000) + firstPut;
+  await run(20_000 - (Date.now() - joined));
+  const result = { firstPut, seen, joinerPuts: pkarr.publishesByKey.get(key) ?? 0, puts: pkarr.publishes - puts };
+  await closeWorld();
+  useFakeWorld();
+  return result;
+}
+
+describe("a joiner's first link packet", () => {
+  it("with no WebRTC, goes out as the link starts, not after its first read of the inviter, and with no put more", async () => {
+    const early = await join(false), late = await join(false, "after-first-poll");
+    // Before: out after the read (1.5 s), the inviter saw the joiner 3.75 s after the join. After: 0 s and 2 s, the same puts.
+    expect(early.firstPut, "out as the link starts").toBeLessThan(DHT_TESTNET.readMs / 5);
+    expect(early.seen, "the inviter sees the joiner a read sooner").toBeLessThanOrEqual(late.seen - DHT_TESTNET.readMs);
+    expect(early.joinerPuts, "the joiner's link key: no put more").toBe(late.joinerPuts);
+    expect(early.puts, "both apps, every key: no put more").toBe(late.puts);
+  }, 120_000);
+
+  it("with WebRTC, still waits for its first read: its offer goes in it", async () => {
+    const { firstPut } = await join(true);
+    expect(firstPut, "after the first read").toBeGreaterThanOrEqual(DHT_TESTNET.readMs);
   }, 60_000);
 });

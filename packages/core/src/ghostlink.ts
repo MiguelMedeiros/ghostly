@@ -916,8 +916,9 @@ export class GhostLink {
       pollIntervals: options.pollIntervals,
       getServices: options.getServices,
       // A joiner dials the moment it sees the inviter, and an app back after a restart (`resume`) the moment it reads its
-      // contact: its offer goes in its first packet, not in a second one right behind its presence.
-      firstPublish: options.firstPublish ?? ((this.tracker && options.pairingProgress?.role === "joiner") || this.resuming ? "after-first-poll" : "at-start"),
+      // contact: its offer goes in its first packet, not in a second one right behind its presence. A joiner with no WebRTC
+      // (a Linux Desktop) has no offer to wait for: its presence goes at once, and the inviter sees it a read sooner.
+      firstPublish: options.firstPublish ?? ((this.tracker && options.pairingProgress?.role === "joiner" && options.rtcAvailable !== false) || this.resuming ? "after-first-poll" : "at-start"),
       events: {
         // The first look decided nothing to dial: say we are here now (a dial says it with its offer).
         onFirstPoll: () => {
