@@ -58,8 +58,14 @@
 
       // (d) The broker, and every other command.
       if (internals) {
-        set("broker context", await settle(internals.invoke("app_broker", { request: { type: "context", args: { app: "someone/else", window: "app-0000000000000000" } } }).then((v) => JSON.stringify(v), errorText)));
-        set("broker start again", await settle(internals.invoke("app_broker", { request: { type: "start", args: null } }).then(() => "answered", errorText)));
+        set("broker context", await settle(internals.invoke("app_broker", { request: { id: 9001, type: "context", args: [], app: "someone/else", window: "app-0000000000000000" } }).then((v) => JSON.stringify(v), errorText)));
+        set("broker start again", await settle(internals.invoke("app_broker", { request: { type: "start" } }).then(() => "answered", errorText)));
+        // The broker's own limits: a request over 64 KiB, then a flood past 50 a second.
+        set("broker too large", await settle(internals.invoke("app_broker", { request: { id: 9002, type: "storage.set", args: ["k", "x".repeat(70000)] } }).then(() => "answered", errorText)));
+        const flood = await Promise.all(Array.from({ length: 60 }, (_, i) => settle(internals.invoke("app_broker", { request: { id: 9100 + i, type: "storage.keys", args: [] } }).then(() => "answered", errorText), 1500)));
+        set("broker flood refused too-fast", flood.filter((r) => /too-fast/.test(r)).length);
+        tryTo("tauri internals deletable", () => { try { delete window.__TAURI_INTERNALS__; } catch (e) { return "threw " + e.name; } return typeof window.__TAURI_INTERNALS__; });
+        tryTo("__ghostlyEvent", () => typeof window.__ghostlyEvent);
         const refused = [], answered = [];
         for (const cmd of P.commands) {
           const out = await settle(internals.invoke(cmd, {}).then(() => "answered", errorText), 1500);
@@ -95,6 +101,10 @@
       add(`<input type="image" src="${http("input-image")}">`);
       add(`<svg><image href="${http("svg-image")}" width="1" height="1"/></svg>`);
       tryTo("websocket", () => { new WebSocket(`ws://${P.host}:${P.http}/${P.nonce}/websocket`); });
+      // HTTPS and WSS to a raw listener: a connection there is a TLS hello that got out (allowed with internet only).
+      tryTo("fetch https", () => { fetch(`https://${P.host}:${P.tls}/${P.nonce}/fetch-https`, { mode: "no-cors" }).catch(() => {}); });
+      tryTo("websocket wss", () => { new WebSocket(`wss://${P.host}:${P.tls}/${P.nonce}/wss`); });
+      add(`<img src="https://${P.host}:${P.tls}/${P.nonce}/img-https">`);
       tryTo("eventsource", () => { new EventSource(http("eventsource")); });
       tryTo("sendBeacon", () => navigator.sendBeacon(http("beacon"), "x"));
       tryTo("worker", () => { new Worker(http("worker")); });
