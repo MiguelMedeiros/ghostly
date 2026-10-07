@@ -137,6 +137,22 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   return { group: group.id, messageId: result.messageId ?? null, file: { id: fileId, name: file.name, size, mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
 }
 
+/** Bytes a file system takes in one name: 255 on ext4, btrfs, APFS (NTFS counts 255 UTF-16 units, within this too). */
+const NAME_BYTES = 255;
+
+/**
+ * `name` as an entry of a folder: an app's name may have 200 characters, which in UTF-8 can be 800 bytes. The end of
+ * its stem goes until it fits, its extension stays (as `sanitizeFileName` shortens it), so "文…文.txt" is saved as a text.
+ */
+export function fitName(name: string): string {
+  const fits = (candidate: string) => Buffer.byteLength(candidate) <= NAME_BYTES;
+  if (fits(name)) return name;
+  const extension = /\.[^.\s]{1,15}$/u.exec(name)?.[0] ?? "";
+  const stem = [...name.slice(0, name.length - extension.length)];
+  while (stem.length && !fits(stem.join("").trimEnd() + extension)) stem.pop();
+  return (stem.join("").trimEnd() || "file") + extension;
+}
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -248,7 +264,7 @@ export const FILE_METHODS: Record<string, Method> = {
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), sanitizeFileName(stored.metadata.name));
+    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), fitName(sanitizeFileName(stored.metadata.name)));
     const flags = bool(params, "force") ? "w" : "wx";
     let out;
     try { out = await open(target, flags, 0o600); } catch (error) {
