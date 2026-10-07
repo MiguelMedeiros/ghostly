@@ -18,7 +18,7 @@ import { windowIs } from "../viewport";
 // covers: apps.view
 
 // The runner's header is answered here, never fetched; the frame is a stand-in (the broker has its own tests).
-vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
+vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
 const started: { container: HTMLElement; frame: HTMLIFrameElement; stop: ReturnType<typeof vi.fn> }[] = [];
 vi.mock("../../lib/apps/broker", async (actual) => ({
   ...(await actual<typeof import("../../lib/apps/broker")>()),
