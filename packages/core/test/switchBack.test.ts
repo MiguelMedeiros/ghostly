@@ -16,12 +16,12 @@ import { NativeWorld } from "./support/nativeWorld";
  * the 20 s retry: 28.3-28.9 s on two CLIs (r9g, n=8) where a later switch takes 0.2-2.3 s.
  */
 
-interface App { name: string; link: GhostLink; state: PairingState }
+interface App { name: string; link: GhostLink; state: PairingState; moves: PairedTransport[] }
 let pkarr: MemoryPkarr, native: NativeWorld;
 const apps: App[] = [];
 
 function startApp(name: string, side: Side, contact: { side: Side; name: string }): App {
-  const app = { name, state: { status: "connecting" } } as App;
+  const app = { name, state: { status: "connecting" }, moves: [] as PairedTransport[] } as App;
   app.link = new GhostLink({
     params: side.params,
     rtcAvailable: true,
@@ -32,7 +32,11 @@ function startApp(name: string, side: Side, contact: { side: Side; name: string 
     autoConnect: true,
     createPeerConnection: () => fakePeerConnection(name),
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
-    events: { onPairingState: (state) => { app.state = state; } },
+    events: { onPairingState: (state) => {
+      app.state = state;
+      // Each transport the chat is ready on, once per move.
+      if (state.status === "ready" && state.transport && app.moves.at(-1) !== state.transport) app.moves.push(state.transport);
+    } },
   });
   apps.push(app);
   app.link.start();
@@ -73,3 +77,36 @@ for (const chooser of ["the dialling side", "the other side"] as const) it(`back
   console.log(`SWITCH_BACK ${chooser}: on WebRTC again ${took / 1000} s after choosing it (retire ${SWITCH_RETIRE_MS / 1000} s)`);
   expect(took).toBeLessThan(8_000);
 }, 60_000);
+
+/**
+ * A choice made while a move back to WebRTC waits for the session it left to retire (`SWITCH_RETIRE_MS`): nothing has
+ * been dialled yet, so the newer choice replaces that move. Before, the move ran (to WebRTC) and the chat then moved
+ * again to the newer choice: two needless switches, each a moment off the chat (r11f, CLI twoPeers).
+ */
+for (const chooser of ["the dialling side", "the other side"] as const) it(`a choice made while a move back to WebRTC waits for the old session replaces that move, chosen by ${chooser}`, async () => {
+  const { inviter, joiner } = invitationWhere("inviter");
+  const a = startApp("a", inviter, { side: joiner, name: "b" }), b = startApp("b", joiner, { side: inviter, name: "a" });
+  expect(await until(on("webrtc/1"), 60_000)).toBeLessThan(60_000);
+  await run(5_000);
+  const who = chooser === "the dialling side" ? a : b;
+  await who.link.setTransportPreference("iroh/1", true);
+  expect(await until(on("iroh/1"), 30_000)).toBeLessThan(30_000);
+  for (const app of apps) app.moves.splice(0, app.moves.length - 1);
+
+  // Back to WebRTC: the move waits for the WebRTC session left behind to retire, a few seconds.
+  await who.link.setTransportPreference("webrtc/1", true);
+  await run(1_000);
+  expect(apps.every((app) => app.state.status === "ready" && app.state.transport === "iroh/1")).toBe(true);
+  // Iroh again, before that move dialled: the chat stays where it is.
+  await who.link.setTransportPreference("iroh/1", true);
+  await run(15_000);
+  console.log(`SUPERSEDE ${chooser}: a ${JSON.stringify(a.moves)}, b ${JSON.stringify(b.moves)}`);
+  expect(a.moves).toEqual(["iroh/1"]);
+  expect(b.moves).toEqual(["iroh/1"]);
+  expect(on("iroh/1")()).toBe(true);
+  for (const app of apps) expect(app.link.transportWait, app.name).toBeUndefined();
+
+  // The chat still moves when asked, at once.
+  await who.link.setTransportPreference("webrtc/1", true);
+  expect(await until(on("webrtc/1"), 8_000)).toBeLessThan(8_000);
+}, 90_000);
