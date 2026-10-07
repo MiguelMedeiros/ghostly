@@ -14,7 +14,7 @@ import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { useAppsAvailable } from "../lib/apps/flag";
-import { appsBlock } from "../lib/apps/availability";
+import { appsComposerHint } from "../lib/apps/availability";
 import { PinIcon } from "../components/PinIcon";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { openOnArrow } from "../lib/menuButton";
@@ -952,7 +952,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         linkPreviews={paired && settings.linkPreviews}
         // The apps this contact and you share, chosen per chat: always reachable here, even before anything is shared.
         services={composerServices(t, platform, params.peerPubKeyB64, shownName, () => setShowServices(true))}
-        apps={appsOn && paired && chatLink ? { onOpen: () => setShowApps(true), hint: appsBlock(platform?.getPeer(params.peerPubKeyB64)) ? t("apps.composer.needsOnline") : undefined } : undefined}
+        apps={appsOn && paired && chatLink ? { onOpen: () => setShowApps(true), hint: appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t) ?? undefined } : undefined}
       />
       </div>
 
@@ -1005,7 +1005,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
       {showApps && appsOn && chatLink && params && (
         <ChatAppsDialog linkId={chatLink.id} name={shownName} onClose={() => setShowApps(false)}
-          waiting={appsBlock(platform?.getPeer(params.peerPubKeyB64)) ? t("apps.composer.needsOnline") : null} />
+          waiting={appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t)} />
       )}
       {showServices && params && (
         <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowServices(false)} />

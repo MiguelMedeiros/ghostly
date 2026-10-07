@@ -78,3 +78,51 @@ export function testNetworkEnv(...layers: (NodeJS.ProcessEnv | undefined)[]): No
   }
   return env;
 }
+
+/*
+ * Ghostly Desktop under the e2e drivers (e2e/support/desktopMac.ts on macOS, e2e/support/desktop.ts on Linux and
+ * Windows). It reads other knobs than the CLI: `GHOSTLY_PKARR_RELAYS` alone means those relays and no Mainline DHT,
+ * `GHOSTLY_PKARR_DHT_BOOTSTRAP` a Mainline DHT of one's own (apps/desktop/src/pkarr_network.rs), `GHOSTLY_IROH_RELAYS`
+ * (apps/desktop/src/paired_transport.rs) and `GHOSTLY_HYPERDHT_BOOTSTRAP` (native/transports/hyperdht/sidecar.mjs).
+ * WebRTC's STUN servers have no knob on Desktop: the WebView's own list stays.
+ */
+
+/** What a Desktop app under test gets first (a test's own goes over it). With the opt-in: nothing, the app's own networks. */
+export function isolatedDesktopNetworkEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (publicNetOptedIn(env)) return {};
+  return {
+    GHOSTLY_PKARR_RELAYS: `http://${NOWHERE}`,
+    GHOSTLY_HYPERDHT_BOOTSTRAP: NOWHERE,
+    GHOSTLY_IROH_RELAYS: env.GHOSTLY_IROH_RELAY_URL || `http://${NOWHERE}`,
+  };
+}
+
+/** What in this environment would take a Desktop app to a public network: one line each, none when it stays here. */
+export function desktopPublicNetworkIn(env: NodeJS.ProcessEnv): string[] {
+  const out: string[] = [];
+  const pkarr = list(env.GHOSTLY_PKARR_RELAYS);
+  if (!pkarr.length) out.push("Pkarr: no GHOSTLY_PKARR_RELAYS, so the public relays and the public Mainline DHT");
+  for (const relay of pkarr) if (!local(relay, true)) out.push(`Pkarr relay ${relay}`);
+  for (const node of list(env.GHOSTLY_PKARR_DHT_BOOTSTRAP)) if (!local(node, false)) out.push(`Mainline DHT node ${node}`);
+  const hyperdht = list(env.GHOSTLY_HYPERDHT_BOOTSTRAP);
+  if (!hyperdht.length) out.push("HyperDHT: no GHOSTLY_HYPERDHT_BOOTSTRAP, so its public bootstrap nodes");
+  for (const node of hyperdht) if (!local(node, false)) out.push(`HyperDHT node ${node}`);
+  const iroh = list(env.GHOSTLY_IROH_RELAYS);
+  if (!iroh.length) out.push("Iroh: no GHOSTLY_IROH_RELAYS, so n0's public relays");
+  for (const relay of iroh) if (!local(relay, true)) out.push(`Iroh relay ${relay}`);
+  return out;
+}
+
+/**
+ * The environment a Desktop app under test starts with: this process's, the isolated defaults under it, the layers
+ * over it. Refused if it would reach a public network without the opt-in.
+ */
+export function desktopTestNetworkEnv(...layers: (NodeJS.ProcessEnv | undefined)[]): Record<string, string> {
+  const given: NodeJS.ProcessEnv = Object.assign({}, process.env, ...layers);
+  const env = { ...isolatedDesktopNetworkEnv(given), ...given };
+  if (!publicNetOptedIn(env)) {
+    const problems = desktopPublicNetworkIn(env);
+    if (problems.length) throw new Error(`A test's Desktop app would reach a public network (${PUBLIC_NET_OPT_IN}=1 allows it):\n- ${problems.join("\n- ")}`);
+  }
+  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+}
