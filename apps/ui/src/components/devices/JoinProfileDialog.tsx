@@ -8,13 +8,14 @@ import { useI18n, type TranslationKey } from "../../contexts/I18nContext";
 import {
   defaultDeviceName, deviceNoun, enrollErrorKey, enrollInUse, enrollLoading, failureKey, joinInNewProfile, readDeviceLink, reloadIntoGate, type JoinRequest,
 } from "../../lib/devices";
-import { errorText } from "../../lib/errorText";
 import { isDesktopApp } from "../../lib/externalLink";
 import { nameStepDone } from "../../lib/nameStep";
 import { servicesPlatform } from "../../lib/platform";
 import { JoinDialog } from "../JoinDialog";
 import { Notice } from "../wallet/ui";
 import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButton } from "./DeviceDialog";
+import { problemText, type Problem } from "../../lib/problemText";
+import { said } from "../../lib/notices";
 
 /** How long a profile whose wallets are still loading is asked again before the join gives up and says why. */
 const LOADING_WAIT_MS = 60_000;
@@ -61,8 +62,8 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   const [kept, setKept] = useState<boolean | null>(null);
   const [preparing, setPreparing] = useState(false);
   // What went wrong before the engine had an enrollment to show: said, with a way to a new code.
-  const [failure, setFailure] = useState("");
-  const [error, setError] = useState("");
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [error, setError] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const ended = useRef(true);
   const closed = useRef(false);
@@ -112,12 +113,12 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
     try {
       setBusy(true);
       joinInNewProfile(profile || t("devices.join.profileName"), { code: device, start: "go", name: name.trim(), ...(profile ? { profile } : {}) });
-    } catch (cause) { setBusy(false); setError(errorText(cause, t)); }
+    } catch (cause) { setBusy(false); setError(problemText(cause, t)); }
   };
 
   /** Joins in this profile, asking again while its wallets load; refused for this profile, the code goes to a new one. */
   const join = async (device: string) => {
-    setStep("enroll"); setFailure(""); setError("");
+    setStep("enroll"); setFailure(null); setError(null);
     setKept(await askPersistentStorage());
     const until = Date.now() + LOADING_WAIT_MS;
     for (;;) {
@@ -138,7 +139,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
         setPreparing(false);
         if (enrollInUse(cause) && canMakeProfiles && request.start !== "go") { goNew(device); return; }
         const key = enrollErrorKey(cause);
-        setFailure(key ? t(key) : errorText(cause, t));
+        setFailure(key ? said(key, t) : problemText(cause, t));
         return;
       }
     }
@@ -155,21 +156,21 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
 
   const add = () => {
     if (!code || !name.trim() || busy) return;
-    setError("");
+    setError(null);
     const reading = readDeviceInvite(code);
-    if (!reading.ok) { setError(t(failureKey(reading.reason))); return; }
-    if (place === "nowhere") { setError(t("devices.fail.inUse")); return; }
+    if (!reading.ok) { setError(said(failureKey(reading.reason), t)); return; }
+    if (place === "nowhere") { setError(said("devices.fail.inUse", t)); return; }
     started.current = true;
     if (place === "new") { goNew(code); return; }
     void join(code);
   };
 
   /** A new code, read in the scanner: the old one is spent or refused. */
-  const scanAgain = () => { setView(null); setFailure(""); setError(""); setCode(undefined); ended.current = true; started.current = false; fromChoose.current = false; setStep("scan"); };
+  const scanAgain = () => { setView(null); setFailure(null); setError(null); setCode(undefined); ended.current = true; started.current = false; fromChoose.current = false; setStep("scan"); };
 
   if (step === "scan") {
     return <JoinDialog
-      onDevice={async (value) => { const link = readDeviceLink(value); setCode(link.code); setProfile(link.profile); setError(""); setStep("confirm"); }}
+      onDevice={async (value) => { const link = readDeviceLink(value); setCode(link.code); setProfile(link.profile); setError(null); setStep("confirm"); }}
       onClose={() => { if (fromChoose.current) setStep("choose"); else onClose(); }} />;
   }
 
@@ -193,14 +194,14 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
             <input data-testid="device-join-name" maxLength={16} value={name} onChange={(event) => setName(event.target.value)} className={field} />
           </label>
           {place === "new" && <InfoLine testId="device-join-new-profile" info={t("devices.join.newProfileInfo")}>{t("devices.join.newProfile")}</InfoLine>}
-          {error && <p role="alert" data-testid="device-join-error" className="text-danger">{error}</p>}
+          {error && <Notice problem={error} testId="device-join-error" />}
           <button type="submit" autoFocus data-testid="device-join-next" disabled={!name.trim() || busy} className={primaryButton}>{t("devices.join.add")}</button>
         </form>
       )}
       {step === "enroll" && <>
         {!view && !failure && <Status testId="device-join-connecting" step={preparing ? "preparing" : "connecting"}>{preparing ? t("devices.join.preparing") : t("devices.join.connecting")}</Status>}
         {failure && <>
-          <p role="alert" data-testid="device-join-error" className="text-danger">{failure}</p>
+          <Notice problem={failure} testId="device-join-error" />
           <button type="button" data-testid="device-join-scan-again" onClick={scanAgain} className={primaryButton}>{t("devices.join.scanAgain")}</button>
         </>}
         {view?.role === "joiner" && <>
@@ -219,7 +220,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
               : <button type="button" data-testid="device-join-continue" onClick={() => void reloadIntoGate({ keepUnlocked: true })} className={primaryButton}>{t("devices.join.continue")}</button>}
           </>}
           {view.step === "failed" && <>
-            <p role="alert" data-testid="device-join-failed" data-reason={view.reason} className="text-danger">{t(failureKey(view.reason))}</p>
+            <div data-testid="device-join-failed" data-reason={view.reason}><Notice problem={said(failureKey(view.reason), t)} /></div>
             <button type="button" data-testid="device-join-scan-again" onClick={scanAgain} className={primaryButton}>{t("devices.join.scanAgain")}</button>
           </>}
         </>}

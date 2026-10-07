@@ -6,10 +6,12 @@ import { meteredConnection } from "@ghostly/browser/devices/handoffHost";
 import { HANDOFF_LATER_BYTES } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { errorText } from "../../lib/errorText";
 import { Switch } from "../wallet/ui";
 import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton, quietButton } from "./DeviceDialog";
+import { type Problem, problemText } from "../../lib/problemText";
+import { Notice } from "../ui/Notice";
+import { said, nextOf } from "../../lib/notices";
 
 /*
  * The handoff's screens (WISP 06 § User experience, "Handoff progress", "Failures"): Use here with the password on a
@@ -63,7 +65,8 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
     <div data-testid="handoff-progress" data-step={view.step} data-role={view.role} data-failure={view.failure} data-woken={view.woken ? "true" : undefined} className="space-y-3 text-start">
       <p className="font-semibold text-text-primary">{t("devices.handoff.title")}</p>
       {failed || done || !current ? (
-        <p data-testid="handoff-line" role={failed ? "alert" : "status"} className={failed ? "text-danger" : "text-text-primary"}>{line}</p>
+        failed ? <Notice testId="handoff-line" tone="error" className="" title={line} next={nextOf(FAILURES[view.failure ?? "failed"], t, { device, wallet: walletNameOf(view.wallet), date: view.expiresAt !== undefined ? dayText(view.expiresAt, language) : "" })} />
+          : <p data-testid="handoff-line" role="status" className="text-text-primary">{line}</p>
       ) : (
         <ol className="space-y-1.5" aria-label={t("devices.handoff.title")}>
           {STEPS.map((step, index) => {
@@ -122,11 +125,11 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   const [password, setPassword] = useState("");
   const [later, setLater] = useState(metered);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const submit = async () => {
-    setBusy(true); setError("");
+    setBusy(true); setError(null);
     try { onStarted(await engine.call("deviceHandoffPull", { password, later: later ? HANDOFF_LATER_BYTES : 0 })); onClose(); }
-    catch (cause) { const key = handoffErrorKey(cause); setError(key ? t(key, { device, wallet: handoffErrorWallet(cause) ?? "" }) : errorText(cause, t)); }
+    catch (cause) { const key = handoffErrorKey(cause); setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t)); }
     finally { setBusy(false); }
   };
   return (
@@ -140,7 +143,7 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
           <span className="min-w-0">{t("devices.handoff.later")}</span>
           <Switch checked={later} onChange={setLater} label={t("devices.handoff.later")} testId="handoff-later" />
         </label>
-        {error && <p role="alert" className="text-danger">{error}</p>}
+        {error && <Notice problem={error} className="" />}
         <button type="submit" data-testid="handoff-start" disabled={busy || !password} className={primaryButton}>{t("devices.handoff.useHere")}</button>
       </form>
     </DeviceDialog>
@@ -170,18 +173,18 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
 /** "Move to <device>" on the active device, and its progress until this device reloads into the gate. */
 export function MoveDialog({ device, deviceKey, onClose }: { device: string; deviceKey: string; onClose(): void }) {
   const { t } = useI18n();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [started, setStarted] = useState(false);
   const view = useHandoffView(started);
   useEffect(() => {
     void engine.call("deviceHandoffPush", { key: deviceKey }).then(() => setStarted(true), (cause: unknown) => {
       const key = handoffErrorKey(cause);
-      setError(key ? t(key, { device, wallet: handoffErrorWallet(cause) ?? "" }) : errorText(cause, t));
+      setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t));
     });
   }, [deviceKey, device, t]);
   return (
     <DeviceDialog title={t("devices.handoff.moveTo", { device })} onClose={onClose} testId="handoff-move-dialog">
-      {error && <p role="alert" data-testid="handoff-move-error" className="text-danger">{error}</p>}
+      {error && <Notice problem={error} testId="handoff-move-error" className="" />}
       {!error && !view && <p role="status" className="text-text-secondary">{t("devices.handoff.waitingOffer", { device })}</p>}
       {view && <HandoffProgress view={view} onCancel={() => void engine.call("deviceHandoffCancel")} />}
       {error && <button type="button" onClick={onClose} className={quietButton}>{t("common.close")}</button>}

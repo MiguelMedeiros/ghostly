@@ -10,7 +10,8 @@ import { baseProfileName, type ProfileEntry } from "../lib/profiles";
 import { input } from "./wallet/ui";
 import { InputGroup } from "./layout";
 import { formatAmount } from "../lib/amount";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /**
  * Deleting a profile removes its chats, keys and wallets for good. The dialog says what is inside, offers
@@ -24,7 +25,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
   const [summary, setSummary] = useState<ProfileSummary | null>(null);
   const [typed, setTyped] = useState(""), [passphrase, setPassphrase] = useState("");
   const [backingUp, setBackingUp] = useState(false), [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [error, setError] = useState<Problem | null>(null);
   const { job, start, saving, end, cancel } = useBackupJob();
   const locked = !!profileLock(entry.id);
   // Its name without the word the app adds to a restored one: what the backup file is named after and what to type.
@@ -38,7 +39,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
     ...summary.wallets.map((name) => t("profile.delete.wallet", { name })),
     summary.services ? (summary.services === 1 ? t("profile.delete.serviceOne") : t("profile.delete.serviceCount", { count: summary.services })) : "",
   ].filter(Boolean) : [];
-  const run = async (work: () => Promise<void>) => { setBusy(true); setError(""); try { await work(); } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); } };
+  const run = async (work: () => Promise<void>) => { setBusy(true); setError(null); try { await work(); } catch (e) { setError(problemText(e, t)); } finally { setBusy(false); } };
   const button = "px-4 py-2 min-h-10 whitespace-nowrap rounded-lg text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
@@ -70,7 +71,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
 
         {locked && <input data-testid="delete-profile-password" type="password" autoComplete="current-password" aria-label={t("profile.delete.lockPasswordLabel", { name: entry.name })} className={input} placeholder={t("profile.delete.lockPassword")} value={lockPassword} onChange={(e) => setLockPassword(e.target.value)} />}
         <input data-testid="delete-profile-confirm" aria-label={t("profile.delete.confirmLabel")} className={input} placeholder={t("profile.delete.confirmPlaceholder", { name: plain })} value={typed} onChange={(e) => setTyped(e.target.value)} />
-        {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+        {error && <Notice problem={error} className="text-xs" />}
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" onClick={onClose} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>
           <button type="button" data-testid="delete-profile-go" disabled={busy || typed.trim() !== plain || (locked && !lockPassword)} onClick={() => void run(async () => { await deleteProfile(entry.id, lockPassword); onClose(); })}

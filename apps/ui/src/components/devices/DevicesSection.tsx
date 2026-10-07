@@ -3,7 +3,6 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { MAX_DEVICES } from "@ghostly/browser/devices/state";
 import { useI18n } from "../../contexts/I18nContext";
-import { errorText } from "../../lib/errorText";
 import { listNames, openJoinAnother, removeErrorKey, useDeviceSet } from "../../lib/devices";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
@@ -14,6 +13,8 @@ import { DeviceGlyph } from "./DeviceGlyph";
 import { MoveDialog } from "./Handoff";
 import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
 import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/handoff";
+import { nextOf, said } from "../../lib/notices";
+import { problemText, type Problem } from "../../lib/problemText";
 
 /** The refusals that come from this device's wallets (WISP 06 § Wallets). */
 const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry", "call"]);
@@ -37,11 +38,11 @@ export function DevicesSection() {
   const [removing, setRemoving] = useState<{ key: string; name: string } | null>(null);
   const [removed, setRemoved] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
-  const [secret, setSecret] = useState<{ busy?: boolean; done?: boolean; error?: string }>({});
+  const [secret, setSecret] = useState<{ busy?: boolean; done?: boolean; error?: Problem }>({});
   const newSecret = async () => {
     setSecret({ busy: true });
     try { await engine.call("deviceNewSecret"); setSecret({ done: true }); }
-    catch (cause) { const key = removeErrorKey(cause); setSecret({ error: key ? t(key) : errorText(cause, t) }); }
+    catch (cause) { const key = removeErrorKey(cause); setSecret({ error: key ? said(key, t) : problemText(cause, t) }); }
   };
   const handoff = useHandoffView(!moving);
   const thisActive = view?.devices.some((device) => device.self && device.active) ?? false;
@@ -108,7 +109,7 @@ export function DevicesSection() {
       {(secret.done || secret.error) && (
         <div className="px-4 py-3">
           {secret.done && <Notice tone="success" testId="device-secret-done">{t("devices.secret.done")}</Notice>}
-          {secret.error && <Notice tone="error" testId="device-secret-error">{secret.error}</Notice>}
+          {secret.error && <Notice problem={secret.error} testId="device-secret-error" />}
         </div>
       )}
       {handoff?.failure === "password" && handoff.role === "giver" && (
@@ -120,7 +121,7 @@ export function DevicesSection() {
       {thisActive && handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && STOPPED.has(handoff.failure) && (() => {
         const name = devices.find((device) => device.key === handoff.key)?.name || handoff.device || t("devices.join.otherDevice");
         return (
-          <Row testId="handoff-stopped" label={t(FAILURES[handoff.failure], { device: name })}>
+          <Row testId="handoff-stopped" label={t(FAILURES[handoff.failure], { device: name })} hint={nextOf(FAILURES[handoff.failure], t, { device: name })}>
             <Button data-testid="handoff-try-again" onClick={() => setMoving({ key: handoff.key, name })}>{t("devices.handoff.tryAgain")}</Button>
           </Row>
         );
