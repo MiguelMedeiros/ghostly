@@ -63,6 +63,35 @@ it("an inviter's first envelope goes out as its delivery starts, not after its f
   await vi.advanceTimersByTimeAsync(3_000); await stopped;
 });
 
+it("a joiner whose capability record changes right after its first envelope names it once the spacing allows, and not at all once live", async () => {
+  vi.useFakeTimers();
+  const net = testnet();
+  let rev = 1;
+  const make = () => new DhtDelivery({ params: createLink().invite, mode: "stream", state: emptyDhtDeliveryState(), credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 },
+    transport: { publish: net.publish, resolve: net.resolve, describe: () => ({ protocol: "testnet model", relays: [] }) },
+    save: async () => {}, pin: async () => {}, message: async () => {}, receipt: async () => {}, changed: () => {}, capsRev: () => rev });
+  // Its first envelope names revision 1; a transport comes up a moment later (revision 2), and the pair goes live.
+  const live = make();
+  await live.start(); await vi.advanceTimersByTimeAsync(2_200);
+  expect(net.publish).toHaveBeenCalledTimes(1);
+  rev = 2; await live.announce();
+  await vi.advanceTimersByTimeAsync(100); live.setLive(true);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(net.publish, "the live session carries it: no envelope more").toHaveBeenCalledTimes(1);
+  const stopped = live.stop(); await vi.advanceTimersByTimeAsync(3_000); await stopped;
+  // Still on the DHT: the envelope naming it goes once the spacing allows, and names the newest of two quick changes.
+  rev = 1;
+  const onDht = make();
+  await onDht.start(); await vi.advanceTimersByTimeAsync(2_200);
+  expect(net.publish).toHaveBeenCalledTimes(2);
+  rev = 2; await onDht.announce(); rev = 3; await onDht.announce();
+  await vi.advanceTimersByTimeAsync(4_000);
+  expect(net.publish).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(net.publish, "one envelope for both").toHaveBeenCalledTimes(3);
+  const stopped2 = onDht.stop(); await vi.advanceTimersByTimeAsync(3_000); await stopped2;
+});
+
 it("a read that can change the envelope still comes first: a joiner seals its first one to the inviter, an inviter started again puts the receipt in its next one", async () => {
   vi.useFakeTimers();
   const net = testnet();

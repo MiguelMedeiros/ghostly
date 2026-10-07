@@ -196,6 +196,8 @@ export class DhtDelivery {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** The first control envelope of a start that waits (`firstControlAfterMs`). */
   private controlTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A new capability revision to name once the publication spacing allows (`announce`). */
+  private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
   /** The sequence of the last envelope of the contact that was past its expiry (traced once). */
@@ -347,7 +349,8 @@ export class DhtDelivery {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     if (this.controlTimer) clearTimeout(this.controlTimer);
-    this.timer = this.controlTimer = null;
+    if (this.announceTimer) clearTimeout(this.announceTimer);
+    this.timer = this.controlTimer = this.announceTimer = null;
     await this.chain;
   }
   async setMode(mode: DeliveryMode): Promise<void> {
@@ -525,6 +528,14 @@ export class DhtDelivery {
       // Every publication spends a relay request: none when the last envelope named this revision already.
       const rev = this.options.capsRev?.();
       if (rev === undefined || rev === this.namedRev) return;
+      // An envelope went out a moment ago (a first contact's, as the link's transports are still coming up): this one
+      // waits out the publication spacing and names the newest revision then, or none if the chat went live meanwhile
+      // (a live session carries the news itself).
+      const wait = this.lastPublish + 4_000 - Date.now();
+      if (wait > 0) {
+        this.announceTimer ??= setTimeout(() => { this.announceTimer = null; if (!this.live) void this.announce(); }, wait);
+        return;
+      }
       try { await this.publish(true); } catch { /* The next envelope names it. */ }
     });
   }
