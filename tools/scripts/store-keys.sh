@@ -63,7 +63,8 @@ publisher_key="$keys/chess-publisher.key"
 
 if [[ ! -e "$store" ]]; then
   echo "Cloning github.com/$STORE_REPO into $store"
-  git clone --quiet "https://github.com/$STORE_REPO.git" "$store"
+  # A normal clone: only the keys are owner-only.
+  (umask 022 && git clone --quiet "https://github.com/$STORE_REPO.git" "$store")
 fi
 store="$(cd "$store" && pwd)"
 [[ -f "$store/store.json" && -f "$store/STORE_KEY" ]] || die "$store is not a clone of github.com/$STORE_REPO (no store.json and STORE_KEY)"
