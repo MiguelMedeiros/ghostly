@@ -7,9 +7,10 @@ import { createIdentity } from "../src/identity";
 
 afterEach(() => { vi.useRealTimers(); });
 
-function pairedLink() {
+/** `paired`: the contact's key is known (a chat paired before), as for every chat a wake resumes. */
+function pairedLink(paired = false) {
   return new GhostLink({ params: { ...createLink().mine, profile: "paired-chat/1" },
-    pairing: { credentials: { seedB64: createIdentity().seedB64 }, pinPeer: vi.fn() },
+    pairing: { credentials: { seedB64: createIdentity().seedB64, ...(paired && { peerKey: createIdentity().pubKeyZ32 }) }, pinPeer: vi.fn() },
     transport: { publish: vi.fn(async () => {}), resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) },
     createPeerConnection: () => { throw new Error("no dial in this test"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined });
 }
@@ -84,6 +85,40 @@ it("waking a chat looks now and starts the wait between attempts over", () => {
   expect(poll).toHaveBeenCalled();
   expect(inner.autoConnectFailures).toBe(0);
   expect(inner.lastAutoConnectAt).toBe(0);
+});
+
+it("a wake with the session up pings it, and a session that does not answer is let go and resumed as after a restart", () => {
+  vi.useFakeTimers();
+  const link = pairedLink(true), inner = link as unknown as Internals & { paired: unknown; resuming?: string };
+  vi.spyOn(link.session, "pollNow").mockImplementation(() => {});
+  const channel = { send: vi.fn(), close: vi.fn() };
+  // Live over WebRTC, the contact answering pings, when the phone put the app to sleep.
+  inner.channel = channel; inner.paired = { state: { status: "ready" }, stop() {} };
+  inner.startLiveness(channel, true);
+  inner.heardFromPeer();
+  vi.advanceTimersByTime(1_000);
+  channel.send.mockClear();
+  link.wake();
+  expect(channel.send, "a ping now, not at the next of every 15 s").toHaveBeenCalledWith(JSON.stringify({ t: "paired-ping" }));
+  vi.advanceTimersByTime(PONG_WAIT_MS - 1);
+  expect(inner.channel).toBe(channel);
+  vi.advanceTimersByTime(1);
+  expect(inner.channel, "dropped once the ping had no answer").toBeNull();
+  expect(inner.resuming, "dials as a resume: whatever its key, knocking on the contact's other transports").toBe("webrtc/1");
+
+  // A session that answers is kept.
+  const kept = pairedLink(true), keptInner = kept as unknown as Internals & { paired: unknown; resuming?: string };
+  vi.spyOn(kept.session, "pollNow").mockImplementation(() => {});
+  const live = { send: vi.fn(), close: vi.fn() };
+  keptInner.channel = live; keptInner.paired = { state: { status: "ready" }, stop() {} };
+  keptInner.startLiveness(live, true);
+  keptInner.heardFromPeer();
+  kept.wake();
+  vi.advanceTimersByTime(100);
+  keptInner.heardFromPeer();
+  vi.advanceTimersByTime(PONG_WAIT_MS * 2);
+  expect(keptInner.channel).toBe(live);
+  expect(keptInner.resuming).toBeUndefined();
 });
 
 it("a chat whose contact was never seen keeps the active pace in the background for a while", () => {
