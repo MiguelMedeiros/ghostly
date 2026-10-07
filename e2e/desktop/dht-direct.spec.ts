@@ -21,8 +21,8 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * refused by the DHT while the first was still being put (apps/desktop/src/pkarr_network.rs `put_newest`).
  *
  * Neither page may freeze on the way: no gap over a second in its event loop from the invite to the live chat. Each
- * app's first sounds of the chat (the knock, the text, "connected") held WebKitGTK's page 5 to 10 s inside
- * `AudioContext.resume()` (r11k, apps/ui/src/lib/sounds.ts `SoundsRelease`).
+ * app's first sounds of the chat (the knock, the text, "connected") held the page of WebKitGTK before 2.52 for 5 to 10 s
+ * inside `AudioContext.resume()` (r11k, apps/ui/src/lib/sounds.ts `SoundsRelease`).
  */
 
 /** The longest a page may go without running a timer while the pair goes live. */
