@@ -2304,6 +2304,17 @@ export class GhostLink {
     return (this.demotedUntil.get("webrtc/1") ?? 0) > Date.now() && this.fallback && this.peerFallback
       && TRANSPORTS.some(t => this.canDial(t) && !!this.peerTransports?.includes(t) && this.transportOffer().includes(t));
   }
+  /**
+   * A first pairing's inviter has no offer of the joiner's to wait for: WebRTC is missing here, or the joiner's record
+   * says its app has none (a Linux Desktop's WebKitGTK), so its first packet carries none. A native transport the record
+   * describes is dialled now. Waiting out `INVITER_DIAL_GRACE_MS` left two Linux Desktops 2.5 s more apart, and the
+   * joiner, still reading, often went on without dialling for seconds (dht-direct on CI, 2026-10-07). Should the joiner
+   * dial too, the two dials cross and the lower key's carries the chat (`parkCrossed`, `attachReplacement`).
+   */
+  private nothingToAwait(): boolean {
+    const rtc = this.availableTransports.includes("webrtc/1") && (!this.peerTransports || this.peerTransports.includes("webrtc/1"));
+    return !rtc && TRANSPORTS.some(t => this.canDial(t) && !!this.peerTransports?.includes(t) && this.transportOffer().includes(t));
+  }
   /** Whether a native dial of `transport` can go now: this side's endpoint is up and the contact's descriptor known. */
   private canDial(transport: PairedTransport): boolean {
     return transport !== "webrtc/1" && this.endpoints.has(transport) && !!this.peerDescriptors[transport];
@@ -2553,8 +2564,8 @@ export class GhostLink {
    * Only the lower key offers, so two peers coming online together do not collide. A first pairing is
    * the exception: the joiner offers, whatever its key, in the very packet that says it is here (one hop
    * less than presence, then the inviter's offer), and the inviter waits for that offer. An inviter that
-   * sees the joiner but no offer for `INVITER_DIAL_GRACE_MS` (an app from before this rule) offers itself;
-   * the lower-key rule settles any collision, on both sides.
+   * sees the joiner but no offer for `INVITER_DIAL_GRACE_MS` (an app from before this rule) offers itself,
+   * and dials at once when no offer can come (`nothingToAwait`); the lower-key rule settles any collision, on both sides.
    */
   private maybeAutoConnect(presence: PeerPresence): void {
     // Stopping (its loops end after an await): a poll finishing meanwhile must not dial again.
@@ -2573,7 +2584,7 @@ export class GhostLink {
     const role = pairing ? this.options.pairingProgress?.role : undefined;
     if (role === "inviter") {
       this.peerSeenAt ||= Date.now();
-      if (Date.now() - this.peerSeenAt < INVITER_DIAL_GRACE_MS) { this.session.expectPeer(); return; }
+      if (Date.now() - this.peerSeenAt < INVITER_DIAL_GRACE_MS && !this.nothingToAwait()) { this.session.expectPeer(); return; }
     } else if (role !== "joiner" && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming && !this.dialsPastRtc()) {
       // Back after a restart (`resume`), this side dials once whatever its key: the contact may still hold the old
       // session, and would not dial. A WebRTC offer from it reaches that session as "the contact lost the connection"
