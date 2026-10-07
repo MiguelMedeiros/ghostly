@@ -7,11 +7,11 @@
 export const DEFAULT_STORE_URL = "https://raw.githubusercontent.com/MiguelMedeiros/ghostly-store/HEAD/ghostly-store.json";
 
 /**
- * The official store's public key (z-base32), which every index read from `DEFAULT_STORE_URL` must be signed by. Empty
- * until the owner makes the key offline (tools/scripts/store-keys.sh) and signs the first index; while it is empty the
- * default store is off: a new profile starts with no store.
+ * The official store's public key (z-base32), which every index read from `DEFAULT_STORE_URL` must be signed by. The
+ * owner made it offline with tools/scripts/store-keys.sh (fingerprint y379 ia3t 1urw udj8); the private key never leaves
+ * the owner's machine. With it set, a new profile starts with the official store.
  */
-export const DEFAULT_STORE_KEY: string = "";
+export const DEFAULT_STORE_KEY: string = "y379ia3t1urwudj8o4w1qwmuwp1mcxyf956b5r7pqup7stce6diy";
 
 /**
  * The stores a new profile starts with (WISP 1200 § Stores: the default store, preloaded and removable), each a URL and
