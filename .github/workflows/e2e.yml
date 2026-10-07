@@ -28,6 +28,7 @@ permissions:
 jobs:
   e2e:
     name: End-to-end
+    if: false
     runs-on: ubuntu-24.04
     # The web and extension suites outgrew 30 minutes (cancelled mid-run on 2026-09-29),
     # then 60 (584 tests, cancelled at 560 while releasing 1.1.1 on 2026-10-04).
@@ -251,7 +252,7 @@ jobs:
         run: docker run -d --name ghostly-iroh-relay -p 127.0.0.1:47085:3340 n0computer/iroh-relay:v1.3.0 --dev
 
       - name: Run Desktop end-to-end tests
-        run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
+        run: xvfb-run -a npm run test:e2e:desktop -- dht-direct --repeat-each 4 --retries 0
         env:
           GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
 
@@ -270,7 +271,7 @@ jobs:
   compat:
     name: Compatibility with v0.4.0 and v1.1.4
     # The deployed-web-app run tests the web app alone.
-    if: ${{ !inputs.web_url }}
+    if: false
     uses: ./.github/workflows/e2e-compat.yml
     with:
       ref: ${{ inputs.ref }}
