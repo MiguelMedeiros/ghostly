@@ -109,10 +109,27 @@ describe("GroupConnection: the popover lists every member's edge", () => {
       { key: CAROL, state: "error", status: "Connection issue · not seen yet" },
       { key: "dave".padEnd(52, "y"), state: "none", status: "No connection yet" },
     ]);
-    // A failure says why, where it happened.
-    expect(within(screen.getAllByTestId("group-connection-member")[2]).getByText("The member's key did not match")).toBeInTheDocument();
+    // A failure says why, where it happened, in a few words: never the engine's English.
+    expect(within(screen.getAllByTestId("group-connection-member")[2]).getByTestId("group-connection-member-why")).toHaveTextContent("Couldn't connect");
+    expect(screen.queryByText("The member's key did not match")).toBeNull();
     // Honest about transports: WebRTC, and Iroh or HyperDHT with a member that has no WebRTC; no DHT-only delivery.
     expect(screen.getByTestId("group-connection-note")).toHaveTextContent("DHT-only delivery is not offered in groups yet");
+  });
+
+  it("says why a member failed in short words, never the relays' addresses or the engine's errors (a phone, 2026-10-07)", async () => {
+    const relays = "Could not publish connection details: Publish failed on every relay: Error: https://pkarr.example.test responded 500; Error: https://pkarr.other.test is left alone after failing. Retrying in 60 s.";
+    await open(active([me,
+      alice({ state: "error", error: relays, cause: "relays", lastSeenAt: NOW - 3_600_000 }),
+      bob({ state: "error", error: "Session receive limit exceeded", cause: "session", lastSeenAt: NOW - 3_600_000 }),
+      member({ key: CAROL, nick: "Carol", edge: edge({ linkId: "edge-c", state: "error", error: "Could not publish discovery: Publish failed on every relay: x" }) })]));
+    const why = screen.getAllByTestId("group-connection-member-why");
+    expect(why.map(line => [line.dataset.cause, line.textContent])).toEqual([
+      ["relays", "Can't reach the relays, retrying…"],
+      ["session", "Connection dropped, trying again…"],
+      // An engine that does not say the cause yet: the generic words, still not its English.
+      ["other", "Couldn't connect"],
+    ]);
+    expect(screen.getByTestId("group-connection")).not.toHaveTextContent(/https?:|pkarr|Session receive limit|DiscoveryBudgetError/);
   });
 
   it("follows the group it is handed: a member coming back turns reachable, one going away turns the header partial", async () => {

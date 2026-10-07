@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
-import { PairedSession, type PairedSessionOptions } from "../src/pairedSession";
+import { PairedSession, SESSION_FRAME_MAX, SESSION_RECEIVE_PENDING, type PairedSessionOptions } from "../src/pairedSession";
 import { createChannelPair } from "./helpers";
 
 // covers: chat.paired.session, chat.paired.verify, core.capabilities, core.version, core.peer-keys
@@ -84,12 +84,22 @@ describe("paired session: receive limits", () => {
     expect(edge.s.state.status).toBe("negotiating");
   });
 
-  it("fails when more than 64 frames wait unprocessed", async () => {
+  it("fails, overloaded, when more frames wait unprocessed than it holds: by count, or by size", async () => {
     const h = lone();
-    for (let i = 0; i < 64; i++) h.inject(`frame ${i}`);
+    for (let i = 0; i < SESSION_RECEIVE_PENDING.frames; i++) h.inject(`frame ${i}`);
     expect(h.s.state.status).toBe("negotiating");
     h.inject("one too many");
     expect(h.s.state.error).toMatch(/receive limit/);
+    expect(h.s.overloaded).toBe(true);
+    const big = lone(), frames = SESSION_RECEIVE_PENDING.bytes / SESSION_FRAME_MAX;
+    for (let i = 0; i < frames; i++) big.inject(new Uint8Array(SESSION_FRAME_MAX));
+    expect(big.s.state.status).toBe("negotiating");
+    big.inject(new Uint8Array(1));
+    expect(big.s.state.error).toMatch(/receive limit/);
+    expect(big.s.overloaded).toBe(true);
+    // One frame too big breaks the protocol: no overload.
+    const over = lone(); over.inject("x".repeat(SESSION_FRAME_MAX + 1));
+    expect(over.s.overloaded).toBe(false);
   });
 
   it("refuses a negotiation frame one byte over 4096, and reads one at the limit", async () => {

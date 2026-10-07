@@ -107,6 +107,17 @@ export type PaymentMethodName = "cashu" | "lightning" | "arkade" | "usdt" | "bar
 const OFFER_EXTENSIONS = ["ping/1"];
 
 const MAX_HANDSHAKE_BYTES = 4096;
+/** One frame from the peer, at most (UTF-16 units for text, bytes for binary): a bigger one breaks the protocol. */
+export const SESSION_FRAME_MAX = 60 * 1024;
+/**
+ * Frames received and not handled yet, at most: their count and their size together. Frames are handled one at a time,
+ * each awaited (a group frame is decrypted, checked and stored before the next), and the peer sends at the network's
+ * pace. A member back in a group answers a sync with a burst: a commit per epoch, its kept messages, the ones it hands
+ * on, edits, reactions. With a bound of 64 frames a phone handling them a few milliseconds each failed its session
+ * mid catch-up ("Session receive limit exceeded", 2026-10-07). The size bound keeps the old worst case in memory
+ * (64 frames of 60 KiB); the count only bounds a flood of tiny frames.
+ */
+export const SESSION_RECEIVE_PENDING = { frames: 1024, bytes: 64 * SESSION_FRAME_MAX } as const;
 const KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const NONCE = /^[A-Za-z0-9_-]{43}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
@@ -129,6 +140,11 @@ export class PairedSession {
   state: PairingState = { status: "negotiating" };
   /** The peer said nothing more within `authTimeoutMs`: the connection carried nothing, which proves nothing about the peer. */
   authTimedOut = false;
+  /**
+   * The peer sent faster than this side handles, past `SESSION_RECEIVE_PENDING`: the session ends, which is no proof
+   * of anything wrong with the peer (a burst of catch-up on a slow device), so the chat dials again.
+   */
+  overloaded = false;
   /** The seed's identity; null when a signer signs. */
   private readonly identity;
   private readonly signer?: Signer;
@@ -145,6 +161,7 @@ export class PairedSession {
   private confirming = false;
   private admission: Promise<void> | null = null;
   private pending = 0;
+  private pendingBytes = 0;
   private queue = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -195,8 +212,12 @@ export class PairedSession {
       this.options.rendezvousKeys.some(k => !KEY.test(k))) return this.fail("Invalid connection binding or unavailable transport");
     this.channel.onMessage = data => {
       if (this.stopped) return;
-      if ((typeof data === "string" ? data.length : data.length) > 60 * 1024 || ++this.pending > 64)
+      const size = data.length;
+      if (size > SESSION_FRAME_MAX) return this.fail("Session receive limit exceeded");
+      if (++this.pending > SESSION_RECEIVE_PENDING.frames || (this.pendingBytes += size) > SESSION_RECEIVE_PENDING.bytes) {
+        this.overloaded = true;
         return this.fail("Session receive limit exceeded");
+      }
       this.queue = this.queue.then(async () => {
         if (this.stopped) return;
         if (typeof data === "string" && data.startsWith('{"t":"pair-')) {
@@ -204,7 +225,7 @@ export class PairedSession {
           await this.receive(data);
         } else if (this.state.status === "ready") await this.options.onApplication(data);
       }).catch(() => this.fail("Invalid session negotiation"))
-        .finally(() => { this.pending--; });
+        .finally(() => { this.pending--; this.pendingBytes -= size; });
     };
     this.timer = setTimeout(() => { this.authTimedOut = true; this.fail("The peer did not finish authentication. Reconnect to try again."); }, this.options.authTimeoutMs ?? 180_000);
     this.update({ status: "negotiating" });

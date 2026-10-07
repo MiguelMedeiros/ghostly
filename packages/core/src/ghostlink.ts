@@ -3312,10 +3312,13 @@ export class GhostLink {
         onFailure: () => {
           // Another participation key than the one pinned: a device's one-time enrollment link says so (WISP 06).
           if (paired.state.keyMismatch) this.options.events?.onPeerKeyRefused?.();
-          // Dialled in and unproven, or a connection that carried nothing in time: neither says anything about the contact.
-          if (this.unproven(channel) || paired.authTimedOut) {
+          // Dialled in and unproven, a connection that carried nothing in time, or one that brought more than this side
+          // could handle at once (`overloaded`): none says anything about the contact. The chat dials again, and its
+          // DHT layer goes on meanwhile.
+          if (this.unproven(channel) || paired.authTimedOut || paired.overloaded) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
             if (this.unproven(channel)) traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            else if (paired.overloaded) traceLink(this.myPubKeyZ32, "receive-overload", { transport: binding?.transport ?? "webrtc/1" });
             else traceLink(this.myPubKeyZ32, "auth-timeout", { transport: binding?.transport ?? "webrtc/1" });
             migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));
             channel.close(); if (this.channel === channel) this.detach();

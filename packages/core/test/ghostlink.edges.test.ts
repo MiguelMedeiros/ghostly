@@ -10,6 +10,7 @@ import type { FileSink } from "../src/files";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
 import { signPairedSignal } from "../src/pairedSignal";
 import { createChannelPair } from "./helpers";
+import { SESSION_RECEIVE_PENDING } from "../src/pairedSession";
 
 // covers: chat.paired.session, chat.paired.send, chat.paired.receipts, chat.paired.reconnect, chat.paired.nickname-sync, chat.legacy.send, core.liveness, core.capabilities, transport.switch, payments.chat.frames
 
@@ -232,6 +233,37 @@ describe("paired chat messages from the peer", () => {
 });
 
 describe("paired session teardown", () => {
+  it("a burst of group frames handled slowly keeps the session: a member's catch-up on a phone (2026-10-07)", async () => {
+    // Each group frame is awaited (decrypted, checked, stored) before the next; here none is handled until the burst is in.
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const frames: unknown[] = [], onPairingState = vi.fn();
+    const t = linkedPair([{ groupsSupport: true }, { groupsSupport: true, events: { onPairingState, onGroupFrame: async frame => { await gate; frames.push(frame); } } }]);
+    await t.ready();
+    await vi.waitFor(() => expect(t.b.groupsSupport).toBe(true));
+    // A sync answer: commits, kept messages, handed-on ones, edits, reactions. Well past the 64 the session took before.
+    for (let i = 0; i < 200; i++) t.toB({ t: "group-msg", g: "g", n: i, c: "x".repeat(200) });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(t.b.isDataLinkOpen).toBe(true);
+    release();
+    await vi.waitFor(() => expect(frames).toHaveLength(200));
+    expect(onPairingState).not.toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
+    expect(t.b.isDataLinkOpen).toBe(true);
+  });
+
+  it("more than it can hold at once ends the session as no rejection of the contact: the chat may dial again", async () => {
+    const gate = new Promise<void>(() => {});
+    const onPairingState = vi.fn();
+    const t = linkedPair([{ groupsSupport: true }, { groupsSupport: true, events: { onPairingState, onGroupFrame: async () => { await gate; } } }]);
+    await t.ready();
+    await vi.waitFor(() => expect(t.b.groupsSupport).toBe(true));
+    for (let i = 0; i <= SESSION_RECEIVE_PENDING.frames; i++) t.toB({ t: "group-msg", g: "g", n: i });
+    await vi.waitFor(() => expect(t.b.isDataLinkOpen).toBe(false));
+    expect(onPairingState).toHaveBeenCalledWith(expect.objectContaining({ status: "error", error: "Session receive limit exceeded" }));
+    // Not a security rejection: no "unauthenticated" stop of the DHT layer, and a later session reports as any other.
+    expect((t.b as unknown as { securityRejected: boolean }).securityRejected).toBe(false);
+  });
+
   it("an oversized frame from the peer ends the session and leaves no way to send text", async () => {
     const onPairingState = vi.fn(), onDataLinkState = vi.fn();
     const t = linkedPair([{}, { events: { onPairingState, onDataLinkState } }]);
