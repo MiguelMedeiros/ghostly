@@ -1570,7 +1570,8 @@ export class Communities {
         await this.store.putGroup(group);
       },
       broadcast: (frame: CommunityFrame) => this.hearers(id, frame).filter(([, linkId]) => this.sendTo(linkId, frame)).length,
-      direct: (to, frame) => { if (this.mayHear(this.live.get(id), to, frame)) this.sendTo(this.host.edges(id).get(to), frame); },
+      // A frame someone the chain took out may not hear is left out, not refused: the rest of a catch-up answer goes on.
+      direct: (to, frame) => this.mayHear(this.live.get(id), to, frame) ? this.sendTo(this.host.edges(id).get(to), frame) : undefined,
       addressed: (to, frame) => {
         const edges = this.host.edges(id), live = this.live.get(id);
         const direct = edges.get(to);
@@ -1611,6 +1612,13 @@ export class Communities {
       adminWork: () => this.host.adminWork?.(id) ?? true,
       adminTurn: () => this.host.adminTurn?.(id) ?? Promise.resolve(true),
       relay: frame => { if (this.live.get(id)?.hub) for (const [, linkId] of this.hearers(id, frame)) this.sendTo(linkId, frame); },
+      // A catch-up answer goes a slice at a time, each once the member's app handled the last (`COMMUNITY_LIMITS.catchUpSlice`).
+      ...(this.host.linkHandled && {
+        handled: (to: string) => {
+          const edge = this.host.edges(id).get(to);
+          return edge && this.host.linkHandled ? this.host.linkHandled(edge) : Promise.resolve(false);
+        },
+      }),
     });
     this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], hubClocks: new HubClocks(() => session.myKey, HUB_CLOCK_READ_GAP_MS), head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
