@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-open"
+description = "Enables the app_open command without any pre-configured scope."
+commands.allow = ["app_open"]
+
+[[permission]]
+identifier = "deny-app-open"
+description = "Denies the app_open command without any pre-configured scope."
+commands.deny = ["app_open"]

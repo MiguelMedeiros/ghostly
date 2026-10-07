@@ -207,7 +207,8 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             let Some(guard) = crate::app_sandbox::Guard::parse(name) else {
                 return (400, error(&format!("no guard {name}")));
             };
-            match crate::app_sandbox::open_guarded(app, open.app, open.entry, guard, open.internet) {
+            match crate::app_sandbox::open_guarded(app, open.app, open.entry, guard, open.internet)
+            {
                 Ok(label) => (200, serde_json::to_string(&label).unwrap_or_default()),
                 Err(e) => (400, error(&e)),
             }

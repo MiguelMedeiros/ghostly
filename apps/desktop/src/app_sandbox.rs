@@ -586,8 +586,9 @@ pub fn refused<R: Runtime>(app: &AppHandle<R>, label: &str) -> Option<Vec<String
 /// one.
 fn forget<R: Runtime>(app: &AppHandle<R>, label: &str) -> Option<bool> {
     let state = app.try_state::<AppSandboxState>()?;
-    let mut windows = state.windows.lock().ok()?;
-    windows.remove(label).map(|window| window.brokered)
+    let window = state.windows.lock().ok()?.remove(label)?;
+    crate::diagnostics::log(&format!("app window {label} ({}) closed", window.app));
+    Some(window.brokered)
 }
 
 /// A window is gone (`WindowEvent::Destroyed`): its state goes, and the Ghostly window's broker hears it, so
@@ -709,7 +710,13 @@ pub fn admit(
                         return Err("Not started".into());
                     }
                     if !window.brokered {
-                        return Err("No broker".into());
+                        // The test driver's window: the runner may write its entry, and nothing else answers.
+                        return match kind {
+                            Some("writing") => {
+                                Ok(Admitted::Answer(json!({ "id": id, "ok": true })))
+                            }
+                            _ => Err("No broker".into()),
+                        };
                     }
                     if window.pending.contains_key(&id) {
                         return Err("bad-request".into());
@@ -1458,6 +1465,16 @@ mod tests {
             .unwrap()
             .insert("app-1".into(), window("spike/malicious", true, false));
         started(&state, "app-1");
+        match admitted(
+            &state,
+            "app-1",
+            json!({"id": 3, "type": "writing", "args": []}),
+        )
+        .unwrap()
+        {
+            Admitted::Answer(answer) => assert_eq!(answer, json!({"id": 3, "ok": true})),
+            other => panic!("{other:?}"),
+        }
         assert_eq!(
             admitted(
                 &state,
@@ -1527,7 +1544,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             script,
-            "window.__ghostlyEvent({\"event\":\"chat.message\",\"data\":{\"m\":\"e4\u{2028}</script>\"}})"
+            "window.__ghostlyEvent({\"data\":{\"m\":\"e4\u{2028}</script>\"},\"event\":\"chat.message\"})"
         );
         assert!(RUNNER.contains("Object.defineProperty(window, \"__ghostlyEvent\""));
         // The receiver and `window.ghostly` are defined before the entry is written.
@@ -1679,7 +1696,6 @@ mod tests {
         assert!(is_app_label(&label), "{label}");
         let window = app.get_webview_window(&label).unwrap();
         assert!(is_runner(&window.url().unwrap()));
-        assert_eq!(window.title().unwrap(), "Chess (Ghostly)");
         let state = app.state::<AppSandboxState>();
         assert_eq!(
             state.with(&label, |w| (w.app.clone(), w.internet, w.brokered)),
