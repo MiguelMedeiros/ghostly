@@ -25,14 +25,12 @@
   "card": {
     "ask": "اطلب من {{name}} رابطًا له",
     "contactCannot": "تطبيق {{name}} لا يشغّل التطبيقات بعد",
-    "install": "ثبّت لتلعب",
     "installed": "مثبّت",
     "label": "تطبيق: {{title}}",
     "needsOnline": "يحتاج {{title}} إلى أن تكونا متصلين معًا",
     "noLink": "لا رابط للتثبيت منه",
     "notChecked": "لم يُتحقق منه بعد",
     "opened": "فتحه {{name}} هنا",
-    "play": "العب",
     "shared": "شاركه {{name}}",
     "youOpened": "فتحته هنا",
     "youShared": "شاركته"
@@ -67,7 +65,7 @@
     "foundBy": "عثر عليه {{name}}",
     "inStore": "في {{name}}",
     "install": "تثبيت",
-    "installPlay": "ثبّت والعب",
+    "installOpen": "ثبّت وافتح",
     "ipInfo": "ينزّل Ghostly التطبيق من {{host}}، الذي يعرف عنوان IP الخاص بك ووقت التنزيل.",
     "ipInfoOffline": "لا يصل التطبيق إلى الإنترنت، لكن قد يعرف ناشره مع ذلك عنوان IP الخاص بك ومتى تفتحه.",
     "ipLine": "يُنزّل من {{host}}، الذي يرى عنوان IP الخاص بك.",

@@ -25,14 +25,12 @@
   "card": {
     "ask": "Ask {{name}} for a link to it",
     "contactCannot": "{{name}}'s app can't run apps yet",
-    "install": "Install to play",
     "installed": "Installed",
     "label": "App: {{title}}",
     "needsOnline": "{{title}} needs you both online",
     "noLink": "No link to install from",
     "notChecked": "Not checked yet",
     "opened": "{{name}} opened it here",
-    "play": "Play",
     "shared": "{{name}} shared it",
     "youOpened": "You opened it here",
     "youShared": "You shared it"
@@ -67,7 +65,7 @@
     "foundBy": "Found by {{name}}",
     "inStore": "In {{name}}",
     "install": "Install",
-    "installPlay": "Install and play",
+    "installOpen": "Install and open",
     "ipInfo": "Ghostly downloads the app from {{host}}, which learns your IP address and when.",
     "ipInfoOffline": "The app has no internet access, but its publisher may still learn your IP address and when you open it.",
     "ipLine": "Downloads from {{host}}, which sees your IP address.",

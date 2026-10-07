@@ -25,14 +25,12 @@
   "card": {
     "ask": "Peça a {{name}} um link para ele",
     "contactCannot": "O app de {{name}} ainda não roda apps",
-    "install": "Instalar para jogar",
     "installed": "Instalado",
     "label": "App: {{title}}",
     "needsOnline": "{{title}} precisa de vocês dois online",
     "noLink": "Sem link para instalar",
     "notChecked": "Ainda não verificado",
     "opened": "{{name}} abriu aqui",
-    "play": "Jogar",
     "shared": "{{name}} compartilhou",
     "youOpened": "Você abriu aqui",
     "youShared": "Você compartilhou"
@@ -67,7 +65,7 @@
     "foundBy": "Encontrado por {{name}}",
     "inStore": "Em {{name}}",
     "install": "Instalar",
-    "installPlay": "Instalar e jogar",
+    "installOpen": "Instalar e abrir",
     "ipInfo": "O Ghostly baixa o app de {{host}}, que fica sabendo do seu endereço IP e de quando.",
     "ipInfoOffline": "O app não tem acesso à internet, mas o publicador ainda pode saber seu endereço IP e quando você o abre.",
     "ipLine": "Baixa de {{host}}, que vê seu endereço IP.",

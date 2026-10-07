@@ -7,7 +7,7 @@ import { STORE_URL, serveStore, testStore } from "../support/appStore";
  * The Apps page and the app card (WISP 1200 § Discovery, § Apps sent in a chat; WISP 405 § An app), on the e2e suite's
  * build (VITE_APPS_TEST). A store at a raw.githubusercontent.com URL, routed in the test: Ana adds it, installs Chess
  * from it, and opens it in her chat with Bob. Bob gets the card, which asks nothing of any host until he presses
- * "Install to play"; then the install screen, and Chess opens in the chat for him too.
+ * "Install and open"; then the install screen, and Chess opens in the chat for him too.
  */
 
 async function setNickname(peer: Peer, nick: string): Promise<void> {
@@ -69,7 +69,7 @@ test("install from a store, open it in a chat, and the contact installs it from 
   await closeApp(ana);
   const anaCard = chat(ana).getByTestId("app-card");
   await expect(anaCard).toContainText("You opened it here");
-  await expect(anaCard.getByTestId("app-card-play")).toBeVisible();
+  await expect(anaCard.getByTestId("app-card-open")).toBeVisible();
 
   // Bob sees the card from its own data: nothing fetched until he presses Install.
   const card = chat(bob).getByTestId("app-card");
@@ -87,6 +87,6 @@ test("install from a store, open it in a chat, and the contact installs it from 
   expect(bobAsked.every((url) => url.startsWith("https://raw.githubusercontent.com/ghostly-e2e/chess/"))).toBe(true);
   await bobScreen.getByTestId("app-install-confirm").click();
   await closeApp(bob);
-  await expect(card.getByTestId("app-card-play")).toBeVisible();
+  await expect(card.getByTestId("app-card-open")).toBeVisible();
   await expect(card.getByTestId("app-card-check")).toHaveText("Installed");
 });

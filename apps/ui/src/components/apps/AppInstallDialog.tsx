@@ -167,7 +167,7 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
  * The install screen for an app to fetch (a pasted URL, a store's listing, a chat card): fetched and checked when it
  * opens, which is when the person pressed Install or chose it, and stored only on Install.
  */
-export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onInstalled, playAfter }: {
+export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onInstalled, openAfter }: {
   source: AppSource;
   /** Already fetched and checked for this screen (a pasted URL read to see whether it is an app). */
   fetched?: AppPreview;
@@ -177,8 +177,8 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   sentBy?: string;
   onClose: () => void;
   onInstalled?: (app: InstalledAppView) => void;
-  /** The button says "Install and play" (from a chat card, where installing opens it there). */
-  playAfter?: boolean;
+  /** The button says "Install and open" (from a chat card, where installing opens it there). */
+  openAfter?: boolean;
 }) {
   const { t } = useI18n();
   const titleId = useId();
@@ -232,7 +232,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
         <Button onClick={onClose}>{t("common.cancel")}</Button>
         {preview && !blocked && (
           <Button variant="primary" data-testid="app-install-confirm" disabled={busy} onClick={() => void install()}>
-            {preview.install === "update" ? t("apps.install.update") : playAfter ? t("apps.install.installPlay") : t("apps.install.install")}
+            {preview.install === "update" ? t("apps.install.update") : openAfter ? t("apps.install.installOpen") : t("apps.install.install")}
           </Button>
         )}
       </div>

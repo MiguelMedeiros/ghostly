@@ -1,4 +1,4 @@
-import { chat, expect, openServicesPage, say, test, type Peer } from "../support/fixtures";
+import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
@@ -17,13 +17,11 @@ async function details(p: Peer): Promise<void> {
 
 /** Ghostly's own Offline switch, on the Services page: the chat has to go somewhere it can be seen. */
 async function setOnline(p: Peer, online: boolean): Promise<void> {
-  // Back to where it was after: the Services page is reached through Profile (Apps has its place in the suite's build).
-  const from = p.page.url();
-  await openServicesPage(p.page);
+  await p.page.getByTestId("account-services").click();
   const toggle = p.page.getByTestId("online-toggle");
   if ((await toggle.textContent())?.includes(online ? "Offline" : "Online")) await toggle.click();
   await expect(toggle).toHaveText(online ? "Online" : "Offline");
-  await p.page.goto(from);
+  await p.page.goBack();
   await expect(p.page.getByPlaceholder("Message…")).toBeVisible();
 }
 

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, guardArchive, openProfilePage, openServicesPage, test } from "../support/fixtures";
+import { expect, guardArchive, openProfilePage, test } from "../support/fixtures";
 import { attachMint } from "../support/mint";
 
 /**
@@ -55,11 +55,11 @@ for (const mobile of [false, true]) {
     const tab = (name: string) => () => page.getByTestId("mobile-tabs").getByRole("button", { name }).click();
     const bar = (id: string) => () => page.getByTestId(id).click();
     const places: [string, () => Promise<void>][] = mobile
-      // Apps holds Services' place in the suite's build (WISP 1200); Services is reached through Profile there.
+      // Apps holds Services' tab on a phone in the suite's build (WISP 1200); a wide screen has both.
       ? [["wallet", tab("Wallets")], ["identities", tab("Identities")], ["apps", tab("Apps")], ["settings", tab("Settings")]]
       : [
           ["profile", () => openProfilePage(page)],
-          ["identities", bar("account-identities")], ["apps", bar("account-apps")], ["services", () => openServicesPage(page)], ["settings", bar("account-settings")], ["wallet", bar("wallet-chip")],
+          ["identities", bar("account-identities")], ["apps", bar("account-apps")], ["services", bar("account-services")], ["settings", bar("account-settings")], ["wallet", bar("wallet-chip")],
         ];
     for (const [path, open] of places) {
       await page.goto("/");

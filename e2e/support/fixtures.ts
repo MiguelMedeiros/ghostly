@@ -410,16 +410,6 @@ export async function getTestCoins(peer: Peer): Promise<void> {
   await expect(peer.page.getByTestId("test-coins-result")).toHaveText(`+${TEST_COINS.toLocaleString("en-US")} test sats`, { timeout: 60_000 });
 }
 
-/**
- * The Services page, through the Profile page's Services row: the suite's build has Apps on (VITE_APPS_TEST), and Apps
- * then takes Services' place under the list (WISP 1200; the bar holds five places).
- */
-export async function openServicesPage(page: Page): Promise<void> {
-  await openProfilePage(page);
-  await page.getByTestId("profile-page").getByRole("button", { name: /^Services/ }).click();
-  await expect(page.getByTestId("my-services")).toBeVisible();
-}
-
 /** The Profile page, from the account bar: its Profile place opens the account switcher, whose first entry is the page. */
 export async function openProfilePage(page: Page): Promise<void> {
   await page.getByTestId("account-profile").click();

@@ -209,7 +209,9 @@ async function navProblems(page: Page): Promise<string[]> {
     const edge = nav.getBoundingClientRect();
     // The places themselves: the account switcher's chevron rides on Profile's corner and is not one.
     const items = [...nav.querySelectorAll("button:not(.profile-switcher-chevron)")];
-    if (items.length !== 5) problems.push(`${items.length} items, not 5`);
+    // Five on a phone; six under a wide screen's list once Apps is there (on in the suite's build, WISP 1200).
+    const places = nav.getAttribute("data-testid") === "mobile-tabs" ? 5 : nav.querySelector("[data-testid=account-apps]") ? 6 : 5;
+    if (items.length !== places) problems.push(`${items.length} items, not ${places}`);
     for (const item of items) {
       const r = item.getBoundingClientRect(), name = item.getAttribute("aria-label") ?? item.textContent;
       if (r.width < 40 || r.height < 40) problems.push(`${name} is ${Math.round(r.width)}×${Math.round(r.height)}`);
@@ -282,7 +284,7 @@ test("the account bar names its places whenever the names fit, however long the 
   const { page } = await peer("alice", { viewport: { width: 1440, height: 900 } });
   // The list at its default width (420px): five places of about 77px.
   expect(Math.round((await page.getByTestId("account-bar").boundingBox())!.width)).toBeGreaterThanOrEqual(419);
-  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: ["Personal", "Wallets", "Identities", "Apps", "Settings"] });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: ["Personal", "Wallets", "Identities", "Apps", "Services", "Settings"] });
 
   // A profile name wider than its place ends in "…" (whole in the tooltip) and hides nothing.
   const long = "This is Fine, a longer name";
@@ -290,14 +292,14 @@ test("the account bar names its places whenever the names fit, however long the 
   await page.getByTestId("profile-name").fill(long);
   await page.getByTestId("profile-name").press("Enter");
   await expect(page.getByTestId("account-profile")).toHaveAttribute("title", `Profile: ${long}`);
-  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], nameCut: true, visible: [long, "Wallets", "Identities", "Apps", "Settings"] });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], nameCut: true, visible: [long, "Wallets", "Identities", "Apps", "Services", "Settings"] });
   expect(await navProblems(page)).toEqual([]);
 
   // In Portuguese, whose names are longer, they still fit at 420px.
   await page.getByTestId("account-settings").click();
   await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identidades");
-  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: [long, "Carteiras", "Identidades", "Apps", "Ajustes"] });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: [long, "Carteiras", "Identidades", "Apps", "Serviços", "Ajustes"] });
 
   // At the list's narrowest (280px), "Identidades" would be cut: all the labels step aside, and come back with the width.
   const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;
@@ -309,7 +311,8 @@ test("the account bar names its places whenever the names fit, however long the 
   await page.mouse.up();
   await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [] });
 
-  // In English, every place's name fits even at 280px, so the labels stay.
+  // In English, with six places (Apps beside Services: on in the suite's build, WISP 1200), "Identities" and "Services"
+  // do not fit at 280px either: the labels step aside together, the icons, their tooltips and names stay.
   await choose(page.getByTestId("settings-language"), "en");
   await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identities");
   const again = (await page.getByTestId("sidebar-resize").boundingBox())!;
@@ -318,7 +321,7 @@ test("the account bar names its places whenever the names fit, however long the 
   await page.mouse.move(0, handle.y + 100, { steps: 5 });
   await page.mouse.up();
   expect(Math.round((await page.getByTestId("account-bar").boundingBox())!.width)).toBeLessThanOrEqual(281);
-  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [] });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: true, visible: [] });
   expect(await navProblems(page)).toEqual([]);
 });
 

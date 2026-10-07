@@ -25,14 +25,12 @@
   "card": {
     "ask": "{{name}} にリンクを頼む",
     "contactCannot": "{{name}} のアプリはまだアプリを実行できません",
-    "install": "インストールして遊ぶ",
     "installed": "インストール済み",
     "label": "アプリ：{{title}}",
     "needsOnline": "{{title}} には二人ともオンラインである必要があります",
     "noLink": "インストール用のリンクがありません",
     "notChecked": "未確認",
     "opened": "{{name}} がここで開きました",
-    "play": "遊ぶ",
     "shared": "{{name}} が共有しました",
     "youOpened": "あなたがここで開きました",
     "youShared": "あなたが共有しました"
@@ -67,7 +65,7 @@
     "foundBy": "{{name}} が見つけました",
     "inStore": "{{name}} にあります",
     "install": "インストール",
-    "installPlay": "インストールして遊ぶ",
+    "installOpen": "インストールして開く",
     "ipInfo": "Ghostly は {{host}} からアプリをダウンロードし、そのホストにはあなたの IP アドレスと時刻が伝わります。",
     "ipInfoOffline": "このアプリはインターネットにアクセスできませんが、それでも発行者があなたの IP アドレスと開いた時刻を知る可能性があります。",
     "ipLine": "{{host}} からダウンロードします。そのホストにはあなたの IP アドレスが見えます。",

@@ -152,10 +152,10 @@ describe("with the apps flag on", () => {
     expect(await screen.findByRole("heading", { name: "Shared services with Ana" })).toBeInTheDocument();
   });
 
-  it("puts Apps in Services' place, in the sidebar and in a phone's tabs: five places each", async () => {
+  it("puts Apps beside Services under the list, and in Services' tab on a phone (five tabs)", async () => {
     renderApp(<><AccountBar /><MobileTabBar /></>);
     expect(await screen.findByTestId("account-apps")).toHaveAccessibleName("Apps");
-    expect(screen.queryByTestId("account-services")).not.toBeInTheDocument();
+    expect(screen.getByTestId("account-services")).toBeInTheDocument();
     expect(screen.getByTestId("mobile-tab-apps")).toHaveTextContent("Apps");
     expect(screen.queryByTestId("mobile-tab-services")).not.toBeInTheDocument();
     expect(screen.getAllByTestId(/^mobile-tab-[a-z]+$/)).toHaveLength(5);
@@ -192,19 +192,19 @@ describe("with the apps flag on", () => {
     expect(within(screenEl).getByTestId("app-ip-line-text")).toHaveTextContent(
       "Ghostly downloads the app from raw.githubusercontent.com, which learns your IP address and when. The app has no internet access, but its publisher may still learn your IP address and when you open it.");
     expect(within(screenEl).queryByTestId("app-webkit-line")).not.toBeInTheDocument();
-    await user.click(within(screenEl).getByRole("button", { name: "Install and play" }));
+    await user.click(within(screenEl).getByRole("button", { name: "Install and open" }));
     expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat"] }]);
     // Installing from a card opens it in that chat.
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1"));
     expect(fetches).toEqual([]);
   });
 
-  it("says the app needs you both online while the contact is not live, and Play once installed", async () => {
+  it("says the app needs you both online while the contact is not live, and Open once installed", async () => {
     fakeEngine.on("appList", () => [installed()]);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     act(() => fakeEngine.update({ links: [ana(false)] }));
     expect(await screen.findByTestId("app-card-waiting")).toHaveTextContent("Chess needs you both online");
-    expect(await screen.findByTestId("app-card-play")).toBeInTheDocument();
+    expect(await screen.findByTestId("app-card-open")).toBeInTheDocument();
     expect(screen.queryByTestId("app-card-install")).not.toBeInTheDocument();
   });
 

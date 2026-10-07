@@ -25,14 +25,12 @@
   "card": {
     "ask": "向 {{name}} 要一个链接",
     "contactCannot": "{{name}} 的应用还不能运行小应用",
-    "install": "安装后开玩",
     "installed": "已安装",
     "label": "应用：{{title}}",
     "needsOnline": "{{title}} 需要你们都在线",
     "noLink": "没有可安装的链接",
     "notChecked": "尚未检查",
     "opened": "{{name}} 在这里打开了它",
-    "play": "开玩",
     "shared": "{{name}} 分享了它",
     "youOpened": "你在这里打开了它",
     "youShared": "你分享了它"
@@ -67,7 +65,7 @@
     "foundBy": "由 {{name}} 找到",
     "inStore": "在 {{name}} 中",
     "install": "安装",
-    "installPlay": "安装并开玩",
+    "installOpen": "安装并打开",
     "ipInfo": "Ghostly 从 {{host}} 下载应用，该主机会知道你的 IP 地址和下载时间。",
     "ipInfoOffline": "该应用无法访问互联网，但其发布者仍可能知道你的 IP 地址以及你何时打开它。",
     "ipLine": "从 {{host}} 下载，该主机会看到你的 IP 地址。",
