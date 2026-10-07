@@ -8,7 +8,7 @@ import { AppInstallDialog } from "./AppInstallDialog";
 import { useInstalledApps } from "../../lib/apps/installed";
 import { appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
-import { appErrorText } from "../../lib/apps/errors";
+import { appErrorCode, appErrorText } from "../../lib/apps/errors";
 
 /*
  * An app card in a 1:1 chat (WISP 405 § An app, WISP 1200 § Apps sent in a chat): "Ana opened Chess", drawn from its
@@ -16,7 +16,8 @@ import { appErrorText } from "../../lib/apps/errors";
  * the publisher's fingerprint from `ref`, "Not checked yet". Nothing is fetched to show it: the bundle is fetched,
  * checked and shown on the install screen only when the person presses "Install and open", and installing opens it in
  * this chat. Once the app is installed here, the card says Open. While the contact is not live it says the app needs
- * you both online.
+ * you both online. A version a store of the person's removed does not open; the warning offers "Run anyway" (WISP 1200
+ * § Takedowns), which a revoked one never gets.
  */
 export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks }: {
   card: AppCard;
@@ -34,12 +35,16 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const platform = useServicesPlatform();
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [removed, setRemoved] = useState(false);
   const app = installed?.find((a) => a.ref === card.ref);
   const named = card.version ? `${card.title} ${card.version}` : card.title;
   const who = mine ? (card.opened ? t("apps.card.youOpened") : t("apps.card.youShared"))
     : card.opened ? t("apps.card.opened", { name: contact }) : t("apps.card.shared", { name: contact });
   const waiting = appsUnavailable(platform?.getPeer(peerKey), card.title, contact, t);
-  const open = () => { setError(null); void openApp(card.ref, linkId).catch((e: unknown) => setError(appErrorText(e, t))); };
+  const open = (runAnyway = false) => {
+    setError(null); setRemoved(false);
+    void openApp(card.ref, linkId, { runAnyway }).catch((e: unknown) => { setError(appErrorText(e, t)); setRemoved(appErrorCode(e) === "removed"); });
+  };
   return (
     <div className="px-3 py-2.5 space-y-2" data-testid="app-card" data-ref={card.ref}>
       <div className="flex items-start gap-3">
@@ -54,11 +59,12 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         </div>
       </div>
       {waiting && <p className="text-xs text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
-      {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+      {error && <p role="alert" className="text-xs text-danger" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
-        {app ? <Button variant="primary" data-testid="app-card-open" onClick={open}>{t("apps.page.open")}</Button>
+        {app ? <Button variant="primary" data-testid="app-card-open" onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.install.installOpen")}</Button>
             : <span className="text-xs text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
+        {app && removed && <Button data-testid="app-card-run-anyway" onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>
       {installing && card.url && (

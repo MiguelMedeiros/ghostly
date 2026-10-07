@@ -1,0 +1,211 @@
+import { chat, expect, test, type Peer } from "../support/fixtures";
+import { pair } from "../support/paired";
+import { composerRow } from "../support/composer";
+import { CHESS_REPO, CHESS_STORE_URL, ChessPublisher, STORE_NAME, chessFrame, colourOf, installFromStore, miniApp, move } from "../support/chessApp";
+
+/*
+ * Chess end to end (WISP 1200; WISP 405 § An app), on the e2e suite's build (VITE_APPS_TEST): the real Chess, built
+ * from apps/mini/chess, bundled and signed by the headless CLI with keys made for the test, in a store the CLI signed,
+ * served at raw.githubusercontent.com URLs by the test. Ana installs it from the store and opens it in her chat with
+ * Bob; Bob installs it from her card, which asks nothing of any host before he presses "Install and open"; they play
+ * Scholar's mate over `paired-app`, and Bob's game is back after he reloads. Then what a client refuses: a tampered
+ * bundle, a lower sequence, a version a store removed (stopped until "Run anyway"), a version its publisher revoked
+ * (stopped for good).
+ */
+
+async function setNickname(peer: Peer, nick: string): Promise<void> {
+  await peer.page.goto("/#/settings");
+  await peer.page.getByPlaceholder("Enter your nickname...").fill(nick);
+  await peer.page.goto("/#/");
+}
+
+/** What the person reads about a bundle changed after it was signed. */
+const TAMPERED = /^Ghostly won't install it: |^Not signed correctly/;
+
+/** Scholar's mate: 1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6?? 4. Qxf7#. */
+const SCHOLARS_MATE: [string, string][] = [["e2", "e4"], ["e7", "e5"], ["f1", "c4"], ["b8", "c6"], ["d1", "h5"], ["g8", "f6"], ["h5", "f7"]];
+
+test("two people install Chess, play Scholar's mate in their chat, and the game is back after a reload", {
+  tag: ["@feature:apps.chess.web", "@feature:apps.chess", "@feature:apps.chat.card", "@feature:apps.chat.wire"],
+}, async ({ peer }) => {
+  test.setTimeout(6 * 60_000);
+  const publisher = new ChessPublisher();
+  const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
+  publisher.signStore({ apps: [chess] });
+  const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
+  const [, bobAsked] = await Promise.all([publisher.serve(ana.context), publisher.serve(bob.context)]);
+  await setNickname(ana, "Ana");
+  await setNickname(bob, "Bob");
+
+  // 1. Ana installs Chess from the store, then opens it in her chat with Bob.
+  await installFromStore(ana.page);
+  await ana.page.goto("/#/");
+  await pair(ana, bob);
+  await (await composerRow(ana.page, "composer-apps")).click();
+  await ana.page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
+  await expect(miniApp(ana.page)).toBeVisible();
+  await expect(chessFrame(ana.page).locator(".status")).toHaveText("Waiting for your contact to open Chess");
+
+  // 2. Bob's card, drawn from its own data: not one request until he presses "Install and open".
+  const card = chat(bob).getByTestId("app-card");
+  await expect(card).toContainText("Chess 1.2.0");
+  await expect(card).toContainText("Ana opened it here");
+  await expect(card.getByTestId("app-card-check")).toHaveText("Not checked yet");
+  expect(bobAsked).toEqual([]);
+  await card.getByTestId("app-card-install").click();
+  const screen = bob.page.getByTestId("app-install");
+  await expect(screen.getByTestId("app-sent-by")).toHaveText("Sent by Ana");
+  await expect(screen.getByTestId("app-publisher-name")).toHaveText("Unknown publisher");
+  expect(bobAsked).toContain(chess.url);
+  expect(bobAsked.every((url) => url.startsWith(CHESS_REPO))).toBe(true);
+  await screen.getByTestId("app-install-confirm").click();
+  await expect(miniApp(bob.page)).toBeVisible();
+
+  // 3. The toss gives each a colour; they play Scholar's mate by clicking squares in their frames.
+  const [anaColour, bobColour] = await Promise.all([colourOf(ana.page), colourOf(bob.page)]);
+  expect(anaColour).not.toBe(bobColour);
+  const [white, black] = anaColour === "w" ? [ana, bob] : [bob, ana];
+  for (const [i, [from, to]] of SCHOLARS_MATE.entries()) {
+    const [mover, watcher] = i % 2 === 0 ? [white, black] : [black, white];
+    await move(mover.page, watcher.page, from, to);
+  }
+  await expect(chessFrame(white.page).locator(".status")).toHaveText("You win: checkmate");
+  await expect(chessFrame(black.page).locator(".status")).toHaveText("You lose: checkmate");
+  for (const side of [white, black]) {
+    await expect(chessFrame(side.page).locator('[data-square="f7"]')).toHaveClass(/\bw\b/);
+    await expect(chessFrame(side.page).locator('[data-square="f7"]')).toHaveText(/♛/);
+  }
+
+  // 4. Bob reloads: Chess is closed, the chat is live again, and opening it from the card brings the game back
+  // (his storage in this chat, and Ana's catch-up).
+  await bob.page.reload();
+  await expect(miniApp(bob.page)).toHaveCount(0);
+  await expect(bob.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
+  await expect(card.getByTestId("app-card-check")).toHaveText("Installed");
+  await expect(card.getByTestId("app-card-waiting")).toHaveCount(0);
+  await card.getByTestId("app-card-open").click();
+  await expect(miniApp(bob.page)).toBeVisible();
+  const bobsBoard = chessFrame(bob.page);
+  await expect(bobsBoard.locator(".status")).toHaveText(bob === white ? "You win: checkmate" : "You lose: checkmate");
+  await expect(bobsBoard.locator(".side")).toHaveText(bobColour === "w" ? "You play white" : "You play black");
+  await expect(bobsBoard.locator('[data-square="f7"]')).toHaveText(/♛/);
+  await expect(bobsBoard.locator('[data-square="e4"]')).toHaveText(/♟/);
+  await expect(bobsBoard.locator('[data-square="c4"]')).toHaveText(/♝/);
+  await expect(bobsBoard.locator('[data-square="f6"]')).toHaveText(/♞/);
+  await expect(chessFrame(ana.page).locator(".status")).toHaveText(ana === white ? "You win: checkmate" : "You lose: checkmate");
+});
+
+test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", "@feature:apps.bundle"] }, async ({ peer }) => {
+  const publisher = new ChessPublisher();
+  const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
+  publisher.signStore({ apps: [chess] });
+  // One byte of Chess's own script changed after the publisher signed it.
+  const tampered = chess.bytes.slice();
+  tampered[tampered.length - 200] ^= 0x01;
+  publisher.files.set(chess.url, tampered);
+  const ana = await peer("ana");
+  await publisher.serve(ana.context);
+
+  await ana.page.goto("/#/apps");
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(chess.url);
+  await ana.page.getByTestId("apps-add-check").click();
+  const dialog = ana.page.getByTestId("apps-add-dialog");
+  await expect(dialog.getByTestId("apps-add-error")).toHaveText(TAMPERED);
+  await expect(ana.page.getByTestId("app-install")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  // From the store's listing too, whose digest it does not match.
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(CHESS_STORE_URL);
+  await ana.page.getByTestId("apps-add-check").click();
+  await ana.page.getByTestId("apps-add-store-confirm").click();
+  const listed = ana.page.getByTestId("app-store").filter({ hasText: STORE_NAME });
+  await listed.getByRole("button", { name: new RegExp(STORE_NAME) }).click();
+  await listed.getByTestId("app-listing-install").click();
+  const screen = ana.page.getByTestId("app-install");
+  await expect(screen.getByTestId("app-install-error")).toHaveText(TAMPERED);
+  await expect(screen.getByTestId("app-install-confirm")).toHaveCount(0);
+  await screen.getByRole("button", { name: "Cancel" }).click();
+  await expect(ana.page.getByTestId("apps-none")).toBeVisible();
+});
+
+test("a lower sequence is not installed over a newer one", { tag: ["@feature:apps.chess.web", "@feature:apps.updates"] }, async ({ peer }) => {
+  const publisher = new ChessPublisher();
+  const older = publisher.publish({ version: "1.2.0", sequence: 1, path: "v1/app.ghostlyapp" });
+  const newer = publisher.publish({ version: "1.3.0", sequence: 2, path: "v2/app.ghostlyapp" });
+  publisher.signStore({ apps: [newer] });
+  const ana = await peer("ana");
+  await publisher.serve(ana.context);
+  await installFromStore(ana.page);
+  await expect(ana.page.getByTestId("installed-app")).toContainText("1.3.0");
+
+  // The older version by its link: the install screen says why, and offers no Install.
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(older.url);
+  await ana.page.getByTestId("apps-add-check").click();
+  const screen = ana.page.getByTestId("app-install");
+  await expect(screen.getByTestId("app-install-blocked")).toHaveText("You have a newer version.");
+  await expect(screen.getByTestId("app-install-confirm")).toHaveCount(0);
+  await screen.getByRole("button", { name: "Cancel" }).click();
+
+  // The store going back to the older one changes nothing: the newer stays installed.
+  publisher.signStore({ apps: [older] });
+  await ana.page.getByTestId("app-store").getByTestId("app-store-refresh").click();
+  await ana.page.goto("/#/");
+  await ana.page.goto("/#/apps");
+  await expect(ana.page.getByTestId("installed-app")).toContainText("1.3.0");
+  await expect(ana.page.getByTestId("installed-app-open")).toBeVisible();
+});
+
+test("a version a store removed stays stopped until Run anyway", { tag: ["@feature:apps.chess.web", "@feature:apps.engine.installed", "@feature:apps.page"] }, async ({ peer }) => {
+  const publisher = new ChessPublisher();
+  const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
+  publisher.signStore({ apps: [chess] });
+  const ana = await peer("ana");
+  await publisher.serve(ana.context);
+  await installFromStore(ana.page);
+
+  publisher.signStore({ apps: [chess], removed: [{ app: chess, reason: "Sends your moves to a server" }] });
+  await ana.page.getByTestId("app-store").getByTestId("app-store-refresh").click();
+  const row = ana.page.getByTestId("installed-app");
+  await expect(row.getByTestId("installed-app-hint")).toHaveText("Stopped");
+  await expect(row.getByTestId("installed-app-open")).toHaveCount(0);
+
+  await row.getByRole("button", { name: /Chess: details/ }).click();
+  const details = ana.page.getByTestId("app-details");
+  await expect(details.getByTestId("app-run-line")).toHaveText(`Removed by ${STORE_NAME}: Sends your moves to a server`);
+  await expect(details.getByTestId("app-open")).toHaveCount(0);
+  await details.getByTestId("app-keep-stopped").click();
+  await expect(miniApp(ana.page)).toHaveCount(0);
+
+  // Run anyway, the person's own choice: it runs.
+  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await details.getByTestId("app-run-anyway").click();
+  await expect(miniApp(ana.page)).toBeVisible();
+  await expect(chessFrame(ana.page).locator(".status")).toHaveText("White to move");
+});
+
+test("a version its publisher revoked never runs", { tag: ["@feature:apps.chess.web", "@feature:apps.engine.installed", "@feature:apps.page"] }, async ({ peer }) => {
+  const publisher = new ChessPublisher();
+  const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
+  publisher.signStore({ apps: [chess] });
+  const ana = await peer("ana");
+  await publisher.serve(ana.context);
+  await installFromStore(ana.page);
+  await expect(ana.page.getByTestId("installed-app-open")).toBeVisible();
+
+  // The publisher revokes it beside the bundle; the next update check (opening the Apps page) reads it.
+  publisher.revoke(chess, "Leaked the game to the wrong chat");
+  await ana.page.goto("/#/");
+  await ana.page.goto("/#/apps");
+  const row = ana.page.getByTestId("installed-app");
+  await expect(row.getByTestId("installed-app-hint")).toHaveText("Stopped");
+  await expect(row.getByTestId("installed-app-open")).toHaveCount(0);
+  await row.getByRole("button", { name: /Chess: details/ }).click();
+  const details = ana.page.getByTestId("app-details");
+  await expect(details.getByTestId("app-run-line")).toHaveText("Its publisher revoked this version.");
+  await expect(details.getByTestId("app-open")).toHaveCount(0);
+  await expect(details.getByTestId("app-run-anyway")).toHaveCount(0);
+  await expect(details.getByTestId("app-keep-stopped")).toBeVisible();
+});

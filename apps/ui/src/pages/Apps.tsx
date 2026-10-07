@@ -13,7 +13,7 @@ import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInst
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { useAppsState } from "../lib/apps/flag";
 import { refreshInstalledApps, useInstalledApps } from "../lib/apps/installed";
-import { openApp } from "../lib/apps/open";
+import { openApp, type OpenAppOptions } from "../lib/apps/open";
 import { appErrorText } from "../lib/apps/errors";
 import { date } from "../lib/identities";
 
@@ -134,7 +134,7 @@ export function Apps() {
 
   if (state === "checking") return null;
   if (!available) return <Navigate to="/" replace />;
-  const open = (app: InstalledAppView) => void openApp(app.ref, null).catch(fail);
+  const open = (app: InstalledAppView, options?: OpenAppOptions) => void openApp(app.ref, null, options).catch(fail);
   const shown = details ? installed?.find((a) => a.ref === details) : undefined;
   return (
     <Page title={t("apps.title")} width="md" testId="apps-page" overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" />}

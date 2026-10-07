@@ -17,7 +17,7 @@ const deployed = process.env.E2E_WEB_URL;
 
 export default defineConfig({
   testDir: "./web",
-  testMatch: ["profile-backup-file.spec.ts", "device-signing-key.spec.ts", "apps-sandbox.spec.ts"],
+  testMatch: ["profile-backup-file.spec.ts", "device-signing-key.spec.ts", "apps-sandbox.spec.ts", "apps-chess.spec.ts"],
   outputDir: "../test-results/webkit",
   globalSetup: "./support/headlessBuild.ts",
   // One test at a time: Playwright's WebKit keeps one origin-private file system per origin for every browser profile

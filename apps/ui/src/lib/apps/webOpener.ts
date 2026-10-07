@@ -18,10 +18,11 @@ export interface WebOpenerOptions {
 }
 
 export function webOpener({ apps, closeLabel, nameIn, onStop }: WebOpenerOptions): AppOpener {
-  return async (ref, linkId) => {
+  return async (ref, linkId, options) => {
     const host = apps();
     if (!host) throw new Error("Apps cannot run in this app");
-    const entry = await host.entry(ref);
+    // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
+    const entry = await host.entry(ref, options?.runAnyway === true);
     // The runner from what the person granted; its server must send that runner's policy.
     const internet = entry.permissions.includes("internet");
     if (!(await runnerAvailable(runnerFor(host, entry), fetch, internet))) throw new Error("This server does not send the policy apps run under");
