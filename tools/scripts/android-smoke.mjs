@@ -98,6 +98,18 @@ try {
     await page.evaluate(() => { location.hash = "#/"; });
   });
 
+  // The first HTTPS requests after start, before anything else asks: a slow first certificate check (Android's
+  // trust store loaded on first use, a revocation check) or a slow first DNS answer shows here.
+  await measure("https", "first HTTPS requests after start", async () => {
+    const times = [];
+    for (const url of ["https://example.com/", "https://pkarr.pubky.org/", "https://example.com/"]) {
+      const t = Date.now();
+      const answer = await page.evaluate((url) => window.__TAURI_INTERNALS__.invoke("link_preview_fetch", { url, kind: "page" }).then(() => "ok", (e) => String(e)), url);
+      times.push(`${new URL(url).host} ${Date.now() - t} ms ${answer === "ok" ? "" : answer.slice(0, 120)}`.trim());
+    }
+    record("https", "first HTTPS requests after start", null, times.join(", "));
+  });
+
   // New, as a person would: how long the invite takes to be published (the pairing scene leaves "publishing"), with
   // the app's own relays and DHT, before the probe changes any setting.
   await measure("pairing", "New: invite published", async () => {
