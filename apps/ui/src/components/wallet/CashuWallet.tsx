@@ -19,7 +19,7 @@ import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { lightningStateLabel, paymentStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
-import { errorText } from "../../lib/errorText";
+import { problemLine, problemText } from "../../lib/problemText";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -110,7 +110,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   /** A Lightning address or LNURL: resolved and paid step by step, through the same source. */
   const [destination, destinationError] = (() => {
     if (isToken || pasted) return [null, ""] as const;
-    try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, errorText(e, t)] as const; }
+    try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, problemText(e, t).title] as const; }
   })();
 
   const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setConfirming(false); };
@@ -149,7 +149,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           <p className="text-text-primary" data-testid="wallet-balance">
             <span className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : formatAmount(ln.balance, t.language)}</span>
             <span className="text-text-muted text-sm ms-2">{t("wallet.lightning.balanceSource", { unit, source: sourceName ?? t("wallet.lightning.theSource") })}</span>
-            {ln?.status !== "ready" && <span className="block text-xs text-yellow-500 mt-1" data-testid="lightning-source-state">{ln?.error ? errorText(ln.error, t) : t("wallet.lightning.connecting")}</span>}
+            {ln?.status !== "ready" && <span className="block text-xs text-yellow-500 mt-1" data-testid="lightning-source-state">{ln?.error ? problemLine(ln.error, t) : t("wallet.lightning.connecting")}</span>}
           </p>
         )}
         <Actions value={action} onChange={choose} actions={rail === "cashu" ? ["receive", "send", "history"] : ["receive", "send"]} />
@@ -244,7 +244,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           </div>
         )}
         {notice && <Notice tone="success" testId="wallet-notice">{notice}</Notice>}
-        {error && <Notice tone="error" testId="wallet-error">{error}</Notice>}
+        {error && <Notice problem={error} testId="wallet-error" />}
         {/* The reviewed payments with something left to do or read: a settled one is in the history, and a cancelled
             one (by Cancel, or past its expiry) moved nothing. Pending, on its way, unknown or failed stay. */}
         {(state.intents ?? []).filter((i) => i.method === "cashu" && i.id !== review?.id && i.state !== "settled" && i.state !== "cancelled").map((i) => (
@@ -259,7 +259,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             <Section title={t("wallet.lightning.recent")} testId="lightning-recent">
               {ln.recent.map((op) => (
                 <Row key={`${op.direction}-${op.paymentHash}`} testId="lightning-op" label={t(op.direction === "in" ? "wallet.lightning.recentIn" : "wallet.lightning.recentOut", { amount: formatAmount(op.amount, t.language), unit })}
-                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language) })}` : ""}${op.error ? ` · ${errorText(op.error, t)}` : ""}`} />
+                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language) })}` : ""}${op.error ? ` · ${problemLine(op.error, t)}` : ""}`} />
               ))}
             </Section>
           )}

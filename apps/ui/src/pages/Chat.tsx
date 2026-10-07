@@ -102,6 +102,7 @@ import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
 import { showChatOnScreen } from "../lib/appBadge";
 import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -331,7 +332,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
   const pay = useCallback(
-    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", network?: WalletNetwork, confirmedReal?: boolean, lightningCard?: string): Promise<string | null> => {
+    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", network?: WalletNetwork, confirmedReal?: boolean, lightningCard?: string): Promise<string | Problem | null> => {
       if (!wallet || !peerKey) return null;
       // The card's own wallet: the request or the ecash is of its network, a request's invoice of its Lightning card.
       const onNetwork = network ? wallet.forNetwork(network) : wallet;
@@ -343,7 +344,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
         return null;
       } catch (e) {
-        return errorText(e, t);
+        return problemText(e, t);
       }
     },
     [wallet, peerKey, addSystemMessage, t],

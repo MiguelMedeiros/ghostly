@@ -14,7 +14,9 @@ import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
 import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
 import { OpenInWallet } from "./OpenInWallet";
-import { errorText, rawError } from "../lib/errorText";
+import { rawError } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 const SETTLED_KEY = "ghostly_settled_money";
 
@@ -131,7 +133,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   /** Real money: Pay opens the second step, and only it pays. */
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const { copied, copy } = useCopy(invoice.invoice);
   useEffect(() => {
@@ -143,12 +145,12 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   // More than the paying card says it holds is never approved (read live: it can change while the review is open).
   const over = quote ? holdsLess("lightning", wallet?.getState(), quote.amount) : undefined;
   const run = async (task: () => Promise<void>) => {
-    setError("");
+    setError(null);
     setBusy(true);
     try {
       await task();
     } catch (e) {
-      setError(errorText(e, t));
+      setError(problemText(e, t));
     } finally {
       setBusy(false);
     }
@@ -212,7 +214,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
           )}
         </>
       )}
-      {error && <p className="text-danger-ink text-xs m-0 basis-full">{error}</p>}
+      {error && <Notice problem={error} className="text-xs m-0 basis-full" ink />}
     </Card>
   );
 }
@@ -251,7 +253,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
   const id = value.slice(-40);
   const [redeemed, setRedeemed] = useState(() => isSettled(id));
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const { copied, copy } = useCopy(value);
 
   useEffect(() => {
@@ -305,14 +307,14 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
             disabled={busy}
             data-testid="token-redeem"
             onClick={async () => {
-              setError("");
+              setError(null);
               setBusy(true);
               try {
                 await wallet.receiveToken(value);
                 markSettled(id);
                 setRedeemed(true);
               } catch (e) {
-                setError(errorText(e, t));
+                setError(problemText(e, t));
               } finally {
                 setBusy(false);
               }
@@ -323,7 +325,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
         )
       )}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
-      {error && <p className="text-danger-ink text-xs m-0 basis-full">{error}</p>}
+      {error && <Notice problem={error} className="text-xs m-0 basis-full" ink />}
     </Card>
   );
 }

@@ -37,8 +37,9 @@ test("on a phone: a first setup whose Ethereum RPC does not answer says so in wo
   await alice.page.getByTestId("mobile-tabs").getByRole("button", { name: "Wallets" }).click();
   const first = alice.page.getByTestId("wallet-first");
   await first.getByTestId("wallet-first-testnet").click();
+  // In a few words, what failed, then why and what is safe (lib/problemText.ts).
   await expect(first.getByTestId("wallet-first-error-usdt")).toHaveText(
-    "Could not create the Testnet USDT wallet: ethereum-sepolia-rpc.publicnode.com did not answer in time. Nothing was saved; try again.", { timeout: 60_000 });
+    "Couldn't create the Testnet USDT wallet" + "ethereum-sepolia-rpc.publicnode.com did not answer in time. Nothing was saved. Try again.", { timeout: 60_000 });
 });
 
 test("on a phone: a first setup that made nothing gives way to a wallet made with New", { tag: ["@feature:wallet.instances.create", "@feature:app.mobile-layout"] }, async ({ peer }) => {

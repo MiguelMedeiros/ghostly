@@ -71,7 +71,7 @@ describe("SourcePicker", () => {
 
     it("shows the engine's error instead of the status", () => {
       picker("lightning", sourceView({ offered: offered("lightning", "mainnet"), providerId: "lnd", label: "LND node", status: "error", alias: "mynode", error: "Could not connect to LND node: refused" }));
-      expect(status()).toHaveTextContent(/^Could not connect to LND node: refused$/);
+      expect(status()).toHaveTextContent(/^Couldn't connect to LND node\. Refused$/);
     });
 
     it("names a source by its id when its provider is gone", () => {
@@ -160,7 +160,7 @@ describe("SourcePicker", () => {
       await choose(user, screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
       await user.type(screen.getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
       await user.click(screen.getByRole("button", { name: "Use Nostr Wallet Connect" }));
-      expect(await screen.findByTestId("lightning-source-error")).toHaveTextContent("Could not connect to Nostr Wallet Connect: no answer");
+      expect(await screen.findByTestId("lightning-source-error")).toHaveTextContent("Couldn't connect to Nostr Wallet Connect" + "No answer");
       expect(screen.queryByTestId("lightning-source-saved")).not.toBeInTheDocument();
       expect(screen.getByTestId("provider-form-nwc")).toBeInTheDocument();
       // What was typed is still there, to fix and try again.

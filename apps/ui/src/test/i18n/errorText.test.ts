@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
-import { ERROR_RULES, errorText, rawError } from "../../lib/errorText";
+import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -320,8 +320,8 @@ describe("errors in the app's language", () => {
   it("a reason nested in a wallet that could not be made is said in the language, also without its final period", () => {
     const pt = translators.pt;
     expect(errorText("Could not create the Mainnet Cashu wallet: Could not reach mint.example. Check the address: it should be a Cashu mint. Nothing was saved; try again.", pt))
-      .toBe("Não foi possível criar a carteira Mainnet Cashu: Não foi possível acessar mint.example. Confira o endereço: deve ser um mint Cashu. Nada foi salvo; tente de novo.");
-    expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK: o servidor Esplora em esplora.example não respondeu em 10 s");
+      .toBe("Não foi possível criar a carteira Mainnet Cashu. Sem acesso a mint.example. Confira o endereço: deve ser um mint Cashu. Nada foi salvo. Tente de novo.");
+    expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK. O servidor Esplora em esplora.example não respondeu em 10 s");
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {
@@ -331,11 +331,11 @@ describe("errors in the app's language", () => {
 
   it("a message nested in another is said in the language too, and the numbers and names stay", () => {
     const pt = translators.pt;
-    expect(errorText("No mint could create an invoice: mint.example did not answer", pt)).toBe("Nenhum mint conseguiu criar uma fatura: mint.example não respondeu");
+    expect(errorText("No mint could create an invoice: mint.example did not answer", pt)).toBe("Nenhum mint conseguiu criar uma fatura. mint.example não respondeu");
     expect(errorText("The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", pt))
-      .toBe("O pagamento Lightning não foi concluído. Os sats voltaram para a sua carteira, menos 2 sats que o mint ficou de taxa.");
+      .toBe("O pagamento Lightning não foi concluído. Os sats voltaram, menos 2 sats que ficaram com o mint.");
     expect(errorText("Refused: Already paid by another member of the group. 1200 sats came back; the mint kept 2 as its fee.", pt))
-      .toBe("Recusado: Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2 de taxa.");
+      .toBe("O pagamento foi recusado. Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2.");
     expect(errorText("Both peers need on-chain Bitcoin on a connected data link", pt)).toBe("Você e seu contato precisam de Bitcoin on-chain, com a conversa ao vivo");
     expect(errorText("This pays with real money: confirm it with Send real money first. Nothing was sent.", pt)).toContain("Enviar dinheiro real");
   });
@@ -358,8 +358,15 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(texts.filter(([, text]) => errorText(text, translators[language]) === text).map(([code]) => code)).toEqual([]);
   });
 
-  it("in English each is the engine's own text, word for word", () => {
-    for (const [, text] of texts) expect(errorText(text, english)).toBe(text);
+  // The app says them its own short way in English too (a title and a next line, lib/problemText.ts): each is known,
+  // and none leaves a value unfilled.
+  it("in English each is known, and keeps its values", () => {
+    for (const [, text] of texts) {
+      const parts = knownErrorParts(text, english);
+      expect(parts, text).not.toBeNull();
+      expect(`${parts!.title} ${parts!.next ?? ""}`).not.toContain("{{");
+    }
+    expect(errorText("Could not reach mint.example.com. Check the address: it should be a Cashu mint.", english)).toBe("Can't reach mint.example.com. Check the address: it should be a Cashu mint.");
   });
 
   it("a reviewed payment's refusals and outcomes are said in the language too", () => {

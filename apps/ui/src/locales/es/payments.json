@@ -46,8 +46,10 @@
     "maxGas": "Gas máximo (ETH)",
     "noSharedMint": "Ningún mint configurado en común",
     "noWallet": {
-      "mainnet": "Se pide dinero real ({{unit}}), y no tienes una cartera Mainnet para pagarlo. Crea una en Carteras, o pide dinero de prueba.",
-      "testnet": "Se pide dinero de prueba ({{unit}}), y no tienes una cartera Testnet para pagarlo. Crea una en Carteras, o pide dinero real."
+      "mainnet": "No tienes billetera Mainnet para pagar esto",
+      "mainnetNext": "Crea una en Billeteras, o pide dinero de prueba.",
+      "testnet": "No tienes billetera Testnet para pagar esto",
+      "testnetNext": "Crea una en Billeteras, o pide dinero real."
     },
     "off": "Esta forma de pago está desactivada en este chat.",
     "payElsewhere": "Pagar con otra cartera",
@@ -92,9 +94,12 @@
     "chooseOther": "Elegir a otra persona",
     "continue": "Continuar",
     "error": {
-      "noAnswer": "La app de tu contacto no respondió. Puede estar sin conexión o necesitar una actualización; tu contacto puede enviarte una solicitud.",
-      "noFederation": "Tú y {{name}} no compartís ninguna federación, y su solicitud no tiene factura Lightning.",
-      "noFederationInvoice": "Tú y {{name}} no compartís ninguna federación: paga su solicitud por Lightning, con Revisar pago en ella en el chat.",
+      "noAnswer": "La app de tu contacto no respondió",
+      "noAnswerNext": "Tu contacto puede enviarte una solicitud.",
+      "noFederation": "Tú y {{name}} no compartís ninguna federación",
+      "noFederationInvoice": "Tú y {{name}} no compartís ninguna federación",
+      "noFederationInvoiceNext": "Paga su solicitud por Lightning en el chat.",
+      "noFederationNext": "Su solicitud tampoco tiene factura Lightning.",
       "noMint": "Añade primero una mint de Cashu",
       "prepare": "No se pudo preparar el pago",
       "request": "No se pudo preparar la solicitud"
@@ -151,7 +156,8 @@
     "copied": "Copiado",
     "copyError": "No se pudo copiar. Selecciona el texto y cópialo tú.",
     "open": "Abrir billetera",
-    "openError": "No se pudo abrir una billetera: {{error}}. Copia el texto o escanea el código.",
+    "openError": "No se pudo abrir una billetera",
+    "openErrorNext": "Copia el texto o escanea el código.",
     "openTitle": "Abrir en una billetera de este dispositivo",
     "paid": "Ya pagué",
     "paidTitle": "Se pide a la billetera de tu contacto que lo compruebe ahora. Solo marca la solicitud como pagada cuando ve el dinero.",

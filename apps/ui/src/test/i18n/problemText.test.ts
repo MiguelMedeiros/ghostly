@@ -57,7 +57,11 @@ describe("problemText: an error in a few words, its English behind the ⓘ", () 
     const fetchFailed = "TypeError: Failed to fetch (https://relay.example.test/abc)";
     expect(problemText(fetchFailed, english)).toEqual({ tone: "error", title: "Something went wrong", detail: "Failed to fetch (https://relay.example.test/abc)" });
     expect(problemText("Error: connect ECONNREFUSED 127.0.0.1:9; Error: connect ECONNREFUSED 127.0.0.1:10", pt, "connect")).toMatchObject({ tone: "error", title: "Não foi possível conectar" });
-    expect(problemText("A".repeat(81), english).title).toBe("Something went wrong");
+    expect(problemText("word ".repeat(25).trim(), english).title).toBe("Something went wrong");
+    // A provider's code is no line a person reads (payment providers, 2026-10-07).
+    for (const code of ["insufficient_balance", "INTERNAL: wallet not found", "402 Payment Required", "ERR_TIMEOUT"]) expect(problemText(code, english).title, code).toBe("Something went wrong");
+    // One plain word is.
+    expect(problemText("refused", english).title).toBe("refused");
   });
 
   it("keeps a short line a person can read as it came (the engine's own words, until a rule says it in the language)", () => {

@@ -280,7 +280,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
           <Notice>{t("profile.backups.s3.note")}</Notice>
         </Block>
       )}
-      {(done || error) && <Block>{done && <Notice tone="success" testId="backup-done">{done}</Notice>}{error && <Notice tone="error" testId="backup-error">{error}</Notice>}</Block>}
+      {(done || error) && <Block>{done && <Notice tone="success" testId="backup-done">{done}</Notice>}{error && <Notice problem={error} testId="backup-error" />}</Block>}
     </Section>
   );
 }

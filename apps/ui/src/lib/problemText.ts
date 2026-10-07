@@ -1,5 +1,5 @@
 import type { Translate } from "../contexts/I18nContext";
-import { knownErrorText, rawError } from "./errorText";
+import { knownErrorParts, rawError, readable } from "./errorText";
 import { english } from "./english";
 
 /*
@@ -51,15 +51,6 @@ const SESSION_DROPS = [/^Session receive queue full$/, /^The peer did not finish
 /** A session the peer broke the protocol on (packages/core pairedSession.ts): it says nothing a person can act on. */
 const PROTOCOL = [/^Session frame too large$/, /^Negotiation message too large$/, /^Invalid connection binding\b/];
 
-/**
- * An English line a person can read as it is ("The code changed", "Relay refused"): short, one sentence, no address,
- * no error name, no chain of causes. Anything else gets a generic title, its English behind the ⓘ.
- */
-function readable(raw: string): boolean {
-  return raw.length <= 80 && !/(?:https?|wss?):\/\/|\b[A-Z]\w*Error\b|Error:|[{}[\]<>]|\b[0-9a-f]{16,}\b|\b[a-z0-9]{32,}\b/i.test(raw)
-    && (raw.match(/:/g)?.length ?? 0) <= 1 && raw.split(/[.;]\s+\S/).length <= 2;
-}
-
 /** What `fallback` titles an error nothing here knows: a connection's own words, or the app's generic ones. */
 export type ProblemFallback = "connect" | "generic";
 
@@ -74,9 +65,18 @@ export function problemText(cause: unknown, t: Translate = english, fallback: Pr
       : { tone: "error", title: t("errors.problem.relaysUnreachable"), next: t("errors.problem.checkConnection"), detail: raw };
   }
   if (SESSION_DROPS.some((drop) => drop.test(raw))) return { tone: "wait", title: t("errors.problem.sessionDropped"), next: t("errors.problem.retrying"), detail: raw };
-  const said = knownErrorText(raw, t);
-  // A known error is said whole in the app's language: its English in an ⓘ would say the same again.
-  if (said !== null) return { tone: "error", title: said };
+  // A known error is said in the app's language: its English in an ⓘ only when part of it (a reason) is not said.
+  // Known also without the final period a message around it took ("…: <reason>. Nothing was saved").
+  const parts = knownErrorParts(raw, t) ?? (raw && !raw.endsWith(".") ? knownErrorParts(`${raw}.`, t) : null);
+  if (parts) return { tone: "error", ...parts };
   if (raw && readable(raw) && !PROTOCOL.some((p) => p.test(raw))) return { tone: "error", title: raw };
   return { tone: "error", title: t(fallback === "connect" ? "errors.problem.connectFailed" : "errors.generic"), ...(raw && { detail: raw }) };
+}
+
+/** A problem as one line, where only a line fits (a status under a name, a hint): its title and next line together. */
+export function problemLine(cause: unknown, t: Translate = english, fallback: ProblemFallback = "generic"): string {
+  const { title, next } = problemText(cause, t, fallback);
+  if (!next) return title;
+  if (/[.!?…。！？]$/.test(title)) return `${title} ${next}`;
+  return t.language === "ja" || t.language === "zh" ? `${title}。${next}` : `${title}. ${next}`;
 }

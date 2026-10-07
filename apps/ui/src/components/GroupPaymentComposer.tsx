@@ -8,7 +8,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { edgeDot, memberName } from "../lib/groups";
 import { PaymentComposer } from "./PaymentComposer";
 import type { ChatRail } from "./WalletCards";
-import { errorText } from "../lib/errorText";
+import { problemText } from "../lib/problemText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -55,7 +55,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
     onSend={async () => t("payments.group.chooseOne")}
     onRequest={async (amount, memo, _method, rail, network, card) => {
       try { await engine.call("requestGroupPayment", { groupId: group.id, amount, memo: memo || undefined, timestamp: Date.now(), rail: rail === "lightning" ? "lightning" : "cashu", ...(network ? { network } : {}), ...(card ? { card } : {}) }); return null; }
-      catch (e) { return errorText(e, t); }
+      catch (e) { return problemText(e, t); }
     }} />;
 
   const member = to ? others.find(m => m.key === to) : undefined;
@@ -64,13 +64,13 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   if (member && link) return <PaymentComposer balance={balance} contact={memberName(member, t)} onBack={() => setTo(null)} onClose={onClose}
     reviewContext={wallet ? { wallet, peer: link.peerPubKeyZ32, linkId: link.id } : undefined}
     onSend={async (amount, memo, network, confirmedReal) => {
-      try { await engine.call("sendPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), ...(network ? { network } : {}), ...(confirmedReal ? { confirmedReal: true as const } : {}) }); return null; } catch (e) { return errorText(e, t); }
+      try { await engine.call("sendPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), ...(network ? { network } : {}), ...(confirmedReal ? { confirmedReal: true as const } : {}) }); return null; } catch (e) { return problemText(e, t); }
     }}
     onRequest={async (amount, memo, method, rail, network, card) => {
       // One way of paying per request, the card's: a Cashu request carries no invoice, a Lightning one no ecash.
       const only = rail === "lightning" ? "lightning" : rail === "cashu" ? "cashu" : undefined;
       try { await engine.call("requestPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), method, ...(only ? { rail: only } : {}), ...(network ? { network } : {}), ...(card ? { card } : {}) }); return null; }
-      catch (e) { return errorText(e, t); }
+      catch (e) { return problemText(e, t); }
     }} />;
 
   return <>
