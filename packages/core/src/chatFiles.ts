@@ -731,7 +731,8 @@ export class ChatFiles {
     switch (frame.t) {
       case "pf-accept": {
         if (!isInt(frame.offset, record.file.size)) return;
-        if (record.state === "paused" && record.pausedBy === "me") return;
+        // Paused here before the person there answered: it stays so, and their side hears it is paused.
+        if (record.state === "paused" && record.pausedBy === "me") { this.send(this.offerFrame(record, true)); return; }
         out.generation++;
         record.confirmed = frame.offset;
         out.next = frame.offset;
@@ -743,6 +744,8 @@ export class ChatFiles {
         return;
       }
       case "pf-wait": {
+        // The answer to the paused offer said while the person there still decides: the pause here holds.
+        if (record.state === "paused" && record.pausedBy === "me") return;
         out.generation++;
         out.next = record.confirmed;
         clearTimeout(out.timer);
