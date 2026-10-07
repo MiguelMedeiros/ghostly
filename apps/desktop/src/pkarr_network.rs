@@ -164,6 +164,15 @@ const DHT_PUT_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 /// The Mainline nodes, each made on a thread of its own. Making one looks up the public bootstrap nodes' names, a
 /// blocking DNS query for each of four, before the call returns: made in `main` it held the app before its window, up
 /// to 55 s where the resolver was slow (Linux under Xvfb, 2026-10-06). Reads and writes wait for them instead.
+///
+/// Two nodes, because one cannot give puts 1 s and reads 2 s: mainline 8.0.1 (the newest) sets the request timeout once,
+/// on the node's socket, for every request it sends, and has no timeout per query. A lookup and a put each end only once
+/// every request has an answer or has timed out, and a put sends its packet only once its lookup has ended. A single
+/// node at 1 s would make reads on a link slower than that hear nobody. What the second node costs, measured against the
+/// public DHT (2026-10-07, one process, 1 node vs 2, two rounds each): it joins with ~700 more packets out and ~500 in
+/// (~100 KiB each way), still in 4 s; it keeps its routing table with ~25 to 40 more packets a minute each way (~4 KiB
+/// out, ~5 KiB in; pings every 5 min, a refresh every 15); 0.4 MB more memory, 35 ms more CPU a minute, a thread and a
+/// UDP port. Its puts took 3.2 s (median of 6) against the read node's 3.9 s (of 12).
 #[derive(Clone)]
 pub struct MainlineNode(
     /// The node reads go to (and puts, when the put node finds no node in time).

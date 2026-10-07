@@ -8,7 +8,7 @@
 //   npm run test:affected -- --list              # print what would run, run nothing
 //   npm run test:affected -- --base HEAD~3       # diff against another base
 //   npm run test:affected -- --files a.ts b.tsx  # these files instead of the diff
-//   npm run test:affected -- --no-e2e --no-rust  # leave those out
+//   npm run test:affected -- --no-e2e --no-rust  # leave those out (also --no-lint, --no-typecheck)
 //   npm run test:affected -- --no-stack          # @gated tests: .env.e2e as it is, the shared stack not asked
 //
 // JOBS (default 2): vitest workers, cargo test threads. E2E_WORKERS (default 2): Playwright workers.
@@ -40,6 +40,9 @@ const base = option("--base") ?? "origin/dev";
 const list = flag("--list");
 const noE2e = flag("--no-e2e");
 const noRust = flag("--no-rust");
+// CI's draft tier (ci.yml, affected-tests) runs the whole lint and typecheck in a job of its own.
+const noLint = flag("--no-lint");
+const noTypecheck = flag("--no-typecheck");
 const noStack = flag("--no-stack");
 const port = option("--port") ?? process.env.E2E_WEB_PORT;
 const webUrl = process.env.E2E_WEB_URL;
@@ -207,13 +210,15 @@ for (const u of p.unit) {
 }
 
 // lint
-if (p.lint.mode === "whole") await run(`lint (whole: ${p.lint.reason})`, "npm", ["run", "lint"]);
+if (noLint) skipped.push("lint: --no-lint");
+else if (p.lint.mode === "whole") await run(`lint (whole: ${p.lint.reason})`, "npm", ["run", "lint"]);
 else if (p.lint.mode === "files") await run("lint (changed files)", "npx", ["eslint", "--no-warn-ignored", ...p.lint.files]);
 else skipped.push(`lint: ${p.lint.reason}`);
 
 // typecheck: one tsc at a time; each is a single process
 for (const t of p.typecheck) {
   if (t.mode === "skip") { skipped.push(`typecheck ${t.name}: ${t.reason}`); continue; }
+  if (noTypecheck) { skipped.push(`typecheck ${t.name}: --no-typecheck`); continue; }
   await run(`typecheck ${t.name}`, t.cmd[0], t.cmd.slice(1));
 }
 
