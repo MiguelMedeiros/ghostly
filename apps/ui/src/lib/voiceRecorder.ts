@@ -17,8 +17,8 @@ export class MicrophoneError extends Error {
 }
 
 export const MICROPHONE_MESSAGES: Record<MicrophoneProblem, string> = {
-  denied: "Ghostly can't use the microphone. Allow it for Ghostly in your browser's site settings (on the desktop app: System Settings → Privacy & Security → Microphone), then try again.",
-  unavailable: "No microphone is available. Connect one, or close the app that is using it, then try again.",
+  denied: "No access to the microphone. Allow it in your browser or system settings.",
+  unavailable: "No microphone found. Connect one, or close the app using it.",
   unsupported: "This browser can't record voice messages.",
 };
 

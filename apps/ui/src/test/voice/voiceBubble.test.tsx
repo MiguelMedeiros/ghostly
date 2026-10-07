@@ -74,7 +74,7 @@ describe("a voice message that will not play as it is", () => {
     show(voice());
     await clickPlay();
     const problem = screen.getByTestId("voice-problem");
-    expect(problem).toHaveTextContent("This device can't play this recording (WebM). Save it to play it elsewhere.");
+    expect(problem).toHaveTextContent("This device can't play WebM recordings. Save it to play elsewhere.");
     expect(screen.getByTestId("voice-save")).toHaveAttribute("download", "Voice message.webm");
     expect(screen.getByTestId("voice-save").getAttribute("href")).toMatch(/^blob:/);
     // The real reason, for whoever debugs it: on the element always, in the console in dev builds.

@@ -13,8 +13,8 @@ function microphoneText(t: Translate, problem: MicrophoneProblem): string {
   }
 }
 import { LiveWaveform, Waveform } from "./Waveform";
-import { errorText } from "../../lib/errorText";
 import "./voice.css";
+import { problemLine } from "../../lib/problemText";
 
 type Mode = "idle" | "hold" | "locked";
 type Phase = "starting" | "recording" | "paused" | "sending";
@@ -194,7 +194,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     } catch (error) {
       if (recorderRef.current === recorder) reset();
       onError(error instanceof MicrophoneError && error.message === MICROPHONE_MESSAGES[error.problem] ? microphoneText(t, error.problem)
-        : error instanceof Error ? errorText(error, t) : microphoneText(t, "unavailable"));
+        : error instanceof Error ? problemLine(error, t) : microphoneText(t, "unavailable"));
       return;
     }
     if (recorderRef.current !== recorder) return;

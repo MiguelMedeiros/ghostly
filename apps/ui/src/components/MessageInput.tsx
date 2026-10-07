@@ -29,7 +29,7 @@ import { useComposition } from "../hooks/useComposition";
 import "./composer/composer.css";
 import { touchOnly } from "../lib/touchOnly";
 import { formatAmount } from "../lib/amount";
-import { errorText } from "../lib/errorText";
+import { problemLine } from "../lib/problemText";
 
 interface MessageInputProps {
   draftId?: string;
@@ -283,7 +283,7 @@ export function MessageInput({
           const send = onSendRef.current;
           err = await (next.named.length ? send(next.words, next.named) : next.preview ? send(next.words, undefined, { preview: next.preview }) : send(next.words));
         } catch (e) {
-          err = errorText(e, t);
+          err = problemLine(e, t);
         }
         if (err) {
           const failed = outbox.current.splice(0).map((o) => o.words);
@@ -450,7 +450,7 @@ export function MessageInput({
     if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
     const reading = platformPastedFiles();
     if (!reading) return false;
-    reading.then((found) => { if (found.length) offerRef.current(found); }, (error: unknown) => showToast(errorText(error, t)));
+    reading.then((found) => { if (found.length) offerRef.current(found); }, (error: unknown) => showToast(problemLine(error, t)));
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;

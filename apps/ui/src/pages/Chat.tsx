@@ -101,8 +101,7 @@ import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
 import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
 import { showChatOnScreen } from "../lib/appBadge";
-import { errorText } from "../lib/errorText";
-import { problemText, type Problem } from "../lib/problemText";
+import { problemText, type Problem, problemLine } from "../lib/problemText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -310,7 +309,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         if (answering) replied(answering);
         return null;
       } catch (e) {
-        return errorText(e, t);
+        return problemLine(e, t);
       }
     },
     [platform, peerKey, paired, addSystemMessage, replied, t],
@@ -620,7 +619,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {webrtc.mediaProblem && (
         <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
           className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
-          {t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}
+          <span className="block font-medium">{t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}</span>
+          <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" ? "calls.mediaDeniedNext" : "calls.mediaUnavailableNext")}</span>
         </div>
       )}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
@@ -917,7 +917,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(chatPeer.hold.bytes / 1024 / 1024),
             max: new Intl.NumberFormat(language).format(Math.round(chatPeer.hold.maxBytes / 1024 / 1024)) })}
           {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
-          {chatPeer.hold.error && <span className="text-danger">{errorText(chatPeer.hold.error, t)}</span>}
+          {chatPeer.hold.error && <span className="text-danger">{problemLine(chatPeer.hold.error, t)}</span>}
         </div>
       )}
 
@@ -940,7 +940,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("chat.editFailed") }))).error } : undefined}
+            .catch((e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }

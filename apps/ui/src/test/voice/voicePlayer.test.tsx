@@ -342,7 +342,7 @@ describe("a voice message in the chat", () => {
     chat(aac);
     fireEvent.click(screen.getByTestId("voice-play"));
     await flush();
-    expect(screen.getByTestId("voice-problem")).toHaveTextContent("This device can't play this recording");
+    expect(screen.getByTestId("voice-problem")).toHaveTextContent("This device can't play M4A recordings");
     expect(screen.getByTestId("voice-save")).toHaveAttribute("download", "Voice message.m4a");
     expect(audio.players).toHaveLength(0);
   });

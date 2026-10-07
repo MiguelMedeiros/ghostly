@@ -24,6 +24,7 @@ import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMedi
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { Waveform } from "./Waveform";
 import "./voice.css";
+import { problemLine } from "../../lib/problemText";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 
@@ -355,7 +356,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     setRetryError("");
     setBusy(true);
     // The ring turns until the transfer moves, or the request comes back without moving it.
-    void action().catch((error: Error) => setRetryError(String(error.message ?? error))).finally(() => setBusy(false));
+    void action().catch((error: Error) => setRetryError(problemLine(error, t))).finally(() => setBusy(false));
   };
 
   return (

@@ -16,7 +16,7 @@
     "symbols": "Símbolos"
   },
   "closeCamera": "Fechar câmera",
-  "dhtTooLong": "Este texto tem {{bytes}} bytes UTF-8. A DHT aceita até {{max}}; encurte ou use uma conexão direta. Seu rascunho foi mantido.",
+  "dhtTooLong": "Longo demais para a DHT ({{bytes}} de {{max}} bytes). Encurte ou conecte ao vivo; o rascunho fica.",
   "document": "Documento",
   "dropFiles": "Solte para enviar",
   "emoji": "Emoji",
@@ -70,5 +70,5 @@
   "skinTone": "Tom de pele",
   "takePhoto": "Tirar foto",
   "tooLong": "Longo demais para enviar ({{count}} caracteres, o limite é {{max}}).",
-  "tooLongDht": "Longo demais para a DHT. Com a conexão direta entre vocês, faturas longas e tokens de ecash cabem."
+  "tooLongDht": "Longo demais para a DHT. Cabe quando vocês estiverem conectados direto."
 }
