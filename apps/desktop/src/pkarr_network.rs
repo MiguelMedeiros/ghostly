@@ -46,7 +46,7 @@ use std::net::SocketAddrV4;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use pkarr::dht::{DhtClient, DhtConfig};
+use pkarr::dht::{DhtClient, DhtConfig, PublishError};
 use pkarr::{Client, PublicKey, ResolvePolicy, SignedPacket};
 use serde::Serialize;
 use tokio::sync::watch;
@@ -152,43 +152,136 @@ pub enum Dht {
     StandIn(Client),
 }
 
-/// The Mainline node, made on a thread of its own. Making it looks up the public bootstrap nodes' names, a blocking
-/// DNS query for each of four, before the call returns: made in `main` it held the app before its window, up to 55 s
-/// where the resolver was slow (Linux under Xvfb, 2026-10-06). Reads and writes wait for it instead.
+/// A Mainline query ends when every node it asked has answered or timed out, and one that does not answer is the rule:
+/// the testnet's and the real DHT's alike hold a node or two that never do. A put first looks up the nodes closest to its
+/// key, and the packet reaches them only once that lookup ends, so a key's first put waited out the read node's 2 s request
+/// timeout before anyone could read it. Two Linux Desktops DHT direct waited for two of those in a row (the inviter's
+/// record, then the joiner's) before they went live. Puts go through a node of their own that gives up on a node after
+/// this long: a node that answers later is left out of where the packet is stored, which the nodes that did answer make
+/// up for. Reads keep the default, so a late answer is still heard.
+const DHT_PUT_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// The Mainline nodes, each made on a thread of its own. Making one looks up the public bootstrap nodes' names, a
+/// blocking DNS query for each of four, before the call returns: made in `main` it held the app before its window, up
+/// to 55 s where the resolver was slow (Linux under Xvfb, 2026-10-06). Reads and writes wait for them instead.
 #[derive(Clone)]
 pub struct MainlineNode(
+    /// The node reads go to (and puts, when the put node finds no node in time).
     watch::Receiver<Option<Result<DhtClient, String>>>,
     Instant,
     /// The newest packet asked to be put, per key, while its put runs (`DHT_NEWER_PUT_EVERY`).
     Arc<Mutex<HashMap<PublicKey, pkarr::Timestamp>>>,
+    /// The node puts go to (`DHT_PUT_REQUEST_TIMEOUT`).
+    watch::Receiver<Option<Result<DhtClient, String>>>,
 );
 
 impl MainlineNode {
-    /// Starts making the node with `build` on a thread of its own, and returns at once.
-    fn spawn(build: impl FnOnce() -> Result<DhtClient, String> + Send + 'static) -> Self {
-        let (made, node) = watch::channel(None);
-        std::thread::Builder::new()
-            .name("ghostly dht node".into())
-            .spawn(move || {
-                let result = build();
-                if let Err(error) = &result {
-                    diagnostics::log(&format!("pkarr dht node: {error}"));
-                }
-                let _ = made.send(Some(result));
-            })
-            .expect("a thread for the DHT node");
-        MainlineNode(node, Instant::now(), Arc::default())
+    /// Starts making the read node and the put node with `build` (given each one's request timeout), each on a thread
+    /// of its own, and returns at once.
+    fn spawn(
+        build: impl Fn(Duration) -> Result<DhtClient, String> + Send + Sync + 'static,
+    ) -> Self {
+        let build = Arc::new(build);
+        let made = |timeout: Duration| {
+            let (made, node) = watch::channel(None);
+            let build = build.clone();
+            std::thread::Builder::new()
+                .name("ghostly dht node".into())
+                .spawn(move || {
+                    let result = build(timeout);
+                    if let Err(error) = &result {
+                        diagnostics::log(&format!("pkarr dht node: {error}"));
+                    }
+                    let _ = made.send(Some(result));
+                })
+                .expect("a thread for the DHT node");
+            node
+        };
+        MainlineNode(
+            made(pkarr::DEFAULT_DHT_REQUEST_TIMEOUT),
+            Instant::now(),
+            Arc::default(),
+            made(DHT_PUT_REQUEST_TIMEOUT),
+        )
     }
 
-    /// The node, once it is made.
+    /// The read node, once it is made.
     async fn get(&self) -> Result<DhtClient, String> {
-        let mut node = self.0.clone();
-        let made = node
-            .wait_for(Option::is_some)
-            .await
-            .map_err(|_| "DHT node: never made".to_string())?;
-        made.clone().expect("waited for it")
+        made(&self.0).await
     }
+
+    /// Puts `packet` through the put node, or through the read node where that one found no node to store at in time
+    /// (a link whose round trips take longer than `DHT_PUT_REQUEST_TIMEOUT`) or could not be made.
+    async fn put(&self, packet: &SignedPacket) -> Result<(), String> {
+        let retries = if self.1.elapsed() < DHT_STARTING {
+            DHT_NO_NODES_RETRIES
+        } else {
+            0
+        };
+        let (key, at) = (packet.public_key(), packet.timestamp());
+        {
+            let mut newest = self.2.lock().unwrap();
+            if newest.get(&key).is_none_or(|known| *known < at) {
+                newest.insert(key.clone(), at);
+            }
+        }
+        let is_newest = || self.2.lock().unwrap().get(&key) == Some(&at);
+        let quick = match made(&self.3).await {
+            Ok(dht) => Some(put_on(&dht, packet, &is_newest, retries).await),
+            Err(_) => None,
+        };
+        let result = match quick {
+            Some(Err(PublishError::NoClosestNodes | PublishError::Timeout)) | None => {
+                match self.get().await {
+                    // The put node has already waited out a start.
+                    Ok(dht) => put_on(&dht, packet, &is_newest, 0)
+                        .await
+                        .map_err(|e| e.to_string()),
+                    Err(e) => Err(e),
+                }
+            }
+            Some(result) => result.map_err(|e| e.to_string()),
+        };
+        let mut newest = self.2.lock().unwrap();
+        if newest.get(&key) == Some(&at) {
+            newest.remove(&key);
+        }
+        result
+    }
+}
+
+/// The node `node` carries, once it is made.
+async fn made(
+    node: &watch::Receiver<Option<Result<DhtClient, String>>>,
+) -> Result<DhtClient, String> {
+    let mut node = node.clone();
+    let made = node
+        .wait_for(Option::is_some)
+        .await
+        .map_err(|_| "DHT node: never made".to_string())?;
+    made.clone().expect("waited for it")
+}
+
+/// A put of `packet` through `dht`, as `put_newest` and `put_once_nodes_known` try it.
+async fn put_on(
+    dht: &DhtClient,
+    packet: &SignedPacket,
+    is_newest: impl Fn() -> bool,
+    retries: usize,
+) -> Result<(), PublishError> {
+    put_once_nodes_known(
+        || {
+            put_newest(
+                || dht.publish(packet),
+                &is_newest,
+                DHT_NEWER_PUT_EVERY,
+                DHT_NEWER_PUT_FOR,
+            )
+        },
+        retries,
+        DHT_NO_NODES_RETRY_AFTER,
+    )
+    .await
 }
 
 impl Dht {
@@ -197,14 +290,16 @@ impl Dht {
     pub fn mainline(bootstrap: Option<Vec<SocketAddrV4>>) -> Result<Self, String> {
         let mut config = DhtConfig::default();
         config.bootstrap = bootstrap.clone();
-        Ok(Self::mainline_with(bootstrap, move || {
+        Ok(Self::mainline_with(bootstrap, move |timeout| {
+            let mut config = config.clone();
+            config.request_timeout = timeout;
             DhtClient::build(config).map_err(|e| format!("DHT node: {e}"))
         }))
     }
 
     fn mainline_with(
         bootstrap: Option<Vec<SocketAddrV4>>,
-        build: impl FnOnce() -> Result<DhtClient, String> + Send + 'static,
+        build: impl Fn(Duration) -> Result<DhtClient, String> + Send + Sync + 'static,
     ) -> Self {
         Dht::Mainline(
             MainlineNode::spawn(build),
@@ -214,40 +309,7 @@ impl Dht {
 
     async fn publish(&self, packet: &SignedPacket) -> Result<(), String> {
         match self {
-            Dht::Mainline(node, _) => {
-                let dht = node.get().await?;
-                let retries = if node.1.elapsed() < DHT_STARTING {
-                    DHT_NO_NODES_RETRIES
-                } else {
-                    0
-                };
-                let (key, at) = (packet.public_key(), packet.timestamp());
-                {
-                    let mut newest = node.2.lock().unwrap();
-                    if newest.get(&key).is_none_or(|known| *known < at) {
-                        newest.insert(key.clone(), at);
-                    }
-                }
-                let is_newest = || node.2.lock().unwrap().get(&key) == Some(&at);
-                let result = put_once_nodes_known(
-                    || {
-                        put_newest(
-                            || dht.publish(packet),
-                            is_newest,
-                            DHT_NEWER_PUT_EVERY,
-                            DHT_NEWER_PUT_FOR,
-                        )
-                    },
-                    retries,
-                    DHT_NO_NODES_RETRY_AFTER,
-                )
-                .await;
-                let mut newest = node.2.lock().unwrap();
-                if newest.get(&key) == Some(&at) {
-                    newest.remove(&key);
-                }
-                result
-            }
+            Dht::Mainline(node, _) => node.put(packet).await,
             Dht::StandIn(client) => client
                 .publish(packet)
                 .await
@@ -294,20 +356,20 @@ async fn put_once_nodes_known<T, F, Fut>(
     mut put: F,
     retries: usize,
     after: Duration,
-) -> Result<(), String>
+) -> Result<(), PublishError>
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<T, pkarr::dht::PublishError>>,
+    Fut: std::future::Future<Output = Result<T, PublishError>>,
 {
     let mut tried_again = 0;
     loop {
         match put().await {
             Ok(_) => return Ok(()),
-            Err(pkarr::dht::PublishError::NoClosestNodes) if tried_again < retries => {
+            Err(PublishError::NoClosestNodes) if tried_again < retries => {
                 tried_again += 1;
                 tokio::time::sleep(after).await;
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e),
         }
     }
 }
@@ -2085,7 +2147,7 @@ mod direct {
     #[tokio::test]
     async fn the_dht_node_is_made_off_the_thread_that_asks_for_it() {
         let started = Instant::now();
-        let dht = Dht::mainline_with(None, || {
+        let dht = Dht::mainline_with(None, |_| {
             std::thread::sleep(Duration::from_millis(800));
             Err("DHT node: a resolver that takes its time".into())
         });
@@ -2133,7 +2195,7 @@ mod direct {
         let error = put_once_nodes_known(never, DHT_NO_NODES_RETRIES, Duration::from_millis(10))
             .await
             .unwrap_err();
-        assert!(error.contains("no closest nodes"), "{error}");
+        assert_eq!(error, PublishError::NoClosestNodes);
         assert_eq!(
             attempts.load(std::sync::atomic::Ordering::SeqCst),
             DHT_NO_NODES_RETRIES + 1,
@@ -2786,6 +2848,70 @@ mod direct {
             ]),
             ["https://relay.example".parse::<Url>().unwrap()]
         );
+    }
+
+    /// A key's first put, on a DHT where a node or two never answer (as every DHT has): it reaches the nodes once the
+    /// lookup before it gave up on those, which took the read node's 2 s request timeout; the reader of the pair waited that
+    /// long for each side's record, one after the other (dht-direct on Linux, 2026-10-07). Now well under it, and the
+    /// other app reads the packet right after.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_keys_first_put_does_not_wait_out_the_read_timeout_for_a_node_that_never_answers() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let bootstrap: Vec<SocketAddrV4> = testnet
+            .bootstrap
+            .iter()
+            .map(|node| node.parse().unwrap())
+            .collect();
+        let app = || Pkarr::direct(Dht::mainline(Some(bootstrap.clone())).unwrap(), &[]).unwrap();
+        let (alice, bob) = (app(), app());
+        // The nodes have joined: a first publish (of another key) went through, and a read of a key nobody has finished.
+        alice
+            .publish(&packet(&Keypair::random(), "0"))
+            .await
+            .unwrap();
+        let nobody = Keypair::random().public_key();
+        assert!(bob.resolve(&nobody).await.is_none());
+        lookups_over(&bob).await;
+
+        for round in 0..3 {
+            let keypair = Keypair::random();
+            let hello = packet(&keypair, "hello");
+            let started = Instant::now();
+            alice.publish(&hello).await.unwrap();
+            let took = started.elapsed();
+            assert!(
+                took < pkarr::DEFAULT_DHT_REQUEST_TIMEOUT - Duration::from_millis(500),
+                "round {round}: the first put took {took:?}"
+            );
+            let found = bob.resolve(&keypair.public_key()).await;
+            assert_eq!(found.map(|p| p.timestamp()), Some(hello.timestamp()));
+        }
+    }
+
+    /// Every node too slow for the put node (round trips past `DHT_PUT_REQUEST_TIMEOUT`, or it could not be made): the
+    /// read node puts the packet.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_put_the_put_node_cannot_make_goes_through_the_read_node() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let bootstrap: Vec<SocketAddrV4> = testnet
+            .bootstrap
+            .iter()
+            .map(|node| node.parse().unwrap())
+            .collect();
+        let mut config = DhtConfig::default();
+        config.bootstrap = Some(bootstrap);
+        let dht = Dht::mainline_with(None, move |timeout| {
+            if timeout == DHT_PUT_REQUEST_TIMEOUT {
+                Err("DHT node: the put node".into())
+            } else {
+                DhtClient::build(config.clone()).map_err(|e| e.to_string())
+            }
+        });
+        let keypair = Keypair::random();
+        let hello = packet(&keypair, "hello");
+        assert_eq!(dht.publish(&hello).await, Ok(()));
+        let (found, _) = dht.resolve(&keypair.public_key(), |_| {}).await;
+        assert_eq!(found.map(|p| p.timestamp()), Some(hello.timestamp()));
     }
 
     /// The real thing in miniature: Mainline DHT nodes on this machine, two apps on it, no relay at all.
