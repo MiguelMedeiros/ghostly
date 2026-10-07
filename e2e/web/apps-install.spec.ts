@@ -1,7 +1,7 @@
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
-import { STORE_URL, serveStore, testStore } from "../support/appStore";
+import { APP_URL, STORE_URL, serveStore, testStore } from "../support/appStore";
 
 /*
  * The Apps page and the app card (WISP 1200 § Discovery, § Apps sent in a chat; WISP 405 § An app), on the e2e suite's
@@ -89,4 +89,32 @@ test("install from a store, open it in a chat, and the contact installs it from 
   await closeApp(bob);
   await expect(card.getByTestId("app-card-open")).toBeVisible();
   await expect(card.getByTestId("app-card-check")).toHaveText("Installed");
+});
+
+test("in Safari the install screen's two ⓘ each open their own line, even when the lines sit close", { tag: ["@feature:apps.page"] }, async ({ peer }) => {
+  // Safari on a Mac shows a second line under the IP line, each with its ⓘ. In Portuguese at this width the two ⓘ were
+  // 20 px apart: the lower one's larger tap area lay over the upper one, so pressing the first opened the second.
+  const safari = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+  const store = await testStore();
+  const ana = await peer("ana", { userAgent: safari });
+  await serveStore(ana.context, store);
+  await ana.page.evaluate(() => localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}"), language: "pt" })));
+  await ana.page.goto("/#/apps");
+  await ana.page.reload();
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(APP_URL);
+  await ana.page.getByTestId("apps-add-check").click();
+  const screen = ana.page.getByTestId("app-install");
+  await expect(screen.getByTestId("app-webkit-line")).toBeVisible();
+  // Pressed where a person aims: the middle of the ⓘ they see.
+  for (const [line, other] of [["app-ip-line", "app-webkit-line"], ["app-webkit-line", "app-ip-line"]] as const) {
+    const box = (await screen.getByTestId(`${line}-info`).boundingBox())!;
+    await ana.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(screen.getByTestId(`${line}-text`)).toBeVisible();
+    await expect(screen.getByTestId(`${other}-text`)).toHaveCount(0);
+    // The screen grew and moved (it stays centred): the ⓘ is read again before it is pressed to close.
+    const again = (await screen.getByTestId(`${line}-info`).boundingBox())!;
+    await ana.page.mouse.click(again.x + again.width / 2, again.y + again.height / 2);
+    await expect(screen.getByTestId(`${line}-text`)).toHaveCount(0);
+  }
 });
