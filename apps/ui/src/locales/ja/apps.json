@@ -121,5 +121,13 @@
     "remove": "削除",
     "stale": "{{date}} から更新されていません"
   },
-  "title": "アプリ"
+  "title": "アプリ",
+  "view": {
+    "back": "チャットに戻る",
+    "beside": "チャットを表示",
+    "full": "全幅で表示",
+    "resume": "{{title}} に戻る",
+    "with": "{{name}} との {{title}}",
+    "withName": "{{name}} と"
+  }
 }

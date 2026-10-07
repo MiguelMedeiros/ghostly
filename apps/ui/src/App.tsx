@@ -22,6 +22,7 @@ import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
 import { useI18n } from "./contexts/I18nContext";
+import { useAppSessions } from "./lib/apps/running";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -125,11 +126,18 @@ function useLoadedChats() {
     if (onCall) setRingSessions((current) => (current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current));
   }, []);
 
-  // Keyed by session id, so a chat that changes places here keeps its call.
-  const loaded = useMemo(
-    () => [...new Set([routeSession, ...callSessions, ...ringSessions].filter((id): id is string => !!id))],
-    [routeSession, callSessions, ringSessions],
-  );
+  // A chat with a mini-app running stays loaded too: the app runs in the chat's panel (lib/apps/running.ts).
+  const appSessions = useAppSessions();
+
+  // Keyed by session id, in the order they came: a chat never changes places here, so it keeps its call, and the
+  // frame of an app in it is never moved (a frame that moves reloads).
+  const order = useRef<readonly string[]>([]);
+  const loaded = useMemo(() => {
+    const wanted = new Set([routeSession, ...callSessions, ...ringSessions, ...appSessions].filter((id): id is string => !!id));
+    const kept = order.current.filter((id) => wanted.has(id));
+    order.current = [...kept, ...[...wanted].filter((id) => !kept.includes(id))];
+    return order.current;
+  }, [routeSession, callSessions, ringSessions, appSessions]);
 
   const render = (visibleClassName: string) => (
     <>

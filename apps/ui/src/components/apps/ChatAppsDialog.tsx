@@ -20,7 +20,9 @@ export function ChatAppsDialog({ linkId, name, waiting, onClose }: { linkId: str
   const installed = useInstalledApps(true);
   const backdrop = useBackdropDismiss(onClose);
   const ref = useRef<HTMLDivElement>(null);
-  useDialogFocus(ref, onClose);
+  // Once an app opened, its panel has the focus: closing this does not take it back.
+  const opened = useRef(false);
+  useDialogFocus(ref, onClose, () => !opened.current);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,6 +31,7 @@ export function ChatAppsDialog({ linkId, name, waiting, onClose }: { linkId: str
     try {
       // Opened first: an app that cannot start here sends no card. Then the contact is told, with what to install.
       await openApp(app.ref, linkId);
+      opened.current = true;
       const failed = await sendAppCard(linkId, app, true);
       if (failed) throw new Error(failed);
       onClose();

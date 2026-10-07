@@ -29,6 +29,8 @@ export interface DesktopOpenerOptions {
   listen: Listen;
   /** The person's name in a chat, for an app granted `name`. */
   nameIn?: (linkId: string) => string | undefined;
+  /** The app window's title: "Chess with Ana" in a chat (`appWithContact`), the app's name alone by default. */
+  windowTitle?: (title: string, linkId: string | null) => string;
   onStop?: (ref: string, reason: AppStopReason) => void;
   view?: AppView;
   startTimeoutMs?: number;
@@ -58,7 +60,7 @@ export function forIpc(message: unknown): unknown {
   return message;
 }
 
-export function desktopOpener({ apps, invoke, listen, nameIn, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS }: DesktopOpenerOptions): AppOpener {
+export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS }: DesktopOpenerOptions): AppOpener {
   const brokers = new Map<string, Broker>();
   const early = new Map<string, { at: number; requests: unknown[] }>();
   void listen<{ label: string; request: unknown }>(APP_REQUEST_EVENT, ({ payload }) => {
@@ -90,7 +92,7 @@ export function desktopOpener({ apps, invoke, listen, nameIn, onStop, view = def
     // Throws where this client has no runner for what the person granted.
     runnerFor(host, entry);
     const label = await invoke<string>("app_open", {
-      request: { app: entry.ref, title: entry.title, entry: entry.entry, internet: entry.permissions.includes("internet") },
+      request: { app: entry.ref, title: windowTitle(entry.title, linkId), entry: entry.entry, internet: entry.permissions.includes("internet") },
     });
     let timer: ReturnType<typeof setTimeout> | null = null;
     const broker = createBroker({

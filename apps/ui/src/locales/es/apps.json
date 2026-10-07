@@ -121,5 +121,13 @@
     "remove": "Quitar",
     "stale": "Desactualizada desde el {{date}}"
   },
-  "title": "Apps"
+  "title": "Apps",
+  "view": {
+    "back": "Volver al chat",
+    "beside": "Mostrar el chat",
+    "full": "Ancho completo",
+    "resume": "Volver a {{title}}",
+    "with": "{{title}} con {{name}}",
+    "withName": "con {{name}}"
+  }
 }
