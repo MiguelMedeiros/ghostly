@@ -101,6 +101,8 @@ pub struct Relay {
     pub requests: Arc<Mutex<Vec<String>>>,
     /// How long it takes to answer a GET, the way the DHT takes its time.
     pub delay: Arc<Mutex<std::time::Duration>>,
+    /// How long it takes to answer a PUT, the way a public relay does its own DHT put before answering.
+    pub put_delay: Arc<Mutex<std::time::Duration>>,
     /// Headers added to every answer (`x-ratelimit-remaining`, as the public relays say).
     pub headers: Arc<Mutex<Vec<(String, String)>>>,
     /// The relay is still putting the packet it holds on the DHT: a PUT replacing it must name it
@@ -128,6 +130,8 @@ pub async fn pkarr_relay() -> Relay {
     let packets = Arc::new(Mutex::new(HashMap::<String, Vec<u8>>::new()));
     let requests = Arc::new(Mutex::new(Vec::new()));
     let delay = Arc::new(Mutex::new(std::time::Duration::ZERO));
+    let put_delay = Arc::new(Mutex::new(std::time::Duration::ZERO));
+    let slow_puts = put_delay.clone();
     let headers = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let putting = Arc::new(Mutex::new(false));
     let broken = Arc::new(Mutex::new(false));
@@ -155,6 +159,7 @@ pub async fn pkarr_relay() -> Relay {
             );
             let honours = honours.clone();
             let old = old.clone();
+            let slow_puts = slow_puts.clone();
             tokio::spawn(async move {
                 let Some((head, body)) = read_request(&mut stream).await else {
                     return;
@@ -211,6 +216,9 @@ pub async fn pkarr_relay() -> Relay {
                         if status.starts_with("200") {
                             store.lock().unwrap().insert(key, body);
                         }
+                        // As a public relay: it serves the packet at once, and answers after its own DHT put.
+                        let delay = *slow_puts.lock().unwrap();
+                        tokio::time::sleep(delay).await;
                         respond(&mut stream, status, &extra, b"").await;
                     }
                     "GET" => {
@@ -237,6 +245,7 @@ pub async fn pkarr_relay() -> Relay {
         packets,
         requests,
         delay,
+        put_delay,
         headers,
         putting,
         broken,
