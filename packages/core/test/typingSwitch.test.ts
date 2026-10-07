@@ -55,6 +55,16 @@ async function until(check: () => boolean, limit: number): Promise<number> {
 }
 const on = (transport: PairedTransport) => () => apps.every((app) => app.state.status === "ready" && app.state.transport === transport && app.link.isDataLinkOpen);
 const agreed = () => apps.every((app) => app.link.supportsTyping);
+/**
+ * Runs `act` once, the moment `app`'s next session is ready and has not heard its contact's capabilities yet: typing
+ * is not agreed then. (Polled for, that moment is too short to land on every time.)
+ */
+function betweenSessions(app: App, act: () => void): { agreed?: boolean } {
+  const capabilities = app.link["sessionCapabilities"] as { reset(): void };
+  const reset = capabilities.reset.bind(capabilities), seen: { agreed?: boolean } = {};
+  capabilities.reset = () => { reset(); capabilities.reset = reset; seen.agreed = app.link.supportsTyping; act(); };
+  return seen;
+}
 
 beforeEach(() => { useFakeWorld(); pkarr = new MemoryPkarr(DESKTOP_NETWORK); native = new NativeWorld(); });
 afterEach(async () => { apps.splice(0); await closeWorld(); });
@@ -88,11 +98,11 @@ for (const typer of ["the side that chose", "the other side"] as const) it(`a st
 
 it("a start said while the chat is between two sessions goes on the new one", async () => {
   const { a, b } = await liveOnWebrtc();
+  // The moment the new session is up, its capabilities not said yet (typing not agreed), the person types once.
+  const seen = betweenSessions(a, () => a.link.setTyping(true));
   await a.link.setTransportPreference("iroh/1", true);
-  // The moment typing is not agreed (the new session is up, its capabilities not said yet), the person types once.
-  expect(await until(() => !a.link.supportsTyping, 30_000)).toBeLessThan(30_000);
-  a.link.setTyping(true);
   expect(await until(on("iroh/1"), 30_000)).toBeLessThan(30_000);
+  expect(seen.agreed).toBe(false);
   expect(await until(() => b.link.peerTyping, 2_000)).toBeLessThan(2_000);
 }, 60_000);
 
@@ -100,10 +110,10 @@ it("a start the person ended during the switch is not said again, nor one older 
   const { a, b } = await liveOnWebrtc();
   a.link.setTyping(true);
   expect(await until(() => b.link.peerTyping, 5_000)).toBeLessThan(5_000);
+  const seen = betweenSessions(a, () => a.link.setTyping(false));
   await a.link.setTransportPreference("iroh/1", true);
-  expect(await until(() => !a.link.supportsTyping, 30_000)).toBeLessThan(30_000);
-  a.link.setTyping(false);
   expect(await until(on("iroh/1"), 30_000)).toBeLessThan(30_000);
+  expect(seen.agreed).toBe(false);
   await run(2_000);
   expect(b.link.peerTyping).toBe(false);
 
