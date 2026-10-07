@@ -129,6 +129,8 @@
     "beside": "Mostra la chat",
     "full": "Larghezza piena",
     "resume": "Torna a {{title}}",
+    "stoppedRemoved": "{{title}} è stata fermata: {{store}} ha rimosso questa versione",
+    "stoppedRevoked": "{{title}} è stata fermata: il suo autore ha revocato questa versione",
     "with": "{{title}} con {{name}}",
     "withName": "con {{name}}"
   }

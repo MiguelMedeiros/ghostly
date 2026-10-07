@@ -9,6 +9,7 @@
  */
 import { useSyncExternalStore } from "react";
 import type { RunningApp } from "./broker";
+import type { AppTakedown } from "./open";
 import type { Translate } from "../../locales/translate";
 
 export interface ChatApp {
@@ -19,8 +20,8 @@ export interface ChatApp {
   /** Over the whole chat on a wide screen, instead of beside it. */
   wide: boolean;
   running: RunningApp;
-  /** A short line the client shows under the header, outside the frame (why it stopped the app, for one). */
-  note?: string;
+  /** Stopped by the client, for this reason: the panel says why until the person closes it (WISP 1200 § Takedowns). */
+  stopped?: AppTakedown;
 }
 
 /** The chat's contact as its header shows them. */
@@ -57,7 +58,9 @@ function changed() {
 export function registerAppSlot(linkId: string, slot: Slot | null): void {
   if (slot) { slots.set(linkId, slot); return; }
   slots.delete(linkId);
-  apps.get(linkId)?.running.stop();
+  const app = apps.get(linkId);
+  if (app?.stopped) setChatApp(linkId, null);
+  else app?.running.stop();
 }
 
 export function appSlot(linkId: string): HTMLElement | undefined {
@@ -80,7 +83,7 @@ export function setChatApp(linkId: string, app: ChatApp | null): void {
 }
 
 /** Shows or hides the app in `linkId`, or puts it over the whole chat (`wide`). */
-export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "shown" | "wide" | "note">>): void {
+export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "shown" | "wide">>): void {
   const app = apps.get(linkId);
   if (!app) return;
   apps.set(linkId, { ...app, ...patch });

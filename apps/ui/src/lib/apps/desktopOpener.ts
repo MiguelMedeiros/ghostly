@@ -13,7 +13,7 @@
  * - The app stops when the broker says so (`app_close`) or when the person closes its window (`ghostly-app-closed`).
  */
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
-import type { AppOpener } from "./open";
+import { registerRunningApp, type AppOpener } from "./open";
 import type { AppsPlatform } from "../platform";
 
 /** Rust's events to the Ghostly window (apps/desktop/src/app_sandbox.rs). */
@@ -95,6 +95,8 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
       request: { app: entry.ref, title: windowTitle(entry.title, linkId), entry: entry.entry, internet: entry.permissions.includes("internet") },
     });
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
+    const unregister = registerRunningApp({ ref, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped") });
     const broker = createBroker({
       host,
       launch: { ...entry, chat: linkId ? { linkId, name: nameIn?.(linkId) } : null },
@@ -102,6 +104,7 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
       post: (message) => { void invoke("app_post", { label, message: forIpc(message) }).catch(() => { /* the window went */ }); },
       stopped: (reason) => {
         if (timer) clearTimeout(timer);
+        unregister();
         brokers.delete(label);
         void invoke("app_close", { label }).catch(() => { /* already gone */ });
         onStop?.(ref, reason);

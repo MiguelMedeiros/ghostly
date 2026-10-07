@@ -2,7 +2,8 @@ import { useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useTabTrap } from "../../hooks/useDismiss";
-import { chatApp, registerAppSlot, updateChatApp, useChatApp, type AppContact } from "../../lib/apps/running";
+import { takedownText } from "../../lib/apps/open";
+import { chatApp, registerAppSlot, setChatApp, updateChatApp, useChatApp, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
 import { AppGlyph } from "./AppIcon";
@@ -86,12 +87,14 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
     };
   }, [shown, linkId]);
 
+  // A stopped app (a takedown) has nothing left to stop: Close takes its message away.
+  const close = () => { if (app?.stopped) setChatApp(linkId, null); else app?.running.stop(); };
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || e.defaultPrevented || !app) return;
     e.preventDefault();
-    if (phone) updateChatApp(linkId, { shown: false });
+    if (phone && !app.stopped) updateChatApp(linkId, { shown: false });
     else if (wide) updateChatApp(linkId, { wide: false });
-    else app.running.stop();
+    else close();
   };
   return (
     <section ref={root} tabIndex={-1} onKeyDown={onKeyDown} data-testid="mini-app" data-place={phone ? "phone" : wide ? "wide" : "beside"} hidden={!shown}
@@ -101,7 +104,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       {/* The header only while the app shows: the chat's own header is the only one otherwise. */}
       {shown && <div className="chat-app-head h-14 header-safe flex items-center gap-2 max-md:gap-1 px-3 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         {phone && (
-          <button ref={back} type="button" data-testid="mini-app-back" onClick={() => updateChatApp(linkId, { shown: false })}
+          <button ref={back} type="button" data-testid="mini-app-back" onClick={() => (app?.stopped ? setChatApp(linkId, null) : updateChatApp(linkId, { shown: false }))}
             aria-label={t("apps.view.back")} title={t("apps.view.back")}
             className="w-9 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 19l-7-7 7-7" /></svg>
@@ -132,14 +135,16 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
                 : <svg {...iconProps}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>}
             </button>
           )}
-          <button type="button" data-testid="mini-app-close" onClick={() => app?.running.stop()} aria-label={t("common.close")} title={t("common.close")}
+          <button type="button" data-testid="mini-app-close" onClick={close} aria-label={t("common.close")} title={t("common.close")}
             className="p-2 max-md:px-1.5 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             <svg {...iconProps}><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
         </div>
       </div>}
-      {/* What the client says about the app, outside its frame (a stop it did not ask for). */}
-      {shown && app?.note && <p role="status" data-testid="mini-app-note" className="m-0 px-4 py-2 text-[13px] text-text-secondary bg-panel-header border-b border-border shrink-0">{app.note}</p>}
+      {/* Stopped by the client (a takedown): why, in the app's place, until Close. */}
+      {shown && app?.stopped && <p role="status" data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
+        {takedownText(title, app.stopped, t)}
+      </p>}
       <div ref={box} data-testid="mini-app-frame" className="chat-app-frame" />
     </section>
   );
