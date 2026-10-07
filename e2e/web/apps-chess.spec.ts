@@ -355,7 +355,8 @@ test("a lower sequence is not installed over a newer one", { tag: ["@feature:app
 
 test("a version a store removed stays stopped until Run anyway", { tag: ["@feature:apps.chess.web", "@feature:apps.engine.installed", "@feature:apps.page"] }, async ({ peer, browserName }) => {
   const publisher = new ChessPublisher();
-  const chess = publisher.publish({ version: "1.2.0", sequence: 1 });
+  // Full screen, so Run anyway opens it here, alone (Chess itself runs in a chat: the Apps page would ask which).
+  const chess = publisher.publish({ version: "1.2.0", sequence: 1, view: "full" });
   publisher.signStore({ apps: [chess] });
   const [ana] = await openPeers(peer, browserName, "ana");
   await publisher.serve(ana.context);

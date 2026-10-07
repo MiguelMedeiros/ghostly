@@ -1766,6 +1766,7 @@ mod tests {
             title: "Chess".into(),
             entry: "<p>chess</p>".into(),
             internet: true,
+            view: AppView::Full,
         };
         let label = open(app.handle(), request).unwrap();
         assert!(is_app_label(&label), "{label}");
@@ -1773,8 +1774,8 @@ mod tests {
         assert!(is_runner(&window.url().unwrap()));
         let state = app.state::<AppSandboxState>();
         assert_eq!(
-            state.with(&label, |w| (w.app.clone(), w.internet, w.brokered)),
-            Some(("ana/chess".to_string(), true, true))
+            state.with(&label, |w| (w.app.clone(), w.internet, w.brokered, w.view)),
+            Some(("ana/chess".to_string(), true, true, AppView::Full))
         );
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);

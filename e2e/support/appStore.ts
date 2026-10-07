@@ -5,7 +5,7 @@
  */
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { BrowserContext } from "@playwright/test";
-import { buildAppBundle, seedSigner, signAppStore, toZ32, utf8Encode, type AppPermission, type AppStoreIndex, type Signer } from "@ghostly/core";
+import { buildAppBundle, seedSigner, signAppStore, toZ32, utf8Encode, type AppPermission, type AppStoreIndex, type AppViewMode, type Signer } from "@ghostly/core";
 
 const signer = (label: string): Signer => seedSigner(sha256(utf8Encode(`ghostly apps e2e: ${label}`)));
 
@@ -22,16 +22,16 @@ export interface TestStore {
 
 /**
  * A curated store listing one app, "Chess", that asks for `chat` (and whatever else `permissions` says). `entry`: the
- * app's HTML instead of a page with its title.
+ * app's HTML instead of a page with its title. `view`: where it shows (absent: in a chat); `title`: another name.
  */
-export async function testStore(options: { permissions?: AppPermission[]; entry?: string } = {}): Promise<TestStore> {
+export async function testStore(options: { permissions?: AppPermission[]; entry?: string; view?: AppViewMode; title?: string } = {}): Promise<TestStore> {
   const publisher = signer("publisher"), store = signer("store");
-  const title = "Chess", storeName = "E2E store";
+  const title = options.title ?? "Chess", storeName = "E2E store";
   const entry = options.entry ?? `<!doctype html><meta charset=utf-8><title>${title}</title><body style="font:16px system-ui"><h1>${title}</h1>`;
   const made = await buildAppBundle({
     name: "chess", version: "1.2.0", sequence: 1, kind: "mini-app", title, tagline: "Play chess with a contact",
     description: "Chess for two, move by move, in your chat.", entry: "index.html", permissions: options.permissions ?? ["chat"],
-    runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT",
+    runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", ...(options.view && { view: options.view }),
   }, [{ path: "index.html", bytes: utf8Encode(entry) }], publisher);
   const ref = `${toZ32(publisher.publicKey)}/chess`;
   const index: AppStoreIndex = {
