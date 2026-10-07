@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ghostly, home, localRelay, ok, Running } from "./support/cli";
+import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.groups, groups.catch-up, groups.link.join, groups.rename
 
 /**
@@ -13,11 +13,20 @@ import { ghostly, home, localRelay, ok, Running } from "./support/cli";
  */
 const N = Math.max(3, Number(process.env.MESH_CLI_N ?? 3));
 let relays: { url: string; server: Server }[] = [];
+let hyperdht: Awaited<ReturnType<typeof hyperdhtTestnet>> | undefined;
 const running = new Map<string, Running>();
 const homes = Array.from({ length: N }, (_, i) => home(i === 0 ? "coordinator" : i === N - 1 ? "person" : `bot${i}`));
 const [coordinator, author] = homes, person = homes[N - 1];
-/** The two relays, the only ones (set once they are up). */
-const pinned = (): NodeJS.ProcessEnv => ({ GHOSTLY_PKARR_RELAYS: relays.map((relay) => relay.url).join(",") });
+/**
+ * The two relays, the only ones, and a HyperDHT of this test's own (set once they are up). An edge whose WebRTC attempt
+ * came to nothing goes on native only for the rest of the run (node.ts `edgeWithoutRtc`), and with no STUN every such
+ * attempt reads as a network that blocks direct connections. Here the native transport it then needs is on loopback;
+ * with none, as since the tests left the public networks (#1389), the edge stayed down and the member unreachable.
+ */
+const pinned = (): NodeJS.ProcessEnv => ({
+  GHOSTLY_PKARR_RELAYS: relays.map((relay) => relay.url).join(","),
+  ...(hyperdht ? { GHOSTLY_HYPERDHT_BOOTSTRAP: hyperdht.bootstrap } : {}),
+});
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env: pinned() });
 
 async function up(dir: string): Promise<void> {
@@ -42,10 +51,11 @@ const members = async (dir: string, group: string) => ok(await as(dir, "group", 
 
 // Two relays, as the defaults are: each allows a daemon 30 requests a minute, and on one alone the edges' offers and
 // answers waited out the minute behind their polls, for minutes when a member came back.
-beforeAll(async () => { relays = [await localRelay(), await localRelay()]; }, 30_000);
+beforeAll(async () => { relays = [await localRelay(), await localRelay()]; hyperdht = await hyperdhtTestnet(); }, 30_000);
 afterAll(async () => {
   await Promise.all([...running.keys()].map(down));
   for (const relay of relays) relay.server.close();
+  await hyperdht?.destroy();
 }, 60_000);
 
 describe(`a private group of ${N} headless members`, { timeout: 480_000 }, () => {
