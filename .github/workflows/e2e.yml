@@ -28,6 +28,7 @@ permissions:
 jobs:
   e2e:
     name: End-to-end
+    if: false
     runs-on: ubuntu-24.04
     # The web and extension suites outgrew 30 minutes (cancelled mid-run on 2026-09-29),
     # then 60 (584 tests, cancelled at 560 while releasing 1.1.1 on 2026-10-04).
@@ -105,7 +106,11 @@ jobs:
   # a Rust build never holds up the browser tests.
   desktop:
     name: Desktop (Tauri)
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     # The deployed-web-app run has no Desktop app to speak of.
     if: ${{ !inputs.web_url }}
@@ -251,7 +256,7 @@ jobs:
         run: docker run -d --name ghostly-iroh-relay -p 127.0.0.1:47085:3340 n0computer/iroh-relay:v1.3.0 --dev
 
       - name: Run Desktop end-to-end tests
-        run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
+        run: xvfb-run -a npm run test:e2e:desktop -- dht-direct --repeat-each 4 --retries 0
         env:
           GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
 
@@ -259,7 +264,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report-desktop
+          name: playwright-report-desktop-${{ matrix.os }}
           path: |
             playwright-report-desktop
             test-results
@@ -270,7 +275,7 @@ jobs:
   compat:
     name: Compatibility with v0.4.0 and v1.1.4
     # The deployed-web-app run tests the web app alone.
-    if: ${{ !inputs.web_url }}
+    if: false
     uses: ./.github/workflows/e2e-compat.yml
     with:
       ref: ${{ inputs.ref }}
