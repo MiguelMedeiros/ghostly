@@ -59,7 +59,8 @@ test("a sub-page's Back goes up to the page it was opened from, then home", { ta
 test("on a phone: the browser's Back from a tab goes home, and Profile goes up to Settings", { tag: ["@feature:app.navigation.back", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("pocket", { mobile: true });
   const tabs = page.getByTestId("mobile-tabs");
-  for (const tab of ["Wallets", "Identities", "Services", "Settings"]) await tabs.getByRole("button", { name: tab }).click();
+  // Apps holds Services' tab on a phone in the suite's build (WISP 1200).
+  for (const tab of ["Wallets", "Identities", "Apps", "Settings"]) await tabs.getByRole("button", { name: tab }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
   // The tab bar is the way home: no header Back on a tab of its own.
   await expect(back(page)).toBeHidden();

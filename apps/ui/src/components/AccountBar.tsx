@@ -13,6 +13,8 @@ import { IdentitiesIcon } from "./identities/IdentitiesIcon";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
 import { SWITCHER_SHORTCUT, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useAppsState } from "../lib/apps/flag";
+import { AppGlyph } from "./apps/AppIcon";
 
 
 /**
@@ -65,8 +67,12 @@ export function AccountBar() {
   // be long (32 characters is wider than any place), so it never decides this: it ends in "…", whole in its tooltip.
   const navRef = useRef<HTMLElement>(null);
   const [labelsHidden, setLabelsHidden] = useState(false);
-  const placeNames = [t("tabs.wallets"), t("tabs.identities"), t("tabs.services"), t("sidebar.settings")].join("\n");
-  const placeCount = 3 + (wallet ? 1 : 0) + (platform ? 1 : 0);
+  // Apps (WISP 1200), where it shows: a place of its own beside Services (a wide screen has room for six; a phone's
+  // tab bar gives Apps Services' tab). It holds its place while the runner's header is checked, so the bar does not
+  // jump on every start.
+  const appsOn = useAppsState() !== "off";
+  const placeNames = [t("tabs.wallets"), t("tabs.identities"), ...(appsOn ? [t("apps.title")] : []), t("tabs.services"), t("sidebar.settings")].join("\n");
+  const placeCount = 3 + (wallet ? 1 : 0) + (platform ? 1 : 0) + (appsOn ? 1 : 0);
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
@@ -166,6 +172,22 @@ export function AccountBar() {
           </span>
           <span className="account-label">{t("tabs.identities")}</span>
         </button>
+
+        {appsOn && (
+          <button
+            data-testid="account-apps"
+            onClick={() => (location.pathname === "/apps" ? nav.home() : nav.place("/apps"))}
+            aria-label={t("apps.title")}
+            aria-current={location.pathname === "/apps" ? "page" : undefined}
+            className={`account-action ${
+              location.pathname === "/apps" ? "bg-surface-hover text-accent" : "text-text-muted hover:text-text-primary hover:bg-surface-alt"
+            }`}
+            title={t("apps.title")}
+          >
+            <span className="shrink-0 flex"><AppGlyph size={23} /></span>
+            <span className="account-label">{t("apps.title")}</span>
+          </button>
+        )}
 
         {platform && (
           <button

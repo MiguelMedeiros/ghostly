@@ -17,8 +17,15 @@ import { locales } from "../../ui/src/locales";
 import { translateWith } from "../../ui/src/locales/translate";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
+import { APPS_ENABLED } from "@ghostly/browser/shared/features";
+import { servicesPlatform } from "../../ui/src/lib/platform";
+import { setAppOpener } from "../../ui/src/lib/apps/open";
+import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
+
+// A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
+if (import.meta.env.VITE_APPS_TEST === "1") void import("../../ui/src/lib/apps/testHook").then((hook) => hook.installAppsTestHook());
 
 // The same UI and the same peer as the extension; only the host differs.
 const root = createRoot(document.getElementById("root")!);
@@ -82,6 +89,10 @@ if (gate.full) {
   askForShare();
 }
 addEventListener("pagehide", () => webHost.announceDeparture());
+// Mini-apps (WISP 1200) open in this server's runner, once the feature is on (or in the e2e suite's build).
+if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
+  setAppOpener(webOpener({ apps: () => servicesPlatform?.apps, closeLabel: () => profileTranslator()("common.close") }));
+}
 
 root.render(
   <StrictMode>

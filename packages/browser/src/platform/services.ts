@@ -22,6 +22,7 @@ import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";
 import { engine } from "./engine";
+import { engineApps } from "./apps";
 
 /**
  * Large files being copied into file storage before they are offered (this page does it): the bubble shows
@@ -209,6 +210,12 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
 }
 
 export const servicesPlatform: ServicesPlatform | null = {
+  // Mini-apps (WISP 1200) where the host frames them: the web app. Nothing reaches this while the feature is off.
+  get apps() {
+    const { appRunner, appNetRunner } = getBrowserHost();
+    return appRunner ? engineApps(appRunner, appNetRunner) : null;
+  },
+
   subscribe: (listener) => {
     preparingListeners.add(listener);
     const stop = engine.subscribe(listener);

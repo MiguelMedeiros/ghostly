@@ -11,8 +11,9 @@ test("on a phone: tabs for chats, wallet, sharing and settings, and Profile thro
   await expect(page.getByRole("heading", { name: "Wallets", exact: true })).toBeVisible();
   await expect(page.getByTestId("wallet")).toBeVisible();
 
-  await tabs.getByRole("button", { name: "Services" }).click();
-  await expect(page.getByTestId("my-services")).toBeVisible();
+  // Apps has Services' tab in the suite's build (WISP 1200; five tabs is what a phone holds).
+  await tabs.getByRole("button", { name: "Apps" }).click();
+  await expect(page.getByTestId("apps-page")).toBeVisible();
 
   await tabs.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
@@ -157,6 +158,10 @@ test("on a wide screen the wallet and services are pages beside the list", { tag
   await page.getByTestId("wallet-chip").click();
   await expect(page).toHaveURL(/#\/wallet$/);
   await expect(page.getByRole("heading", { name: "Wallets", exact: true })).toBeVisible();
+  // Apps is a place of its own beside Services on a wide screen (on in the suite's build, WISP 1200).
+  await page.getByTestId("account-apps").click();
+  await expect(page).toHaveURL(/#\/apps$/);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
   await page.getByTestId("account-services").click();
   await expect(page).toHaveURL(/#\/services$/);
   await expect(page.getByRole("heading", { name: "Services" })).toBeVisible();

@@ -111,7 +111,8 @@ describe("updates", () => {
     await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
     await store.addStore({ url: STORE_URL });
     expect(await store.checkUpdates()).toEqual([{ ref: v1.ref, outcome: "updated", run: { status: "ok" } }]);
-    expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest, permissions: [] });
+    // The URL it came from is what an app card sent in a chat names (WISP 405 § An app).
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest, permissions: [], from: PINNED_URL, icon: false });
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
   });
 

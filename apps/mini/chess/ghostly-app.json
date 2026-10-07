@@ -1,0 +1,14 @@
+{
+  "name": "chess",
+  "version": "1.0.0",
+  "kind": "mini-app",
+  "title": "Chess",
+  "tagline": "Play chess with a contact, live in your chat",
+  "description": "Open Chess in a chat and your contact gets a card to join. Moves travel over the chat's live connection, and each side keeps the game for that chat, so it comes back after a reload. Opened alone, you play both sides.",
+  "entry": "index.html",
+  "permissions": ["chat"],
+  "runtime": { "host": ">=1.2", "clients": ["web", "desktop"] },
+  "license": "MIT",
+  "homepage": "https://github.com/MiguelMedeiros/ghostly/tree/dev/apps/mini/chess",
+  "support": "https://github.com/MiguelMedeiros/ghostly/issues"
+}

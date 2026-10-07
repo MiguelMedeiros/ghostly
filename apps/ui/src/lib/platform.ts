@@ -15,7 +15,8 @@ import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/prov
 import type { LightningCardView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { BackupReminders } from "@ghostly/browser/shared/backupReminder";
-import type { DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
+import type { AppFrameEvent, AppSendError, DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
+import type { MiniAppJson } from "@ghostly/core/miniApp";
 import type { ChatFile } from "./types";
 
 /**
@@ -402,7 +403,56 @@ export interface WalletPlatform {
   getPayment(paymentId: string): ChatPayment | null;
 }
 
+/**
+ * Mini-apps (WISP 1200): what the broker (`lib/apps/broker.ts`) reaches of the engine for an app it runs. Every call
+ * names the app by its reference (`<publisher key in z-base32>/<name>`), which the broker takes from the app's port,
+ * never from the app. A storage `scope` is a 1:1 chat's link id, or `alone`.
+ */
+export interface AppsPlatform {
+  /** The runner page apps are framed in, served with the runner's policy as a header (`/app-frame.html` on the web). */
+  runnerUrl: string;
+  /**
+   * The runner for an app the person granted `internet`: the same page under a policy that allows HTTPS and WSS
+   * (`/app-frame-net.html` on the web). Absent where this client cannot give an app the internet: such an app does not run.
+   */
+  netRunnerUrl?: string;
+  /** The entry of an installed app, checked again: refused when revoked, or removed unless `runAnyway`. */
+  entry(ref: string, runAnyway?: boolean): Promise<AppEntry>;
+  /** One file of an installed app's bundle. */
+  file(ref: string, path: string): Promise<Uint8Array>;
+  storage: {
+    /** Null when the key is not set. */
+    get(ref: string, scope: string, key: string): Promise<{ value: MiniAppJson } | null>;
+    set(ref: string, scope: string, key: string, value: MiniAppJson): Promise<void>;
+    delete(ref: string, scope: string, key: string): Promise<void>;
+    keys(ref: string, scope: string): Promise<string[]>;
+  };
+  chat: {
+    /** This side opened the app in a 1:1 chat: `open` goes to the contact; the app's chat app id there. */
+    open(linkId: string, ref: string, version: string): Promise<{ app: string }>;
+    close(linkId: string, ref: string): Promise<void>;
+    /** One data frame to the same app on the contact's side; null when it went, else why not. */
+    send(linkId: string, ref: string, data: MiniAppJson): Promise<AppSendError | null>;
+    /** The contact's frames, in every chat: the caller keeps those of its own app (`app`, from `open`). */
+    onFrame(listener: (linkId: string, frame: AppFrameEvent) => void): () => void;
+    /** The contact's app as last heard: open (its version) or not. Heard since the client started, before any app ran. */
+    peer(linkId: string, app: string): { version: string } | null;
+  };
+}
+
+/** An installed app's entry, ready for the runner (the engine's `appEntry`). */
+export interface AppEntry {
+  ref: string;
+  digest: string;
+  version: string;
+  title: string;
+  permissions: string[];
+  entry: string;
+}
+
 export interface ServicesPlatform {
+  /** Mini-apps (WISP 1200), where this client runs them; absent or null where it does not (yet). */
+  apps?: AppsPlatform | null;
   /** Something the user should know about this client, shown in the sidebar. */
   notice?: string;
   features: {

@@ -8,6 +8,7 @@ import { Settings } from "./pages/Settings";
 import { Services } from "./pages/Services";
 import { Profile } from "./pages/Profile";
 import { Identities } from "./pages/Identities";
+import { Apps } from "./pages/Apps";
 import { Tasks } from "./pages/Tasks";
 import { Wallet } from "./pages/Wallet";
 import { GroupChat } from "./pages/GroupChat";
@@ -262,6 +263,8 @@ export function Root() {
                       <Route path="/services" element={<Services />} />
                       <Route path="/profile" element={<Profile />} />
                       <Route path="/identities" element={<Identities />} />
+                      {/* Mini-apps (WISP 1200): the page sends the person home where Apps does not show. */}
+                      <Route path="/apps" element={<Apps />} />
                       <Route path="/tasks" element={<Tasks />} />
                       <Route path="/share" element={<Navigate to="/services" replace />} />
                       {/* The installed web app: what another app shared, and the icon's shortcuts (manifest.json). */}

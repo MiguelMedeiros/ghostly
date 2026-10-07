@@ -157,6 +157,8 @@ export class FakeEngine implements BrowserHost {
   readClipboardFiles?: BrowserHost["readClipboardFiles"];
   /** The desktop host's "Keep this computer awake", when a test gives one (WISP 06). */
   keepAwake?: BrowserHost["keepAwake"];
+  /** Where mini-apps run (the web app's runner page), when a test turns Apps on; left out, no client runs apps. */
+  appRunner?: string;
   /** Every web host can sign in to an AT Protocol server; this window never answers unless a test replaces it. */
   atproto?: BrowserHost["atproto"] = { platform: "web", open: () => new Promise(() => {}) };
 
@@ -210,6 +212,7 @@ export class FakeEngine implements BrowserHost {
     this.readClipboardText = undefined;
     this.readClipboardFiles = undefined;
     this.keepAwake = undefined;
+    this.appRunner = undefined;
     this.setState({});
   }
 

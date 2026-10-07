@@ -49,6 +49,14 @@ describe("the Chess bundle", () => {
     expect(code).not.toMatch(/\bimport\s*\(/);
   });
 
+  // The web runner locks the page with a nonce once the entry is written (WISP 1200, "The runner and the broker"):
+  // markup handlers and scripts made later never run there.
+  it("runs under the runner's lock: no inline event handler, no script made after start", () => {
+    expect(page).not.toMatch(/<[a-z][^>]*\son[a-z]+\s*=/i);
+    expect(page).not.toMatch(/createElement\(\s*["'`]script["'`]/);
+    expect(page).not.toMatch(/\b(?:insertAdjacentHTML|outerHTML|document\.write)\b|setAttribute\(\s*["'`]on/);
+  });
+
   it("stays small", () => {
     expect(Buffer.byteLength(page)).toBeLessThan(160 * 1024);
   });

@@ -50,8 +50,11 @@ export const APP_ICON_PATH = "icon.png";
 export const APP_SCREENSHOTS_DIR = "screenshots/";
 const SCREENSHOT_TYPES = /\.(png|jpg|webp)$/;
 
-/** The permissions of phase 1 (WISP 1200 · Permissions). */
-export const APP_PERMISSIONS = ["chat", "name"] as const;
+/**
+ * The permissions of phase 1 (WISP 1200 · Permissions). `internet`: the app reaches HTTPS and WSS servers of its
+ * choosing (the client runs it in its network runner); without it, an app has no network.
+ */
+export const APP_PERMISSIONS = ["chat", "internet", "name"] as const;
 export type AppPermission = typeof APP_PERMISSIONS[number];
 export const APP_CLIENTS = ["web", "desktop", "extension"] as const;
 export type AppClient = typeof APP_CLIENTS[number];
