@@ -33,10 +33,16 @@ const discovery = (p: DesktopPerson) => p.app.execute<{ path: string | null; rel
   };`);
 
 /** Each app's own log (`ghostly.log`, apps/desktop/src/diagnostics.rs): its link-trace lines say how the first text went. */
-function attachLogs(name: string, home: string): void {
+function attachLogs(name: string, home: string, joined?: number): void {
   const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
     .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);
-  for (const file of find(home)) void test.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
+  for (const file of find(home)) {
+    const log = readFileSync(file);
+    void test.info().attach(`${name}'s ghostly.log`, { body: log, contentType: "text/plain" });
+    // How long the pair took to go live after the invite was opened: the app's own clock, which is this machine's.
+    const ready = /^(\d+) link .*"step":"paired-ready"/m.exec(log.toString())?.[1];
+    if (joined && ready) test.info().annotations.push({ type: "live", description: `${name} ${Number(ready) - joined} ms after the join` });
+  }
 }
 
 test("two Desktop apps pair and go live on the DHT directly, never reading a relay", {
@@ -48,10 +54,11 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
   const cleanup: (() => Promise<void> | void)[] = [() => relay.close(), () => network.close(), () => dht.close()];
   try {
     const env = { ...network.env, GHOSTLY_PKARR_DHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_IROH_RELAYS: "http://127.0.0.1:9" };
+    const join = { at: 0 };
     const open = async (name: string): Promise<DesktopPerson> => {
       const home = desktopHome(name);
       const person = await desktopPerson(name, { home: home.dir, env });
-      cleanup.push(async () => { await person.stop(); attachLogs(name, home.dir); home.remove(); });
+      cleanup.push(async () => { await person.stop(); attachLogs(name, home.dir, join.at); home.remove(); });
       return person;
     };
     const a = await open("ana");
@@ -59,17 +66,16 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
 
     await a.press("New chat");
     const invite = await a.copyInvite();
+    join.at = Date.now();
     await b.join(invite);
     for (const p of [a, b]) {
       await expect.poll(() => p.canWrite(), { timeout: 120_000, message: `${p.name}'s chat is open` }).toBe(true);
     }
-    const opened = Date.now();
     await a.say("found on the DHT");
     await expect.poll(() => count(b, "found on the DHT"), { timeout: 180_000, message: "bia gets the text" }).toBe(1);
     for (const p of [a, b]) {
       await expect.poll(() => p.connection(), { timeout: 180_000, message: `${p.name} goes live` }).toMatch(/Connected · (Iroh|HyperDHT)/);
     }
-    test.info().annotations.push({ type: "live", description: `${Math.round((Date.now() - opened) / 1000)} s after both chats opened` });
 
     for (const p of [a, b]) {
       expect(await discovery(p), `${p.name}'s panel`).toEqual({ path: "DHT direct", relays: ["ok"] });
