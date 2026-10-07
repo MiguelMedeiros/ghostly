@@ -1,0 +1,1 @@
+A catch-up answer goes in slices of 16 frames, at most two of them not handled yet by the other app, which says so by answering a `paired-ping` in the order frames come. All at once, an answer of over a hundred frames ended an older app's session (64 frames waiting at most) mid catch-up. Nothing changes on the wire.

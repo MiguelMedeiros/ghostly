@@ -44,6 +44,11 @@ export interface GroupsHost {
   adminTurn?(groupId: string, options?: { wait?: boolean }): Promise<boolean>;
   /** Sends a frame on a paired link (a contact chat or an edge). Throws when it cannot. */
   sendOnLink(linkId: string, frame: object): void;
+  /**
+   * Resolves once the app on the other end of the link handled every frame sent on it so far (`GhostLink.handled`):
+   * `false` when it cannot tell. Absent: a member's catch-up answer goes all at once.
+   */
+  linkHandled?(linkId: string): Promise<boolean>;
   /** The link is open and both sides announced groups (`version` 2: community groups too). */
   linkReady(linkId: string, version?: number): boolean;
   /** Whether the link's connection is open, whatever the other app announces on it. Absent: not known. */
@@ -1584,6 +1589,13 @@ export class Groups {
         void this.membershipChanged(state.id);
       },
       metaChanged: (by, change, at) => { void this.metaChanged(state.id, session, by, change, at); },
+      // A catch-up answer goes a slice at a time, each once the member's app handled the last (`GROUP_LIMITS.catchUpSlice`).
+      ...(this.host.linkHandled && {
+        handled: (to: string) => {
+          const edge = this.host.edges(state.id).get(to);
+          return edge && this.host.linkHandled ? this.host.linkHandled(edge) : Promise.resolve(false);
+        },
+      }),
     });
     this.sessions.set(state.id, session);
     this.lastRoster.set(state.id, session.roster);
