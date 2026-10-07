@@ -16,7 +16,9 @@ class FakeAudioContext {
   suspends = 0;
   started: number[] = [];
   constructor() { FakeAudioContext.made.push(this); }
-  resume() { this.resumes++; this.state = "running"; return Promise.resolve(); }
+  /** A resume of a context that was suspended before: what holds a page for seconds on WebKitGTK before 2.52. */
+  resumesAfterSuspend = 0;
+  resume() { this.resumes++; if (this.suspends) this.resumesAfterSuspend++; this.state = "running"; return Promise.resolve(); }
   suspend() { this.suspends++; this.state = "suspended"; return Promise.resolve(); }
   decodeAudioData() { return Promise.reject(new Error("no decoder")); }
   createGain() { return { connect: (to: unknown) => to, gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} } }; }
@@ -94,5 +96,38 @@ describe("the sounds' audio output between sounds", () => {
     expect(context.resumes).toBe(resumes);
     expect(context.started).toEqual([]);
     localStorage.removeItem("ghostly_app_settings");
+  });
+});
+
+/**
+ * The Linux Desktop on WebKitGTK before 2.52 keeps the output running: there a `resume()` after a `suspend()` held the
+ * page for 5 to 16 s (r11k: every new chat's first sound froze the app). A closed output is no answer either: a new
+ * context does not start without a fresh gesture, so the sounds after it would be silent.
+ */
+describe("the sounds' audio output where it is kept running (WebKitGTK before 2.52)", () => {
+  beforeEach(() => sounds.setSoundsRelease("keep"));
+
+  it("stays running between sounds, one context, never suspended and so never resumed after a suspend", async () => {
+    const context = FakeAudioContext.made[0]!;
+    for (const name of ["knock", "message", "connected"] as const) {
+      await vi.advanceTimersByTimeAsync(sounds.SOUNDS_IDLE_MS + 2_000);
+      sounds.playSound(name);
+      await flush();
+    }
+    await vi.advanceTimersByTimeAsync(sounds.SOUNDS_IDLE_MS + 2_000);
+    expect(FakeAudioContext.made).toHaveLength(1);
+    expect(context.state).toBe("running");
+    expect(context.suspends).toBe(0);
+    expect(context.resumesAfterSuspend).toBe(0);
+    expect(context.started).toEqual([392, 415, 880, 1046, 587, 784, 784]);
+  });
+
+  it("is let go of again once suspending is safe", async () => {
+    const context = FakeAudioContext.made[0]!;
+    await vi.advanceTimersByTimeAsync(sounds.SOUNDS_IDLE_MS + 2_000);
+    expect(context.state).toBe("running");
+    sounds.setSoundsRelease("suspend");
+    await vi.advanceTimersByTimeAsync(sounds.SOUNDS_IDLE_MS);
+    expect(context.state).toBe("suspended");
   });
 });

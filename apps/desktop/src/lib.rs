@@ -136,6 +136,7 @@ macro_rules! commands {
             commands::turn_warm,
             commands::under_test,
             commands::updater_can_install,
+            commands::webkit_version,
             device_state::device_state_read,
             device_state::device_state_write,
             file_store::file_bytes_append,
