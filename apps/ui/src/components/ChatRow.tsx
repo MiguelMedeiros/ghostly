@@ -17,7 +17,7 @@ import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnly
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
-import { errorText } from "../lib/errorText";
+import { problemText } from "../lib/problemText";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
@@ -349,7 +349,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
   const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
       : invitation.accepted ? t("group.chat.joining") : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members: members(invitation.members) }) : t("sidebar.group.invitedByUnknown", { members: members(invitation.members) }))
-    : group.status !== "active" ? (group.statusReason ? errorText(group.statusReason, t) : group.status && groupStatusText(group.status, t)) : members(group.members.length);
+    : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
   const note = reacted && reactionNoteText(reacted, authorName(group, reacted.by, t), t);

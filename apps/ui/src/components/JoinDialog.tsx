@@ -10,7 +10,8 @@ import { dragHasFiles, droppedFiles, pastedFiles } from "../lib/pastedFiles";
 import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /**
  * Scanned data is only parsed as an invite; never opened as a URL or executed. A picture pasted or dropped on the
@@ -37,7 +38,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   const stream = useRef<MediaStream | null>(null);
   const generation = useRef(0), joined = useRef(false);
   const [input, setInput] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [own, setOwn] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -70,13 +71,13 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     if (onDevice) {
       // A code that adds this device to a profile: read as one, and nothing else.
       const device = readDeviceInvite(value);
-      if (!device.ok) { setError(t(failureKey(device.reason))); setManual(true); return; }
+      if (!device.ok) { setError({ tone: "error", title: t(failureKey(device.reason)) }); setManual(true); return; }
       joined.current = true; stop(); busyRef.current = true; setBusy(true);
       onDevice(value.trim()).catch((cause: unknown) => {
         if (closed.current) return;
         joined.current = false; busyRef.current = false; setBusy(false);
         const key = enrollErrorKey(cause);
-        setError(key ? t(key) : cause instanceof Error ? errorText(cause, t) : t("join.invalid")); setManual(true);
+        setError(key ? said(t(key)) : cause instanceof Error ? problemText(cause, t) : said(t("join.invalid"))); setManual(true);
       });
       return;
     }
@@ -85,7 +86,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       onJoinGroup(value.trim()).catch((cause: unknown) => {
         if (closed.current) return;
         joined.current = false; busyRef.current = false; setBusy(false);
-        setError(cause instanceof Error ? errorText(cause, t) : t("join.invalid")); setManual(true);
+        setError(cause instanceof Error ? problemText(cause, t) : said(t("join.invalid"))); setManual(true);
       });
       return;
     }
@@ -93,16 +94,16 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     // A good code that adds a device (WISP 06), scanned from the active device with Join: it goes where such a code goes.
     if (!reading.ok && reading.reason === "device" && readDeviceInvite(value).ok) { joined.current = true; close(); offerDeviceLink(value.trim()); return; }
     // The reason, as WISP 801 words it: a typo, a newer version, not an invite at all, or a damaged one.
-    if (!reading.ok) { setError(t(INVITE_REFUSAL_MESSAGE[reading.reason])); setManual(true); return; }
+    if (!reading.ok) { setError({ tone: "error", title: t(INVITE_REFUSAL_MESSAGE[reading.reason]) }); setManual(true); return; }
     const outcome = classifyInvite(reading.keys);
-    if (outcome.kind === "own") { setError(""); setManual(false); setOwn(outcome.sessionId); return; }
+    if (outcome.kind === "own") { setError(null); setManual(false); setOwn(outcome.sessionId); return; }
     joined.current = true; stop();
     if (outcome.kind === "joined") { showJoinNotice("join.alreadyIn"); (onOpenChat ?? (() => onJoin?.(reading.keys)))(outcome.sessionId); return; }
     onJoin?.(reading.keys);
   };
   const paste = async () => {
     if (busyRef.current || joined.current || closed.current) return;
-    stop(); busyRef.current = true; setBusy(true); setError(""); setOwn(null);
+    stop(); busyRef.current = true; setBusy(true); setError(null); setOwn(null);
     const current = generation.current;
     try {
       // One click: the desktop app reads natively (no WebKit "Paste" callout); a refusal leaves the field and the shortcut.
@@ -111,8 +112,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       // A phone has no keys to press: there the field pastes with a long press.
       const touch = touchOnly();
       // A device code is not an invite: the words say which one to paste.
-      if (value === null) { setError(touch ? t("join.clipboardUnavailableTouch") : t(onDevice ? "devices.join.codeUnavailable" : "join.clipboardUnavailable", { keys: pasteShortcut() })); setManual(true); return; }
-      if (!value.trim()) { setError(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() })); setManual(true); return; }
+      if (value === null) { setError(said(touch ? t("join.clipboardUnavailableTouch") : t(onDevice ? "devices.join.codeUnavailable" : "join.clipboardUnavailable", { keys: pasteShortcut() }))); setManual(true); return; }
+      if (!value.trim()) { setError(said(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() }))); setManual(true); return; }
       accept(value.trim());
     } finally {
       if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); }
@@ -120,7 +121,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   };
   const scan = async () => {
     if (busyRef.current || joined.current || closed.current) return;
-    stop(); busyRef.current = true; setError(""); setOwn(null); setStarting(true);
+    stop(); busyRef.current = true; setError(null); setOwn(null); setStarting(true);
     const current = generation.current;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
@@ -147,7 +148,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     } catch {
       if (current !== generation.current) return;
       stop();
-      setError(t("join.cameraUnavailable")); setManual(true);
+      setError({ tone: "error", title: t("join.cameraUnavailable") }); setManual(true);
     }
   };
   // Once, on opening, after the dialog is up; `scan` itself stops anything a closed dialog started.
@@ -155,8 +156,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   useEffect(() => { if (autoScan) void scan(); }, []);
   const readImage = async (file?: File) => {
     if (!file || busyRef.current || joined.current || closed.current) return;
-    stop(); setError("");
-    if (file.size > 12 * 1024 * 1024) { setError(t("join.imageSize")); return; }
+    stop(); setError(null);
+    if (file.size > 12 * 1024 * 1024) { setError({ tone: "error", title: t("join.imageSize") }); return; }
     busyRef.current = true; setBusy(true);
     const current = generation.current;
     try {
@@ -169,9 +170,9 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
         const data = context.getImageData(0, 0, canvas.width, canvas.height);
         const qr = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
         if (current !== generation.current) return;
-        if (qr) accept(qr.data); else setError(t("join.noQr"));
+        if (qr) accept(qr.data); else setError({ tone: "error", title: t("join.noQr") });
       } finally { bitmap.close(); }
-    } catch { if (current === generation.current) setError(t("join.imageFailed")); }
+    } catch { if (current === generation.current) setError({ tone: "error", title: t("join.imageFailed") }); }
     finally { if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); } }
   };
   // A screenshot of the QR, pasted (the desktop app's WebKit hands it as a file) or dropped: read as "Open image" reads
@@ -188,7 +189,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     event.preventDefault();
     const file = droppedFiles(event.dataTransfer)[0];
     if (file?.type.startsWith("image/")) void readImage(file);
-    else if (file) setError(t("join.imageFailed"));
+    else if (file) setError({ tone: "error", title: t("join.imageFailed") });
   };
   const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed";
   return <dialog ref={dialog} {...backdrop} onCancel={event => { event.preventDefault(); close(); }}
@@ -223,14 +224,17 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       </div>
       <p className="mt-2 text-center text-xs text-text-secondary">{t("join.pasteScreenshot")}</p>
     </>}
-    {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    {error && <Notice problem={error} className="mt-3 text-sm" />}
     {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
       <p role="alert" className="text-sm text-text-primary">{t("join.own")}</p>
       <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header`}>{t("join.openChat")}</button>
     </div>}
     {manual && <form className="mt-3" onSubmit={event => { event.preventDefault(); if (!busyRef.current) accept(input.trim()); }}>
-      <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} onChange={event => { setInput(event.target.value); setError(""); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
+      <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} onChange={event => { setInput(event.target.value); setError(null); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
       <div className="mt-3 grid grid-cols-2 gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><button disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</button></div>
     </form>}
   </dialog>;
 }
+
+/** A line of the app's own as an error notice. */
+const said = (title: string): Problem => ({ tone: "error", title });

@@ -51,7 +51,8 @@ import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { canEditInGroup } from "@ghostly/browser/shared/edits";
 import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import { errorText } from "../lib/errorText";
+import { problemLine, problemText, type Problem } from "../lib/problemText";
+import { Notice } from "../components/ui/Notice";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -275,7 +276,7 @@ export function GroupChat() {
     setSharing("created");
     navigate(location.pathname, { replace: true, state: navOnly(location.state) });
   }, [location.state, location.pathname, navigate]);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
@@ -337,9 +338,9 @@ export function GroupChat() {
         setReplyingTo(current => current === answering ? null : current);
       }
       // The engine says why in English: said here in the app's language (lib/errorText.ts).
-      return error && errorText(error, t);
+      return error && problemLine(error, t);
     }
-    catch (e) { return e instanceof Error ? errorText(e, t) : t("group.chat.sendFailed"); }
+    catch (e) { return e instanceof Error ? problemLine(e, t) : t("group.chat.sendFailed"); }
   }, [groupId, t]);
 
   // Typing (WISP 902 · Group Mesh § Typing): private groups only; a community does not carry it yet.
@@ -419,7 +420,7 @@ export function GroupChat() {
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
   const community = group.profile === "community" ? group.community : undefined;
   // Why I am out of it (removed, left, forked, lost), as the engine says it, in the app's language; else its status in a word.
-  const outOfIt = group.status && group.status !== "active" ? (group.statusReason ? errorText(group.statusReason, t) : groupStatusText(group.status, t)) : undefined;
+  const outOfIt = group.status && group.status !== "active" ? (group.statusReason ? problemLine(group.statusReason, t) : groupStatusText(group.status, t)) : undefined;
   const count = group.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: group.members.length });
   const subtitle = joiningByLink ? (group.invitation!.admin ? t("group.chat.joining") : t("group.chat.joiningByLink"))
     : community && group.status === "active" ? (community.hub ? t("group.chat.communityHub", { members: count })
@@ -430,16 +431,16 @@ export function GroupChat() {
   // In a community every member can let people in, so every member hands the link out; in a private group, the admin.
   const canShare = group.status === "active" && (group.isAdmin || (group.profile === "community" && !!group.entryLink));
   const openShare = async () => {
-    setError("");
+    setError(null);
     // The link may be off: sharing it turns it on. On or not, the engine hears it is being handed out
     // (whoever gets it opens it soon, so this app looks for knocks faster a while).
     try { await engine.call("enableGroupLink", { groupId }); }
-    catch (e) { if (!group.entryLink) { setError(e instanceof Error ? errorText(e, t) : t("group.link.enableFailed")); return; } }
+    catch (e) { if (!group.entryLink) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.link.enableFailed") }); return; } }
     setSharing("share");
   };
   const act = async (action: () => Promise<unknown>) => {
-    setMenuOpen(false); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); }
+    setMenuOpen(false); setError(null);
+    try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); }
   };
 
   return (
@@ -506,7 +507,7 @@ export function GroupChat() {
       </div>}
       {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        {error || (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
+        {error ? <Notice problem={error} className="text-xs" /> : (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
 
 
@@ -565,7 +566,7 @@ export function GroupChat() {
         // Editing one of mine (WISP 902 § Edits): the new text shows here at once and goes to the members; @ names more.
         edit={editing ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
-            .then(result => ({ error: result.error && errorText(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("group.chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("group.chat.editFailed") }))).error } : undefined}
         onEditLast={group.canSend ? () => {
           const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card);
           if (last) { setReplyingTo(null); setEditing(last); }

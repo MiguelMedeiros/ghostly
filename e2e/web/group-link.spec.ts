@@ -90,7 +90,7 @@ test("strangers join a group through its link, and a replaced link reaches nobod
   await expect(field).not.toHaveValue(url);
   await alice.page.keyboard.press("Escape");
   await dave.page.goto(url);
-  await expect(dave.page.getByTestId("group-joining")).toContainText("Waiting for the admin's app", { timeout: 30_000 });
+  await expect(dave.page.getByTestId("group-joining")).toContainText("once the admin's app is open", { timeout: 30_000 });
   await dave.page.waitForTimeout(20_000);
   await expect(groupChat(dave)).toHaveAttribute("data-status", "invitation");
   await expect(alice.page.getByTestId("group-members")).toContainText("3 members");

@@ -68,7 +68,7 @@ describe("GroupChat: joining through a link", () => {
     openGroup(viaLink(""));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining through a link");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("Waiting to be let in");
-    expect(screen.getByTestId("group-joining")).toHaveTextContent("Waiting for the admin's app to let you in");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("It happens once the admin's app is open. You can leave this page.");
     // Nothing to write until the group lets you in: no composer at all.
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
@@ -76,7 +76,7 @@ describe("GroupChat: joining through a link", () => {
   it("still knocking after two minutes: says the link may have been replaced, and not before", async () => {
     openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }));
     expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
-    expect(await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 })).toHaveTextContent("Still no answer. If the group's link was replaced, this one no longer works: ask for the new link.");
+    expect(await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 })).toHaveTextContent("Still no answer. If the link was replaced, ask for the new one.");
   });
 
   it("others knocking too: says how many wait, and after two minutes that the group is busy, not that the link may be dead", async () => {
@@ -93,7 +93,7 @@ describe("GroupChat: joining through a link", () => {
     // Two minutes on, still behind others: a wait, in words that do not send the person to ask for another link.
     act(() => view.engine.update({ groups: [knocking(2, 2 * 60_000 - 400)] }));
     const hint = await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
-    expect(hint).toHaveTextContent("Still waiting. The group lets people in a few at a time");
+    expect(hint).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
     expect(hint).not.toHaveTextContent("link was replaced");
   });
 
@@ -115,7 +115,7 @@ describe("GroupChat: joining through a link", () => {
     openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
     const card = screen.getByTestId("group-joining");
     expect(card).toHaveTextContent("Groups can't connect from this app yet");
-    expect(card).toHaveTextContent("Open the group on the web app or on another device to take part.");
+    expect(card).toHaveTextContent("Open the group in the web app or on another device.");
     expect(card).not.toHaveTextContent("You are in in a moment");
     expect(card.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
@@ -133,7 +133,7 @@ describe("GroupChat: joining through a link", () => {
 
   it.each([
     ["knocking", "", "Leaving a knock where the admin's app looks for one", ["current", "todo", "todo", "todo"]],
-    ["knocked", "", "Waiting for the admin's app to let you in", ["done", "current", "todo", "todo"]],
+    ["knocked", "", "It happens once the admin's app is open", ["done", "current", "todo", "todo"]],
     ["answered", "", "The admin's app saw you knock and is connecting to you", ["done", "done", "current", "todo"]],
     // Let in: what is left is connecting to the members, which the chat itself shows next.
     ["admitted", ALICE, "getting the group's keys", ["done", "done", "done", "current"]],
@@ -156,7 +156,7 @@ describe("GroupChat: joining through a link", () => {
     const joined = stored({ id: "event:1:joined", event: "joined", text: "You joined.", timestamp: Date.now() });
     const away = [members[0], member({ key: ALICE, nick: "Alice", role: "admin" })];
     openGroup(active({ members: away }), [joined]);
-    expect(await screen.findByTestId("group-connecting")).toHaveTextContent("Connecting to the members");
+    expect(await screen.findByTestId("group-connecting")).toHaveTextContent("You're in. Messages go out once a member is reached.");
     expect(screen.getByTestId("group-members")).toHaveTextContent("2 members · 0 of 1 reachable");
     act(() => fakeEngine.update({ groups: [active({ members: [members[0], { ...away[1], online: true }] })] }));
     expect(screen.queryByTestId("group-connecting")).not.toBeInTheDocument();
@@ -180,14 +180,15 @@ describe("GroupChat: joining through a link", () => {
 
 describe("GroupChat: out of the group", () => {
   it.each([
-    ["removed", "You were removed from this group"],
-    ["left", "You left this group"],
-    ["forked", "The membership history forked. Membership changes are halted; the admin must re-form the group."],
-  ] as const)("says why when %s, and cannot send", async (status, reason) => {
+    ["removed", "You were removed from this group", "You were removed from this group"],
+    ["left", "You left this group", "You left this group"],
+    // In a few words; the engine's own English (which fork) is not the line.
+    ["forked", "The membership history forked. Membership changes are halted; the admin must re-form the group.", "Group changes are paused. The admin must re-form the group."],
+  ] as const)("says why when %s, and cannot send", async (status, reason, said) => {
     const { user } = openGroup(active({ status, statusReason: reason, canSend: false }));
     expect(screen.getByTestId("group-chat")).toHaveAttribute("data-status", status);
-    expect(screen.getByTestId("group-notice")).toHaveTextContent(reason);
-    expect(screen.getByTestId("group-members")).toHaveTextContent(reason);
+    expect(screen.getByTestId("group-notice")).toHaveTextContent(said);
+    expect(screen.getByTestId("group-members")).toHaveTextContent(said);
     expect(composer()).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     // Nothing to leave; only forgetting it here is left.
@@ -213,9 +214,9 @@ describe("GroupChat: out of the group", () => {
   it.each([
     ["removed", "You were removed from this group", "Você foi removido deste grupo"],
     ["forked", "Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.",
-      "O membro 3r69cgd5 tem outro histórico de membros na época 4. As mudanças de membros estão paradas; o admin precisa recriar o grupo."],
+      "As mudanças no grupo estão pausadas. O admin precisa recriar o grupo."],
     ["lost", "Two members let people in at the same moment and yours did not count. Asking to be let in again…",
-      "Dois membros deixaram pessoas entrar ao mesmo tempo e a sua entrada não valeu. Pedindo para entrar de novo…"],
+      "Dois membros deixaram pessoas entrar ao mesmo tempo. Pedindo para entrar de novo…"],
   ] as const)("says why when %s in the app's language, not in the engine's English", (status, reason, said) => {
     fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
     fakeEngine.update({ groups: [active({ status, statusReason: reason, canSend: false })] });
@@ -357,7 +358,7 @@ describe("GroupChat: leaving", () => {
   it("keeps the admin from leaving while no member is online to take over", async () => {
     const { user } = openGroup(adminOf([member({ key: BOB, nick: "Bob" })]));
     const dialog = await leaveFromMenu(user);
-    expect(dialog).toHaveTextContent("nobody else in the group is online to take over");
+    expect(dialog).toHaveTextContent("Nobody is online to become admin" + "Make someone admin, or wait for a member.");
     expect(within(dialog).queryByTestId("group-leave-successor")).not.toBeInTheDocument();
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
   });
@@ -489,7 +490,7 @@ describe("GroupChat: history and sending", () => {
     fakeEngine.update({ groups: [active()] });
     const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     await user.type(composer(), "alguém?{Enter}");
-    expect(await screen.findByText("A chave desta época ainda não chegou. Espere um membro atualizar você.")).toBeInTheDocument();
+    expect(await screen.findByText("A chave mais recente do grupo não chegou. Um membro vai te atualizar.")).toBeInTheDocument();
     expect(composer()).toHaveValue("alguém?");
   });
 });
