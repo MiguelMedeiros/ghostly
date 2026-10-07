@@ -8,16 +8,20 @@ Needs python-gobject and webkit2gtk-4.1.
 import gi, os, subprocess, sys, time
 MODES = ["close-new", "close-new-nowait", "element", "running", "suspend-long"]
 
+# "allow": the page as Ghostly Desktop opens it (wry: autoplay policy Allow), no user gesture at all.
+# "gesture": no autoplay policy, the run started as a user gesture (as a key press).
 if len(sys.argv) < 2:
-    for mode in MODES:
-        print(f"===== {mode}", flush=True)
-        try:
-            subprocess.run([sys.executable, __file__, mode], timeout=60)
-        except subprocess.TimeoutExpired:
-            print("  (process killed after 60 s)", flush=True)
+    for setup in ["allow", "gesture"]:
+        for mode in MODES:
+            print(f"===== {setup} {mode}", flush=True)
+            try:
+                subprocess.run([sys.executable, __file__, mode, setup], timeout=60)
+            except subprocess.TimeoutExpired:
+                print("  (process killed after 60 s)", flush=True)
     sys.exit(0)
 
 MODE = sys.argv[1]
+SETUP = sys.argv[2] if len(sys.argv) > 2 else "allow"
 gi.require_version("Gtk", "3.0")
 gi.require_version("WebKit2", "4.1")
 from gi.repository import Gtk, WebKit2, GLib
@@ -82,6 +86,7 @@ async function run() {
   log("DONE");
 }
 log("ready webkit " + navigator.userAgent);
+if ("@SETUP@" === "allow") setTimeout(run, 500);
 </script>"""
 
 def web_ticks():
@@ -97,8 +102,11 @@ def web_ticks():
 print(f"  WebKitGTK {WebKit2.get_major_version()}.{WebKit2.get_minor_version()}.{WebKit2.get_micro_version()}", flush=True)
 win = Gtk.Window(title="r11k audio probe"); win.set_default_size(300, 120)
 manager = WebKit2.UserContentManager(); manager.register_script_message_handler("r11k")
-view = WebKit2.WebView.new_with_user_content_manager(manager)
-view.get_settings().set_property("media-playback-requires-user-gesture", False)
+if SETUP == "allow":
+    policies = WebKit2.WebsitePolicies.new_with_policies(autoplay=WebKit2.AutoplayPolicy.ALLOW)
+    view = WebKit2.WebView(user_content_manager=manager, website_policies=policies)
+else:
+    view = WebKit2.WebView(user_content_manager=manager)
 win.add(view); win.connect("destroy", Gtk.main_quit)
 start = time.time()
 mark = {"name": None, "ticks": 0, "at": 0.0}
@@ -115,12 +123,12 @@ def message(_m, result):
         mark.update(name=None if name == "end" else name, ticks=t, at=now)
         return
     print(f"  {now - start:6.2f}s {text}", flush=True)
-    if text.startswith("ready"):
+    if text.startswith("ready") and SETUP == "gesture":
         # Started from the UI process: WebKitGTK runs it as a user gesture (activation), as a key press would be.
         GLib.timeout_add(300, lambda: (view.evaluate_javascript("run()", -1, None, None, None, None, None), False)[1])
     if text == "DONE": GLib.timeout_add(200, Gtk.main_quit)
 manager.connect("script-message-received::r11k", message)
-view.load_html(PAGE.replace("@MODE@", MODE), "http://localhost/")
+view.load_html(PAGE.replace("@MODE@", MODE).replace("@SETUP@", SETUP), "http://localhost/")
 win.show_all()
 GLib.timeout_add(50_000, lambda: (print("  timeout (50 s)", flush=True), Gtk.main_quit()))
 Gtk.main()
