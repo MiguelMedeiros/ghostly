@@ -48,6 +48,12 @@ export function relayCause(text: string): RelayCause | null {
 /** A live session that ended in a way that says nothing about the contact: it is dialled again (packages/core). */
 const SESSION_DROPS = [/^Session receive queue full$/, /^The peer did not finish authentication\b/, /^Invalid session negotiation$/];
 
+/**
+ * A Reconnect that ran out of time (packages/core ghostlink.ts `connect`): the contact is not there yet, and the link
+ * keeps dialling by itself. A wait, in the app's language: it showed in red, in English, in every language (2026-10-07).
+ */
+const DIAL_TIMEOUTS = [/^Timed out connecting to the peer$/];
+
 /** A session the peer broke the protocol on (packages/core pairedSession.ts): it says nothing a person can act on. */
 const PROTOCOL = [/^Session frame too large$/, /^Negotiation message too large$/, /^Invalid connection binding\b/];
 
@@ -65,6 +71,7 @@ export function problemText(cause: unknown, t: Translate = english, fallback: Pr
       : { tone: "error", title: t("errors.problem.relaysUnreachable"), next: t("errors.problem.checkConnection"), detail: raw };
   }
   if (SESSION_DROPS.some((drop) => drop.test(raw))) return { tone: "wait", title: t("errors.problem.sessionDropped"), next: t("errors.problem.retrying"), detail: raw };
+  if (DIAL_TIMEOUTS.some((timeout) => timeout.test(raw))) return { tone: "wait", title: t("errors.problem.connectFailed"), next: t("errors.problem.retrying"), detail: raw };
   // A known error is said in the app's language: its English in an ⓘ only when part of it (a reason) is not said.
   // Known also without the final period a message around it took ("…: <reason>. Nothing was saved").
   const parts = knownErrorParts(raw, t) ?? (raw && !raw.endsWith(".") ? knownErrorParts(`${raw}.`, t) : null);
