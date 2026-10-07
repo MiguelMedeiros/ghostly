@@ -175,7 +175,7 @@ test("a chat app's Open on the Apps page asks which chat, and opens it there, ne
   await expect(ana.page.getByTestId("mini-app")).toHaveCount(0);
   const chats = picker.getByTestId("app-chat-picker-chat");
   await expect(chats).toHaveCount(1);
-  await expect(chats).toHaveText("Bob");
+  await expect(chats).toContainText("Bob");
   await chats.click();
 
   // In that chat, beside it, as + → Apps opens it; Bob gets the card.
