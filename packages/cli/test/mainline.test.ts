@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Mainline, RelaysAndDht } from "../src/runtime/mainline";
 import { mainlineNetwork, pkarrRelays } from "../src/runtime/engine";
-import { error, ghostly, home, ok, Running } from "./support/cli";
+import { error, ghostly, home, hyperdhtTestnet, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.groups, core.relay-client
 
 /**
@@ -148,18 +148,26 @@ describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 
   });
 });
 
+/**
+ * The daemons also get a HyperDHT of this test's own. An edge whose WebRTC attempt came to nothing goes on native only
+ * for the rest of the run (node.ts `edgeWithoutRtc`), and with no STUN every such attempt reads as a network that blocks
+ * direct connections. Here the native transport it then needs is on loopback; with none, as since the tests left the
+ * public networks (#1389), the edge stayed down and the test timed out at "edge up" (CI, 2026-10-07).
+ */
 describe("two daemons whose only relay answers 500 to everything", { timeout: 300_000 }, () => {
   let relay: Server, url = "";
+  let hyperdht: Awaited<ReturnType<typeof hyperdhtTestnet>> | undefined;
   const running: Running[] = [];
   beforeAll(async () => {
     relay = createServer((_request, response) => { response.statusCode = 500; response.end("internal error"); });
     await new Promise<void>((resolve) => relay.listen(0, "127.0.0.1", resolve));
     url = `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
-  });
-  afterAll(async () => { await Promise.all(running.map((r) => r.stop())); relay?.close(); }, 60_000);
+    hyperdht = await hyperdhtTestnet();
+  }, 30_000);
+  afterAll(async () => { await Promise.all(running.map((r) => r.stop())); relay?.close(); await hyperdht?.destroy(); }, 60_000);
 
   it("a private group is joined by its link and carries a message, all through the Mainline DHT", async () => {
-    const env = { GHOSTLY_DHT: "1", GHOSTLY_DHT_BOOTSTRAP: bootstrap, GHOSTLY_PKARR_RELAYS: url };
+    const env = { GHOSTLY_DHT: "1", GHOSTLY_DHT_BOOTSTRAP: bootstrap, GHOSTLY_PKARR_RELAYS: url, GHOSTLY_HYPERDHT_BOOTSTRAP: hyperdht!.bootstrap };
     const [admin, joiner] = [home("dht-admin"), home("dht-joiner")];
     const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
     for (const dir of [admin, joiner]) {
