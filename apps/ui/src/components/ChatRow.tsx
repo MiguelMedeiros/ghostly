@@ -24,6 +24,8 @@ import { servicesPlatform } from "../lib/platform";
 import { paymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
 import type { Translate } from "../locales/translate";
+import type { UsageEntry } from "../lib/usage";
+import { UsagePill } from "./chat/UsageMeter";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -198,6 +200,8 @@ export interface ChatRowProps {
    * listens to, whether it is the one in the hand, and the line on its edge when the dragged row would land there.
    */
   reorder?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
+  /** A bot's usage card (WISP 405 § Usage): how much of its quota is left, a small meter beside the unread count. */
+  usage?: UsageEntry;
 }
 
 /** A join notice as the chat's line says it (MessageBubble): mine, or the contact by the name the list shows. */
@@ -295,7 +299,10 @@ export function ChatRow(p: ChatRowProps) {
           {muted && <MutedMark label={t("mute.bell")} />}
           {p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
         </>}
-        trailing={p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />}
+        trailing={(p.usage || p.unread > 0) && <>
+          {p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />}
+          {p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />}
+        </>}
         timeCover={
           // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place. A row in
           // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.

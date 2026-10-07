@@ -92,6 +92,8 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
+import { UsageButton } from "../components/chat/UsageMeter";
+import { useUsageOf } from "../hooks/useUsage";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
@@ -552,6 +554,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   }, [callState, sessionId, holdForUnlock]);
   // Under the lock it would only hold the keys: the lock screen shows the call instead.
   const locked = useIsLocked();
+  // A bot's usage card (WISP 405 § Usage): the meter in the header.
+  const usage = useUsageOf(params?.peerPubKeyB64);
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -715,7 +719,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             )}
             {/* The contact's key, or "typing…" while they write (presence, not connection). Everything about the
                 connection, pairing included, is the icon beside the calls. */}
-            <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={truncatedPeerKey} />
+            <div className="flex min-w-0 items-center gap-1.5">
+              <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={truncatedPeerKey} />
+              {/* A bot's usage (WISP 405 § Usage): what is left of its quota and when it resets; a tap says more. */}
+              {usage && <UsageButton entry={usage} />}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-1 max-md:gap-0 shrink-0">
