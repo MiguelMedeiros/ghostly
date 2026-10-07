@@ -24,6 +24,7 @@ import { MESH_HUBS, meshRendezvous, NO_HUB_POLICY, type MeshHubPolicy } from "./
 import { readReaction, type WireReaction } from "./reactions";
 import { GROUP_PIN_FRAME, readPin, type WirePin } from "./pins";
 import { RateWindow } from "./pairedEdits";
+import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers } from "./catchUp";
 
 /**
  * One member's view of a `group-mesh/1` group: the membership chain, the epoch
@@ -80,9 +81,9 @@ export const GROUP_LIMITS = {
    * member's app: the next goes once it handled the one before the last. An app holds 64 frames waiting at most before
    * 2026-10-07 (more ends the session), and a member back in a busy group was handed over a hundred at once.
    */
-  catchUpSlice: 16,
+  catchUpSlice: CATCH_UP_SLICE,
   /** Between two slices, when the member's app cannot say it handled one (`handled` resolves `false`). */
-  catchUpPauseMs: 500,
+  catchUpPauseMs: CATCH_UP_PAUSE_MS,
 } as const;
 
 /** What every member should know about who can read what, in the words the apps show. */
@@ -374,8 +375,8 @@ export class GroupSession {
   private passOn: GroupEdgeFrame[] | null = null;
   /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
-  /** Catch-up answers still going out, per member: what is left of each (`handOut`). */
-  private handingOut = new Map<string, GroupEdgeFrame[]>();
+  /** Catch-up answers still going out, a slice at a time (`handOut`). */
+  private readonly answers: CatchUpAnswers<GroupEdgeFrame>;
   /**
    * Messages delivered from a copy that was not whole (handed on without its author's whole signature): not seen, so
    * a sync still asks for them and a whole copy completes them. Oldest first, saved as `GroupState.provisional`, so a
@@ -388,6 +389,11 @@ export class GroupSession {
   constructor(state: GroupState, private readonly hooks: GroupSessionHooks) {
     this.state = state;
     this.identity = identityFromSeedB64(state.seedB64);
+    this.answers = new CatchUpAnswers({
+      send: (to, frame) => hooks.send(to, frame),
+      ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
+      active: () => this.state.status === "active",
+    });
     this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
     this.chainMovedAt = this.clock();
   }
@@ -1291,40 +1297,12 @@ export class GroupSession {
 
   /**
    * A catch-up answer, a slice at a time (`GROUP_LIMITS.catchUpSlice`), with two slices at most not handled yet by the
-   * member's app (`hooks.handled`): the next once it handled the one before the last, so the slices follow each other
-   * without a round trip between them. All at once, a member back in a busy group was handed over a hundred frames on
-   * one session, and an app that holds 64 waiting ended that session mid catch-up ("Session receive limit exceeded",
-   * 2026-10-07). The first two slices go now, the rest without holding this group's other frames back. A newer answer
-   * to the same member takes the place of what is left of the last; a frame the edge did not take ends it (the member
-   * asks again when its edge opens).
+   * member's app (`hooks.handled`), as a community's goes (`CatchUpAnswers`). All at once, a member back in a busy group
+   * was handed over a hundred frames on one session, and an app that holds 64 waiting ended that session mid catch-up
+   * ("Session receive limit exceeded", 2026-10-07). A newer answer to the same member takes the place of what is left of
+   * the last; a frame the edge did not take ends it (the member asks again when its edge opens).
    */
-  private handOut(to: string, frames: GroupEdgeFrame[]): void {
-    const handled = this.hooks.handled;
-    if (!handled) { for (const frame of frames) this.hooks.send(to, frame); return; }
-    const going = this.handingOut.get(to);
-    if (going) { going.splice(0, going.length, ...frames); return; }
-    const rest = [...frames], told: Promise<boolean>[] = [];
-    const next = () => {
-      if (!this.sendSlice(to, rest)) return false;
-      if (rest.length) told.push(handled(to).catch(() => false));
-      return true;
-    };
-    if (!next() || !next() || !rest.length) return;
-    this.handingOut.set(to, rest);
-    void (async () => {
-      try {
-        while (rest.length) {
-          if (!await told.shift()!) await new Promise(resolve => setTimeout(resolve, GROUP_LIMITS.catchUpPauseMs));
-          if (this.state.status !== "active" || !next()) break;
-        }
-      } finally { this.handingOut.delete(to); }
-    })();
-  }
-  /** The next slice of `rest` to `to`: false, and nothing left, when the edge did not take one. */
-  private sendSlice(to: string, rest: GroupEdgeFrame[]): boolean {
-    for (const frame of rest.splice(0, GROUP_LIMITS.catchUpSlice)) if (this.hooks.send(to, frame) === false) { rest.length = 0; return false; }
-    return true;
-  }
+  private handOut(to: string, frames: GroupEdgeFrame[]): void { this.answers.handOut(to, frames); }
 
   /** My own messages a member's sync says it lacks, from my bounded log, for the epochs it was a member of. */
   private handOwn(to: string, frame: GroupSyncFrame): void {
