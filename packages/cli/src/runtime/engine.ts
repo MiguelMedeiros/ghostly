@@ -2,7 +2,8 @@ import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fromBase64Url, setLinkTraceSink } from "@ghostly/core";
+import { fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
+import { irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { CliError } from "../errors";
@@ -51,6 +52,36 @@ export function pkarrRelays(env = process.env): string[] | null {
 }
 
 /**
+ * The Iroh relays of a private network or a test, `GHOSTLY_IROH_RELAYS` ("https://…,…"; http:// on loopback): the only
+ * relays this process's Iroh homes on, whatever the profile's `irohRelays` setting says. Null when unset (the setting,
+ * else n0's public relays).
+ */
+export function irohRelays(env = process.env): string[] | null {
+  const relays = (env.GHOSTLY_IROH_RELAYS ?? "").split(",").map((url) => url.trim()).filter(Boolean);
+  if (!relays.length) return null;
+  const bad = relays.map((url) => irohRelayProblem(url)).find(Boolean);
+  if (bad) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: ${bad}`);
+  return relays;
+}
+
+/**
+ * The apps' public STUN servers (Google's, `RTC_CONFIG`), which every WebRTC connection asks for its public address:
+ * `GHOSTLY_STUN=0` leaves them out (a private network, or tests on one machine, where host candidates connect). The
+ * profile's own `iceServers` stay.
+ */
+export function publicStun(env = process.env): boolean { return env.GHOSTLY_STUN !== "0"; }
+
+/** An RTC configuration without the apps' public STUN servers. */
+export function withoutPublicStun(config: RTCConfiguration | undefined): RTCConfiguration | undefined {
+  if (!config?.iceServers) return config;
+  const ours = new Set((RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()));
+  const iceServers = config.iceServers
+    .map((server) => ({ ...server, urls: [server.urls].flat().filter((url) => !ours.has(url)) }))
+    .filter((server) => server.urls.length);
+  return { ...config, iceServers };
+}
+
+/**
  * The Mainline DHT, for Pkarr beside the relays (`RelaysAndDht`): `GHOSTLY_DHT=0` leaves it out (relays only, as the web
  * app), `GHOSTLY_DHT_BOOTSTRAP` ("host:port,…") replaces the public routers (a testnet; one all on loopback binds there).
  * `GHOSTLY_PKARR_RELAYS` without a bootstrap leaves it out too, as on the Desktop: a private network stays off the
@@ -79,6 +110,7 @@ async function installWebRtc(): Promise<boolean> {
       scope[name] ??= (polyfill as unknown as Record<string, unknown>)[name];
     }
     refuseDataAnswers(scope);
+    if (!publicStun()) leaveOutPublicStun(scope);
     return true;
   } catch (error) {
     process.stderr.write(`ghostly: WebRTC is unavailable (${error instanceof Error ? error.message : String(error)}); chats use HyperDHT, Iroh or the DHT\n`);
@@ -104,6 +136,14 @@ function refuseDataAnswers(scope: Record<string, unknown>): void {
       }
       return super.setRemoteDescription(description);
     }
+  };
+}
+
+/** `GHOSTLY_STUN=0`: every connection the engine makes leaves the apps' public STUN servers out of its configuration. */
+function leaveOutPublicStun(scope: Record<string, unknown>): void {
+  const Base = scope.RTCPeerConnection as typeof RTCPeerConnection;
+  scope.RTCPeerConnection = class extends Base {
+    constructor(config?: RTCConfiguration) { super(withoutPublicStun(config)); }
   };
 }
 
@@ -156,6 +196,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   // as the Desktop writes to its log. For measuring, not needed to run.
   // Read first: a mistyped one stops here, before anything opens.
   const pinned = pkarrRelays();
+  const pinnedIroh = irohRelays();
   const trace = process.env.GHOSTLY_LINK_TRACE;
   if (trace) {
     setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
@@ -209,6 +250,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const server = new EngineServer({
     ...(transport ? { transport } : {}),
     irohWeb: true,
+    // `GHOSTLY_IROH_RELAYS`: those relays only (the setting is not read).
+    ...(pinnedIroh ? { irohRelays: pinnedIroh } : {}),
     // A CLI profile is one device's (WISP 06): no device state is kept for it.
     singleDevice: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },

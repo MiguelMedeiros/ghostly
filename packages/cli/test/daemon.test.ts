@@ -17,7 +17,7 @@ const dir = home("restart");
 beforeAll(async () => {
   relay = await localRelay();
   dht = await hyperdhtTestnet();
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
+  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_PKARR_RELAYS: relay.url };
 }, 30_000);
 
 afterAll(async () => {

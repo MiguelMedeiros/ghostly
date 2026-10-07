@@ -1,8 +1,10 @@
 /**
- * The app's words. English is built in; another of the app's 8 languages (en, pt, es, fr, it, ja, zh, ar) is a table
- * passed to addStrings, and pickLanguage chooses from the client's locale (context.locale, else the browser's).
- * A key a table leaves out falls back to English.
+ * The app's words in its 8 languages (en, pt, es, fr, it, ja, zh, ar): English here, the others in languages.ts.
+ * pickLanguage chooses from the client's locale (context.locale, else the browser's). addStrings can add or replace a
+ * table; a key it leaves out falls back to English.
  */
+import { ar, es, fr, it, ja, pt, zh } from "./languages.ts";
+
 export const en = {
   title: "Chess",
   board: "Chessboard",
@@ -52,6 +54,8 @@ export const en = {
   notice_sendFailed: "Not sent. It goes when your contact is back.",
   white: "white",
   black: "black",
+  /** A piece in a square's label: "white pawn". */
+  piece: "{colour} {piece}",
   empty: "empty",
   selected: "selected",
   canMoveHere: "move here",
@@ -70,7 +74,7 @@ export type StringKey = keyof Strings;
 export const LANGUAGES = ["en", "pt", "es", "fr", "it", "ja", "zh", "ar"] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-const tables: Partial<Record<Language, Partial<Strings>>> = { en };
+const tables: Partial<Record<Language, Partial<Strings>>> = { en, pt, es, fr, it, ja, zh, ar };
 
 /** Adds (or replaces) the words of one language. */
 export function addStrings(language: Language, table: Partial<Strings>): void {
