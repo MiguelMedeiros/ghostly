@@ -5,11 +5,11 @@
  * The rule is one function, `appsAvailable`, so a later rule (a browser apps are hidden or limited on) is added there
  * and every screen follows. The screens ask it through `useAppsState` / `useAppsAvailable`.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../platform";
 import { useAppOpener, type AppOpener } from "./open";
-import { runnerAvailable } from "./runnerCheck";
+import { runnerPolicy } from "./runnerCheck";
 
 /** The feature is on in this build: `APPS_ENABLED`, or the e2e suite's build (`VITE_APPS_TEST=1`, fixed at build time). */
 export function appsEnabled(): boolean {
@@ -26,8 +26,8 @@ export interface AppsFacts {
   runner: string | null;
   /** An opener is registered (`setAppOpener`). */
   opener: AppOpener | null;
-  /** This server sends the runner's policy as a header: undefined while it is being asked. */
-  runnerPolicy: boolean | undefined;
+  /** This server sends the runner's policy as a header: undefined while it is being asked, null while it cannot be asked. */
+  runnerPolicy: boolean | null | undefined;
 }
 
 /**
@@ -43,30 +43,76 @@ export function appsAvailable(facts: AppsFacts): AppsState {
 
 /** What the runner check answered, per runner page: later screens know at once. */
 const answered = new Map<string, boolean>();
+/** Runner pages that could not be asked (offline, a dropped request): asked again when the network is back. */
+const unreachable = new Set<string>();
+const asking = new Set<string>();
+const listeners = new Set<() => void>();
+let version = 0;
+let retry: ReturnType<typeof setTimeout> | null = null;
+let listening = false;
+
+/** How long until a runner page that could not be asked is asked again, unless the browser says it is online first. */
+export const RUNNER_RETRY_MS = 30_000;
+
+function told(): void {
+  version++;
+  for (const listener of [...listeners]) listener();
+}
+
+function askAgain(): void {
+  if (retry) clearTimeout(retry);
+  retry = null;
+  for (const url of [...unreachable]) askRunner(url);
+}
+
+function askRunner(url: string): void {
+  if (answered.has(url) || asking.has(url)) return;
+  asking.add(url);
+  void runnerPolicy(url).then((ok) => {
+    asking.delete(url);
+    if (ok === null) {
+      unreachable.add(url);
+      if (!listening && typeof window !== "undefined") { listening = true; window.addEventListener("online", askAgain); }
+      retry ??= setTimeout(askAgain, RUNNER_RETRY_MS);
+    } else {
+      unreachable.delete(url);
+      answered.set(url, ok);
+    }
+    told();
+  });
+}
 
 /** For tests: ask again. */
 export function forgetAppsAvailable(): void {
   answered.clear();
+  unreachable.clear();
+  asking.clear();
+  if (retry) clearTimeout(retry);
+  retry = null;
 }
 
-/** `appsAvailable` for this client now, asking the runner page once when the rest already holds. */
+const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+const snapshot = () => version;
+
+/**
+ * `appsAvailable` for this client now, asking the runner page once when the rest already holds. A runner page that
+ * could not be asked (the app opened offline) is "off" for now, and asked again when the browser is online, or every
+ * RUNNER_RETRY_MS: Apps then shows without a reload.
+ */
 export function useAppsState(): AppsState {
   const enabled = appsEnabled();
   // Read, not subscribed to: where apps run depends on the host, not on the engine's state, and every message bubble
-  // asks (a subscription would draw each of them again on every change of state).
+  // asks (a subscription to the engine would draw each of them again on every change of state). The runner check's
+  // own answers are subscribed to: they change once or twice in a page's life.
   const runner = servicesPlatform?.apps?.runnerUrl ?? null;
   // Desktop serves its runner itself, with the policy: there is no server to ask.
   const served = servicesPlatform?.apps?.runnerServed === true;
   const opener = useAppOpener();
   const ask = enabled && opener && !served ? runner : null;
-  const [, setChecked] = useState(0);
-  useEffect(() => {
-    if (!ask || answered.has(ask)) return;
-    let live = true;
-    void runnerAvailable(ask).then((ok) => { answered.set(ask, ok); if (live) setChecked((n) => n + 1); });
-    return () => { live = false; };
-  }, [ask]);
-  return appsAvailable({ enabled, runner, opener, runnerPolicy: served || (runner ? answered.get(runner) : undefined) });
+  useSyncExternalStore(subscribe, snapshot, snapshot);
+  useEffect(() => { if (ask) askRunner(ask); }, [ask]);
+  const policy = runner ? (answered.get(runner) ?? (unreachable.has(runner) ? null : undefined)) : undefined;
+  return appsAvailable({ enabled, runner, opener, runnerPolicy: served || policy });
 }
 
 /** Whether Apps shows here now. False until the runner check has answered. */

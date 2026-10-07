@@ -22,7 +22,7 @@ import { renderApp } from "../render";
 // covers: apps.page, apps.chat.card
 
 // The runner page's header, asked once by the real check: answered here, never fetched in a test.
-vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
+vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
 
 const KEY = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo";
 const REF = `${KEY}/chess`;
