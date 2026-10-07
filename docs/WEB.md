@@ -104,7 +104,7 @@ Everything the web app keeps (keys, chats, files, wallets) lives in the browser'
 
 ## Keeping up to date
 
-The build writes `/version.json` next to the app, and a tab asks for it on load, every four hours and whenever it comes back to the foreground. Different version, or the same version from a different commit, and the app offers a reload, never on its own, because reloading ends the peer and every call it holds. The question goes to the origin serving the app and to nobody else, and **Settings → Updates** turns it off.
+The build writes `/version.json` next to the app, and a tab asks for it on load, every four hours and whenever it comes back to the foreground. A newer version number, and the app offers a reload (a redeploy of the same version is not offered: the service worker takes it up once no tab of the app is left), never on its own, because reloading ends the peer and every call it holds. The question goes to the origin serving the app and to nobody else, and **Settings → Updates** turns it off.
 
 The service worker keeps the version it was built with, so a deploy never swaps the app under a running chat, and reloading the tab on its own reloads the same version. The browser fetches the new `/sw.js` when a tab loads, and at once when the version check finds a deploy; the new worker installs beside the old one and waits. **Reload** on *New version* tells it to take over, then reloads into the new build, and the old version's cache is deleted. Once no tab of the app is left, the waiting worker takes over by itself, so the next start is the new version. Before there was a worker, no cached copy existed to go stale; now the explicit Reload is what keeps a tab and the server in step.
 

@@ -15,11 +15,18 @@ it("offers a newer version, and nothing when this one is current or newer", asyn
   expect(await check()).toBeNull();
 });
 
-it("a new build of the same version is an update, only when both builds are known", async () => {
-  answer('{"version":"1.2.3","build":"b2"}');
-  expect(await check("1.2.3", "b1")).toMatchObject({ version: "1.2.3", build: "b2" });
-  expect(await check("1.2.3", "b2")).toBeNull();
-  expect(await check("1.2.3")).toBeNull();
+it("compares version numbers only: a new build of the same version is not an update", async () => {
+  // "Ghostly 1.1.4 is available" on 1.1.4, after a redeploy of the same version.
+  answer('{"version":"1.1.4","build":"b2"}');
+  expect(await check("1.1.4", "b1")).toBeNull();
+  expect(await check("v1.1.4", "b1")).toBeNull();
+  expect(await check("1.1.4-beta.1", "b1")).toBeNull();
+  answer('{"version":"1.1.4+b2"}');
+  expect(await check("1.1.4+b1", "b1")).toBeNull();
+  answer('{"version":"1.1.3","build":"b2"}');
+  expect(await check("1.1.4", "b1")).toBeNull();
+  answer('{"version":"1.1.10","build":"b2"}');
+  expect(await check("1.1.9", "b1")).toMatchObject({ version: "1.1.10", build: "b2" });
 });
 
 it("never trusts what the network says: bounded, typed, and a failure is not an update", async () => {
