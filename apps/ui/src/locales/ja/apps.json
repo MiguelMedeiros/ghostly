@@ -129,6 +129,8 @@
     "beside": "チャットを表示",
     "full": "全幅で表示",
     "resume": "{{title}} に戻る",
+    "stoppedRemoved": "{{title}} を停止しました: {{store}} がこのバージョンを削除しました",
+    "stoppedRevoked": "{{title}} を停止しました: 作者がこのバージョンを取り消しました",
     "with": "{{name}} との {{title}}",
     "withName": "{{name}} と"
   }

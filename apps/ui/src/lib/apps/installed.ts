@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
+import { appsRunning, stopTakenDown } from "./open";
 
 /*
  * The apps installed in this profile, as the engine lists them (`appList`, no request), shared by every screen that
@@ -14,14 +15,13 @@ let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
 
-/** Reads the list again. */
-// After any update check (the engine's scheduled one included), once a screen has read the list: a version found
-// removed or revoked shows as stopped.
-engine.onAppsChecked(() => { if (apps !== null) void refreshInstalledApps(); });
+// After any update check (the engine's scheduled one included), once a screen has read the list or an app runs: a
+// version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`).
+engine.onAppsChecked(() => { if (apps !== null || appsRunning()) void refreshInstalledApps(); });
 
 /** Reads the list again. */
 export function refreshInstalledApps(): Promise<void> {
-  loading = engine.call("appList").then((list) => { apps = list; tell(); }, () => { apps ??= []; tell(); }).finally(() => { loading = null; });
+  loading = engine.call("appList").then((list) => { apps = list; tell(); stopTakenDown(list); }, () => { apps ??= []; tell(); }).finally(() => { loading = null; });
   return loading;
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
 import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, forIpc, toBase64 } from "../../lib/apps/desktopOpener";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
+import { stopTakenDown } from "../../lib/apps/open";
 import type { AppEntry } from "../../lib/platform";
 
 // covers: apps.desktop-sandbox
@@ -44,6 +45,17 @@ function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, link
 }
 
 describe("opening an app on Desktop", () => {
+  it("closes an app's window when its version is found revoked, and not one run anyway after a removal", async () => {
+    const { calls, open } = setup();
+    await open(REF, LINK);
+    await open(REF, null, { runAnyway: true });
+    const removed = { status: "removed", by: [{ name: "Ghostly" }] };
+    stopTakenDown([{ ref: REF, run: removed }]);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1"]);
+    stopTakenDown([{ ref: REF, run: { status: "revoked" } }]);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1", "app-2"]);
+  });
+
   it("names its window after the app and the contact in a chat, and the app alone outside one", async () => {
     const { calls, open } = setup({}, (title, linkId) => (linkId ? `${title} with Ana` : title));
     await open(REF, LINK);
