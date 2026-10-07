@@ -25,6 +25,7 @@
   "incomingVideo": "Appel vidéo entrant...",
   "mediaDenied": "Ghostly ne peut pas utiliser le micro ou la caméra. Autorisez-les dans les paramètres du site de votre navigateur (dans l'app de bureau : Réglages Système → Confidentialité et sécurité), puis réessayez.",
   "mediaUnavailable": "Aucun micro ni caméra n'est disponible. Branchez-en un, ou fermez l'app qui l'utilise, puis réessayez.",
+  "micPaused": "Votre appareil a mis le micro en pause. Gardez Ghostly à l'écran pour être entendu.",
   "missed": "Appel manqué",
   "mute": "Couper le son",
   "needLive": "Les appels nécessitent une liaison directe",
