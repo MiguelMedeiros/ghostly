@@ -1,36 +1,65 @@
 # Ghostly on Android
 
-The Android app is [Ghostly on the web](WEB.md) (app.ghostly.tools) in a Trusted Web Activity (TWA): a small APK that opens the site full screen in the phone's browser engine, with its own launcher icon, task and splash screen. It is built with [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap) from `apps/android-twa/twa-manifest.json`.
+The Android app is the Desktop app (`apps/desktop`) built with [Tauri 2](https://v2.tauri.app/) for Android: the same UI and engine as Desktop, with native Iroh and direct Mainline DHT reads in Rust. Package id `tools.ghostly.app`, Android 8.0 (API 26) and up, arm64 phones (`arm64-v8a`).
 
-It is the web app, so it has the web app's limits, not the Desktop's:
+It is not the whole Desktop yet. Left out on Android, and why (`#[cfg(desktop)]`, refusing stubs in `apps/desktop/src/mobile.rs`): HyperDHT (a Node program; native HyperDHT through Bare is its own piece of work), the updater and the clipboard crate (no Android support), keep awake, the macOS share sheet, and the windows of shared and installed apps (a mobile app has one window). Opening a link or a sign-in page from Rust fails for now: the Android host brings the system's opener. What is still open is listed at the end ([Still open](#still-open-by-pull-request)).
 
-- No native Iroh and no direct HyperDHT: contacts are reached over WebRTC, or Iroh and HyperDHT through a relay ([WEB.md](WEB.md)).
-- The peer runs only while the app is open, and sharing a local web app does not work ([What a web page cannot do](WEB.md#what-a-web-page-cannot-do)).
-- Its data lives in the browser's storage for app.ghostly.tools, shared with that browser's tab of the site. Clearing the browser's site data clears Ghostly's too.
-- It needs a browser that runs TWAs (Chrome, and others built on it). With none, it opens the site in a Custom Tab, with a URL bar.
+## Install it
 
-What the web app already has comes along: sharing into Ghostly from other apps (the share target), notifications (web push), `web+ghostly:` links and the launcher shortcuts (New chat, Scan invite, Wallets). There is no Play Billing and no location delegation.
+Each release attaches the APK: `ghostly-<version>-android-arm64.apk`, signed with Ghostly's upload key, and listed in `SHA256SUMS.txt` like the other downloads. Check it, then install it:
 
-## Build it
+```bash
+sha256sum --ignore-missing -c SHA256SUMS.txt
+adb install -r ghostly-<version>-android-arm64.apk   # over USB, with USB debugging on
+```
 
-CI builds it: Actions > Android > Run workflow builds an APK from any branch and attaches it to the run as the `android` artifact (the step summary gives its size). A pull request that changes `apps/android-twa/` builds it too once it is not a draft, and every release builds it (`release.yml`).
+Or copy the APK to the phone, open it in Files, and allow "Install unknown apps" for Files when asked. Each release installs over the last (the version code is `major * 1000000 + minor * 1000 + patch`), and Android refuses an update signed with another key.
 
-Without the upload key (below), it is a debug APK signed with the Android debug key: install it to try the app (`adb install ghostly-<version>-android-debug.apk`), never publish it. With the key, it is a release APK signed with it, and releases attach that one.
+A release made while the repository has no upload key attaches a **debug** APK instead, `ghostly-<version>-android-arm64-debug.apk`, and its release notes say so. It is signed with the Android debug key of that one CI run: to try the app, not for daily use. Nothing signed with another key installs over it, so uninstall it (which removes its data) before installing the signed APK. A debug build can also be inspected over USB (`chrome://inspect`).
 
-Locally, with Node, a JDK 17 and the Android SDK (`platforms;android-36` and `build-tools;36.0.0`):
+The app keeps its own data; the web app's (the PWA installed from Chrome) stays in Chrome. To move a profile, use [Several devices](DEVICES.md).
+
+## What CI does
+
+Two workflows build the app:
+
+- **Android** (`.github/workflows/android.yml`), the one releases use (`release.yml` calls it with the tag). One arm64 APK, `npm run tauri -- android build --apk --split-per-abi --target aarch64`:
+  - With the upload key in the repository's secrets (below): a release build signed with it, `ghostly-<version>-android-arm64.apk`.
+  - Without them: a debug build signed with the Android debug key, `ghostly-<version>-android-arm64-debug.apk`. The job summary says **DEBUG build** in bold, and the run carries a warning.
+  - On a pull request that changes `apps/desktop/gen/android/`, `tauri.android.conf.json` or the workflow, once it is not a draft: the release path (R8, signing) with a key made for the run and thrown away, so a release is not the first build to try it. That APK is not uploaded.
+
+  The APK is the run's `android` artifact (Actions > Android > Run workflow builds one from any branch). The job summary gives its size, version, whether it is debuggable, the signing certificate's SHA-256 fingerprint and the APK's SHA-256. A release build that comes out debuggable fails the run. The release takes the APK into its assets and `SHA256SUMS.txt`; a failed Android build does not hold a release back, and its notes then say there is no APK.
+
+- **Android native** (`.github/workflows/android-native.yml`), on pull requests that touch `apps/desktop/` (once they are not drafts) and by hand: two debug APKs, `ghostly-android-debug-arm64-v8a` (phones, and an arm64 emulator on a Mac) and `ghostly-android-debug-x86_64` (the CI emulator). It then installs the x86_64 APK on an Android 15 emulator and runs `tools/scripts/android-smoke.mjs` (Playwright over adb, inside the app's WebView): it launches, the UI renders, the engine starts, and [the measurements](#what-the-emulator-measured-a0-october-2026). The table is in the job summary; screenshots, logcat and the app's log are in the `android-smoke` artifact.
+
+  It keeps the Android debug key the Gradle plugin makes (an Actions cache), so a newer debug APK installs over an older one. When that cache is gone (7 days unused, or another branch), Android refuses the update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`): uninstall the old one first.
+
+## Build it locally
+
+You need Node 22, Rust with the `aarch64-linux-android` target, a JDK 17, the Android SDK and NDK 27.3 (`ndk;27.3.13750724`). Gradle fetches the SDK platform and build tools itself once the licences are accepted.
 
 ```bash
 export JAVA_HOME=/path/to/jdk-17 ANDROID_HOME=/path/to/android-sdk
-apps/android-twa/build.sh            # debug APK in apps/android-twa/build/
+export NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
+rustup target add aarch64-linux-android
+npm ci
+npm run tauri -- android build --debug --apk --split-per-abi --target aarch64   # debug APK
+npm run tauri -- android build --apk --split-per-abi --target aarch64           # release APK
 ```
 
-`build.sh release` signs with the key in `ANDROID_KEYSTORE` (a file), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. The version is the repository's (`package.json`), and the version code is `major * 1000000 + minor * 1000 + patch`, so each release installs over the last. Icons and the web manifest are read from this checkout (`apps/web/public`), and the launcher icon is the Desktop's Android one (`apps/desktop/icons/android`). The script runs Bubblewrap's `update` itself; `bubblewrap build` is not used, so the `signingKey` block in the manifest is only a name.
+The APKs land in `apps/desktop/gen/android/app/build/outputs/apk/arm64/`. The web build runs first (`tauri.android.conf.json`'s `beforeBuildCommand`). The version is the Desktop app's (`apps/desktop/tauri.conf.json`). `--target x86_64` builds for an emulator on a PC.
 
-## One-time setup (Miguel)
+A release build is signed with the upload key when `ANDROID_KEYSTORE` names the keystore file, with `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` (`gen/android/app/build.gradle.kts`); without `ANDROID_KEYSTORE` it comes out unsigned (`app-arm64-release-unsigned.apk`), which Android will not install.
 
-The app opens without a URL bar only once app.ghostly.tools vouches for the key the APK is signed with. Until then, it shows the URL bar. These steps need the key, so only Miguel can do them:
+The Gradle project is `apps/desktop/gen/android` (generated by `tauri android init`, then edited: keep the edits when regenerating). `cargo check --target aarch64-linux-android -p ghostly --lib` (with the NDK's clang as `CC_aarch64_linux_android` and linker) checks the Rust alone.
 
-1. Make the upload key on your own machine, and keep it (and its passwords) somewhere safe outside the repository. Losing it means a new app for everyone who installed this one.
+A debug build started with `adb shell am start -n tools.ghostly.app/.MainActivity --ez ghostly_e2e true` runs as under an e2e suite (no name step, never a new profile's default Mainnet wallets). A release build ignores the extra.
+
+## Signing (one-time setup, Miguel)
+
+Releases are signed with an upload key that only Miguel holds, offline. It never goes into the repository, and nothing in CI makes or prints it. Losing it means a new app for everyone who installed this one: an update signed with another key does not install.
+
+1. Make the key on your own machine, and keep it (and its passwords) somewhere safe outside the repository:
 
    ```bash
    keytool -genkeypair -v -keystore ghostly-upload.keystore -alias upload \
@@ -44,46 +73,13 @@ The app opens without a URL bar only once app.ghostly.tools vouches for the key 
    - `ANDROID_KEY_ALIAS`: `upload`
    - `ANDROID_KEY_PASSWORD`: the key's password (the same as the keystore's unless you chose another)
 
-3. Put the key's SHA-256 fingerprint in `apps/android-twa/twa-manifest.json`. It is public, not a secret:
+3. Run Actions > Android > Run workflow. The summary should say "Release build, signed with the upload key", with the certificate's SHA-256 fingerprint: it should match `keytool -list -v -keystore ghostly-upload.keystore -alias upload | grep SHA256`.
 
-   ```bash
-   keytool -list -v -keystore ghostly-upload.keystore -alias upload | grep SHA256
-   ```
+From then on every release attaches the signed APK. CI writes the keystore to the runner's temporary folder for the build only and deletes it after; pull requests never see the secrets.
 
-   ```json
-   "fingerprints": [{ "name": "upload", "value": "AB:CD:...:EF" }]
-   ```
+If the app is ever on Google Play with Play App Signing, this key becomes the upload key and Google signs what phones install.
 
-   (or `npx @bubblewrap/cli@1.25.0 fingerprint add <fingerprint> --manifest=apps/android-twa/twa-manifest.json`). Merge it, and deploy the web app: its build writes `/.well-known/assetlinks.json` from that list (`apps/web/assetlinks.ts`), and nginx serves it as `application/json`. While the list is empty, the site serves no such file at all. A fingerprint that is not 32 hex pairs stops the web build. If the app is ever on Google Play with Play App Signing, add Google's app signing key fingerprint to the list too.
-
-4. Check it: `curl -i https://app.ghostly.tools/.well-known/assetlinks.json`, then open the release APK on a phone. The URL bar should be gone.
-
-## F-Droid
-
-A TWA runs inside a browser the phone already has, so it needs one that supports TWAs. F-Droid's inclusion policy on TWAs and wrapper apps has not been checked yet: read it before submitting, as the app may not qualify or may need changes (for example the Google Play Services dependency some Bubblewrap features add).
-
-## The native app (in progress)
-
-A native Android app is being built to replace the TWA: the Desktop app (`apps/desktop`) built with Tauri 2 for Android, so the same UI and engine as Desktop, with native Iroh and direct Mainline DHT reads in Rust. It is not released. Package id `tools.ghostly.app` (the TWA's), Android 8.0 (API 26) and up.
-
-### Build it
-
-CI builds it: Actions > Android native (`.github/workflows/android-native.yml`), by hand or on a pull request that touches `apps/desktop/` (once it is not a draft). Each run has two debug APKs, signed with the Android debug key, to try and never to publish:
-
-- `ghostly-android-debug-arm64-v8a`: phones, and an arm64 emulator on a Mac.
-- `ghostly-android-debug-x86_64`: the CI emulator.
-
-The run then installs the x86_64 APK on an Android 15 emulator and runs `tools/scripts/android-smoke.mjs` (Playwright over adb, inside the app's WebView): it launches, the UI renders, the engine starts, and the measurements below. The table is in the job summary; screenshots, logcat and the app's log are in the `android-smoke` artifact.
-
-Locally, with the Android SDK, NDK 27.3 and a JDK 17: `npm run tauri -- android build --debug --apk --target aarch64`. The Gradle project is `apps/desktop/gen/android` (generated by `tauri android init`, then edited: keep the edits when regenerating). `rustup target add aarch64-linux-android` and `cargo check --target aarch64-linux-android -p ghostly --lib` (with the NDK's clang as `CC_aarch64_linux_android` and linker) check the Rust alone.
-
-What is left out on Android, and why (`#[cfg(desktop)]`, refusing stubs in `apps/desktop/src/mobile.rs`): HyperDHT (a Node program; native HyperDHT through Bare is its own piece of work), the updater and the clipboard crate (no Android support), keep awake, the macOS share sheet, and the windows of shared and installed apps (a mobile app has one window). Opening a link or a sign-in page from Rust fails for now: the Android host brings the system's opener.
-
-CI keeps the Android debug key the Gradle plugin makes (an Actions cache), so a newer debug APK installs over an older one. When that cache is gone (7 days unused, or another branch), Android refuses the update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`): uninstall the old one first.
-
-A debug build started with `adb shell am start -n tools.ghostly.app/.MainActivity --ez ghostly_e2e true` runs as under an e2e suite (no name step, never a new profile's default Mainnet wallets). A release build ignores the extra.
-
-### What the emulator measured (A0, October 2026)
+## What the emulator measured (A0, October 2026)
 
 Android 15 (API 35) x86_64 emulator on a CI runner, debug build. The emulator image's WebView is Chrome 124; a phone's WebView updates from the Play Store and is newer.
 
@@ -104,7 +100,7 @@ Android 15 (API 35) x86_64 emulator on a CI runner, debug build. The emulator im
 | Touch only (no keyboard on opening a chat) | No on the emulator | The emulator reports both a coarse and a fine pointer, so the composer takes the focus and the keyboard opens. A phone normally reports coarse only |
 | JavaScript timers, screen off for 60 s | Yes on the emulator | 60 ticks of 60. A phone's Doze and maker battery rules can differ: check on a phone |
 
-### On a phone (checklist for Miguel)
+## On a phone (checklist for Miguel)
 
 The emulator cannot answer these. A debug build, so the WebView can be inspected from a computer.
 
@@ -123,14 +119,14 @@ The emulator cannot answer these. A debug build, so the WebView can be inspected
 10. **Video:** send the phone a video over 64 MB from Desktop and play it (the `ghostly-file` scheme), including a seek.
 11. Send the results (and anything odd: the battery settings of the phone's maker, a crash) to the coordinator. A crash's details: `adb logcat -d | grep -E "RustStdoutStderr|AndroidRuntime"`.
 
-### Fixed during the spike
+## Fixed during the spike
 
 - The page drew under the status bar and the gesture bar (Android 15 enforces edge to edge): `MainActivity` pads the content by the system bars, the cutout and the keyboard, following the keyboard frame by frame.
 - HTTPS from Rust panicked (above), so publishing an invite failed with "writes vanished".
 - File bytes over Android's `postMessage` IPC, and the `ghostly-file` URL (above).
 - Gradle ran the Tauri CLI as `node tauri`, which only works where `tauri android init` was run: it goes through `npm run tauri` now.
 
-### Still open, by pull request
+## Still open, by pull request
 
 - **A1 (Android host):** the light status-bar strip over a dark app (the bars' colours should follow the theme); a native "Update Android System WebView" screen below a minimum version, checked in `MainActivity` before the page loads (the UI bundle is built for Vite's default baseline target and is proven on Chrome 124; a WebView too old for it shows a blank page, since the Desktop entry has no boot check); treat Android as touch only, whatever the pointer query says; the opener, share sheet and clipboard; OIDC through a deep link. Big files over IPC: a JSON array per chunk is slow, so smaller chunks or another path.
 - **A3 (Keystore):** the device signing key already falls back to a stored seed when the WebView has no Ed25519 (`devices/signingKey.ts`), and no other code uses WebCrypto Ed25519 or X25519; the Keystore-sealed seed is what protects it on such a phone.
