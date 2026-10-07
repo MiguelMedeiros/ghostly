@@ -16,7 +16,7 @@
     "symbols": "記号"
   },
   "closeCamera": "カメラを閉じる",
-  "dhtTooLong": "このテキストは {{bytes}} バイト（UTF-8）です。DHT は最大 {{max}} バイトまでです。短くするか直接接続を使ってください。下書きは残っています。",
+  "dhtTooLong": "DHT には長すぎます（{{bytes}} / {{max}} バイト）。短くするかライブ接続にしてください。下書きは残ります。",
   "document": "書類",
   "dropFiles": "ドロップして送信",
   "emoji": "絵文字",
@@ -70,5 +70,5 @@
   "skinTone": "肌の色",
   "takePhoto": "写真を撮る",
   "tooLong": "長すぎて送信できません（{{count}} 文字、上限は {{max}}）。",
-  "tooLongDht": "DHT には長すぎます。P2P で接続されれば、長い請求書や ecash トークンも送れます。"
+  "tooLongDht": "DHT には長すぎます。直接つながれば送れます。"
 }

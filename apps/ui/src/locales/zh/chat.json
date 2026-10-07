@@ -21,7 +21,7 @@
     "open": "打开新聊天",
     "overLimit": "无法发布消息：超出 DHT 负载上限。",
     "sendFailed": "消息发送失败。请检查网络连接。",
-    "tooLarge": "消息对 DHT 来说太大（{{bytes}} 字节，最大 {{max}}）。请缩短消息或改为分享链接。"
+    "tooLarge": "对 DHT 来说太长（{{bytes}}/{{max}} 字节）。请缩短或发送链接。"
   },
   "connecting": "连接中",
   "createdHere": "此聊天由你创建",
@@ -405,7 +405,7 @@
   },
   "voice": {
     "cancelled": "语音消息已取消",
-    "cantPlay": "此设备无法播放此录音（{{format}}）。请保存后在别处播放。",
+    "cantPlay": "此设备无法播放 {{format}} 录音。保存后在别处播放。",
     "couldNotPlay": "无法播放此录音。",
     "discard": "丢弃",
     "discardAsk": "丢弃语音消息？",
@@ -415,8 +415,8 @@
     "keep": "保留",
     "limit": "语音消息最长 {{minutes}} 分钟",
     "message": "语音消息",
-    "micDenied": "Ghostly 无法使用麦克风。请在浏览器的网站设置中允许 Ghostly（桌面应用：系统设置 → 隐私与安全性 → 麦克风），然后重试。",
-    "micUnavailable": "没有可用的麦克风。请连接一个，或关闭正在使用它的应用，然后重试。",
+    "micDenied": "无法使用麦克风。请在浏览器或系统设置中允许。",
+    "micUnavailable": "未找到麦克风。请连接一个，或关闭正在使用它的应用。",
     "micUnsupported": "此浏览器无法录制语音消息。",
     "pause": "暂停语音消息",
     "pausePlayback": "暂停播放",

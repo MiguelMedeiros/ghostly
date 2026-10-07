@@ -16,7 +16,7 @@
     "symbols": "符号"
   },
   "closeCamera": "关闭相机",
-  "dhtTooLong": "此文字为 {{bytes}} 字节（UTF-8）。DHT 最多允许 {{max}} 字节；请缩短或使用直连。草稿已保留。",
+  "dhtTooLong": "对 DHT 来说太长（{{bytes}}/{{max}} 字节）。请缩短或改用实时连接；草稿会保留。",
   "document": "文档",
   "dropFiles": "拖放到此处发送",
   "emoji": "表情",
@@ -70,5 +70,5 @@
   "skinTone": "肤色",
   "takePhoto": "拍照",
   "tooLong": "内容过长，无法发送（{{count}} 个字符，上限为 {{max}}）。",
-  "tooLongDht": "对 DHT 来说太长了。建立点对点连接后，长发票和 ecash 代币都能发送。"
+  "tooLongDht": "对 DHT 来说太长。直接连接后即可发送。"
 }

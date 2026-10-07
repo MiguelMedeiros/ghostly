@@ -21,7 +21,7 @@
     "open": "Ouvrir la nouvelle discussion",
     "overLimit": "Impossible de publier le message : limite de la DHT dépassée.",
     "sendFailed": "Échec de l'envoi du message. Vérifiez votre connexion.",
-    "tooLarge": "Message trop volumineux pour la DHT ({{bytes}} octets, max {{max}}). Essayez un message plus court ou partagez un lien."
+    "tooLarge": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou envoyez un lien."
   },
   "connecting": "connexion",
   "createdHere": "Vous avez créé cette discussion",
@@ -405,7 +405,7 @@
   },
   "voice": {
     "cancelled": "Message vocal annulé",
-    "cantPlay": "Cet appareil ne peut pas lire cet enregistrement ({{format}}). Enregistrez-le pour l'écouter ailleurs.",
+    "cantPlay": "Cet appareil ne lit pas les enregistrements {{format}}. Enregistrez-le pour l'écouter ailleurs.",
     "couldNotPlay": "Impossible de lire cet enregistrement.",
     "discard": "Supprimer",
     "discardAsk": "Supprimer le message vocal ?",
@@ -415,8 +415,8 @@
     "keep": "Garder",
     "limit": "Les messages vocaux durent au plus {{minutes}} minutes",
     "message": "Message vocal",
-    "micDenied": "Ghostly ne peut pas utiliser le micro. Autorisez-le dans les réglages du site de votre navigateur (dans l'app de bureau : Réglages Système → Confidentialité et sécurité → Micro), puis réessayez.",
-    "micUnavailable": "Aucun micro n'est disponible. Branchez-en un ou fermez l'app qui l'utilise, puis réessayez.",
+    "micDenied": "Pas d'accès au micro. Autorisez-le dans les réglages du navigateur ou du système.",
+    "micUnavailable": "Aucun micro trouvé. Branchez-en un, ou fermez l'app qui l'utilise.",
     "micUnsupported": "Ce navigateur ne peut pas enregistrer de messages vocaux.",
     "pause": "Mettre le message vocal en pause",
     "pausePlayback": "Mettre la lecture en pause",
