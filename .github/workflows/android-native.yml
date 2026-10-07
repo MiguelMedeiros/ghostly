@@ -71,6 +71,16 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      # The Android debug key the Gradle plugin makes on first use, kept from run to run, so a newer debug APK installs
+      # over an older one (Android refuses an update signed with another key). It signs debug builds only, never a
+      # release. A run with no cache makes a new one (the first run on a branch, or after 7 days unused): then the
+      # older debug APK has to be uninstalled once.
+      - name: Debug key
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
       # `--split-per-abi`: one APK per ABI, each with only its own library. The web build runs first
       # (tauri.android.conf.json's beforeBuildCommand).
       - name: Build

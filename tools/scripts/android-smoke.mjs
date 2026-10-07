@@ -203,6 +203,16 @@ try {
     const page_ = await invoke("link_preview_fetch", { url: "https://example.com/", kind: "page" });
     record("https", "HTTPS from Rust (link preview GET)", !!page_?.bodyB64, `${Date.now() - t} ms, ${page_?.contentType}`);
   });
+  // Where a slow relay write goes: a new TLS connection (and Android's certificate check) against a warm one.
+  await measure("https", "TLS to a Pkarr relay, cold then warm", async () => {
+    const times = [];
+    for (let i = 0; i < 3; i++) {
+      const t = Date.now();
+      await invoke("link_preview_fetch", { url: "https://pkarr.pubky.app/", kind: "page" }).catch((e) => e);
+      times.push(Date.now() - t);
+    }
+    record("https", "TLS to a Pkarr relay, cold then warm", null, `${times.join(" ms, ")} ms (GET https://pkarr.pubky.app/)`);
+  });
   await measure("pkarr", "relay write (HTTPS)", async () => {
     await invoke("set_pkarr_relays", { relays: ["https://pkarr.pubky.org", "https://pkarr.pubky.app"], readRelays: true });
     const seedB64 = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
@@ -292,6 +302,9 @@ try {
     writeFileSync(resolve(out, "logcat-app.txt"), ours.join("\n"));
     const netlink = ours.filter((l) => /netlink|netwatch|EACCES|Permission denied|avc: denied/i.test(l));
     record("iroh", "netlink / netwatch in logcat", netlink.length === 0 ? true : null, netlink.length ? netlink.slice(0, 5).join(" / ").slice(0, 600) : "no netlink, netwatch or permission errors");
+    // Each publish's sources and when each answered (pkarr_network.rs: "pkarr publish <key> done dht=ok@<ms> ...").
+    const publishes = ours.map((l) => l.match(/pkarr publish \w+ done (.*)$/)?.[1]).filter(Boolean);
+    record("pkarr", "publish timings (app log)", null, publishes.join(" / ") || "none");
     const crash = logcat.split("\n").filter((l) => /FATAL EXCEPTION|panicked at|SIGSEGV|SIGABRT/.test(l));
     record("smoke", "no crash in logcat", crash.length === 0, crash.slice(0, 3).join(" / ").slice(0, 600) || "none");
     if (crash.length) smokeFailed = true;
