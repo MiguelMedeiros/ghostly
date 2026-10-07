@@ -3142,10 +3142,15 @@ export class GhostLink {
             // Back to WebRTC a moment after leaving it: the session left behind still holds the data link, and an offer
             // goes once it has closed. Before, nothing was offered: the plan gave up after its 8 s and waited for the
             // 20 s retry (28 s on two CLIs, bug hunt r9g).
-            void this.rtcRetired().then(() => { if (active) return this.dataLink.connect(); }).catch(done.reject);
+            void this.rtcRetired().then(() => {
+              if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
+              this.switcher.dialing(plan);
+              return this.dataLink.connect();
+            }).catch(done.reject);
           } else {
             const endpoint = this.endpoints.get(transport), descriptor = plan.remote.descriptors[transport];
             if (!endpoint || !descriptor) { done.reject(new Error("Peer native address unavailable")); return; }
+            this.switcher.dialing(plan);
             void endpoint.connect(descriptor).then(({ channel, binding }) => {
               if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) { channel.close(); return; }
               return this.attachCandidate(channel, binding, plan).then(done.resolve, done.reject);
