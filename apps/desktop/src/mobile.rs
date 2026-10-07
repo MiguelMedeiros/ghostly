@@ -4,7 +4,7 @@
 //! - `hyperdht`: Desktop runs HyperDHT in a Node program, which a phone cannot start (native HyperDHT on Android is
 //!   its own piece of work, through Bare).
 //! - `keep_awake`: a phone keeps a call awake with a foreground service and a wake lock instead.
-//! - `share`: the macOS share sheet; Android's comes with the Android host.
+//! - `share`: the macOS share sheet; Android's share sheet is the Android host's (android.rs), with Desktop's checks.
 //! - `viewer`, `app_sandbox`: a contact's app or an installed app in a window of its own. A mobile app has one
 //!   window.
 
@@ -52,11 +52,21 @@ pub mod keep_awake {
 }
 
 pub mod share {
-    use super::NOT_HERE;
-
+    /// A link someone asked to share, in Android's share sheet (android.rs), with the checks Desktop's has: text only,
+    /// at most 4 KiB. iOS has none yet: false, and the page copies the link instead.
     #[tauri::command]
-    pub fn share_text() -> Result<bool, String> {
-        Err(NOT_HERE.into())
+    pub fn share_text(text: String) -> Result<bool, String> {
+        if text.is_empty() || text.len() > 4096 || text.chars().any(|c| c.is_control()) {
+            return Err("Nothing to share".into());
+        }
+        #[cfg(target_os = "android")]
+        {
+            crate::android::share_text(&text)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(false)
+        }
     }
 }
 

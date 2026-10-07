@@ -247,6 +247,7 @@
     "downloadMp3": "MP3でダウンロード",
     "downloadPreparing": "準備中です",
     "downloadUnconverted": "変換できません",
+    "downloadUnsaved": "保存されませんでした。別のフォルダをお試しください",
     "edit": "編集",
     "editPending": "まだ相手に表示されていません",
     "editPendingGroup": "まだグループに送信されていません",

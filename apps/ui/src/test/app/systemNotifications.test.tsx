@@ -12,7 +12,7 @@ import { Settings } from "../../pages/Settings";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: app.attention.notifications, desktop.notifications
+// covers: app.attention.notifications, desktop.notifications, app.android.refusals
 
 /*
  * System notifications on each platform: whether the Settings switch is available, what asking for permission
@@ -118,6 +118,10 @@ describe("availability and the permission, by platform", () => {
     expect(noticeSettings()).toBe("windows");
     desktop("Linux x86_64", { native_notification_permission: null });
     expect(noticeSettings()).toBeUndefined();
+    // The Android app: Linux by its platform, Android by its agent, and its own settings page to open.
+    const agent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36");
+    expect(noticeSettings()).toBe("android");
+    agent.mockRestore();
   });
 
   it("Desktop: a native command that fails reads as unavailable, not as a crash", async () => {
@@ -292,6 +296,19 @@ describe("Settings → System notifications", () => {
     // No browser here: the line said "device or browser settings".
     await waitFor(() => expect(row()).toHaveTextContent("Blocked. Allow them in system settings."));
     expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
+  });
+
+  it("the Android app, denied: the next step and a button to the app's page in Android's settings", async () => {
+    desktop("Linux x86_64", { native_notification_permission: "denied" });
+    const agent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64; wv) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36");
+    try {
+      const { user } = renderSettings();
+      await waitFor(() => expect(row()).toHaveTextContent("Blocked. Allow them in system settings."));
+      await user.click(screen.getByTestId("settings-notification-settings"));
+      expect(commands()).toContainEqual(["open_notification_settings"]);
+    } finally {
+      agent.mockRestore();
+    }
   });
 
   it("Desktop on macOS, run from a temporary folder: says to move the app, and asking changes nothing", async () => {

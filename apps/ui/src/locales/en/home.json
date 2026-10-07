@@ -6,7 +6,6 @@
     "encrypted": "End-to-end encrypted",
     "onDevice": "Your messages stay on your devices"
   },
-  "linkFailed": "Could not open the link.",
   "unpublishedVersion": "Local version — view published releases",
   "viewRelease": "View this release",
   "welcome": "Welcome to Ghostly"

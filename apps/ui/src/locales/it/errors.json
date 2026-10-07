@@ -109,6 +109,8 @@
     "peerUnavailable": "Il peer di Ghostly non è disponibile. Riapri l'estensione per riprovare.",
     "signInCancelled": "L'accesso è stato annullato.",
     "signInPermission": "Ghostly ha bisogno del permesso di accesso per questo.",
+    "signInTimedOut": "L'accesso è scaduto",
+    "signInTimedOutNext": "Ricomincia e torna su Ghostly appena hai effettuato l'accesso.",
     "switchingProfiles": "Cambio di profilo…"
   },
   "files": {
@@ -181,6 +183,14 @@
     "removed": "Sei stato rimosso da questo gruppo",
     "shareLinkInstead": "Condividi con questa persona il link del gruppo: chi lo apre entra",
     "tooLong": "Il messaggio supera i 16 KiB"
+  },
+  "host": {
+    "noApp": "Nessuna app di questo telefono può aprirlo",
+    "noAppNext": "Installa un'app adatta, oppure copia il link e aprilo altrove.",
+    "openFailed": "Impossibile aprire il link",
+    "openFailedNext": "Copia il link e aprilo nel browser.",
+    "saveFailed": "Impossibile salvare il file lì",
+    "saveFailedNext": "Riprova e scegli un'altra cartella."
   },
   "lightning": {
     "alreadyPaid": "Questa fattura è già stata pagata",

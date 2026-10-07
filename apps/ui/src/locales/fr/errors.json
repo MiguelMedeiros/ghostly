@@ -109,6 +109,8 @@
     "peerUnavailable": "Le pair Ghostly est indisponible. Rouvrez l'extension pour réessayer.",
     "signInCancelled": "La connexion a été annulée.",
     "signInPermission": "Ghostly a besoin de l'autorisation de connexion pour cela.",
+    "signInTimedOut": "La connexion a expiré",
+    "signInTimedOutNext": "Recommencez, et revenez à Ghostly une fois connecté.",
     "switchingProfiles": "Changement de profil…"
   },
   "files": {
@@ -181,6 +183,14 @@
     "removed": "Vous avez été retiré de ce groupe",
     "shareLinkInstead": "Partagez le lien du groupe avec cette personne : quiconque l'ouvre rejoint le groupe",
     "tooLong": "Le message dépasse 16 Kio"
+  },
+  "host": {
+    "noApp": "Aucune app de ce téléphone ne peut l'ouvrir",
+    "noAppNext": "Installez une app pour cela, ou copiez le lien et ouvrez-le ailleurs.",
+    "openFailed": "Impossible d'ouvrir le lien",
+    "openFailedNext": "Copiez le lien et ouvrez-le dans votre navigateur.",
+    "saveFailed": "Impossible d'enregistrer le fichier à cet endroit",
+    "saveFailedNext": "Réessayez et choisissez un autre dossier."
   },
   "lightning": {
     "alreadyPaid": "Cette facture est déjà payée",

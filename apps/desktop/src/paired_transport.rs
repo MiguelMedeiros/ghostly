@@ -150,6 +150,23 @@ impl TransportState {
         let closing = close_all(peers);
         let _ = tokio::time::timeout(within, closing).await;
     }
+    /// The network changed (Android's own callback: there Iroh's netwatch may not see it, denied the routing table):
+    /// every endpoint looks again at its addresses and paths now. Returns how many were told.
+    #[cfg_attr(not(any(test, target_os = "android")), allow(dead_code))]
+    pub async fn network_changed(&self) -> usize {
+        let endpoints: Vec<Endpoint> = {
+            let inner = self.inner.lock().unwrap();
+            inner
+                .peers
+                .values()
+                .map(|peer| peer.endpoint.clone())
+                .collect()
+        };
+        for endpoint in &endpoints {
+            endpoint.network_change().await;
+        }
+        endpoints.len()
+    }
     /// Binds an endpoint for `seed` and accepts on it. `local_only` keeps it on
     /// this machine's loopback, with no relay (tests). `relays`, when there are
     /// any, home it on those Iroh relays instead of n0's (`iroh_relays`).
@@ -457,6 +474,34 @@ mod tests {
                     .unwrap(),
                 "Invalid transport seed"
             );
+        }
+    }
+
+    /// Android's network callback reaches every endpoint, and a live connection goes on through it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_network_change_reaches_every_endpoint_and_keeps_its_connections() {
+        let (one, other) = (app(), app());
+        let state = one.state::<TransportState>();
+        assert_eq!(state.network_changed().await, 0, "no endpoint yet");
+        let (alice, _, alice_seen) = start(&one, 5).await;
+        start(&one, 6).await;
+        let (_bob, bob_address, bob_seen) = start(&other, 7).await;
+        let sent = connect(&one, alice, &bob_address).await.unwrap();
+        event(&bob_seen, kind("open")).await;
+
+        assert_eq!(state.network_changed().await, 2);
+        paired_native_send(one.state(), sent, "after the change".into()).unwrap();
+        let frame = event(&bob_seen, kind("frame")).await;
+        assert_eq!(frame["text"], "after the change");
+        assert!(!alice_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "closed"));
+        for app in [&one, &other] {
+            app.state::<TransportState>()
+                .shutdown(Duration::from_secs(2))
+                .await;
         }
     }
 

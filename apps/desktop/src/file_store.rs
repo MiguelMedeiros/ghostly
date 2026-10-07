@@ -240,7 +240,9 @@ impl FileStore {
         fs4::available_space(dir).map_err(|e| e.to_string())
     }
 
-    /// Copies a stored file to `target`, a step at a time, marked as downloaded (`mark_downloaded`).
+    /// Copies a stored file to `target`, a step at a time, marked as downloaded (`mark_downloaded`). Not on Android,
+    /// whose document picker gives no path (the Kotlin side copies there).
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub fn copy_to(&self, space: &str, id: &str, target: &Path) -> Result<(), String> {
         let mut from = File::open(self.path(space, id)?).map_err(|e| e.to_string())?;
         write_whole(target, |to| std::io::copy(&mut from, to).map(|_| ()))?;
@@ -253,6 +255,7 @@ impl FileStore {
 /// rename stays on one disk) and take the chosen name only once all of them are on the disk. A copy
 /// that fails partway (a full disk, a removed drive) leaves no half file under the name the person
 /// chose, and does not truncate a file that was there before.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn write_whole(
     target: &Path,
     write: impl FnOnce(&mut File) -> std::io::Result<()>,
@@ -275,6 +278,7 @@ fn write_whole(
 }
 
 /// `.<name>.<random>.part` beside `target`.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn partial_path(target: &Path) -> Result<PathBuf, String> {
     let name = target
         .file_name()
@@ -289,6 +293,7 @@ fn partial_path(target: &Path) -> Result<PathBuf, String> {
 /// or running it goes through Gatekeeper (macOS) or SmartScreen and Office's Protected View
 /// (Windows) first, as it would from a browser. Best effort: a disk that cannot hold the mark (FAT,
 /// some network shares) still gets the copy.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn mark_downloaded(target: &Path) {
     #[cfg(target_os = "macos")]
     {
@@ -574,22 +579,32 @@ pub async fn file_bytes_save<R: tauri::Runtime>(
     id: String,
     name: String,
 ) -> Result<bool, String> {
-    use tauri_plugin_dialog::DialogExt;
     let base = store(&app)?.base.clone();
     let files = FileStore::new(base);
-    files.path(&space, &id)?;
-    let dialog = app.dialog().file().set_file_name(suggested_name(&name));
-    let target = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
-        .await
-        .map_err(|e| e.to_string())?;
-    let Some(target) = target else {
-        return Ok(false);
-    };
-    let target = target.into_path().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || files.copy_to(&space, &id, &target))
-        .await
-        .map_err(|e| e.to_string())??;
-    Ok(true)
+    let source = files.path(&space, &id)?;
+    // Android: its document picker (Downloads, a cloud drive) answers with a content address, not a path, and the
+    // Kotlin side copies the file there (android.rs).
+    #[cfg(target_os = "android")]
+    {
+        crate::android::save_file(source, &suggested_name(&name)).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        let _ = source;
+        let dialog = app.dialog().file().set_file_name(suggested_name(&name));
+        let target = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
+            .await
+            .map_err(|e| e.to_string())?;
+        let Some(target) = target else {
+            return Ok(false);
+        };
+        let target = target.into_path().map_err(|e| e.to_string())?;
+        tauri::async_runtime::spawn_blocking(move || files.copy_to(&space, &id, &target))
+            .await
+            .map_err(|e| e.to_string())??;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]

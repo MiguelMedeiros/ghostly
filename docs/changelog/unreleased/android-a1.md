@@ -1,4 +1,4 @@
 ---
 section: For users / Android
 ---
-- The native Android app (in progress, not released): links, sign-in pages and payment links open in the system apps, copy and paste, the share sheet, notifications, and saving files.
+- The native Android app (in progress, not released): links, sign-in pages and payment links open in the phone's own apps, and when the phone has no app for one, or a share, paste, save or sign-in does not go through, the app says so in your language with what to do next; paste reads the phone's clipboard; Share opens Android's share sheet, and other apps can share text and files to Ghostly; notifications ask for permission when you turn them on, and a tap opens the chat; received files save through Android's file picker; signing in to prove an identity comes back to the app; the status and navigation bars follow Light and Dark; opening a chat no longer brings up the keyboard; and a phone whose Android System WebView is too old is told to update it instead of showing a blank page.

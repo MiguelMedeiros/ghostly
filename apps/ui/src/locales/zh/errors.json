@@ -109,6 +109,8 @@
     "peerUnavailable": "Ghostly 节点不可用。请重新打开扩展程序再试。",
     "signInCancelled": "登录已取消。",
     "signInPermission": "Ghostly 需要登录权限才能执行此操作。",
+    "signInTimedOut": "登录超时",
+    "signInTimedOutNext": "请重新开始，登录后回到 Ghostly。",
     "switchingProfiles": "正在切换资料…"
   },
   "files": {
@@ -181,6 +183,14 @@
     "removed": "你已被移出此群组",
     "shareLinkInstead": "把群组链接分享给对方：打开链接即可加入",
     "tooLong": "消息超过 16 KiB"
+  },
+  "host": {
+    "noApp": "这台手机上没有能打开它的应用",
+    "noAppNext": "请安装相应的应用，或复制链接到别处打开。",
+    "openFailed": "无法打开链接",
+    "openFailedNext": "请复制链接并在浏览器中打开。",
+    "saveFailed": "无法将文件保存到那里",
+    "saveFailedNext": "请重试并选择其他文件夹。"
   },
   "lightning": {
     "alreadyPaid": "这张发票已经支付",
