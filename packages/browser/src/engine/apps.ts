@@ -8,7 +8,7 @@ import {
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytesKind } from "../shared/fileBytes";
-import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, type AppFetcher } from "./appFetch";
+import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { DEFAULT_APP_STORES } from "./appDefaults";
 
 /*
@@ -210,6 +210,15 @@ interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; at: numbe
 /** An error whose message starts with its code (`<code>: words`), as it crosses the engine's RPC. */
 function fail(code: string, words: string): never {
   throw new Error(`${code}: ${words}`);
+}
+
+/**
+ * Why a pasted link is not read: a github.com page that is neither a repository nor a file of one (`github-link`), so
+ * the person is not told GitHub is off the list; any other host (`host`).
+ */
+function notReadable(url: unknown, words: string): never {
+  if (typeof url === "string" && isGitHubPage(url)) fail("github-link", "Paste the repository's link, or the link to its app file");
+  fail("host", words);
 }
 
 const versionOf = (manifest: AppManifest, digest: string): AppVersion => ({ ref: appRef(manifest.publisher, manifest.name), sequence: manifest.sequence, digest });
@@ -447,7 +456,7 @@ export class Apps {
   }
 
   private storeUrl(url: unknown): string {
-    return (typeof url === "string" && appPasteUrl(url, "ghostly-store.json")) || fail("host", "Stores are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
+    return (typeof url === "string" && appPasteUrl(url, "ghostly-store.json")) || notReadable(url, "Stores are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
   }
 
   /** Reads a store at a URL for the person to see before adding it. Nothing is kept. */
@@ -531,7 +540,7 @@ export class Apps {
     let urls: string[];
     let expect: { ref: string; sequence?: number; digest?: string } | null = null;
     if ("url" in source) {
-      urls = [(typeof source.url === "string" && appPasteUrl(source.url, "app.ghostlyapp")) || fail("host", "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS")];
+      urls = [(typeof source.url === "string" && appPasteUrl(source.url, "app.ghostlyapp")) || notReadable(source.url, "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS")];
     } else if ("store" in source) {
       const s = await this.storeRecord(source.store);
       const listing = s && !s.removed ? s.index?.apps.find((a) => a.ref === source.ref) : undefined;

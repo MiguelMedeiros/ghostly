@@ -437,12 +437,12 @@ In release 1.2 the CLI has `ghostly app publish`, `ghostly app verify` (checks a
 
 ### Paste a URL
 
-The person pastes `https://github.com/<owner>/<repo>` (or a `/tree/<ref>` form) in the Apps page, or in a chat as a message. The client reads, **without `api.github.com`**:
+The person pastes `https://github.com/<owner>/<repo>` (or a `/tree/<ref>` form) in the Apps page, or in a chat as a message. The client reads, **without `api.github.com`** (and without any request to `github.com`):
 
 - `raw.githubusercontent.com/<owner>/<repo>/<ref or HEAD>/app.ghostlyapp`, an app, or
 - `raw.githubusercontent.com/<owner>/<repo>/<ref or HEAD>/ghostly-store.json`, a store,
 
-then shows the app's card or the store's summary, and installs or adds only when the person confirms. `HEAD` is fine because the signed digest, not the commit, pins the bytes: the client keeps the `sequence` it saw and treats what comes later by the update rule. In phase 1 the Apps page reads only the hosts a card may name, `raw.githubusercontent.com` and `cdn.jsdelivr.net` pinned to a commit: a pasted URL of any other host is refused before any request. Other HTTPS hosts come later, once the Apps page can say which host will learn the person's address before it asks.
+or, for a file as GitHub shows it, `https://github.com/<owner>/<repo>/blob/<ref>/<path>` (or `/raw/<ref>/<path>`) naming a `.ghostlyapp` or `.json` file, that file at `raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>`. Any other `github.com` page is answered as a GitHub page that holds no app, so the person pastes the repository or the file instead; it is never refused as a host off the list. The client then shows the app's card or the store's summary, and installs or adds only when the person confirms. `HEAD` is fine because the signed digest, not the commit, pins the bytes: the client keeps the `sequence` it saw and treats what comes later by the update rule. In phase 1 the Apps page reads only the hosts a card may name, `raw.githubusercontent.com` and `cdn.jsdelivr.net` pinned to a commit: a pasted URL of any other host is refused before any request. Other HTTPS hosts come later, once the Apps page can say which host will learn the person's address before it asks.
 
 ### Stores
 

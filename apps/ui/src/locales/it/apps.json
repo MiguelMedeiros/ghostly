@@ -45,6 +45,7 @@
   "errors": {
     "equivocation": "Questo link contiene un'altra copia di una versione che hai. Ghostly ha tenuto la tua.",
     "expired": "Ci è voluto troppo. Controlla di nuovo l'app.",
+    "githubLink": "Questa pagina di GitHub non è un'app. Incolla il link del repository o quello del file dell'app.",
     "host": "Le app arrivano solo da GitHub (raw.githubusercontent.com) o da jsDelivr a un commit.",
     "needsFiles": "I suoi file non sono ancora su questo dispositivo.",
     "network": "Impossibile raggiungere il server.",
