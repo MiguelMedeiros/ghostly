@@ -137,6 +137,22 @@ describe("the app is its port: nothing it says names it", () => {
     expect(await ask("storage.get", [7])).toMatchObject({ ok: false, error: "bad-key" });
     expect(await ask("storage.set", ["k", "x".repeat(MINI_APP_LIMITS.storageValueBytes)])).toMatchObject({ ok: false, error: "too-large" });
   });
+
+  it("an engine refusal reaches the app by its code: a full storage is `full`, a missing file `no-file`", async () => {
+    // The engine's errors cross its RPC as "<code>: words" (engine/apps.ts). The app saw "failed" for all of them, so it
+    // could not tell its 5 MiB were used up (and make room) from a passing failure.
+    const { host, run, ask } = setup();
+    run();
+    vi.spyOn(host.storage, "set").mockRejectedValueOnce(new Error("full: This app's storage in this chat is full (5 MiB)"));
+    expect(await ask("storage.set", ["k", "v"])).toMatchObject({ ok: false, error: "full" });
+    vi.spyOn(host, "file").mockRejectedValueOnce(new Error("no-file: No such file in this app"));
+    expect(await ask("file", ["nope.txt"])).toMatchObject({ ok: false, error: "no-file" });
+    // Anything else stays "failed": the words, and codes an app has no use for, are not passed on.
+    vi.spyOn(host.storage, "get").mockRejectedValueOnce(new Error("bad-scope: Not a chat of this profile"));
+    expect(await ask("storage.get", ["k"])).toMatchObject({ ok: false, error: "failed" });
+    vi.spyOn(host.storage, "get").mockRejectedValueOnce(new Error("IndexedDB went away"));
+    expect(await ask("storage.get", ["k"])).toMatchObject({ ok: false, error: "failed" });
+  });
 });
 
 describe("requests", () => {

@@ -4,9 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { TestInfo } from "@playwright/test";
-
-/** The CLI stays off the public Mainline DHT in tests (it would bootstrap to the public routers): relays only, as the web app. */
-const headlessEnv = (): NodeJS.ProcessEnv => ({ GHOSTLY_DHT: "0", ...process.env });
+import { testNetworkEnv } from "../../packages/cli/test/support/network";
 
 /**
  * The headless Ghostly (`packages/cli`, WISP 1100) in a test: built once per run before the workers start
@@ -30,13 +28,25 @@ export class HeadlessBot {
   /** The daemon's steps on each chat's way to live (`GHOSTLY_LINK_TRACE`), for `attachLogs`. */
   private readonly linkTrace = join(this.home, "link-trace.jsonl");
 
+  /** The test's Pkarr relay, the bot's only one once `start` has it. */
+  private relay: string | null = null;
+
   /** `env`: more environment for every command and the daemon (the CLI's test switches). */
   constructor(private readonly env: NodeJS.ProcessEnv = {}) {}
+
+  /**
+   * The bot's environment: on this machine only, as the CLI's own tests (packages/cli/test/support/network.ts): the
+   * test's Pkarr relay, no public HyperDHT, Iroh relay (the e2e infra's when the shell has it) or STUN server, unless
+   * the run sets GHOSTLY_TEST_PUBLIC_NET=1.
+   */
+  private envFor(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    return testNetworkEnv(this.relay ? { GHOSTLY_PKARR_RELAYS: this.relay } : {}, extra, this.env);
+  }
 
   /** Runs one command to its end; rejects with the CLI's JSON error. */
   run(...args: string[]): Promise<Record<string, unknown>> {
     return new Promise((done, fail) => {
-      const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: { ...headlessEnv(), ...this.env }, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: this.envFor(), stdio: ["ignore", "pipe", "pipe"] });
       let out = "", err = "";
       child.stdout.on("data", (d) => (out += d));
       child.stderr.on("data", (d) => (err += d));
@@ -51,6 +61,7 @@ export class HeadlessBot {
   /** The profile's daemon, and a listener collecting its events. */
   async start(relay: string, name: string): Promise<void> {
     assertBuilt();
+    this.relay = relay;
     await this.run("settings", "set", "relays", JSON.stringify([relay]));
     await this.run("profile", "set", "--name", name);
     const daemon = this.spawn("daemon");
@@ -63,7 +74,7 @@ export class HeadlessBot {
   }
 
   private spawn(...args: string[]): ChildProcess {
-    const env = { ...headlessEnv(), GHOSTLY_LINK_TRACE: this.linkTrace, ...this.env };
+    const env = this.envFor({ GHOSTLY_LINK_TRACE: this.linkTrace });
     const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
     child.stderr!.on("data", (d: Buffer) => { this.stderr += d; process.stderr.write(d); });
     this.running.push(child);

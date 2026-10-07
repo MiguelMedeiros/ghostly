@@ -99,7 +99,7 @@ async function hears(dir: string, from: string, group: string, text: string): Pr
 beforeAll(async () => {
   relays = await Promise.all([localRelay(), localRelay()]);
   dht = await hyperdhtTestnet();
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_LINK_TRACE: traceOf(now) };
+  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_PKARR_RELAYS: relays.map((r) => r.url).join(","), GHOSTLY_LINK_TRACE: traceOf(now) };
   oldEnv = { ...env, GHOSTLY_LINK_TRACE: traceOf(old), ...(OLD_BIN ? {} : { GHOSTLY_TEST_WEBRTC_GROUP_LINKS: "1" }) };
   for (const [dir, name] of [[now, "Now"], [old, "Old"]] as const) {
     ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));

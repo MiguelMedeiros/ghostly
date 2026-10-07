@@ -16,10 +16,12 @@ let relays: { url: string; server: Server }[] = [];
 const running = new Map<string, Running>();
 const homes = Array.from({ length: N }, (_, i) => home(i === 0 ? "coordinator" : i === N - 1 ? "person" : `bot${i}`));
 const [coordinator, author] = homes, person = homes[N - 1];
-const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env: {} });
+/** The two relays, the only ones (set once they are up). */
+const pinned = (): NodeJS.ProcessEnv => ({ GHOSTLY_PKARR_RELAYS: relays.map((relay) => relay.url).join(",") });
+const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env: pinned() });
 
 async function up(dir: string): Promise<void> {
-  const daemon = new Running(["--home", dir, "daemon"]);
+  const daemon = new Running(["--home", dir, "daemon"], pinned());
   running.set(dir, daemon);
   await daemon.waitFor((l) => l.daemon === "ready");
 }

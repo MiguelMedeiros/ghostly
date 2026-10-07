@@ -426,7 +426,8 @@ directly (every packet to both; reads from the DHT when every relay fails). Test
 `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces its bootstrap routers,
 `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` replaces HyperDHT's bootstrap nodes, `settings set relays
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
-turns WebRTC off. A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
+turns WebRTC off, and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of it (the profile's own `iceServers`
+stay). A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
 `GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it).
 
 ### Private networks
@@ -435,7 +436,8 @@ A profile publishes on Pkarr within seconds of its first run (its `did:dht` reco
 public relays and the Mainline DHT unless told otherwise. To keep a private network or a test on its own relays from
 the start, run every command with `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desktop reads the same variable): those are
 then the only Pkarr relays, the profile's `relays` setting is not used, and the Mainline DHT is left out unless
-`GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `status` shows the relays in use (`discovery.relays`); `settings get`
+`GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `GHOSTLY_IROH_RELAYS=https://…,…` (`http://` on loopback) does the same
+for Iroh: those are the only Iroh relays, whatever `irohRelays` says. `status` shows the relays in use (`discovery.relays`); `settings get`
 still shows the profile's own list, which is used again once the variable is unset. Without the variable,
 `settings set relays '["http://…"]'` before the first `daemon`, with `GHOSTLY_DHT=0` or `GHOSTLY_DHT_BOOTSTRAP`, does
 the same for that profile. Unlike the Desktop, the CLI keeps its request budget per relay (30 a minute), so give a
