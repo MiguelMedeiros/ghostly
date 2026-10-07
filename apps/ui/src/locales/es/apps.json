@@ -65,19 +65,23 @@
     "equivocation": "Existen dos versiones {{sequence}} distintas. Ghostly conservó la que tienes.",
     "fetching": "Comprobando la app…",
     "foundBy": "Encontrada por {{name}}",
-    "host": "Instalar descarga de {{host}}, que conoce tu dirección IP.",
     "inStore": "En {{name}}",
     "install": "Instalar",
     "installPlay": "Instalar y jugar",
+    "ipInfo": "Ghostly descarga la app de {{host}}, que conoce tu dirección IP y cuándo.",
+    "ipInfoOffline": "La app no tiene acceso a internet, pero su editor aún puede conocer tu dirección IP y cuándo la abres.",
+    "ipLine": "Se descarga de {{host}}, que ve tu dirección IP.",
+    "ipLineInstalled": "Su editor puede conocer tu dirección IP.",
     "newPermissions": "Esta actualización también pide",
     "notListed": "No está en ninguna de tus tiendas",
     "perm": {
       "chat": "Hablar con la misma app en el lado de tu contacto",
+      "internet": "Usar internet",
+      "internetInfo": "La app puede conectar con servidores en internet. La app y esos servidores conocen tu dirección IP y lo que les envía.",
       "name": "Ver tu nombre en este chat",
       "storage": "Guardar sus propios datos en este dispositivo"
     },
     "permissions": "Puede",
-    "privacy": "Sin acceso a internet. El editor aún puede conocer tu dirección IP y cuándo la abres.",
     "publisher": "Editor",
     "removed": "Retirada por {{store}}: {{reason}}",
     "revoked": "Su editor revocó esta versión.",
@@ -86,7 +90,9 @@
     "sentBy": "Enviada por {{name}}",
     "unknownPublisher": "Editor desconocido",
     "unknownPublisherInfo": "Cualquiera puede firmar una app con una clave nueva. Solo una tienda que añadiste puede responder por quién la hizo. Compara la clave con la que publica su autor.",
-    "update": "Actualizar"
+    "update": "Actualizar",
+    "webkit": "En Safari, cualquier app puede conectar con otros servidores.",
+    "webkitInfo": "Safari, y cualquier navegador en iPhone y iPad, deja que una app abra conexiones que Ghostly no puede bloquear, incluso sin el permiso de internet. Esos servidores conocen tu dirección IP. La app de escritorio las bloquea."
   },
   "page": {
     "add": "Añadir",

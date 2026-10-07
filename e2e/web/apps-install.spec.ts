@@ -51,8 +51,11 @@ test("install from a store, open it in a chat, and the contact installs it from 
   await expect(screen.getByTestId("app-store-line")).toHaveText(`In ${store.storeName}`);
   await expect(screen.getByTestId("app-publisher-name")).toHaveText("Publisher");
   await expect(screen.getByTestId("app-permissions")).toContainText("Talk to the same app on your contact's side");
-  await expect(screen.getByTestId("app-privacy")).toContainText("No internet access");
-  await expect(screen.getByTestId("app-ip-line")).toHaveText("Installing downloads from raw.githubusercontent.com, which learns your IP address.");
+  // One line about who learns the address; the rest behind its ⓘ. Chromium is not WebKit: no Safari line.
+  await expect(screen.getByTestId("app-ip-line")).toHaveText("Downloads from raw.githubusercontent.com, which sees your IP address.");
+  await screen.getByTestId("app-ip-line-info").click();
+  await expect(screen.getByTestId("app-ip-line-text")).toContainText("The app has no internet access, but its publisher may still learn your IP address");
+  await expect(screen.getByTestId("app-webkit-line")).toHaveCount(0);
   await screen.getByTestId("app-install-confirm").click();
   await expect(ana.page.getByTestId("installed-app")).toContainText(store.title);
 

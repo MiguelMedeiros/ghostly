@@ -71,3 +71,16 @@ export function useAppsState(): AppsState {
 export function useAppsAvailable(): boolean {
   return useAppsState() === "on";
 }
+
+/**
+ * The web app in a WebKit browser (Safari on macOS, and every browser on iOS and iPadOS): Apps is there, but an app's
+ * frame can still open a connection to another server (WebKit's `<link rel=preconnect>` ignores the runner's policy,
+ * WISP 1200 § Per client), so the install screen says so. Not Desktop: its app windows block that with a content rule
+ * list. Chromium and Firefox name WebKit in their user agent too, so they are told apart by their own names.
+ */
+export function webKitAppLeak(userAgent: string = typeof navigator === "undefined" ? "" : navigator.userAgent, desktop: boolean = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window): boolean {
+  if (desktop || !/AppleWebKit\//.test(userAgent)) return false;
+  // On iOS and iPadOS every browser is WebKit, whatever it calls itself.
+  if (/\b(iPhone|iPad|iPod)\b/.test(userAgent)) return true;
+  return !/\b(Chrome|Chromium|CriOS|Edg|EdgiOS|OPR|Firefox|FxiOS|SamsungBrowser|Android)\b/.test(userAgent);
+}

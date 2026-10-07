@@ -65,19 +65,23 @@
     "equivocation": "Existem duas versões {{sequence}} diferentes. O Ghostly manteve a que você tem.",
     "fetching": "Verificando o app…",
     "foundBy": "Encontrado por {{name}}",
-    "host": "Instalar baixa de {{host}}, que fica sabendo do seu endereço IP.",
     "inStore": "Em {{name}}",
     "install": "Instalar",
     "installPlay": "Instalar e jogar",
+    "ipInfo": "O Ghostly baixa o app de {{host}}, que fica sabendo do seu endereço IP e de quando.",
+    "ipInfoOffline": "O app não tem acesso à internet, mas o publicador ainda pode saber seu endereço IP e quando você o abre.",
+    "ipLine": "Baixa de {{host}}, que vê seu endereço IP.",
+    "ipLineInstalled": "O publicador pode saber seu endereço IP.",
     "newPermissions": "Esta atualização também pede para",
     "notListed": "Não está em nenhuma das suas lojas",
     "perm": {
       "chat": "Conversar com o mesmo app do lado do seu contato",
+      "internet": "Usar a internet",
+      "internetInfo": "O app pode acessar servidores na internet. O app e esses servidores ficam sabendo do seu endereço IP e do que ele envia a eles.",
       "name": "Ver seu nome nesta conversa",
       "storage": "Guardar os próprios dados neste dispositivo"
     },
     "permissions": "Ele pode",
-    "privacy": "Sem acesso à internet. O publicador ainda pode saber seu endereço IP e quando você o abre.",
     "publisher": "Publicador",
     "removed": "Removido por {{store}}: {{reason}}",
     "revoked": "O publicador revogou esta versão.",
@@ -86,7 +90,9 @@
     "sentBy": "Enviado por {{name}}",
     "unknownPublisher": "Publicador desconhecido",
     "unknownPublisherInfo": "Qualquer pessoa pode assinar um app com uma chave nova. Só uma loja que você adicionou pode garantir quem o fez. Compare a chave com a que o autor publica.",
-    "update": "Atualizar"
+    "update": "Atualizar",
+    "webkit": "No Safari, qualquer app pode acessar outros servidores.",
+    "webkitInfo": "O Safari, e qualquer navegador no iPhone e no iPad, deixa um app abrir conexões que o Ghostly não consegue bloquear, mesmo sem a permissão de internet. Esses servidores ficam sabendo do seu endereço IP. O app para desktop as bloqueia."
   },
   "page": {
     "add": "Adicionar",

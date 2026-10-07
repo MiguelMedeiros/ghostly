@@ -13,7 +13,7 @@ import { InstalledAppDialog, AppInstallDialog } from "../../components/apps/AppI
 import { Apps } from "../../pages/Apps";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { setAppOpener } from "../../lib/apps/open";
-import { appsAvailable, forgetAppsAvailable } from "../../lib/apps/flag";
+import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -65,12 +65,32 @@ beforeEach(() => {
   forgetAppsAvailable();
   forgetInstalledApps();
   fetches = [];
+  // Chromium, as the e2e suite runs: happy-dom's own user agent names AppleWebKit and no other engine.
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36");
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => { fetches.push(String(input)); return new Response("", { status: 404 }); });
 });
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   setAppOpener(null);
+});
+
+describe("webKitAppLeak: the web app in a WebKit browser", () => {
+  it("is Safari and every iOS browser, not Chromium, Firefox or Desktop", () => {
+    const ua = {
+      safari: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+      iosChrome: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/129.0 Mobile/15E148 Safari/604.1",
+      chrome: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
+      android: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36",
+      firefox: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:131.0) Gecko/20100101 Firefox/131.0",
+    };
+    expect(webKitAppLeak(ua.safari, false)).toBe(true);
+    expect(webKitAppLeak(ua.iosChrome, false)).toBe(true);
+    expect(webKitAppLeak(ua.chrome, false)).toBe(false);
+    expect(webKitAppLeak(ua.android, false)).toBe(false);
+    expect(webKitAppLeak(ua.firefox, false)).toBe(false);
+    expect(webKitAppLeak(ua.safari, true)).toBe(false);
+  });
 });
 
 describe("appsAvailable, the one rule every screen asks", () => {
@@ -165,8 +185,13 @@ describe("with the apps flag on", () => {
     expect(within(screenEl).getByTestId("app-store-line")).toHaveTextContent("Not in any of your stores");
     expect(within(screenEl).getByTestId("app-permissions")).toHaveTextContent("Keep its own data on this device");
     expect(within(screenEl).getByTestId("app-permissions")).toHaveTextContent("Talk to the same app on your contact's side");
-    expect(within(screenEl).getByTestId("app-privacy")).toHaveTextContent("No internet access. The publisher may still learn your IP address and when you open it.");
-    expect(within(screenEl).getByTestId("app-ip-line")).toHaveTextContent("Installing downloads from raw.githubusercontent.com, which learns your IP address.");
+    // One line about who learns the address, the rest behind its ⓘ.
+    expect(within(screenEl).getByTestId("app-ip-line")).toHaveTextContent("Downloads from raw.githubusercontent.com, which sees your IP address.");
+    expect(within(screenEl).queryByTestId("app-ip-line-text")).not.toBeInTheDocument();
+    await user.click(within(screenEl).getByTestId("app-ip-line-info"));
+    expect(within(screenEl).getByTestId("app-ip-line-text")).toHaveTextContent(
+      "Ghostly downloads the app from raw.githubusercontent.com, which learns your IP address and when. The app has no internet access, but its publisher may still learn your IP address and when you open it.");
+    expect(within(screenEl).queryByTestId("app-webkit-line")).not.toBeInTheDocument();
     await user.click(within(screenEl).getByRole("button", { name: "Install and play" }));
     expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat"] }]);
     // Installing from a card opens it in that chat.
@@ -214,6 +239,39 @@ describe("with the apps flag on", () => {
     expect(permissions).toHaveTextContent("See your name in this chat");
     expect(permissions).not.toHaveTextContent("Keep its own data");
     expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Update");
+  });
+
+  it("shows the internet permission with what it means behind ⓘ, and an update that adds it asks again", async () => {
+    const internet = ["chat", "internet"] as unknown as AppPreview["asks"];
+    fakeEngine.on("appPreview", () => preview({ asks: internet, manifest: { ...preview().manifest, permissions: internet } }));
+    const { user, unmount } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    const line = await screen.findByTestId("app-permission-internet");
+    expect(line).toHaveTextContent("Use the internet");
+    await user.click(within(line).getByTestId("app-permission-internet-info"));
+    expect(screen.getByTestId("app-permission-internet-text")).toHaveTextContent("The app and those servers learn your IP address and whatever it sends them.");
+    // An app that may use the internet is not told it has none.
+    await user.click(screen.getByTestId("app-ip-line-info"));
+    expect(screen.getByTestId("app-ip-line-text")).not.toHaveTextContent("no internet access");
+    unmount();
+
+    fakeEngine.on("appUpdateAccept", () => installed()).on("appList", () => []);
+    renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+      app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["internet"] as unknown as AppPreview["asks"] } })} />);
+    const update = await screen.findByTestId("app-update");
+    expect(within(update).getByTestId("app-permissions")).toHaveTextContent("This update also asks to");
+    expect(within(update).getByTestId("app-permission-internet")).toHaveTextContent("Use the internet");
+    expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([]);
+  });
+
+  it("says on Safari, and only there, that any app can reach other servers", async () => {
+    const safari = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(safari);
+    fakeEngine.on("appPreview", () => preview());
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    const line = await screen.findByTestId("app-webkit-line");
+    expect(line).toHaveTextContent("On Safari, any app can reach other servers.");
+    await user.click(within(line).getByTestId("app-webkit-line-info"));
+    expect(screen.getByTestId("app-webkit-line-text")).toHaveTextContent("The desktop app blocks them.");
   });
 
   it("refuses to install a version a store removed or its publisher revoked", async () => {

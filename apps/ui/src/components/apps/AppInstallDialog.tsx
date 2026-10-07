@@ -2,15 +2,15 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppListedBy, AppPreview, AppRunStatus, AppSource, InstalledAppView } from "@ghostly/browser/engine/apps";
-import type { AppPermission } from "@ghostly/core";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
-import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18nContext";
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { appErrorText } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
+import { webKitAppLeak } from "../../lib/apps/flag";
 
 /*
  * The install screen (WISP 1200 § Permissions, § Apps sent in a chat, § Takedowns): what the checked bundle says,
@@ -20,9 +20,14 @@ import { saveAppData } from "../../lib/apps/exportData";
  * adds a permission shows only what is new. The same screen shows an installed app: its update, its state, Uninstall.
  */
 
-const PERMISSIONS: Record<AppPermission, "apps.install.perm.chat" | "apps.install.perm.name"> = {
-  chat: "apps.install.perm.chat",
-  name: "apps.install.perm.name",
+/**
+ * What each permission is called at install, and the longer story behind its ⓘ where there is one. By name, so a
+ * permission this build does not know yet still shows (as its name) rather than being hidden.
+ */
+const PERMISSIONS: Record<string, { label: TranslationKey; info?: TranslationKey }> = {
+  chat: { label: "apps.install.perm.chat" },
+  internet: { label: "apps.install.perm.internet", info: "apps.install.perm.internetInfo" },
+  name: { label: "apps.install.perm.name" },
 };
 
 function hostOf(url: string): string {
@@ -70,17 +75,39 @@ function Publisher({ fingerprint, unknown, listedBy, sentBy }: { fingerprint: st
   );
 }
 
-/** What the app may do: always its own data on this device, then each permission it asks for. */
-function Permissions({ asks, update }: { asks: readonly AppPermission[]; update: boolean }) {
+/** One short line, and the longer story behind an ⓘ beside it. */
+function InfoLine({ children, info, testId, className = "text-xs text-text-secondary" }: { children: ReactNode; info?: ReactNode; testId?: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div data-testid={testId}>
+      <div className={`flex items-start gap-1.5 ${className}`}>
+        <span className="min-w-0">{children}</span>
+        {info && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId && `${testId}-info`} className="-my-0.5" />}
+      </div>
+      {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border">{info}</p>}
+    </div>
+  );
+}
+
+/** What the app may do: always its own data on this device (not on an update), then each permission it asks for. */
+function Permissions({ asks, update }: { asks: readonly string[]; update: boolean }) {
   const { t } = useI18n();
-  const lines = update ? asks.map((p) => t(PERMISSIONS[p])) : [t("apps.install.perm.storage"), ...asks.map((p) => t(PERMISSIONS[p]))];
+  const lines: { key: string; label: string; info?: string }[] = [
+    ...(update ? [] : [{ key: "storage", label: t("apps.install.perm.storage") }]),
+    ...asks.map((p) => {
+      const known = PERMISSIONS[p];
+      return { key: p, label: known ? t(known.label) : p, ...(known?.info && { info: t(known.info) }) };
+    }),
+  ];
   return (
     <div className="space-y-1.5" data-testid="app-permissions">
       <p className="text-xs font-semibold text-accent uppercase tracking-wide">{update ? t("apps.install.newPermissions") : t("apps.install.permissions")}</p>
       <ul className="space-y-1">
         {lines.map((line) => (
-          <li key={line} className="flex items-start gap-2 text-sm text-text-primary">
-            <span aria-hidden="true" className="mt-[7px] w-1.5 h-1.5 rounded-full bg-accent shrink-0" />{line}
+          <li key={line.key} data-permission={line.key} className="flex items-start gap-2 text-sm text-text-primary">
+            <span aria-hidden="true" className="mt-[7px] w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+            <InfoLine info={line.info} testId={`app-permission-${line.key}`} className="text-sm text-text-primary">{line.label}</InfoLine>
           </li>
         ))}
       </ul>
@@ -88,13 +115,20 @@ function Permissions({ asks, update }: { asks: readonly AppPermission[]; update:
   );
 }
 
-/** The network line every install screen says (WISP 1200 § Permissions), and the host the bytes come from. */
-function Privacy({ from }: { from?: string }) {
+/**
+ * Who learns the person's address (WISP 1200 § Permissions): one line, the rest behind its ⓘ. On the install screen,
+ * the host the bundle comes from; for an app without `internet`, that its publisher may still learn the address. On
+ * the web in WebKit (Safari, every browser on iPhone and iPad), one more line: any app can reach other servers there.
+ */
+function Privacy({ from, internet }: { from?: string; internet: boolean }) {
   const { t } = useI18n();
+  const offline = internet ? "" : ` ${t("apps.install.ipInfoOffline")}`;
   return (
     <div className="space-y-1" data-testid="app-privacy">
-      <Line>{t("apps.install.privacy")}</Line>
-      {from && <Line testId="app-ip-line">{t("apps.install.host", { host: hostOf(from) })}</Line>}
+      {from
+        ? <InfoLine testId="app-ip-line" info={`${t("apps.install.ipInfo", { host: hostOf(from) })}${offline}`}>{t("apps.install.ipLine", { host: hostOf(from) })}</InfoLine>
+        : !internet && <InfoLine testId="app-ip-line" info={t("apps.install.ipInfoOffline")}>{t("apps.install.ipLineInstalled")}</InfoLine>}
+      {from && webKitAppLeak() && <InfoLine testId="app-webkit-line" info={t("apps.install.webkitInfo")}>{t("apps.install.webkit")}</InfoLine>}
     </div>
   );
 }
@@ -190,7 +224,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           {preview.manifest.description && <p className="text-sm text-text-secondary whitespace-pre-line">{preview.manifest.description}</p>}
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
-          <Privacy from={preview.from} />
+          <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} />
         </>
       )}
       {error && <Line tone="danger" testId="app-install-error">{error}</Line>}
@@ -253,7 +287,7 @@ export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledApp
         </div>
       )}
       {!app.pending && <Permissions asks={app.permissions} update={false} />}
-      <Privacy />
+      <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
       {error && <Line tone="danger" testId="app-details-error">{error}</Line>}
       <div className="flex flex-wrap justify-end gap-2">
         <Button variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>

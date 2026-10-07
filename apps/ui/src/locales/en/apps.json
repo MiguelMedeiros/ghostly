@@ -65,19 +65,23 @@
     "equivocation": "Two different versions {{sequence}} exist. Ghostly kept the one you have.",
     "fetching": "Checking the app…",
     "foundBy": "Found by {{name}}",
-    "host": "Installing downloads from {{host}}, which learns your IP address.",
     "inStore": "In {{name}}",
     "install": "Install",
     "installPlay": "Install and play",
+    "ipInfo": "Ghostly downloads the app from {{host}}, which learns your IP address and when.",
+    "ipInfoOffline": "The app has no internet access, but its publisher may still learn your IP address and when you open it.",
+    "ipLine": "Downloads from {{host}}, which sees your IP address.",
+    "ipLineInstalled": "Its publisher may learn your IP address.",
     "newPermissions": "This update also asks to",
     "notListed": "Not in any of your stores",
     "perm": {
       "chat": "Talk to the same app on your contact's side",
+      "internet": "Use the internet",
+      "internetInfo": "The app can contact servers on the internet. The app and those servers learn your IP address and whatever it sends them.",
       "name": "See your name in this chat",
       "storage": "Keep its own data on this device"
     },
     "permissions": "It can",
-    "privacy": "No internet access. The publisher may still learn your IP address and when you open it.",
     "publisher": "Publisher",
     "removed": "Removed by {{store}}: {{reason}}",
     "revoked": "Its publisher revoked this version.",
@@ -86,7 +90,9 @@
     "sentBy": "Sent by {{name}}",
     "unknownPublisher": "Unknown publisher",
     "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added can vouch for who made it. Compare the key with the one the maker publishes.",
-    "update": "Update"
+    "update": "Update",
+    "webkit": "On Safari, any app can reach other servers.",
+    "webkitInfo": "Safari, and every browser on iPhone and iPad, lets an app open connections Ghostly cannot block, even without the internet permission. Those servers learn your IP address. The desktop app blocks them."
   },
   "page": {
     "add": "Add",

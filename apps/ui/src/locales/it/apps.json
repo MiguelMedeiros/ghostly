@@ -65,19 +65,23 @@
     "equivocation": "Esistono due versioni {{sequence}} diverse. Ghostly ha tenuto quella che hai.",
     "fetching": "Controllo dell'app…",
     "foundBy": "Trovata da {{name}}",
-    "host": "L'installazione scarica da {{host}}, che vede il tuo indirizzo IP.",
     "inStore": "In {{name}}",
     "install": "Installa",
     "installPlay": "Installa e gioca",
+    "ipInfo": "Ghostly scarica l'app da {{host}}, che vede il tuo indirizzo IP e quando.",
+    "ipInfoOffline": "L'app non ha accesso a internet, ma il suo editore può comunque sapere il tuo indirizzo IP e quando la apri.",
+    "ipLine": "Scaricata da {{host}}, che vede il tuo indirizzo IP.",
+    "ipLineInstalled": "Il suo editore può sapere il tuo indirizzo IP.",
     "newPermissions": "Questo aggiornamento chiede anche di",
     "notListed": "In nessuno dei tuoi store",
     "perm": {
       "chat": "Parlare con la stessa app dal lato del tuo contatto",
+      "internet": "Usare internet",
+      "internetInfo": "L'app può contattare server su internet. L'app e quei server vedono il tuo indirizzo IP e quello che invia loro.",
       "name": "Vedere il tuo nome in questa chat",
       "storage": "Tenere i propri dati su questo dispositivo"
     },
     "permissions": "Può",
-    "privacy": "Nessun accesso a internet. L'editore può comunque sapere il tuo indirizzo IP e quando la apri.",
     "publisher": "Editore",
     "removed": "Rimossa da {{store}}: {{reason}}",
     "revoked": "Il suo editore ha revocato questa versione.",
@@ -86,7 +90,9 @@
     "sentBy": "Inviata da {{name}}",
     "unknownPublisher": "Editore sconosciuto",
     "unknownPublisherInfo": "Chiunque può firmare un'app con una chiave nuova. Solo uno store che hai aggiunto può garantire chi l'ha fatta. Confronta la chiave con quella pubblicata dall'autore.",
-    "update": "Aggiorna"
+    "update": "Aggiorna",
+    "webkit": "Su Safari, qualsiasi app può raggiungere altri server.",
+    "webkitInfo": "Safari, e ogni browser su iPhone e iPad, lascia che un'app apra connessioni che Ghostly non può bloccare, anche senza il permesso internet. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca."
   },
   "page": {
     "add": "Aggiungi",

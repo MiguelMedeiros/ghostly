@@ -65,19 +65,23 @@
     "equivocation": "Deux versions {{sequence}} différentes existent. Ghostly a gardé celle que vous avez.",
     "fetching": "Vérification de l'app…",
     "foundBy": "Trouvée par {{name}}",
-    "host": "L'installation télécharge depuis {{host}}, qui apprend votre adresse IP.",
     "inStore": "Dans {{name}}",
     "install": "Installer",
     "installPlay": "Installer et jouer",
+    "ipInfo": "Ghostly télécharge l'app depuis {{host}}, qui apprend votre adresse IP et à quel moment.",
+    "ipInfoOffline": "L'app n'a pas accès à Internet, mais son éditeur peut quand même apprendre votre adresse IP et quand vous l'ouvrez.",
+    "ipLine": "Téléchargée depuis {{host}}, qui voit votre adresse IP.",
+    "ipLineInstalled": "Son éditeur peut apprendre votre adresse IP.",
     "newPermissions": "Cette mise à jour demande aussi de",
     "notListed": "Dans aucune de vos boutiques",
     "perm": {
       "chat": "Échanger avec la même app chez votre contact",
+      "internet": "Utiliser Internet",
+      "internetInfo": "L'app peut contacter des serveurs sur Internet. L'app et ces serveurs apprennent votre adresse IP et ce qu'elle leur envoie.",
       "name": "Voir votre nom dans cette discussion",
       "storage": "Garder ses propres données sur cet appareil"
     },
     "permissions": "Elle peut",
-    "privacy": "Pas d'accès à Internet. L'éditeur peut quand même apprendre votre adresse IP et quand vous l'ouvrez.",
     "publisher": "Éditeur",
     "removed": "Retirée par {{store}} : {{reason}}",
     "revoked": "Son éditeur a révoqué cette version.",
@@ -86,7 +90,9 @@
     "sentBy": "Envoyée par {{name}}",
     "unknownPublisher": "Éditeur inconnu",
     "unknownPublisherInfo": "N'importe qui peut signer une app avec une nouvelle clé. Seule une boutique que vous avez ajoutée peut garantir qui l'a faite. Comparez la clé avec celle que publie son auteur.",
-    "update": "Mettre à jour"
+    "update": "Mettre à jour",
+    "webkit": "Sur Safari, toute app peut joindre d'autres serveurs.",
+    "webkitInfo": "Safari, et tout navigateur sur iPhone et iPad, laisse une app ouvrir des connexions que Ghostly ne peut pas bloquer, même sans la permission Internet. Ces serveurs apprennent votre adresse IP. L'app de bureau les bloque."
   },
   "page": {
     "add": "Ajouter",
