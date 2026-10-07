@@ -681,8 +681,9 @@ export class LinkSession {
       // This side's offer is out, and this read looks for its answer: signaling (`PkarrRequestOptions.signal`).
       const signal = pace === "fast" && this.fastStepsAfter > 0 && this.rtcSignalOut !== null;
       const watch = !signal && this.watching();
-      // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`).
-      const departed = watch && Date.now() < this.departedUntil;
+      // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`). Not `watch`
+      // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.
+      const departed = !signal && Date.now() < this.departedUntil;
       const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }) });
       if (!this.running) return;
       this.discoveryResult("read");

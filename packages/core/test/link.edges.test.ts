@@ -714,11 +714,22 @@ describe("LinkSession poll pacing", () => {
     a.s.pollNow();
     await settle();
     expect(last()).toMatchObject({ watch: true, departed: true });
-    // Past its first seconds, a read still watches, as any other.
+    // A packet the contact put just before its goodbye, read after it, advertises: the reads stop watching, yet are still
+    // the first ones (the contact's offer, once it is back, is what they look for).
+    vi.setSystemTime(NOW + 2_000);
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(true);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.watch).toBeUndefined();
+    expect(last()?.departed).toBe(true);
+    // Past its first seconds, a read is the contact's like any other.
     vi.setSystemTime(NOW + DEPARTED_READ_MS);
     a.s.pollNow();
     await settle();
-    expect(last()?.watch).toBe(true);
     expect(last()?.departed).toBeUndefined();
     await a.s.stop(false);
     await b.s.stop(false);
