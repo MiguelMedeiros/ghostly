@@ -20,8 +20,8 @@ import { avatarFromFile } from "../lib/avatarImage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
-import { errorText } from "../lib/errorText";
 import { openJoinAnother } from "../lib/devices";
+import { problemText, type Problem } from "../lib/problemText";
 
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
 function useProfiles() {
@@ -73,14 +73,14 @@ export function Profile() {
     navigate("/profile", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival
   }, [replacing]);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   useEffect(() => setName(plain), [plain]);
 
   const canSwitch = !!platform?.features.profiles;
   const wallet = platform?.wallet?.getState();
   const services = platform?.features.shareLocalServices ? platform.getSharedServices() : [];
   const chats = listSessions().length;
-  const attempt = (work: () => void) => { try { work(); setError(""); } catch (e) { setError(errorText(e, t)); } };
+  const attempt = (work: () => void) => { try { work(); setError(null); } catch (e) { setError(problemText(e, t)); } };
   const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => renameProfile(current.id, name)); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
 
@@ -94,7 +94,7 @@ export function Profile() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
           </span>
           <input data-testid="profile-avatar-input" type="file" accept="image/*" aria-label={myAvatar ? t("profile.changePicture") : t("profile.addPicture")} className="sr-only"
-            onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(""), (err: unknown) => setError(errorText(err, t))); }} />
+            onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(null), (err: unknown) => setError(problemText(err, t))); }} />
         </label>
         <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} onBlur={saveName} {...nameComposition.inputProps} onKeyDown={(e) => !nameComposition.composing(e) && e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
           className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
@@ -109,7 +109,7 @@ export function Profile() {
         )}
         {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
       </div>
-      {error && <Notice tone="error">{error}</Notice>}
+      {error && <Notice problem={error} />}
 
       <Section title={t("profile.look")}>
         <Row label={t("profile.color")}><ColorSwatches label={t("profile.colorLabel")} testIdPrefix="profile-theme" /></Row>
@@ -121,7 +121,7 @@ export function Profile() {
         {/* Per profile: contacts are told at once, or told there is nothing to show (WISP 401 § name and picture). */}
         <Row label={t("settings.shareProfile")} hint={t("settings.shareProfileHint")}>
           <Switch testId="profile-share" label={t("settings.shareProfile")} checked={shareProfile}
-            onChange={(share) => void setShareProfile(share).then(() => setError(""), (err: unknown) => setError(errorText(err, t)))} />
+            onChange={(share) => void setShareProfile(share).then(() => setError(null), (err: unknown) => setError(problemText(err, t)))} />
         </Row>
       </Section>
 

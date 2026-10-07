@@ -46,10 +46,12 @@
     "protection": {
       "confirm": "Ho capito. Crea il backup senza passphrase.",
       "label": "Protezione",
-      "mainnet": "Questo profilo ha portafogli Mainnet che hanno contenuto denaro reale. Chi ottiene il file può spenderlo.",
+      "mainnet": "Questo profilo ha contenuto denaro reale",
+      "mainnetNext": "Chi ha il file può spenderlo.",
       "none": "Senza passphrase",
       "passphrase": "Passphrase",
-      "warning": "Non cifrato. Il file contiene in chiaro le chiavi, le chat e i segreti dei portafogli di questo profilo. Chi ottiene il file ottiene tutto ciò che contiene, compreso il denaro dei suoi portafogli."
+      "warning": "Non cifrato",
+      "warningNext": "Chi ha il file ottiene chiavi, chat e denaro."
     },
     "refresh": "Aggiorna",
     "repeat": "Ripeti",

@@ -4,7 +4,8 @@ import { expect, openProfilePage, test } from "../support/fixtures";
 // WISP 05: a device with no room left for a backup or a restore says so in words a person can act on, and keeps
 // nothing of what it could not finish. Chromium only: the room is taken away through its DevTools protocol.
 const PASSPHRASE = "a file backup passphrase";
-const NO_ROOM = "This device has no room left for this backup. Free some space, then try again.";
+// A few words, then what to do (lib/problemText.ts): the notice reads the two as one text.
+const NO_ROOM = "No room for this backup" + "Free some space, then try again.";
 const MIB = 1024 * 1024;
 const SMALL = [{ id: "seed-in-s0", size: 150_000 }, { id: "seed-in-s1", size: 200_000 }];
 /** Too large to keep in the database: in pieces here, and written to file storage by a restore. */

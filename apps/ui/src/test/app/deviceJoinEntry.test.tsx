@@ -176,7 +176,7 @@ describe("in a profile that holds something", () => {
     const form = await oneScreen();
     await waitFor(() => expect(form).toHaveAttribute("data-place", "nowhere"));
     await user.click(screen.getByTestId("device-join-next"));
-    expect(await screen.findByTestId("device-join-error")).toHaveTextContent("This profile is in use here.");
+    expect(await screen.findByTestId("device-join-error")).toHaveTextContent("This profile is in use here" + "Add a new profile first, then add the device there.");
     expect(listProfiles()).toHaveLength(1);
     expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(0);
   });

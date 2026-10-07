@@ -8,7 +8,6 @@ import { currentProfile } from "../../lib/profiles";
 import { isDesktopApp } from "../../lib/externalLink";
 import { appLinkOrigin } from "../../lib/url";
 import { hashPassword, verifyPassword } from "../../lib/settings";
-import { errorText } from "../../lib/errorText";
 import { QRCodeDisplay } from "../QRCode";
 import { Notice } from "../wallet/ui";
 import { Toast } from "../ui/Toast";
@@ -16,6 +15,8 @@ import { useToast } from "../../hooks/useToast";
 import { FieldError } from "../ui/FieldError";
 import { focusToRetype } from "../../lib/focus";
 import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButton } from "./DeviceDialog";
+import { said } from "../../lib/notices";
+import { problemLine } from "../../lib/problemText";
 
 /**
  * Add a device, on the active device (WISP 06 § Adding a device). First the lock password, in the same dialog: a device
@@ -81,7 +82,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       setView(first); setStep("enroll");
     } catch (cause) {
       const key = enrollErrorKey(cause);
-      fail(key ? t(key) : errorText(cause, t));
+      fail(key ? t(key) : problemLine(cause, t));
     } finally { setBusy(false); }
   };
 
@@ -115,7 +116,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   };
 
   const confirm = async (match: boolean) => {
-    try { setView(await engine.call("deviceEnrollConfirm", { match })); } catch (cause) { fail(errorText(cause, t)); }
+    try { setView(await engine.call("deviceEnrollConfirm", { match })); } catch (cause) { fail(problemLine(cause, t)); }
   };
 
   const startAgain = () => { setView(null); void start(); };
@@ -180,7 +181,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         <button type="button" onClick={onClose} className={primaryButton}>{t("devices.add.finish")}</button>
       </>}
       {view?.step === "failed" && <>
-        <p role="alert" data-testid="device-add-failed" data-reason={view.reason} className="text-danger">{t(failureKey(view.reason))}</p>
+        <div data-testid="device-add-failed" data-reason={view.reason}><Notice problem={said(failureKey(view.reason), t)} className="" /></div>
         <button type="button" data-testid="device-add-again" onClick={startAgain} className={primaryButton}>{t("devices.add.tryAgain")}</button>
       </>}
       {error && <p data-testid="device-add-error" className="text-danger">{error.text}</p>}

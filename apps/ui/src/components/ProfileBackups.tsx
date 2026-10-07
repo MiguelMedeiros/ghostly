@@ -14,6 +14,7 @@ import { useBackupJob } from "../hooks/useBackupJob";
 import { BackupProgress } from "./BackupProgress";
 import { Select } from "./ui/Select";
 import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
+import { said } from "../lib/notices";
 
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
 type Open = "none" | "backup" | "restore" | "s3";
@@ -183,8 +184,8 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
             </FieldGrid>
           ) : (
             <div data-testid="backup-unprotected" className="space-y-2">
-              <Notice tone="error" testId="backup-unprotected-warning">{t("profile.backups.protection.warning")}</Notice>
-              {realMoney && <Notice tone="error" testId="backup-unprotected-mainnet">{t("profile.backups.protection.mainnet")}</Notice>}
+              <Notice problem={said("profile.backups.protection.warning", t)} testId="backup-unprotected-warning" />
+              {realMoney && <Notice problem={said("profile.backups.protection.mainnet", t)} testId="backup-unprotected-mainnet" />}
               <label className="flex items-start gap-2 text-sm text-text-primary cursor-pointer">
                 <input data-testid="backup-unprotected-confirm" type="checkbox" className="mt-0.5 accent-accent" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
                 <span>{t("profile.backups.protection.confirm")}</span>

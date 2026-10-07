@@ -2,9 +2,11 @@ import { useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
-import { errorText } from "../../lib/errorText";
 import { lostWalletLines, removeErrorKey } from "../../lib/devices";
 import { DeviceDialog, dangerButton, primaryButton, quietButton } from "./DeviceDialog";
+import { type Problem, problemText } from "../../lib/problemText";
+import { Notice } from "../ui/Notice";
+import { said } from "../../lib/notices";
 
 /**
  * Remove (WISP 06 § User experience, Remove): "Remove <device>?", what it means, and "Lost or stolen", which shows the
@@ -13,17 +15,17 @@ import { DeviceDialog, dangerButton, primaryButton, quietButton } from "./Device
 export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { device: string; deviceKey: string; onClose(): void; onRemoved?(): void }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [checklist, setChecklist] = useState(false);
   const remove = async () => {
-    setBusy(true); setError("");
+    setBusy(true); setError(null);
     try {
       await engine.call("deviceRemove", { key: deviceKey });
       onRemoved?.();
       onClose();
     } catch (cause) {
       const key = removeErrorKey(cause);
-      setError(key ? t(key) : errorText(cause, t));
+      setError(key ? said(key, t) : problemText(cause, t));
     } finally { setBusy(false); }
   };
   if (checklist) return <LostChecklist device={device} onClose={onClose} onRemove={() => { setChecklist(false); void remove(); }} />;
@@ -32,7 +34,7 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
       <p className="text-text-secondary">{t("devices.remove.text")}</p>
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
       {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
-      {error && <p role="alert" data-testid="device-remove-error" className="text-danger">{error}</p>}
+      {error && <Notice problem={error} testId="device-remove-error" className="" />}
       <button type="button" data-testid="device-remove-go" disabled={busy} onClick={() => void remove()} className={dangerButton}>{t("devices.remove.go")}</button>
       <button type="button" data-testid="device-remove-lost" disabled={busy} onClick={() => setChecklist(true)} className={quietButton}>{t("devices.remove.lost")}</button>
     </DeviceDialog>
