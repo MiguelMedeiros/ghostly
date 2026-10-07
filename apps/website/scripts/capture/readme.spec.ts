@@ -4,7 +4,8 @@
 // server, Iroh off, every other host refused.
 import { test, expect, type Browser } from "@playwright/test";
 import { LocalRelay } from "../../../../e2e/support/relay";
-import { useLocalStun } from "../../../../e2e/support/stun";
+// Not a React hook, despite the name: renamed so the website's lint does not read it as one.
+import { useLocalStun as localStun } from "../../../../e2e/support/stun";
 import { CAST, CLIPBOARD, DESKTOP, EVENING, PHONE, chat, converse, dress, pair, sceneImage, shot, toBottom, voice, type Peer, type Person } from "./helpers";
 
 const local = (url: URL) => url.hostname === "localhost" || url.hostname === "127.0.0.1";
@@ -19,7 +20,7 @@ async function offline(browser: Browser, relay: LocalRelay, baseURL: string, who
   await context.route((url) => !local(url) && url.protocol.startsWith("http"), (route) => route.abort("blockedbyclient"));
   await context.routeWebSocket((url) => !local(url), (ws) => { void ws.close({ code: 1008, reason: "Offline capture" }); });
   await relay.attach(context);
-  await useLocalStun(context);
+  await localStun(context);
   await context.addInitScript(() => { try { localStorage.setItem("ghostly-test-iroh", "off"); } catch { /* opaque origin */ } });
   const page = context.pages()[0] ?? await context.newPage();
   page.on("pageerror", (e) => console.log(`  [${who.name}] ${e.message}`));
