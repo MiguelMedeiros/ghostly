@@ -71,7 +71,8 @@ rust {
 }
 
 // HTTPS from Rust checks certificates with Android's own verifier (rustls-platform-verifier). Its Kotlin half ships
-// inside the crate as a Maven folder, found through `cargo metadata` (the crate's own instructions).
+// inside the crate as a Maven folder, found through `cargo metadata` (the crate's own instructions); the app takes
+// the .aar in it as a file.
 val rustlsPlatformVerifierMaven: String = run {
     val metadata = providers.exec {
         workingDir = file("../../..")
@@ -86,15 +87,8 @@ val rustlsPlatformVerifierMaven: String = run {
     File(File(manifest).parentFile, "maven").path
 }
 
-repositories {
-    maven {
-        url = uri(rustlsPlatformVerifierMaven)
-        metadataSources { artifact() }
-    }
-}
-
 dependencies {
-    implementation("rustls:rustls-platform-verifier:0.1.1")
+    implementation(fileTree(rustlsPlatformVerifierMaven) { include("**/*.aar") })
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")
