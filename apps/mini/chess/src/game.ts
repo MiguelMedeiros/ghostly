@@ -20,6 +20,16 @@ import { encodeMessage, MAX_PLIES, parseMessage, UCI, type Colour, type DrawOpti
 import { commitment, cryptoRandom, deal, newSalt, type Random } from "./toss.ts";
 
 /** The game in a chat, as storage keeps it under "game". */
+
+/**
+ * A value as the broker takes it: strict JSON, made by a round trip through JSON. The broker refuses a value with an
+ * `undefined` member (a JSON value has none), and a game record spread with `d: undefined` has one: its save and its
+ * move were refused, so a move was never sent nor kept. JSON drops such a member, as it does here.
+ */
+function plain(value: unknown): MiniAppJson {
+  return JSON.parse(JSON.stringify(value)) as MiniAppJson;
+}
+
 export interface SavedGame {
   v: 1;
   /** Game id, from both salts. */
@@ -270,7 +280,7 @@ export class ChessController {
       }
       if (!this.inChat) {
         this.local = { v: 1, m: [...(this.local?.m ?? []), uci] };
-        await this.api.storage.set(KEY_LOCAL, this.local as unknown as MiniAppJson);
+        await this.api.storage.set(KEY_LOCAL, plain(this.local));
         this.changed();
         return true;
       }
@@ -319,7 +329,7 @@ export class ChessController {
       if (!this.inChat) {
         this.chess = new Chess();
         this.local = { v: 1, m: [] };
-        await this.api.storage.set(KEY_LOCAL, this.local as unknown as MiniAppJson);
+        await this.api.storage.set(KEY_LOCAL, plain(this.local));
         this.changed();
         return;
       }
@@ -385,7 +395,7 @@ export class ChessController {
     } else {
       this.flip = { ...this.flip, peer: peerCommit };
     }
-    await this.api.storage.set(KEY_FLIP, this.flip as unknown as MiniAppJson);
+    await this.api.storage.set(KEY_FLIP, plain(this.flip));
     this.changed();
     // Our seek again before the reveal: the peer can check a reveal only against a commitment it has.
     await this.send({ k: "seek", c: commitment(this.flip.salt), a: this.flip.a });
@@ -515,7 +525,7 @@ export class ChessController {
   /** A new toss with a fresh salt, giving up these games. */
   private async startToss(abandons: string[]): Promise<void> {
     this.flip = { v: 1, salt: newSalt(this.random), a: abandons.slice(0, 2) };
-    await this.api.storage.set(KEY_FLIP, this.flip as unknown as MiniAppJson);
+    await this.api.storage.set(KEY_FLIP, plain(this.flip));
     this.changed();
     await this.send({ k: "seek", c: commitment(this.flip.salt), a: this.flip.a });
   }
@@ -548,7 +558,7 @@ export class ChessController {
   private async send(message: Message): Promise<void> {
     if (!this.peerOpen) return;
     try {
-      await this.api.chat.send(encodeMessage(message));
+      await this.api.chat.send(plain(encodeMessage(message)));
     } catch {
       // The peer closed or the chat dropped: the sync on its next open carries this.
       this.notice("send-failed");
@@ -556,7 +566,7 @@ export class ChessController {
   }
 
   private async saveGame(): Promise<void> {
-    if (this.game) await this.api.storage.set(KEY_GAME, this.game as unknown as MiniAppJson);
+    if (this.game) await this.api.storage.set(KEY_GAME, plain(this.game));
   }
 
   private readGame(value: MiniAppJson | undefined): SavedGame | null {

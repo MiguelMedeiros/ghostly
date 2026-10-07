@@ -22,6 +22,23 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
 /** What the person reads about a bundle changed after it was signed. */
 const TAMPERED = /^Ghostly won't install it: |^Not signed correctly/;
 
+/** Closes Chess (its bar's Close, outside the frame) and opens it again from the app card in the chat. */
+async function closeAndReopen(peer: Peer): Promise<void> {
+  await miniApp(peer.page).getByRole("button", { name: "Close" }).click();
+  await expect(miniApp(peer.page)).toHaveCount(0);
+  await chat(peer).getByTestId("app-card").getByTestId("app-card-open").click();
+  await expect(miniApp(peer.page)).toBeVisible();
+}
+
+/** Both boards hold these pieces (square, glyph), and each side still plays its colour. */
+async function boardsShow(sides: [Peer, "w" | "b"][], pieces: [string, RegExp][]): Promise<void> {
+  for (const [side, colour] of sides) {
+    const board = chessFrame(side.page);
+    await expect(board.locator(".side")).toHaveText(colour === "w" ? "You play white" : "You play black");
+    for (const [square, glyph] of pieces) await expect(board.locator(`[data-square="${square}"]`)).toHaveText(glyph);
+  }
+}
+
 /** Scholar's mate: 1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6?? 4. Qxf7#. */
 const SCHOLARS_MATE: [string, string][] = [["e2", "e4"], ["e7", "e5"], ["f1", "c4"], ["b8", "c6"], ["d1", "h5"], ["g8", "f6"], ["h5", "f7"]];
 
@@ -44,6 +61,9 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
   await (await composerRow(ana.page, "composer-apps")).click();
   await ana.page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
   await expect(miniApp(ana.page)).toBeVisible();
+  await expect(chessFrame(ana.page).locator(".status")).toHaveText("Waiting for your contact to open Chess");
+  // Ana waits a while before Bob opens it (as in a live game: the toss starts only when he does).
+  await ana.page.waitForTimeout(15_000);
   await expect(chessFrame(ana.page).locator(".status")).toHaveText("Waiting for your contact to open Chess");
 
   // 2. Bob's card, drawn from its own data: not one request until he presses "Install and open".
@@ -68,6 +88,14 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
   for (const [i, [from, to]] of SCHOLARS_MATE.entries()) {
     const [mover, watcher] = i % 2 === 0 ? [white, black] : [black, white];
     await move(mover.page, watcher.page, from, to);
+    if (i !== 3) continue;
+    // After 2...Nc6, each side closes Chess and opens it again from the card: the game is kept, and goes on.
+    for (const [closer, other] of [[ana, bob], [bob, ana]] as const) {
+      await miniApp(closer.page).getByRole("button", { name: "Close" }).click();
+      await expect(chessFrame(other.page).locator(".status")).toHaveText("Your contact closed Chess. The game waits here.");
+      await chat(closer).getByTestId("app-card").getByTestId("app-card-open").click();
+      await boardsShow([[ana, anaColour], [bob, bobColour]], [["e4", /♟/], ["e5", /♟/], ["c4", /♝/], ["c6", /♞/], ["e2", /^$/], ["e7", /^$/]]);
+    }
   }
   await expect(chessFrame(white.page).locator(".status")).toHaveText("You win: checkmate");
   await expect(chessFrame(black.page).locator(".status")).toHaveText("You lose: checkmate");
@@ -93,6 +121,45 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
   await expect(bobsBoard.locator('[data-square="c4"]')).toHaveText(/♝/);
   await expect(bobsBoard.locator('[data-square="f6"]')).toHaveText(/♞/);
   await expect(chessFrame(ana.page).locator(".status")).toHaveText(ana === white ? "You win: checkmate" : "You lose: checkmate");
+});
+
+test("both have Chess: one opens it and waits, the other opens it from the card later; they toss, play, close and reopen", {
+  tag: ["@feature:apps.chess.web", "@feature:apps.chess", "@feature:apps.chat.wire"],
+}, async ({ peer }) => {
+  test.setTimeout(6 * 60_000);
+  const publisher = new ChessPublisher();
+  publisher.signStore({ apps: [publisher.publish({ version: "1.2.0", sequence: 1 })] });
+  const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
+  await Promise.all([publisher.serve(ana.context), publisher.serve(bob.context)]);
+  await setNickname(ana, "Ana");
+  await setNickname(bob, "Bob");
+  await installFromStore(ana.page);
+  await installFromStore(bob.page);
+  await ana.page.goto("/#/");
+  await bob.page.goto("/#/");
+  await pair(ana, bob);
+
+  // Ana opens it from + > Apps and waits; Bob, who has it, opens it from her card a while later.
+  await (await composerRow(ana.page, "composer-apps")).click();
+  await ana.page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
+  await expect(chessFrame(ana.page).locator(".status")).toHaveText("Waiting for your contact to open Chess");
+  const card = chat(bob).getByTestId("app-card");
+  await expect(card.getByTestId("app-card-check")).toHaveText("Installed");
+  await ana.page.waitForTimeout(15_000);
+  await card.getByTestId("app-card-open").click();
+  await expect(miniApp(bob.page)).toBeVisible();
+
+  const [anaColour, bobColour] = await Promise.all([colourOf(ana.page), colourOf(bob.page)]);
+  expect(anaColour).not.toBe(bobColour);
+  const [white, black] = anaColour === "w" ? [ana, bob] : [bob, ana];
+  await move(white.page, black.page, "e2", "e4");
+  await move(black.page, white.page, "e7", "e5");
+
+  // Each closes Chess and opens it again: both moves are kept, and the next one still reaches the other side.
+  for (const side of [white, black]) await closeAndReopen(side);
+  await boardsShow([[ana, anaColour], [bob, bobColour]], [["e4", /♟/], ["e5", /♟/], ["e2", /^$/], ["e7", /^$/]]);
+  await move(white.page, black.page, "g1", "f3");
+  await boardsShow([[ana, anaColour], [bob, bobColour]], [["f3", /♞/], ["g1", /^$/]]);
 });
 
 test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", "@feature:apps.bundle"] }, async ({ peer }) => {

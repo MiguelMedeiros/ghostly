@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, isJsonValue, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -240,6 +240,21 @@ describe("chat", () => {
     expect(host.sent).toEqual([{ linkId: LINK, ref: REF, data: { move: "e2e4" } }]);
   });
 
+  it("takes a value as JSON.stringify writes it: undefined members left out, undefined in a list as null", async () => {
+    // Chess saved and sent `{ ...game, d: undefined }`: refused, so no move was ever sent or kept.
+    const { host, run, ask } = setup();
+    run();
+    await vi.waitFor(() => expect(host.calls).toContainEqual({ op: "chat.open", ref: REF, linkId: LINK }));
+    host.receive(LINK, { app: memoryAppId(LINK, REF), o: "open", v: "1.2.0" });
+    expect(await ask("storage.set", ["game", { m: ["e2e4"], d: undefined, x: [1, undefined] }])).toMatchObject({ ok: true });
+    expect(host.stored.get(`${REF} ${LINK}`)?.get("game")).toEqual({ m: ["e2e4"], x: [1, null] });
+    expect(Object.keys(host.stored.get(`${REF} ${LINK}`)!.get("game") as object)).toEqual(["m", "x"]);
+    expect(await ask("chat.send", [{ k: "move", m: "e2e4", d: undefined }])).toMatchObject({ ok: true });
+    expect(host.sent[host.sent.length - 1]).toEqual({ linkId: LINK, ref: REF, data: { k: "move", m: "e2e4" } });
+    // Anything else that is not JSON is still refused.
+    for (const bad of [new Date(), new Map(), Number.NaN]) expect(await ask("storage.set", ["k", { bad }])).toMatchObject({ ok: false, error: "bad-request" });
+  });
+
   it("refuses chat without the permission, and alone", async () => {
     for (const launch of [{ permissions: [] }, { chat: null }]) {
       const { host, run, ask } = setup(launch);
@@ -292,6 +307,14 @@ it("isJsonValue takes plain JSON only", () => {
   let deep: unknown = 1;
   for (let i = 0; i < 100; i++) deep = [deep];
   expect(isJsonValue(deep)).toBe(false);
+});
+
+it("jsonValueOf writes a value as JSON.stringify does, or refuses it", () => {
+  expect(jsonValueOf({ a: 1, b: undefined, c: [undefined, { d: undefined }] })).toEqual({ a: 1, c: [null, {}] });
+  for (const bad of [Number.POSITIVE_INFINITY, () => 1, new Date(), new Map(), Symbol("x"), 1n, { a: new Uint8Array(1) }]) expect(typeof jsonValueOf(bad)).toBe("symbol");
+  let deep: unknown = 1;
+  for (let i = 0; i < 100; i++) deep = [deep];
+  expect(typeof jsonValueOf(deep)).toBe("symbol");
 });
 
 describe("the runner, from what the person granted", () => {

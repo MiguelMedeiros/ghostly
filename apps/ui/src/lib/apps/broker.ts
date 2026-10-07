@@ -87,6 +87,40 @@ export function isJsonValue(value: unknown, depth = 0): value is MiniAppJson {
   return Object.values(value).every((item) => isJsonValue(item, depth + 1));
 }
 
+const NOT_JSON: unique symbol = Symbol("not JSON");
+
+/**
+ * A request's value as JSON.stringify writes it (WISP 1200 § The app API): an object member that is `undefined` is left
+ * out, and `undefined` in an array is null; anything else that is not plain JSON (a function, a Map, a Date, a number
+ * that is not finite, a value deeper than MAX_DEPTH) makes it NOT_JSON. Apps written in JavaScript spread records with
+ * `field: undefined` all the time; refusing those refused Chess's every move.
+ */
+export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT_JSON {
+  if (depth > MAX_DEPTH) return NOT_JSON;
+  if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : NOT_JSON;
+  if (Array.isArray(value)) {
+    const out: MiniAppJson[] = [];
+    for (const item of value) {
+      const next = item === undefined ? null : jsonValueOf(item, depth + 1);
+      if (next === NOT_JSON) return NOT_JSON;
+      out.push(next);
+    }
+    return out;
+  }
+  if (typeof value !== "object") return NOT_JSON;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return NOT_JSON;
+  const out: Record<string, MiniAppJson> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) continue;
+    const next = jsonValueOf(item, depth + 1);
+    if (next === NOT_JSON) return NOT_JSON;
+    out[key] = next;
+  }
+  return out;
+}
+
 class Refusal extends Error {}
 const refuse = (code: string): never => { throw new Refusal(code); };
 
@@ -214,8 +248,10 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
     let text: string;
     try { text = JSON.stringify(data) ?? ""; } catch { return fail("bad-request"); }
     if (utf8Bytes(text) > MINI_APP_LIMITS.requestBytes) return fail("too-large");
-    const { type, args } = data as { type?: unknown; args?: unknown };
-    if (id === null || typeof type !== "string" || !Array.isArray(args) || !isJsonValue(args)) return fail("bad-request");
+    const { type, args: raw } = data as { type?: unknown; args?: unknown };
+    // The arguments as JSON writes them: undefined members left out (jsonValueOf), anything else not JSON refused.
+    const args = Array.isArray(raw) ? jsonValueOf(raw) : NOT_JSON;
+    if (id === null || typeof type !== "string" || !Array.isArray(args)) return fail("bad-request");
 
     if (type === "writing") return stop("protocol");
     if (type === "close") {

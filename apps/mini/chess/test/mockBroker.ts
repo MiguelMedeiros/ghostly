@@ -6,6 +6,19 @@ import { MINI_APP_LIMITS, type MiniAppApi, type MiniAppContext, type MiniAppJson
 
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 
+/**
+ * Strict JSON, as the 1.2 client's broker first took it (no `undefined` member, no Date, no Map, finite numbers): what
+ * Chess sends must pass it, so it runs on every client. Stricter than JSON.stringify, which drops `undefined`: a game
+ * record spread with `d: undefined` was refused there, and no move was sent or kept.
+ */
+export function strictJson(value: unknown): boolean {
+  if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(strictJson);
+  if (typeof value !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return false;
+  return Object.values(value).every(strictJson);
+}
+
 export class MockBroker implements MiniAppApi {
   /** The app's storage in this chat: survives a close and a reopen, as the client's does. */
   readonly stored = new Map<string, string>();
@@ -40,6 +53,7 @@ export class MockBroker implements MiniAppApi {
     },
     set: async (key: string, value: MiniAppJson): Promise<void> => {
       if (new TextEncoder().encode(key).length > MINI_APP_LIMITS.storageKeyBytes) throw new Error("key too long");
+      if (!strictJson(value)) throw new Error("bad-request");
       const text = JSON.stringify(value);
       if (bytes(value) > MINI_APP_LIMITS.storageValueBytes) throw new Error("value too big");
       const total = [...this.stored].reduce((n, [k, v]) => (k === key ? n : n + k.length + v.length), key.length + text.length);
@@ -56,6 +70,7 @@ export class MockBroker implements MiniAppApi {
     send: async (value: MiniAppJson): Promise<void> => {
       const peer = this.peer;
       if (!this.isOpen || !peer?.isOpen) throw new Error("the peer does not have the app open");
+      if (!strictJson(value)) throw new Error("bad-request");
       if (bytes(value) > MINI_APP_LIMITS.chatDataBytes) throw new Error("frame too big");
       this.sent.push(value);
       peer.deliver(JSON.parse(JSON.stringify(value)) as MiniAppJson);
