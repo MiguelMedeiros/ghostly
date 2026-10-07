@@ -737,9 +737,10 @@ export class GhostLink {
   private racing = false;
   /**
    * The WebRTC offer this side's dial made last, with fallback allowed: what a transport that comes up meanwhile joins.
-   * `resume`: the dial that made it is this side back after an absence, over WebRTC (`resuming`).
+   * `resume`: the dial that made it is this side back after an absence, over WebRTC (`resuming`); `woke`: the absence
+   * was the app's in the background, not a restart (`resumeAfterAbsence`).
    */
-  private offered?: { epoch: number; at: number; resume?: boolean };
+  private offered?: { epoch: number; at: number; resume?: boolean; woke?: boolean };
   /** The attempt (its epoch) whose direct transports were knocked on as its offer went out (`knockEarly`), and whether that is under way. */
   private knockedEarly = -1;
   private knockingEarly = false;
@@ -817,6 +818,8 @@ export class GhostLink {
   private resumeWaitUntil = 0;
   /** What the last live session ran on, kept after it ended: a wake resumes on it (`resumeAfterAbsence`). */
   private lastLiveOn: PairedTransport | undefined;
+  /** `resuming` is a wake's, not a restart's. */
+  private resumingWoke = false;
   /** Until then, a session that ends was lost while the app was away (`WAKE_LOST_MS`). */
   private wokeUntil = 0;
 
@@ -1753,12 +1756,14 @@ export class GhostLink {
   registerEndpoint(endpoint: NativeEndpoint): void {
     if (this.stopped || this.deliveryMode === "dht" || !this.options.params.profile) { void endpoint.close(); return; }
     this.endpoints.set(endpoint.transport, endpoint);
+    traceLink(this.myPubKeyZ32, "endpoint-up", { transport: endpoint.transport });
     endpoint.onConnection = ({ channel, binding }) => {
       traceLink(this.myPubKeyZ32, "dialed-in", { transport: binding.transport, held: !!this.channel, dialing: this.dialing });
       this.takeDialIn(channel, binding);
     };
     endpoint.onUnavailable = () => {
       if (this.endpoints.get(endpoint.transport) !== endpoint) return;
+      traceLink(this.myPubKeyZ32, "endpoint-gone", { transport: endpoint.transport });
       this.endpoints.delete(endpoint.transport);
       this.advertiseTransports(); this.options.events?.onTransportsChanged?.();
     };
@@ -1878,7 +1883,7 @@ export class GhostLink {
    * simply be away. Two dials crossing are settled by key order (see `registerEndpoint`).
    */
   private async knock(transport: NativeTransport): Promise<void> {
-    if (this.resuming === transport) this.resuming = undefined;
+    if (this.resuming === transport) { this.resuming = undefined; this.resumingWoke = false; }
     const endpoint = this.endpoints.get(transport), descriptor = this.peerDescriptors[transport];
     if (!endpoint || !descriptor || this.channel || this.dialing || this.stopped || this.streamBlocked || this.keyStopped) return;
     if (!this.transportOffer().includes(transport)) return;
@@ -2016,8 +2021,8 @@ export class GhostLink {
       // A standing explicit choice goes first, relayed or not: the session starts where the agreement would move it
       // anyway. With no session behind it, the choice this side or the contact made meanwhile (WISP 100).
       const chosen = this.switcher.chosenTarget ?? this.choiceApart?.transport ?? this.resuming;
-      const resume = this.resuming === "webrtc/1";
-      if (chosen && chosen === this.resuming && ranked.includes(chosen)) this.resuming = undefined;
+      const resume = this.resuming === "webrtc/1", woke = resume && this.resumingWoke;
+      if (chosen && chosen === this.resuming && ranked.includes(chosen)) { this.resuming = undefined; this.resumingWoke = false; }
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
       if (!choices.length) {
         // A group link: the member's app may be starting a native endpoint for this one right now, and says how to dial
@@ -2047,7 +2052,7 @@ export class GhostLink {
           // stands as it was made, its time and whether it resumes with it, or the knock and the race would go by the second.
           const standing = this.offerOut && this.offered?.epoch === epoch ? this.offered : undefined;
           const offeredAt = standing?.at ?? Date.now();
-          this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }) } : undefined;
+          this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }), ...(woke && { woke }) } : undefined;
           const gate = this.dialGate;
           this.dialGate = undefined;
           if (await this.dataLink.connect(gate) === "held") {
@@ -2226,7 +2231,7 @@ export class GhostLink {
     if (this.channel || this.dialing || this.stopped || this.streamBlocked || this.keyStopped || !this.contactQuiet(OFFER_FAST_MS)) return;
     if (!this.fallback || !this.peerFallback) return;
     this.knockedEarly = epoch;
-    if (this.resuming === "webrtc/1") this.resuming = undefined;
+    if (this.resuming === "webrtc/1") { this.resuming = undefined; this.resumingWoke = false; }
     const relayed = this.upgradesFromRelay() ? [] : this.relayedTransports;
     const offer = this.transportOffer();
     const direct = TRANSPORTS.filter(t => t !== "webrtc/1" && offer.includes(t) && !!this.peerTransports?.includes(t) && !relayed.includes(t) && this.canDial(t));
@@ -2247,7 +2252,9 @@ export class GhostLink {
   private maybeKnockEarly(epoch: number): void {
     const next = this.afterRtc;
     if (!this.offered?.resume || this.offered.epoch !== epoch || this.knockedEarly === epoch || next?.epoch !== epoch || epoch !== this.connectionEpoch) return;
-    if (this.dialing || this.channel || this.stopped || !this.offerOut || !this.contactQuiet()) return;
+    // After a wake, whatever the contact's newest packet: a contact that just ended an attempt of its own, its offer
+    // unanswered while this app slept, published a moment ago and still reads at its slow pace (30 s in the background).
+    if (this.dialing || this.channel || this.stopped || !this.offerOut || !(this.offered.woke || this.contactQuiet())) return;
     // A relayed transport too where both apps move off it once live (`upgrade/1`): the chat is live over the relay in a
     // second, and on the direct path a moment later, its signaling on the session (WISP 100 § Back to a quiet contact).
     const relayed = this.upgradesFromRelay() ? [] : this.relayedTransports;
@@ -3796,6 +3803,7 @@ export class GhostLink {
     if (!transport || this.resuming || this.departed || !this.options.pairing?.credentials.peerKey || !this.options.params.profile || this.deliveryMode === "dht") return;
     this.lastLiveOn = undefined;
     this.resuming = transport;
+    this.resumingWoke = true;
     traceLink(this.myPubKeyZ32, "wake-resume", { transport });
     if (transport !== "webrtc/1") { this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS; return; }
     // The session's close was heard just before the wake, and this side answers the contact's offer already: it knocks
@@ -3809,7 +3817,9 @@ export class GhostLink {
     const offered = this.offered;
     if (!offered || offered.resume || offered.epoch !== this.connectionEpoch || !this.offerOut && !this.dialing) return;
     this.resuming = undefined;
+    this.resumingWoke = false;
     offered.resume = true;
+    offered.woke = true;
     // Still gathering: the race is scheduled once it is out, and knocks then (`scheduleRace`).
     if (!this.dialing) setTimeout(() => this.maybeKnockEarly(offered.epoch), 0);
   }

@@ -587,8 +587,10 @@ describe("back from the background (a phone that slept), the contact's chat not 
   /**
    * `frozen`: the app's timers stop while it sleeps (iOS suspends the page), so it holds its session to the end, and the
    * close is heard just before the wake, as it is in WebKit and Chromium a few ms after the page runs again.
+   * `afterAttempt`: the app wakes 1.4 s after an attempt of the CLI's (its offer to the sleeping app) ended unanswered,
+   * so the CLI's newest packet is fresh, though it reads at its slow pace (the lab, 2026-10-07: 18 to 36 s).
    */
-  async function sleepAndWake({ higher, awayMs, frozen = false }: { higher: boolean; awayMs: number; frozen?: boolean }) {
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean }) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     const made = invitationWhere("inviter");
     const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
@@ -604,6 +606,14 @@ describe("back from the background (a phone that slept), the contact's chat not 
     const inner = phone.link as unknown as { livenessTimer: ReturnType<typeof setInterval> | null };
     if (frozen && inner.livenessTimer) { clearInterval(inner.livenessTimer); inner.livenessTimer = null; }
     await run(awayMs);
+    if (afterAttempt) {
+      const state = () => (cli.link as unknown as { dataLink: { state: string } }).dataLink.state;
+      await until(() => state() === "offering", 4 * 60_000);
+      await until(() => state() === "idle", 4 * 60_000);
+      await run(1_400);
+      // A browser's offer gathers in 0.2 to 0.5 s: the wake's read of the CLI's record is back before it goes out.
+      rtc.srflxAfterMs = 450;
+    }
     phone.offline = false; world.native.asleep.delete("phone"); world.native.dialsLost.delete("phone");
     if (frozen) for (const channel of dead) channel.dispatchEvent(new Event("close"));
     const requests = () => phone.requests.length + cli.requests.length, before = requests();
@@ -615,22 +625,23 @@ describe("back from the background (a phone that slept), the contact's chat not 
   }
 
   it.each([
-    { higher: false, awayMs: 5 * 60_000 + 3_700, frozen: false },
-    { higher: true, awayMs: 5 * 60_000 + 3_700, frozen: false },
-    { higher: false, awayMs: 35_000, frozen: false },
-    { higher: true, awayMs: 35_000, frozen: false },
-    { higher: false, awayMs: 5 * 60_000 + 3_700, frozen: true },
-    { higher: true, awayMs: 5 * 60_000 + 3_700, frozen: true },
-  ])("live again within seconds of coming back (higher key: $higher, away $awayMs ms, frozen: $frozen)", async ({ higher, awayMs, frozen }) => {
-    const { liveMs, firstOn, directMs, requestsToLive } = await sleepAndWake({ higher, awayMs, frozen });
-    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ higher, awayMs, frozen, liveMs, firstOn, directMs, requestsToLive }) + "\n");
+    { higher: false, awayMs: 5 * 60_000 + 3_700, frozen: false, afterAttempt: false },
+    { higher: true, awayMs: 5 * 60_000 + 3_700, frozen: false, afterAttempt: false },
+    { higher: false, awayMs: 35_000, frozen: false, afterAttempt: false },
+    { higher: true, awayMs: 35_000, frozen: false, afterAttempt: false },
+    { higher: false, awayMs: 5 * 60_000 + 3_700, frozen: true, afterAttempt: false },
+    { higher: true, awayMs: 5 * 60_000 + 3_700, frozen: true, afterAttempt: false },
+    { higher: true, awayMs: 5 * 60_000, frozen: true, afterAttempt: true },
+  ])("live again within seconds of coming back (higher key: $higher, away $awayMs ms, frozen: $frozen, after the CLI's attempt: $afterAttempt)", async ({ higher, awayMs, frozen, afterAttempt }) => {
+    const { liveMs, firstOn, directMs, requestsToLive } = await sleepAndWake({ higher, awayMs, frozen, afterAttempt });
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ higher, awayMs, frozen, afterAttempt, liveMs, firstOn, directMs, requestsToLive }) + "\n");
     // Before: 20 and 64 s away 5 minutes (lower and higher key), 3.3 and 4.9 s away 35 s. After: 0.6 to 0.7 s.
     expect(liveMs, "from the return to live on both sides").toBeLessThan(awayMs > 60_000 ? 2_000 : 3_000);
     // Long away, the contact reads slowly and is reached through its Iroh relay; just away, it still looks fast for the
     // session it lost, and may read the offer first.
     if (awayMs > 60_000) expect(firstOn).toBe("iroh/1");
     expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
-    // A knock costs the relays nothing: the reads and publishes of a return, no more.
-    expect(requestsToLive).toBeLessThanOrEqual(8);
+    // A knock costs the relays nothing: the reads and publishes of a return, no more (4 to 8 here).
+    expect(requestsToLive).toBeLessThanOrEqual(10);
   }, 240_000);
 });
