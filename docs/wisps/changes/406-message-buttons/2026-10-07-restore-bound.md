@@ -1,0 +1,1 @@
+Restoring buttons that went on the DHT floor or into a hold is now the rule for every card kind (WISP 405 § Cards that went as text), and it is bounded: only the newest 50 noted messages of a chat sent in the last 7 days go, older ones are given up.

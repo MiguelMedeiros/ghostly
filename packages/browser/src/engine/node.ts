@@ -34,7 +34,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
+import { APPS_CAPABILITY, BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, STATUS_CARD_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
 import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
@@ -257,6 +257,12 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** How many deleted ids a link remembers: enough to outlast what a peer republishes. */
 const MAX_DELETED_IDS = 500;
+/**
+ * A card that went on the DHT floor or into a hold goes again live (`restoreCards`) only for the newest this many
+ * messages of a chat, sent within this long: an old chat's cards are not worth a burst of edits.
+ */
+const CARD_RESTORE_MOST = 50;
+const CARD_RESTORE_MS = 7 * 24 * 60 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
 /** A second press of one message's buttons waits this long (WISP 406 · Message Buttons). */
@@ -2872,7 +2878,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.holdingFor(live) && bytes <= HOLD_LIMITS.maxTextBytes) {
       // Longer than the DHT carries, and both sides allow held items: it waits in this device's storage, sealed for them.
       await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending", ...(preview && { preview }), ...answers,
-        ...(card?.kind === "buttons" && { buttonsRestore: "due" as const }) });
+        ...(card && { cardRestore: "due" as const }) });
       // The durable row carries the outcome; the promise only says whether it could start.
       void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
       return { error: null, messageId: id };
@@ -3028,38 +3034,53 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * A question of mine with buttons went on the DHT floor or into a hold, which carry its text alone (WISP 406 · Message
-   * Buttons): its buttons are due to go again live. Once: a row that had them restored already stays so.
+   * A card of mine went on the DHT floor or into a hold, which carry its text alone (WISP 405 · Status Cards, WISP 406 ·
+   * Message Buttons): the card is due to go again live. Once: a row that had it restored already stays so.
    */
-  private async buttonsWentBare(linkId: string, message: Pick<StoredMessage, "id" | "card" | "buttonsRestore">): Promise<void> {
-    if (message.card?.kind !== "buttons" || message.buttonsRestore) return;
-    await db.patchMessage(linkId, message.id, current => current.sender === "me" && current.card?.kind === "buttons" && !current.buttonsRestore ? { buttonsRestore: "due" } : null);
+  private async cardWentBare(linkId: string, message: Pick<StoredMessage, "id" | "card" | "cardRestore" | "buttonsRestore">): Promise<void> {
+    if (!message.card || message.cardRestore || message.buttonsRestore) return;
+    await db.patchMessage(linkId, message.id, current => current.sender === "me" && current.card && !current.cardRestore && !current.buttonsRestore ? { cardRestore: "due" } : null);
+  }
+
+  /** The session capability a contact's app lists when it shows a card of this kind, so a restore edit reads as a card there. */
+  private static cardCapability(card: StatusCard): string {
+    return card.kind === "buttons" ? BUTTONS_CAPABILITY : card.kind === "app" ? APPS_CAPABILITY : STATUS_CARD_CAPABILITY;
   }
 
   /**
-   * Buttons the contact may not have (WISP 406 · Message Buttons): a question whose text went on the DHT floor or into a
-   * hold reached the contact as text alone, and a copy under the same id that comes live later is taken as the one
-   * already there. Once the chat is live with an app that shows buttons (`buttons/1`) and takes edits, each such
-   * question goes again as an edit of its buttons alone: the same text, so no version and no edit mark. Once per
-   * message (the row says so, across restarts); the edit queue carries it (a card's edit goes only live, and a later
-   * edit of the bot's replaces it, the highest number winning). An app without `buttons/1` (1.0.0 would mark it edited)
-   * gets none: the row waits for one that shows buttons. The edit is marked `restore`: the bot's own event stream says
-   * nothing of it, while its number counts, so a later edit of the bot's takes the next one.
+   * Cards the contact may not have (WISP 405 · Status Cards, WISP 406 · Message Buttons): a message whose text went on
+   * the DHT floor or into a hold reached the contact as text alone, and a copy under the same id that comes live later
+   * is taken as the one already there. An app card or a finished task gets no later update to carry its card. So once
+   * the chat is live with an app that shows the kind (`buttons/1`, `status-card/1`, `apps/1`) and takes edits, each such
+   * message goes again as an edit of its card alone: the same text, so no version and no edit mark. Once per message (the
+   * row says so, across restarts); the edit queue carries it (a card's edit goes only live, and a later edit of the
+   * author's replaces it, the highest number winning). A contact whose app does not show the kind (it would drop the card
+   * and mark the text edited) gets none: the row waits for one that does. Bounded: the newest `CARD_RESTORE_MOST` such
+   * messages of the last `CARD_RESTORE_MS`; older ones are given up. The edit is marked `restore`: the bot's own event
+   * stream says nothing of it, while its number counts, so a later edit of the bot's takes the next one.
    */
-  private async restoreButtons(linkId: string): Promise<void> {
+  private async restoreCards(linkId: string): Promise<void> {
     const live = this.links.get(linkId), link = live?.link;
-    if (!live?.stored.profile || live.stored.group || !link?.supportsEdits || !link.sessionOffers.peer?.includes(BUTTONS_CAPABILITY)) return;
-    const due = (await db.getMessages(linkId)).filter(m => m.sender === "me" && m.buttonsRestore === "due");
+    const offers = link?.sessionOffers.peer;
+    if (!live?.stored.profile || live.stored.group || !link?.supportsEdits || !offers) return;
+    const due = (await db.getMessages(linkId)).filter(m => m.sender === "me" && (m.cardRestore ?? m.buttonsRestore) === "due")
+      .sort((a, b) => b.timestamp - a.timestamp);
+    const since = Date.now() - CARD_RESTORE_MS;
     const changed: string[] = [];
-    for (const message of due) {
+    for (const [index, message] of due.entries()) {
+      const stale = index >= CARD_RESTORE_MOST || message.timestamp < since;
+      if (!stale && message.card && !offers.includes(GhostlyNode.cardCapability(message.card))) continue;
       const at = Date.now();
       const patched = await db.patchMessage(linkId, message.id, current => {
-        if (current.sender !== "me" || current.buttonsRestore !== "due") return null;
+        if (current.sender !== "me" || (current.cardRestore ?? current.buttonsRestore) !== "due") return null;
+        const done = { cardRestore: "sent" as const, buttonsRestore: undefined };
         const seq = (current.edit?.seq ?? 0) + 1;
-        // Its buttons gone since (an edit that left none), or no edit left to carry them: nothing to restore.
-        if (current.card?.kind !== "buttons" || !current.wireId || seq > STATUS_CARD_LIMITS.edits) return { buttonsRestore: "sent" };
+        // Too old, its card gone since (an edit that left none), or no edit left to carry it: nothing to restore.
+        if (stale || !current.card || !current.wireId || seq > STATUS_CARD_LIMITS.edits) return done;
+        // An update of the author's already on its way carries the card.
+        if (current.edit?.pending) return done;
         const next = withEdit(current, { seq, at, text: current.text, preview: current.preview, card: current.card, pending: true });
-        return { edit: { ...next.edit!, restore: true }, buttonsRestore: "sent" };
+        return { edit: { ...next.edit!, restore: true }, ...done };
       });
       if (patched?.edit?.pending) changed.push(message.id);
     }
@@ -3159,8 +3180,8 @@ export class GhostlyNode implements EngineImplementation {
           : reply ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply)
           : await link.sendMessage(message.text, message.timestamp, message.wireId, ...(message.preview ? [message.preview] : []));
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
-        // On the DHT floor a question goes without its buttons: they go again once live (`restoreButtons`).
-        if (!error && message.via === "pkarr") await this.buttonsWentBare(linkId, message);
+        // On the DHT floor a card goes as its text alone: it goes again once live (`restoreCards`).
+        if (!error && message.via === "pkarr") await this.cardWentBare(linkId, message);
         return error;
       }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
         const pending = this.links.get(linkId)?.stored.dhtDeliveryState?.pending;
@@ -3189,7 +3210,7 @@ export class GhostlyNode implements EngineImplementation {
           const live = this.links.get(linkId), bytes = new TextEncoder().encode(message.text).length;
           if (!live || !this.holdingFor(live) || !message.wireId || message.file || message.paymentId || bytes > HOLD_LIMITS.maxTextBytes) return false;
           await db.updateDelivery(linkId, message.id, "sending", undefined, { via: "hold", resendUntil: undefined });
-          await this.buttonsWentBare(linkId, message);
+          await this.cardWentBare(linkId, message);
           await this.messagesChanged(linkId, [message.id]);
           void this.hold.hold(linkId, { kind: "text", id: message.wireId, messageId: message.id, bytes, timestamp: message.timestamp }).catch(() => {});
           return true;
@@ -6439,7 +6460,7 @@ export class GhostlyNode implements EngineImplementation {
         onEditReceipt: stored.profile && !stored.group ? (id, e) => this.editsFor(linkId).received(id, e) : undefined,
         // Edits agreed on a new session: questions whose buttons went on the floor or into a hold get them now, then what waits goes.
         onEditSupport: supported => {
-          if (supported && stored.profile && !stored.group) void this.restoreButtons(linkId).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
+          if (supported && stored.profile && !stored.group) void this.restoreCards(linkId).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
         },
         onWakeSupport: supported => { if (supported && stored.profile && !stored.group) void this.shareWake(linkId); },
         onPeerWake: target => {
