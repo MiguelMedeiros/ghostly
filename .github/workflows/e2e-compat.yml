@@ -1,11 +1,12 @@
 name: E2E (compatibility)
 
-# The current web app against a real v0.4.0 (e2e/compat/, WISP 402): a v0.4 invite opens a compatibility chat
-# that works both ways and continues in a new chat, and v0.4 refuses a ghostly1 invite. v0.4.0 is built from its
-# tag by tools/scripts/build-compat-web.mjs (the release attaches no web build) and cached, so a run spends its time on
-# the current app's build and two short tests: about 4 minutes.
-# Not on pull requests, like every other app e2e (they run before a release and nightly), and v0.4.0 never
-# changes: what can break it is dev, so it runs nightly on dev, in the E2E workflow (the release gate), and by hand.
+# The current web app against real older releases (e2e/compat/). v0.4.0 (WISP 402): a v0.4 invite opens a
+# compatibility chat that works both ways and continues in a new chat, and v0.4 refuses a ghostly1 invite. v1.1.4, the
+# last release with no mini-apps (WISP 1200): an app card reaches it as its text with a link, no apps/1 is offered, and
+# + > Apps says the contact's app can't run apps. Each is built from its tag by tools/scripts/build-compat-web.mjs (a
+# release attaches no web build) and cached, so a run spends its time on the current app's build and three short tests.
+# Not on pull requests, like every other app e2e (they run before a release and nightly), and old releases never
+# change: what can break them is dev, so it runs nightly on dev, in the E2E workflow (the release gate), and by hand.
 on:
   schedule:
     - cron: "53 3 * * *"
@@ -22,9 +23,9 @@ permissions:
 
 jobs:
   compat:
-    name: Compatibility with v0.4.0
+    name: Compatibility with v0.4.0 and v1.1.4
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -46,18 +47,20 @@ jobs:
       - name: Install Chromium
         uses: ./.github/actions/playwright-chromium
 
-      # The built v0.4.0 only: a tag's build never changes, so the key is the tag and the script that builds it.
-      - name: Cache the v0.4.0 build
+      # The built old releases only: a tag's build never changes, so the key is the tags and the script that builds them.
+      - name: Cache the v0.4.0 and v1.1.4 builds
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ghostly/compat
-          key: compat-web-v0.4.0-${{ hashFiles('tools/scripts/build-compat-web.mjs') }}
+          key: compat-web-v0.4.0-v1.1.4-${{ hashFiles('tools/scripts/build-compat-web.mjs') }}
 
-      # The checkout has no tags; the script fetches v0.4.0 alone when it has to build.
-      - name: Build v0.4.0's web app
-        run: node tools/scripts/build-compat-web.mjs --tag v0.4.0
+      # The checkout has no tags; the script fetches each tag alone when it has to build.
+      - name: Build v0.4.0's and v1.1.4's web apps
+        run: |
+          node tools/scripts/build-compat-web.mjs --tag v0.4.0
+          node tools/scripts/build-compat-web.mjs --tag v1.1.4
 
-      - name: The current app with v0.4.0
+      - name: The current app with v0.4.0 and v1.1.4
         run: npm run test:e2e:compat
 
       - name: Upload report
