@@ -1,276 +1,33 @@
 name: E2E
-
-# Real browsers against the shipped build of the web app and the extension, and
-# the real Desktop app driven through WebDriver.
-# Peers meet through a relay inside the test process and the wallets use a mint
-# started below, so nothing here depends on outside services. The tests that do
-# (tagged @network: public chain servers, Breez's regtest) are left out here and
-# run nightly in E2E (full).
-# Too slow to hold up every pull request: it runs before each release (release.yml
-# calls it and ships nothing unless it passes), and by hand from the Actions tab.
+# PROBE r11k (not for merge): WebKitGTK audio timings per runner image, with and without a sound server.
 on:
   workflow_dispatch:
     inputs:
       web_url:
-        description: "Test a deployed web app instead of a fresh build (e.g. https://app.ghostly.tools). Web tests only."
         required: false
         type: string
-  workflow_call:
-    inputs:
-      ref:
-        description: "What to test: the tag being released"
-        required: false
-        type: string
-
 permissions:
   contents: read
-
 jobs:
-  e2e:
-    name: End-to-end
-    runs-on: ubuntu-24.04
-    # The web and extension suites outgrew 30 minutes (cancelled mid-run on 2026-09-29),
-    # then 60 (584 tests, cancelled at 560 while releasing 1.1.1 on 2026-10-04).
-    timeout-minutes: 90
-
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        sound: [none, pulse]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Chromium
-        uses: ./.github/actions/playwright-chromium
-
-      # The wallet tests need a mint whose sats are worthless and whose invoices
-      # settle themselves. The public one (testnut.cashu.space) is a single
-      # volunteer's server that these runners cannot reach, which was stopping
-      # every release, so the same mint software runs here instead. Nothing
-      # else in the suite talks to it; see e2e/support/mint.ts.
-      - name: Start a Cashu test mint
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq python3-gi gir1.2-webkit2-4.1 gir1.2-gtk-3.0 xvfb pulseaudio gstreamer1.0-pulseaudio gstreamer1.0-plugins-good dbus-x11 >/dev/null
+      - run: dpkg -l | grep -E "libwebkit2gtk-4.1-0|libgstreamer1.0-0 " | awk '{print $2, $3}'
+      - name: Probe
         run: |
-          docker run -d --name ghostly-testmint -p 3338:3338 \
-            -e CDK_MINTD_LN_BACKEND=fakewallet \
-            -e CDK_MINTD_LISTEN_HOST=0.0.0.0 \
-            -e CDK_MINTD_LISTEN_PORT=3338 \
-            -e CDK_MINTD_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
-            -e CDK_MINTD_MINT_NAME="Ghostly test mint" \
-            -e CDK_MINTD_INPUT_FEE_PPK=100 \
-            cashubtc/mintd:0.17.7
-          for _ in $(seq 1 60); do
-            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3338/v1/info)" = "200" ] && echo "mint up" && exit 0
+          if [ "${{ matrix.sound }}" = pulse ]; then
+            D=$(mktemp -d); export PULSE_SERVER=unix:$D/native
+            HOME=$D XDG_RUNTIME_DIR=$D pulseaudio -n --daemonize=yes --exit-idle-time=-1 --use-pid-file=no -L "module-native-protocol-unix socket=$D/native auth-anonymous=1" -L module-null-sink
             sleep 2
-          done
-          echo "The test mint never came up:"; docker logs ghostly-testmint; exit 1
-
-      - name: Run end-to-end tests
-        if: ${{ !inputs.web_url }}
-        env:
-          E2E_MINT_URL: http://127.0.0.1:3338
-        # @release-skip: specs that have not passed on a GitHub runner yet and do not gate a release until they
-        # do (the nightly E2E (full) still runs them). See the follow-up issue before adding one.
-        # @network: the tests that need a service on the Internet; a release never waits on one.
-        run: npm run test:e2e -- --grep-invert "@release-skip|@network"
-
-      - name: Run end-to-end tests against ${{ inputs.web_url }}
-        if: ${{ inputs.web_url }}
-        env:
-          E2E_WEB_URL: ${{ inputs.web_url }}
-          E2E_MINT_URL: http://127.0.0.1:3338
-        run: npx playwright test -c e2e/playwright.config.ts --project=web
-
-      - name: Upload report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-report
-          path: |
-            playwright-report
-            test-results
-          retention-days: 14
-
-  # Ghostly Desktop, driven through WebDriver by tauri-driver: the bundled app,
-  # nothing added to it to make it testable. Linux only — macOS has no WebDriver
-  # for WKWebView — so this is where Desktop is covered at all. Its own job, so
-  # a Rust build never holds up the browser tests.
-  desktop:
-    name: Desktop (Tauri)
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    # The deployed-web-app run has no Desktop app to speak of.
-    if: ${{ !inputs.web_url }}
-    env:
-      # gstreamer1.0-plugins-good: WebKitGTK's VP9 decoder, for the large-video check (e2e/desktop/video-stream.spec.ts).
-      # PulseAudio: the named test microphones and speakers of e2e/desktop/call-devices.spec.ts.
-      # Sway and wl-clipboard: a headless Wayland clipboard for e2e/desktop/wayland-clipboard.spec.ts.
-      APT_PACKAGES: >-
-        libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
-        librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev webkit2gtk-driver xvfb pulseaudio
-        gstreamer1.0-pulseaudio sway wl-clipboard
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-          cache: "npm"
-
-      # The .deb files apt fetched for APT_PACKAGES on this runner image, as the Tauri job does in ci.yml (#808): apt-get
-      # update and the download from the mirror are the slow and variable part (28 to 101 s here). One entry per runner
-      # image (a new image has other versions already installed, so it needs another set) and package list, shared with
-      # the other Desktop e2e job that has the same list. Saved on a miss, whatever the tests do after.
-      - name: Apt cache key
-        id: apt-key
-        run: echo "key=${ImageOS}-${ImageVersion}-apt-desktop-e2e-$(echo "$APT_PACKAGES" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the system packages
-        id: apt-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/apt-debs
-          key: ${{ steps.apt-key.outputs.key }}
-
-      # In the background, while Rust, the Cargo cache and npm ci come in; "Wait for the system dependencies" joins it.
-      # Both paths install the same way, from the .deb files, so a cached run and a fresh one test the same thing.
-      - name: Install system dependencies
-        env:
-          CACHED: ${{ steps.apt-cache.outputs.cache-hit }}
-        run: |
-          {
-            debs="$RUNNER_TEMP/apt-debs"
-            # needrestart's scan, the man-db index and dpkg's fsyncs add time and nothing to a runner thrown away after.
-            apt_get() { sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get -y "$@"; }
-            sudo rm -f /var/lib/man-db/auto-update
-            echo force-unsafe-io | sudo tee /etc/dpkg/dpkg.cfg.d/99-unsafe-io > /dev/null
-            echo "$(date +%T) remove libunwind-14-dev"
-            # GStreamer's headers (calls on Linux, apps/desktop/src/native_call) need libunwind-dev, which the
-            # runner image's libunwind-14-dev (LLVM's) blocks.
-            apt_get remove libunwind-14-dev || true
-            if [[ "$CACHED" != "true" ]]; then
-              echo "$(date +%T) update"
-              apt_get update
-              echo "$(date +%T) download"
-              mkdir -p "$debs/partial"
-              # shellcheck disable=SC2086
-              apt_get install --download-only -o Dir::Cache::Archives="$debs" $APT_PACKAGES
-              sudo rm -rf "$debs/partial" "$debs/lock"
-            fi
-            echo "$(date +%T) install $(ls "$debs" | wc -l) packages, $(du -sh "$debs" | cut -f1)"
-            # A cached set can miss a package a newer runner image now needs, and the image's own index can name a
-            # version the mirror no longer serves (404). Then fetch the set again from a fresh index.
-            if ! apt_get install "$debs"/*.deb; then
-              echo "$(date +%T) install from the cached set failed: update and download again"
-              apt_get update
-              mkdir -p "$debs/partial"
-              # shellcheck disable=SC2086
-              apt_get install --download-only -o Dir::Cache::Archives="$debs" $APT_PACKAGES
-              sudo rm -rf "$debs/partial" "$debs/lock"
-              apt_get install "$debs"/*.deb
-            fi
-            echo "$(date +%T) done"
-          } > "$RUNNER_TEMP/apt.log" 2>&1 &
-          echo $! > "$RUNNER_TEMP/apt.pid"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-
-      # Crates and tauri-driver, but deliberately not target/. The repository is
-      # already past GitHub's 10 GB of cache, and build artefacts are most of the
-      # weight for the least benefit here: this job runs on releases, not on every
-      # push. Sharing ci.yml's cache instead is not an option either — that job
-      # runs on 24.04 and this one pins the release's 22.04, and its
-      # target/ does not link here ("can't find crate for tauri_runtime").
-      - name: Cache Cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-desktop-e2e-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-desktop-e2e-${{ github.repository }}-
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Wait for the system dependencies
-        run: |
-          pid=$(cat "$RUNNER_TEMP/apt.pid")
-          while kill -0 "$pid" 2>/dev/null; do sleep 1; done
-          grep -E '^[0-9]{2}:[0-9]{2}:[0-9]{2} ' "$RUNNER_TEMP/apt.log" || true
-          tail -n 5 "$RUNNER_TEMP/apt.log"
-          # The exit status of a process that is not this shell's child is gone: check the result instead.
-          # shellcheck disable=SC2086
-          dpkg -s $APT_PACKAGES > /dev/null
-
-      - name: Save the system packages
-        if: steps.apt-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/apt-debs
-          key: ${{ steps.apt-key.outputs.key }}
-
-      # After the wait: were a library missing, its apt-get would race the one above for dpkg's lock.
-      # e2e/desktop/calls-interop.spec.ts calls the Linux Desktop from a Chromium page.
-      - name: Install Chromium
-        uses: ./.github/actions/playwright-chromium
-
-      - name: Install tauri-driver
-        run: command -v tauri-driver || cargo install tauri-driver --locked
-
-      # `tauri build` and not `cargo build`: a plain cargo debug build points the
-      # WebView at the dev server. `--debug` keeps the compile short; `--no-bundle`
-      # skips the installers, since the test runs the binary itself. VITE_APPS_TEST: the e2e suite's build, with
-      # mini-apps on and their test store (e2e/desktop/apps.spec.ts), as the web suites build it; never shipped.
-      - name: Build the Desktop app
-        run: npm run tauri -- build --debug --no-bundle
-        env:
-          VITE_APPS_TEST: "1"
-
-      # The apps under test reach no public network (e2e/support/desktop.ts): their Iroh homes on this relay, the same
-      # one the e2e infra runs (e2e/infra/docker-compose.yml), instead of n0's.
-      - name: Start an Iroh relay
-        run: docker run -d --name ghostly-iroh-relay -p 127.0.0.1:47085:3340 n0computer/iroh-relay:v1.3.0 --dev
-
-      - name: Run Desktop end-to-end tests
-        run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
-        env:
-          GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
-
-      - name: Upload report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-report-desktop
-          path: |
-            playwright-report-desktop
-            test-results
-          retention-days: 14
-
-  # The current web app against a real v0.4.0 and a real v1.1.4, built from their tags (e2e-compat.yml): a contact
-  # still on 0.4 must keep working with the release (WISP 402), and one on 1.1 gets an app card as its text (WISP 1200).
-  compat:
-    name: Compatibility with v0.4.0 and v1.1.4
-    # The deployed-web-app run tests the web app alone.
-    if: ${{ !inputs.web_url }}
-    uses: ./.github/workflows/e2e-compat.yml
-    with:
-      ref: ${{ inputs.ref }}
+          fi
+          dbus-run-session -- xvfb-run -a python3 tools/probe/webkit_audio_probe2.py
