@@ -92,13 +92,17 @@ test("header connection popover, five desktop destinations and resizing preserve
   for(const width of [280,435,600]) {
     const handle=await a.page.getByTestId("sidebar-resize").boundingBox();
     await a.page.mouse.move(handle!.x+2,handle!.y+100); await a.page.mouse.down(); await a.page.mouse.move(width,handle!.y+100); await a.page.mouse.up();
-    // New (with its arrow for a group) and Join share the header evenly.
-    const newBounds = (await a.page.getByTestId("sidebar-new").boundingBox())!, joinBounds = (await a.page.getByTestId("sidebar-chat-actions").getByRole("button", { name: "Join chat" }).boundingBox())!;
+    // The column takes its width in a render after the drag; the words beside New and Join come back in a render after
+    // that (useLabelsFit, from a ResizeObserver). Two reads in turn can land on either side of it (64px without words,
+    // 89.9px with them), so both buttons are read in one go: New (with its arrow for a group) and Join share the header
+    // evenly in every frame.
+    await expect.poll(async () => (await a.page.getByTestId("sidebar").boundingBox())!.width).toBe(width);
+    const [newBounds, joinBounds] = await a.page.getByTestId("sidebar-chat-actions").evaluate(actions => [actions.querySelector('[data-testid="sidebar-new"]')!, actions.querySelector(':scope > button[aria-label="Join chat"]')!]
+      .map(element => { const box = element.getBoundingClientRect(); return { x: box.x, width: box.width, height: box.height }; }));
     expect(Math.abs(newBounds.width - joinBounds.width)).toBeLessThanOrEqual(1);
     expect(newBounds.height).toBe(joinBounds.height);
     expect(joinBounds.x + joinBounds.width).toBeLessThanOrEqual(width);
     const footer=a.page.getByTestId("account-bar");
-    expect((await a.page.getByTestId("sidebar").boundingBox())!.width).toBe(width);
     expect((await footer.boundingBox())!.width).toBeGreaterThanOrEqual(width-1);
     // Six places with Apps (on in the suite's build, WISP 1200): at the narrowest list each is still 40px wide.
     for(const id of ["account-profile","wallet-chip","account-identities","account-apps","account-services","account-settings"]) {

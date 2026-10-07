@@ -31,6 +31,8 @@ interface App {
   heldUntil?: number;
   /** While set, the relays' budget holds back every read of this app: it is answered with the last packet it read. */
   readsHeldUntil?: number;
+  /** While set, this app has no network: every publish and read fails. */
+  offline?: boolean;
 }
 
 /** The session the staying side holds: a new one (or none) means it let the old one go. */
@@ -42,11 +44,13 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
   const inner = pkarr.transport(), requests = app.requests, lastRead = new Map<string, Awaited<ReturnType<PkarrTransport["resolve"]>>>();
   return {
     publish: async (identity, records) => {
+      if (app.offline) throw new Error("offline");
       // Held back: nothing went out, and the caller tries again when the budget frees a request.
       if (app.heldUntil && Date.now() < app.heldUntil) throw new DiscoveryBudgetError(app.heldUntil - Date.now());
       requests.push({ at: Date.now() }); return inner.publish(identity, records);
     },
     resolve: async (key, options) => {
+      if (app.offline) throw new Error("offline");
       // Held back: as the relay transport does, what it read last is the answer (`RelayTransport.resolve`).
       if (app.readsHeldUntil && Date.now() < app.readsHeldUntil) return lastRead.get(key) ?? null;
       requests.push({ at: Date.now() });
@@ -569,3 +573,83 @@ describe("back after a while away over a relay at once, then to WebRTC on the se
   }, 240_000);
 });
 
+
+/**
+ * A phone puts the web app to sleep in the background (iOS suspends an installed web app): its session dies with nothing
+ * said, and the app is not restarted, only back in front (`wake`). The contact is the CLI, its chat not on screen (it
+ * reads every 30 s on the relays). Before: the app back waited for that read, of its fresh packet or of its offer, and
+ * was live 10 to 30 s after coming back (Miguel's iPhone and the coordinator's CLI, 2026-10-06: "always 30 seconds").
+ * Now a wake that finds the session gone resumes as a restart does: it dials whatever its key and knocks on the
+ * contact's Iroh relay at once (`upgrade/1`), then moves to WebRTC on the session.
+ */
+describe("back from the background (a phone that slept), the contact's chat not on screen", () => {
+  const transportOf = (app: App) => (app.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport;
+  /**
+   * `frozen`: the app's timers stop while it sleeps (iOS suspends the page), so it holds its session to the end, and the
+   * close is heard just before the wake, as it is in WebKit and Chromium a few ms after the page runs again.
+   * `afterAttempt`: the app wakes 1.4 s after an attempt of the CLI's (its offer to the sleeping app) ended unanswered,
+   * so the CLI's newest packet is fresh, though it reads at its slow pace (the lab, 2026-10-07: 18 to 36 s).
+   * `times`: the app sleeps and wakes this many times, the same link throughout (the lab: only the first was fast).
+   * The numbers are the last return's.
+   */
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, times = 1 }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; times?: number }) {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
+    const up = { mine: true, contact: true };
+    const phone = startApp(world, "phone", phoneSide, { side: cliSide, name: "cli" }, "webrtc+iroh", emptyDhtDeliveryState(), false, undefined, false, up);
+    const cli = startApp(world, "cli", cliSide, { side: phoneSide, name: "phone" }, "webrtc+iroh", emptyDhtDeliveryState(), false, undefined, false, up);
+    expect(await until(() => phone.link.isDataLinkOpen && cli.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    expect(transportOf(phone)).toBe("webrtc/1");
+    let result = { liveMs: Infinity, firstOn: undefined as string | undefined, directMs: Infinity, requestsToLive: 0 };
+    for (let time = 0; time < times; time++) {
+      if (time) { await run(20_000); rtc.srflxAfterMs = undefined; expect(transportOf(phone)).toBe("webrtc/1"); }
+      // Asleep: no network, nothing reaches it, and its WebRTC connection dies unheard (the CLI's fails 20 s on).
+      phone.offline = true; world.native.asleep.add("phone"); world.native.dialsLost.add("phone");
+      const dead = killRtc("phone", undefined, 20_000);
+      const inner = phone.link as unknown as { livenessTimer: ReturnType<typeof setInterval> | null };
+      if (frozen && inner.livenessTimer) { clearInterval(inner.livenessTimer); inner.livenessTimer = null; }
+      await run(awayMs);
+      if (afterAttempt) {
+        const state = () => (cli.link as unknown as { dataLink: { state: string } }).dataLink.state;
+        await until(() => state() === "offering", 4 * 60_000);
+        await until(() => state() === "idle", 4 * 60_000);
+        await run(1_400);
+        // A browser's offer gathers in 0.2 to 0.5 s: the wake's read of the CLI's record is back before it goes out.
+        rtc.srflxAfterMs = 450;
+      }
+      phone.offline = false; world.native.asleep.delete("phone"); world.native.dialsLost.delete("phone");
+      if (frozen) for (const channel of dead) channel.dispatchEvent(new Event("close"));
+      const requests = () => phone.requests.length + cli.requests.length, before = requests();
+      phone.link.wake();
+      const liveMs = await until(() => phone.link.isDataLinkOpen && cli.link.isDataLinkOpen && !!transportOf(cli), 120_000);
+      const firstOn = transportOf(phone), requestsToLive = requests() - before;
+      const directMs = await until(() => transportOf(phone) === "webrtc/1" && transportOf(cli) === "webrtc/1", 60_000);
+      result = { liveMs, firstOn, directMs, requestsToLive };
+    }
+    return result;
+  }
+
+  it.each([
+    { higher: false, awayMs: 5 * 60_000 + 3_700, frozen: false, afterAttempt: false, times: 1 },
+    { higher: true, awayMs: 5 * 60_000 + 3_700, frozen: false, afterAttempt: false, times: 1 },
+    { higher: false, awayMs: 35_000, frozen: false, afterAttempt: false, times: 1 },
+    { higher: true, awayMs: 35_000, frozen: false, afterAttempt: false, times: 1 },
+    { higher: false, awayMs: 5 * 60_000 + 3_700, frozen: true, afterAttempt: false, times: 1 },
+    { higher: true, awayMs: 5 * 60_000 + 3_700, frozen: true, afterAttempt: false, times: 1 },
+    { higher: true, awayMs: 5 * 60_000, frozen: true, afterAttempt: true, times: 1 },
+    { higher: false, awayMs: 5 * 60_000 + 3_700, frozen: true, afterAttempt: false, times: 3 },
+  ])("live again within seconds of coming back (higher key: $higher, away $awayMs ms, frozen: $frozen, after the CLI's attempt: $afterAttempt, times: $times)", async ({ higher, awayMs, frozen, afterAttempt, times }) => {
+    const { liveMs, firstOn, directMs, requestsToLive } = await sleepAndWake({ higher, awayMs, frozen, afterAttempt, times });
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ higher, awayMs, frozen, afterAttempt, times, liveMs, firstOn, directMs, requestsToLive }) + "\n");
+    // Before: 20 and 64 s away 5 minutes (lower and higher key), 3.3 and 4.9 s away 35 s. After: 0.6 to 0.7 s.
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(awayMs > 60_000 ? 2_000 : 3_000);
+    // Long away, the contact reads slowly and is reached through its Iroh relay; just away, it still looks fast for the
+    // session it lost, and may read the offer first.
+    if (awayMs > 60_000) expect(firstOn).toBe("iroh/1");
+    expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
+    // A knock costs the relays nothing: the reads and publishes of a return, no more (4 to 8 here).
+    expect(requestsToLive).toBeLessThanOrEqual(10);
+  }, 240_000);
+});
