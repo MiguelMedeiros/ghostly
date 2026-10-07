@@ -105,7 +105,7 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
   }
 
   // 4. Bob reloads: Chess is closed, the chat is live again, and opening it from the card brings the game back
-  // (his storage in this chat, and Ana's catch-up).
+  // (his storage in this chat; the mid-game reload in the next test is the one that needs the catch-up).
   await bob.page.reload();
   await expect(miniApp(bob.page)).toHaveCount(0);
   await expect(bob.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
@@ -123,7 +123,7 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
   await expect(chessFrame(ana.page).locator(".status")).toHaveText(ana === white ? "You win: checkmate" : "You lose: checkmate");
 });
 
-test("both have Chess: one opens it and waits, the other opens it from the card later; they toss, play, close and reopen", {
+test("both have Chess: one opens it and waits, the other opens it from the card later; they toss, play, close, reopen and reload mid-game", {
   tag: ["@feature:apps.chess.web", "@feature:apps.chess", "@feature:apps.chat.wire"],
 }, async ({ peer, browserName }) => {
   test.setTimeout(6 * 60_000);
@@ -160,6 +160,18 @@ test("both have Chess: one opens it and waits, the other opens it from the card 
   await boardsShow([[ana, anaColour], [bob, bobColour]], [["e4", /♟/], ["e5", /♟/], ["e2", /^$/], ["e7", /^$/]]);
   await move(white.page, black.page, "g1", "f3");
   await boardsShow([[ana, anaColour], [bob, bobColour]], [["f3", /♞/], ["g1", /^$/]]);
+
+  // Bob reloads mid-game: the session comes back, his Chess is opened again from the card, and the game goes on both
+  // ways (his saved game, Ana's open said again on the new session, and the catch-up between the two apps).
+  await bob.page.reload();
+  await expect(miniApp(bob.page)).toHaveCount(0);
+  await expect(bob.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
+  await expect(card.getByTestId("app-card-waiting")).toHaveCount(0);
+  await card.getByTestId("app-card-open").click();
+  await boardsShow([[ana, anaColour], [bob, bobColour]], [["e4", /♟/], ["e5", /♟/], ["f3", /♞/]]);
+  await move(black.page, white.page, "b8", "c6");
+  await move(white.page, black.page, "f1", "c4");
+  await boardsShow([[ana, anaColour], [bob, bobColour]], [["c6", /♞/], ["c4", /♝/], ["b8", /^$/], ["f1", /^$/]]);
 });
 
 test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", "@feature:apps.bundle"] }, async ({ peer, browserName }) => {
