@@ -193,7 +193,7 @@ describe("GroupConnection: the popover lists every member's edge", () => {
 
   it("an app with no transport for group links says why no member is reachable, and offers no Reconnect that cannot help", async () => {
     await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } });
-    expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("this app has neither");
+    expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("Open the group in the web app or on another device.");
     expect(screen.queryByTestId("group-connection-reconnect")).not.toBeInTheDocument();
   });
 

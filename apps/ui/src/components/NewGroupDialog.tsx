@@ -4,7 +4,8 @@ import { COMMUNITY_LIMITS } from "@ghostly/core";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../contexts/I18nContext";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -27,7 +28,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
   const [name, setName] = useState("");
   const [kind, setKind] = useState<Kind>("community");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const backdrop = useBackdropDismiss(onClose);
   // An app with no transport for a group's links (no WebRTC, no native transport) could make the group and show its
   // link, but never let anyone in, nor reach a member (GroupConnection says the same once in). It says so here instead.
@@ -45,7 +46,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
   }, [returnFocus]);
   const submit = async () => {
     if (!name.trim() || busy || noLinks) return;
-    setBusy(true); setError("");
+    setBusy(true); setError(null);
     try {
       const { groupId } = await engine.call("createGroup", { name: name.trim(), profile: kind });
       // The link is what a group is for: it is on from the start, and the group opens on it.
@@ -53,7 +54,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
       created.current = true;
       onCreated(groupId);
     }
-    catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.create.failed")); setBusy(false); }
+    catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.create.failed") }); setBusy(false); }
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="new-group-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
@@ -71,7 +72,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
       </div>
       {noLinks && <p className="mt-3 rounded-lg border border-border px-3 py-2 text-xs text-text-muted" data-testid="new-group-no-webrtc">
         <span className="block text-sm font-semibold text-text-primary">{t("group.connection.noWebrtc")}</span>{t("group.connection.noWebrtcHint")}</p>}
-      {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
+      {error && <Notice problem={error} className="mt-2 text-sm" />}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
         <button type="submit" disabled={!name.trim() || busy || noLinks} data-testid="new-group-create"

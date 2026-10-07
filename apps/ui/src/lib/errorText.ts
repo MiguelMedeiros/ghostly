@@ -25,6 +25,8 @@ interface Rule {
    * the detail behind the ⓘ: never English engine text inside a translated sentence.
    */
   reason?: "next" | "title";
+  /** The error as it was thrown goes to the detail behind the ⓘ too: what it names (a member, an epoch) is for whoever debugs. */
+  detail?: true;
 }
 
 /** An error in three parts: a title, maybe a next line, and the English behind the ⓘ when part of it is not said. */
@@ -241,16 +243,19 @@ const RULES: readonly Rule[] = [
   // edit was refused for, and what the members panel, the leave dialog and a group's link answer.
   exact("You were removed from this group", "errors.group.removed"),
   exact("You left this group", "errors.group.left"),
-  { match: /^Member (?<member>\S+) holds a different membership history for epoch (?<epoch>\d+)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forkedMember" },
-  { match: /^The admin signed two different changes after epoch (?<epoch>\d+)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forkedAdminChanges" },
-  { match: /^The admin signed changes on two branches after epoch (?<epoch>\d+)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forkedAdminBranches" },
-  exact("Two members let people in at the same moment and yours did not count. Asking to be let in again…", "errors.group.lost"),
+  { match: /^Member (?<member>\S+) holds a different membership history for epoch (?<epoch>\d+)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forkedMember", next: "errors.group.forkedNext", detail: true },
+  { match: /^The admin signed two different changes after epoch (?<epoch>\d+)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forkedAdminChanges", next: "errors.group.forkedNext", detail: true },
+  { match: /^The admin signed changes on two branches after epoch (?<epoch>\d+)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forkedAdminBranches", next: "errors.group.forkedNext", detail: true },
+  // Any other fork the session names, and the engine's word for one it did not name.
+  { match: /^(?<reason>[\s\S]+?)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forked", next: "errors.group.forkedNext", detail: true },
+  { match: /^The membership history forked$/, key: "errors.group.forked", next: "errors.group.forkedNext" },
+  exact("Two members let people in at the same moment and yours did not count. Asking to be let in again…", "errors.group.lost", "errors.group.lostNext"),
   exact("You are no longer in this group", "errors.group.noLonger"),
   exact("You are not in this group yet", "errors.group.notYet"),
   exact("You are not in this group", "errors.group.notIn"),
   exact("Nothing to send", "errors.group.nothingToSend"),
   exact("Message exceeds 16 KiB", "errors.group.tooLong"),
-  exact("This epoch's key has not arrived yet. Wait for a member to catch you up.", "errors.group.keyNotHere"),
+  exact("This epoch's key has not arrived yet. Wait for a member to catch you up.", "errors.group.keyNotHere", "errors.group.keyNotHereNext"),
   exact("Only your own messages can be edited", "errors.group.editOwnOnly"),
   exact("This message was edited too many times", "errors.group.editTooMany"),
   exact("This message is too old to edit: its epoch's key is gone", "errors.group.editTooOld"),
@@ -259,10 +264,10 @@ const RULES: readonly Rule[] = [
   exact("Only the admin can invite", "errors.group.adminInvites"),
   exact("This contact is already a member", "errors.group.alreadyMember"),
   { match: /^A group holds (?<max>\d+) members at most$/, key: "errors.group.full" },
-  exact("Connect to this contact first. Their app needs groups (an updated Ghostly).", "errors.group.connectFirst"),
-  exact("The contact who invited you is not connected. Try again when they are.", "errors.group.inviterAway"),
-  exact("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", "errors.group.adminAlone"),
-  exact("Nobody in the group is connected right now to take your leave. Try again in a moment.", "errors.group.nobodyForLeave"),
+  exact("Connect to this contact first. Their app needs groups (an updated Ghostly).", "errors.group.connectFirst", "errors.group.connectFirstNext"),
+  exact("The contact who invited you is not connected. Try again when they are.", "errors.group.inviterAway", "errors.group.inviterAwayNext"),
+  exact("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", "errors.group.adminAlone", "errors.group.adminAloneNext"),
+  exact("Nobody in the group is connected right now to take your leave. Try again in a moment.", "errors.group.nobodyForLeave", "errors.group.nobodyForLeaveNext"),
   exact("Only the admin can share a link to the group", "errors.group.adminShares"),
   exact("This is not a link to a group", "errors.group.notALink"),
   exact("You are already joining this group", "errors.group.alreadyJoining"),
@@ -274,10 +279,10 @@ const RULES: readonly Rule[] = [
   exact("Only the admin can rename the group", "errors.group.adminRename"),
   exact("Only the admin can choose the group's hubs", "errors.group.adminHubs"),
   exact("Only the admin can replace or turn off the group's link", "errors.group.adminLink"),
-  exact("This group has reached its membership history limit. Create a new group.", "errors.group.chainFull"),
-  exact("This group runs through hubs, which their app does not take part in: they need an updated Ghostly first.", "errors.group.hubsNeedUpdate"),
-  { match: /^Their app takes groups of (?<max>\d+) at most: they need an updated Ghostly first\.$/, key: "errors.group.legacyApp" },
-  { match: /^A group grows past (?<max>\d+) only when everyone is on an updated Ghostly\. Not seen updated yet: (?<names>[\s\S]+)\.$/, key: "errors.group.growNeedsUpdates" },
+  exact("This group has reached its membership history limit. Create a new group.", "errors.group.chainFull", "errors.group.chainFullNext"),
+  exact("This group runs through hubs, which their app does not take part in: they need an updated Ghostly first.", "errors.group.hubsNeedUpdate", "errors.group.hubsNeedUpdateNext"),
+  { match: /^Their app takes groups of (?<max>\d+) at most: they need an updated Ghostly first\.$/, key: "errors.group.legacyApp", next: "errors.group.legacyAppNext" },
+  { match: /^A group grows past (?<max>\d+) only when everyone is on an updated Ghostly\. Not seen updated yet: (?<names>[\s\S]+)\.$/, key: "errors.group.growNeedsUpdates", next: "errors.group.growNeedsUpdatesNext" },
   exact("Share the group's link with them: anyone who opens it joins", "errors.group.shareLinkInstead"),
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
@@ -478,7 +483,7 @@ export function knownErrorParts(cause: unknown, t: Translate = english): ErrorPa
     const groups = { ...found.groups };
     const params = rule.params ? rule.params(groups, t) : groups;
     const fixed = rule.next ? t(rule.next, params) : undefined;
-    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }) };
+    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }), ...(rule.detail && { detail: raw }) };
     const reason = reasonLine(groups.reason ?? "", t);
     const detail = reason === undefined ? { detail: raw } : {};
     if (rule.reason === "title" && reason) return { title: reason, ...(fixed && { next: fixed }) };
