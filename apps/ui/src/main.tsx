@@ -16,6 +16,10 @@ import { createDesktopHost } from "./desktop/host";
 import { nativeCallSupport } from "./desktop/nativeCalls";
 import { setProfileBase } from "./lib/profiles";
 import { openProfile } from "./lib/profileStart";
+import { listen } from "@tauri-apps/api/event";
+import { setAppOpener } from "./lib/apps/open";
+import { desktopOpener } from "./lib/apps/desktopOpener";
+import { servicesPlatform } from "./lib/platform";
 
 async function boot() {
   let profile = "";
@@ -46,6 +50,8 @@ async function boot() {
   setHandoffProfileHost(handoffProfileHost(version, "desktop"));
   const host = createDesktopHost(version, await nativeCallSupport());
   setBrowserHost(host);
+  // Mini-apps (WISP 1200) open in windows of their own, each with its broker here (lib/apps/desktopOpener.ts).
+  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
   // The app is exiting (apps/desktop's lib.rs `on_run_event`): contacts hear it now, in the moment it waits for this.

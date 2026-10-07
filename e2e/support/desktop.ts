@@ -157,12 +157,36 @@ class Driver {
     return (await this.call("GET", "/title")) as string;
   }
 
+  /** The handles of every window the driver sees (the Ghostly window, and an app's own window when one is open). */
+  async windows(): Promise<string[]> {
+    return (await this.call("GET", "/window/handles")) as string[];
+  }
+
+  /** The window commands go to now. */
+  async window(): Promise<string> {
+    return (await this.call("GET", "/window")) as string;
+  }
+
+  /** Sends the next commands to another window (`windows`). */
+  async switchTo(handle: string): Promise<void> {
+    await this.call("POST", "/window", { handle });
+  }
+
   async close(): Promise<void> {
     await this.call("DELETE", "").catch(() => {});
   }
 }
 
 export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
+
+/** Going from window to window (an app's own window, WISP 1200): WebDriver's, which the macOS driver has no part of. */
+export type DesktopWindows = Pick<Driver, "windows" | "window" | "switchTo">;
+
+/** `app`'s windows, where its driver is WebDriver's (Linux and Windows). */
+export function desktopWindows(app: DesktopApp): DesktopWindows {
+  if (!(app instanceof Driver)) throw new Error("Only WebDriver goes from window to window");
+  return app;
+}
 
 /**
  * Chooses in a `Select` (apps/ui/src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the

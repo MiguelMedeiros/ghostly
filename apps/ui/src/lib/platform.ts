@@ -416,6 +416,11 @@ export interface AppsPlatform {
    * (`/app-frame-net.html` on the web). Absent where this client cannot give an app the internet: such an app does not run.
    */
   netRunnerUrl?: string;
+  /**
+   * The client serves the runner itself, always with its policy (Desktop's `ghostly-app` scheme): nothing to ask of a
+   * server. Absent where a web server serves it, whose header is checked once (`runnerCheck.ts`).
+   */
+  runnerServed?: boolean;
   /** The entry of an installed app, checked again: refused when revoked, or removed unless `runAnyway`. */
   entry(ref: string, runAnyway?: boolean): Promise<AppEntry>;
   /** One file of an installed app's bundle. */

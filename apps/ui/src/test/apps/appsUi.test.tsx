@@ -146,6 +146,18 @@ describe("with the apps flag off", () => {
 describe("with the apps flag on", () => {
   beforeEach(appsOn);
 
+  it("on Desktop, which serves its runner itself, shows Apps without asking any server for the runner's header", async () => {
+    // covers: apps.desktop-sandbox
+    const { runnerAvailable } = await import("../../lib/apps/runnerCheck");
+    vi.mocked(runnerAvailable).mockClear();
+    fakeEngine.appRunner = "ghostly-app://localhost/";
+    fakeEngine.appRunnerServed = true;
+    renderApp(<AccountBar />);
+    expect(await screen.findByTestId("account-apps")).toHaveAccessibleName("Apps");
+    expect(runnerAvailable).not.toHaveBeenCalled();
+    expect(fetches).toEqual([]);
+  });
+
   it("renames the shared-apps dialog Shared services", async () => {
     renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
     act(() => fakeEngine.update({ links: [ana(true)] }));

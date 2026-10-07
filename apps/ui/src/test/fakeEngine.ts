@@ -159,6 +159,8 @@ export class FakeEngine implements BrowserHost {
   keepAwake?: BrowserHost["keepAwake"];
   /** Where mini-apps run (the web app's runner page), when a test turns Apps on; left out, no client runs apps. */
   appRunner?: string;
+  /** Desktop serves its runner itself (WISP 1200), when a test says so: no header to ask a server for. */
+  appRunnerServed?: boolean;
   /** Every web host can sign in to an AT Protocol server; this window never answers unless a test replaces it. */
   atproto?: BrowserHost["atproto"] = { platform: "web", open: () => new Promise(() => {}) };
 
@@ -213,6 +215,7 @@ export class FakeEngine implements BrowserHost {
     this.readClipboardFiles = undefined;
     this.keepAwake = undefined;
     this.appRunner = undefined;
+    this.appRunnerServed = undefined;
     this.setState({});
   }
 
