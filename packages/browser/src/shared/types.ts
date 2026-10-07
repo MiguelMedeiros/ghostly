@@ -860,9 +860,12 @@ export interface StoredMessage {
    */
   press?: MessagePress;
   /**
-   * A question of mine with buttons whose text went on the DHT floor or into a hold, which carry text alone (WISP 406 ·
-   * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
+   * A card of mine (WISP 405 · Status Cards, WISP 406 · Message Buttons) whose text went on the DHT floor or into a hold,
+   * which carry text alone: `due` until the card goes again live, as an edit of the card alone; `sent` once it did, or
+   * once it was given up (too old).
    */
+  cardRestore?: "due" | "sent";
+  /** What `cardRestore` was named before it covered every kind of card (buttons only): read for rows kept since. */
   buttonsRestore?: "due" | "sent";
 }
 
