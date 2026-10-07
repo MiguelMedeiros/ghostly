@@ -91,9 +91,10 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
     }
     for (const p of [a, b]) {
       const gaps = await longestEventLoopGap(p.app);
-      test.info().annotations.push({ type: "event-loop", description: `${p.name} longest gap ${gaps?.longest} ms (${gaps?.count} over 300 ms)` });
+      test.info().annotations.push({ type: "event-loop", description: `${p.name} longest gap ${gaps?.longest} ms from ${gaps?.at} (${gaps?.count} over 300 ms)` });
       expect(gaps, `${p.name}'s page was watched throughout`).not.toBeNull();
-      expect(gaps!.longest, `${p.name}'s page froze`).toBeLessThanOrEqual(MAX_FREEZE_MS);
+      // `at` is the app's clock, as ghostly.log's: the link steps just before it say what the page was doing.
+      expect(gaps!.longest, `${p.name}'s page froze at ${gaps!.at} (see ${p.name}'s ghostly.log)`).toBeLessThanOrEqual(MAX_FREEZE_MS);
     }
     // Written to, for browser contacts; never read.
     expect(relay.puts, "the apps publish to the relay too").toBeGreaterThan(0);
