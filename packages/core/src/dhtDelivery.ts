@@ -811,20 +811,27 @@ export class DhtDelivery {
       this.urgent = false; if (signal) this.signalReads--;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
       // One that started before the network came back failed for want of it (`networkBack`): the read after it says.
+      // An inviter's first envelope, before anyone is pinned, goes before the read: the joiner dials only once it read it, and
+      // the read (2 s on the DHT for a key nobody wrote yet) can add nothing to it. Every other envelope follows the read,
+      // which may pin the contact (the envelope is sealed to it) or take a text (it carries the receipt).
+      if (!this.options.credentials.peerKey && !this.options.credentials.expectedPeerKey && !this.state.sequence) await this.publishOnTick();
       const readAt = Date.now();
       try { await this.read(background, signal); if (!this.running) return; delete this.errors.read; }
       catch (error) { if (!isDiscoveryBudgetError(error) && readAt >= this.networkBackAt) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       // The contact says it left DHT only: nothing waits on its mailbox any more.
       if (this.state.peerMode !== "dht") this.signalReads = 0;
-      const publishAt = Date.now();
-      try { await this.publish(); }
-      catch (error) { if (!isDiscoveryBudgetError(error) && publishAt >= this.networkBackAt) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      await this.publishOnTick();
       this.changed();
     });
     } finally { this.ticking = false; }
     if (!this.running) return;
     if (this.tickAgain) { void this.tick(); return; }
     this.schedule();
+  }
+  private async publishOnTick(): Promise<void> {
+    const publishAt = Date.now();
+    try { await this.publish(); }
+    catch (error) { if (!isDiscoveryBudgetError(error) && publishAt >= this.networkBackAt) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
   }
   /** How long until the next read of the contact's mailbox (WISP 403, poll pace). */
   get pollMs(): number {
