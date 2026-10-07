@@ -27,7 +27,9 @@ const RELAY_MS = 2_500;
 let relays: { url: string; server: Server }[] = [];
 const running: Running[] = [];
 const [admin, member, joiner] = [home("admin"), home("member"), home("joiner")];
-const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env: {} });
+/** The two slow relays, the only ones (set once they are up). */
+const pinned = (): NodeJS.ProcessEnv => ({ GHOSTLY_PKARR_RELAYS: relays.map((relay) => relay.url).join(",") });
+const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env: pinned() });
 
 async function until<T>(what: string, read: () => Promise<T>, done: (value: T) => boolean, ms = 180_000, every = 250): Promise<T> {
   const end = Date.now() + ms;
@@ -72,7 +74,7 @@ describe("a private group's edges signal through members", { timeout: 300_000 },
     for (const [dir, name] of [[admin, "Admin"], [member, "Member"], [joiner, "Joiner"]]) {
       ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((relay) => relay.url))));
       ok(await as(dir, "profile", "set", "--name", name));
-      const daemon = new Running(["--home", dir, "daemon"], { GHOSTLY_LINK_TRACE: join(dir, "link-trace.jsonl"), ...(dir === joiner ? { GHOSTLY_TEST_REFUSE_DATA_ANSWERS: "2" } : {}) });
+      const daemon = new Running(["--home", dir, "daemon"], { ...pinned(), GHOSTLY_LINK_TRACE: join(dir, "link-trace.jsonl"), ...(dir === joiner ? { GHOSTLY_TEST_REFUSE_DATA_ANSWERS: "2" } : {}) });
       running.push(daemon);
       await daemon.waitFor((l) => l.daemon === "ready");
     }

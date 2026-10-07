@@ -45,6 +45,7 @@
   "errors": {
     "equivocation": "这个链接里是你已有版本的另一个副本。Ghostly 保留了你的版本。",
     "expired": "耗时太久。请重新检查应用。",
+    "githubLink": "这个 GitHub 页面不是应用。请粘贴仓库链接，或应用文件的链接。",
     "host": "应用只来自 GitHub（raw.githubusercontent.com）或固定到某个提交的 jsDelivr。",
     "needsFiles": "它的文件还不在此设备上。",
     "network": "无法连接到主机。",

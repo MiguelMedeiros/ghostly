@@ -42,10 +42,11 @@ export function loadCallStack(): Promise<CallStack | string> {
 
 /**
  * The ICE servers of a call, as libdatachannel takes them: the apps' STUN servers (RTC_CONFIG; libjuice uses the
- * first), then the profile's own (Settings `iceServers`: a TURN relay, typically), as the apps' calls use them.
+ * first; none with `GHOSTLY_STUN=0`), then the profile's own (Settings `iceServers`: a TURN relay, typically), as the
+ * apps' calls use them.
  */
-export function callIceServers(extra: readonly CallIceServer[] = []): (string | IceServer)[] {
-  const out: (string | IceServer)[] = (RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()).slice(0, 2);
+export function callIceServers(extra: readonly CallIceServer[] = [], env = process.env): (string | IceServer)[] {
+  const out: (string | IceServer)[] = env.GHOSTLY_STUN === "0" ? [] : (RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()).slice(0, 2);
   for (const server of callRtcConfig(extra).iceServers?.slice(RTC_CONFIG.iceServers?.length ?? 0) ?? []) {
     for (const url of [server.urls].flat()) {
       const m = /^(stun|turns?):([^:?\s]+)(?::(\d+))?(?:\?transport=(udp|tcp))?$/i.exec(url);

@@ -45,6 +45,7 @@
   "errors": {
     "equivocation": "This link holds a different copy of a version you have. Ghostly kept yours.",
     "expired": "That took too long. Check the app again.",
+    "githubLink": "That GitHub page is not an app. Paste the repository's link, or the link to its app file.",
     "host": "Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.",
     "needsFiles": "Its files are not on this device yet.",
     "network": "Could not reach the host.",

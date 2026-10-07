@@ -340,14 +340,14 @@ The runner is a small page **shipped inside the client**, never fetched. One run
 
 **The broker** identifies an app by its port (web, and later the extension) or its window label (Desktop), never by origin, which is `"null"` for every sandboxed frame, and never by anything the app says. It answers only what the permissions allow. A **request** is at most 64 KiB, at most 50 a second per app; an answer can be larger (a file read through `ghostly.file`, up to the bundle's size).
 
-**The broker's messages (phase 1), the whole `ghostly.*` API.** On the port each request is `{"id", "type", "args"}`, each answer `{"id", "ok": true, "value"}` or `{"id", "ok": false, "error"}`, each event `{"event", "data"}`; an unknown `type` is refused. On Desktop the same objects travel as the argument and result of `app_broker`, and events are emitted to that window only.
+**The broker's messages (phase 1), the whole `ghostly.*` API.** On the port each request is `{"id", "type", "args"}`, each answer `{"id", "ok": true, "value"}` or `{"id", "ok": false, "error"}`, each event `{"event", "data"}`; an unknown `type` is refused. `error` is a code the rows below name; any other failure is `failed`. On Desktop the same objects travel as the argument and result of `app_broker`, and events are emitted to that window only.
 
 | `ghostly.*` | Message type | What it does |
 |---|---|---|
 | (runner only) | `start` (Desktop), `writing` | The entry; the start of the write |
 | `ghostly.context()` | `context` | `{version, inChat, peer: {version} or null, name, theme, locale}` (`name` only with that permission; `theme` is `"light"` or `"dark"`, the client's; `locale` is the client's language as a BCP 47 tag, so the app can match both) |
-| `ghostly.file(path)` | `file` | The bytes of a file of the bundle, as an `ArrayBuffer` |
-| `ghostly.storage.get(key)`, `.set(key, value)`, `.delete(key)`, `.keys()` | `storage.get`, `storage.set`, `storage.delete`, `storage.keys` | The app's storage in the current scope (this app, this chat or alone): keys up to 256 bytes, JSON values up to 64 KiB, 5 MiB in all |
+| `ghostly.file(path)` | `file` | The bytes of a file of the bundle, as an `ArrayBuffer`. Refused with `no-file` when the bundle has no such file |
+| `ghostly.storage.get(key)`, `.set(key, value)`, `.delete(key)`, `.keys()` | `storage.get`, `storage.set`, `storage.delete`, `storage.keys` | The app's storage in the current scope (this app, this chat or alone): keys up to 256 bytes, JSON values up to 64 KiB, 5 MiB in all. Refused with `bad-key` or `too-large` past those bounds, and with `full` when a write would pass 5 MiB, so the app can make room |
 | `ghostly.chat.send(value)` | `chat.send` | One `paired-app` data frame (`chat` permission, live chat, the peer open). Refused with `offline` while the session is not live, with `too-large` when `value` passes 32 KiB as JSON, with `peer-closed` while the peer has not opened the app (or its client does not offer `apps/1`), and with `too-fast` past 48 a second for this app ([In a chat](#in-a-chat-apps1)) |
 | `ghostly.chat.on("message" or "peer", f)` | events `chat.message`, `chat.peer` | A frame from the peer; the peer opened, closed or changed version, or the session went down or came back |
 | `ghostly.close()` | `close` | Ends the app |
@@ -437,12 +437,12 @@ In release 1.2 the CLI has `ghostly app publish`, `ghostly app verify` (checks a
 
 ### Paste a URL
 
-The person pastes `https://github.com/<owner>/<repo>` (or a `/tree/<ref>` form) in the Apps page, or in a chat as a message. The client reads, **without `api.github.com`**:
+The person pastes `https://github.com/<owner>/<repo>` (or a `/tree/<ref>` form) in the Apps page, or in a chat as a message. The client reads, **without `api.github.com`** (and without any request to `github.com`):
 
 - `raw.githubusercontent.com/<owner>/<repo>/<ref or HEAD>/app.ghostlyapp`, an app, or
 - `raw.githubusercontent.com/<owner>/<repo>/<ref or HEAD>/ghostly-store.json`, a store,
 
-then shows the app's card or the store's summary, and installs or adds only when the person confirms. `HEAD` is fine because the signed digest, not the commit, pins the bytes: the client keeps the `sequence` it saw and treats what comes later by the update rule. In phase 1 the Apps page reads only the hosts a card may name, `raw.githubusercontent.com` and `cdn.jsdelivr.net` pinned to a commit: a pasted URL of any other host is refused before any request. Other HTTPS hosts come later, once the Apps page can say which host will learn the person's address before it asks.
+or, for a file as GitHub shows it, `https://github.com/<owner>/<repo>/blob/<ref>/<path>` (or `/raw/<ref>/<path>`) naming a `.ghostlyapp` or `.json` file, that file at `raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>`. Any other `github.com` page is answered as a GitHub page that holds no app, so the person pastes the repository or the file instead; it is never refused as a host off the list. The client then shows the app's card or the store's summary, and installs or adds only when the person confirms. `HEAD` is fine because the signed digest, not the commit, pins the bytes: the client keeps the `sequence` it saw and treats what comes later by the update rule. In phase 1 the Apps page reads only the hosts a card may name, `raw.githubusercontent.com` and `cdn.jsdelivr.net` pinned to a commit: a pasted URL of any other host is refused before any request. Other HTTPS hosts come later, once the Apps page can say which host will learn the person's address before it asks.
 
 ### Stores
 
