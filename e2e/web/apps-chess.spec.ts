@@ -23,10 +23,10 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
 /** What the person reads about a bundle changed after it was signed. */
 const TAMPERED = /^Ghostly won't install it: |^Not signed correctly/;
 
-/** Closes Chess (its bar's Close, outside the frame) and opens it again from the app card in the chat. */
+/** Closes Chess (its header's Close, outside the frame: the chat's panel hides) and opens it again from the app card. */
 async function closeAndReopen(peer: Peer): Promise<void> {
   await miniApp(peer.page).getByRole("button", { name: "Close" }).click();
-  await expect(miniApp(peer.page)).toHaveCount(0);
+  await expect(miniApp(peer.page)).toBeHidden();
   await chat(peer).getByTestId("app-card").getByTestId("app-card-open").click();
   await expect(miniApp(peer.page)).toBeVisible();
 }
@@ -108,7 +108,7 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
   // 4. Bob reloads: Chess is closed, the chat is live again, and opening it from the card brings the game back
   // (his storage in this chat; the mid-game reload in the next test is the one that needs the catch-up).
   await bob.page.reload();
-  await expect(miniApp(bob.page)).toHaveCount(0);
+  await expect(miniApp(bob.page)).toBeHidden();
   await expect(bob.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
   await expect(card.getByTestId("app-card-check")).toHaveText("Installed");
   await expect(card.getByTestId("app-card-waiting")).toHaveCount(0);
@@ -165,7 +165,7 @@ test("both have Chess: one opens it and waits, the other opens it from the card 
   // Bob reloads mid-game: the session comes back, his Chess is opened again from the card, and the game goes on both
   // ways (his saved game, Ana's open said again on the new session, and the catch-up between the two apps).
   await bob.page.reload();
-  await expect(miniApp(bob.page)).toHaveCount(0);
+  await expect(miniApp(bob.page)).toBeHidden();
   await expect(bob.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
   await expect(card.getByTestId("app-card-waiting")).toHaveCount(0);
   await card.getByTestId("app-card-open").click();
@@ -372,7 +372,7 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
   await expect(details.getByTestId("app-run-line")).toHaveText(`Removed by ${STORE_NAME}: Sends your moves to a server`);
   await expect(details.getByTestId("app-open")).toHaveCount(0);
   await details.getByTestId("app-keep-stopped").click();
-  await expect(miniApp(ana.page)).toHaveCount(0);
+  await expect(miniApp(ana.page)).toBeHidden();
 
   // Run anyway, the person's own choice: it runs.
   await row.getByRole("button", { name: /Chess: details/ }).click();
