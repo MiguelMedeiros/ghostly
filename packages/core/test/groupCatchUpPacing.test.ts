@@ -82,7 +82,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 async function catchUp(each: number, options: { paced: boolean; perFrameMs: number; delayMs?: number }) {
   const { alice, bob, authors, sync } = await busyGroup(each);
   const got: GroupIncomingMessage[] = [];
-  let receiver!: GroupSession;
+  const receiver = new GroupSession(clone(bob.state), { save: async () => {}, send: () => {}, message: m => { got.push(m); }, changed: () => {} });
   let sentGroup = 0, handledGroup = 0, mostWaiting = 0;
   const link = edge({
     onGroupFrame: async frame => {
@@ -91,7 +91,6 @@ async function catchUp(each: number, options: { paced: boolean; perFrameMs: numb
       handledGroup++;
     },
   }, options.delayMs);
-  receiver = new GroupSession(clone(bob.state), { save: async () => {}, send: () => {}, message: m => { got.push(m); }, changed: () => {} });
   await vi.waitFor(() => { expect(link.a.groupsSupport).toBe(true); expect(link.b.groupsSupport).toBe(true); });
   // What Bob's app holds received and not handled yet: what ends its session past 64 (before 2026-10-07).
   const send = link.ca.send.bind(link.ca);
