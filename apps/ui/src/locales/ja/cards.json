@@ -136,5 +136,21 @@
     },
     "steps": "{{total}} 件中 {{done}} 件",
     "updated": "更新：{{ago}}"
+  },
+  "usage": {
+    "accountLabel": "アカウント",
+    "info": "ボットが自己申告した残量です。Ghostly は確認しません。",
+    "label": "{{name}}：残り {{left}}%",
+    "labelResets": "{{name}}：残り {{left}}%、{{time}} にリセット",
+    "left": "残り {{left}}%",
+    "leftLabel": "残り",
+    "resets": "{{time}} にリセット",
+    "resetsLabel": "リセット",
+    "stale": "最近更新なし",
+    "staleHint": "古い数値です。ボットが最近更新していないか、枠がリセットされました。",
+    "title": "使用量",
+    "updatedLabel": "更新",
+    "used": "{{limit}} 中 {{used}} 使用",
+    "usedLabel": "使用済み"
   }
 }

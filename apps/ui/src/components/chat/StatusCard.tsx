@@ -7,6 +7,7 @@ import { agoIn } from "../../lib/relativeTime";
 import { clockTime } from "../../lib/time";
 import { STATUS_TONE, durationIn, isFinished, taskElapsed, type ShownCard } from "../../lib/statusCards";
 import { RoutineView } from "./RoutineCard";
+import { UsageView } from "./UsageMeter";
 
 /*
  * A bot's status card in the chat (WISP 405 · Status Cards), shown instead of the message's text, which is only its
@@ -135,6 +136,7 @@ function TaskView({ card, time, marks, end }: { card: TaskCard; time?: ReactNode
  * `end` the message's last change, for how long a finished task took.
  */
 export function StatusCardView({ card, time, marks, end }: { card: ShownCard; time?: ReactNode; marks?: ReactNode; end?: number }) {
+  if (card.kind === "usage") return <UsageView card={card} at={end ?? 0} time={time} marks={marks} />;
   return card.kind === "task" ? <TaskView card={card} time={time} marks={marks} end={end} /> : <RoutineView card={card} time={time} marks={marks} />;
 }
 

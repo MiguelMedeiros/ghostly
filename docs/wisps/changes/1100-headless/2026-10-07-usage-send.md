@@ -1,0 +1,1 @@
+`usage.send` (`ghostly usage send <chat|group|--all>`) reports a bot's usage card (405 § Usage): the first report in a chat sends it, later ones edit that one message, paced as a task's updates; each report is whole; `--all` covers every 1:1 chat with a contact.

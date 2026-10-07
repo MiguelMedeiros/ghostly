@@ -2128,7 +2128,7 @@ export class GhostlyNode implements EngineImplementation {
   async statusCardIndex(): Promise<CardIndexRow[]> {
     const rows: CardIndexRow[] = [];
     for (const m of await db.getCardMessages()) {
-      if (m.card?.kind !== "task" && m.card?.kind !== "routine") continue;
+      if (m.card?.kind !== "task" && m.card?.kind !== "routine" && m.card?.kind !== "usage") continue;
       rows.push({ linkId: m.linkId, id: m.id, card: m.card, sender: m.sender, ...(m.member && { member: m.member }), timestamp: m.timestamp, ...(m.edit && { editedAt: m.edit.at }) });
     }
     return rows;

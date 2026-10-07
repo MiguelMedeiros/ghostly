@@ -110,6 +110,6 @@ describe("the app card", () => {
     expect(checkStatusCard({ ...shared, version: "1".repeat(33) })).toEqual({ error: "version is at most 32 characters" });
     expect(checkStatusCard({ ...shared, id: "chess.other" })).toEqual({ error: `id is ${appCardId(REF)}, made from ref` });
     expect(checkStatusCard({ ...shared, links: [] })).toEqual({ error: "an app card takes no links" });
-    expect(checkStatusCard({ ...shared, kind: "game" })).toEqual({ error: "kind is task, routine, buttons or app" });
+    expect(checkStatusCard({ ...shared, kind: "game" })).toEqual({ error: "kind is task, routine, buttons, app or usage" });
   });
 });

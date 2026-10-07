@@ -1,6 +1,6 @@
 import { STATUS_CARD_LIMITS, checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { chatOrGroup, node, num, oneOf, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
@@ -113,7 +113,7 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   const now = Date.now();
   const id = typeof fields.id === "string" && fields.id ? fields.id : `${kind}-${toBase64Url(randomBytes(6))}`;
   const card = checked(withRun({
-    ...(kind === "task" ? { status: "running", startedAt: now, updatedAt: now } : { state: "active" }),
+    ...(kind === "task" ? { status: "running", startedAt: now, updatedAt: now } : kind === "routine" ? { state: "active" } : {}),
     ...fields, kind, id,
   }, params, now));
   await parentThere(ctx, target, card);
@@ -205,6 +205,49 @@ export async function flushCardUpdates(ctx: ApiContext): Promise<void> {
   await Promise.all(waiting.map((pace) => pace.flushed));
 }
 
+/** A usage card's fields: all of them are said again by each report, so one not given goes from the card. */
+const USAGE_FIELDS = ["left", "used", "limit", "label", "account", "window", "resetsAt", "updatedAt", "windows"] as const;
+
+/** The id a bot's usage card goes by when it names none: one live card per chat. */
+export const USAGE_CARD_ID = "usage";
+
+/**
+ * One chat's usage report (WISP 405 § Usage): the bot's usage card there, kept as one message. The first report sends
+ * it; every later one edits it in place (quiet: no sound, no unread, no move in the list), paced as a task's updates.
+ * A report is whole: what it does not say goes from the card. A card at its edits' cap gives way to a new message.
+ */
+async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, unknown>, params: Params): Promise<Record<string, unknown>> {
+  const target = chatOrGroup(ctx, ref);
+  const id = typeof fields.id === "string" && fields.id ? fields.id : USAGE_CARD_ID;
+  const report = { updatedAt: Date.now(), ...fields, kind: "usage", id };
+  checked(report);
+  const sent = await cardMessage(ctx, target, "usage", id).catch(() => undefined);
+  const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+  if (!sent || (sent.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits) {
+    const answer = await sendCard(ctx, { ...params, chat: ref, card: report, wait }, "usage");
+    return { ...answer, updated: false };
+  }
+  const patch: Record<string, unknown> = {};
+  for (const key of USAGE_FIELDS) patch[key] = report[key as keyof typeof report] ?? null;
+  const answer = await updateCard(ctx, { ...params, chat: ref, usage: id, card: patch, wait: wait === "none" ? "none" : target.group ? "sent" : "confirmed" }, "usage");
+  return { ...answer, updated: true };
+}
+
+/** `usage send`: one chat or group, or (`all`) every 1:1 chat with a contact; a chat that refuses is said, not fatal. */
+async function sendUsage(ctx: ApiContext, params: Params): Promise<Record<string, unknown>> {
+  const fields = fieldsOf(params);
+  if (!bool(params, "all")) return reportUsage(ctx, str(params, "chat", true), fields, params);
+  if (str(params, "chat")) throw new CliError("bad_request", "Name a chat or --all, not both");
+  checked({ updatedAt: Date.now(), ...fields, kind: "usage", id: typeof fields.id === "string" && fields.id ? fields.id : USAGE_CARD_ID });
+  const chats = state(ctx).links.filter((link) => link.profile && link.peerPubKeyZ32);
+  const results: Record<string, unknown>[] = [];
+  for (const link of chats) {
+    try { results.push(await reportUsage(ctx, link.id, fields, params)); }
+    catch (error) { results.push({ chat: link.id, error: error instanceof Error ? error.message : String(error) }); }
+  }
+  return { chats: results };
+}
+
 export const STATUS_CARD_METHODS: Record<string, Method> = {
   /** WISP 405 · Status Cards: a task card in a chat or a group; the answer names the task's id and its message. */
   "task.send": (ctx, params) => sendCard(ctx, params, "task"),
@@ -214,4 +257,6 @@ export const STATUS_CARD_METHODS: Record<string, Method> = {
   "routine.send": (ctx, params) => sendCard(ctx, params, "routine"),
   /** A routine's update, as a task's; `run` records a run as its last and the newest of its recent ones. */
   "routine.update": (ctx, params) => updateCard(ctx, params, "routine"),
+  /** WISP 405 § Usage: how much of a quota the bot has left, kept as one card per chat; `all` for every 1:1 chat. */
+  "usage.send": sendUsage,
 };

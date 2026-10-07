@@ -229,3 +229,40 @@ export const taskOptions: Record<string, OptionSpec> = {
   parent: { type: "string", description: "The id of the task of yours in this chat that this one is a part of" },
   ...cardOptions,
 };
+
+/**
+ * `--also week=80` or `--also week=80@2026-10-10T00:00:00Z`: another window of a usage card, its percent left and, after
+ * `@`, when it resets.
+ */
+export function usageWindowOf(value: string): { window: string; left: number; resetsAt?: number } {
+  const match = /^([^=]+)=(\d+(?:\.\d+)?)(?:@(.+))?$/.exec(value.trim());
+  if (!match) throw new CliError("usage", `--also takes window=percent or window=percent@time, like week=80@2026-10-10T00:00:00Z, not ${JSON.stringify(value)}`);
+  const resetsAt = cardTime(match[3], "also");
+  return { window: match[1].trim(), left: Number(match[2]), ...(resetsAt !== undefined && { resetsAt }) };
+}
+
+/** A usage card's fields from its flags (WISP 405 § Usage); `--json` gives any of them, the flags win over it. */
+export function usageFields(options: Parsed["options"]): Record<string, unknown> {
+  const fields: Record<string, unknown> = { ...cardJson(options.json) };
+  for (const key of ["id", "left", "used", "limit", "label", "account", "window"] as const) if (options[key] !== undefined) fields[key] = options[key];
+  const resets = cardTime(options.resets, "resets");
+  if (resets !== undefined) fields.resetsAt = resets;
+  if (Array.isArray(options.also) && options.also.length) fields.windows = (options.also as string[]).map(usageWindowOf);
+  return fields;
+}
+
+/** Options `usage send` takes. */
+export const usageOptions: Record<string, OptionSpec> = {
+  left: { type: "number", description: "Percent of the quota left, 0 to 100" },
+  used: { type: "number", description: "How much is used, with --limit (instead of --left; the percent is worked out)" },
+  limit: { type: "number", description: "The quota, with --used" },
+  label: { type: "string", description: "What the quota is of, like Claude (24 characters)" },
+  account: { type: "string", description: "Which of your accounts it is, short (24 characters)" },
+  window: { type: "string", description: "The quota's window, as people say it: \"5 h\", \"week\" (16 characters)" },
+  resets: { type: "string", description: "When the window starts again: milliseconds or a date like 2026-10-07T18:00:00Z" },
+  also: { type: "list", description: "Another window, window=percent[@time], like week=80@2026-10-10T00:00:00Z (up to 3; shown in the details)" },
+  id: { type: "string", description: "The card's id (default usage: one card per chat)" },
+  all: { type: "boolean", description: "Every 1:1 chat with a contact, instead of one chat" },
+  json: cardOptions.json,
+  text: cardOptions.text,
+};
