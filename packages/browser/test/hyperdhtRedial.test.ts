@@ -71,12 +71,16 @@ it(`dials at most ${MAX_DIALS} times: the last one is waited for to its own end`
   const { dials, dialOnce } = dialer();
   const done = redial(dialOnce);
   const failed = expect(done).rejects.toThrow("connection timed out");
-  dials[0].opened(true);
-  await vi.advanceTimersByTimeAsync(PREFACE_WAIT_MS);
-  dials[1].opened(true);
+  for (let i = 0; i < MAX_DIALS - 1; i++) {
+    dials[i].opened(true);
+    await vi.advanceTimersByTimeAsync(PREFACE_WAIT_MS);
+    expect(dials[i].closed).toBe(true);
+  }
+  const last = dials[MAX_DIALS - 1];
+  last.opened(true);
   await vi.advanceTimersByTimeAsync(PREFACE_WAIT_MS * 5);
   expect(dials).toHaveLength(MAX_DIALS);
-  expect(dials[1].closed).toBe(false);
-  dials[1].fail(new Error("connection timed out"));
+  expect(last.closed).toBe(false);
+  last.fail(new Error("connection timed out"));
   await failed;
 });

@@ -10,8 +10,11 @@
  */
 export const PREFACE_WAIT_MS = 2000
 
-/** At most this many dials for one `connect`: the first, and one more if it stalled. */
-export const MAX_DIALS = 2
+/**
+ * At most this many dials for one `connect`: the first, and two more if they stalled, 2 s apart, all within the 8 s a
+ * chat's move gives its dial. Under load a dial made again stalled too about once in 20 (bug hunt r11h).
+ */
+export const MAX_DIALS = 3
 
 /**
  * Dials with `dialOnce` until one brings the contact's preface. `dialOnce()` starts a connection and returns
