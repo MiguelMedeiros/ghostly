@@ -147,6 +147,9 @@ describe("the app is its port: nothing it says names it", () => {
     expect(await ask("storage.set", ["k", "v"])).toMatchObject({ ok: false, error: "full" });
     vi.spyOn(host, "file").mockRejectedValueOnce(new Error("no-file: No such file in this app"));
     expect(await ask("file", ["nope.txt"])).toMatchObject({ ok: false, error: "no-file" });
+    // A version a store removed, or its publisher revoked, since it started: cut off (WISP 1200 § Takedowns).
+    vi.spyOn(host.storage, "set").mockRejectedValueOnce(new Error("stopped: Removed by Ghostly Store: Malware"));
+    expect(await ask("storage.set", ["k", "v"])).toMatchObject({ ok: false, error: "stopped" });
     // Anything else stays "failed": the words, and codes an app has no use for, are not passed on.
     vi.spyOn(host.storage, "get").mockRejectedValueOnce(new Error("bad-scope: Not a chat of this profile"));
     expect(await ask("storage.get", ["k"])).toMatchObject({ ok: false, error: "failed" });

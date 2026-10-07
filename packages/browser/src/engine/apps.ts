@@ -203,6 +203,8 @@ export interface AppsHost {
   online(): boolean;
   now?: () => number;
   defaults?: readonly { url: string; key: string }[];
+  /** After every update check (the scheduled one included): the pages read the installed apps again. */
+  checked?(results: AppCheckResult[]): void;
 }
 
 interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; at: number }
@@ -261,6 +263,8 @@ export class Apps {
   private readonly queues = new Map<string, Promise<unknown>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private checking: Promise<AppCheckResult[]> | null = null;
+  /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
+  private readonly anyway = new Set<string>();
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -319,6 +323,31 @@ export class Apps {
   private async installedOrFail(ref: unknown): Promise<InstalledApp> {
     if (!isAppRef(ref)) fail("bad-ref", "Not an app reference");
     return (await this.app(ref)) ?? fail("not-installed", "This app is not installed");
+  }
+
+  /**
+   * An installed app that may still run (WISP 1200 § Takedowns): a running app whose version its publisher revoked, or
+   * a store of the person's removed (unless this run was started with Run anyway), is cut off with `stopped`, whether
+   * or not the page stops its frame.
+   */
+  private async stillRunnable(app: InstalledApp): Promise<InstalledApp> {
+    const run = this.runStatus(app, await this.stores(), app.revocations);
+    if (run.status === "revoked") fail("stopped", "Its publisher revoked this version");
+    if (run.status === "removed" && !this.anyway.has(`${app.ref} ${app.digest}`)) fail("stopped", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
+    return app;
+  }
+
+  private async runningOrFail(ref: unknown): Promise<InstalledApp> {
+    return this.stillRunnable(await this.installedOrFail(ref));
+  }
+
+  /**
+   * Before an app's frames go to a contact (`appOpen`, `appSend`): refused with `stopped` as its storage is. A reference
+   * not installed here (a bot that speaks an app's messages) is not this store's to refuse.
+   */
+  async chatRunnable({ ref }: { ref: string }): Promise<void> {
+    const app = isAppRef(ref) ? await this.app(ref) : undefined;
+    if (app) await this.stillRunnable(app);
   }
   private async putApp(app: InstalledApp): Promise<void> {
     await wrap((await store(STORES.apps, "readwrite")).put(app));
@@ -683,7 +712,11 @@ export class Apps {
    * some waits for the person. One check at a time.
    */
   checkUpdates(): Promise<AppCheckResult[]> {
-    this.checking ??= this.checkNow().finally(() => { this.checking = null; });
+    this.checking ??= this.checkNow().then((results) => {
+      // A version found removed or revoked stops where it runs: the pages hear of every check, the scheduled one too.
+      try { this.host.checked?.(results); } catch { /* a page's listener */ }
+      return results;
+    }).finally(() => { this.checking = null; });
     return this.checking;
   }
 
@@ -811,6 +844,7 @@ export class Apps {
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed" && runAnyway !== true) fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     if (run.status === "needs-files") fail("needs-files", "This app's files are not on this device yet");
+    if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
     const bundle = await this.verifiedBundle(app);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
     return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], entry: utf8Decode(entry) };
@@ -818,8 +852,7 @@ export class Apps {
 
   /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). */
   async file({ ref, path }: { ref: string; path: string }): Promise<Uint8Array> {
-    const app = await this.installedOrFail(ref);
-    if ((await this.runCheckOf(app, await this.stores())).status === "revoked") fail("revoked", "Its publisher revoked this version");
+    const app = await this.runningOrFail(ref);
     const bundle = await this.verifiedBundle(app);
     if (typeof path !== "string" || !bundle.files.has(path)) fail("no-file", "No such file in this app");
     return bundle.files.get(path)!.slice();
@@ -898,14 +931,14 @@ export class Apps {
   }
 
   async storageGet({ ref, scope, key }: { ref: string; scope: string; key: string }): Promise<{ value: JsonValue } | null> {
-    const app = await this.installedOrFail(ref);
+    const app = await this.runningOrFail(ref);
     const row = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, this.scopeOf(scope), this.keyOf(key)]));
     return row ? { value: JSON.parse(row.value) as JsonValue } : null;
   }
 
   /** Keeps a JSON value under a key: at most 64 KiB, and 5 MiB for every key of this app in this scope. */
   async storageSet({ ref, scope, key, value }: { ref: string; scope: string; key: string; value: unknown }): Promise<void> {
-    const app = await this.installedOrFail(ref);
+    const app = await this.runningOrFail(ref);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     let text: string | undefined;
     try { text = JSON.stringify(value); } catch { text = undefined; }
@@ -925,7 +958,7 @@ export class Apps {
   }
 
   async storageDelete({ ref, scope, key }: { ref: string; scope: string; key: string }): Promise<void> {
-    const app = await this.installedOrFail(ref);
+    const app = await this.runningOrFail(ref);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     await this.serial(`${app.ref}\0${where}`, async () => {
       const used = await this.usageOf(app.ref, where);
@@ -937,7 +970,7 @@ export class Apps {
   }
 
   async storageKeys({ ref, scope }: { ref: string; scope: string }): Promise<string[]> {
-    const app = await this.installedOrFail(ref);
+    const app = await this.runningOrFail(ref);
     const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(rowsOf(app.ref, this.scopeOf(scope)))) as [string, string, string][];
     return keys.map((k) => k[2]);
   }
