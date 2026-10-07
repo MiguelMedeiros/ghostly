@@ -123,8 +123,10 @@ function Permissions({ asks, update }: { asks: readonly string[]; update: boolea
 function Privacy({ from, internet }: { from?: string; internet: boolean }) {
   const { t } = useI18n();
   const offline = internet ? "" : ` ${t("apps.install.ipInfoOffline")}`;
+  // Lines far enough apart that each ⓘ's tap area (wider than the icon) stays off the other's: 20 px apart, pressing
+  // the IP line's ⓘ opened Safari's line.
   return (
-    <div className="space-y-1" data-testid="app-privacy">
+    <div className="space-y-2" data-testid="app-privacy">
       {from
         ? <InfoLine testId="app-ip-line" info={`${t("apps.install.ipInfo", { host: hostOf(from) })}${offline}`}>{t("apps.install.ipLine", { host: hostOf(from) })}</InfoLine>
         : !internet && <InfoLine testId="app-ip-line" info={t("apps.install.ipInfoOffline")}>{t("apps.install.ipLineInstalled")}</InfoLine>}
