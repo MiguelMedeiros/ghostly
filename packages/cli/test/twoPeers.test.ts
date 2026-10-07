@@ -186,6 +186,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // moved before any move, and the chat would then go to WebRTC and back under the next steps, a typing frame said
     // in between lost (CI run 37571224993).
     for (const [dir, chat] of [[alice, "bob"], [bob, "alice"]]) expect(ok(await as(dir, "chat", "show", chat))).toMatchObject({ live: true, transport: "webrtc/1" });
+    const asked = Date.now();
     ok(await as(alice, "chat", "transport", "bob", "hyperdht"));
     for (const [dir, chat] of [[bob, "alice"], [alice, "bob"]]) {
       const until = Date.now() + 90_000;
@@ -196,6 +197,14 @@ describe("two headless peers", { timeout: 180_000 }, () => {
         await new Promise((r) => setTimeout(r, 500));
       }
       expect(shown).toMatchObject({ live: true, transport: "hyperdht/1" });
+    }
+    // Most runs move in about a second. Slower, both links' steps since the ask are printed: 36 CI runs of 270 took
+    // about 28 s (a dial of the restarted contact that opened and carried nothing, then the 20 s retry) and said
+    // nothing more (bug hunt r11h).
+    const took = Date.now() - asked;
+    if (took > 10_000) {
+      const steps = readFileSync(trace, "utf8").split("\n").filter((l) => l && (JSON.parse(l) as { t: number }).t >= asked);
+      console.log(`[hyperdht] moved in ${took} ms; link steps since the ask:\n${steps.join("\n")}`);
     }
   });
 
