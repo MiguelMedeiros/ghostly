@@ -13,6 +13,7 @@ import { mentionsBytes, validMentions, wireMentions, type GroupMention } from ".
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
 import { cardEditNumber, readStatusCard, statusCardBytes, type StatusCard } from "./statusCards";
+import { readGroupFileMeta, type GroupFileMeta } from "./groupFiles";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
 import { RateWindow, validEditNumber } from "./pairedEdits";
 import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers } from "./catchUp";
@@ -310,7 +311,7 @@ export interface CommunityState {
   meta?: GroupMeta;
 }
 
-export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard }
+export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta }
 /**
  * What an application sends through the group rather than as text: `frame` for everyone in the epoch (the group
  * reads it, as it reads text), or, in `pair`, a payload only `to` can open. Delivered once, like a message: the
@@ -1050,20 +1051,25 @@ export class CommunitySession {
    * count against the text's 16 KiB, so the box stays within what older apps accept. `reply`: the message it
    * answers (`r`), counted the same way. `forwarded`: a forwarded text's hop count (`fw`, WISP 903 § Forwards). `card`:
    * a status card, checked by the caller (`sc`, WISP 405 · Status Cards), counted the same way; the text is its fallback.
+   * `file`: a file or voice message the text announces (`fl`, WISP 503 · Group Files), counted the same way; the text is
+   * its caption, or the line an older app shows.
    */
-  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ id: string } | { error: string }> {
+  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard, file?: GroupFileMeta): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       const trimmed = text.trim();
       if (!trimmed) return { error: "Nothing to send" };
+      const described = file === undefined ? undefined : readGroupFileMeta(file);
+      if (file !== undefined && !described) return { error: "That file cannot go to a group" };
       const named = validMentions(wireMentions(mentions), trimmed, false);
       const answers = reply && readReply(wireReply(reply), groupReplyAuthor);
       const replyBytes = answers ? utf8Encode(JSON.stringify(answers)).length : 0;
+      const fileBytes = described ? utf8Encode(JSON.stringify(described)).length + 8 : 0;
       const hops = readForwarded(forwarded);
-      if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + (hops ? 16 : 0) + (card ? statusCardBytes(card) + 8 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
-      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}) }), nick, now);
+      if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + fileBytes + (hops ? 16 : 0) + (card ? statusCardBytes(card) + 8 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
+      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}), ...(described ? { fl: described } : {}) }), nick, now);
       if ("error" in sent) return sent;
-      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}) });
+      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}) });
       await this.say(sent.frame);
       return { id: sent.id };
     });
@@ -1330,7 +1336,7 @@ export class CommunitySession {
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
     if (payload === null) return false;
-    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown; fw?: unknown; sc?: unknown; o?: unknown };
+    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown; fw?: unknown; sc?: unknown; fl?: unknown; o?: unknown };
     try { parsed = JSON.parse(payload) as typeof parsed; } catch { return false; }
     if (!isObject(parsed)) return false;
     // Said again under a newer commit (its author was behind): the message it first was, by that one's identity. Taken
@@ -1355,7 +1361,9 @@ export class CommunitySession {
       const forwarded = readForwarded(parsed.fw);
       // A card that does not hold is left out: the text, its fallback, shows.
       const card = parsed.sc === undefined ? undefined : readStatusCard(parsed.sc);
-      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}) });
+      // A file that does not hold is left out too (WISP 503): the text, its caption or fallback line, shows.
+      const file = parsed.fl === undefined ? undefined : readGroupFileMeta(parsed.fl) ?? undefined;
+      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}) });
     }
     else if (isObject(parsed.x)) await this.hooks.app?.({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x });
     else {

@@ -25,6 +25,7 @@ import { readReaction, type WireReaction } from "./reactions";
 import { GROUP_PIN_FRAME, readPin, type WirePin } from "./pins";
 import { RateWindow } from "./pairedEdits";
 import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers } from "./catchUp";
+import { GROUP_FILE_LIMITS, readGroupFileMeta, type GroupFileMeta } from "./groupFiles";
 
 /**
  * One member's view of a `group-mesh/1` group: the membership chain, the epoch
@@ -101,10 +102,12 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
  * `f`: a forwarded text's hop count (WISP 902 § Forwards), in the clear like the header: every member reads it anyway.
  * `sc`: a status card (WISP 405 · Status Cards) as JSON, sealed like the reply in a box of its own, so an older app
  * reads the text, its fallback; `xs` covers it after the rest, only when there is one.
+ * `fl`: a file or voice message the message announces (WISP 503 · Group Files), its description as JSON, sealed in a box
+ * of its own; the text is the caption, or a line an older app shows instead. `xs` covers it after `sc`, before `o`.
  * `o`: where a message said again under a later epoch was first said (WISP 902 § Catch-up, "Frames said again"): that
  * frame's epoch and sequence, in the clear like the header. `xs` covers it last, only when there is one.
  */
-export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; sc?: { n: string; c: string }; o?: { e: number; n: number }; xs?: string }
+export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; sc?: { n: string; c: string }; fl?: { n: string; c: string }; o?: { e: number; n: number }; xs?: string }
 /**
  * An edit of message `<s>:<e>:<n>` by its author (WISP 902 § Edits): edit number `v`, the new text (and its mentions)
  * as JSON `{ text, m?, sc? }` sealed under the key of the message's epoch `e`, signed by the author. `sc`: the status card
@@ -179,7 +182,7 @@ export interface GroupState {
  * `completes`: this message was delivered before from a copy another member handed on without its author's whole
  * signature (its text only); this is the whole one, with the mentions, reply and hop count its author put there.
  */
-export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; completes?: true }
+export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta; completes?: true }
 
 export interface GroupSessionHooks {
   save(state: GroupState): Promise<void>;
@@ -239,6 +242,10 @@ const isReplyBox = isSealedBox(MAX_REPLY_BOX);
 const MAX_CARD_BOX = Math.ceil((STATUS_CARD_LIMITS.bytes + 16) * 4 / 3) + 4;
 const cardAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify(["ghostly-group/1 card", f.g, f.e, f.s, f.n, f.ts]);
 const isCardBox = isSealedBox(MAX_CARD_BOX);
+/** A file's description as JSON: a name and a type of 255 characters each, 128 voice bars or a 12 KiB poster, sealed. */
+const MAX_FILE_BOX = Math.ceil((GROUP_FILE_LIMITS.nameChars * 4 + GROUP_FILE_LIMITS.mimeChars + 17_000) * 4 / 3) + 4;
+const fileAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify(["ghostly-group/1 file", f.g, f.e, f.s, f.n, f.ts]);
+const isFileBox = isSealedBox(MAX_FILE_BOX);
 const B64 = /^[A-Za-z0-9_-]*$/;
 const secretAad = (g: string, e: number, member: string) => JSON.stringify(["ghostly-group/1 secret", g, e, member]);
 const messageAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify([f.g, f.e, f.s, f.n, f.ts]);
@@ -250,7 +257,7 @@ const messageSigned = (f: Omit<GroupMessageFrame, "sig" | "t">) => utf8Encode(JS
  */
 const messageSignedWhole = (f: Omit<GroupMessageFrame, "sig" | "t" | "xs">) =>
   utf8Encode(JSON.stringify(["ghostly-group/1 msg+", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c, f.m?.n ?? "", f.m?.c ?? "", f.r?.n ?? "", f.r?.c ?? "", ...(f.f !== undefined ? [f.f] : []),
-    ...(f.sc ? ["sc", f.sc.n, f.sc.c] : []), ...(f.o ? ["o", f.o.e, f.o.n] : [])]));
+    ...(f.sc ? ["sc", f.sc.n, f.sc.c] : []), ...(f.fl ? ["fl", f.fl.n, f.fl.c] : []), ...(f.o ? ["o", f.o.e, f.o.n] : [])]));
 export const groupMessageId = (sender: string, epoch: number, seq: number) => `${sender}:${epoch}:${seq}`;
 /** An edit's box holds the text, its mentions and its card as JSON: room for a text whose every character JSON escapes. */
 const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + STATUS_CARD_LIMITS.bytes + 64;
@@ -292,7 +299,7 @@ function readFirstPlace(o: unknown, epoch: number): { e: number; n: number } | n
 const ownKey = (f: { e: number; n: number }) => `${f.e}:${f.n}`;
 
 /** What a frame weighs in a log, roughly: its boxes plus the fixed fields around them. */
-const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + 400;
+const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + (f.fl?.c.length ?? 0) + 400;
 
 /** Only the fields an edit frame has, as `clean` does for a message. */
 const cleanEdit = (f: GroupEditFrame): GroupEditFrame => ({ t: GROUP_EDIT_FRAME, g: f.g, e: f.e, s: f.s, n: f.n, v: f.v, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig });
@@ -302,6 +309,7 @@ function clean(f: GroupMessageFrame): GroupMessageFrame {
   return { t: "group-msg", g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig,
     ...(isMentionsBox(f.m) ? { m: { n: f.m.n, c: f.m.c } } : {}), ...(isReplyBox(f.r) ? { r: { n: f.r.n, c: f.r.c } } : {}),
     ...(readForwarded(f.f) ? { f: f.f } : {}), ...(isCardBox(f.sc) ? { sc: { n: f.sc.n, c: f.sc.c } } : {}),
+    ...(isFileBox(f.fl) ? { fl: { n: f.fl.n, c: f.fl.c } } : {}),
     ...(readFirstPlace(f.o, f.e) ? { o: readFirstPlace(f.o, f.e)! } : {}),
     ...(typeof f.xs === "string" && f.xs.length === 86 && B64.test(f.xs) ? { xs: f.xs } : {}) };
 }
@@ -665,24 +673,28 @@ export class GroupSession {
    * text that name members (everyone: the admin only); what does not hold is left out. `reply`: the message it
    * answers, sealed apart from the text (`r`) like the mentions, so an older app still reads the text. `forwarded`: the
    * hop count of a forwarded text (`f`, WISP 902 § Forwards). `card`: a status card, checked by the caller, sealed in a
-   * box of its own (`sc`, WISP 405 · Status Cards); the text is its fallback.
+   * box of its own (`sc`, WISP 405 · Status Cards); the text is its fallback. `file`: a file or voice message the text
+   * announces (`fl`, WISP 503 · Group Files), its description checked by the caller; the text is its caption, or the
+   * line an older app shows.
    */
-  sendText(text: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ id: string } | { error: string }> {
+  sendText(text: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard, file?: GroupFileMeta): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (this.state.status !== "active") return { error: this.state.statusReason ?? "You are no longer in this group" };
       const trimmed = text.trim();
       if (!trimmed) return { error: "Nothing to send" };
       if (utf8Encode(trimmed).length > GROUP_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
+      const described = file === undefined ? undefined : readGroupFileMeta(file);
+      if (file !== undefined && !described) return { error: "That file cannot go to a group" };
       const epoch = this.epoch;
       if (!this.secret(epoch)) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
       const n = this.nextSeq(epoch);
       const named = validMentions(wireMentions(mentions), trimmed, this.isAdmin);
       const answers = reply && readReply(wireReply(reply), groupReplyAuthor);
       const fw = readForwarded(forwarded) ? forwarded : undefined;
-      const frame = this.seal(epoch, n, now, trimmed, { mentions: named, reply: answers || undefined, forwarded: fw, card });
+      const frame = this.seal(epoch, n, now, trimmed, { mentions: named, reply: answers || undefined, forwarded: fw, card, file: described ?? undefined });
       this.logOwn(frame);
       const id = groupMessageId(this.myKey, epoch, n);
-      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(fw ? { forwarded: fw } : {}), ...(card ? { card } : {}) });
+      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(fw ? { forwarded: fw } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}) });
       await this.say(frame);
       return { id };
     });
@@ -703,14 +715,15 @@ export class GroupSession {
   }
 
   /** A text sealed and signed as my frame `n` of `epoch`, with its boxes; `o`: where it was first said (`resealBehind`). */
-  private seal(epoch: number, n: number, ts: number, text: string, extra: { mentions?: readonly GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard }, o?: { e: number; n: number }): GroupMessageFrame {
+  private seal(epoch: number, n: number, ts: number, text: string, extra: { mentions?: readonly GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta }, o?: { e: number; n: number }): GroupMessageFrame {
     const header = { g: this.id, e: epoch, s: this.myKey, n, ts };
     const key = epochKeys(this.secret(epoch)!, this.id, epoch).message;
     const { n: nn, c } = encryptText(key, messageAad(header), text);
     const unsigned = { ...header, nn, c };
     const boxes = { ...(extra.mentions?.length ? { m: encryptText(key, mentionsAad(header), JSON.stringify(extra.mentions)) } : {}),
       ...(extra.reply ? { r: encryptText(key, replyAad(header), JSON.stringify(extra.reply)) } : {}), ...(extra.forwarded ? { f: extra.forwarded } : {}),
-      ...(extra.card ? { sc: encryptText(key, cardAad(header), JSON.stringify(extra.card)) } : {}), ...(o ? { o } : {}) };
+      ...(extra.card ? { sc: encryptText(key, cardAad(header), JSON.stringify(extra.card)) } : {}),
+      ...(extra.file ? { fl: encryptText(key, fileAad(header), JSON.stringify(extra.file)) } : {}), ...(o ? { o } : {}) };
     return { t: "group-msg", ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)), ...boxes,
       xs: toBase64Url(sign(messageSignedWhole({ ...unsigned, ...boxes }), this.identity.seed)) };
   }
@@ -770,7 +783,7 @@ export class GroupSession {
       const text = decryptText(key, messageAad(f), f.nn, f.c);
       if (text === null) continue;
       const mentions = this.openMentions(key, f, text, rosterAdmin(before.m) === this.myKey);
-      const frame = this.seal(target, this.nextSeq(target), f.ts, text, { mentions, reply: this.openReply(key, f), forwarded: readForwarded(f.f) ? f.f : undefined, card: this.openCard(key, f) },
+      const frame = this.seal(target, this.nextSeq(target), f.ts, text, { mentions, reply: this.openReply(key, f), forwarded: readForwarded(f.f) ? f.f : undefined, card: this.openCard(key, f), file: this.openFile(key, f) },
         // Said again once already (I was behind twice): it still names the very first.
         readFirstPlace(f.o, f.e) ?? { e: f.e, n: f.n });
       this.logOwn(frame);
@@ -1009,7 +1022,7 @@ export class GroupSession {
     const whole = !relayed || this.wholeSigned(raw);
     if (!whole) {
       if (this.provisional.has(own)) return;
-      delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.o; delete raw.xs;
+      delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.fl; delete raw.o; delete raw.xs;
     }
     // Said again under a later epoch (its author was behind, `resealBehind`): the message it first was, by that one's id.
     const first = raw.o === undefined ? null : readFirstPlace(raw.o, raw.e);
@@ -1035,8 +1048,9 @@ export class GroupSession {
     const reply = this.openReply(key, raw);
     const forwarded = readForwarded(raw.f);
     const card = this.openCard(key, raw);
+    const file = this.openFile(key, raw);
     const completes = whole && this.provisional.delete(id);
-    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(completes ? { completes: true as const } : {}) });
+    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), ...(completes ? { completes: true as const } : {}) });
     if (!whole) {
       this.provisional.add(id);
       if (this.provisional.size > GROUP_LIMITS.provisional) this.provisional.delete(this.provisional.values().next().value!);
@@ -1109,6 +1123,14 @@ export class GroupSession {
     const plain = decryptText(key, cardAad(raw), raw.sc.n, raw.sc.c);
     if (plain === null) return undefined;
     try { return readStatusCard(JSON.parse(plain)); } catch { return undefined; }
+  }
+
+  /** The file a message announces (WISP 503); a box that does not open, or a description that does not hold, is no file. */
+  private openFile(key: Uint8Array, raw: GroupMessageFrame): GroupFileMeta | undefined {
+    if (!isFileBox(raw.fl)) return undefined;
+    const plain = decryptText(key, fileAad(raw), raw.fl.n, raw.fl.c);
+    if (plain === null) return undefined;
+    try { return readGroupFileMeta(JSON.parse(plain)) ?? undefined; } catch { return undefined; }
   }
 
   /** The message a text answers; a box that does not open, or does not hold one, is no reply, not no message. */
