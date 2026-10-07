@@ -452,6 +452,8 @@ export interface AppEntry {
   version: string;
   title: string;
   permissions: string[];
+  /** Where it shows (the manifest's `view`): in a 1:1 chat only, or full screen. Absent: `chat`. */
+  view?: "chat" | "full";
   entry: string;
 }
 

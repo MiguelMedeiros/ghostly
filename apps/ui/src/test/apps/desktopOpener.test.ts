@@ -67,7 +67,7 @@ describe("opening an app on Desktop", () => {
   it("opens a window with the checked entry and what the person granted, and runs the web broker for it", async () => {
     const { calls, open, request, answer, host } = setup();
     await open(REF, LINK);
-    expect(calls[0]).toEqual({ command: "app_open", args: { request: { app: REF, title: "Chess", entry: "<p>chess</p>", internet: false } } });
+    expect(calls[0]).toEqual({ command: "app_open", args: { request: { app: REF, title: "Chess", entry: "<p>chess</p>", internet: false, view: "chat" } } });
 
     request("app-1", { id: 1, type: "writing", args: [] });
     expect(await answer("app-1", 1)).toEqual({ id: 1, ok: true });
@@ -92,7 +92,13 @@ describe("opening an app on Desktop", () => {
   it("opens an app granted internet in the network runner's window", async () => {
     const { calls, open } = setup({ permissions: ["internet"] });
     await open(REF, null);
-    expect(calls[0]!.args).toEqual({ request: { app: REF, title: "Chess", entry: "<p>chess</p>", internet: true } });
+    expect(calls[0]!.args).toEqual({ request: { app: REF, title: "Chess", entry: "<p>chess</p>", internet: true, view: "chat" } });
+  });
+
+  it("asks Rust for a full-screen app's window, at the Ghostly window's size", async () => {
+    const { calls, open } = setup({ view: "full" });
+    await open(REF, null);
+    expect((calls[0]!.args.request as { view: string }).view).toBe("full");
   });
 
   it("refuses an app granted internet where the client has no network runner", async () => {

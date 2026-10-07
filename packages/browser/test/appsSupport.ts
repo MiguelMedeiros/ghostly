@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
   buildAppBundle, seedSigner, signAppRevocation, signAppStore, toZ32, utf8Encode,
-  type AppListing, type AppManifestDraft, type AppPermission, type AppRemoval, type AppStoreIndex, type SignedAppRevocation, type Signer,
+  type AppListing, type AppManifestDraft, type AppPermission, type AppRemoval, type AppStoreIndex, type AppViewMode, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { vi } from "vitest";
 import { STORES, wrap } from "../src/shared/idb";
@@ -32,12 +32,13 @@ export const PINNED_URL = `https://cdn.jsdelivr.net/gh/ana/chess@${"a".repeat(40
 
 export interface Built { bytes: Uint8Array; digest: string; ref: string; sequence: number }
 
-export async function bundle(options: { sequence?: number; version?: string; permissions?: AppPermission[]; entry?: string; sources?: string[]; by?: Signer; name?: string } = {}): Promise<Built> {
+export async function bundle(options: { sequence?: number; version?: string; permissions?: AppPermission[]; entry?: string; sources?: string[]; by?: Signer; name?: string; view?: AppViewMode } = {}): Promise<Built> {
   const sequence = options.sequence ?? 1;
   const draft: AppManifestDraft = {
     name: options.name ?? "chess", version: options.version ?? `1.0.${sequence}`, sequence, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact",
     entry: "index.html", permissions: options.permissions ?? ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT",
     ...(options.sources && { sources: options.sources }),
+    ...(options.view && { view: options.view }),
   };
   const files = [{ path: "index.html", bytes: utf8Encode(options.entry ?? `<!doctype html><title>Chess</title><p>v${sequence}`) }, { path: "data/openings.json", bytes: utf8Encode("[]") }];
   const by = options.by ?? PUBLISHER;

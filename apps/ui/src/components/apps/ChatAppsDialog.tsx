@@ -14,7 +14,14 @@ import { appErrorText } from "../../lib/apps/errors";
  * Opening one sends the "opened" app card (WISP 405 § An app), made from the app as installed, so the contact sees
  * "Ana opened Chess" and can install the same app; then the app opens in this chat. Nothing is advertised before.
  */
-export function ChatAppsDialog({ linkId, name, waiting, onClose }: { linkId: string; name: string; waiting?: string | null; onClose: () => void }) {
+export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, onClose }: {
+  linkId: string;
+  name: string;
+  waiting?: string | null;
+  /** Why an app opened here from the Apps page did not open. */
+  error?: string | null;
+  onClose: () => void;
+}) {
   const { t } = useI18n();
   const nav = useAppNavigation();
   const installed = useInstalledApps(true);
@@ -24,7 +31,7 @@ export function ChatAppsDialog({ linkId, name, waiting, onClose }: { linkId: str
   const opened = useRef(false);
   useDialogFocus(ref, onClose, () => !opened.current);
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(failed);
 
   const open = async (app: InstalledAppView) => {
     setBusy(app.ref); setError(null);

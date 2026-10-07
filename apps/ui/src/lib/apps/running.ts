@@ -6,19 +6,26 @@
  * A frame reloads when it moves in the page, so the box never moves: the app is shown and hidden in place. Back on a
  * phone hides it, and opening the same app again in that chat shows it as it was. A chat with an app running stays
  * loaded (App.tsx), as one on a call does, so going to another chat or page and back finds the app where it was.
+ *
+ * An app's manifest says where it shows (`view`): a `chat` app is this panel's, beside the chat or over its whole width
+ * as the person chooses; a `full` app covers the whole chat, with Back to it, and never sits beside it.
  */
 import { useSyncExternalStore } from "react";
 import type { RunningApp } from "./broker";
 import type { AppTakedown } from "./open";
 import type { Translate } from "../../locales/translate";
+import type { InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { OpenAppOptions } from "./open";
 
 export interface ChatApp {
   ref: string;
   title: string;
   /** On screen. A phone's Back hides it; it keeps running. */
   shown: boolean;
-  /** Over the whole chat on a wide screen, instead of beside it. */
+  /** Over the whole chat on a wide screen, instead of beside it (a `chat` app, the person's choice). */
   wide: boolean;
+  /** Where its manifest says it shows: `full` covers the whole chat, with Back to it, at every width. */
+  view: "chat" | "full";
   running: RunningApp;
   /** Stopped by the client, for this reason: the panel says why until the person closes it (WISP 1200 § Takedowns). */
   stopped?: AppTakedown;
@@ -102,6 +109,35 @@ export function useChatApp(linkId: string | undefined): ChatApp | undefined {
 /** The chats an app runs in, by session: App.tsx keeps them loaded. */
 export function useAppSessions(): readonly string[] {
   return useSyncExternalStore(subscribe, () => sessions, () => sessions);
+}
+
+/**
+ * Opened from the Apps page in a chat the person picked (a `chat` app runs in a chat only): the chat takes it as it
+ * shows, once its panel is there (Chat.tsx), and opens it as its own + → Apps would. One not taken within a minute (the
+ * person went elsewhere) is dropped.
+ */
+export interface OpenRequest { app: InstalledAppView; options?: OpenAppOptions }
+const OPEN_REQUEST_MS = 60_000;
+const requests = new Map<string, OpenRequest & { at: number }>();
+
+export function requestOpenInChat(linkId: string, request: OpenRequest): void {
+  requests.set(linkId, { ...request, at: Date.now() });
+  changed();
+}
+
+/** Whether an open request waits for the chat `linkId`. */
+export function useOpenRequested(linkId: string | undefined): boolean {
+  useSyncExternalStore(subscribe, snapshot, snapshot);
+  return !!linkId && requests.has(linkId);
+}
+
+/** The open request for the chat `linkId`, once: taken, it is gone. */
+export function takeOpenRequest(linkId: string): OpenRequest | undefined {
+  const request = requests.get(linkId);
+  if (!request) return undefined;
+  requests.delete(linkId);
+  changed();
+  return Date.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
 }
 
 /** "Chess with Ana": a panel's name, and a Desktop app window's title. Only the title when opened alone. */
