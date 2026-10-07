@@ -693,6 +693,9 @@ pub fn admit(
                 // The entry, once: a second start (a reload that got through) is refused.
                 Some("start") if !window.started => {
                     window.started = true;
+                    // The runner's wait for the window ("Not ready", up to 40 asks a second on Linux) is not the
+                    // app's: the app's own second starts with its entry.
+                    window.recent.clear();
                     window
                         .entry
                         .take()
@@ -1413,12 +1416,12 @@ mod tests {
             admit(&state, "app-1", &json!({"type": "start"}), at(0)),
             Ok(Admitted::Answer(_))
         ));
-        // A malformed request counts as well.
+        // A malformed request counts as well (the start does not: the app's second begins after it).
         assert_eq!(
             admit(&state, "app-1", &json!({"type": "context"}), at(1)).unwrap_err(),
             "bad-request"
         );
-        for id in 0..48 {
+        for id in 0..49 {
             let request = json!({"id": id, "type": "context", "args": []});
             assert!(
                 admit(&state, "app-1", &request, at(10 + id)).is_ok(),
@@ -1642,6 +1645,36 @@ mod tests {
                 "LinkPrefetchEnabled",
                 "PeerConnectionEnabled",
             ]
+        );
+    }
+
+    /// The runner's "Not ready" asks do not count against the app: a slow filter leaves it its 50.
+    #[test]
+    fn the_runners_wait_leaves_the_app_its_50_requests() {
+        let state = AppSandboxState::default();
+        state
+            .windows
+            .lock()
+            .unwrap()
+            .insert("app-1".into(), window("ana/chess", false, true));
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        for ms in 0..40 {
+            assert_eq!(
+                admit(&state, "app-1", &json!({"type": "start"}), at(ms * 20)).unwrap_err(),
+                "Not ready"
+            );
+        }
+        state.with("app-1", |window| window.ready = true);
+        assert!(admit(&state, "app-1", &json!({"type": "start"}), at(800)).is_ok());
+        for id in 0..50 {
+            let request = json!({"id": id, "type": "context", "args": []});
+            assert!(admit(&state, "app-1", &request, at(801)).is_ok(), "{id}");
+        }
+        let request = json!({"id": 50, "type": "context", "args": []});
+        assert_eq!(
+            admit(&state, "app-1", &request, at(802)).unwrap_err(),
+            "too-fast"
         );
     }
 
