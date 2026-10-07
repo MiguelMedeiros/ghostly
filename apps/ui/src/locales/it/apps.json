@@ -123,5 +123,13 @@
     "remove": "Rimuovi",
     "stale": "Non aggiornato dal {{date}}"
   },
-  "title": "App"
+  "title": "App",
+  "view": {
+    "back": "Torna alla chat",
+    "beside": "Mostra la chat",
+    "full": "Larghezza piena",
+    "resume": "Torna a {{title}}",
+    "with": "{{title}} con {{name}}",
+    "withName": "con {{name}}"
+  }
 }

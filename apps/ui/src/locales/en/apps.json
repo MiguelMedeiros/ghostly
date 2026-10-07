@@ -123,5 +123,13 @@
     "remove": "Remove",
     "stale": "Out of date since {{date}}"
   },
-  "title": "Apps"
+  "title": "Apps",
+  "view": {
+    "back": "Back to the chat",
+    "beside": "Show the chat",
+    "full": "Full width",
+    "resume": "Back to {{title}}",
+    "with": "{{title}} with {{name}}",
+    "withName": "with {{name}}"
+  }
 }

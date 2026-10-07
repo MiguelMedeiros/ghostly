@@ -121,6 +121,16 @@ export function Apps() {
   const [adding, setAdding] = useState(false);
   const [details, setDetails] = useState<string | null>(null);
   const [installing, setInstalling] = useState<{ store: string; listing: AppListing } | null>(null);
+  // Installed from a listing: its Install button is gone, so the focus goes to the app's row (its Open), not the page.
+  const [justInstalled, setJustInstalled] = useState<string | null>(null);
+  useEffect(() => {
+    if (!justInstalled || installing) return;
+    const row = document.querySelector(`[data-testid=installed-app][data-ref="${CSS.escape(justInstalled)}"]`);
+    const target = row?.querySelector<HTMLElement>("[data-testid=installed-app-open]") ?? row?.querySelector<HTMLElement>("button");
+    if (!target) return;
+    target.focus({ preventScroll: true });
+    setJustInstalled(null);
+  }, [justInstalled, installing, installed]);
   const notice = useToast();
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
@@ -155,7 +165,8 @@ export function Apps() {
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} />}
       {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} />}
       {installing && (
-        <AppInstallDialog source={{ store: installing.store, ref: installing.listing.ref }} title={installing.listing.title} onClose={() => setInstalling(null)} />
+        <AppInstallDialog source={{ store: installing.store, ref: installing.listing.ref }} title={installing.listing.title} onClose={() => setInstalling(null)}
+          onInstalled={(app) => setJustInstalled(app.ref)} />
       )}
     </Page>
   );

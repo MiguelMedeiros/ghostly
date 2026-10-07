@@ -123,5 +123,13 @@
     "remove": "Remover",
     "stale": "Desatualizada desde {{date}}"
   },
-  "title": "Apps"
+  "title": "Apps",
+  "view": {
+    "back": "Voltar à conversa",
+    "beside": "Mostrar a conversa",
+    "full": "Largura total",
+    "resume": "Voltar para {{title}}",
+    "with": "{{title}} com {{name}}",
+    "withName": "com {{name}}"
+  }
 }

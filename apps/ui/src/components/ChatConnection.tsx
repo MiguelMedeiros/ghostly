@@ -46,7 +46,7 @@ type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" |
  * It is the header's only connection element: while a first pairing is on its way (`pairing`), the icon is the
  * pairing scene in small, its name says the stage, and the panel says how far it got, with a way to the scene.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status, pairing }: {
+export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "" }: {
   peerKey: string;
   paired?: boolean;
   /** This side's key in the chat. */
@@ -55,6 +55,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
   status?: string;
   /** A first pairing not live yet (`usePairingProgress`), and how to bring its scene into view, while there is one. */
   pairing?: { progress: PairingProgressState; onShow?(): void };
+  /** Before its control's test ids, where a second copy is on screen (a mini-app's header: `app-`), so the chat's stay unique. */
+  testIdPrefix?: string;
 }) {
   const state = useSyncExternalStore(subscribe, snapshot);
   const link = paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined, pair = link?.pairing;
@@ -169,8 +171,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
   <details ref={root} onToggle={e => setMenuOpen(e.currentTarget.open)} onKeyDown={e => {
     if (e.key !== "Escape") return;
     if (root.current?.open) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
-  }} className="relative" data-testid="connection-menu">
-    <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid="connection-options" data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined}
+  }} className="relative" data-testid={`${testIdPrefix}connection-menu`}>
+    <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid={`${testIdPrefix}connection-options`} data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined}
       data-pairing={stage} data-status={status} data-busy={glyph || connecting || retrying || undefined} aria-label={t("connection.panel.titleWith", { label })} aria-describedby={`${id}-tip`}
       onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
       onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}

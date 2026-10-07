@@ -66,7 +66,7 @@ export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; o
         <h2 id={titleId} className="text-lg font-medium text-text-primary">{t("apps.add.title")}</h2>
         <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); void check(); }}>
           <label htmlFor={fieldId} className="text-sm text-text-primary">{t("apps.add.label")}</label>
-          <input id={fieldId} data-testid="apps-add-url" className={input} type="url" inputMode="url" autoComplete="off" spellCheck={false} dir="ltr"
+          <input id={fieldId} data-testid="apps-add-url" autoFocus className={input} type="url" inputMode="url" autoComplete="off" spellCheck={false} dir="ltr"
             placeholder="https://github.com/owner/repo" value={url} onChange={(e) => { setUrl(e.target.value); setStore(null); setError(null); }} />
           <Notice>{t("apps.add.hint")}</Notice>
           {error && <Notice tone="error" testId="apps-add-error">{error}</Notice>}

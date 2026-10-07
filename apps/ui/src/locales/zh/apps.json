@@ -123,5 +123,13 @@
     "remove": "移除",
     "stale": "自 {{date}} 起已过期"
   },
-  "title": "应用"
+  "title": "应用",
+  "view": {
+    "back": "返回聊天",
+    "beside": "显示聊天",
+    "full": "全宽",
+    "resume": "返回 {{title}}",
+    "with": "与 {{name}} 的 {{title}}",
+    "withName": "与 {{name}}"
+  }
 }

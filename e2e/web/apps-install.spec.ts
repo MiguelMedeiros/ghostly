@@ -16,12 +16,13 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/");
 }
 
-/** The app the runner opened (full screen over the page), closed by its own bar's Close. */
+/** The app the runner opened (in the chat's panel), closed by its header's Close: the panel hides, its frame goes. */
 async function closeApp(peer: Peer): Promise<void> {
   const app = peer.page.getByTestId("mini-app");
   await expect(app).toBeVisible();
   await app.getByRole("button", { name: "Close" }).click();
-  await expect(app).toHaveCount(0);
+  await expect(app).toBeHidden();
+  await expect(app.locator("iframe")).toHaveCount(0);
 }
 
 test("install from a store, open it in a chat, and the contact installs it from the card", { tag: ["@feature:apps.page", "@feature:apps.chat.card"] }, async ({ peer }) => {
