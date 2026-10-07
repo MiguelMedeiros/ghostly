@@ -357,6 +357,24 @@ fn short(key: &PublicKey) -> String {
     key.to_z32().chars().take(6).collect()
 }
 
+/// A failed request in a few words, with its deepest cause, which says why ("dns error", "invalid peer certificate:
+/// UnknownIssuer", "Connection refused"): reqwest's own text stops at "error sending request".
+fn request_error(error: &reqwest::Error) -> String {
+    let mut cause: &dyn std::error::Error = error;
+    while let Some(next) = cause.source() {
+        cause = next;
+    }
+    let first = brief(&error.to_string());
+    if std::ptr::addr_eq(cause, error as &dyn std::error::Error) {
+        first
+    } else {
+        format!(
+            "{first} ({})",
+            cause.to_string().chars().take(80).collect::<String>()
+        )
+    }
+}
+
 /// An error, in a few words, for a log line.
 fn brief(error: &str) -> String {
     let first = error.split(':').next().unwrap_or(error).trim();
@@ -649,7 +667,9 @@ impl Pkarr {
                             report.push(format!("{name}=ok@{at}ms"));
                         }
                         Err(e) => {
-                            report.push(format!("{name}=err@{at}ms({})", brief(&e)));
+                            // Not `brief`: a relay's error carries its cause after a colon.
+                            let why: String = e.chars().take(140).collect();
+                            report.push(format!("{name}=err@{at}ms({why})"));
                             errors.push(format!("{name}: {e}"));
                         }
                     }
@@ -1008,8 +1028,8 @@ impl Pkarr {
         {
             Ok(response) => response,
             Err(e) if e.is_timeout() => return RelayAnswer::Timeout,
-            Err(e) if e.is_connect() => return RelayAnswer::Unreachable(e.to_string()),
-            Err(e) => return RelayAnswer::Other(e.to_string()),
+            Err(e) if e.is_connect() => return RelayAnswer::Unreachable(request_error(&e)),
+            Err(e) => return RelayAnswer::Other(request_error(&e)),
         };
         self.note_rate_limit(url, &response);
         match response.status().as_u16() {
@@ -1129,7 +1149,7 @@ impl Pkarr {
                 "no answer"
             };
             self.breaker(url, Some((Failure::Error, reason)));
-            brief(&e.to_string())
+            request_error(&e)
         };
         let mut response = send(previous).await.map_err(failed)?;
         self.note_rate_limit(url, &response);
@@ -1190,11 +1210,7 @@ impl Pkarr {
             }
             RelayAnswer::Unreachable(reason) => {
                 self.with_budget(url, |budget| budget.rest());
-                diagnostics::log(&format!(
-                    "pkarr relay {} unreachable: {}",
-                    host(url),
-                    brief(&reason)
-                ));
+                diagnostics::log(&format!("pkarr relay {} unreachable: {reason}", host(url)));
                 self.breaker(url, Some((Failure::Error, "no answer")));
             }
             RelayAnswer::Other(reason) => {

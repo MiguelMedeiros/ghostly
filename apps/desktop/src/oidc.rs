@@ -181,6 +181,12 @@ fn open_in_browser(url: &str) -> Result<(), String> {
     let result = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
         .spawn();
+    // Android and iOS: no opener process; sign-in there goes through a deep link (the mobile host's own work).
+    #[cfg(mobile)]
+    let result: std::io::Result<std::process::Child> = Err(std::io::Error::other(format!(
+        "No browser to open {} from here",
+        url.split('?').next().unwrap_or_default()
+    )));
     // The opener exits at once; waiting for it keeps no zombie behind until the app quits.
     result
         .map(|mut child| drop(std::thread::spawn(move || child.wait())))
