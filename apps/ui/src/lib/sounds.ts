@@ -144,15 +144,29 @@ let idleTimer: ReturnType<typeof setTimeout> | undefined;
  */
 export const SOUNDS_IDLE_MS = 5_000;
 
+/**
+ * Whether the output is let go of between sounds. "suspend": suspended after `SOUNDS_IDLE_MS`, resumed for the next
+ * sound. "keep": left running. WebKitGTK before 2.52 holds the page inside a `resume()` that follows a `suspend()` (0.5
+ * s, then 5 to 16 s: the Linux app froze at a new chat's first sounds), so the Linux Desktop keeps the output running
+ * there (`setSoundsRelease`). Closing it instead is no way out: a new context does not start without a fresh gesture.
+ */
+export type SoundsRelease = "suspend" | "keep";
+let release: SoundsRelease = "suspend";
+export function setSoundsRelease(mode: SoundsRelease): void {
+  release = mode;
+  if (mode === "suspend") idleLater();
+  else { clearTimeout(idleTimer); idleTimer = undefined; }
+}
+
 /** Nothing plays and no call rings: the output is let go of after `SOUNDS_IDLE_MS`. */
 function idleLater(): void {
   clearTimeout(idleTimer);
   idleTimer = undefined;
-  if (!context || playing.size || ringing) return;
+  if (!context || playing.size || ringing || release === "keep") return;
   const ctx = context;
   idleTimer = setTimeout(() => {
     idleTimer = undefined;
-    if (ctx === context && !playing.size && !ringing && ctx.state === "running") void ctx.suspend?.().catch(() => {});
+    if (ctx === context && !playing.size && !ringing && release === "suspend" && ctx.state === "running") void ctx.suspend?.().catch(() => {});
   }, SOUNDS_IDLE_MS);
 }
 

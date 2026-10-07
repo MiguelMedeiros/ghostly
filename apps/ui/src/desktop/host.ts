@@ -34,6 +34,7 @@ import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appComman
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
 import { setAppBadgeTarget } from "../lib/appBadge";
+import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
 import { dockBadge } from "./dockBadge";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
@@ -230,6 +231,19 @@ export function macPeerBudget(agent = typeof navigator === "undefined" ? "" : na
 }
 
 /**
+ * Whether the sounds' audio output is suspended between sounds (apps/ui/src/lib/sounds.ts). WebKitGTK before 2.52
+ * holds the page inside an `AudioContext.resume()` that follows a `suspend()` (0.5 s, then 5 to 16 s; 2.52 resumes in
+ * milliseconds), so there it stays running. `webkit`: the WebKitGTK Rust reports (`webkit_version`), null while unknown.
+ * WKWebView (macOS) and WebView2 (Windows) resume at once.
+ */
+export function soundsRelease(webkit: readonly number[] | null, agent = typeof navigator === "undefined" ? "" : navigator.userAgent): SoundsRelease {
+  if (!/Linux/.test(agent) || /Android/.test(agent)) return "suspend";
+  if (!webkit) return "keep";
+  const [major = 0, minor = 0] = webkit;
+  return major > 2 || (major === 2 && minor >= 52) ? "suspend" : "keep";
+}
+
+/**
  * New Chat and Settings from outside the page. On a Mac they are the app menu's items (Cmd+N, Cmd+,), which Rust
  * sends as `app-command` (apps/desktop/src/app_window.rs). Linux and Windows have no menu bar: there the page takes
  * Ctrl+N and Ctrl+, itself. The Mac leaves the keys to the menu, so a press runs once.
@@ -270,6 +284,9 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
   listenForAppCommands();
+  // Kept running until Rust says which WebKitGTK this is: a sound before the answer must not freeze the page.
+  setSoundsRelease(soundsRelease(null));
+  void invoke<number[] | null>("webkit_version").then((webkit) => setSoundsRelease(soundsRelease(webkit))).catch(() => {});
   // A new profile asks for a name; never under an e2e suite, which runs no automated browser here (desktopUnderTest).
   setNameStepUnderTest(desktopUnderTest);
   // Files sent and received are real files in the app's data folder, written and read through Rust.
