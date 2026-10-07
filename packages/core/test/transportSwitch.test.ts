@@ -2,17 +2,25 @@ import { afterEach, expect, it, vi } from "vitest";
 import { TransportSwitch, type TransportPolicy, type SwitchPlan } from "../src/transportSwitch";
 // covers: transport.switch, transport.preference, transport.wait
 
-function peers(options: { waits?: boolean } = {}) {
+/**
+ * Two switches wired to each other. The coordinator's dial starts as `prepare` asks for it (a native dial does), unless
+ * `holdDial`: then it waits, as a move back to WebRTC waits for the session it left to retire, until `dial()` starts it.
+ */
+function peers(options: { waits?: boolean; holdDial?: boolean } = {}) {
   const policies: Omit<TransportPolicy, "revision" | "intent">[] = [0, 1].map(() => ({ preferred: "webrtc/1", fallback: true,
     available: ["webrtc/1", "iroh/1", "hyperdht/1"], descriptors: { "iroh/1": "iroh", "hyperdht/1": "hyper" } }));
   const queue: { side: number; frame: Record<string, unknown> }[] = [];
   const state = [vi.fn(), vi.fn()], prepare = [vi.fn(), vi.fn()], cancel = [vi.fn(), vi.fn()], unreached = [vi.fn(), vi.fn()], kept = [vi.fn(), vi.fn()];
-  const switches = [0, 1].map(i => new TransportSwitch({ key: String(i), peerKey: String(1-i),
+  let held: SwitchPlan | null = null;
+  const switches: TransportSwitch[] = [];
+  prepare[0].mockImplementation((plan: SwitchPlan, dial: boolean) => { if (!dial) return; if (options.holdDial) held = plan; else switches[0].dialing(plan); });
+  const dial = () => { if (held) switches[0].dialing(held); held = null; };
+  switches.push(...[0, 1].map(i => new TransportSwitch({ key: String(i), peerKey: String(1-i),
     policy: () => structuredClone(policies[i]), send: frame => queue.push({side: 1-i, frame: frame as Record<string, unknown>}),
-    peer: vi.fn(), state: state[i], prepare: prepare[i], cancel: cancel[i], kept: kept[i], timeoutMs: 100, ...(options.waits ? { unreached: unreached[i] } : {}) }));
+    peer: vi.fn(), state: state[i], prepare: prepare[i], cancel: cancel[i], kept: kept[i], timeoutMs: 100, ...(options.waits ? { unreached: unreached[i] } : {}) })));
   const flush = () => { let steps = 0; while (queue.length) { if (++steps > 100) throw new Error("Negotiation loop"); const {side, frame} = queue.shift()!; switches[side].handle(frame); } };
   switches.forEach(s => s.begin("session-1", "webrtc/1")); flush();
-  return { policies, queue, state, prepare, cancel, unreached, kept, switches, flush };
+  return { policies, queue, state, prepare, cancel, unreached, kept, switches, flush, dial };
 }
 afterEach(() => vi.useRealTimers());
 it.each([0, 1])("lets endpoint %s propose with no creator privilege", side => {
@@ -204,6 +212,37 @@ it.each([0, 1])("plans a choice made on side %s while another move was dialling,
   expect(h.switches.map(s => s.wanted()?.transport)).toEqual(["iroh/1", "iroh/1"]);
   expect(h.switches.every(s => s.pending?.choices[0] === "iroh/1")).toBe(true);
   expect(h.prepare[0]).toHaveBeenLastCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["iroh/1"]) }), true);
+  h.switches.forEach(s => s.stop());
+});
+it.each([0, 1])("a choice made on side %s before the planned move dialled replaces it: back where the chat is, no move", side => {
+  const h = peers({ waits: true, holdDial: true });
+  h.switches.forEach(s => s.begin("session-2", "iroh/1", true)); h.flush();
+  // Back to WebRTC: both sides agreed, the coordinator waits for the old WebRTC session to retire before it dials.
+  h.policies[side].preferred = "webrtc/1"; h.switches[side].changed(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "webrtc/1")).toBe(true);
+  expect(h.prepare[0]).toHaveBeenLastCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["webrtc/1"]) }), true);
+  // Iroh again, still before the dial: the move is dropped on both sides, and nothing is said missed.
+  h.policies[side].preferred = "iroh/1"; h.switches[side].changed(); h.flush();
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  expect(h.cancel[0]).toHaveBeenCalled();
+  h.dial();
+  [...h.kept, ...h.unreached].forEach(f => expect(f).not.toHaveBeenCalled());
+  expect(h.switches.map(s => s.wanted()?.transport)).toEqual(["iroh/1", "iroh/1"]);
+  h.state.forEach(s => expect(s.mock.lastCall).toEqual([]));
+  h.switches.forEach(s => s.stop());
+});
+it.each([0, 1])("a choice made on side %s before the planned move dialled replaces it: the newer target is planned at once", side => {
+  const h = peers({ waits: true, holdDial: true });
+  h.switches.forEach(s => s.begin("session-2", "iroh/1", true)); h.flush();
+  h.policies[side].preferred = "webrtc/1"; h.switches[side].changed(); h.flush();
+  h.policies[side].preferred = "hyperdht/1"; h.switches[side].changed(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  expect(h.prepare[0]).toHaveBeenLastCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["hyperdht/1"]) }), true);
+  [...h.kept, ...h.unreached].forEach(f => expect(f).not.toHaveBeenCalled());
+  // Once that move dials, a newer choice waits for it, as before.
+  h.dial();
+  h.policies[side].preferred = "iroh/1"; h.switches[side].changed(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
   h.switches.forEach(s => s.stop());
 });
 it("does not plan a failed move again by itself when nothing changed since (the owner's retry pace does)", () => {
