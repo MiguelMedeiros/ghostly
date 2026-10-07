@@ -102,4 +102,19 @@ pub mod app_sandbox {
     pub fn app_broker() -> Result<Value, String> {
         Err(NOT_HERE.into())
     }
+
+    #[tauri::command]
+    pub fn app_close() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
+
+    #[tauri::command]
+    pub fn app_open() -> Result<String, String> {
+        Err(NOT_HERE.into())
+    }
+
+    #[tauri::command]
+    pub fn app_post() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
 }
