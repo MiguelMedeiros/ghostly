@@ -7,7 +7,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice } from "../wallet/ui";
 import { NostrPublishDialog } from "./NostrPublishDialog";
 import { externalLinkProps } from "../../lib/externalLink";
-import { errorText } from "../../lib/errorText";
+import { problemLine } from "../../lib/problemText";
 
 
 /**
@@ -25,8 +25,8 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
   const [error, setError] = useState("");
   const [publish, setPublish] = useState<NostrDraftRequest | null>(null);
   const busy = view.loading;
-  const load = (what: "profile" | "follows" | "notes", more = false) => { setError(""); void engine.call("nostrLoadContact", { linkId, subject: view.subject, what, more }).catch(e => setError(errorText(e, t))); };
-  const loadOwn = (subject: string) => { setError(""); void engine.call("nostrLoadOwn", { subject }).catch(e => setError(errorText(e, t))); };
+  const load = (what: "profile" | "follows" | "notes", more = false) => { setError(""); void engine.call("nostrLoadContact", { linkId, subject: view.subject, what, more }).catch(e => setError(problemLine(e, t))); };
+  const loadOwn = (subject: string) => { setError(""); void engine.call("nostrLoadOwn", { subject }).catch(e => setError(problemLine(e, t))); };
   const p = view.profile, f = view.follows, n = view.notes;
   const profile = p?.profile;
   const myKey = f?.hints?.myKey ?? own[0]?.subject;
@@ -105,7 +105,7 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
         </div>
       </div>
 
-      {(p || f || n) && <Button data-testid="nostr-forget" disabled={!!busy} onClick={() => void engine.call("nostrForgetContact", { linkId, subject: view.subject }).catch(e => setError(errorText(e, t)))}>{t("identities.nostr.forget")}</Button>}
+      {(p || f || n) && <Button data-testid="nostr-forget" disabled={!!busy} onClick={() => void engine.call("nostrForgetContact", { linkId, subject: view.subject }).catch(e => setError(problemLine(e, t)))}>{t("identities.nostr.forget")}</Button>}
       {(error || view.error) && <Notice tone="error" testId="nostr-contact-error">{error || view.error}</Notice>}
       {publish && <NostrPublishDialog request={publish} onClose={() => setPublish(null)} onDone={() => load("follows")} />}
     </div>

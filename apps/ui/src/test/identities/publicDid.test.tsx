@@ -47,7 +47,7 @@ describe("Public DID", () => {
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, upToDate: false }) }));
     expect(screen.getByTestId("did-status")).toHaveTextContent("Publishing the change…");
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, error: "Publish failed on every relay" }) }));
-    expect(screen.getByTestId("did-status")).toHaveTextContent("Could not publish: Publish failed on every relay");
+    expect(screen.getByTestId("did-status")).toHaveTextContent("Could not publish: Can't reach the relays. Trying again in a few minutes.");
     act(() => engine.update({ did: didView(), settings: { online: false } }));
     expect(screen.getByTestId("did-status")).toHaveTextContent("Not published while the network is off.");
   });
@@ -56,8 +56,10 @@ describe("Public DID", () => {
     const { engine, user } = renderApp(<IdentityProofsSection />);
     act(() => engine.update({ did: didView(), identityProofs: [proofView({ id: "ssh", provider: "ssh", subject: "SHA256:abc" })] }));
     await ghostlyCard(user);
-    expect(screen.getByTestId("did-warning")).toHaveTextContent("public to everyone, for good");
-    expect(screen.getByTestId("did-warning")).toHaveTextContent("some resolvers keep copies");
+    expect(screen.getByTestId("did-warning")).toHaveTextContent("Public to everyone, for good");
+    // The why behind the ⓘ.
+    await user.click(screen.getByTestId("did-warning-info"));
+    expect(screen.getByText(/some resolvers keep copies/)).toBeInTheDocument();
     expect(screen.getByTestId("did-none")).toBeInTheDocument();
     expect(screen.queryByTestId("did-list")).not.toBeInTheDocument();
   });

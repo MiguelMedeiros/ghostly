@@ -21,7 +21,7 @@ import { DiscoveryHealth } from "./DiscoveryHealth";
 import { DirectBlockedHint } from "./DirectBlockedHint";
 import { ClockOffHint } from "./ClockOffHint";
 import { rawError } from "../lib/errorText";
-import { problemText } from "../lib/problemText";
+import { problemText, problemLine } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useWindowAway } from "../lib/windowAway";
 import { useOnline } from "../hooks/useOnline";
@@ -280,7 +280,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             {!!link?.transportHistory?.length && <ConnectionHistory events={link.transportHistory} contact={contact} />}
             {paired && <p>{t("connection.panel.fallbackNote")}</p>}
             {pair?.transitionTarget && <p>{t("connection.panel.preparing", { transport: name(pair.transitionTarget), current: name(pair.transport) })}</p>}
-            {online && !dht && !textDht && link?.dhtDelivery?.error && <p>{t("connection.panel.offlineText", { error: link.dhtDelivery.error })}</p>}
+            {online && !dht && !textDht && link?.dhtDelivery?.error && <p>{t("connection.panel.offlineText", { error: problemLine(link.dhtDelivery.error, t, "connect") })}</p>}
             {pinned && !pair?.keyMismatch && <p>{link?.peerVerified ? t("connection.panel.pinnedVerified") : t("connection.panel.pinnedUnverified")}</p>}
             {(dht || textDht) && <div data-testid="dht-delivery-details">
               <p>{t("connection.panel.dhtText", { bytes: link?.dhtDelivery?.maxTextBytes ?? 256 })}</p>

@@ -50,7 +50,6 @@ funded is reported and shot as the app shows it.
 | `groups.spec.ts` | `groups`, `groups-mobile` | "Bring the whole group": a private group with a picture and four members, joined by its link |
 | `identities.spec.ts` | `identities-chat`, `identities-chat-mobile` | "Prove who you are": SSH, OpenPGP, Bitcoin (signet) and Nostr proofs, verified on the contact's side |
 | `profiles.spec.ts` | `profiles` | "Your space": the Profile page with three profiles and backups |
-| `readme.spec.ts` | `x-readme-desktop`, `x-readme-phone` (scratch only) | The README's hero, in Dark: Boo's chat with Casper (a voice message, a photo) on a computer and a phone, with nothing reaching the Internet. Then `node apps/website/scripts/capture/readme-hero.mjs <scratch folder>` writes `docs/assets/readme/hero.webp` |
 | `agents.spec.ts` | `agents`, `agents-mobile` | /developers/agents, "What your agent can show": Boo's chat with Casper, an agent on the headless CLI (`HeadlessBot`), thinking, a task card done with its PR, a routine card and a task running. Build the CLI first (`npm run build -w @ghostlytools/cli`); no wallets needed |
 
 `helpers.ts` holds the cast (names, colors, pictures drawn on a canvas), pairing, conversations,

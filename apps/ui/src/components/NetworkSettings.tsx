@@ -7,7 +7,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Block, Field, FieldGrid, Row, Section } from "./layout";
 import { Switch } from "./wallet/ui";
-import { errorText } from "../lib/errorText";
+import { problemLine } from "../lib/problemText";
 import { clockOffTexts } from "../lib/clockOff";
 
 /**
@@ -64,7 +64,7 @@ export function NetworkSettings() {
       // Either spelling of a default (with or without the trailing dot of a full domain name) is that default.
       const defaults = network.iroh && JSON.stringify(irohRelays.map(url => irohRelayUrl(url))) === JSON.stringify(network.iroh.defaultRelays.map(url => irohRelayUrl(url)));
       await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), hyperdhtRelay: relay, pushRelay: push });
-    } catch (e) { setError(errorText(e, t)); return; }
+    } catch (e) { setError(problemLine(e, t)); return; }
     setSavedAs(current);
   };
 
@@ -74,7 +74,7 @@ export function NetworkSettings() {
     setError("");
     setSwitching(true);
     try { await platform.setNetwork({ relays: network.relays, readRelays: on }); }
-    catch (e) { setError(errorText(e, t)); }
+    catch (e) { setError(problemLine(e, t)); }
     finally { setSwitching(false); }
   };
 

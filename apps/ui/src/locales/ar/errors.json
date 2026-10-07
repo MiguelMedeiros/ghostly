@@ -303,7 +303,7 @@
     "sessionDropped": "انقطع الاتصال"
   },
   "profile": {
-    "arkBackup": "تعذّرت قراءة محفظة Ark للنسخ الاحتياطي: {{reason}}",
+    "arkBackup": "تعذّرت قراءة محفظة Ark للنسخ الاحتياطي",
     "backupTooLarge": "هذه النسخة أكبر من أن تُستعاد هنا.",
     "damagedBackup": "هذه النسخة الاحتياطية تالفة",
     "damagedBackupNext": "جرّب نسخة أخرى من الملف.",
