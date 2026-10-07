@@ -245,8 +245,15 @@ jobs:
         env:
           VITE_APPS_TEST: "1"
 
+      # The apps under test reach no public network (e2e/support/desktop.ts): their Iroh homes on this relay, the same
+      # one the e2e infra runs (e2e/infra/docker-compose.yml), instead of n0's.
+      - name: Start an Iroh relay
+        run: docker run -d --name ghostly-iroh-relay -p 127.0.0.1:47085:3340 n0computer/iroh-relay:v1.3.0 --dev
+
       - name: Run Desktop end-to-end tests
         run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
+        env:
+          GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
 
       - name: Upload report
         if: ${{ !cancelled() }}
