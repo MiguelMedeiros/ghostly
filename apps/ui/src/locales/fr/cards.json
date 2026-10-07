@@ -136,5 +136,21 @@
     },
     "steps": "{{done}} étapes sur {{total}}",
     "updated": "mise à jour {{ago}}"
+  },
+  "usage": {
+    "accountLabel": "Compte",
+    "info": "Ce que le bot dit qu'il lui reste. Ghostly ne le vérifie pas.",
+    "label": "{{name}} : {{left}} % restants",
+    "labelResets": "{{name}} : {{left}} % restants, renouvelé {{time}}",
+    "left": "{{left}} % restants",
+    "leftLabel": "Restant",
+    "resets": "renouvelé {{time}}",
+    "resetsLabel": "Renouvelé",
+    "stale": "pas mis à jour récemment",
+    "staleHint": "Chiffres anciens : le bot ne les a pas mis à jour récemment, ou la fenêtre s'est renouvelée.",
+    "title": "Utilisation",
+    "updatedLabel": "Mis à jour",
+    "used": "{{used}} sur {{limit}} utilisés",
+    "usedLabel": "Utilisé"
   }
 }

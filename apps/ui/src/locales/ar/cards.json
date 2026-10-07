@@ -136,5 +136,21 @@
     },
     "steps": "{{done}} من {{total}} خطوات",
     "updated": "حُدّثت {{ago}}"
+  },
+  "usage": {
+    "accountLabel": "الحساب",
+    "info": "ما يقول البوت إنه تبقّى له. لا يتحقق Ghostly منه.",
+    "label": "{{name}}: تبقّى {{left}}%",
+    "labelResets": "{{name}}: تبقّى {{left}}%، يتجدد {{time}}",
+    "left": "تبقّى {{left}}%",
+    "leftLabel": "المتبقي",
+    "resets": "يتجدد {{time}}",
+    "resetsLabel": "يتجدد",
+    "stale": "لم يُحدَّث مؤخرًا",
+    "staleHint": "أرقام قديمة: لم يحدّثها البوت مؤخرًا، أو تجددت الفترة.",
+    "title": "الاستخدام",
+    "updatedLabel": "آخر تحديث",
+    "used": "{{used}} من {{limit}} مستخدمة",
+    "usedLabel": "المستخدم"
   }
 }

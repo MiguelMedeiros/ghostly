@@ -136,5 +136,21 @@
     },
     "steps": "{{done}} of {{total}} steps",
     "updated": "updated {{ago}}"
+  },
+  "usage": {
+    "accountLabel": "Account",
+    "info": "What the bot says it has left. Ghostly doesn't check it.",
+    "label": "{{name}}: {{left}}% left",
+    "labelResets": "{{name}}: {{left}}% left, resets {{time}}",
+    "left": "{{left}}% left",
+    "leftLabel": "Left",
+    "resets": "resets {{time}}",
+    "resetsLabel": "Resets",
+    "stale": "not updated lately",
+    "staleHint": "Old numbers: the bot hasn't updated them lately, or the window has reset.",
+    "title": "Usage",
+    "updatedLabel": "Updated",
+    "used": "{{used}} of {{limit}} used",
+    "usedLabel": "Used"
   }
 }

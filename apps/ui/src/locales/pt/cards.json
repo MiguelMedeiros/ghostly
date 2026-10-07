@@ -136,5 +136,21 @@
     },
     "steps": "{{done}} de {{total}} etapas",
     "updated": "atualizada {{ago}}"
+  },
+  "usage": {
+    "accountLabel": "Conta",
+    "info": "O que o bot diz que ainda tem. O Ghostly não confere.",
+    "label": "{{name}}: restam {{left}}%",
+    "labelResets": "{{name}}: restam {{left}}%, renova {{time}}",
+    "left": "restam {{left}}%",
+    "leftLabel": "Resta",
+    "resets": "renova {{time}}",
+    "resetsLabel": "Renova",
+    "stale": "sem atualização recente",
+    "staleHint": "Números antigos: o bot não os atualizou há algum tempo, ou a janela já renovou.",
+    "title": "Uso",
+    "updatedLabel": "Atualizado",
+    "used": "{{used}} de {{limit}} usados",
+    "usedLabel": "Usado"
   }
 }
