@@ -210,6 +210,11 @@ fn paste_source() -> clipboard::PasteSource {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First of all, before anything here can make an HTTPS request (logcat shows it: RustStdoutStderr).
+    #[cfg(target_os = "android")]
+    if let Err(error) = android_tls() {
+        eprintln!("tls: Android's certificate verifier is not ready: {error}");
+    }
     let context = tauri::generate_context!();
     let builder = tauri::Builder::default();
     // Launched again on the same profile, it brings the running window forward and exits here, before its peer.
@@ -273,12 +278,6 @@ pub fn run() {
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
-            #[cfg(target_os = "android")]
-            if let Err(error) = android_tls() {
-                diagnostics::log(&format!(
-                    "tls: Android's certificate verifier is not ready: {error}"
-                ));
-            }
             notifications::install(app.handle());
             // Files sent and received in chats, one folder per profile.
             // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
@@ -338,8 +337,8 @@ pub fn run() {
 }
 
 /// Android: rustls-platform-verifier checks every HTTPS certificate with Android's own verifier, through the JVM, and
-/// panics on a request made before it knows the JVM and the app's context. Tao has both by now (`setup` runs after the
-/// activity's `onCreate`).
+/// panics on a request made before it knows the JVM and the app's context. Tao sets both in the activity's `onCreate`
+/// before it calls `run`.
 #[cfg(target_os = "android")]
 fn android_tls() -> Result<(), String> {
     let android = ndk_context::android_context();

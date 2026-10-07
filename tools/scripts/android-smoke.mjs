@@ -98,6 +98,23 @@ try {
     await page.evaluate(() => { location.hash = "#/"; });
   });
 
+  // New, as a person would: how long the invite takes to be published (the pairing scene leaves "publishing"), with
+  // the app's own relays and DHT, before the probe changes any setting.
+  await measure("pairing", "New: invite published", async () => {
+    const t = Date.now();
+    await page.locator('[title="New chat"]').first().click();
+    const scene = page.locator('[data-testid="pairing-scene"], [data-testid="pairing-glyph"]').first();
+    await scene.waitFor({ state: "attached", timeout: 30_000 });
+    let stage = await scene.getAttribute("data-stage");
+    while (stage === "publishing" && Date.now() - t < 90_000) {
+      await sleep(250);
+      stage = await scene.getAttribute("data-stage").catch(() => null);
+    }
+    record("pairing", "New: invite published", stage !== "publishing" && stage !== "failed", `${Date.now() - t} ms to "${stage}"`);
+    await page.screenshot({ path: resolve(out, "new.png") }).catch(() => {});
+    await page.evaluate(() => { location.hash = "#/"; });
+  });
+
   // From here on, the page's own Tauri bridge: what the app's code would call.
   const invoke = (cmd, args, options) => page.evaluate(([cmd, args, options]) => window.__TAURI_INTERNALS__.invoke(cmd, args, options), [cmd, args, options]);
 
@@ -305,6 +322,8 @@ try {
     // Each publish's sources and when each answered (pkarr_network.rs: "pkarr publish <key> done dht=ok@<ms> ...").
     const publishes = ours.map((l) => l.match(/pkarr publish \w+ done (.*)$/)?.[1]).filter(Boolean);
     record("pkarr", "publish timings (app log)", null, publishes.join(" / ") || "none");
+    const relayErrors = ours.filter((l) => /pkarr relay .* (unreachable|answered oddly)|=err@|tls:/.test(l)).map((l) => l.replace(/^.*?RustStdoutStderr\(\s*\d+\): /, ""));
+    record("pkarr", "relay errors (app log)", relayErrors.length === 0 ? true : null, relayErrors.slice(0, 6).join(" / ").slice(0, 900) || "none");
     const crash = logcat.split("\n").filter((l) => /FATAL EXCEPTION|panicked at|SIGSEGV|SIGABRT/.test(l));
     record("smoke", "no crash in logcat", crash.length === 0, crash.slice(0, 3).join(" / ").slice(0, 600) || "none");
     if (crash.length) smokeFailed = true;
