@@ -206,12 +206,14 @@ export function fakePeerConnection(owner?: string): RTCPeerConnection {
  * `disconnected` once ICE consent checks stop being answered, `disconnectedAfterMs` later. `farFailsAfterMs`: it never
  * does (node-datachannel, the CLI's WebRTC, reports no `disconnected`), and its connection goes `failed` this long after.
  */
-export function killRtc(owner: string, disconnectedAfterMs = 5_000, farFailsAfterMs?: number): void {
+export function killRtc(owner: string, disconnectedAfterMs = 5_000, farFailsAfterMs?: number): EventTarget[] {
+  const killed: EventTarget[] = [];
   for (const pc of [...peerConnections]) {
     if (pc.owner !== owner || pc.closed) continue;
     peerConnections.delete(pc);
     pc.closed = true; pc.connectionState = "closed";
     const channel = pc.channel, far = channel?.peer;
+    if (channel) killed.push(channel);
     if (channel) { channel.peer = null; channel.readyState = "closed"; }
     const farPc = [...peerConnections].find(other => other.channel === far);
     if (farPc) setTimeout(() => {
@@ -220,6 +222,8 @@ export function killRtc(owner: string, disconnectedAfterMs = 5_000, farFailsAfte
       farPc.dispatchEvent(new Event("connectionstatechange"));
     }, farFailsAfterMs ?? disconnectedAfterMs);
   }
+  // The owner's own channels, closed without a word: a test may let the owner hear it later (`close`).
+  return killed;
 }
 
 export interface Side { params: LinkParams; seedB64: string; role: "inviter" | "joiner"; createdAt: number; /** An app from before pairing progress: no tracker, the lower key dials. */ old?: boolean }
