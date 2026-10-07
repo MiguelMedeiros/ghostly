@@ -124,6 +124,10 @@ export interface InstalledAppView {
   sequence: number;
   digest: string;
   permissions: AppPermission[];
+  /** The URL the installed version was read from: what an app card sent in a chat names (WISP 405 § An app). */
+  from: string;
+  /** The bundle has an `icon.png` (read with `appFile`, no request). */
+  icon: boolean;
   installedAt: number;
   updatedAt: number;
   run: AppRunStatus;
@@ -821,6 +825,7 @@ export class Apps {
       ref: app.ref, name: app.name, publisher: app.publisher, fingerprint: appFingerprint(app.publisher),
       title: manifest.title, tagline: manifest.tagline, ...(manifest.description !== undefined && { description: manifest.description }),
       version: manifest.version, sequence: app.sequence, digest: app.digest, permissions: [...app.permissions],
+      from: app.from, icon: manifest.files.some((f) => f.path === "icon.png"),
       installedAt: app.installedAt, updatedAt: app.updatedAt,
       run: await this.runCheckOf(app, stores), listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
       ...(app.pending && { pending: { sequence: app.pending.sequence, version: app.pending.manifest.version, added: [...app.pending.added] } }),

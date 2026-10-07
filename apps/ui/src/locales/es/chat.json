@@ -359,6 +359,7 @@
     "sharingMany": "Compartes {{count}} apps",
     "sharingOne": "Compartes 1 app",
     "title": "Apps con {{name}}",
+    "titleShared": "Servicios compartidos con {{name}}",
     "yours": "Tus apps"
   },
   "setName": "Pon un nombre...",
