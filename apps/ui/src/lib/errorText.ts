@@ -342,6 +342,16 @@ const RULES: readonly Rule[] = [
   { match: /^Could not read the Ark wallet for the backup: (?<reason>[\s\S]+)$/, key: "errors.profile.arkBackup", reason: "next" },
   exact("This wallet has no recovery phrase to show", "errors.profile.noPhrase"),
   exact("This wallet has no backup file", "errors.profile.noBackupFile"),
+  // Identity proofs (packages/browser/src/proofs): what failed, in a few words; the record, file or key it names behind
+  // the ⓘ. "Made by another key" stays in the line: it is why the proof is refused.
+  { match: /^This signature was made by another key(?: \([0-9A-F]+\))?, not the public key given\.$/, key: "errors.proof.otherKey", next: "errors.proof.otherKeyPgpNext", detail: true },
+  { match: /^That signature was made by \S+, not the key you entered \([^)]*\)$/, key: "errors.proof.otherKey", next: "errors.proof.otherKeySshNext", detail: true },
+  { match: /^No Ghostly TXT record at \S+(?: \(DNS changes can take a few minutes\))?$/, key: "errors.proof.noDnsRecord", next: "errors.proof.noDnsRecordNext", detail: true },
+  { match: /^https:\/\/\S+ was not found$/, key: "errors.proof.fileNotFound", detail: true },
+  { match: /^https:\/\/\S+ was not found: it was deleted, or not uploaded yet$/, key: "errors.proof.fileNotFound", next: "errors.proof.fileNotFoundNext", detail: true },
+  { match: /^https:\/\/\S+ names no Ghostly proof$/, key: "errors.proof.fileNoProof", detail: true },
+  { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
+  { match: /^Enter at least one relay address \((?:https|wss):\/\/…\)$/, key: "errors.relays.atLeastOne" },
   exact("Choose a picture", "errors.picture.choose"),
   exact("That picture is too large (max 20 MB)", "errors.picture.tooLarge"),
   exact("This picture cannot be read here. Try a JPEG or PNG.", "errors.picture.unreadableTryJpeg"),
