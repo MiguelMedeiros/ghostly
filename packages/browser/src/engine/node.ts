@@ -509,6 +509,8 @@ export interface NodeEvents {
   onCallSignal(linkId: string, signal: string): void;
   /** A contact's mini-app frame in a 1:1 chat, already checked (`apps/1`, WISP 1200 § In a chat); never stored. */
   onAppFrame?(linkId: string, event: AppFrameEvent): void;
+  /** An update check of the installed mini-apps ran (WISP 1200 § Updates): the pages read them again, and stop those it stopped. */
+  onAppsChecked?(): void;
   /**
    * The device state changed so that this engine may no longer run (WISP 06): another device took the turn. The state
    * is written; the pages show the standby screen and start again into the gate.
@@ -2009,6 +2011,7 @@ export class GhostlyNode implements EngineImplementation {
       fetch: boundedAppFetch({ fetcher: this.options.appFetch, online: () => this.networkOn }),
       isChat: (scope) => { const stored = this.links.get(scope)?.stored; return !!stored && !stored.group && !!stored.profile && !!stored.pairedPeerKey; },
       online: () => this.networkOn && !this.shuttingDown,
+      checked: () => this.events.onAppsChecked?.(),
     });
   }
   appList(): Promise<InstalledAppView[]> { return this.appStore.list(); }
@@ -4169,9 +4172,11 @@ export class GhostlyNode implements EngineImplementation {
    * This side opened an app in a paired chat, or updated it: `open` goes to the contact now when the session is live,
    * and again on every session that comes back while it stays open.
    */
-  appOpen({ linkId, ref, version }: { linkId: string; ref: string; version: string }): { app: string } {
+  async appOpen({ linkId, ref, version }: { linkId: string; ref: string; version: string }): Promise<{ app: string }> {
     const { live, app } = this.appChat(linkId, ref);
     if (!isAppVersion(version)) throw new Error("Not an app version");
+    // A version removed or revoked since it started says nothing more to the contact (WISP 1200 § Takedowns).
+    await this.appStore.chatRunnable({ ref });
     const open = live.appsOpen ??= new Map();
     if (live.link) live.link.openApp(app, version);
     else open.set(app, version);
@@ -4186,9 +4191,10 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** One data frame of an app open on both sides, on the live session only; nothing is kept to send later. */
-  appSend({ linkId, ref, data }: { linkId: string; ref: string; data: unknown }): { error: AppSendError | null } {
+  async appSend({ linkId, ref, data }: { linkId: string; ref: string; data: unknown }): Promise<{ error: AppSendError | null }> {
     const { live, app } = this.appChat(linkId, ref);
     if (!live.appsOpen?.has(app)) return { error: "not-open" };
+    await this.appStore.chatRunnable({ ref });
     return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
   }
 

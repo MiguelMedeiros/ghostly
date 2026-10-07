@@ -126,10 +126,10 @@ const refuse = (code: string): never => { throw new Refusal(code); };
 
 /**
  * The engine's refusals an app is told by their code (its errors cross the RPC as "<code>: words", engine/apps.ts):
- * `full` (its storage in this scope holds 5 MiB), `no-file` (no such file in its bundle), and the bounds the broker
- * checks too. Any other failure is `failed`, without the words.
+ * `full` (its storage in this scope holds 5 MiB), `no-file` (no such file in its bundle), `stopped` (a store removed
+ * or its publisher revoked the version running, WISP 1200 § Takedowns), and the bounds the broker checks too. Any other failure is `failed`, without the words.
  */
-const ENGINE_REFUSALS: ReadonlySet<string> = new Set(["full", "no-file", "too-large", "bad-key"]);
+const ENGINE_REFUSALS: ReadonlySet<string> = new Set(["full", "no-file", "too-large", "bad-key", "stopped"]);
 
 function refusalOf(error: unknown): string {
   if (error instanceof Refusal) return error.message;
