@@ -84,7 +84,15 @@ fn only_main<R: tauri::Runtime>(
             invoke.resolver.reject("Not allowed from this window");
             return true;
         }
-        handler(invoke)
+        // PROBE r11k: a command that holds the calling thread.
+        let command = invoke.message.command().to_string();
+        let started = std::time::Instant::now();
+        let handled = handler(invoke);
+        let took = started.elapsed().as_millis();
+        if took > 200 {
+            diagnostics::log(&format!("probe slow-command {command} {took}ms main={}", std::thread::current().name().unwrap_or("?")));
+        }
+        handled
     }
 }
 
@@ -282,6 +290,20 @@ pub fn run() {
                 diagnostics::init(&dir);
             }
             notifications::install(app.handle());
+            // PROBE r11k: how long the main thread takes to run a closure sent to it.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    let sent = std::time::Instant::now();
+                    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+                    let (tx, rx) = std::sync::mpsc::channel::<()>();
+                    if handle.run_on_main_thread(move || { let _ = tx.send(()); }).is_err() { break; }
+                    let _ = rx.recv();
+                    let waited = sent.elapsed().as_millis();
+                    if waited > 600 { diagnostics::log(&format!("probe main-gap {waited}ms from {at}")); }
+                });
+            }
             // Files sent and received in chats, one folder per profile.
             // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
             app.manage(local_access::LocalAccess::load(

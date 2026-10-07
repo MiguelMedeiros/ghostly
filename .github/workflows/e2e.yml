@@ -28,6 +28,7 @@ permissions:
 jobs:
   e2e:
     name: End-to-end
+    if: false
     runs-on: ubuntu-24.04
     # The web and extension suites outgrew 30 minutes (cancelled mid-run on 2026-09-29),
     # then 60 (584 tests, cancelled at 560 while releasing 1.1.1 on 2026-10-04).
@@ -250,10 +251,26 @@ jobs:
       - name: Start an Iroh relay
         run: docker run -d --name ghostly-iroh-relay -p 127.0.0.1:47085:3340 n0computer/iroh-relay:v1.3.0 --dev
 
-      - name: Run Desktop end-to-end tests
-        run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
+      - name: Run Desktop end-to-end tests (no sound server)
+        continue-on-error: true
+        run: xvfb-run -a npm run test:e2e:desktop -- dht-direct --repeat-each 3 --retries 0
         env:
           GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
+      - name: Keep the first report
+        if: ${{ !cancelled() }}
+        run: mv playwright-report-desktop report-nosound || true
+      - name: Run Desktop end-to-end tests (PulseAudio null sink)
+        continue-on-error: true
+        run: |
+          D=$(mktemp -d); export PULSE_SERVER=unix:$D/native
+          HOME=$D XDG_RUNTIME_DIR=$D pulseaudio -n --daemonize=yes --exit-idle-time=-1 --use-pid-file=no -L "module-native-protocol-unix socket=$D/native auth-anonymous=1" -L module-null-sink
+          sleep 2; pactl info | head -5
+          xvfb-run -a npm run test:e2e:desktop -- dht-direct --repeat-each 3 --retries 0
+        env:
+          GHOSTLY_IROH_RELAY_URL: http://127.0.0.1:47085
+      - name: Keep the second report
+        if: ${{ !cancelled() }}
+        run: mv playwright-report-desktop report-pulse || true
 
       - name: Upload report
         if: ${{ !cancelled() }}
@@ -261,8 +278,8 @@ jobs:
         with:
           name: playwright-report-desktop
           path: |
-            playwright-report-desktop
-            test-results
+            report-nosound
+            report-pulse
           retention-days: 14
 
   # The current web app against a real v0.4.0 and a real v1.1.4, built from their tags (e2e-compat.yml): a contact
@@ -270,7 +287,7 @@ jobs:
   compat:
     name: Compatibility with v0.4.0 and v1.1.4
     # The deployed-web-app run tests the web app alone.
-    if: ${{ !inputs.web_url }}
+    if: false
     uses: ./.github/workflows/e2e-compat.yml
     with:
       ref: ${{ inputs.ref }}

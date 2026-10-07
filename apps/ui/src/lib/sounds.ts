@@ -143,6 +143,8 @@ let idleTimer: ReturnType<typeof setTimeout> | undefined;
  * so it is suspended between sounds and resumed for the next one, which costs that sound a few milliseconds.
  */
 export const SOUNDS_IDLE_MS = 5_000;
+// PROBE r11k: how long each Web Audio call holds the page.
+function T<V>(label: string, fn: () => V): V { const t = Date.now(); try { return fn(); } finally { const d = Date.now() - t; (globalThis as any).__probe?.(`audio ${label} sync ${d}ms at ${t} state=${context?.state}`); } }
 
 /** Nothing plays and no call rings: the output is let go of after `SOUNDS_IDLE_MS`. */
 function idleLater(): void {
@@ -152,7 +154,7 @@ function idleLater(): void {
   const ctx = context;
   idleTimer = setTimeout(() => {
     idleTimer = undefined;
-    if (ctx === context && !playing.size && !ringing && ctx.state === "running") void ctx.suspend?.().catch(() => {});
+    if (ctx === context && !playing.size && !ringing && ctx.state === "running") { const t=Date.now(); void T("suspend", () => ctx.suspend?.())?.then(() => (globalThis as any).__probe?.(`audio suspend resolved after ${Date.now()-t}ms`)).catch(() => {}); }
   }, SOUNDS_IDLE_MS);
 }
 
@@ -160,7 +162,7 @@ function idleLater(): void {
 async function awake(ctx: AudioContext): Promise<boolean> {
   clearTimeout(idleTimer);
   idleTimer = undefined;
-  if (ctx.state !== "running") await ctx.resume().catch(() => {});
+  if (ctx.state !== "running") { const t=Date.now(); await T("resume", () => ctx.resume()).catch(() => {}); (globalThis as any).__probe?.(`audio resume resolved after ${Date.now()-t}ms state=${ctx.state}`); }
   return ctx.state === "running";
 }
 
@@ -172,7 +174,7 @@ function load(name: SoundName): Promise<AudioBuffer> | undefined {
     decoded.set(name,fetch(url).then(response => {
       if (!response.ok) throw new Error("Sound unavailable");
       return response.arrayBuffer();
-    }).then(bytes=>ctx.decodeAudioData(bytes)));
+    }).then(bytes=>T(`decode ${name}`, () => ctx.decodeAudioData(bytes))));
   }
   return decoded.get(name);
 }
@@ -183,14 +185,14 @@ export function installAudioGestures(): () => void {
   listening = true;
   const unlock = () => {
     try {
-      context ??= new AudioContext();
+      context ??= T("new", () => new AudioContext());
       unfollowSpeaker ??= followSpeaker(context).stop;
       // Only the first gesture starts it; later ones leave a let-go output alone until a sound needs it.
       if (!unlocked) {
         const ctx = context;
         const started = () => { if (ctx.state === "running") { unlocked = true; idleLater(); } };
         if (ctx.state === "running") started();
-        else void ctx.resume().then(started).catch(()=>{});
+        else void T("resume-gesture", () => ctx.resume()).then(started).catch(()=>{});
       }
       for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
     } catch { /* no audio device */ }
@@ -215,6 +217,7 @@ export function installAudioGestures(): () => void {
 }
 
 export function playSound(name: SoundName): () => void {
+  (globalThis as any).__probe?.(`audio play ${name} ctx=${context?.state} unlocked=${unlocked}`);
   if (!loadSettings().notifications.soundEnabled || !context || !unlocked) return () => {};
   const ctx=context, started=Date.now();
   let cancelled=false;
@@ -232,7 +235,7 @@ export function playSound(name: SoundName): () => void {
     if(buffer){
       const source=ctx.createBufferSource(),gain=ctx.createGain();
       source.buffer=buffer;gain.gain.value=0.2;
-      source.connect(gain).connect(ctx.destination);sources.push(source);source.start(start);
+      T(`start ${name}`, () => { source.connect(gain).connect(ctx.destination);sources.push(source);source.start(start); });
       expiry=setTimeout(ended,buffer.duration*1000+100);
     }else{
       for(const note of SOUNDS[name] as Note[]){

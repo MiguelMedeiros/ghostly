@@ -269,6 +269,9 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
+  // PROBE r11k: the page's event-loop gaps, and a sink for the sync timings below.
+  (globalThis as any).__probe = (line: string) => void invoke("diagnostic_log", { line: `probe ${line}` }).catch(() => {});
+  { let last = Date.now(); setInterval(() => { const now = Date.now(); if (now - last > 600) (globalThis as any).__probe(`js-gap ${now - last}ms from ${last}`); last = now; }, 100); }
   listenForAppCommands();
   // A new profile asks for a name; never under an e2e suite, which runs no automated browser here (desktopUnderTest).
   setNameStepUnderTest(desktopUnderTest);
