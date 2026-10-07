@@ -13,6 +13,11 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * text before the link is live, and the capability records that take the pair live on Iroh or HyperDHT are
  * all read off a DHT of their own (GHOSTLY_PKARR_DHT_BOOTSTRAP, e2e/support/mainlineTestnet.ts). The relay
  * is still written to, for contacts in a browser, which read only relays; the apps never read it.
+ *
+ * Iroh's relay is out of reach here (`GHOSTLY_IROH_RELAYS` on a closed port, whatever relay the run has), so the pair
+ * goes live on HyperDHT from the descriptors in each other's capability record. Before #1404 Iroh homed on n0's relay
+ * a few seconds in, and the record went out a third time: that hid that the second one, with the descriptors, was
+ * refused by the DHT while the first was still being put (apps/desktop/src/pkarr_network.rs `put_newest`).
  */
 
 /** How many times the open conversation shows this exact text. */
@@ -42,7 +47,7 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
   const [network, dht] = await Promise.all([desktopNetwork(relay), mainlineTestnet()]);
   const cleanup: (() => Promise<void> | void)[] = [() => relay.close(), () => network.close(), () => dht.close()];
   try {
-    const env = { ...network.env, GHOSTLY_PKARR_DHT_BOOTSTRAP: dht.bootstrap };
+    const env = { ...network.env, GHOSTLY_PKARR_DHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_IROH_RELAYS: "http://127.0.0.1:9" };
     const open = async (name: string): Promise<DesktopPerson> => {
       const home = desktopHome(name);
       const person = await desktopPerson(name, { home: home.dir, env });
@@ -58,11 +63,13 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
     for (const p of [a, b]) {
       await expect.poll(() => p.canWrite(), { timeout: 120_000, message: `${p.name}'s chat is open` }).toBe(true);
     }
+    const opened = Date.now();
     await a.say("found on the DHT");
     await expect.poll(() => count(b, "found on the DHT"), { timeout: 180_000, message: "bia gets the text" }).toBe(1);
     for (const p of [a, b]) {
       await expect.poll(() => p.connection(), { timeout: 180_000, message: `${p.name} goes live` }).toMatch(/Connected · (Iroh|HyperDHT)/);
     }
+    test.info().annotations.push({ type: "live", description: `${Math.round((Date.now() - opened) / 1000)} s after both chats opened` });
 
     for (const p of [a, b]) {
       expect(await discovery(p), `${p.name}'s panel`).toEqual({ path: "DHT direct", relays: ["ok"] });
