@@ -7,7 +7,8 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useCopyKey } from "../../hooks/useCopyKey";
 import { idCard } from "./idCard";
 import { ProviderMark, StatusPill } from "./ProviderMark";
-import { errorText } from "../../lib/errorText";
+import { problemLine, problemText } from "../../lib/problemText";
+import { InfoLine } from "../devices/DeviceDialog";
 
 /**
  * The profile's public DID (did:dht, WISP 310-did-dht), in the Ghostly card's details: the identifier with
@@ -25,13 +26,13 @@ export function PublicDid({ state }: { state: EngineState }) {
 
   const now = Date.now() / 1000;
   const listable = state.identityProofs.filter(p => p.publicUri);
-  const status = did.error ? t("identities.did.failed", { error: did.error })
+  const status = did.error ? t("identities.did.failed", { error: problemText(did.error, t).title.replace(/\.$/, "") })
     : did.published && did.upToDate ? t("identities.did.published", { time: new Date(did.published.at).toLocaleString() })
     : !state.settings.online ? t("identities.did.offline")
     : did.published ? t("identities.did.updating") : t("identities.did.publishing");
   const list = (id: string, listed: boolean) => {
     setBusy(id); setError("");
-    void engine.call("setDidListed", { id, listed }).catch(e => setError(errorText(e, t))).finally(() => setBusy(""));
+    void engine.call("setDidListed", { id, listed }).catch(e => setError(problemLine(e, t))).finally(() => setBusy(""));
   };
 
   return (
@@ -52,7 +53,7 @@ export function PublicDid({ state }: { state: EngineState }) {
       </Block>
       <Block testId="did-links">
         <p className="text-xs font-medium text-text-secondary">{t("identities.did.listTitle")}</p>
-        <Notice tone="warning" testId="did-warning">{t("identities.did.warning")}</Notice>
+        <InfoLine testId="did-warning" className="text-xs text-yellow-500" info={t("identities.did.warningInfo")}>{t("identities.did.warning")}<span className="block text-text-secondary">{t("identities.did.warningNext")}</span></InfoLine>
         {listable.length === 0 ? <p className="text-xs text-text-muted" data-testid="did-none">{t("identities.did.none")}</p>
           : listable.map(p => {
             const card = idCard(p, { now });

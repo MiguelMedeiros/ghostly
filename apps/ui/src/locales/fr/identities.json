@@ -139,7 +139,9 @@
     "showQr": "Afficher le code QR",
     "title": "DID public",
     "updating": "Publication de la modification…",
-    "warning": "Tout ce qui est affiché ici est public, pour tout le monde et pour toujours : quiconque a votre DID le voit, et certains résolveurs en gardent des copies même après que vous l'avez retiré. Les discussions n'en ont jamais besoin. Laissez désactivé pour partager chaque identité avec un seul contact à la fois."
+    "warning": "Public pour tous, pour toujours",
+    "warningInfo": "Quiconque a votre DID voit ce qui est affiché ici, et certains résolveurs en gardent des copies même après que vous l'avez retiré.",
+    "warningNext": "Les discussions n'en ont pas besoin. Laissez désactivé pour partager avec un contact à la fois."
   },
   "face": {
     "hint": "Nom et photo dans votre liste de discussions. Sur cet appareil seulement.",

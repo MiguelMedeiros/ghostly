@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { contactArrived, deriveStage, pairingView, reportedProgress, stepIndex, type PairingProgress, type PairingRole, type PairingStage } from "../lib/pairingProgress";
 import { loadSettings } from "../lib/settings";
 import { playSound } from "../lib/sounds";
-import { errorText } from "../lib/errorText";
+import { problemLine } from "../lib/problemText";
 import { useT } from "../contexts/I18nContext";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -179,7 +179,7 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
     if (!linkId) return;
     setRetrying(true); setRetryError(""); setAttempt(n => n + 1);
     try { await engine.call("connect", { linkId }); }
-    catch (cause) { setRetryError(errorText(cause, t)); }
+    catch (cause) { setRetryError(problemLine(cause, t)); }
     finally { setRetrying(false); }
   }, [linkId, t, setAttempt]);
 

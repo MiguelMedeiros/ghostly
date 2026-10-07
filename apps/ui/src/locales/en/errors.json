@@ -303,7 +303,7 @@
     "sessionDropped": "Connection dropped"
   },
   "profile": {
-    "arkBackup": "Could not read the Ark wallet for the backup: {{reason}}",
+    "arkBackup": "Couldn't read the Ark wallet for the backup",
     "backupTooLarge": "This backup is too large to restore here.",
     "damagedBackup": "This backup is damaged",
     "damagedBackupNext": "Try another copy of the file.",

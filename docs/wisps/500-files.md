@@ -32,11 +32,11 @@ See the concrete profiles above for current fields, limits, receipt semantics an
 
 Retain bounded admission before allocation, backpressure, explicit cancellation/reset, exact length checks and local storage accounting. A file larger than an implementation takes by itself needs its person's consent before any byte is written; the size limit is the receiver's storage, which it advertises, not a constant. Received bytes should go to storage as they arrive rather than be gathered in memory. Names are display/download suggestions, never paths; sanitize and store under locally chosen IDs. No automatic execution. An enabled file capability does not authorize unlimited disk writes.
 
-For other adapters, preserve these semantics through their framing and flow-control mapping. Group files are not multicast file chunks by default: announce bounded authenticated metadata over the group channel and negotiate bulk transfer off the DHT with willing peers. Group access and encryption require 900; the existing pairwise profile does not provide them.
+For other adapters, preserve these semantics through their framing and flow-control mapping. Group files are not multicast file chunks by default: announce bounded authenticated metadata over the group channel and negotiate bulk transfer off the DHT with willing peers. Group access and encryption require 900; the existing pairwise profile does not provide them. [503](503-group-files.md) is that profile: the announcement is a group message, the bytes go over `files/3` between two members.
 
 ## Compatibility, security and open decisions
 
-Preserve existing framing as a versioned profile. Paired 501 implements a SHA-256 integrity check and final durable-storage receipt; legacy 502 does not. Since revision 0.3, 501's `files/3` resumes from the stored offset, asks the receiver's person before a large file and advertises the space the receiver has. Multi-source content addressing, offline download and group distribution remain unsupported. Choose their semantics before advertising support. Cancelled partial files must release quota; MIME labels are untrusted.
+Preserve existing framing as a versioned profile. Paired 501 implements a SHA-256 integrity check and final durable-storage receipt; legacy 502 does not. Since revision 0.3, 501's `files/3` resumes from the stored offset, asks the receiver's person before a large file and advertises the space the receiver has. Multi-source content addressing and offline download remain unsupported. Choose their semantics before advertising support. Group distribution is proposed in [503 · Group Files](503-group-files.md) (revision 2026-10-07), not built yet. Cancelled partial files must release quota; MIME labels are untrusted.
 
 ## Conformance
 

@@ -139,7 +139,9 @@
     "showQr": "Mostrar código QR",
     "title": "DID público",
     "updating": "Publicando el cambio…",
-    "warning": "Todo lo que se muestre aquí es público para todos y para siempre: cualquiera con tu DID lo ve, y algunos resolvedores guardan copias incluso después de que lo quites. Los chats nunca lo necesitan. Déjalo desactivado para compartir cada identidad con un contacto a la vez."
+    "warning": "Público para todos, para siempre",
+    "warningInfo": "Cualquiera con tu DID ve lo que se muestre aquí, y algunos resolvedores guardan copias incluso después de que lo quites.",
+    "warningNext": "Los chats no lo necesitan. Déjalo desactivado para compartir con un contacto a la vez."
   },
   "face": {
     "hint": "Nombre y foto en tu lista de chats. Solo en este dispositivo.",
