@@ -271,7 +271,7 @@ mounted over: `node_modules` must be Linux's), then `npm ci`, `npm run tauri -- 
 
 `openDesktop({ profile, home, env })` opens one more app: `profile` is its `GHOSTLY_PROFILE`, `home` a directory of
 its own for `HOME` and the XDG directories (`desktopHome(name)` makes one; two apps on one machine otherwise
-share one WebKit store), and `env` whatever else it should start with. The app reads three variables for its network,
+share one WebKit store), and `env` whatever else it should start with. The app reads these variables for its network,
 for a private network as much as for tests:
 
 | | |
@@ -280,6 +280,13 @@ for a private network as much as for tests:
 | `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`apps/desktop/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
 | `GHOSTLY_DHT` | `0` keeps the headless CLI off the Mainline DHT (relays only); the e2e helpers and the CLI's own tests set it unless a test runs its own DHT testnet (`GHOSTLY_DHT_BOOTSTRAP`) |
 | `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native/transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
+| `GHOSTLY_IROH_RELAYS` | comma-separated Iroh relay URLs instead of n0's public ones, unless the profile names its own in Settings (`apps/desktop/src/paired_transport.rs`) |
+
+Every driver (`support/desktop.ts`, `support/desktopMac.ts`, `support/streamCheck.ts`) starts the app on this machine
+only: a dead Pkarr relay (and so no Mainline DHT), a dead HyperDHT bootstrap and an Iroh relay that is the e2e infra's
+(`GHOSTLY_IROH_RELAY_URL`) or a dead one, each unless the test or the shell names its own on loopback
+(`desktopTestNetworkEnv` in `packages/cli/test/support/network.ts`). A public host there is refused;
+`GHOSTLY_TEST_PUBLIC_NET=1` allows the app's own networks. The WebView's public STUN servers have no knob on Desktop.
 
 `DesktopApp` clicks, types (`type`, with `\uE007` for Enter), reads text and attributes, and runs a script in the
 page (`execute`): enough for `matrix/people.ts` to drive a chat.

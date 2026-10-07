@@ -5,6 +5,7 @@ import { createServer, type Server } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { desktopBinary, type DesktopApp } from "./desktop";
 import { MacDriver } from "./desktopMac";
+import { desktopTestNetworkEnv } from "../../packages/cli/test/support/network";
 
 /**
  * The Desktop checks that a video too large for the page plays and seeks from the stored file (`ghostly-file`,
@@ -153,8 +154,8 @@ export async function openDriven(env: Record<string, string> = {}): Promise<{ ap
   const child = spawn(desktopBinary(), [], {
     stdio: ["ignore", "pipe", "pipe"],
     // GHOSTLY_E2E: never a new profile's default Mainnet wallets (#682). This driver sets no navigator.webdriver, and
-    // the build has the real bundle id.
-    env: { ...process.env, GHOSTLY_E2E: "1", GHOSTLY_PROFILE: "e2e-stream", GHOSTLY_E2E_DRIVER: String(port), GHOSTLY_E2E_DRIVER_TOKEN: token, ...env },
+    // the build has the real bundle id. No public network: packages/cli/test/support/network.ts.
+    env: desktopTestNetworkEnv({ GHOSTLY_E2E: "1", GHOSTLY_PROFILE: "e2e-stream", GHOSTLY_E2E_DRIVER: String(port), GHOSTLY_E2E_DRIVER_TOKEN: token }, env),
   });
   for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
   let exited: number | null | undefined;

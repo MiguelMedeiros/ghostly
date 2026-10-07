@@ -10,9 +10,9 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * HyperDHT here, told in each link's own packet (`_tr`). Before, group links were WebRTC only: New group was off on
  * Linux, and a link made elsewhere never let a Linux app in.
  *
- * Nothing leaves the machine but Iroh's relays: both apps read and publish on the test's Pkarr relay
- * (GHOSTLY_PKARR_RELAYS) and find each other on a HyperDHT testnet in this process (GHOSTLY_HYPERDHT_BOOTSTRAP).
- * Either native transport passes.
+ * Nothing leaves the machine: both apps read and publish on the test's Pkarr relay (GHOSTLY_PKARR_RELAYS), find each
+ * other on a HyperDHT testnet in this process (GHOSTLY_HYPERDHT_BOOTSTRAP), and home Iroh on the e2e infra's relay
+ * (GHOSTLY_IROH_RELAY_URL) or a dead one. Either native transport passes.
  */
 
 const run = <T>(p: DesktopPerson, script: string, ...args: unknown[]) => p.app.execute<T>(script, ...args);
