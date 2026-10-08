@@ -104,6 +104,28 @@ export async function setWake(on: boolean): Promise<void> {
   await engine.call("setWakeSubscription", { subscription: { ...keys, vapid } });
 }
 
+/**
+ * Whether notifications are no longer allowed for Ghostly, as a page that shows reads it. A page being closed reads
+ * "denied" whatever the person chose (the browser has let go of it while its scripts still run), and wake-ups turned
+ * off on that word stayed off. So a hidden page waits until it shows before it believes a refusal: one that is being
+ * closed never shows again, and one in the background decides when the person comes back to it.
+ */
+async function notificationsRefused(): Promise<boolean> {
+  const refused = () => typeof Notification !== "undefined" && Notification.permission !== "granted";
+  if (!refused()) return false;
+  if (document.visibilityState === "hidden") {
+    await new Promise<void>((resolve) => {
+      const shown = () => {
+        if (document.visibilityState === "hidden") return;
+        document.removeEventListener("visibilitychange", shown);
+        resolve();
+      };
+      document.addEventListener("visibilitychange", shown);
+    });
+  }
+  return refused();
+}
+
 let rotating: Promise<void> | null = null;
 
 /**
@@ -112,11 +134,15 @@ let rotating: Promise<void> | null = null;
  */
 export function rotateWake(): Promise<void> {
   rotating ??= (async () => {
-    const push = pushPlatform();
     // Another device's subscription is that device's to replace, never this one's (WISP 06 § Push and the phone).
-    if (!push || !engine.state?.settings.wake || engine.state.wakeOwner === "away") return;
+    const mine = () => (engine.state?.settings.wake && engine.state.wakeOwner !== "away" ? pushPlatform() : null);
+    if (!mine()) return;
+    const refused = await notificationsRefused();
+    // The wait for a hidden page to show may be long: wake-ups may have been turned off meanwhile.
+    const push = mine();
+    if (!push) return;
     const profile = activeProfileId();
-    if (typeof Notification !== "undefined" && Notification.permission !== "granted") {
+    if (refused) {
       await engine.call("setWakeSubscription", { subscription: null });
       await push.unsubscribe(profile);
       return;
@@ -190,6 +216,7 @@ export function useWakeTableSync(text: WakeWords): void {
     const push = pushPlatform();
     if (!push || !wake) return;
     const profile = activeProfileId();
+    let stale = false;
     void push.current(profile).then(async (current) => {
       if (current?.endpoint === wake.endpoint) {
         // This browser's own: in a profile on several devices it names this device (made before it had a device set).
@@ -199,13 +226,17 @@ export function useWakeTableSync(text: WakeWords): void {
       // Another device's subscription, given to contacts while this device is active (WISP 06 § Push and the phone): it
       // is neither made again here nor turned off. This device has none of its own until the person turns it on here.
       if (owner === "away") return;
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      const allowed = typeof Notification !== "undefined" && !(await notificationsRefused());
+      // The wait for a hidden page to show may be long: a subscription or an owner that changed meanwhile has its own look.
+      if (stale) return;
+      if (allowed) {
         const keys = await push.subscribe(profile, wake.vapid);
         await engine.call("setWakeSubscription", { subscription: { ...keys, vapid: wake.vapid } });
       } else {
         await engine.call("setWakeSubscription", { subscription: null });
       }
     }).catch(() => {});
+    return () => { stale = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per subscription and owner
   }, [endpoint, owner]);
 }
@@ -236,7 +267,7 @@ export function useStandbyPush(text: WakeWords, on: boolean): void {
         if (!stored) return;
         const current = await push.current(profile);
         if (current?.endpoint === stored.endpoint && !stored.renew) return;
-        if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+        if (typeof Notification === "undefined" || await notificationsRefused()) {
           await engine.call("devicePushSet", { subscription: null });
           return;
         }
