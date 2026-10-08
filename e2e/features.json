@@ -962,6 +962,7 @@
     "apps/ui/src/lib/servicesAvailability.ts": ["services.*"],
     "apps/ui/src/lib/settings.ts": ["*"],
     "apps/ui/src/lib/shareLink.ts": ["groups.link.*"],
+    "apps/ui/src/lib/soundGate.ts": ["app.attention.sounds","app.attention.cues","calls.*"],
     "apps/ui/src/lib/sounds.ts": ["app.attention.sounds","calls.*"],
     "apps/ui/src/lib/storage.ts": ["*"],
     "apps/ui/src/lib/storagePersistence.ts": ["app.storage.persist","wallet.backup-reminder"],
