@@ -21,7 +21,7 @@
     "downloaded": "Downloaded {{name}} · {{size}}",
     "emptyFile": "This file is empty. Choose a backup file.",
     "fromFile": "File",
-    "holds": "In it: chats and their keys, messages, files of any size, wallets, shared apps and settings. Not in it: S3 storage keys, this device's notification subscription, files still arriving, and the local data of Bark, Spark and Fedimint wallets, which come back from their recovery phrase (the phrase is in the backup).",
+    "holds": "In it: chats and their keys, messages, files of any size, wallets, shared services and settings. Not in it: S3 storage keys, this device's notification subscription, files still arriving, and the local data of Bark, Spark and Fedimint wallets, which come back from their recovery phrase (the phrase is in the backup).",
     "keepOne": "Original still here? Keep using just one: they share wallets.",
     "list": "List",
     "noneYet": "None yet.",

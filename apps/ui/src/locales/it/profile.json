@@ -21,7 +21,7 @@
     "downloaded": "Scaricato {{name}} · {{size}}",
     "emptyFile": "Questo file è vuoto. Scegli un file di backup.",
     "fromFile": "File",
-    "holds": "Contiene: chat e relative chiavi, messaggi, file di qualsiasi dimensione, portafogli, app condivise e impostazioni. Non contiene: le chiavi dello storage S3, l'iscrizione alle notifiche di questo dispositivo, i file ancora in arrivo e i dati locali dei portafogli Bark, Spark e Fedimint, che tornano con la loro frase di recupero (la frase è nel backup).",
+    "holds": "Contiene: chat e relative chiavi, messaggi, file di qualsiasi dimensione, portafogli, servizi condivisi e impostazioni. Non contiene: le chiavi dello storage S3, l'iscrizione alle notifiche di questo dispositivo, i file ancora in arrivo e i dati locali dei portafogli Bark, Spark e Fedimint, che tornano con la loro frase di recupero (la frase è nel backup).",
     "keepOne": "L'originale è ancora qui? Usane solo uno: condividono i portafogli.",
     "list": "Elenca",
     "noneYet": "Ancora nessuno.",

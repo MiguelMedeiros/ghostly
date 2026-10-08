@@ -1,11 +1,10 @@
 /**
- * The real Chess (apps/mini/chess) in a store, for the end-to-end games (WISP 1200 § Publishing, § Stores): built from
- * its source, bundled and signed by the headless CLI (`ghostly app publish`, `store sign`, `app revoke`) with keys the
- * CLI makes in the test's own temporary folder (thrown away with it, never a real key), and served at
- * `raw.githubusercontent.com` URLs by `context.route` (serveStore): nothing leaves the machine.
+ * The real Chess in a store, for the end-to-end games (WISP 1200 § Publishing, § Stores): its pinned build
+ * (support/chessFixture.ts, e2e/fixtures/chess), bundled and signed by the headless CLI (`ghostly app publish`,
+ * `store sign`, `app revoke`) with keys the CLI makes in the test's own temporary folder (thrown away with it, never a
+ * real key), and served at `raw.githubusercontent.com` URLs by `context.route` (serveStore): nothing leaves the machine.
  *
- * The CLI is the one Playwright's globalSetup built (support/headlessBuild.ts). Chess is built once per worker, into
- * a folder of that worker's own: a build empties its output folder, so two workers never share one.
+ * The CLI is the one Playwright's globalSetup built (support/headlessBuild.ts).
  */
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,6 +13,7 @@ import { join, resolve } from "node:path";
 import type { BrowserContext, FrameLocator, Page } from "@playwright/test";
 import { expect, type Peer, type PeerOptions } from "./fixtures";
 import { serveStore } from "./appStore";
+import { CHESS_ENTRY } from "./chessFixture";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const CLI = join(ROOT, "packages/cli/dist/ghostly.mjs");
@@ -21,17 +21,6 @@ const CLI = join(ROOT, "packages/cli/dist/ghostly.mjs");
 export const CHESS_REPO = "https://raw.githubusercontent.com/ghostly-e2e/chess/HEAD/";
 export const CHESS_STORE_URL = "https://raw.githubusercontent.com/ghostly-e2e/store/HEAD/ghostly-store.json";
 export const STORE_NAME = "E2E store";
-
-let built: string | null = null;
-
-/** Chess's one HTML file, built from apps/mini/chess for this worker. */
-function chessEntry(): string {
-  if (built) return built;
-  const out = mkdtempSync(join(tmpdir(), "ghostly-e2e-chess-"));
-  execFileSync("npx", ["vite", "build", "apps/mini/chess", "--outDir", out, "--emptyOutDir", "--logLevel", "error"], { cwd: ROOT, stdio: "ignore" });
-  built = join(out, "index.html");
-  return built;
-}
 
 /** The headless CLI's JSON answer. */
 function ghostly(...args: string[]): Record<string, unknown> {
@@ -52,7 +41,7 @@ export class ChessPublisher {
   constructor() {
     this.dir = mkdtempSync(join(tmpdir(), "ghostly-e2e-publisher-"));
     mkdirSync(join(this.dir, "app"));
-    copyFileSync(chessEntry(), join(this.dir, "app", "index.html"));
+    copyFileSync(CHESS_ENTRY, join(this.dir, "app", "index.html"));
   }
 
   /** `ghostly app publish`: Chess as `version`, at `sequence`, served at `<repo>/<path>`; `view` as its manifest says (absent: in a chat). */

@@ -101,7 +101,7 @@ export const cli = {
       files: "Files and voice notes, with their waveform",
       pay: "Wallets and payments (Mainnet only with --confirm-real)",
       ids: "Identity proofs",
-      services: "Shared web apps",
+      services: "Shared services",
       calls: "Voice calls, the audio handed to your program",
       npm: "On npm as @ghostlytools/cli",
       dht: "Reading the DHT directly (relays for now)",

@@ -51,7 +51,7 @@ More: [Identities](IDENTITIES.md).
 
 More: [On the web](WEB.md#install-it).
 
-## Shared apps
+## Shared services
 
 - Share a web app running on your machine (`localhost`) with a contact while you are online, over the chat's live connection. Desktop and the extension can share and open them; the web app cannot. Desktop asks you, in a system dialog, before it reaches a local address.
 

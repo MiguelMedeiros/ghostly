@@ -359,7 +359,6 @@
     "shared": "مُشارك",
     "sharingMany": "تشارك {{count}} تطبيقات",
     "sharingOne": "تشارك تطبيقًا واحدًا",
-    "title": "التطبيقات مع {{name}}",
     "titleShared": "الخدمات المشتركة مع {{name}}",
     "yours": "تطبيقاتك"
   },

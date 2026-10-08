@@ -1,0 +1,1 @@
+In the chat session the feature is now called shared services, and the dialog opened from the composer's + is the Shared services dialog, as the apps name it. The wire names do not change: `services/1`, `paired-services` and `ph` stay.
