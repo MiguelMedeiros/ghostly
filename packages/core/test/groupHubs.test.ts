@@ -202,6 +202,28 @@ describe("what a session hands a hub to pass on", { timeout: 60_000 }, () => {
     expect(alice.roster.some(([k]) => k === erin)).toBe(false);
   });
 
+  it("a signed leave goes on once, so it does not go round the hubs while the admin is away; its member may say it again", async () => {
+    const { mesh, alice, bob, carol, dave } = await hubbed();
+    const erin = await admit(mesh, alice, "Erin");
+    const hubs = [bob, carol, dave];
+    const bye = erin.byeFrame();
+    // Each hub passes what it took to the other hubs (not back where it came from); Alice is away.
+    const queue: { to: GroupSession; from: string }[] = [{ to: bob, from: erin.myKey }];
+    let delivered = 0;
+    while (queue.length && delivered < 100) {
+      const { to, from } = queue.shift()!;
+      delivered++;
+      for (const _ of await to.handle(from, clone(bye))) for (const hub of hubs) if (hub !== to && hub.myKey !== from) queue.push({ to: hub, from: to.myKey });
+    }
+    expect(queue).toEqual([]);
+    expect(delivered).toBe(5);
+    // Erin says it again on an edge to a hub that opened: it goes on, for an admin that was away.
+    expect(await bob.handle(erin.myKey, clone(bye))).toEqual([bye]);
+    expect(await bob.handle(carol.myKey, clone(bye))).toEqual([]);
+    await alice.handle(bob.myKey, clone(bye)); await mesh.settle();
+    expect(alice.roster.some(([k]) => k === erin.myKey)).toBe(false);
+  });
+
   it("a metadata statement, and the admin's pins and exclusions in it", async () => {
     const { mesh, alice, bob, carol, dave, passOn } = await hubbed();
     await alice.setPicture(JPEG); await mesh.settle();
