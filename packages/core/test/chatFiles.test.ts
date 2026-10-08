@@ -342,6 +342,27 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.b, "in", "pause-01")).toBe("done");
   });
 
+  it("the sender pauses before the person there answers: it stays paused when they accept, and goes on resume", async () => {
+    const w = wire();
+    w.b.decide = async () => "ask";
+    w.attach();
+    send(w, file("pask-001", 300_000));
+    await until(() => state(w.a, "out", "pask-001") === "asking");
+    w.a.files.pause("out", "pask-001");
+    // The paused offer is answered "still asking": that answer must not undo the pause.
+    await until(() => w.a.sent.filter((f) => f.t === "pf-offer").length >= 2 && w.b.sent.filter((f) => f.t === "pf-wait").length >= 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.a.records.get("out:pask-001")).toMatchObject({ state: "paused", pausedBy: "me" });
+    w.b.files.accept("pask-001");
+    await until(() => state(w.b, "in", "pask-001") === "paused");
+    expect(w.b.records.get("in:pask-001")?.pausedBy).toBe("peer");
+    expect(w.a.records.get("out:pask-001")).toMatchObject({ state: "paused", pausedBy: "me" });
+    expect(w.a.sent.some((f) => f.t === "pf-data")).toBe(false);
+    w.a.files.resume("out", "pask-001");
+    await until(() => state(w.a, "out", "pask-001") === "done");
+    expect(state(w.b, "in", "pask-001")).toBe("done");
+  });
+
   it("after the receiver's restart, its cancel or the sender's drops what it had, though nothing arrived since", async () => {
     const w = wire();
     w.attach();
