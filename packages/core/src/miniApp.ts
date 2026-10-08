@@ -72,8 +72,10 @@ export interface MiniAppRequest {
 }
 
 /**
- * Every code a refused request answers with (WISP 1200, "The runner and the broker"). In the sandbox a refusal rejects
- * the call's promise with an `Error` whose `message` is the code; `miniAppErrorCode` reads it back.
+ * Every code a refused request answers with (WISP 1200, "The runner and the broker"). In the sandbox every failed
+ * `ghostly.*` call rejects with an `Error` whose `message` is one of these codes; `miniAppErrorCode` reads it back. The
+ * runner turns its own failures (no answer from the client, a lost broker) into `failed`, and arguments that are not
+ * JSON into `bad-request`.
  *
  * - `bad-key`: a storage key that is not a string of 1 to 256 bytes.
  * - `bad-path`: a `file` path that is not a string of 1 to 1024 characters.
@@ -104,8 +106,18 @@ export function miniAppErrorCode(error: unknown): MiniAppErrorCode | null {
   return (MINI_APP_ERROR_CODES as readonly string[]).includes(code as string) ? code as MiniAppErrorCode : null;
 }
 
-/** The broker's answer to one request. */
-export type MiniAppAnswer = { id: number; ok: true; value?: MiniAppJson } | { id: number; ok: false; error: MiniAppErrorCode };
+/**
+ * The broker's answer to one request. `value` is JSON, or an `ArrayBuffer` for `file` on the port (web, extension). On
+ * Desktop `app_broker` answers `file` with `bytes` instead, the file in base64, and the runner hands the app an
+ * `ArrayBuffer` either way.
+ *
+ * `error` is one of `MINI_APP_ERROR_CODES` from this client; a later client may send a code this list does not have yet,
+ * which an app reads as `failed`.
+ */
+export type MiniAppAnswer =
+  | { id: number; ok: true; value?: MiniAppJson | ArrayBuffer }
+  | { id: number; ok: true; bytes: string }
+  | { id: number; ok: false; error: MiniAppErrorCode | (string & {}) };
 
 /** An event from the broker. */
 export type MiniAppEvent = { event: "chat.message"; data: MiniAppJson } | { event: "chat.peer"; data: MiniAppPeerEvent };

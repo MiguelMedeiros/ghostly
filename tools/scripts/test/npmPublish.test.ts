@@ -41,3 +41,41 @@ describe("the CLI on npm", () => {
     expect(read(".github/workflows/security-autorelease.yml")).toContain("gh workflow run npm-publish.yml");
   });
 });
+
+/** The workflow's jobs by id, each its own text without comments (a comment above a job sits at the end of the one before). */
+function jobs(): Record<string, string> {
+  const workflow = read(".github/workflows/npm-publish.yml");
+  const body = workflow.slice(workflow.indexOf("\njobs:\n") + 7);
+  const out: Record<string, string> = {};
+  for (const part of body.split(/^(?= {2}[a-z][a-z-]*:$)/m)) {
+    const id = /^ {2}([a-z][a-z-]*):$/m.exec(part)?.[1];
+    if (id) out[id] = part.replace(/^ *#.*\n/gm, "");
+  }
+  return out;
+}
+
+describe("npm-publish.yml's tokens", () => {
+  const all = jobs();
+
+  it("only the two publish jobs can ask for one, and both run in the npm environment their Trusted Publishers name", () => {
+    expect(Object.keys(all).sort()).toEqual(["check-cli", "check-sdk", "publish", "publish-sdk", "verify-sdk"]);
+    const withToken = Object.keys(all).filter((id) => /id-token: write/.test(all[id]!)).sort();
+    expect(withToken).toEqual(["publish", "publish-sdk"]);
+    for (const id of withToken) expect(all[id], id).toMatch(/^ {4}environment: npm$/m);
+    expect(read("docs/RELEASING.md")).toContain("environment `npm`");
+  });
+
+  it("publishes the SDK tarball verify-sdk checked, with no install, build or script where the token is", () => {
+    expect(all["verify-sdk"]).toContain("npm run test:sdk-example");
+    expect(all["verify-sdk"]).toContain("actions/upload-artifact@");
+    const publish = all["publish-sdk"]!;
+    expect(publish).toMatch(/needs: verify-sdk/);
+    expect(publish).toContain("actions/download-artifact@");
+    expect(publish).toContain('npm publish "$RUNNER_TEMP/sdk/ghostlytools-sdk-$VERSION.tgz" --provenance --access public --ignore-scripts');
+    for (const step of ["actions/checkout@", "npm ci", "npm install", "npm run"]) expect(publish, step).not.toContain(step);
+    expect(publish).not.toMatch(/^ +cache:/m);
+    // The checks that install from npm run where no token is.
+    expect(all["check-sdk"]).toContain('npm install --no-audit --no-fund --prefer-online "@ghostlytools/sdk@$VERSION"');
+    expect(all["check-cli"]).toContain('npm install --no-audit --no-fund --prefer-online "@ghostlytools/cli@$VERSION"');
+  });
+});

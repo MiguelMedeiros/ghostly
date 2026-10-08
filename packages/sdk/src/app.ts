@@ -1,7 +1,7 @@
 /**
  * @ghostlytools/sdk/app: what a mini-app (WISP 1200, Apps) is written against. The `window.ghostly` API the runner
  * gives an app, the broker's messages and refusal codes, the limits the broker enforces, and the manifest
- * (`ghostly-app.json`) that `ghostly app publish` signs into a bundle.
+ * (`ghostly-app.json`) that `ghostly app publish` signs into a bundle. Apps run in Ghostly from release 1.2.
  *
  * Nothing in it imports anything at run time, so an app's single-file bundle takes only what it uses: the types, plus
  * `MINI_APP_LIMITS`, `MINI_APP_ERROR_CODES` and `miniAppErrorCode`. The client reads the same module, so the two cannot

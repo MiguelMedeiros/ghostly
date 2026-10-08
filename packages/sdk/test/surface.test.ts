@@ -46,8 +46,14 @@ describe("@ghostlytools/sdk", () => {
     const values = [...entry.matchAll(/^(?:import|export)(\s+type)?\s*\{[^}]*\}\s*from\s*"([^"]+)"/gm)].filter((m) => !m[1]).map((m) => m[2]);
     expect(values).toEqual(["../../core/src/miniApp"]);
   });
-  it("names every refusal code the broker answers with, and reads one back", () => {
+  it("keeps the refusal codes sorted, the runners on the same list, and reads a code back from an error", () => {
     expect(app.MINI_APP_ERROR_CODES).toEqual([...app.MINI_APP_ERROR_CODES].sort());
+    // Both runners turn anything that is not one of these into "failed" (apps/desktop's Rust tests check its refusals).
+    for (const runner of ["../../../apps/web/public/app-frame.html", "../../../apps/desktop/src/app_sandbox.rs"]) {
+      const source = readFileSync(new URL(runner, import.meta.url), "utf8");
+      const list = /const CODES = \[([^\]]*)\]/.exec(source)?.[1] ?? "";
+      expect([...list.matchAll(/"([^"]+)"/g)].map((m) => m[1]), runner).toEqual([...app.MINI_APP_ERROR_CODES]);
+    }
     expect(app.miniAppErrorCode(new Error("peer-closed"))).toBe("peer-closed");
     expect(app.miniAppErrorCode(new Error("peer closed"))).toBeNull();
     expect(app.miniAppErrorCode("offline")).toBeNull();
