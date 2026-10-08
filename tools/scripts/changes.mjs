@@ -15,8 +15,12 @@
  * exist yet is added at the end. The body is one or more Markdown list items, added at the end of that section, in
  * the files' name order.
  *
- *   node tools/scripts/changes.mjs            check every file (CI)
- *   node tools/scripts/changes.mjs --preview  print "## Unreleased" as the release would write it
+ * An optional `release: <major>.<minor>` holds an entry for that release: a bump to an older version (a 1.1.x patch
+ * for `release: 1.2`) leaves the file where it is, and the first bump to 1.2.0 or later takes it.
+ *
+ *   node tools/scripts/changes.mjs                    check every file, held ones too (CI)
+ *   node tools/scripts/changes.mjs --preview          print "## Unreleased" with every entry
+ *   node tools/scripts/changes.mjs --preview 1.1.7    print it as bumping to 1.1.7 would write it (held entries out)
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,12 +29,42 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
 export const CHANGES = "docs/changelog/unreleased";
 
-/** A fragment's section and bullets, or a list of what is wrong with it. */
-export function parseFragment(name, text) {
+/**
+ * Flags that hold part of the next release back, one per flag. A version before `from` must not ship the flag on
+ * (tools/scripts/bump-version.mjs refuses the bump), and while the repository is at a version before `from`, an entry
+ * about it (`entry`) says `release: <release>` or later, so a patch never announces it. The flag flips only on the
+ * release/<from> branch, before that release's bump (docs/RELEASING.md).
+ */
+export const RELEASE_GUARDS = [
+  {
+    file: "packages/browser/src/shared/features.ts",
+    flag: "APPS_ENABLED",
+    from: "1.2.0",
+    release: "1.2",
+    about: "Apps",
+    entry: ({ group, body }) => group === "Apps" || /apps flag|WISP 1200|\bapps\/1\b/i.test(body ?? ""),
+  },
+];
+
+/** The only front matter keys a fragment has: a misspelled `release` would otherwise leave its entry unheld. */
+const KEYS = ["section", "release"];
+
+/**
+ * A fragment's section and bullets, or a list of what is wrong with it. `version` is the repository's (package.json):
+ * before a guard's `from`, an entry about that flag must be held for its release.
+ */
+export function parseFragment(name, text, version) {
   const problems = [];
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { problems: [`${name}: starts with a front matter block (---, section: ..., ---)`] };
-  const fields = Object.fromEntries(match[1].split("\n").map((line) => line.split(/:\s*(.*)/s).slice(0, 2)));
+  const fields = {};
+  for (const line of match[1].split("\n")) {
+    const pair = line.match(/^([a-z]+): ?(.*)$/);
+    if (!pair) problems.push(`${name}: each front matter line is "<key>: <value>" (${KEYS.join(", ")}), not "${line}"`);
+    else if (!KEYS.includes(pair[1])) problems.push(`${name}: "${pair[1]}" is not a front matter key (${KEYS.join(", ")})`);
+    else if (pair[1] in fields) problems.push(`${name}: "${pair[1]}" appears twice in the front matter`);
+    else fields[pair[1]] = pair[2];
+  }
   const section = (fields.section ?? "").trim();
   const [heading, group, ...rest] = section.split(" / ").map((part) => part.trim());
   if (!heading || rest.length || group === "") problems.push(`${name}: "section" is "<### heading>" or "<### heading> / <**group**>"`);
@@ -39,11 +73,63 @@ export function parseFragment(name, text) {
   if (!body) problems.push(`${name}: no text after the front matter`);
   else if (!body.startsWith("- ")) problems.push(`${name}: the text is one or more list items ("- ...")`);
   if (/[–—]/.test(text)) problems.push(`${name}: no em or en dashes`);
-  return { heading, group, body, problems };
+  const release = fields.release === undefined ? undefined : fields.release.trim();
+  const releaseOk = release !== undefined && /^\d+\.\d+$/.test(release);
+  if (release !== undefined && !releaseOk) {
+    problems.push(`${name}: "release" is the release that takes the entry, as <major>.<minor> (such as 1.2)`);
+  }
+  for (const guard of RELEASE_GUARDS) {
+    if (version !== undefined && !versionBefore(version, guard.from)) continue;
+    if (!guard.entry({ group, body })) continue;
+    if (release === undefined || (releaseOk && versionBefore(release, guard.release))) {
+      problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (it ships with ${guard.flag} from ${guard.from})`);
+    }
+  }
+  return { heading, group, body, release, problems };
+}
+
+/** A version's numbers, for comparing: "1.2" is [1, 2], "1.10.3" is [1, 10, 3]. */
+const numbers = (version) => version.split(".").map(Number);
+
+/** Whether version `a` comes before `b`, number by number ("1.9.0" before "1.10.0"; a missing number counts as 0). */
+export function versionBefore(a, b) {
+  const [x, y] = [numbers(a), numbers(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
+  }
+  return false;
+}
+
+/**
+ * Whether an entry held for `release` ("1.2") stays out of `version` ("1.1.7"): its major.minor is newer. An entry
+ * with no `release` is never held, and `release: 1.2` goes out with 1.2.0 and every version after it.
+ */
+export function heldFor(release, version) {
+  if (!release) return false;
+  const [major, minor] = numbers(version);
+  return versionBefore(`${major}.${minor}`, release);
+}
+
+/** The fragments a bump to `version` writes, and the ones it leaves for a later release. */
+export function splitFragments(fragments, version) {
+  const released = [];
+  const held = [];
+  for (const fragment of fragments) (heldFor(fragment.release, version) ? held : released).push(fragment);
+  return { released, held };
+}
+
+/** The repository's version (package.json), or undefined where there is none. */
+export function repositoryVersion(root = ROOT) {
+  try {
+    return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Every fragment in docs/changelog/unreleased/, in name order (README.md is the folder's own notes). */
 export function readFragments(root = ROOT) {
+  const version = repositoryVersion(root);
   let names = [];
   try {
     names = readdirSync(join(root, CHANGES));
@@ -53,7 +139,7 @@ export function readFragments(root = ROOT) {
   return names
     .filter((name) => name.endsWith(".md") && name !== "README.md")
     .sort()
-    .map((name) => ({ name: `${CHANGES}/${name}`, ...parseFragment(`${CHANGES}/${name}`, readFileSync(join(root, CHANGES, name), "utf8")) }));
+    .map((name) => ({ name: `${CHANGES}/${name}`, ...parseFragment(`${CHANGES}/${name}`, readFileSync(join(root, CHANGES, name), "utf8"), version) }));
 }
 
 /**
@@ -115,6 +201,29 @@ export function assembleChangelog(changelog, fragments) {
   return [...lines.slice(0, start), ...section, "", ...lines.slice(end)].join("\n");
 }
 
+/**
+ * CHANGELOG.md after a bump to `version`: the fragments go into "## Unreleased", which becomes "## <version>", and a
+ * new "## Unreleased" with the same note stays above it, for the entries still held and the next ones.
+ */
+export function releaseChangelog(changelog, fragments, version) {
+  const lines = assembleChangelog(changelog, fragments).split("\n");
+  const start = lines.indexOf("## Unreleased");
+  let end = lines.findIndex((line, i) => i > start && line.startsWith("## "));
+  if (end < 0) end = lines.length;
+  const notes = [];
+  const entries = [];
+  // The note is an HTML comment (one line or several): it stays with the heading, the rest goes to the release.
+  let inNote = false;
+  for (const line of lines.slice(start + 1, end)) {
+    if (line.startsWith("<!--")) inNote = true;
+    (inNote ? notes : entries).push(line);
+    if (inNote && line.includes("-->")) inNote = false;
+  }
+  while (entries.length && entries[0] === "") entries.shift();
+  const unreleased = ["## Unreleased", "", ...(notes.length ? [...notes, ""] : [])];
+  return [...lines.slice(0, start), ...unreleased, `## ${version}`, "", ...entries, ...lines.slice(end)].join("\n");
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const stray = strayFragments();
   if (stray.length) {
@@ -128,10 +237,28 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
-  const changelog = assembleChangelog(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"), fragments);
-  if (process.argv.includes("--preview")) {
+  const preview = process.argv.indexOf("--preview");
+  const version = preview < 0 ? undefined : process.argv[preview + 1];
+  if (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) {
+    console.error("usage: node tools/scripts/changes.mjs [--preview [<major.minor.patch>]]");
+    process.exit(1);
+  }
+  const { released, held } = version ? splitFragments(fragments, version) : { released: fragments, held: [] };
+  let changelog;
+  try {
+    changelog = assembleChangelog(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"), released);
+  } catch (error) {
+    console.error(`✗ ${error.message}`);
+    process.exit(1);
+  }
+  if (preview >= 0) {
     const from = changelog.indexOf("## Unreleased");
     const to = changelog.indexOf("\n## ", from + 1);
     console.log(changelog.slice(from, to < 0 ? undefined : to));
-  } else console.log(`${CHANGES}/: ${fragments.length} change${fragments.length === 1 ? "" : "s"} for the next release, all well formed`);
+    if (held.length) console.error(`Held for a later release: ${held.map((f) => `${f.name} (${f.release})`).join(", ")}`);
+  } else {
+    const waiting = fragments.filter((f) => f.release);
+    const note = waiting.length ? `, ${waiting.length} of them held for a release (release: <major.minor>)` : "";
+    console.log(`${CHANGES}/: ${fragments.length} change${fragments.length === 1 ? "" : "s"}${note}, all well formed`);
+  }
 }

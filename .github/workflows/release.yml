@@ -46,6 +46,23 @@ jobs:
       ref: ${{ inputs.tag || github.ref }}
 
   # ============================================
+  # No flag is on before the release it ships with (RELEASE_GUARDS in
+  # tools/scripts/changes.mjs): Apps stay off in every 1.1.x tag
+  # ============================================
+  guard:
+    name: Release flags
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Check the flags for the tag's version
+        run: node tools/scripts/bump-version.mjs --check
+
+  # ============================================
   # Build Tauri App for all platforms
   # ============================================
   build-tauri:
@@ -258,7 +275,7 @@ jobs:
   build-web:
     runs-on: ubuntu-24.04
     name: Build web image
-    needs: [e2e]
+    needs: [e2e, guard]
     if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     permissions:
       contents: read
@@ -297,13 +314,14 @@ jobs:
             ${{ steps.image.outputs.name }}:latest
 
   release:
-    needs: [e2e, build-tauri, build-extension, build-android]
+    needs: [e2e, guard, build-tauri, build-extension, build-android]
     runs-on: ubuntu-24.04
     # The Android build is waited for but does not hold the release back: a release (a security one included)
     # goes out without the APK rather than not at all.
     if: >-
       !cancelled()
-      && needs.e2e.result == 'success' && needs.build-tauri.result == 'success' && needs.build-extension.result == 'success'
+      && needs.e2e.result == 'success' && needs.guard.result == 'success'
+      && needs.build-tauri.result == 'success' && needs.build-extension.result == 'success'
       && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
     permissions:
       contents: write
