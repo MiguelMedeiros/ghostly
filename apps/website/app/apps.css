@@ -1,0 +1,248 @@
+/* /apps and /apps/<slug>: page rules are prefixed ap-. */
+.ap-hero {
+  padding-block: calc(var(--nav-h) + 64px) 48px;
+  background: radial-gradient(ellipse at 80% 10%, rgba(34, 211, 238, 0.07), transparent 60%);
+}
+.ap-hero-copy {
+  display: grid;
+  gap: 20px;
+  justify-items: start;
+}
+.ap-title {
+  font-size: clamp(44px, 7vw, 88px);
+}
+.ap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.ap-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-content: start;
+  padding-block: 32px;
+  border-top: 1px solid var(--line);
+}
+.ap-list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ap-count {
+  font-size: 13px;
+  color: var(--dim);
+}
+.ap-stale {
+  color: var(--amber);
+}
+
+/* The store's apps: one card each. */
+.ap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.ap-card {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  height: 100%;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  transition:
+    border-color var(--dur-fast) var(--ease-exit),
+    transform var(--dur-fast) var(--ease-exit);
+}
+.ap-card:hover,
+.ap-card:focus-visible {
+  border-color: rgba(34, 211, 238, 0.5);
+  transform: translateY(-1px);
+  transition-timing-function: var(--ease-enter);
+}
+.ap-card-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.ap-card-title {
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--text);
+}
+.ap-card-tagline {
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.ap-card-meta {
+  font-size: 12px;
+  color: var(--dim);
+}
+.ap-store {
+  margin-top: 8px;
+}
+
+/* An app's icon, or its first letter on a tile. */
+.ap-icon {
+  flex: none;
+  border-radius: 22%;
+  border: 1px solid var(--line-2);
+  background: var(--surface-3);
+  object-fit: cover;
+}
+.ap-icon--letter {
+  display: inline-grid;
+  place-items: center;
+  font-weight: 700;
+  color: var(--text);
+  background: linear-gradient(135deg, #0e3a4a, #0b2a36);
+}
+
+/* One app. */
+.ap-hero--app {
+  padding-bottom: 32px;
+}
+.ap-back {
+  margin-bottom: 28px;
+}
+.ap-head {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+}
+.ap-head-copy {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.ap-app-title {
+  overflow-wrap: anywhere;
+}
+.ap-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  font-size: 14px;
+}
+.ap-meta div {
+  display: flex;
+  gap: 8px;
+}
+.ap-meta dt {
+  color: var(--dim);
+}
+.ap-meta dd {
+  color: var(--text);
+}
+
+.ap-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 0 56px;
+}
+.ap-description p {
+  font-size: var(--t-body);
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 40em;
+}
+.ap-perms {
+  display: grid;
+  gap: 10px;
+}
+.ap-perms li {
+  display: grid;
+  gap: 2px;
+  padding-left: 22px;
+  position: relative;
+  font-size: 16px;
+}
+.ap-perms li::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0.55em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+}
+.ap-steps {
+  display: grid;
+  gap: 10px;
+  padding-left: 22px;
+  list-style: decimal;
+  color: var(--muted);
+}
+.ap-steps li::marker {
+  color: var(--cyan);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+.ap-code {
+  margin: 0;
+  padding: 14px 18px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: #03070c;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ap-facts {
+  display: grid;
+  gap: 14px;
+}
+.ap-facts dt {
+  font-size: 13px;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+.ap-facts dd {
+  display: grid;
+  gap: 4px;
+  font-size: 15px;
+  color: var(--text);
+  min-width: 0;
+}
+.ap-fingerprint {
+  color: var(--cyan);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+.ap-key {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.ap-url {
+  overflow-wrap: anywhere;
+  display: inline;
+}
+
+@media (max-width: 900px) {
+  .ap-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .ap-hero {
+    padding-block: calc(var(--nav-h) + 40px) 32px;
+  }
+  .ap-head {
+    gap: 18px;
+  }
+  .ap-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

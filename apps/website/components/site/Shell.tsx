@@ -5,17 +5,20 @@ import { GhostPet } from "./GhostPet";
 import { BooTransition } from "./Boo";
 import { IdleLoops } from "./IdleLoops";
 import { JoinLanding } from "./JoinLanding";
+import { appsReleased } from "@/lib/appsGate";
 
-export function Shell({ children }: { children: React.ReactNode }) {
+/** `apps`: the Apps link shows only once the released Ghostly has Apps (lib/appsGate.ts). */
+export async function Shell({ children }: { children: React.ReactNode }) {
   const t = shell;
+  const apps = await appsReleased();
   return (
     <div>
       <a className="skip-link" href="#content">
         {t.skip}
       </a>
-      <Nav />
+      <Nav apps={apps} />
       <main id="content">{children}</main>
-      <SiteFooter />
+      <SiteFooter apps={apps} />
       <GhostPet label={t.pet} />
       <BooTransition />
       <IdleLoops />

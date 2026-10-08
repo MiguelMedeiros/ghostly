@@ -1,0 +1,13 @@
+{
+  "about": "The site's test store, made by packages/browser/test/websiteStore.test.ts from test keys. Nothing in it is real.",
+  "key": "thcfud97rbo3rp1p8nbzseuofumh5s7nnums8rj5wcawkbtdoomy",
+  "now": 1791417600,
+  "bundles": {
+    "https://raw.githubusercontent.com/ghostly-fixtures/chess/HEAD/app.ghostlyapp": "chess.ghostlyapp",
+    "https://cdn.jsdelivr.net/gh/ghostly-fixtures/notes@0123456789abcdef0123456789abcdef01234567/notes.ghostlyapp": "notes.ghostlyapp",
+    "https://raw.githubusercontent.com/ghostly-fixtures/gone/HEAD/app.ghostlyapp": "gone.ghostlyapp",
+    "https://raw.githubusercontent.com/ghostly-fixtures/revoked/HEAD/app.ghostlyapp": "revoked.ghostlyapp",
+    "https://raw.githubusercontent.com/ghostly-fixtures/older/HEAD/app.ghostlyapp": "older.ghostlyapp",
+    "https://example.com/elsewhere.ghostlyapp": "elsewhere.ghostlyapp"
+  }
+}

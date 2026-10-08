@@ -37,6 +37,8 @@ const generated = new Set([
   "apps/website/lib/levels.json",
   "apps/website/lib/code-snippets.json",
   "apps/website/lib/agent-prompt.json",
+  // The store as the build read it: third parties' words (scripts/sync-store.mjs).
+  "apps/website/lib/store-snapshot.json",
   "docs/wisps/NUMBERING.md",
 ]);
 const text = new Set([".ts", ".tsx", ".js", ".mjs", ".css", ".md", ".json"]);
@@ -55,7 +57,8 @@ for (const entry of scanned) {
   for (const path of files(resolve(root, entry))) {
     const file = relative(root, path);
     // components/app is the app's deck, copied by sync-app-deck.mjs: it renders the site's words, not its own.
-    if (generated.has(file) || file.startsWith("apps/website/components/app/")) continue;
+    // lib/store-core is core's store readers, copied by sync-store-core.mjs: core's words, not the site's.
+    if (generated.has(file) || file.startsWith("apps/website/components/app/") || file.startsWith("apps/website/lib/store-core/")) continue;
     readFileSync(path, "utf8")
       .split("\n")
       .forEach((line, i) => {

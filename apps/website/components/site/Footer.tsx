@@ -5,7 +5,8 @@ import { RELEASES_URL } from "@/lib/release";
 import { shell, APP_URL, CONTRIBUTING_URL, REPO_URL, SECURITY_URL } from "@/content/shell";
 import { Particles } from "./Particles";
 
-export function SiteFooter() {
+/** `apps`: whether the released Ghostly has Apps, so the Apps page exists (lib/appsGate.ts). */
+export function SiteFooter({ apps = false }: { apps?: boolean }) {
   const t = shell.footer;
   const cols = [
     {
@@ -13,6 +14,7 @@ export function SiteFooter() {
       links: [
         { label: t.links.open, href: APP_URL },
         { label: t.links.download, href: "/#download" },
+        ...(apps ? [{ label: t.links.apps, href: "/apps" }] : []),
         { label: t.links.privacy, href: "/privacy" },
         { label: t.links.terms, href: "/terms" },
       ],

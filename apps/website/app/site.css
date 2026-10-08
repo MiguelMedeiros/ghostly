@@ -1165,6 +1165,10 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 }
 .footer-bottom a {
   color: var(--muted);
+  /* Links inside a sentence ("... with Pkarr · BEP44") are told apart by more than colour (WCAG 1.4.1). */
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
 }
 .footer-bottom a:hover {
   color: var(--cyan);
