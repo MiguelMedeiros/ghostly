@@ -62,18 +62,25 @@ const STATUS_EVERY_MS = 2_000;
 export function createTauriTransport(): PkarrTransport {
   let status: DiscoveryStatus | undefined;
   let askedAt = 0;
+  let later: ReturnType<typeof setTimeout> | null = null;
   const listeners = new Set<(change?: DiscoveryChange) => void>();
-  // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering.
+  // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering, and
+  // of the path changing (no change named: the panel shows it, links do nothing). A read or write within 2 s of the last
+  // ask is asked about when the 2 s are up: an inviter's first envelope goes before its first read (dhtDelivery.ts), and
+  // that read may be the last for a while once the pair is live.
   const refresh = () => {
-    if (Date.now() - askedAt < STATUS_EVERY_MS) return;
+    const wait = askedAt + STATUS_EVERY_MS - Date.now();
+    if (wait > 0) { later ??= setTimeout(() => { later = null; refresh(); }, wait); return; }
     askedAt = Date.now();
     void invoke<DiscoveryStatus>("pkarr_status").then((next) => {
       const health = (s?: DiscoveryStatus) => JSON.stringify(s?.relays.map((r) => [r.relay, r.state]) ?? []);
       const changed = health(next) !== health(status);
+      const moved = JSON.stringify(next.path) !== JSON.stringify(status?.path ?? null);
       // A relay that was failing answers again: links look and publish now rather than at their pace.
       const recovered = !!status && next.relays.some((r) => r.state === "ok" && status!.relays.some((was) => was.relay === r.relay && was.state !== "ok"));
       status = next;
       if (changed) for (const listener of listeners) listener(recovered ? "recovered" : "tripped");
+      else if (moved) for (const listener of listeners) listener();
     }).catch(() => {});
   };
   return {
