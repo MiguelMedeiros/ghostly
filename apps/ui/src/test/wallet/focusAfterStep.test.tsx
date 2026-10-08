@@ -8,7 +8,7 @@ import { walletView } from "../fakeEngine";
 import { REGTEST_INVOICE, mint } from "../payments/fixtures";
 import { renderApp } from "../render";
 
-// covers: wallet.cashu.receive, wallet.cashu.pay-invoice
+// covers: wallet.cashu.receive-lightning, wallet.cashu.pay-invoice
 
 /**
  * Receive's invoice and Send's quote take the place of the form that had the focus. The focus goes to their first line,
