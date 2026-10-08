@@ -10,7 +10,8 @@ import { pair } from "../support/paired";
  * in the default colour theme, light and dark, left to right and right to left. The home screen, a 1:1 chat with its
  * ⋮ menu, + menu and payment sheet, a group, the wallets and New wallet, identities, settings, profile and services.
  * And the Apps screens on the suite's build (VITE_APPS_TEST), with the apps specs' test store: the Apps page, Add, the
- * install screen, the chat picker, + → Apps, the app's panel in a chat and the app card on both sides.
+ * install screen, the chat picker, + → Apps, the app's panel in a chat (beside it, and over it on a phone), the app card on
+ * both sides, the app's details and Uninstall.
  */
 test.describe.configure({ timeout: 6 * 60_000 });
 
@@ -171,6 +172,26 @@ for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
     await card.getByTestId("app-card-install").click();
     await expect(bob.page.getByTestId("app-install").getByTestId("app-install-confirm")).toBeVisible();
     await check("install from a card", bob.page);
+
+    // On a phone the panel covers the chat, a dialog; then the app's details and Uninstall, after which Add has the focus.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/${chatUrl}`);
+    await chat(ana).getByTestId("app-card").getByTestId("app-card-open").click();
+    await expect(app).toHaveAttribute("data-place", "phone");
+    await expect(app.getByTestId("mini-app-back")).toBeFocused();
+    await check("app panel, phone", page, { frames: false });
+    await app.getByTestId("mini-app-close").click();
+    await expect(app).toBeHidden();
+    await page.goto("/#/apps");
+    await page.getByTestId("installed-app").getByRole("button").first().click();
+    await expect(page.getByTestId("app-details")).toBeVisible();
+    await check("details");
+    await page.getByTestId("app-uninstall-open").click();
+    await expect(page.getByTestId("app-uninstall-confirm")).toBeVisible();
+    await check("uninstall");
+    await page.getByTestId("app-uninstall-confirm").click();
+    await expect(page.getByTestId("installed-app")).toHaveCount(0);
+    await expect(page.getByTestId("apps-add")).toBeFocused();
     expect(found).toEqual({});
   });
 }

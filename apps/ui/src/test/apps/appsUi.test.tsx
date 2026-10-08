@@ -437,4 +437,31 @@ describe("with the apps flag on", () => {
     expect(fakeEngine.callsTo("appUninstall")).toEqual([{ ref: REF }]);
     expect(fetches).toEqual([]);
   });
+
+  it("an installed app's row is named for its details and describes its line, so a stopped app says so to a screen reader", async () => {
+    const run = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
+    fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" });
+    expect(details).toHaveAccessibleDescription("Stopped");
+  });
+
+  it("the focus goes to Add once an uninstalled app's row or a removed store's block is gone, not lost on the page", async () => {
+    let apps = [installed()];
+    let stores = [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+      name: "Ghostly", kind: "curated" as const, sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] }];
+    fakeEngine.on("appList", () => apps).on("appStoreList", () => stores).on("appCheckUpdates", () => [])
+      .on("appUninstall", () => { apps = []; return undefined; }).on("appStoreRemove", () => { stores = []; return undefined; });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" }));
+    await user.click(screen.getByTestId("app-uninstall-open"));
+    await user.click(screen.getByTestId("app-uninstall-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
+
+    screen.getByTestId("app-store-remove").focus();
+    await user.click(screen.getByTestId("app-store-remove"));
+    await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
+  });
 });
