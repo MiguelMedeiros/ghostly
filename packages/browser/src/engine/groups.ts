@@ -386,6 +386,12 @@ export class Groups {
    */
   private readonly relayAsked = new Map<string, Map<string, { via: string; at: number }>>();
   private readonly lastGossip = new Map<string, number>();
+  /**
+   * Per mesh group, each reachable member some of whose messages never reached me (`GroupSession.lacking`): what was
+   * missing when it was asked for, and of whom since. Each connected member once until that changes, so messages nobody
+   * holds any more are not asked for every gossip turn.
+   */
+  private readonly gapsAsked = new Map<string, Map<string, { mark: string; of: Set<string> }>>();
   /** Per mesh group: member key → since when its edge to me is down, and when someone last told me it is here. */
   private readonly downSince = new Map<string, Map<string, number>>();
   private readonly hereHeard = new Map<string, Map<string, number>>();
@@ -895,6 +901,7 @@ export class Groups {
     this.hubs.forget(groupId);
     this.removedAt.delete(groupId);
     this.lastGossip.delete(groupId);
+    this.gapsAsked.delete(groupId);
     this.typings.forget(groupId);
     this.downSince.delete(groupId);
     this.hereHeard.delete(groupId);
@@ -1540,15 +1547,45 @@ export class Groups {
       asked.set(key, { via, at: now });
       out.push(key);
     }
+    out.push(...this.gapsOf(groupId, session, via, session.lacking()));
     // What this sync asks for is the gossip turn's job too: the next one waits.
     if (out.length) this.lastGossip.set(groupId, now);
     return out;
   }
 
   /**
-   * While some member is unreachable, one connected member (in turn) is asked, once a `MESH_GOSSIP_MS`, for what it
-   * has from the unreachable ones: a message sent while the author could reach it and not me gets here within that,
-   * without either edge opening again. Edges the roster asks for and that do not exist are opened again.
+   * Reachable members whose messages below the highest seen never reached me, for `via` to hand on: their own answer
+   * comes from their last `GROUP_LIMITS.outlog` only (WISP 902 § Catch-up), the rest another member may hold. As
+   * `askOf`, one member at a time, and each member once until what is missing changes.
+   */
+  private gapsOf(groupId: string, session: GroupSession, via: string, lacking: Map<string, string>): string[] {
+    if (!lacking.size) return [];
+    let asked = this.relayAsked.get(groupId), tried = this.gapsAsked.get(groupId);
+    if (!asked) this.relayAsked.set(groupId, (asked = new Map()));
+    if (!tried) this.gapsAsked.set(groupId, (tried = new Map()));
+    const edges = this.host.edges(groupId), now = this.now();
+    const up = (key: string) => { const edge = edges.get(key); return !!edge && this.host.linkReady(edge); };
+    for (const key of tried.keys()) if (!lacking.has(key)) tried.delete(key);
+    const out: string[] = [];
+    for (const [key, mark] of lacking) {
+      if (key === via || !up(key)) continue;
+      const prior = asked.get(key);
+      if (prior && prior.via !== via && up(prior.via) && now - prior.at < MESH_GOSSIP_MS) continue;
+      let entry = tried.get(key);
+      if (!entry || entry.mark !== mark) tried.set(key, (entry = { mark, of: new Set() }));
+      if (entry.of.has(via)) continue;
+      entry.of.add(via);
+      asked.set(key, { via, at: now });
+      out.push(key);
+    }
+    return out;
+  }
+
+  /**
+   * While some member is unreachable, or some of a member's messages never reached me (`gapsOf`), one connected member
+   * (in turn) is asked, once a `MESH_GOSSIP_MS`, for what it has from them: a message sent while the author could reach
+   * it and not me gets here within that, without either edge opening again. Edges the roster asks for and that do not
+   * exist are opened again.
    */
   private meshTick(now: number): void {
     this.tickNow = now;
@@ -1569,7 +1606,9 @@ export class Groups {
       if (now - (this.lastGossip.get(groupId) ?? -Infinity) < MESH_GOSSIP_MS) continue;
       const edges = this.host.edges(groupId);
       const connected = session.others.filter(key => !away.includes(key));
-      if (!away.length || !connected.length) continue;
+      if (!connected.length) continue;
+      const lacking = session.lacking();
+      if (!away.length && !lacking.size) continue;
       this.lastGossip.set(groupId, now);
       // Each member starts its turns at a place of its own (from its key): members cut off from the same member (a Mac
       // past its budget) have much the same list and turn count, and in step they would all ask the same ones, those
@@ -1578,7 +1617,9 @@ export class Groups {
       const asked = this.relayAsked.get(groupId) ?? new Map<string, { via: string; at: number }>();
       this.relayAsked.set(groupId, asked);
       for (const key of away) asked.set(key, { via, at: now });
-      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(away)); } catch { /* it closed: the next turn asks another */ }
+      const ask = [...away, ...this.gapsOf(groupId, session, via, lacking)];
+      if (!ask.length) continue;
+      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(ask)); } catch { /* it closed: the next turn asks another */ }
     }
   }
 
