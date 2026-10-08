@@ -250,6 +250,8 @@
     "confirmRealFirst": "Confirmez d'abord l'argent réel",
     "confirmRealFirstNext": "Utilisez {{button}}. Rien n'a été envoyé.",
     "contactAllowsNeither": "Votre contact n'a autorisé ni Cashu ni Lightning dans cette discussion",
+    "contactAway": "Votre contact est hors ligne",
+    "contactAwayNext": "Rien n’a été envoyé. Payez quand la discussion sera en direct.",
     "contactClosed": "votre contact l'a fermée",
     "contactHasNone": "Votre contact n'a pas de portefeuille {{method}} {{network}}",
     "contactRefuses": "Votre contact n'accepte pas {{method}} dans cette discussion",
