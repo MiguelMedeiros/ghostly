@@ -230,8 +230,8 @@ describe("the engine", () => {
   it("is off: every app call is refused", async () => {
     // Off by the engine's option, so this holds whatever the build's APPS_ENABLED says.
     const peer = await node({ apps: false });
-    await expect(Promise.resolve().then(() => peer.appList())).rejects.toThrow("Apps are unavailable in this release");
-    await expect(Promise.resolve().then(() => peer.appStoreAdd({ url: STORE_URL }))).rejects.toThrow("Apps are unavailable in this release");
+    await expect(Promise.resolve().then(() => peer.appList())).rejects.toThrow("Apps do not run on this client");
+    await expect(Promise.resolve().then(() => peer.appStoreAdd({ url: STORE_URL }))).rejects.toThrow("Apps do not run on this client");
     await peer.shutdown({ quiet: true });
     expect(net.fetch).not.toHaveBeenCalled();
   });

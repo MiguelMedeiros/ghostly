@@ -26,7 +26,7 @@ describe("apps in the engine (apps/1)", () => {
     expect(contact.sessionOffers.peer).not.toContain(APPS_CAPABILITY);
     expect(contact.supportsApps).toBe(false);
     for (const [method, params] of [["appId", { linkId: id, ref }], ["appOpen", { linkId: id, ref, version: "1.0.0" }], ["appClose", { linkId: id, ref }], ["appSend", { linkId: id, ref, data: 1 }]] as const)
-      await expect(call(method, params), method).rejects.toThrow("Apps are unavailable in this release");
+      await expect(call(method, params), method).rejects.toThrow("Apps do not run on this client");
     // What the contact says anyway is dropped.
     contact.openApp(app, "1.0.0");
     (contact as unknown as { channel: { send(data: string): void } }).channel.send(JSON.stringify({ t: "paired-app", a: app, o: "open", v: "1.0.0" }));
