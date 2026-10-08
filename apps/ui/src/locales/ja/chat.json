@@ -25,8 +25,10 @@
   },
   "connecting": "接続中",
   "createdHere": "このチャットはあなたが作成しました",
+  "deleteArrivingFileHint": "この端末からのみ削除されます。受信は止まり、相手には送信の取り消しが表示されます。",
   "deleteMessage": "メッセージを削除",
   "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。",
+  "deleteSendingFileHint": "この端末からのみ削除されます。送信は止まり、相手にはファイルが届きません。",
   "delivery": {
     "delivered": "配信済み",
     "failed": "未送信",

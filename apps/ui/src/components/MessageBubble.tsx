@@ -537,6 +537,11 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
   const [confirm, setConfirm] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const side = align === "left" ? "end" : "start";
+  // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
+  // keeps no copy of it, so the hint says what happens instead.
+  const { transfer } = useTransfer(download?.file.id);
+  const deleteHint = transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
+    : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
 
   return (
     <div ref={ref} className="relative self-center shrink-0">
@@ -594,7 +599,7 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
       {onDelete && (
         <Menu open={confirm} onClose={() => setConfirm(false)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} label={t("chat.deleteMessage")}>
           <div className="px-3 py-2 md:w-[210px]">
-            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{t("chat.deleteMessageHint")}</p>
+            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
