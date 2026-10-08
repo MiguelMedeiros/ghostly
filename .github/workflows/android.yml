@@ -166,7 +166,7 @@ jobs:
             echo "::error::apksigner verify failed ($BUILD_TOOLS)"
             exit 1
           fi
-          # "Signer #1 certificate ...", or per SDK range ("Signer (minSdkVersion=...) certificate ...") with v3.1.
+          # "Signer #1 certificate ...", "V2 Signer: certificate ..." (build-tools 36+), or per SDK range with v3.1.
           grep -E 'certificate (DN|SHA-256 digest):' "$RUNNER_TEMP/apksigner.txt" | sort -u > "$RUNNER_TEMP/certs.txt" \
             || cp "$RUNNER_TEMP/apksigner.txt" "$RUNNER_TEMP/certs.txt"
           {
