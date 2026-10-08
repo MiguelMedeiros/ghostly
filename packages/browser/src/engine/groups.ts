@@ -399,6 +399,8 @@ export class Groups {
    * holds any more are not asked for every gossip turn. `last`: the latest ask, its member and the numbers it named.
    */
   private readonly gapsAsked = new Map<string, Map<string, GapAsk>>();
+  /** Per mesh group, when `gapsAgain` last looked: every half `MESH_GAP_AGAIN_MS`, not every tick. */
+  private readonly gapsLooked = new Map<string, number>();
   /** Per mesh group: member key → since when its edge to me is down, and when someone last told me it is here. */
   private readonly downSince = new Map<string, Map<string, number>>();
   private readonly hereHeard = new Map<string, Map<string, number>>();
@@ -909,6 +911,7 @@ export class Groups {
     this.removedAt.delete(groupId);
     this.lastGossip.delete(groupId);
     this.gapsAsked.delete(groupId);
+    this.gapsLooked.delete(groupId);
     this.typings.forget(groupId);
     this.downSince.delete(groupId);
     this.hereHeard.delete(groupId);
@@ -1597,6 +1600,8 @@ export class Groups {
    * nothing on waits for the gossip turn, as before.
    */
   private gapsAgain(groupId: string, session: GroupSession, now: number, connected: readonly string[]): void {
+    if (now - (this.gapsLooked.get(groupId) ?? -Infinity) < MESH_GAP_AGAIN_MS / 2) return;
+    this.gapsLooked.set(groupId, now);
     const lacking = session.lacking();
     let tried = this.gapsAsked.get(groupId);
     if (!lacking.size && !tried?.size) return;
