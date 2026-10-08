@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { assetLinksFile } from "./assetlinks";
 import { runnerHeaders } from "./runnerPolicy";
 import { appsTestGuard } from "./appsTestFlag";
 import { serviceWorker } from "./pwa";
@@ -57,7 +56,7 @@ function versionFile(): Plugin {
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version), __APP_BUILD__: JSON.stringify(build) },
-  plugins: [appsTestGuard("web"), versionFile(), serviceWorker(build), assetLinksFile(), runnerHeaders(), ghostlyPlatformModules(), react(), tailwindcss()],
+  plugins: [appsTestGuard("web"), versionFile(), serviceWorker(build), runnerHeaders(), ghostlyPlatformModules(), react(), tailwindcss()],
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },
   server: { port: 5180, strictPort: true },
