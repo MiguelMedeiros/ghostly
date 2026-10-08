@@ -135,8 +135,13 @@ export const db = {
     await Promise.all(appKeys.map((key) => wrap(appStorage.delete(key))));
   },
 
+  /**
+   * A chat's whole history, by time. Read by its key range (every key is `[linkId, id]`, ids are strings: from `[linkId]`
+   * to `[linkId, []]`), the same rows in the same order as the `byLink` index has them, without looking each one up
+   * again: in the CLI's store (fake-indexeddb) that lookup cost 4-9 times the read itself.
+   */
   async getMessages(linkId: string): Promise<StoredMessage[]> {
-    const messages = await wrap<StoredMessage[]>((await store(STORES.messages, "readonly")).index("byLink").getAll(linkId));
+    const messages = await wrap<StoredMessage[]>((await store(STORES.messages, "readonly")).getAll(IDBKeyRange.bound([linkId], [linkId, []])));
     return messages.sort((a, b) => a.timestamp - b.timestamp);
   },
   /** Whether the chat has a message with this id. */
