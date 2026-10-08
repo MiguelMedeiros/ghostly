@@ -142,6 +142,7 @@ const RULES: readonly Rule[] = [
   { match: /^(?<method>Cashu|Lightning) is not allowed by both of you here$/, key: "errors.pay.notBoth" },
   exact("Your contact allowed neither Cashu nor Lightning in this chat", "errors.pay.contactAllowsNeither"),
   exact("Your contact took no Cashu or Lightning last time. Try again once the chat is live", "errors.pay.contactTookNone", "errors.pay.contactTookNoneNext"),
+  exact("Your contact is offline. Nothing was sent: pay once the chat is live.", "errors.pay.contactAway", "errors.pay.contactAwayNext"),
   exact("Cashu and Lightning are off in this chat", "errors.pay.bothOff"),
   exact("A request to the group is paid in Cashu or over Lightning", "errors.pay.groupRails"),
   exact("Unknown payment request", "errors.pay.unknownRequest"),

@@ -98,6 +98,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Lightning is not allowed by both of you here", `${BROWSER}/engine/payments.ts`, " is not allowed by both of you here"],
   ["Your contact allowed neither Cashu nor Lightning in this chat", `${BROWSER}/engine/payments.ts`],
   ["Your contact took no Cashu or Lightning last time. Try again once the chat is live", `${BROWSER}/engine/payments.ts`],
+  ["Your contact is offline. Nothing was sent: pay once the chat is live.", CODES],
   ["Cashu and Lightning are off in this chat", `${BROWSER}/engine/payments.ts`],
   ["A request to the group is paid in Cashu or over Lightning", `${BROWSER}/engine/payments.ts`],
   ["Unknown payment request", `${BROWSER}/engine/payments.ts`],

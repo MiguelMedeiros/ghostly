@@ -250,6 +250,8 @@
     "confirmRealFirst": "Confirme o dinheiro real antes",
     "confirmRealFirstNext": "Use {{button}}. Nada foi enviado.",
     "contactAllowsNeither": "Seu contato não permitiu nem Cashu nem Lightning nesta conversa",
+    "contactAway": "Seu contato está offline",
+    "contactAwayNext": "Nada foi enviado. Pague quando a conversa estiver ao vivo.",
     "contactClosed": "seu contato o fechou",
     "contactHasNone": "Seu contato não tem carteira {{method}} {{network}}",
     "contactRefuses": "Seu contato não aceita {{method}} nesta conversa",
