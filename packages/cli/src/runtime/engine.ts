@@ -261,6 +261,9 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     fedimintSdk: nodeFedimintSdk(join(paths.dir, "fedimint")),
     // Local web apps may be shared with a contact, reached on loopback only (src/services.ts).
     servicesSupport: true,
+    // No mini-app runs here (WISP 1200 § Per client: CLI), and the bot side of apps/1 is phase 2: no apps/1 is offered
+    // and the app calls are refused, whatever the build's APPS_ENABLED says.
+    apps: false,
     // A daemon stays online: a hub of the large private groups it is in (WISP 902 · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
     staysOnline: process.env.GHOSTLY_HUB !== "0",
     localFetch: nodeLocalFetch,
