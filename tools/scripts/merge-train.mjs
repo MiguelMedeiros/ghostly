@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The merge train: the only way pull requests land on `dev` (and on each `epic/*` branch). A reviewer adds the label
-// `queue` to an approved, green pull request; the train lines them up and lands them in batches.
+// `queue` to an approved, green pull request; the train lines them up and lands them in batches, or alone when only one
+// is in line.
 //
 // - The line, per base: `queue:priority` first, then by the time each got `queue` (the latest `labeled` event, so
 //   taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request whose CI
@@ -13,10 +14,17 @@
 // - Red: the batch closes and its first half becomes the next batch, with the second half noted to go right after it
 //   if the first half is green. A batch of one that is red is the culprit: `queue:failed`, a comment, `queue` off.
 //   Whatever was not part of the red half goes back to the line at its old place.
+// - One pull request alone (the next batch would hold only it) skips the batch: when its head already holds the base's
+//   tip and CI Success is green on it, the train merges the pull request itself (dev: the rebase merge at that head;
+//   an epic: a fast-forward), with no batch and no new CI run. When it is behind, the train rebases its branch onto the
+//   tip (a push with --force-with-lease, so an author's push wins), waits for CI on exactly that commit, and merges it
+//   the same way. Red there gets one more run on a fresh rebase, then `queue:failed`; a conflict, `queue:conflict`. A
+//   fork, or a head branch the train must never push to (dev, main, an epic, a batch), goes the batch way.
 // - Each queued pull request keeps one comment that says where it is ("In line for `dev`: 3rd").
 //
 // The train keeps no state of its own: a batch's members and the half that waits after it live in a hidden mark in
-// the batch's body, and everything else is read again each run.
+// the batch's body, the commit a lone pull request was rebased to lives in a hidden mark of its position comment, and
+// everything else is read again each run.
 //
 //   node tools/scripts/merge-train.mjs --run | --dry-run | --list-bases  [--base dev] [--every 120] [--also 12,34]
 //
@@ -41,6 +49,7 @@ export const MAX_BATCH = 5;
 const POSITION = "<!-- merge-train:position -->";
 const HEAD = /<!-- merge-train:head (\w+) -->/;
 const STATE = /<!-- merge-train:batch (\{.*?\}) -->/g;
+const ALONE = /<!-- merge-train:alone (\{.*?\}) -->/;
 /** The bases a train runs for; anything else never reaches a URL path, a refspec or a branch name. */
 export const BASE = /^(dev|epic\/[A-Za-z0-9._-]+)$/;
 /** A batch whose CI has not started after this long (the GITHUB_TOKEN trap, a lost event) is rebuilt. */
@@ -134,9 +143,16 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}) {
   ].join("\n");
 }
 
-/** The comment that says where a pull request is. It also records the head the train first saw queued (`head`). */
-export function positionText(base, pr, place, batch, head = pr.sha) {
+/**
+ * The comment that says where a pull request is. It also records the head the train first saw queued (`head`) and,
+ * while the train lands it alone, the commit it rebased it to (`alone`: sha, baseSha, at, retried).
+ */
+export function positionText(base, pr, place, batch, head = pr.sha, alone = null) {
   const mark = `<!-- merge-train:head ${head} -->`;
+  if (alone) {
+    const again = alone.retried ? " (a second run, after a red one)" : "";
+    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone)} -->\nMerge train: next into \`${base}\`, alone. Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
+  }
   if (batch) return `${POSITION}${mark}\nMerge train: in batch #${batch} into \`${base}\`, waiting for its CI.`;
   const why = waiting(pr);
   return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : ""}`;
@@ -147,6 +163,19 @@ export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
 
 const newCommitsText = (what) =>
   `Merge train: this pull request got new commits after it was queued (${what}), so it left the line. Add \`queue\` again once this head is reviewed and green.`;
+
+/** The commit the train rebased a lone pull request to, from its position comment: { sha, baseSha, at, retried }. */
+export const aloneMark = (sticky) => {
+  try {
+    const m = JSON.parse(sticky?.body?.match(ALONE)?.[1] ?? "null");
+    return typeof m?.sha === "string" && typeof m.baseSha === "string" ? m : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Whether the train may land a pull request alone: its head is a branch of this repository it may rebase and push. */
+export const canGoAlone = (p) => !p.fork && !BASE.test(p.branch) && p.branch !== "main" && !p.branch.startsWith("batch/");
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -175,6 +204,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.priority = p.labels.includes(LABEL.priority);
     p.ci = ciState(await gh.checkRuns(p.sha));
     p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    p.alone = aloneMark(p.sticky);
     // No position comment records the queued head yet: tell it by time, the head's first CI against the label.
     if (!p.sticky && p.labels.includes(LABEL.queue)) {
       p.labeledAt = queuedAt(events, null);
@@ -190,7 +220,16 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (label) await w.addLabel(p.number, label);
     for (const l of Object.values(LABEL)) if (l !== label && p.labels.includes(l)) await w.removeLabel(p.number, l);
     if (p.sticky) await w.deleteComment(p.sticky.id);
-    await w.comment(p.number, text);
+    if (text) await w.comment(p.number, text);
+  };
+  /** Posts or edits a pull request's position comment, and keeps the copy read at the start of the run current. */
+  const setSticky = async (p, text) => {
+    if (!p.labels.includes(LABEL.queue)) return; // --also: pretended, never commented on
+    if (!p.sticky) p.sticky = { id: (await w.comment(p.number, text))?.id, body: text };
+    else if (p.sticky.body !== text) {
+      await w.editComment(p.sticky.id, text);
+      p.sticky = { ...p.sticky, body: text };
+    }
   };
   // Closed first: a run that stops before the labels are off leaves a closed pull request, never an open one out of line.
   const landed = async (p, batch) => {
@@ -241,8 +280,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       say(`DROP #${p.number} (merges with a merge commit)`);
       done.dropped.push(p.number);
       await leave(p, null, `Merge train: \`${p.branch}\` merges into \`${base}\` with a merge commit, never squashed into a batch, so it left the line; it lands by hand with a merge commit when it is ready.`);
-    } else if (queuedHead(p.sticky) && queuedHead(p.sticky) !== p.sha) {
-      // `queue` vouches for the head that was reviewed: a later push needs a new review.
+    } else if (queuedHead(p.sticky) && queuedHead(p.sticky) !== p.sha && p.alone?.sha !== p.sha) {
+      // `queue` vouches for the head that was reviewed (or the train's own rebase of it): a later push needs a new review.
       say(`DROP #${p.number} (new head since it was queued)`);
       done.dropped.push(p.number);
       await leave(p, null, newCommitsText(`${queuedHead(p.sticky).slice(0, 12)} → ${p.sha.slice(0, 12)}`));
@@ -317,19 +356,119 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       inFlight = stay;
     }
   }
-  if (!inFlight) inFlight = await board(pickBatch(line()));
+  // One pull request alone, with no batch. Each step returns what is in flight now, `null` when the pull request landed
+  // or left the line (so the next one may go), or `false` when nothing more boards in this run.
+
+  /** Merges a lone pull request at its head: dev by the rebase merge (refused unless up to date and green), an epic by a fast-forward. */
+  const landAlone = async (p) => {
+    const r =
+      base === "dev" ? await w.merge(p.number, p.sha) : dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p.number, p.sha);
+    if (r.ok) {
+      say(`MERGED #${p.number} alone`);
+      done.merged.push(p.number);
+      // Merged already (an epic's pull request shows as merged once the epic holds its head): only the labels and the
+      // position comment go.
+      await leave(p, null, null);
+    }
+    return r;
+  };
+
+  /**
+   * The next pull request, alone: merged at once when its head holds the base's tip and is green, else rebased onto
+   * the tip and pushed for CI. `rerun` rebases even when nothing moved (a fresh commit for a second CI run).
+   */
+  const goAlone = async (p, { retried = false, rerun = false } = {}) => {
+    const tip = await gh.branchSha(base);
+    if (!rerun && p.ci === "success" && (await gh.behindBy(tip, p.sha)) === 0) {
+      const r = await landAlone(p);
+      if (r.ok) return null;
+      // Refused while up to date and green (GitHub calls some rebases unsafe): the squash of a batch always applies.
+      say(`::warning::Could not merge #${p.number} alone: ${r.message}; it goes the batch way.`);
+      return (await board([p])) ?? false;
+    }
+    const built = await git.rebase(base, p, { force: rerun });
+    if (built.dropped) {
+      say(`DROP #${p.number} (${built.dropped})`);
+      if (built.dropped === "moved") return false; // pushed after its CI was read: the next run reads it again
+      done.dropped.push(p.number);
+      await leave(p, built.dropped === "empty" ? null : LABEL.conflict, conflictText(base, built.dropped));
+      return null;
+    }
+    // The mark goes first: a run that stops before the push leaves the reviewed head with a mark naming a commit it
+    // never got, which the next run reads as nothing in flight.
+    p.alone = { sha: built.sha, baseSha: built.baseSha, at: new Date(now).toISOString(), retried };
+    await setSticky(p, positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone));
+    say(`ALONE #${p.number}: rebased onto ${built.baseSha.slice(0, 12)} as ${built.sha.slice(0, 12)}${retried ? " (second run)" : ""}`);
+    if (built.sha !== p.sha) {
+      const pushed = dry ? (say(`(dry run) would push ${built.sha.slice(0, 12)} to ${p.branch} (lease ${p.sha.slice(0, 12)})`), { ok: true }) : await git.pushHead(p.branch, built.sha, p.sha);
+      if (!pushed.ok) say(`::warning::Could not push the rebase of #${p.number}: ${pushed.message}`);
+    }
+    return { number: p.number, members: [p], alone: true };
+  };
+
+  /** A lone pull request the train rebased and waits on: its head is the commit its mark names. */
+  const flyAlone = async (p) => {
+    const mark = p.alone;
+    const stay = { number: p.number, members: [p], alone: true };
+    const tip = await gh.branchSha(base);
+    say(`ALONE #${p.number} at ${p.sha.slice(0, 12)} CI ${p.ci}`);
+    // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place.
+    if (p.draft) return null;
+    // Red on an old tip says nothing about the new one, and green on an old tip must not land.
+    if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried });
+    if (p.ci === "failure") {
+      const baseCi = ciState(await gh.checkRuns(mark.baseSha));
+      if (baseCi === "failure" || baseCi === "pending") {
+        say(`HOLD #${p.number}: CI Success on \`${base}\` itself is ${baseCi === "failure" ? "red" : "still running"}; nobody is blamed until it is green.`);
+        return stay;
+      }
+      // One more run before blaming it: a flake should not cost its author a review round. The queue app may not rerun
+      // workflows, so the rerun is a fresh rebase (a new committer time, so a new sha: a CI run has passed since).
+      if (!mark.retried) return goAlone(p, { retried: true, rerun: true });
+      say(`FAILED #${p.number}`);
+      done.failed.push(p.number);
+      await leave(p, LABEL.failed, `Merge train: CI Success failed twice with only this pull request on \`${base}\` (last: ${p.sha.slice(0, 12)}). Fix it, get it reviewed again, and add \`queue\` again.`);
+      return null;
+    }
+    if (p.ci === "success") {
+      const r = await landAlone(p);
+      if (r.ok) return null;
+      say(`::warning::Could not land #${p.number}: ${r.message}`);
+      return stay;
+    }
+    if (p.ci === "none" && now - Date.parse(mark.at) > CI_START_TIMEOUT) {
+      say(`CI never started on #${p.number} at ${p.sha.slice(0, 12)}, so it is rebased again.`);
+      return goAlone(p, { retried: mark.retried, rerun: true });
+    }
+    if (p.ci === "none") say(`::warning::CI has not started on #${p.number} at ${p.sha.slice(0, 12)} yet.`);
+    return stay;
+  };
+
+  if (!inFlight) {
+    const lone = line().find((p) => p.alone?.sha === p.sha);
+    if (lone) inFlight = await flyAlone(lone);
+  }
+  while (inFlight === null || inFlight === undefined) {
+    const next = pickBatch(line());
+    if (next.length === 1 && canGoAlone(next[0])) inFlight = await goAlone(next[0]);
+    else inFlight = (await board(next)) ?? false;
+  }
+  inFlight ||= null;
 
   const aboard = new Set(inFlight?.members.map((p) => p.number) ?? []);
   let place = 0;
   for (const p of line()) {
-    const head = queuedHead(p.sticky) ?? p.sha;
-    const text = aboard.has(p.number) ? positionText(base, p, 0, inFlight.number, head) : positionText(base, p, ++place, 0, head);
-    if (!p.labels.includes(LABEL.queue)) continue; // --also: pretended, never commented on
+    // Whoever is still in line passed the head checks above: its head is the one `queue` (or the train) vouches for.
+    const text =
+      inFlight?.alone && inFlight.number === p.number
+        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone)
+        : aboard.has(p.number)
+          ? positionText(base, p, 0, inFlight.number, p.sha)
+          : positionText(base, p, ++place, 0, p.sha);
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
-    if (!p.sticky) await w.comment(p.number, text);
-    else if (p.sticky.body !== text) await w.editComment(p.sticky.id, text);
+    await setSticky(p, text);
   }
-  say(inFlight ? `IN FLIGHT #${inFlight.number}` : "Nothing to board.");
+  say(inFlight ? `IN FLIGHT #${inFlight.number}${inFlight.alone ? " (alone)" : ""}` : "Nothing to board.");
   return { log, ...done, inFlight: inFlight?.number ?? null };
 }
 
@@ -473,6 +612,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       const r = await api("PUT", `/pulls/${n}/merge`, { merge_method: "rebase", sha });
       return { ok: r.ok, message: `HTTP ${r.status} ${r.data?.message ?? ""}` };
     },
+    /** How many commits of `baseSha` the commit `headSha` lacks: 0 when it already holds them (a rebase merge rewrites nothing). */
+    behindBy: async (baseSha, headSha) => (await must("GET", `/compare/${baseSha}...${headSha}?per_page=1`)).behind_by,
   };
 }
 
@@ -571,6 +712,56 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
       if (dir) rmSync(dir, { recursive: true, force: true });
       dir = null;
       for (const ref of git(["for-each-ref", "--format=%(refname)", `${ns}/`], cwd).split("\n").filter(Boolean)) git(["update-ref", "-d", ref], cwd);
+    },
+    /**
+     * Rebases one pull request's head onto `base`'s tip in the temporary worktree, without pushing: { baseSha, sha }, or
+     * { baseSha, dropped } with "moved" (its head is not `p.sha`), "conflict" or "empty" (nothing left against the
+     * base). `force` makes new commits even when the head already sits on the tip (a fresh commit for another CI run).
+     */
+    async rebase(base, p, { force = false } = {}) {
+      signal?.throwIfAborted();
+      fetch([`+refs/heads/${base}:${ns}/base`, `+refs/pull/${p.number}/head:${ns}/pr-${p.number}`]);
+      const baseSha = git(["rev-parse", `${ns}/base`], cwd);
+      if (git(["rev-parse", `${ns}/pr-${p.number}`], cwd) !== p.sha) return { baseSha, dropped: "moved" };
+      if (!dir) {
+        dir = mkdtempSync(join(tmpdir(), "merge-train-"));
+        git(["worktree", "add", "-q", "--detach", dir, baseSha], cwd);
+      }
+      git(["reset", "-q", "--hard", p.sha]);
+      // Settings of the machine's own git must not reach this rebase: updateRefs would move its local branches.
+      const plain = ["-c", "rebase.updateRefs=false", "-c", "rebase.autoSquash=false", "-c", "rebase.autoStash=false"];
+      try {
+        git([...identity(), ...plain, "rebase", "-q", "--no-verify", ...(force ? ["--force-rebase"] : []), baseSha]);
+      } catch (e) {
+        try {
+          git(["rebase", "--abort"]);
+        } catch {
+          // nothing to abort
+        }
+        git(["reset", "-q", "--hard", baseSha]);
+        if (e.code === "ETIMEDOUT") throw e; // not a conflict
+        return { baseSha, dropped: "conflict" };
+      }
+      const sha = git(["rev-parse", "HEAD"]);
+      if (git(["rev-parse", `${sha}^{tree}`]) === git(["rev-parse", `${baseSha}^{tree}`])) return { baseSha, dropped: "empty" };
+      return { baseSha, sha };
+    },
+    /** Moves a pull request's branch to `sha`, only while it still points at `expected` (an author's push wins). */
+    async pushHead(branch, sha, expected) {
+      signal?.throwIfAborted();
+      try {
+        git(["push", "-q", `--force-with-lease=refs/heads/${branch}:${expected}`, remote, `${sha}:refs/heads/${branch}`], cwd);
+        return { ok: true };
+      } catch (e) {
+        if (e.code === "ETIMEDOUT") throw e; // it may have pushed: the next run reads the head against the mark
+        const lines = String(e.stderr ?? e.message).trim().split("\n");
+        return { ok: false, message: (lines.find((l) => /^\s*!|^error:|^fatal:/.test(l)) ?? lines.at(-1)).trim() };
+      }
+    },
+    /** An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it). */
+    async landPull(base, number, sha) {
+      fetch([`+refs/pull/${number}/head:${ns}/pr-${number}`]);
+      return this.land(base, sha);
     },
   };
 }
