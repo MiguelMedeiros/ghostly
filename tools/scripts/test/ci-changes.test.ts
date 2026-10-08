@@ -3,12 +3,17 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PACKAGES_READ_FROM_SITE, WEBSITE_INPUTS, covers, plan } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
+import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
 
 describe("the website gate", () => {
   it("covers every app file the deck check compares", () => {
     for (const file of DECK) expect(covers(WEBSITE_INPUTS, `apps/ui/src/components/${file}`), `apps/ui/src/components/${file}`).toBe(true);
+  });
+
+  it("covers every core file the store readers' check compares", () => {
+    for (const file of STORE_CORE) expect(covers(WEBSITE_INPUTS, `packages/core/src/${file}`), `packages/core/src/${file}`).toBe(true);
   });
 
   it("covers every repository file and folder the site's scripts name", () => {

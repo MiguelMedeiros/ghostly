@@ -68,6 +68,8 @@ export interface StoreApp {
 export type StoreView =
   | {
       ok: true;
+      /** The key the index is signed by. */
+      key: string;
       name: string;
       description?: string;
       sequence: number;
@@ -173,6 +175,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
   }
   return {
     ok: true,
+    key: index.key,
     name: index.name,
     ...(index.description !== undefined && { description: index.description }),
     sequence: index.sequence,

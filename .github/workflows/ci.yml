@@ -604,6 +604,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.website == 'true'
     runs-on: ubuntu-24.04
+    # The /apps pages read the committed test store, not GitHub (scripts/sync-store.mjs).
+    env:
+      GHOSTLY_STORE_FIXTURE: "1"
     defaults:
       run:
         working-directory: apps/website
@@ -637,6 +640,10 @@ jobs:
       - name: App deck copies match the app
         run: node scripts/sync-app-deck.mjs --check
 
+      # The /apps pages check the store with core's own readers, copied (scripts/sync-store-core.mjs).
+      - name: Store reader copies match core
+        run: node scripts/sync-store-core.mjs --check
+
       - name: ESLint
         run: npm run lint
 
@@ -656,6 +663,9 @@ jobs:
     if: needs.changes.outputs.website_e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # The /apps pages read the committed test store, not GitHub (scripts/sync-store.mjs).
+    env:
+      GHOSTLY_STORE_FIXTURE: "1"
     strategy:
       fail-fast: false
       matrix:
