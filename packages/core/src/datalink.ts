@@ -113,6 +113,27 @@ export const ANSWER_REFUSED_REDIALS = 4;
 /** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
 const REANSWER_MARGIN_MS = 15_000;
 
+/**
+ * Traces the candidate pair an opened data link uses, by type only (host, srflx, prflx, relay; never an address): two
+ * devices on one network should meet host to host. A connection without stats (a test's fake) traces nothing.
+ */
+async function tracePair(me: string, pc: RTCPeerConnection): Promise<void> {
+  try {
+    if (typeof pc.getStats !== "function") return;
+    const stats = await pc.getStats();
+    const byId = new Map<string, Record<string, unknown>>();
+    stats.forEach((s: Record<string, unknown>) => byId.set(s.id as string, s));
+    let pairId: unknown;
+    for (const s of byId.values()) if (s.type === "transport" && s.selectedCandidatePairId) pairId = s.selectedCandidatePairId;
+    const pair = pairId !== undefined ? byId.get(pairId as string)
+      : [...byId.values()].find((s) => s.type === "candidate-pair" && s.nominated && s.state === "succeeded");
+    if (!pair) return;
+    const kind = (id: unknown) => byId.get(id as string)?.candidateType ?? "?";
+    const rtt = typeof pair.currentRoundTripTime === "number" ? Math.round(pair.currentRoundTripTime * 1000) : undefined;
+    traceLink(me, "rtc-pair", { local: kind(pair.localCandidateId), remote: kind(pair.remoteCandidateId), ...(rtt !== undefined && { rttMs: rtt }) });
+  } catch { /* the trace must not fail the link */ }
+}
+
 export class DataLink {
   state: DataLinkState = "idle";
   private pc: RTCPeerConnection | null = null;
@@ -371,6 +392,7 @@ export class DataLink {
       this.options.publishSignal(null);
       this.options.onDirect?.("open");
       this.options.onOpen(wrapDataChannel(dc));
+      void tracePair(this.options.myPubKeyZ32, pc);
     });
     dc.addEventListener("close", () => {
       if (this.pc === pc) this.failed();
