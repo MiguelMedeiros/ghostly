@@ -65,14 +65,19 @@ export function createTauriTransport(): PkarrTransport {
   let later: ReturnType<typeof setTimeout> | null = null;
   const listeners = new Set<(change?: DiscoveryChange) => void>();
   // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering, and
-  // of the path changing (no change named: the panel shows it, links do nothing). A read or write within 2 s of the last
-  // ask is asked about when the 2 s are up: an inviter's first envelope goes before its first read (dhtDelivery.ts), and
-  // that read may be the last for a while once the pair is live.
-  const refresh = () => {
-    const wait = askedAt + STATUS_EVERY_MS - Date.now();
+  // of the path changing (no change named: the panel shows it, links do nothing). A read before any path is known is
+  // asked about at once: a new chat's first writes (an inviter's first envelope, a joiner's claim) go before its first
+  // reads, and the pair can be live within a second of those. Any other read or write within 2 s of the last ask is asked
+  // about when the 2 s are up, as it may be the last for a while.
+  let asks = 0;
+  const refresh = (read = false) => {
+    const wait = read && !status?.path ? 0 : askedAt + STATUS_EVERY_MS - Date.now();
     if (wait > 0) { later ??= setTimeout(() => { later = null; refresh(); }, wait); return; }
     askedAt = Date.now();
+    const ask = ++asks;
     void invoke<DiscoveryStatus>("pkarr_status").then((next) => {
+      // An answer to an older ask, come after a newer one's.
+      if (ask < asks && status) return;
       const health = (s?: DiscoveryStatus) => JSON.stringify(s?.relays.map((r) => [r.relay, r.state]) ?? []);
       const changed = health(next) !== health(status);
       const moved = JSON.stringify(next.path) !== JSON.stringify(status?.path ?? null);
@@ -98,7 +103,7 @@ export function createTauriTransport(): PkarrTransport {
         publicKeyZ32: pubKeyZ32,
         background: !!options?.background,
         urgent: !!options?.urgent,
-      }).finally(refresh);
+      }).finally(() => refresh(true));
       // Rust verified the signature while resolving.
       return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
     },

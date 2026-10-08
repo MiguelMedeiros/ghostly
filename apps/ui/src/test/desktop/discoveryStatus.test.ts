@@ -16,9 +16,9 @@ import { createTauriTransport } from "../../desktop/host";
 
 /**
  * The connection panel's discovery path on Desktop is Rust's (`pkarr_status`), asked after reads and writes at most every
- * 2 s. An inviter's first envelope goes out before its first read (#1445): Rust is asked after the envelope, before any
- * read, and the read that lands a moment later must still reach the panel, though the pair goes live and nothing else
- * reads or writes for a while.
+ * 2 s. A new chat's first writes go before its first reads (an inviter's first envelope since #1445, a joiner's claim):
+ * Rust is asked after them, before any read, and the read that lands a moment later must reach the panel by the time
+ * the pair is live, though nothing else reads or writes for a while.
  */
 describe("the Desktop's discovery status", () => {
   const key = "y".repeat(52);
@@ -36,7 +36,9 @@ describe("the Desktop's discovery status", () => {
   });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("shows a read that lands within 2 s of the last ask, and tells the panel", async () => {
+  const asked = () => tauri.invoke.mock.calls.filter(([command]) => command === "pkarr_status").length;
+
+  it("shows the first read at once, though it lands within 2 s of the last ask, and tells the panel", async () => {
     const transport = createTauriTransport();
     const heard: unknown[] = [];
     transport.subscribe!((change) => heard.push(change));
@@ -46,11 +48,33 @@ describe("the Desktop's discovery status", () => {
 
     await vi.advanceTimersByTimeAsync(500);
     await transport.resolve(key, { background: true });
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(0);
     expect(transport.discovery!().path).toEqual({ via: "dht" });
     // A path, not a relay tripping or recovering: the engine shows it (node.ts `emitState`), and no link looks again.
     expect(heard).toEqual([undefined]);
-    // Rust was asked twice in those 2.5 s: once after the envelope, once when the spacing allowed.
-    expect(tauri.invoke.mock.calls.filter(([command]) => command === "pkarr_status")).toHaveLength(2);
+    expect(asked()).toBe(2);
+  });
+
+  it("asks about a later read when the 2 s are up, and not before", async () => {
+    const transport = createTauriTransport();
+    await transport.resolve(key, { background: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.discovery!().path).toEqual({ via: "dht" });
+
+    // "Also use Pkarr relays" on: the next read goes through a relay.
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "pkarr_status") return structuredClone(rust);
+      if (command === "resolve_records") { rust.path = { via: "relay", relay: "http://127.0.0.1:46401" }; return null; }
+      return undefined;
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await transport.resolve(key);
+    await transport.resolve(key);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.discovery!().path).toEqual({ via: "dht" });
+    expect(asked()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(transport.discovery!().path).toEqual({ via: "relay", relay: "http://127.0.0.1:46401" });
+    expect(asked()).toBe(2);
   });
 });
