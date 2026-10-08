@@ -250,6 +250,8 @@
     "confirmRealFirst": "أكّد الأموال الحقيقية أولًا",
     "confirmRealFirstNext": "استخدم {{button}}. لم يُرسل شيء.",
     "contactAllowsNeither": "لم تسمح جهة اتصالك لا بـ Cashu ولا بـ Lightning في هذه المحادثة",
+    "contactAway": "جهة الاتصال غير متصلة",
+    "contactAwayNext": "لم يُرسل شيء. ادفع عندما تصبح المحادثة مباشرة.",
     "contactClosed": "أغلقته جهة اتصالك",
     "contactHasNone": "ليس لدى جهة اتصالك محفظة {{method}} {{network}}",
     "contactRefuses": "لا تقبل جهة اتصالك {{method}} في هذه المحادثة",

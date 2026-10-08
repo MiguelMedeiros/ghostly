@@ -63,6 +63,7 @@ import { GROUP_VERSION_HUBS } from "./groupHubs";
 import { GROUP_VERSION_SIGNALS } from "./groupSignals";
 import { GROUP_VERSION_FILES } from "./groupFiles";
 import { PairingTracker, type PairingProgress, type PairingRole } from "./pairingProgress";
+import { engineError } from "./engineErrors";
 
 /**
  * One link to one peer, complete: Pkarr presence and signaling, the WebRTC
@@ -3126,8 +3127,19 @@ export class GhostLink {
     // The networks go for every wallet, on or off here: a way turned off is told apart from one with no wallet.
     try { this.channel.send(JSON.stringify({ t: "paired-payments", m: methods, ...(networks ? { n: networks } : {}) })); } catch { /* the next session offers it */ }
   }
+  /**
+   * The contact said goodbye on the last live session (its app quit or stopped) and has published nothing since but its
+   * leave packet: its app is not running, so a dial now waits for nobody until it gives up.
+   */
+  get contactAway(): boolean {
+    const presence = this.session.peerPresence;
+    return !this.isDataLinkOpen && !!this.departed && (presence.lastPacketAt === this.departed.packet || !presence.online);
+  }
+
   async requirePaymentSupport(): Promise<void> {
     if (!PAYMENT_METHODS.some(m => this.paymentEnabled(m))) throw new Error("Payments are turned off in this chat.");
+    // Said at once: before, the dial below waited out its 90 s for an app that had said it was going.
+    if (this.contactAway) throw engineError("contactAway");
     await this.connect();
     if (!this.supportsPayments) throw new Error("This contact does not support payments. Both peers need an updated Ghostly.");
   }

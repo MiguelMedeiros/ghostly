@@ -250,6 +250,8 @@
     "confirmRealFirst": "请先确认真钱付款",
     "confirmRealFirstNext": "使用“{{button}}”。没有发送任何款项。",
     "contactAllowsNeither": "你的联系人在此聊天中既未允许 Cashu 也未允许 Lightning",
+    "contactAway": "你的联系人不在线",
+    "contactAwayNext": "没有发送任何内容。等聊天连上后再付款。",
     "contactClosed": "你的联系人关闭了它",
     "contactHasNone": "你的联系人没有 {{network}} {{method}} 钱包",
     "contactRefuses": "你的联系人在此聊天中不接受 {{method}}",
