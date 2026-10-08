@@ -204,6 +204,34 @@ describe("updates", () => {
     expect((await again.store.install({ digest: v2.digest, grant: ["chat"] })).equivocation).toBeUndefined();
   });
 
+  it("an app uninstalled while its update downloads stays uninstalled, with neither version's files kept", async () => {
+    for (const permissions of [[], ["chat", "name"]] as const) {
+      await emptyProfile();
+      const { store, v1 } = await installed();
+      const v2 = await bundle({ sequence: 2, permissions: [...permissions] });
+      net.put(PINNED_URL, v2.bytes);
+      await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+      await store.addStore({ url: STORE_URL });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let downloading!: () => void;
+      const started = new Promise<void>((resolve) => { downloading = resolve; });
+      const answer = net.fetch.getMockImplementation()!;
+      net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === PINNED_URL) { downloading(); await held; }
+        return answer(input, init);
+      });
+      const check = store.checkUpdates();
+      await started;
+      await store.uninstall({ ref: v1.ref });
+      release();
+      expect(await check, permissions.length ? "the update that waits" : "the update that installs by itself").toEqual([]);
+      expect(await appRows()).toEqual([]);
+      expect(await bundleIds()).toEqual([]);
+      net.fetch.mockImplementation(answer);
+    }
+  });
+
   it("with no app installed the check asks nothing", async () => {
     await net.putStore(await storeFiles());
     expect(await apps(net).checkUpdates()).toEqual([]);
