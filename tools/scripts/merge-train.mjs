@@ -22,8 +22,10 @@
 //
 // .github/workflows/merge-queue.yml runs it with the queue app's token (GH_TOKEN); pushes made with the workflow's own
 // GITHUB_TOKEN would start no CI. Until that app exists a Mac runs it with its gh login (`gh auth token` when GH_TOKEN
-// is unset) and its git credentials for `origin`; --every <seconds> repeats the run. Without --base it runs every base
-// that has a queued pull request or a batch open (--list-bases prints them as JSON). --dry-run reads the live repo,
+// is unset) and its git credentials for `origin`; --every <seconds> repeats the run. Without --base the workflow runs
+// every base that has a queued pull request or a batch open (--list-bases prints them as JSON), and a Mac runs `dev`
+// and every `epic/*` branch, logging them each round. Every request and git call has a timeout, and a round that runs
+// past ROUND_DEADLINE is cut and logged, so the loop never stalls silently. --dry-run reads the live repo,
 // builds batches in a temporary worktree (never pushed) and prints what it would do; it changes nothing on GitHub.
 // --also pretends the listed pull requests carry `queue` (dry runs only). GITHUB_REPOSITORY defaults to this repo.
 // tools/scripts/test/merge-train.test.ts drives the train through a fake GitHub and git.
@@ -43,6 +45,10 @@ const STATE = /<!-- merge-train:batch (\{.*?\}) -->/g;
 export const BASE = /^(dev|epic\/[A-Za-z0-9._-]+)$/;
 /** A batch whose CI has not started after this long (the GITHUB_TOKEN trap, a lost event) is rebuilt. */
 export const CI_START_TIMEOUT = 20 * 60_000;
+/** One REST request (each attempt), one git call, and one round of every base: past these they fail and are logged. */
+export const REQUEST_TIMEOUT = 30_000;
+export const GIT_TIMEOUT = 5 * 60_000;
+export const ROUND_DEADLINE = 15 * 60_000;
 
 /**
  * CI on one commit, from its check runs: "success", "failure", "pending" (CI Success has not finished, or has no run
@@ -345,23 +351,29 @@ export class BudgetLow extends Error {}
 /**
  * GitHub over REST (the shared GraphQL quota stays free). A request that fails to connect (a reset, DNS after a Mac
  * wakes), a 5xx, a 429 or a rate-limited 403 (primary, or secondary with `Retry-After`) is retried with backoff;
- * below `budget` calls left the run stops. A POST retried after a 5xx that GitHub did carry out can leave a second
- * comment, or a 422 "already exists" that fails this run; the next run goes on from GitHub's state. `wait` and
- * `fetchImpl` are injectable for the tests.
+ * below `budget` calls left the run stops. An attempt with no answer within `timeout` counts as one that failed to
+ * connect; once `signal` aborts (the round's deadline), every request fails at once. A POST retried after a 5xx that
+ * GitHub did carry out can leave a second comment, or a 422 "already exists" that fails this run; the next run goes on
+ * from GitHub's state. `wait`, `fetchImpl` and `timeout` are injectable for the tests.
  */
-export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch } = {}) {
+export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch, timeout = REQUEST_TIMEOUT, signal } = {}) {
   const backoff = (attempt, after) => wait(Math.min(60, Number(after) || 2 ** attempt * 5) * 1000);
   const api = async (method, path, body) => {
+    const named = (e) => (e?.name === "TimeoutError" ? new Error(`${method} ${path}: no answer within ${timeout / 1000} s`) : e);
     for (let attempt = 0; ; attempt++) {
+      signal?.throwIfAborted();
+      // The timeout covers the body too: a reply that stalls half way fails instead of hanging the run.
+      const cut = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout);
       let r;
       try {
         r = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
           method,
           headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
           body: body ? JSON.stringify(body) : undefined,
+          signal: cut,
         });
       } catch (e) {
-        if (attempt >= 3) throw e;
+        if (attempt >= 3 || signal?.aborted) throw named(e);
         await backoff(attempt);
         continue;
       }
@@ -372,7 +384,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
         continue;
       }
       if (left < budget) throw new BudgetLow(`GitHub API budget low (${left} calls left); stopping this run`);
-      const text = await r.text();
+      const text = await r.text().catch((e) => Promise.reject(named(e)));
       let data = null;
       try {
         data = text ? JSON.parse(text) : null;
@@ -426,6 +438,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       }
       return false;
     },
+    /** Every `epic/*` branch: the bases a Mac serves besides `dev`. */
+    epicBranches: async () => (await must("GET", "/git/matching-refs/heads/epic/")).map((r) => r.ref.replace("refs/heads/", "")),
     events: (n) => all(`/issues/${n}/events`),
     checkRuns: (sha) => all(`/commits/${sha}/check-runs?filter=latest`),
     comments: (n) => all(`/issues/${n}/comments`),
@@ -445,10 +459,20 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
   };
 }
 
-/** Builds batches in a temporary worktree of the repository in `cwd`, from `remote`'s refs. */
-export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
+/**
+ * Builds batches in a temporary worktree of the repository in `cwd`, from `remote`'s refs. A git call that runs past
+ * `timeout` is killed and throws; once `signal` aborts (the round's deadline), nothing more is built, pushed or landed.
+ */
+export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT_TIMEOUT, signal } = {}) {
   let dir = null;
-  const git = (args, at = dir ?? cwd) => execFileSync("git", args, { cwd: at, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const git = (args, at = dir ?? cwd) => {
+    try {
+      return execFileSync("git", args, { cwd: at, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout }).trim();
+    } catch (e) {
+      if (e.code === "ETIMEDOUT") e.message = `git ${args[0]}: no answer within ${timeout / 1000} s`;
+      throw e;
+    }
+  };
   let who = null; // a runner without a git identity commits as the train (GitHub sets the committer on merge anyway)
   const identity = () => {
     if (who) return who;
@@ -465,7 +489,7 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
       try {
         return git(["fetch", "-q", "--no-tags", remote, ...refspecs], cwd);
       } catch (e) {
-        if (i === 2) throw e; // other sessions fetch the same repo: "cannot lock ref" passes on a retry
+        if (i === 2 || e.code === "ETIMEDOUT") throw e; // other sessions fetch the same repo: "cannot lock ref" passes on a retry
       }
     }
   };
@@ -473,6 +497,7 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
   const ns = `refs/merge-train/${process.pid}-${Date.now()}`;
   return {
     async build(base, prs) {
+      signal?.throwIfAborted();
       fetch([`+refs/heads/${base}:${ns}/base`, ...prs.map((p) => `+refs/pull/${p.number}/head:${ns}/pr-${p.number}`)]);
       const baseSha = git(["rev-parse", `${ns}/base`], cwd);
       if (!dir) {
@@ -490,7 +515,8 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
         }
         try {
           git(["merge", "-q", "--squash", ref]);
-        } catch {
+        } catch (e) {
+          if (e.code === "ETIMEDOUT") throw e; // not a conflict
           git(["reset", "-q", "--hard", "HEAD"]);
           dropped.push({ number: p.number, reason: "conflict" });
           continue;
@@ -507,14 +533,17 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
       return { baseSha, sha: git(["rev-parse", "HEAD"]), applied, dropped };
     },
     async push(branch, sha) {
+      signal?.throwIfAborted();
       git(["push", "-q", "--force", remote, `${sha}:refs/heads/${branch}`], cwd);
     },
     /** Fast-forwards `base` to `sha` without force: the push is refused if `base` moved since the batch was built. */
     async land(base, sha) {
+      signal?.throwIfAborted();
       try {
         git(["push", "-q", remote, `${sha}:refs/heads/${base}`], cwd);
         return { ok: true };
       } catch (e) {
+        if (e.code === "ETIMEDOUT") throw e; // it may have landed: the next run reads where the base is
         // git ends with `hint:` lines; the reason is the `! [rejected]` or `error:` line.
         const lines = String(e.stderr ?? e.message).trim().split("\n");
         return { ok: false, message: (lines.find((l) => /^\s*!|^error:|^fatal:/.test(l)) ?? lines.at(-1)).trim() };
@@ -532,6 +561,39 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
 /** The bases with a train to run: `dev` and `epic/<name>` branches with a queued pull request or a batch open. */
 export const trainBases = (pulls) =>
   [...new Set(pulls.filter((p) => BASE.test(p.base) && (p.labels.includes(LABEL.queue) || isBatch(p, p.base))).map((p) => p.base))].sort();
+
+/** The bases a Mac serves without --base, the queue app configured or not: `dev` and every `epic/*` branch. */
+export const localBases = async (gh) => ["dev", ...(await gh.epicBranches()).filter((b) => BASE.test(b)).sort()];
+
+/**
+ * Runs `round(signal)` once, or every `every` seconds. A round never ends the loop: what it throws goes to `report`,
+ * and a round still running after `deadline` ms is cut (its signal aborts, so its next request or git call fails), goes
+ * to `report` too, and the next round starts on time. A round that returns true stops the loop.
+ */
+export async function rounds(round, { every = 0, deadline = ROUND_DEADLINE, report, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+  for (;;) {
+    const ac = new AbortController();
+    let timer;
+    const cut = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const e = new Error(`the round ran past its ${deadline / 1000} s deadline, so it is cut and the next round starts`);
+        ac.abort(e);
+        reject(e);
+      }, deadline);
+    });
+    const run = round(ac.signal);
+    run.catch(() => {}); // a cut round that fails later is not an unhandled rejection
+    try {
+      if (await Promise.race([run, cut])) return;
+    } catch (e) {
+      report(e);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!every) return;
+    await sleep(every * 1000);
+  }
+}
 
 /** One train per machine: a lock file holding the pid; a lock whose process is gone is taken over. */
 function lock(path) {
@@ -567,14 +629,14 @@ async function main() {
   const repo = process.env.GITHUB_REPOSITORY || "MiguelMedeiros/ghostly";
   // On a runner: the queue app's token. On a Mac until the app exists: the local gh login. Never printed: git gets
   // its credentials from the checkout or the Mac's own helper (never a URL), and errors are scrubbed of the token.
-  const token = process.env.GH_TOKEN || execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+  const token = process.env.GH_TOKEN || execFileSync("gh", ["auth", "token"], { encoding: "utf8", timeout: 60_000 }).trim();
   const scrub = (s) => String(s).replaceAll(token, "***");
   const gh = restLayer(token, repo);
   if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls())));
   const local = !process.env.GITHUB_ACTIONS && !dry;
-  if (local) lock(join(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim(), "merge-train.lock"));
+  if (local) lock(join(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 60_000 }).trim(), "merge-train.lock"));
   // The login the train comments as: the app's bot on a runner (set by the workflow), the gh user on a Mac.
-  const login = process.env.MERGE_TRAIN_LOGIN || execFileSync("gh", ["api", "user", "-q", ".login"], { encoding: "utf8" }).trim();
+  const login = process.env.MERGE_TRAIN_LOGIN || execFileSync("gh", ["api", "user", "-q", ".login"], { encoding: "utf8", timeout: 60_000 }).trim();
 
   const every = Number(opt("--every")) || 0;
   const print = (base, log) => {
@@ -587,15 +649,24 @@ async function main() {
     log.push(e instanceof BudgetLow ? `::warning::${base}: ${e.message}` : `::error::${base}: ${e.message}`);
     if (!(e instanceof BudgetLow) && !every) process.exitCode = 1;
   };
-  for (;;) {
-    // A round never ends the loop: a network error or a low budget is logged, and the next round tries again.
-    try {
+  // A round never ends the loop: a network error, a low budget or a round cut at its deadline is logged, and the next
+  // round tries again.
+  const report = (e) => {
+    const log = [];
+    failed("train", e, log);
+    print("train", log);
+  };
+  await rounds(
+    async (signal) => {
+      const gh = restLayer(token, repo, { signal });
       if (local && (await gh.appTrainRuns())) {
         console.log("The merge-queue workflow runs the train now (the queue app is configured); this machine stops.");
-        return;
+        return true;
       }
-      for (const base of opt("--base") ? [opt("--base")] : trainBases(await gh.pulls())) {
-        const git = gitLayer();
+      const bases = opt("--base") ? [opt("--base")] : process.env.GITHUB_ACTIONS ? trainBases(await gh.pulls()) : await localBases(gh);
+      if (!opt("--base")) print("train", [`Serving ${bases.join(", ") || "no base"}.`]);
+      for (const base of bases) {
+        const git = gitLayer({ signal });
         const log = [];
         try {
           await tick({ gh, git, base, login, dry, also, log });
@@ -606,14 +677,9 @@ async function main() {
         }
         print(base, log);
       }
-    } catch (e) {
-      const log = [];
-      failed("train", e, log);
-      print("train", log);
-    }
-    if (!every) break;
-    await new Promise((r) => setTimeout(r, every * 1000));
-  }
+    },
+    { every, report },
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
