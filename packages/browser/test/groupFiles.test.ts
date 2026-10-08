@@ -212,6 +212,25 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(Math.min(...fromBob)).toBe(cut);
   });
 
+  it("a holder serving bad bytes then stalling does not get the next holder blamed", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const size = 600_000, cut = 256 * 1024;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 11));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    // Alice's first byte goes bad, then her bytes to Carol stop past the first 256 KiB.
+    t.files.get(alice)!.store.corrupt = true;
+    t.hold = (from, to, frame) => from === alice && to === carol && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    t.world.reopen(carol);
+    await t.world.until(() => t.done(carol, id, messageId), 10 * 60_000);
+    expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
+    // Bob's tail on Alice's bad prefix failed the check: Bob was asked again from 0, never refused as damaged twice.
+    const toBob = t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-accept").map(s => s.frame.offset);
+    expect(toBob).toEqual([cut, 0]);
+  });
+
   it("an offer nobody asked for is refused, and nothing is stored", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);

@@ -160,6 +160,13 @@ interface Kept {
   idle?: Promise<void>;
   /** Bytes a transfer stored here that the next one goes on from, shown while it waits for a holder. */
   stored?: number;
+  /**
+   * The bytes kept from an earlier holder did not check out with the next one's tail: who served the bad part is not
+   * known, so the next transfer starts from 0 (`fresh`) and the holder whose tail failed is not counted as damaged
+   * (`unclear`, read once by `transferChanged`).
+   */
+  fresh?: boolean;
+  unclear?: boolean;
 }
 
 /** A file being asked for: of one holder at a time. */
@@ -584,7 +591,9 @@ export class GroupFileDesk {
     // What an earlier holder's transfer stored stays, and this one goes on from there (WISP 503: the asker accepts from
     // the offset it stored): every holder serves the author's bytes, and the whole file is checked at the end.
     await kept.idle;
-    const writer = await this.deps.store.write(kept.id, true);
+    const writer = await this.deps.store.write(kept.id, !kept.fresh);
+    kept.fresh = false;
+    const resumed = writer.offset > 0;
     let damaged = false;
     return {
       offset: writer.offset,
@@ -595,7 +604,7 @@ export class GroupFileDesk {
       verify: async () => { damaged = (await writer.digest()) !== kept.meta.d; return !damaged; },
       // Only damaged bytes go. Left with a holder that stalled or stopped, what came is kept for the next holder.
       discard: () => {
-        if (damaged) kept.stored = 0;
+        if (damaged) { kept.stored = 0; if (resumed) kept.fresh = kept.unclear = true; }
         return (kept.idle = (damaged ? writer.discard() : writer.close()).catch(() => {}));
       },
     };
@@ -638,7 +647,9 @@ export class GroupFileDesk {
       case "failed": case "declined": case "cancelled":
         // Damaged (refused, its bytes deleted), stopped by the holder or left here: the next holder is asked.
         edge.taking.delete(record.id);
-        if (want.holder) want.tried.add(want.holder);
+        // A resumed file that failed its check may owe its bad bytes to the earlier holder: this one is asked again, from 0.
+        if (want.holder && !kept.unclear) want.tried.add(want.holder);
+        kept.unclear = false;
         Object.assign(want, { wire: undefined, holder: undefined, linkId: undefined, moved: 0 });
         this.ask(kept);
         return;
