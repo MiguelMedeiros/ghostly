@@ -72,15 +72,22 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
 
 1. The Release workflow is green and the draft has all its assets (twelve from 1.0; v0.4.0 had sixteen, with the Rust CLI binaries), `latest.json` among them.
 2. Download a few and check them: `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` and `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`.
-3. Publish it as the latest release, with the changelog section as notes:
+3. **Apps on macOS, by hand** (releases with Apps on, from 1.2). No e2e covers apps on the macOS Desktop app: `e2e/desktop/apps.spec.ts` runs on Linux only, and `e2e/desktop-macos/` has no apps spec. Install the draft's `.dmg` on a Mac, then:
+   - install Chess from the default store on the Apps page;
+   - open it in a 1:1 chat with a contact on another device: it opens in a window of its own, titled "Chess with" the contact;
+   - play a few moves each way, close the window and open it again: the game is back;
+   - `~/Library/Logs/app.ghostly.chat/ghostly.log` has no `app window: not hardened` line (the window then closes), and no `WebKit has no feature` line (this macOS dropped a switch the window turns off; the window opens anyway, so read [WISP 1200](wisps/1200-marketplace.md#per-client), Desktop, before going on).
+
+   If one fails, do not publish: fix it and move the tag.
+4. Publish it as the latest release, with the changelog section as notes:
 
    ```bash
    gh release edit v1.0.0 --draft=false --latest --notes-file notes.md
    ```
 
-4. A download URL (`releases/download/v1.0.0/Ghostly_1.0.0_aarch64.dmg`) answers 200, and so does `releases/latest/download/latest.json`. That address is what every installed app asks, and it only moves to this release once the release is the latest one.
+5. A download URL (`releases/download/v1.0.0/Ghostly_1.0.0_aarch64.dmg`) answers 200, and so does `releases/latest/download/latest.json`. That address is what every installed app asks, and it only moves to this release once the release is the latest one.
 
-5. Publishing the release starts `Publish npm` (`.github/workflows/npm-publish.yml`), which puts the CLI on npm as `@ghostlytools/cli` (the npm organization `ghostlytools`) at the tag's version, with provenance. It refuses a tag that is not `packages/cli/package.json`'s version, skips a version already on npm, and ends by installing it from npm and running `ghostly --version`. To run it again for a tag: `gh workflow run npm-publish.yml -f tag=v1.0.0`.
+6. Publishing the release starts `Publish npm` (`.github/workflows/npm-publish.yml`), which puts the CLI on npm as `@ghostlytools/cli` (the npm organization `ghostlytools`) at the tag's version, with provenance. It refuses a tag that is not `packages/cli/package.json`'s version, skips a version already on npm, and ends by installing it from npm and running `ghostly --version`. To run it again for a tag: `gh workflow run npm-publish.yml -f tag=v1.0.0`.
 
 ### npm trusted publishing
 

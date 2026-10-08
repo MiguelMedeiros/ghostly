@@ -30,6 +30,15 @@ Its log names no one: each request is one line with the time, the method, the fi
 
 `npm run test:e2e` checks every feature of the web app in real browsers, and the web app against the extension ([e2e/README.md](../e2e/README.md)). `E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.config.ts --project=web` runs the same tests against a deployed copy.
 
+### Apps on your own server
+
+From 1.2, apps ([APPS.md](APPS.md)) run in a sandboxed page, the runner, and the runner's sandbox is an HTTP header. The Docker image sends it. Any other server needs two locations, copied from `apps/web/nginx.conf`:
+
+- `/app-frame.html`, with the runner's `Content-Security-Policy` header and the other headers of that location.
+- `/app-frame-net.html`, the same file (`app-frame.html`; there is no `app-frame-net.html` in the build) with the network runner's header, for apps granted the internet.
+
+The client asks `/app-frame.html` once for its header. When it is missing or different, the client hides Apps. Without the second location, an app granted the internet does not open. Copy the values as they are, send one `Content-Security-Policy` on those two paths (not the site's as well), and keep a proxy or CDN from adding or rewriting it. `curl -sI https://<your-host>/app-frame.html` shows what is sent. `npm run dev` and `vite preview` send both headers by themselves.
+
 ## How it shares code
 
 ```
