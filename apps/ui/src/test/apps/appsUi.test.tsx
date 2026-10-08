@@ -26,6 +26,9 @@ import { renderApp } from "../render";
 
 // The runner page's header, asked once by the real check: answered here, never fetched in a test.
 vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
+// The build's flag, off here whatever APPS_ENABLED says: "with the apps flag on" turns it on as the e2e build does.
+vi.mock("@ghostly/browser/shared/features", async (importOriginal) =>
+  ({ ...(await importOriginal<typeof import("@ghostly/browser/shared/features")>()), APPS_ENABLED: false }));
 
 const KEY = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo";
 const REF = `${KEY}/chess`;

@@ -8,27 +8,42 @@ import { appsChat } from "./helpers/appsChat";
 /**
  * Mini-apps in the engine (WISP 1200 § In a chat: `apps/1`): the pages open an app in a paired chat by its reference,
  * talk to the same app on the contact's side through the engine's calls, and hear the contact's frames as `app-frame`
- * events. A real engine and its contact's link over a stand-in for Iroh, as reactions.test.ts does. Behind a flag:
- * off, nothing is offered and every call is refused.
+ * events. A real engine and its contact's link over a stand-in for Iroh, as reactions.test.ts does. Behind a flag
+ * (`NodeOptions.apps`, by default `APPS_ENABLED`): off, nothing is offered and every call is refused.
  */
+
+// The build's flag, off here whatever the constant says: a test that passes no `apps` reaches the default as dev ships it.
+vi.mock("../src/shared/features", async (actual) => ({ ...await actual<typeof import("../src/shared/features")>(), APPS_ENABLED: false }));
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 const setup = (options?: Parameters<typeof appsChat>[1]) => appsChat(cleanup, options);
 
 describe("apps in the engine (apps/1)", () => {
-  it("are off in this build: nothing is offered, every call is refused", async () => {
-    expect(APPS_ENABLED).toBe(false);
-    const { call, contact, id, ref, app, appEvents } = await setup();
+  it("off: nothing is offered, every call is refused", async () => {
+    // Off by the engine's option, so this holds whatever the build's APPS_ENABLED says.
+    const { call, contact, id, ref, app, appEvents } = await setup({ apps: false });
     expect(contact.sessionOffers.peer).not.toContain(APPS_CAPABILITY);
     expect(contact.supportsApps).toBe(false);
     for (const [method, params] of [["appId", { linkId: id, ref }], ["appOpen", { linkId: id, ref, version: "1.0.0" }], ["appClose", { linkId: id, ref }], ["appSend", { linkId: id, ref, data: 1 }]] as const)
-      await expect(call(method, params), method).rejects.toThrow("Apps are unavailable in this release");
+      await expect(call(method, params), method).rejects.toThrow("Apps do not run on this client");
     // What the contact says anyway is dropped.
     contact.openApp(app, "1.0.0");
     (contact as unknown as { channel: { send(data: string): void } }).channel.send(JSON.stringify({ t: "paired-app", a: app, o: "open", v: "1.0.0" }));
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(appEvents()).toEqual([]);
+  });
+
+  it("an engine that does not say follows the build's flag: off, nothing is offered and every call is refused", async () => {
+    // No `apps` option, as the pages' and the server's engines are made: the default is APPS_ENABLED (mocked off).
+    expect(APPS_ENABLED).toBe(false);
+    const { call, contact, id, ref } = await setup();
+    expect(contact.sessionOffers.peer).not.toContain(APPS_CAPABILITY);
+    expect(contact.supportsApps).toBe(false);
+    for (const [method, params] of [
+      ["appId", { linkId: id, ref }], ["appOpen", { linkId: id, ref, version: "1.0.0" }], ["appList", undefined], ["appStoreList", undefined],
+    ] as const)
+      await expect(call(method, params), method).rejects.toThrow("Apps are unavailable in this release");
   });
 
   it("on: the page opens an app by its reference, the contact hears it under the same chat app id, and they talk", async () => {
