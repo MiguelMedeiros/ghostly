@@ -13,7 +13,7 @@
  * - touches CI, release, the scanner, this gate or the advisory allowlist
  * - adds a dependency (only versions of existing ones may change)
  * - changes more than MAX_LINES lines outside lock files
- * - in "deps" mode, touches anything but manifests, lock files and release notes
+ * - in "deps" mode, touches anything but manifests, lock files and release notes, or changes more than versions in them
  * - does not bump the version by exactly one patch, with a changelog entry
  * - comes less than MIN_HOURS after the previous automatic release
  * - did not pass the Security workflow on the same commit
@@ -94,6 +94,54 @@ const current = version(await raw("package.json", "main"));
 const next = version(await raw("package.json", sha));
 const [major, minor, patch] = current.split(".").map(Number);
 if (next !== `${major}.${minor}.${patch + 1}`) refuse(`version must go from ${current} to ${major}.${minor}.${patch + 1}, found ${next}`);
+
+// In deps mode a file may only change versions: not a package.json's scripts, an extension's permissions, the updater's
+// key, a Cargo build script or a Dockerfile's RUN lines. Each changed file is read on main and on the branch with its
+// versions blanked out (a dependency's range, a crate's version, a base image's tag), and the two must be equal. A
+// dependency spec that is not a plain range (`npm:`, `file:`, a git or GitHub source) stays as written, so changing it
+// counts. Lock files have their own check above; the changelog and the security review are notes.
+if (MODE === "deps") {
+  const RANGE = /^[\w.^~<>=*|+ -]*$/;
+  const blank = (value) =>
+    typeof value === "string" ? (RANGE.test(value) ? "" : value) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blank(v)])) : value;
+  const DEP_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides"];
+  const json = (text) => {
+    const data = JSON.parse(text);
+    delete data.version;
+    for (const field of DEP_FIELDS) if (field in data) data[field] = blank(data[field]);
+    return JSON.stringify(data);
+  };
+  // Cargo.toml: the package's own version, and the versions in dependency tables (`a = "1"`, `version = "1"`).
+  const cargo = (text) => {
+    let section = "";
+    return text
+      .split("\n")
+      .map((line) => {
+        section = line.match(/^\s*\[\[?([^\]]+)\]\]?\s*$/)?.[1] ?? section;
+        if (/dependencies/.test(section)) return line.replace(/\bversion\s*=\s*"[^"]*"/g, 'version = ""').replace(/^(\s*[\w-]+\s*=\s*)"[^"]*"\s*$/, '$1""');
+        if (section === "package" || section === "workspace.package") return line.replace(/^(\s*version\s*=\s*)"[^"]*"/, '$1""');
+        return line;
+      })
+      .join("\n");
+  };
+  // Dockerfile: a base image's tag and digest, never the image or anything else.
+  const docker = (text) => text.replace(/^(FROM\s+(?:--platform=\S+\s+)?[^\s:@]+(?::\d+\/[^\s:@]+)?)(?::[\w.-]+)?(?:@sha256:[0-9a-f]+)?/gim, "$1");
+  const same = {
+    json: (a, b) => json(a) === json(b),
+    cargo: (a, b) => cargo(a) === cargo(b),
+    docker: (a, b) => docker(a) === docker(b),
+    text: (a, b) => a.replaceAll(current, "<version>") === b.replaceAll(next, "<version>"),
+  };
+  for (const file of new Set(files)) {
+    if (LOCKFILES.has(file) || file === "CHANGELOG.md" || file === "docs/SECURITY-REVIEW.md") continue;
+    const kind = file.endsWith(".json") ? "json" : /(^|\/)Cargo\.toml$/.test(file) ? "cargo" : /(^|\/)Dockerfile$/.test(file) ? "docker" : "text";
+    const before = await raw(file, "main").catch((error) => (String(error).includes("HTTP 404") ? null : Promise.reject(error)));
+    if (before === null) refuse(`deps mode, but ${file} is new`);
+    const after = await raw(file, sha).catch((error) => (String(error).includes("HTTP 404") ? null : Promise.reject(error)));
+    if (after === null) refuse(`deps mode, but ${file} is removed`);
+    if (!same[kind](before, after)) refuse(`deps mode, but ${file} changes more than versions`);
+  }
+}
 const changelog = await raw("CHANGELOG.md", sha);
 if (!new RegExp(`^## ${next.replace(/\./g, "\\.")}\\s*$`, "m").test(changelog)) refuse(`CHANGELOG.md has no "## ${next}" section`);
 try {
