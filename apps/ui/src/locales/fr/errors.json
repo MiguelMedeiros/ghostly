@@ -380,7 +380,8 @@
     "usdtRejected": "Le RPC USDT a refusé l'opération"
   },
   "relays": {
-    "atLeastOne": "Saisissez au moins une adresse de relais"
+    "atLeastOne": "Saisissez au moins une adresse de relais",
+    "useHttps": "Utilisez une adresse de relais https:// : {{address}}"
   },
   "transport": {
     "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",

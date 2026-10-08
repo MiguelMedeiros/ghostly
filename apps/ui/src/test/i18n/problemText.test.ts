@@ -112,4 +112,11 @@ describe("problemLine: a problem where only a line fits", () => {
     });
     expect(problemLine("This signature was made by another key, not the public key given.", pt)).toBe(`${pt("errors.proof.otherKey")}. ${pt("errors.proof.otherKeyPgpNext")}`);
   });
+
+  it("an Iroh relay refused for plain http:// is the reason alone, with no \"Something went wrong\" in front", () => {
+    const refused = new Error("Use an https:// relay address: http://relay.example.org/");
+    expect(problemLine(refused, english)).toBe("Use an https:// relay address: http://relay.example.org/");
+    expect(problemLine(refused, pt)).toBe(pt("errors.relays.useHttps", { address: "http://relay.example.org/" }));
+    expect(problemLine(refused, pt)).not.toContain(pt("errors.generic"));
+  });
 });

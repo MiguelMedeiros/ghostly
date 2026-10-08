@@ -364,6 +364,8 @@ const RULES: readonly Rule[] = [
   { match: /^https:\/\/\S+ names no Ghostly proof$/, key: "errors.proof.fileNoProof", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
   { match: /^Enter at least one relay address \((?:https|wss):\/\/…\)$/, key: "errors.relays.atLeastOne" },
+  // An Iroh relay refused (packages/browser/src/platform/irohWeb.ts): the address typed stays in the line, which has no ⓘ.
+  { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   exact("Choose a picture", "errors.picture.choose"),
   exact("That picture is too large (max 20 MB)", "errors.picture.tooLarge"),
   exact("This picture cannot be read here. Try a JPEG or PNG.", "errors.picture.unreadableTryJpeg"),
