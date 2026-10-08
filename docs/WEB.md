@@ -37,7 +37,9 @@ From 1.2, apps ([APPS.md](APPS.md)) run in a sandboxed page, the runner, and the
 - `/app-frame.html`, with the runner's `Content-Security-Policy` header and the other headers of that location.
 - `/app-frame-net.html`, the same file (`app-frame.html`; there is no `app-frame-net.html` in the build) with the network runner's header, for apps granted the internet.
 
-The client asks `/app-frame.html` once for its header. When it is missing or different, the client hides Apps. Without the second location, an app granted the internet does not open. Copy the values as they are, send one `Content-Security-Policy` on those two paths (not the site's as well), and keep a proxy or CDN from adding or rewriting it. `curl -sI https://<your-host>/app-frame.html` shows what is sent. `npm run dev` and `vite preview` send both headers by themselves.
+The client asks `/app-frame.html` once for its header. When it is missing, or looser in the directives the client checks, the client hides Apps. It does not check every directive, so copy the whole value as it is. The client asks `/app-frame-net.html` only when an app granted the internet opens, so without that location such an app does not open, and Apps still shows. Send one `Content-Security-Policy` on those two paths (not the site's as well), and keep a proxy or CDN from adding or rewriting it. Every other path keeps the site's own policy from `apps/web/nginx-headers.conf`, whose `frame-src 'self'` lets the page frame the runner: a site policy that blocks frames (`frame-src 'none'`, `child-src 'none'`) breaks every app, even though Apps shows.
+
+`curl -sI https://<your-host>/app-frame.html` shows what is sent. `curl -sI https://<your-host>/app-frame-net.html` must show the network runner's policy (`connect-src https: wss:`), not the plain runner's and not the site's. `npm run dev -w @ghostly/web` and `npm run preview -w @ghostly/web` send both headers by themselves.
 
 ## How it shares code
 

@@ -74,11 +74,10 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
 2. Download a few and check them: `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` and `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`.
 3. **Apps on macOS, by hand** (releases with Apps on, from 1.2). No e2e covers apps on the macOS Desktop app: `e2e/desktop/apps.spec.ts` runs on Linux only, and `e2e/desktop-macos/` has no apps spec. Install the draft's `.dmg` on a Mac, then:
    - install Chess from the default store on the Apps page;
-   - open it in a 1:1 chat with a contact on another device: it opens in a window of its own, titled "Chess with" the contact;
-   - play a few moves each way, close the window and open it again: the game is back;
-   - `~/Library/Logs/app.ghostly.chat/ghostly.log` has no `app window: not hardened` line (the window then closes), and no `WebKit has no feature` line (this macOS dropped a switch the window turns off; the window opens anyway, so read [WISP 1200](wisps/1200-marketplace.md#per-client), Desktop, before going on).
+   - open it in a 1:1 chat with a contact on another device: it opens in a window of its own, titled "Chess with" the contact. That is what shows the window was hardened: on macOS, a window that cannot get its content rule list or WebKit configuration never opens. The app shows the reason instead, and `~/Library/Logs/app.ghostly.chat/ghostly.log` has an `app window app-... closed` line with no window before it;
+   - play a few moves each way, close the window and open it again: the game is back.
 
-   If one fails, do not publish: fix it and move the tag.
+   If one of these fails, do not publish: fix it and move the tag. A `WebKit has no feature <key>` line in that log (this macOS dropped a switch the window turns off; the window opens anyway) does not block the release by itself. Write the key and the macOS version in the release notes or an issue, and check that the required layers of [WISP 1200](wisps/1200-marketplace.md#per-client), Desktop (the CSP header, the navigation lock, the content rule list), still cover what that switch did.
 4. Publish it as the latest release, with the changelog section as notes:
 
    ```bash
