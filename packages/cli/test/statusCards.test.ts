@@ -54,7 +54,7 @@ describe("the task commands", () => {
   it("build a card from flags, the JSON under them", () => {
     expect(params("task send", ["Coordinator", "--title", "Fix relay rotation", "--steps", "2/5", "--step", "Running the e2e", "--item", "done:Codec", "--item", "Engine",
       "--pr-url", "https://github.com/o/r/pull/612", "--pr-number", "612", "--additions", "123", "--deletions", "45", "--link", "CI=https://ci.example/1", "--json", '{"branch":"r6a/x","title":"ignored"}'])).toEqual({
-      chat: "Coordinator", text: undefined, wait: undefined, timeout: undefined,
+      chat: "Coordinator", text: undefined, force: false, wait: undefined, timeout: undefined,
       card: { branch: "r6a/x", title: "Fix relay rotation", done: 2, total: 5, step: "Running the e2e", items: [{ state: "done", text: "Codec" }, { state: "pending", text: "Engine" }],
         pr: { url: "https://github.com/o/r/pull/612", number: 612, additions: 123, deletions: 45 }, links: [{ label: "CI", url: "https://ci.example/1" }] },
     });
@@ -115,6 +115,42 @@ describe("task send", () => {
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", pr: { url: "http://github.com/o/r/pull/1" } } })).rejects.toMatchObject({ code: "bad_request", message: /https/ });
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", items: Array.from({ length: 21 }, () => ({ text: "x" })) } })).rejects.toMatchObject({ code: "bad_request" });
     expect(node.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("the secret guard on cards", () => {
+  const seed = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  const nsec = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
+
+  it("refuses a card whose text looks like a seed or a key, as send does, unless --force", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Deploy", step: seed } })).rejects.toMatchObject({ code: "confirm", details: { kind: "mnemonic" }, message: /send it with --force/ });
+    await expect(callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { title: "Deploy", items: [{ state: "done", text: nsec }] } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Deploy" }, text: seed })).rejects.toMatchObject({ code: "confirm" });
+    await expect(callApi(ctx, "routine.send", { chat: "Coordinator", card: { name: "Nightly", schedule: "every day 01:00" }, run: { result: "failed", summary: `key: ${nsec}` } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: seed }, force: true })).resolves.toMatchObject({ task: "t1" });
+    expect(node.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an update that brings one, and not one for the text the card already had", async () => {
+    vi.useFakeTimers();
+    const { ctx, node } = fake("one-shot");
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: seed }, force: true });
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: `seed: ${seed}` } })).rejects.toMatchObject({ code: "confirm", message: /update it with --force/ });
+    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" } });
+    await expect(callApi(ctx, "routine.update", { chat: "Coordinator", routine: "r1", card: {}, run: { result: "failed", summary: nsec } })).rejects.toMatchObject({ code: "confirm" });
+    expect(node.editMessage).not.toHaveBeenCalled();
+    const update = callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done" } });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+    await expect(update).resolves.toMatchObject({ task: "t1" });
+    expect(node.editMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes --force on every card command", () => {
+    for (const [name, argv] of [["task send", ["c", "--title", "t"]], ["task update", ["c", "t1"]], ["routine send", ["c", "--name", "n", "--schedule", "daily"]], ["routine update", ["c", "r1"]], ["usage send", ["c", "--left", "50"]]] as const)
+      expect(params(name, [...argv, "--force"])).toMatchObject({ force: true });
   });
 });
 
@@ -235,7 +271,7 @@ describe("task update", () => {
 describe("routines", () => {
   it("take their fields and a run from flags", () => {
     expect(params("routine send", ["g1", "--name", "Nightly bug hunt", "--schedule", "every day 01:00", "--cron", "0 1 * * *", "--next", "2026-09-30T01:00:00Z", "--run", "ok:12 issues checked"])).toEqual({
-      chat: "g1", text: undefined, wait: undefined, timeout: undefined, run: { result: "ok", summary: "12 issues checked" },
+      chat: "g1", text: undefined, force: false, wait: undefined, timeout: undefined, run: { result: "ok", summary: "12 issues checked" },
       card: { name: "Nightly bug hunt", schedule: "every day 01:00", cron: "0 1 * * *", nextRunAt: Date.UTC(2026, 8, 30, 1, 0) },
     });
     expect(params("routine update", ["g1", "nightly", "--run", "failed", "--state", "paused"])).toMatchObject({ routine: "nightly", run: { result: "failed" }, card: { state: "paused" } });
