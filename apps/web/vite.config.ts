@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { assetLinksFile } from "./assetlinks";
 import { runnerHeaders } from "./runnerPolicy";
-import { checkAppsTestFlag } from "./appsTestFlag";
+import { appsTestGuard } from "./appsTestFlag";
 import { serviceWorker } from "./pwa";
 import { ghostlyPlatformModules, repositoryRoot, tauriAliases } from "../../packages/browser/vite-plugin";
 
@@ -26,7 +26,6 @@ function buildId(): string {
 }
 
 const build = buildId();
-checkAppsTestFlag();
 
 /**
  * `/version.json` is what a running tab asks to find out that it is out of
@@ -58,7 +57,7 @@ function versionFile(): Plugin {
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version), __APP_BUILD__: JSON.stringify(build) },
-  plugins: [versionFile(), serviceWorker(build), assetLinksFile(), runnerHeaders(), ghostlyPlatformModules(), react(), tailwindcss()],
+  plugins: [appsTestGuard("web"), versionFile(), serviceWorker(build), assetLinksFile(), runnerHeaders(), ghostlyPlatformModules(), react(), tailwindcss()],
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },
   server: { port: 5180, strictPort: true },
