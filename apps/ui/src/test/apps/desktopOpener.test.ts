@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
 import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, forIpc, toBase64 } from "../../lib/apps/desktopOpener";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
+import { nameToldIn } from "../../lib/apps/nameInChat";
 import { stopTakenDown } from "../../lib/apps/open";
 import type { AppEntry } from "../../lib/platform";
+import { engineState, linkView } from "../fakeEngine";
 
 // covers: apps.desktop-sandbox
 
@@ -15,7 +17,7 @@ import type { AppEntry } from "../../lib/platform";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, linkId: string | null) => string) {
+function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, linkId: string | null) => string, nameIn: (linkId: string) => string | undefined = () => undefined) {
   const host = memoryHost("ghostly-app://localhost/", "ghostly-app://localhost/");
   host.entry = async (ref) => ({ ref, digest: "d", version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<p>chess</p>", ...entry });
   const handlers = new Map<string, (event: { payload: unknown }) => void>();
@@ -33,7 +35,7 @@ function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, link
   }) as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
   const listen = async <T,>(event: string, handler: (event: { payload: T }) => void) => { handlers.set(event, handler as (event: { payload: unknown }) => void); return () => {}; };
   const stops: string[] = [];
-  const open = desktopOpener({ apps: () => host, invoke, listen, windowTitle, onStop: (_, reason) => stops.push(reason), view: { theme: () => "light", locale: () => "en" }, startTimeoutMs: 200 });
+  const open = desktopOpener({ apps: () => host, invoke, listen, nameIn, windowTitle, onStop: (_, reason) => stops.push(reason), view: { theme: () => "light", locale: () => "en" }, startTimeoutMs: 200 });
   /** The app window `label` asks, as Rust hands it over. */
   const request = (label: string, message: unknown) => handlers.get(APP_REQUEST_EVENT)!({ payload: { label, request: message } });
   const posts = (label: string) => calls.filter((c) => c.command === "app_post" && c.args.label === label).map((c) => c.args.message as Record<string, unknown>);
@@ -77,6 +79,33 @@ describe("opening an app on Desktop", () => {
     await answer("app-1", 3);
     expect(host.stored.get(`${REF} ${LINK}`)?.get("k")).toBe(1);
     expect(host.calls.find((c) => c.op === "chat.open")).toEqual({ op: "chat.open", ref: REF, linkId: LINK });
+  });
+
+  it("tells an app granted name the name the contact was told in that chat, and no other app, chat or name", async () => {
+    /** The app's `context()`, as a profile in `state` opens it in the chat (or alone). */
+    const context = async (permissions: string[], state: Parameters<typeof nameToldIn>[0], linkId: string | null = LINK) => {
+      const { open, request, answer } = setup({ permissions }, undefined, (id) => nameToldIn(state, id));
+      await open(REF, linkId);
+      request("app-1", { id: 1, type: "writing", args: [] });
+      await answer("app-1", 1);
+      request("app-1", { id: 2, type: "context", args: [] });
+      return (await answer("app-1", 2)).value as Record<string, unknown>;
+    };
+    // Ana's chat, where both sides said their names; the profile goes by Bia and shares it.
+    const chat = linkView({ id: LINK, profile: "paired-chat/1", peerNick: "Ana" });
+    const profile = (settings: { nick?: string; shareProfile?: boolean } = {}, links = [chat]) => engineState({ settings: { nick: "Bia", ...settings }, links });
+
+    expect(await context(["chat", "name"], profile())).toEqual({ version: "1.2.0", inChat: true, peer: null, theme: "light", locale: "en", name: "Bia" });
+    // Without the permission: no `name` at all.
+    expect(await context(["chat"], profile())).not.toHaveProperty("name");
+    // The profile does not share its name: the contact has none, so the app gets none.
+    expect(await context(["chat", "name"], profile({ shareProfile: false }))).not.toHaveProperty("name");
+    // The profile has no name.
+    expect(await context(["chat", "name"], profile({ nick: "" }))).not.toHaveProperty("name");
+    // The contact was never heard from in this chat: it may not have the name yet.
+    expect(await context(["chat", "name"], profile({}, [linkView({ id: LINK, profile: "paired-chat/1" })]))).not.toHaveProperty("name");
+    // Opened alone: there is no chat to have a name in.
+    expect(await context(["name"], profile(), null)).toEqual({ version: "1.2.0", inChat: false, peer: null, theme: "light", locale: "en" });
   });
 
   it("asks for the entry with Run anyway only when the person chose it (a version a store removed)", async () => {

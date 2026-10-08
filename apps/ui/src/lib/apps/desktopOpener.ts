@@ -27,8 +27,8 @@ export interface DesktopOpenerOptions {
   apps: () => AppsPlatform | null | undefined;
   invoke: Invoke;
   listen: Listen;
-  /** The person's name in a chat, for an app granted `name`. */
-  nameIn?: (linkId: string) => string | undefined;
+  /** The person's name in a chat, for an app granted `name`: what the contact was told, or none (`nameInChat`). */
+  nameIn: (linkId: string) => string | undefined;
   /** The app window's title: "Chess with Ana" in a chat (`appWithContact`), the app's name alone by default. */
   windowTitle?: (title: string, linkId: string | null) => string;
   onStop?: (ref: string, reason: AppStopReason) => void;
@@ -100,7 +100,7 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     const unregister = registerRunningApp({ ref, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped") });
     const broker = createBroker({
       host,
-      launch: { ...entry, chat: linkId ? { linkId, name: nameIn?.(linkId) } : null },
+      launch: { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null },
       view,
       post: (message) => { void invoke("app_post", { label, message: forIpc(message) }).catch(() => { /* the window went */ }); },
       stopped: (reason) => {

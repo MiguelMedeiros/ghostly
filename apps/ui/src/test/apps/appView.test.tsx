@@ -14,6 +14,7 @@ import type { ChatSession } from "../../lib/types";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { webOpener } from "../../lib/apps/webOpener";
+import { nameInChat } from "../../lib/apps/nameInChat";
 import type { AppsPlatform } from "../../lib/platform";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -23,15 +24,15 @@ import { windowIs } from "../viewport";
 
 // The runner's header is answered here, never fetched; the frame is a stand-in (the broker has its own tests).
 vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
-const started: { container: HTMLElement; frame: HTMLIFrameElement; stop: ReturnType<typeof vi.fn> }[] = [];
+const started: { container: HTMLElement; frame: HTMLIFrameElement; chat: { linkId: string; name?: string } | null; stop: ReturnType<typeof vi.fn> }[] = [];
 vi.mock("../../lib/apps/broker", async (actual) => ({
   ...(await actual<typeof import("../../lib/apps/broker")>()),
-  startApp: ({ container, launch, onStop }: { container: HTMLElement; launch: { title: string }; onStop?: (reason: string) => void }) => {
+  startApp: ({ container, launch, onStop }: { container: HTMLElement; launch: { title: string; chat: { linkId: string; name?: string } | null }; onStop?: (reason: string) => void }) => {
     const frame = document.createElement("iframe");
     frame.title = launch.title;
     container.appendChild(frame);
     const stop = vi.fn(() => { frame.remove(); onStop?.("stopped"); });
-    started.push({ container, frame, stop });
+    started.push({ container, frame, chat: launch.chat, stop });
     return { frame, phase: "running", stop };
   },
 }));
@@ -55,7 +56,8 @@ let open: AppOpener;
 beforeEach(() => {
   started.length = 0;
   view = undefined;
-  open = webOpener({ apps: () => host, closeLabel: () => "Close" });
+  // As the web app builds it (apps/web/src/main.tsx).
+  open = webOpener({ apps: () => host, nameIn: nameInChat, closeLabel: () => "Close" });
 });
 afterEach(() => {
   document.querySelectorAll("[data-place=alone]").forEach((node) => node.remove());
@@ -218,6 +220,22 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     unmount();
     expect(started[0]!.stop).toHaveBeenCalled();
     expect(chatApp("link-1")).toBeUndefined();
+  });
+
+  it("starts with the name the contact was told in that chat, none once the profile stops sharing it, and none alone", async () => {
+    windowIs(false);
+    panel();
+    act(() => fakeEngine.update({ settings: { nick: "Bia" } }));
+    await act(() => open(REF, "link-1"));
+    expect(started[0]!.chat).toEqual({ linkId: "link-1", name: "Bia" });
+    act(() => { started[0]!.stop(); });
+    act(() => fakeEngine.update({ settings: { nick: "Bia", shareProfile: false } }));
+    await act(() => open(REF, "link-1"));
+    expect(started[1]!.chat?.linkId).toBe("link-1");
+    expect(started[1]!.chat?.name).toBeUndefined();
+    act(() => fakeEngine.update({ settings: { nick: "Bia" } }));
+    await act(() => open(REF, null));
+    expect(started[2]!.chat).toBeNull();
   });
 
   it("opened alone is full screen with its title only", async () => {

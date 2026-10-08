@@ -19,6 +19,7 @@ import { openProfile } from "./lib/profileStart";
 import { listen } from "@tauri-apps/api/event";
 import { setAppOpener } from "./lib/apps/open";
 import { desktopOpener } from "./lib/apps/desktopOpener";
+import { nameInChat } from "./lib/apps/nameInChat";
 import { appWithContact } from "./lib/apps/running";
 import { loadSettings } from "./lib/settings";
 import { locales } from "./locales";
@@ -71,7 +72,7 @@ async function boot() {
     const language = loadSettings().language;
     return appWithContact(title, linkId, translateWith(locales[language] || locales.en, locales[language] ? language : "en"));
   };
-  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, windowTitle }));
+  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
   // The app is exiting (apps/desktop's lib.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
