@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, appDigest, appViewOf, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, appDigest, appViewOf, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
   canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocations, readAppStore,
   toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
@@ -278,6 +278,13 @@ export class Apps {
   private readonly staged = new Map<string, Staged>();
   /** Bundles read back and checked, by digest: the one running is read once, not on every `file`. */
   private readonly verified = new Map<string, AppBundle>();
+  /** Reads of a bundle under way, by digest: icons drawn at once share one read. */
+  private readonly verifying = new Map<string, Promise<AppBundle>>();
+  /**
+   * The `icon.png` of each checked bundle, by digest (at most 256 KiB, or null for none): every icon shown on the Apps
+   * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
+   */
+  private readonly icons = new Map<string, Uint8Array | null>();
   /** Bytes used per `ref\0scope`, counted once from the rows and kept in step by the writes here. */
   private readonly usage = new Map<string, number>();
   private readonly queues = new Map<string, Promise<unknown>>();
@@ -468,20 +475,28 @@ export class Apps {
 
   private async removeBundle(kind: FileBytesKind, digest: string): Promise<void> {
     this.verified.delete(digest);
+    this.icons.delete(digest);
     await (await fileBytesOf(kind))?.remove(bundleId(digest)).catch(() => {});
   }
 
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
-  private async verifiedBundle(app: InstalledApp): Promise<AppBundle> {
+  private verifiedBundle(app: InstalledApp): Promise<AppBundle> {
     const kept = this.verified.get(app.digest);
-    if (kept) return kept;
-    const bytes = await this.readBundleBytes(app.bytes, app.digest);
-    if (!bytes) fail("needs-files", "This app's files are not on this device yet");
-    const read = readAppBundle(bytes);
-    if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
-    if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
-    this.verified.set(app.digest, read.bundle);
-    return read.bundle;
+    if (kept) return Promise.resolve(kept);
+    const under = this.verifying.get(app.digest);
+    if (under) return under;
+    const reading = (async () => {
+      const bytes = await this.readBundleBytes(app.bytes, app.digest);
+      if (!bytes) fail("needs-files", "This app's files are not on this device yet");
+      const read = readAppBundle(bytes);
+      if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
+      if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
+      this.verified.set(app.digest, read.bundle);
+      this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH) ?? null);
+      return read.bundle;
+    })().finally(() => { this.verifying.delete(app.digest); });
+    this.verifying.set(app.digest, reading);
+    return reading;
   }
 
   // ---------- network ----------
@@ -961,7 +976,10 @@ export class Apps {
   /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). */
   async file({ ref, path }: { ref: string; path: string }): Promise<Uint8Array> {
     // Its icon still shows on the Apps page and in chats once it is stopped: a picture the publisher signed, nothing more.
-    const app = path === "icon.png" ? await this.installedOrFail(ref) : await this.runningOrFail(ref);
+    const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref);
+    const icon = path === APP_ICON_PATH ? this.icons.get(app.digest) : undefined;
+    if (icon) return icon.slice();
+    if (icon === null) fail("no-file", "No such file in this app");
     const bundle = await this.verifiedBundle(app);
     if (typeof path !== "string" || !bundle.files.has(path)) fail("no-file", "No such file in this app");
     return bundle.files.get(path)!.slice();
