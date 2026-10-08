@@ -267,6 +267,27 @@ describe("chat", () => {
     for (const bad of [new Date(), new Map(), Number.NaN]) expect(await ask("storage.set", ["k", { bad }])).toMatchObject({ ok: false, error: "bad-request" });
   });
 
+  it("keeps a member named __proto__ as JSON.stringify does, at the top and nested", async () => {
+    // A key typed by a person ("__proto__" in a shared dictionary) set the copy's prototype: storage.set was refused as
+    // too-large, and chat.send and a flat storage.set lost the member without a word.
+    const { host, run, ask } = setup();
+    run();
+    await vi.waitFor(() => expect(host.calls).toContainEqual({ op: "chat.open", ref: REF, linkId: LINK }));
+    peerOpen(host);
+    const nested = JSON.parse('{"words":{"__proto__":{"n":1},"cat":{"n":2}}}') as unknown;
+    const flat = JSON.parse('{"__proto__":5,"b":1}') as unknown;
+    expect(await ask("storage.set", ["dict", nested])).toMatchObject({ ok: true });
+    expect(await ask("storage.set", ["flat", flat])).toMatchObject({ ok: true });
+    expect(await ask("chat.send", [nested])).toMatchObject({ ok: true });
+    const stored = host.stored.get(`${REF} ${LINK}`)!;
+    expect(JSON.stringify(stored.get("dict"))).toBe(JSON.stringify(nested));
+    expect(JSON.stringify(stored.get("flat"))).toBe(JSON.stringify(flat));
+    expect(JSON.stringify(host.sent[host.sent.length - 1]!.data)).toBe(JSON.stringify(nested));
+    // Plain JSON still, with no prototype of the app's anywhere in it.
+    expect(isJsonValue(stored.get("dict"))).toBe(true);
+    expect(Object.getPrototypeOf((stored.get("dict") as { words: object }).words)).toBe(Object.prototype);
+  });
+
   it("refuses chat without the permission, and alone", async () => {
     for (const launch of [{ permissions: [] }, { chat: null }]) {
       const { host, run, ask } = setup(launch);
@@ -323,6 +344,8 @@ it("isJsonValue takes plain JSON only", () => {
 
 it("jsonValueOf writes a value as JSON.stringify does, or refuses it", () => {
   expect(jsonValueOf({ a: 1, b: undefined, c: [undefined, { d: undefined }] })).toEqual({ a: 1, c: [null, {}] });
+  const proto = JSON.parse('{"__proto__":{"x":1},"y":[{"__proto__":2}]}') as unknown;
+  expect(JSON.stringify(jsonValueOf(proto))).toBe(JSON.stringify(proto));
   for (const bad of [Number.POSITIVE_INFINITY, () => 1, new Date(), new Map(), Symbol("x"), 1n, { a: new Uint8Array(1) }]) expect(typeof jsonValueOf(bad)).toBe("symbol");
   let deep: unknown = 1;
   for (let i = 0; i < 100; i++) deep = [deep];

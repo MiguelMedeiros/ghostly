@@ -116,7 +116,9 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
     if (item === undefined) continue;
     const next = jsonValueOf(item, depth + 1);
     if (next === NOT_JSON) return NOT_JSON;
-    out[key] = next;
+    // Defined, not assigned: a member named `__proto__` (a word a person typed) is kept as JSON.stringify keeps it,
+    // where an assignment would set the copy's prototype and lose it.
+    Object.defineProperty(out, key, { value: next, enumerable: true, writable: true, configurable: true });
   }
   return out;
 }
