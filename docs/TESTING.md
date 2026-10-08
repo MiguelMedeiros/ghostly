@@ -135,13 +135,13 @@ Other workflows:
 
 - A reviewed, green pull request gets the label `queue`. The line is `queue:priority` first (flake and test fixes, which unblock everyone), then the time `queue` was added. A draft, or one whose CI Success is not green on its last commit, waits and keeps its place.
 - With no batch open, the train takes up to 5 from the front of the line and builds `batch/<base>-<time>` on the base's tip, one squash commit per pull request (`<title> (#n)`). It opens that as a pull request, and CI runs once for all of them. One that conflicts leaves the line with `queue:conflict` and a comment.
-- A green batch merges with the rebase method, so the base gets one commit per pull request. The originals close with "Merged via #<batch>".
-- A red batch is split in halves until the pull request that breaks CI is found. That one gets `queue:failed` and a comment, and the others land.
-- Each queued pull request has one comment that says its place in line.
+- A green batch lands with one commit per pull request: on `dev` by the rebase merge, on an epic by a fast-forward of exactly the tested commits. The originals close with "Merged via #<batch>".
+- A red batch is split in halves until the pull request that breaks CI is found. A pull request alone in a red batch gets one more try (flakes), then `queue:failed` and a comment, and the others land. While CI Success is red on the base itself, nobody is blamed.
+- Each queued pull request has one comment that says its place in line. It also records the head that was queued: `queue` vouches for that reviewed head, so a later push takes the pull request out of the line.
 
-So a finished pull request needs `gh pr ready`, a review, and the label. Don't arm auto-merge. After a conflict or a failure, fix it and add `queue` again; it goes to the back of the line. An epic's umbrella pull request never boards: it merges into `dev` with a merge commit.
+So a finished pull request needs `gh pr ready`, a review, and the label. Don't arm auto-merge. After a conflict, a failure or a new push, fix it, get it reviewed, and add `queue` again; it goes to the back of the line. An epic's umbrella pull request never boards: it merges into `dev` with a merge commit.
 
-The workflow acts as a GitHub App (secrets `QUEUE_APP_ID`, `QUEUE_APP_PRIVATE_KEY`): a batch pushed with the workflow's own token would start no CI. Without the secrets each run ends green with the notice "queue app not configured", and a maintainer's machine runs the train instead: `node tools/scripts/merge-train.mjs --run --every 300` (with its gh login). `--dry-run` (or **dry run** when you run the workflow by hand) shows what it would do and changes nothing.
+The workflow acts as a GitHub App (secrets `QUEUE_APP_ID`, `QUEUE_APP_PRIVATE_KEY`): a batch pushed with the workflow's own token would start no CI. Without the secrets each run ends green with the notice "queue app not configured", and one maintainer machine runs the train instead: `node tools/scripts/merge-train.mjs --run --every 300` (with its gh login). It holds a lock, so only one runs per clone, and it stops by itself once the workflow's train job runs. `--dry-run` (or **dry run** when you run the workflow by hand) shows what it would do and changes nothing.
 
 The app's e2e suites do not run on pull requests: they would hold up every merge. See [e2e/README.md](../e2e/README.md#when-they-run).
 
