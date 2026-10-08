@@ -66,6 +66,37 @@ describe("a private group catches up a member from whoever is there", { timeout:
     expect(toFrank.length).toBe(10);
   });
 
+  it("a member back gets an author's messages past the author's own log from another member, though the author is there", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, bob, , dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    // Forty each: the authors keep their last 32 (`GROUP_LIMITS.outlog`), Carol holds all eighty.
+    for (let i = 0; i < 40; i++) { await alice.groups.send(id, `alice ${i}`); await bob.groups.send(id, `bob ${i}`); }
+    await world.run(2_000);
+    world.reopen(dave);
+    await world.until(() => world.texts(dave, id).filter(t => /^(alice|bob) /.test(t)).length === 80, 5 * 60_000, 1000,
+      () => `dave has ${world.texts(dave, id).filter(t => /^(alice|bob) /.test(t)).length} of 80`);
+    expect(new Set(world.texts(dave, id)).size).toBe(world.texts(dave, id).length);
+  });
+
+  it("a member asks each other member once for messages nobody holds, not every gossip turn", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , , dave] = peers;
+    const aliceKey = world.view(alice, id)!.myKey!;
+    const asks: string[] = [];
+    // Alice's messages 0 to 9 reach nobody: Dave holds 10 and 11, so it names ten it never got.
+    world.drop = (from, to, frame) => {
+      if (from === dave && frame.t === "group-sync" && Array.isArray(frame.ask) && frame.ask.includes(aliceKey)) asks.push(to.name);
+      return from === alice && frame.t === "group-msg" && (frame.n as number) < 10;
+    };
+    for (let i = 0; i < 12; i++) await alice.groups.send(id, `alice ${i}`);
+    await world.run(MESH_GOSSIP_MS * 6);
+    expect(world.texts(dave, id).filter(t => t.startsWith("alice "))).toHaveLength(2);
+    // Bob and Carol, once each; Alice is not asked for her own.
+    expect(asks.sort()).toEqual(["bob", "carol"]);
+  });
+
   it("a member back after a while is announced once, and the others look fast for it", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "erin"], true);
     const erin = peers[4];
