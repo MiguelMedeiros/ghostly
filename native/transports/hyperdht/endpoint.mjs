@@ -107,12 +107,13 @@ export async function createHyperEndpoint(seed, options = {}) {
       if (stopped || !address || !/^[a-f0-9]{64}$/.test(address.publicKey)) throw new Error('Invalid HyperDHT endpoint')
       const remote = Buffer.from(address.publicKey, 'hex')
       // A dial whose stream opened and carried nothing is made again (`redial.mjs`): it is dropped from the limit at
-      // once, so the next one has its place even while another channel is live.
+      // once, so the next one has its place even while another channel is live. The wait follows the stream's RTT.
       return redial(() => {
         const socket = node.connect(remote, { keyPair })
         let counted = null
         const ready = attach(socket, channel => { counted = channel })
-        return { opened: socket.opened, ready, close() { if (counted) channels.delete(counted); socket.destroy() } }
+        return { opened: socket.opened, ready, rtt: () => socket.rawStream?.rtt ?? 0,
+          close() { if (counted) channels.delete(counted); socket.destroy() } }
       })
     },
     async close() { stopped = true; for (const channel of channels) channel.close(); waiting.length = 0; await server.close(); await node.destroy() },
