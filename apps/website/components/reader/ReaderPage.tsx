@@ -3,6 +3,7 @@ import path from "node:path";
 import Link from "next/link";
 import GithubSlugger from "github-slugger";
 import { Shell } from "@/components/site/Shell";
+import { IntentLink } from "@/components/site/IntentLink";
 import { LevelBadge } from "@/components/site/Level";
 import { reader } from "@/content/reader";
 import { catalog } from "@/content/catalog";
@@ -34,9 +35,9 @@ function outline(body: string) {
 
 function WispLink({ w }: { w: Wisp }) {
   return (
-    <Link href={`/wisps/${w.slug}`}>
+    <IntentLink href={`/wisps/${w.slug}`}>
       <span className="mono">{w.number}</span> {w.name}
-    </Link>
+    </IntentLink>
   );
 }
 
