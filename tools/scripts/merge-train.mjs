@@ -139,6 +139,9 @@ export function positionText(base, pr, place, batch, head = pr.sha) {
 /** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
 export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
 
+const newCommitsText = (what) =>
+  `Merge train: this pull request got new commits after it was queued (${what}), so it left the line. Add \`queue\` again once this head is reviewed and green.`;
+
 const conflictText = (base, reason) =>
   reason === "empty"
     ? `Merge train: this pull request has no changes left against \`${base}\`, so it left the line. Close it if it already landed.`
@@ -161,10 +164,16 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const batches = open.filter((p) => isBatch(p, base)).sort((a, b) => a.number - b.number);
   const queued = open.filter((p) => !isBatch(p, base) && (p.labels.includes(LABEL.queue) || also.includes(p.number)));
   for (const p of queued) {
-    p.queuedAt = queuedAt(await gh.events(p.number), p.createdAt);
+    const events = await gh.events(p.number);
+    p.queuedAt = queuedAt(events, p.createdAt);
     p.priority = p.labels.includes(LABEL.priority);
     p.ci = ciState(await gh.checkRuns(p.sha));
     p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    // No position comment records the queued head yet: tell it by time, the head's first CI against the label.
+    if (!p.sticky && p.labels.includes(LABEL.queue)) {
+      p.labeledAt = queuedAt(events, null);
+      p.pushedAt = await gh.headPushedAt(p.sha);
+    }
   }
   const byNumber = new Map(queued.map((p) => [p.number, p]));
   const line = () => order(queued.filter((p) => !gone.has(p.number)));
@@ -230,7 +239,12 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // `queue` vouches for the head that was reviewed: a later push needs a new review.
       say(`DROP #${p.number} (new head since it was queued)`);
       done.dropped.push(p.number);
-      await leave(p, null, `Merge train: this pull request got new commits after it was queued (${queuedHead(p.sticky).slice(0, 12)} → ${p.sha.slice(0, 12)}), so it left the line. Add \`queue\` again once this head is reviewed and green.`);
+      await leave(p, null, newCommitsText(`${queuedHead(p.sticky).slice(0, 12)} → ${p.sha.slice(0, 12)}`));
+    } else if (!p.sticky && p.labeledAt && p.pushedAt && Date.parse(p.pushedAt) > Date.parse(p.labeledAt)) {
+      // A push in the window between the label and the train's first read: `queue` vouched for an earlier head.
+      say(`DROP #${p.number} (head pushed after it was queued)`);
+      done.dropped.push(p.number);
+      await leave(p, null, newCommitsText(`${p.sha.slice(0, 12)} was pushed after \`queue\` was added`));
     }
   }
 
@@ -305,6 +319,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const head = queuedHead(p.sticky) ?? p.sha;
     const text = aboard.has(p.number) ? positionText(base, p, 0, inFlight.number, head) : positionText(base, p, ++place, 0, head);
     if (!p.labels.includes(LABEL.queue)) continue; // --also: pretended, never commented on
+    if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
     if (!p.sticky) await w.comment(p.number, text);
     else if (p.sticky.body !== text) await w.editComment(p.sticky.id, text);
   }
@@ -428,6 +443,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     },
     events: (n) => all(`/issues/${n}/events`),
     checkRuns: (sha) => all(`/commits/${sha}/check-runs?filter=latest`),
+    /** When a commit was pushed: its earliest check suite (GitHub makes them on the push), or null before any. */
+    headPushedAt: async (sha) => (await must("GET", `/commits/${sha}/check-suites?per_page=100`)).check_suites.map((s) => s.created_at).sort()[0] ?? null,
     comments: (n) => all(`/issues/${n}/comments`),
     branchSha: async (base) => (await must("GET", `/git/ref/heads/${base}`)).object.sha,
     comment: (n, body) => must("POST", `/issues/${n}/comments`, { body }),
