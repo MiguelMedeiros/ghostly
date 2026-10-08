@@ -9,8 +9,23 @@
 // - One batch per base at a time: up to 5 pull requests from the front of the line, built on the base's tip with one
 //   squash commit per pull request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one
 //   comment, `queue` taken off. The batch is a pull request from `batch/<base>-<stamp>`; CI runs on it once.
-// - Green: the batch merges with the rebase method (one commit per pull request on the base), each original closes
-//   with "Merged via #<batch>" and loses its labels.
+// - Green on `dev`: the batch's pull requests are merged one at a time, in the batch's order, each with GitHub's squash
+//   merge at the head the batch holds and with the message of the batch's commit of it. So each shows as merged, with
+//   a commit GitHub wrote and signed. Before the first merge dev's tip must be the batch's base. After each one, dev's
+//   new commit must hold exactly the files (the same tree) of the batch's commit of that pull request: what CI tested
+//   is what landed. If it does not, the landing stops with an error, nothing is reverted, the rest go back to the line
+//   and the batch closes with a comment that says what happened. A pull request that changed or left the line (new
+//   commits, `queue` taken off, turned into a draft) stops the landing too: the ones ahead of it land, it and the
+//   ones after it do not. When all landed, the batch closes with a comment that lists them.
+//   - A pull request of a batch is seldom up to date with dev by itself, which dev's ruleset asks for, so the queue
+//     app must be on that ruleset's bypass list (pull requests only). Until it is, GitHub refuses the first merge and
+//     the batch lands the old way with a warning: its own rebase merge, whose commits GitHub does not sign, and each
+//     original closes with "Merged via #<batch>".
+//   - A landing that a run left half done (a crash, the API budget) goes on in the next run from what GitHub shows:
+//     the first pull requests are merged at the heads the batch holds, and dev's tip still has the tree of the last of
+//     them in the batch. If dev holds anything else, the batch closes and the rest go back to the line.
+// - Green on an epic: a fast-forward push of the batch's commits; each original closes with "Merged via #<batch>" and
+//   loses its labels.
 // - Red: the batch closes and its first half becomes the next batch, with the second half noted to go right after it
 //   if the first half is green. A batch of one that is red is the culprit: `queue:failed`, a comment, `queue` off.
 //   Whatever was not part of the red half goes back to the line at its old place.
@@ -21,14 +36,15 @@
 //   merges it the same way. Red there gets one more run on a fresh rebase, then `queue:failed`; a conflict,
 //   `queue:conflict`. A fork, or a head branch the train must never push to (dev, main, an epic, a batch), goes the
 //   batch way.
-// - Signatures: GitHub writes and signs the commit of a squash merge, so a pull request that lands alone on `dev` shows
-//   as Verified, with the message a batch gives it ("<title> (#n)", then one "* <subject>" line per commit). The train
-//   reads the new commit back and warns when it is not verified. GitHub never signs a rebase merge, and a fast-forward
-//   pushes commits as they are, so a batch's commits and everything that lands on an epic stay unsigned.
+// - Signatures: GitHub writes and signs the commit of a squash merge, so what the train lands on `dev`, alone or in a
+//   batch, shows as Verified, with one message format ("<title> (#n)", then one "* <subject>" line per commit). The
+//   train reads each new commit back and warns when it is not verified. GitHub never signs a rebase merge, and a
+//   fast-forward pushes commits as they are: a batch that fell back to the rebase merge and everything that lands on
+//   an epic stay unsigned.
 // - Each queued pull request keeps one comment that says where it is ("In line for `dev`: 3rd").
 //
-// The train keeps no state of its own: a batch's members and the half that waits after it live in a hidden mark in
-// the batch's body, the commit a lone pull request was rebased to lives in a hidden mark of its position comment, and
+// The train keeps no state of its own: a batch's members (each with its head and the batch's commit of it) and the half
+// that waits after it live in a hidden mark in the batch's body, the commit a lone pull request was rebased to lives in a hidden mark of its position comment, and
 // everything else is read again each run.
 //
 //   node tools/scripts/merge-train.mjs --run | --dry-run | --list-bases  [--base dev] [--every 120] [--also 12,34]
@@ -135,15 +151,21 @@ export const isBatch = (p, base) => !p.fork && p.branch.startsWith(`batch/${base
 /** An epic's umbrella (or main) merges into its base with a merge commit, never squashed into a batch. */
 const mergeCommitOnly = (p) => p.branch.startsWith("epic/") || p.branch === "main";
 
-export function batchBody(base, baseSha, head, prs, next, extra = {}) {
-  const state = { base, baseSha, head, prs: prs.map((p) => ({ number: p.number, sha: p.sha })), next: next.map((p) => p.number), ...extra };
+/**
+ * A batch's body: what it holds, and the train's mark. `commits` names the batch's commit of each pull request (by
+ * number): what CI tested for it, and what its landing on `dev` is checked against.
+ */
+export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = {}) {
+  const state = { base, baseSha, head, prs: prs.map((p) => ({ number: p.number, sha: p.sha, commit: commits[p.number] })), next: next.map((p) => p.number), ...extra };
   return [
     `The merge train lands these pull requests on \`${base}\` together, one commit each, in this order:`,
     "",
     ...prs.map((p) => `- #${p.number} ${p.title.replaceAll("<", "&lt;")}`),
     "",
     next.length ? `If this batch is green, ${next.map((p) => `#${p.number}`).join(" ")} go next (the other half of a red batch).` : "",
-    "Green: it merges with the rebase method and the originals close as merged via this one. Red: it is split in halves until the pull request that breaks CI is found.",
+    base === "dev"
+      ? "Green: each of them is merged with GitHub's squash merge, in this order (a commit GitHub signs, checked against the one tested here), and this pull request closes. Red: it is split in halves until the pull request that breaks CI is found."
+      : "Green: the base is fast-forwarded to these commits and the originals close as merged via this one. Red: it is split in halves until the pull request that breaks CI is found.",
     `<!-- merge-train:batch ${JSON.stringify(state)} -->`,
   ].join("\n");
 }
@@ -201,7 +223,7 @@ const conflictText = (base, reason) =>
  * One run of the train for one base. `gh` reads and writes GitHub, `git` builds and pushes batches (both are fakes
  * in the tests). In a dry run every write is logged instead. Returns the log and what happened.
  */
-export async function tick({ gh, git, base, login, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [], now = Date.now(), log = [] }) {
+export async function tick({ gh, git, base, login, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [], now = Date.now(), log = [], pause = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   if (!BASE.test(base)) throw new Error(`Not a train base: ${JSON.stringify(base)}`);
   // The train's own GitHub login: only its comments count as position comments (anyone can write the marks).
   if (!login) throw new Error("The train's own login is required");
@@ -259,6 +281,26 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     done.closed.push(batch.number);
   };
 
+  /** Logs whether GitHub shows a commit it just made as verified, with a warning when it does not: a regression shows in the log. */
+  const verifiedLine = (number, sha, c) =>
+    say(
+      c.verified
+        ? `VERIFIED #${number}: GitHub signed ${sha.slice(0, 12)} (verified=true)`
+        : `::warning::#${number} landed as ${sha.slice(0, 12)}, which is not verified (verified=false, reason: ${c.reason ?? "unknown"}).`,
+    );
+  /** The same for a commit not read yet. A read that fails is only a warning: the pull request has landed. */
+  const sayVerified = async (number, sha) => {
+    let c;
+    try {
+      c = await gh.commit(sha);
+    } catch (e) {
+      if (e instanceof BudgetLow) throw e;
+      say(`::warning::Could not read whether #${number}'s commit ${sha.slice(0, 12)} is verified: ${e.message}`);
+      return;
+    }
+    verifiedLine(number, sha, c);
+  };
+
   /** Builds a batch from `prs` on the base's tip and opens its pull request; `next` waits behind it. */
   const board = async (prs, next = [], extra = {}) => {
     if (!prs.length) return null;
@@ -276,7 +318,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const branch = `batch/${base}-${stamp}`;
     await (dry ? say(`(dry run) would push ${built.sha.slice(0, 12)} to ${branch}`) : git.push(branch, built.sha));
     const title = `train: ${aboard.length} into ${base} (${aboard.map((p) => `#${p.number}`).join(" ")})`;
-    const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next, extra) });
+    const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next, extra, built.commits) });
     say(`OPEN #${pr.number} ${title}`);
     done.opened.push(pr.number);
     return { number: pr.number, branch, sha: built.sha, members: aboard };
@@ -316,16 +358,145 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const members = state.prs.map((s) => (gone.has(s.number) ? undefined : byNumber.get(s.number)));
     const next = state.next.map((n) => byNumber.get(n)).filter((p) => p && !gone.has(p.number) && !waiting(p));
     const ci = ciState(await gh.checkRuns(batch.sha));
-    const changed = state.prs.filter((s, i) => !members[i] || members[i].sha !== s.sha);
     const tip = await gh.branchSha(base);
     const baseCi = ci === "failure" ? ciState(await gh.checkRuns(state.baseSha)) : null;
     const stay = { number: batch.number, members };
-    say(`BATCH #${batch.number} [${state.prs.map((s) => `#${s.number}`).join(" ")}] CI ${ci}`);
+    const names = (list) => list.map((s) => `#${s.number}`).join(" ");
+    say(`BATCH #${batch.number} [${names(state.prs)}] CI ${ci}`);
+
+    // dev: a green batch lands one pull request at a time, each by GitHub's squash merge (a commit GitHub signs),
+    // checked against the batch's own commit of it. That needs those commits in the mark: a batch without them (opened
+    // by an older train) lands the old way, like an epic's.
+    const bySquash = base === "dev" && batch.sha === state.head && state.prs.every((s) => typeof s.commit === "string") && state.prs.at(-1)?.commit === state.head;
+    // A landing that stopped half way (a crash, the API budget) left the first pull requests merged and this batch
+    // open. GitHub's state says how far it got: the ones no longer open that were merged at the head the batch holds.
+    let before = 0;
+    if (bySquash) {
+      for (const s of state.prs) {
+        if (byNumber.has(s.number)) break;
+        const was = await gh.pull(s.number);
+        if (!was.merged || was.sha !== s.sha) break;
+        before++;
+        // That run may have stopped before the labels and the position comment went.
+        for (const l of Object.values(LABEL)) if (was.labels.includes(l)) await w.removeLabel(s.number, l);
+        const sticky = (await gh.comments(s.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+        if (sticky) await w.deleteComment(sticky.id);
+      }
+    }
+    // Among the ones still to land: which changed or left the line, and the first of them. Nothing lands from it on.
+    // One turned into a draft counts where each is merged by itself: GitHub merges no draft.
+    const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha || (bySquash && members[i].draft)));
+    const stop = changed.length ? state.prs.indexOf(changed[0]) : state.prs.length;
+
+    /** The batch's commit of each pull request, as GitHub lists them: { sha, tree, title, message }; null when one is missing. */
+    const readTested = async () => {
+      const listed = new Map((await gh.pullCommits(batch.number)).map((c) => [c.sha, c]));
+      const tested = state.prs.map((s) => listed.get(s.commit));
+      if (tested.some((c, i) => !c || !c.commit.message.split("\n")[0].endsWith(` (#${state.prs[i].number})`))) return null;
+      return tested.map((c) => {
+        const [title, ...rest] = c.commit.message.split("\n");
+        return { sha: c.sha, tree: c.commit.tree.sha, title, message: rest.join("\n").trim() };
+      });
+    };
+
+    /** The whole batch at once: on dev the rebase merge of the batch (GitHub signs none of its commits), on an epic a fast-forward. */
+    const landWhole = async () => {
+      // dev: the rebase merge, which its strict ruleset refuses unless the batch is up to date and green. An epic has
+      // no ruleset, so it lands by a fast-forward push of the tested commits: the push fails if the epic moved since.
+      const r =
+        base === "dev" ? await w.merge(batch.number, batch.sha) : dry ? (say(`(dry run) would fast-forward ${base} to ${batch.sha.slice(0, 12)}`), { ok: true }) : await git.land(base, batch.sha);
+      if (!r.ok) {
+        say(`::warning::Could not land #${batch.number}: ${r.message}`);
+        return stay;
+      }
+      say(`MERGED #${batch.number}`);
+      await w.deleteBranch(batch.branch);
+      for (const p of members) await landed(p, batch.number);
+      return board(next);
+    };
+
+    /**
+     * Lands the batch's pull requests from `from` up to `stop` on dev, in order, each by GitHub's squash merge at the
+     * head the batch holds, with the title and message of the batch's commit of it. After each one, dev's new commit
+     * must hold exactly the files of that batch commit (the same tree): what CI tested is what landed. The caller has
+     * checked where dev is: on the batch's base before the first, on the tree of the last landed one when going on.
+     */
+    const landEach = async (tested, from) => {
+      let at = from;
+      let why = null;
+      let wrong = false;
+      for (; at < stop; at++) {
+        const s = state.prs[at];
+        let r = await w.squash(s.number, s.sha, tested[at].title, tested[at].message);
+        // Right after dev moved, GitHub may refuse the next merge for a moment ("Base branch was modified").
+        for (let again = 0; !r.ok && r.status !== 409 && at > from && again < 2; again++) {
+          await pause(5000);
+          r = await w.squash(s.number, s.sha, tested[at].title, tested[at].message);
+        }
+        if (!r.ok && r.status !== 409 && at === 0 && stop === state.prs.length) {
+          // Nothing landed yet and the first is refused: most likely the queue app may not merge past dev's rule yet
+          // (a pull request in a batch is seldom up to date with dev by itself). The batch as a whole still can.
+          say(
+            `::warning::GitHub refused the squash merge of #${s.number} (${r.message}), so batch #${batch.number} lands by the rebase merge and its commits will not be verified. The queue app must be a bypass actor (pull requests only) of \`${base}\`'s ruleset.`,
+          );
+          return landWhole();
+        }
+        if (!r.ok) {
+          why = r.status === 409 ? `#${s.number} got new commits since this batch was built` : `GitHub refused to merge #${s.number} (${r.message})`;
+          break;
+        }
+        say(`MERGED #${s.number} (batch #${batch.number}, squash)`);
+        done.merged.push(s.number);
+        // GitHub merged it, so it shows as merged: only the labels and the position comment go.
+        await leave(members[at], null, null);
+        if (!r.sha) continue; // a dry run: nothing landed, nothing to read back
+        const c = await gh.commit(r.sha);
+        verifiedLine(s.number, r.sha, c);
+        if (c.tree !== tested[at].tree) {
+          wrong = true;
+          why = `GitHub's commit for #${s.number} (${r.sha.slice(0, 12)}, tree ${c.tree.slice(0, 12)}) does not hold the files this batch tested for it (${tested[at].sha.slice(0, 12)}, tree ${tested[at].tree.slice(0, 12)}). The train reverts nothing: check \`${base}\` by hand`;
+          say(`::error::Batch #${batch.number}: ${why}.`);
+          at++;
+          break;
+        }
+      }
+      const inBase = state.prs.slice(0, at);
+      const rest = state.prs.slice(at);
+      if (!rest.length && !wrong) {
+        say(`LANDED batch #${batch.number}: ${names(inBase)} (squash)`);
+        await w.comment(batch.number, `Merge train: ${names(inBase)} landed on \`${base}\`, each with GitHub's squash merge, so this batch closes.`);
+        await w.closePull(batch.number);
+        await w.deleteBranch(batch.branch);
+        return board(next);
+      }
+      why ??= `${names(changed)} changed or left the line`;
+      const left = rest.length ? ` ${names(rest)} did not land; the ones still queued go back to the line.` : "";
+      await retire(batch, `Merge train: ${inBase.length ? `${names(inBase)} landed on \`${base}\`` : "nothing landed"}, and the landing stopped there: ${why}.${left}`);
+      // After a commit that is not what was tested, nothing more boards in this run.
+      return wrong ? false : null;
+    };
 
     if (batch.sha !== state.head) {
       await retire(batch, "Merge train: this batch's branch holds a commit the train did not build, so it closes; its pull requests go back to the line.");
+    } else if (before) {
+      // Go on from where the landing stopped, while dev still holds exactly what the batch tested up to there.
+      const inBase = state.prs.slice(0, before);
+      const rest = state.prs.slice(before);
+      say(`RESUME batch #${batch.number}: ${names(inBase)} landed in an earlier run.`);
+      const tested = rest.length ? await readTested() : [];
+      if (!rest.length) inFlight = await landEach(tested, before);
+      else if (ci === "success" && stop > before && tested && (await gh.commit(tip)).tree === tested[before - 1].tree) inFlight = await landEach(tested, before);
+      else {
+        const why = changed.length && stop === before ? `${names(changed)} changed or left the line` : ci !== "success" ? "CI Success is no longer green on it" : `\`${base}\` no longer holds what this batch tested`;
+        await retire(batch, `Merge train: ${names(inBase)} landed on \`${base}\`, and the landing cannot go on (${why}), so this batch closes; ${names(rest)} did not land, and the ones still queued go back to the line.`);
+      }
+    } else if (changed.length && bySquash && ci === "success" && stop > 0 && tip === state.baseSha) {
+      // Green, but one changed or left: the ones ahead of it land (in the order CI tested), it and the rest do not.
+      const tested = await readTested();
+      if (tested) inFlight = await landEach(tested, 0);
+      else await retire(batch, `Merge train: ${names(changed)} changed or left the line, so this batch closes; the rest go back to the line.`);
     } else if (changed.length) {
-      await retire(batch, `Merge train: ${changed.map((s) => `#${s.number}`).join(" ")} changed or left the line, so this batch closes; the rest go back to the line.`);
+      await retire(batch, `Merge train: ${names(changed)} changed or left the line, so this batch closes; the rest go back to the line.`);
     } else if (tip !== state.baseSha) {
       // Red on an old tip says nothing about the batch on the new one, and green on an old tip must not land.
       await retire(batch, `Merge train: \`${base}\` moved, so this batch is rebuilt on its new tip.`);
@@ -350,19 +521,13 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         }
       }
     } else if (ci === "success") {
-      // dev: the rebase merge, which its strict ruleset refuses unless the batch is up to date and green. An epic has
-      // no ruleset, so it lands by a fast-forward push of the tested commits: the push fails if the epic moved since.
-      const r =
-        base === "dev" ? await w.merge(batch.number, batch.sha) : dry ? (say(`(dry run) would fast-forward ${base} to ${batch.sha.slice(0, 12)}`), { ok: true }) : await git.land(base, batch.sha);
-      if (!r.ok) {
-        say(`::warning::Could not land #${batch.number}: ${r.message}`);
-        inFlight = stay;
-      } else {
-        say(`MERGED #${batch.number}`);
-        await w.deleteBranch(batch.branch);
-        for (const p of members) await landed(p, batch.number);
-        inFlight = await board(next);
+      // The base's tip is the batch's base here (checked above): the first merge starts from what CI tested on.
+      const tested = bySquash ? await readTested() : null;
+      if (base === "dev" && !tested) {
+        const why = bySquash ? "GitHub does not list the commits its mark names" : "its mark names no commits (an older train opened it)";
+        say(`::warning::Batch #${batch.number} lands by the rebase merge, so its commits will not be verified: ${why}.`);
       }
+      inFlight = tested ? await landEach(tested, 0) : await landWhole();
     } else if (ci === "none" && now - Date.parse(batch.createdAt) > CI_START_TIMEOUT) {
       await retire(batch, "Merge train: CI never started on this batch, so it is rebuilt.");
       inFlight = await board(members, next, { retried: state.retried });
@@ -373,20 +538,6 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   }
   // One pull request alone, with no batch. Each step returns what is in flight now, `null` when the pull request landed
   // or left the line (so the next one may go), or `false` when nothing more boards in this run.
-
-  /** Says whether GitHub shows a commit it just made as verified, with a warning when it does not: a regression shows in the log. */
-  const sayVerified = async (number, sha) => {
-    let c;
-    try {
-      c = await gh.commit(sha);
-    } catch (e) {
-      if (e instanceof BudgetLow) throw e;
-      say(`::warning::Could not read whether #${number}'s commit ${sha.slice(0, 12)} is verified: ${e.message}`);
-      return;
-    }
-    if (c.verified) say(`VERIFIED #${number}: GitHub signed ${sha.slice(0, 12)} (verified=true)`);
-    else say(`::warning::#${number} landed as ${sha.slice(0, 12)}, which is not verified (verified=false, reason: ${c.reason ?? "unknown"}).`);
-  };
 
   /**
    * Merges a lone pull request at its head. dev: GitHub's squash merge (refused unless up to date and green), so GitHub
@@ -657,7 +808,12 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      */
     squash: async (n, sha, title, message) => {
       const r = await api("PUT", `/pulls/${n}/merge`, { merge_method: "squash", sha, commit_title: title, commit_message: message });
-      return { ok: r.ok, sha: r.ok ? r.data?.sha : undefined, message: `HTTP ${r.status} ${r.data?.message ?? ""}` };
+      return { ok: r.ok, status: r.status, sha: r.ok ? r.data?.sha : undefined, message: `HTTP ${r.status} ${r.data?.message ?? ""}` };
+    },
+    /** One pull request, open or not: as `pulls` gives it, and whether it was merged. */
+    pull: async (n) => {
+      const p = await must("GET", `/pulls/${n}`);
+      return { ...pull(p), merged: p.merged === true };
     },
     /** A pull request's commits, oldest first (GitHub lists at most 250). */
     pullCommits: (n) => all(`/pulls/${n}/commits`),
@@ -719,6 +875,7 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
       git(["reset", "-q", "--hard", baseSha]);
       const applied = [];
       const dropped = [];
+      const commitOf = {}; // the batch's commit of each pull request aboard, by number
       for (const p of prs) {
         const ref = `${ns}/pr-${p.number}`;
         if (git(["rev-parse", ref], cwd) !== p.sha) {
@@ -726,7 +883,9 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
           continue;
         }
         try {
-          git(["merge", "-q", "--squash", ref]);
+          // git asks for an identity before any merge that is not a fast-forward, squashed or not: without one a
+          // runner would call every such pull request a conflict.
+          git([...identity(), "merge", "-q", "--squash", ref]);
         } catch (e) {
           if (e.code === "ETIMEDOUT") throw e; // not a conflict
           git(["reset", "-q", "--hard", "HEAD"]);
@@ -741,8 +900,9 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
         const commits = git(["log", "--reverse", "--format=* %s", `HEAD..${ref}`]);
         git([...identity(), "commit", "-q", "--no-verify", `--author=${author}`, "-m", `${p.title} (#${p.number})`, ...(commits ? ["-m", commits] : [])]);
         applied.push(p.number);
+        commitOf[p.number] = git(["rev-parse", "HEAD"]);
       }
-      return { baseSha, sha: git(["rev-parse", "HEAD"]), applied, dropped };
+      return { baseSha, sha: git(["rev-parse", "HEAD"]), applied, dropped, commits: commitOf };
     },
     async push(branch, sha) {
       signal?.throwIfAborted();

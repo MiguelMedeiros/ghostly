@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -36,6 +36,13 @@ function fakeRepo() {
   /** Each pull request's commit messages (two commits unless set), and the commits GitHub does not show as verified. */
   const commits = new Map<number, string[]>();
   const unsigned = new Set<string>();
+  /** The files each commit holds (its tree): a base's plus "+<n>" per pull request on top. A batch's commits, by sha. */
+  const trees = new Map<string, string>();
+  const treeOf = (sha: string) => trees.get(sha) ?? `tree:${sha}`;
+  const made = new Map<string, { message: string; tree: string }>();
+  /** Whether the train may merge a batch's pull requests past dev's rule, and the ones GitHub would squash to other files. */
+  const rules = { bypass: true };
+  const skewed = new Set<number>();
   /** A lone pull request merges only at its head, and only while that head sits on the base's tip. */
   const mergeAlone = (p: Pr, sha: string) => {
     if (p.sha !== sha || sitsOn.get(sha) !== tips[p.base]) return { ok: false, message: "HTTP 405 not up to date" };
@@ -73,17 +80,33 @@ function fakeRepo() {
       pulls.set(number, { number, title, body, draft: false, sha: built.get(head)!, branch: head, fork: false, labels: [], createdAt: "", open: true, base });
       return { number };
     },
-    pullCommits: async (n: number) => (commits.get(n) ?? [`part one of ${n}`, `part two of ${n}\n\nIts body.`]).map((message) => ({ commit: { message } })),
-    commit: async (sha: string) => ({ verified: !unsigned.has(sha), reason: unsigned.has(sha) ? "unsigned" : "valid", tree: `tree:${sha}` }),
-    /** GitHub's squash merge: one new commit on the base (`s<n>`), written and signed by GitHub. */
+    /** A pull request's commits: a batch's are the ones the train built (one per member), with their trees. */
+    pullCommits: async (n: number) => {
+      const state = readState(pulls.get(n)?.body);
+      if (state) return state.prs.filter((m: { commit?: string }) => made.has(m.commit!)).map((m: { commit: string }) => ({ sha: m.commit, commit: { message: made.get(m.commit)!.message, tree: { sha: made.get(m.commit)!.tree } } }));
+      return (commits.get(n) ?? [`part one of ${n}`, `part two of ${n}\n\nIts body.`]).map((message) => ({ commit: { message } }));
+    },
+    pull: async (n: number) => ({ ...pulls.get(n)!, labels: [...pulls.get(n)!.labels], merged: !!pulls.get(n)!.merged }),
+    commit: async (sha: string) => ({ verified: !unsigned.has(sha), reason: unsigned.has(sha) ? "unsigned" : "valid", tree: treeOf(sha) }),
+    /**
+     * GitHub's squash merge: one new commit on the base (`s<n>`), written and signed by GitHub, holding the base's
+     * files plus the pull request's. Refused (409) at another head, and (405) for a head that does not sit on the
+     * base's tip, unless it is aboard a batch and the train may bypass the rule.
+     */
     squash: async (n: number, sha: string, title: string, message: string) => {
       const p = pulls.get(n)!;
       merges.push(`squash #${n}`);
-      const r = mergeAlone(p, sha);
-      if (!r.ok) return r;
+      const aboard = [...pulls.values()].some((b) => b.open && readState(b.body)?.prs.some((m: { number: number }) => m.number === n));
+      if (p.sha !== sha) return { ok: false, status: 409, message: "HTTP 409 Head branch was modified. Review and try the merge again." };
+      if (!p.open) return { ok: false, status: 405, message: "HTTP 405 Pull Request is not mergeable" };
+      if (sitsOn.get(sha) !== tips[p.base] && !(aboard && rules.bypass)) return { ok: false, status: 405, message: "HTTP 405 Repository rule violations found" };
+      const tip = `s${n}`;
+      trees.set(tip, `${treeOf(tips[p.base])}+${n}${skewed.has(n) ? "?" : ""}`);
+      landed.push(`#${n}`);
+      tips[p.base] = tip;
+      Object.assign(p, { open: false, merged: true });
       squashes.set(n, { title, message });
-      tips[p.base] = `s${n}`;
-      return { ok: true, sha: tips[p.base] };
+      return { ok: true, status: 200, sha: tip };
     },
     merge: async (n: number, sha: string) => {
       const p = pulls.get(n)!;
@@ -105,7 +128,16 @@ function fakeRepo() {
     build: async (base: string, prs: Pr[]) => {
       const applied = prs.filter((p) => !conflicts.has(p.number)).map((p) => p.number);
       lastSha = `${tips[base]}:${applied.join(",")}`;
-      return { baseSha: tips[base], sha: lastSha, applied, dropped: prs.filter((p) => conflicts.has(p.number)).map((p) => ({ number: p.number, reason: "conflict" })) };
+      // One commit per pull request aboard, each holding the files of the one before plus its own.
+      const commitOf: Record<number, string> = {};
+      let tree = treeOf(tips[base]);
+      applied.forEach((n, i) => {
+        commitOf[n] = `${tips[base]}:${applied.slice(0, i + 1).join(",")}`;
+        tree = `${tree}+${n}`;
+        trees.set(commitOf[n], tree);
+        made.set(commitOf[n], { message: `${pulls.get(n)!.title} (#${n})\n\n* part one of ${n}\n* part two of ${n}`, tree });
+      });
+      return { baseSha: tips[base], sha: lastSha, applied, dropped: prs.filter((p) => conflicts.has(p.number)).map((p) => ({ number: p.number, reason: "conflict" })), commits: commitOf };
     },
     push: async (branch: string, sha: string) => void built.set(branch, sha),
     /** An epic's fast-forward: refused unless the epic's tip is the batch's base. */
@@ -162,8 +194,8 @@ function fakeRepo() {
   /** What is in flight: a batch's members, or the one pull request rebased alone whose head is the mark's commit. */
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
-  const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), ...opts });
-  return { gh, git, pulls, comments, runs, pushed, tips, landed, conflicts, moved, pushes, sitsOn, merges, squashes, commits, unsigned, add, settle, batch, members, alone, flight, run };
+  const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
+  return { gh, git, pulls, comments, runs, pushed, tips, landed, conflicts, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -243,7 +275,7 @@ describe("a run of the train", () => {
     expect(repo.comments.get(16)).toHaveLength(1);
   });
 
-  it("merges a green batch, closes the originals as merged via it, and boards the next", async () => {
+  it("lands a green batch one pull request at a time, each merged by GitHub, closes the batch, and boards the next", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12, 13, 14, 15, 16]) repo.add(n);
     const first = (await repo.run()).inFlight;
@@ -251,12 +283,21 @@ describe("a run of the train", () => {
     const r = await repo.run();
     expect(r.merged).toEqual([11, 12, 13, 14, 15]);
     expect(repo.landed).toEqual(["#11", "#12", "#13", "#14", "#15"]);
+    expect(repo.merges).toEqual(["squash #11", "squash #12", "squash #13", "squash #14", "squash #15"]); // in the batch's order, never the rebase merge
     for (const n of [11, 12, 13, 14, 15]) {
-      const p = repo.pulls.get(n)!;
-      expect(p.open).toBe(false);
-      expect(p.labels).toEqual([]);
-      expect(repo.comments.get(n)!.map((c) => c.body)).toEqual([`Merged via #${first}.`]);
+      expect(repo.pulls.get(n)).toMatchObject({ open: false, merged: true, labels: [] }); // merged, not closed
+      expect(repo.comments.get(n)).toEqual([]); // the position comment goes, and no "Merged via"
+      // The title and message of the batch's own commit of it: what CI tested is what `git log` shows.
+      expect(repo.squashes.get(n)).toEqual({ title: `fix ${n} (#${n})`, message: `* part one of ${n}\n* part two of ${n}` });
+      expect(r.log).toContain(`VERIFIED #${n}: GitHub signed s${n} (verified=true)`);
     }
+    // dev holds exactly the files of the batch's last commit, and the batch closes with a comment that lists them.
+    expect(repo.trees.get(repo.tips.dev)).toBe(repo.trees.get(repo.pulls.get(first)!.sha));
+    expect(repo.pulls.get(first)).toMatchObject({ open: false });
+    expect(repo.pulls.get(first)!.merged).toBeUndefined();
+    expect(repo.comments.get(first)!.map((c) => c.body)).toEqual(["Merge train: #11 #12 #13 #14 #15 landed on `dev`, each with GitHub's squash merge, so this batch closes."]);
+    expect(r.closed).toEqual([]);
+    expect(r.log.join("\n")).not.toMatch(/::(warning|error)::/);
     // #16 is next, alone: dev moved under it, so the train rebases its branch instead of opening a batch.
     expect(r.inFlight).toBe(16);
     expect(repo.batch()).toBeUndefined();
@@ -529,8 +570,10 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 12]);
   });
 
-  it("still lands a batch on dev by the rebase merge of the batch", async () => {
+  it("lands a batch an older train opened (no commits in its mark) by the rebase merge of the batch", async () => {
     const repo = fakeRepo();
+    const build = repo.git.build;
+    repo.git.build = async (base: string, prs: Pr[]) => ({ ...(await build(base, prs)), commits: undefined as never });
     repo.add(11);
     repo.add(12);
     const b = (await repo.run()).inFlight;
@@ -538,7 +581,22 @@ describe("a run of the train", () => {
     const r = await repo.run();
     expect(repo.merges).toEqual([`rebase #${b}`]);
     expect(repo.landed).toEqual(["#11", "#12"]);
-    expect(r.log.join("\n")).not.toMatch(/verified/i); // GitHub signs no rebase merge: nothing to check
+    expect(repo.comments.get(11)!.at(-1)!.body).toBe(`Merged via #${b}.`);
+    // GitHub signs no rebase merge: nothing to read back, and the log says why these commits are not verified.
+    expect(r.log).toContain(`::warning::Batch #${b} lands by the rebase merge, so its commits will not be verified: its mark names no commits (an older train opened it).`);
+    expect(r.log.join("\n")).not.toMatch(/VERIFIED/);
+  });
+
+  it("warns and lands by the rebase merge when GitHub does not list the commits the mark names", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const b = (await repo.run()).inFlight;
+    repo.settle();
+    repo.made.clear();
+    const r = await repo.run();
+    expect(repo.merges).toEqual([`rebase #${b}`]);
+    expect(r.log).toContain(`::warning::Batch #${b} lands by the rebase merge, so its commits will not be verified: GitHub does not list the commits its mark names.`);
   });
 
   it("lands an epic's batch by a fast-forward of exactly the tested commits", async () => {
@@ -578,7 +636,279 @@ describe("a run of the train", () => {
     const r = await repo.run({ dry: true });
     expect(JSON.stringify([...repo.pulls.values()]) + JSON.stringify([...repo.comments.entries()])).toBe(before);
     expect(repo.landed).toEqual([]);
-    expect(r.log.join("\n")).toMatch(/\(dry run\) would merge #9000/);
+    expect(r.log.join("\n")).toMatch(/\(dry run\) would merge #11 at h11 \(squash\) as "fix 11 \(#11\)"\n[^]*\(dry run\) would merge #12 at h12 \(squash\)[^]*\(dry run\) would close #9000/);
+    expect(r.log.join("\n")).not.toMatch(/verified/i);
+  });
+});
+
+describe("a green batch landing on dev", () => {
+  /** A batch of `numbers`, built on dev's tip and green. `behind`: their heads do not sit on that tip (the usual case). */
+  const greenBatch = async (numbers = [11, 12, 13], opts: { behind?: boolean } = {}) => {
+    const repo = fakeRepo();
+    for (const n of numbers) repo.add(n, opts);
+    const b = (await repo.run()).inFlight as number;
+    repo.settle();
+    return { repo, b };
+  };
+  const last = (repo: ReturnType<typeof fakeRepo>, n: number) => repo.comments.get(n)!.at(-1)!.body;
+
+  it("keeps the batch's commit of each pull request in its mark", async () => {
+    const { repo, b } = await greenBatch([11, 12], { behind: true });
+    expect(readState(repo.pulls.get(b)!.body).prs).toEqual([
+      { number: 11, sha: "h11", commit: "dev0:11" },
+      { number: 12, sha: "h12", commit: "dev0:11,12" },
+    ]);
+    expect(repo.pulls.get(b)!.body).toMatch(/Green: each of them is merged with GitHub's squash merge, in this order/);
+    expect(batchBody("epic/x", "a", "b", [], [])).toMatch(/Green: the base is fast-forwarded to these commits/);
+    // Pull requests that are behind dev land all the same: the batch, not each head, is what CI tested on dev's tip.
+    await repo.run();
+    expect(repo.landed).toEqual(["#11", "#12"]);
+  });
+
+  it("lands nothing when dev is no longer the batch's base: the batch is rebuilt", async () => {
+    const { repo, b } = await greenBatch();
+    repo.tips.dev = "dev1";
+    const r = await repo.run();
+    expect(repo.merges).toEqual([]);
+    expect(r.closed).toEqual([b]);
+    expect(repo.members()).toEqual([11, 12, 13]);
+    expect(readState(repo.batch()!.body).baseSha).toBe("dev1");
+  });
+
+  it("stops at a commit that does not hold the files the batch tested, reverts nothing, and says so", async () => {
+    const { repo, b } = await greenBatch();
+    repo.skewed.add(12); // GitHub's squash of #12 comes out with other files than the batch's commit of it
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(repo.landed).toEqual(["#11", "#12"]);
+    expect(repo.tips.dev).toBe("s12"); // no revert by the train
+    expect(r.merged).toEqual([11, 12]);
+    expect(r.log.join("\n")).toMatch(/::error::Batch #9000: GitHub's commit for #12 \(s12, tree [^)]+\) does not hold the files this batch tested for it \(dev0:11,12, tree [^)]+\)\. The train reverts nothing: check `dev` by hand\./);
+    expect(repo.pulls.get(13)).toMatchObject({ open: true, labels: [LABEL.queue] });
+    expect(repo.pulls.get(13)!.merged).toBeUndefined();
+    expect(repo.pulls.get(b)!.open).toBe(false);
+    expect(last(repo, b)).toMatch(/^Merge train: #11 #12 landed on `dev`, and the landing stopped there: GitHub's commit for #12 .* check `dev` by hand\. #13 did not land; the ones still queued go back to the line\.$/);
+    // Nothing more boards in that run; #13 is in line again and goes on the next one.
+    expect(r.inFlight).toBeNull();
+    expect(r.opened).toEqual([]);
+    expect(repo.pushes).toEqual([]);
+    expect(last(repo, 13)).toMatch(/in line for `dev`: \*\*1st\*\*/);
+    expect((await repo.run()).inFlight).toBe(13);
+  });
+
+  it("flags a wrong commit even when it is the batch's last", async () => {
+    const { repo, b } = await greenBatch([11, 12]);
+    repo.skewed.add(12);
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/::error::Batch #9000: GitHub's commit for #12/);
+    expect(r.log.join("\n")).not.toMatch(/LANDED batch/);
+    expect(last(repo, b)).toMatch(/#11 #12 landed on `dev`, and the landing stopped there: .* by hand\.$/);
+  });
+
+  it("goes on after a run that stopped half way, from what GitHub shows alone", async () => {
+    const { repo, b } = await greenBatch();
+    const commit = repo.gh.commit;
+    repo.gh.commit = async (sha: string) => (sha === "s12" ? Promise.reject(new Error("GET /commits/s12: HTTP 502")) : commit(sha));
+    await expect(repo.run()).rejects.toThrow(/HTTP 502/); // the run dies right after #12 merged
+    expect(repo.landed).toEqual(["#11", "#12"]);
+    expect(repo.pulls.get(b)!.open).toBe(true);
+    repo.gh.commit = commit;
+    const r = await repo.run();
+    expect(r.log).toContain(`RESUME batch #${b}: #11 #12 landed in an earlier run.`);
+    expect(repo.merges).toEqual(["squash #11", "squash #12", "squash #13"]); // nobody merged twice
+    expect(r.merged).toEqual([13]);
+    expect(repo.trees.get(repo.tips.dev)).toBe(repo.trees.get(repo.pulls.get(b)!.sha));
+    expect(repo.pulls.get(b)!.open).toBe(false);
+    expect(last(repo, b)).toBe("Merge train: #11 #12 #13 landed on `dev`, each with GitHub's squash merge, so this batch closes.");
+  });
+
+  it("closes a batch whose pull requests all landed before the run stopped", async () => {
+    const { repo, b } = await greenBatch([11, 12]);
+    const close = repo.gh.closePull;
+    repo.gh.closePull = async () => Promise.reject(new Error("PATCH: HTTP 502"));
+    await expect(repo.run()).rejects.toThrow(/HTTP 502/);
+    expect(repo.landed).toEqual(["#11", "#12"]);
+    repo.gh.closePull = close;
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(r.merged).toEqual([]);
+    expect(repo.pulls.get(b)!.open).toBe(false);
+    expect(r.inFlight).toBeNull();
+  });
+
+  it("after a run that stopped half way, sends the rest back to the line when dev no longer holds what was tested", async () => {
+    const { repo, b } = await greenBatch();
+    const removeLabel = repo.gh.removeLabel;
+    repo.gh.removeLabel = async (n: number, l: string) => (n === 11 ? Promise.reject(new Error("DELETE label: HTTP 502")) : removeLabel(n, l));
+    await expect(repo.run()).rejects.toThrow(/HTTP 502/); // the run dies between #11's merge and its labels
+    expect(repo.pulls.get(11)).toMatchObject({ merged: true, labels: [LABEL.queue] });
+    expect(repo.comments.get(11)).toHaveLength(1);
+    repo.gh.removeLabel = removeLabel;
+    repo.tips.dev = "byhand"; // and something else landed on dev meanwhile
+    const r = await repo.run();
+    expect(repo.pulls.get(11)!.labels).toEqual([]); // what that run left undone
+    expect(repo.comments.get(11)).toEqual([]);
+    expect(repo.merges).toEqual(["squash #11"]);
+    expect(r.closed).toEqual([b]);
+    expect(repo.comments.get(b)!.at(-1)!.body).toBe(
+      "Merge train: #11 landed on `dev`, and the landing cannot go on (`dev` no longer holds what this batch tested), so this batch closes; #12 #13 did not land, and the ones still queued go back to the line.",
+    );
+    expect(repo.members()).toEqual([12, 13]); // a new batch on dev's tip, with its own CI run
+    expect(readState(repo.batch()!.body).baseSha).toBe("byhand");
+  });
+
+  it("does not go on after a stop when one of the rest changed", async () => {
+    const { repo, b } = await greenBatch();
+    const commit = repo.gh.commit;
+    repo.gh.commit = async (sha: string) => (sha === "s11" ? Promise.reject(new Error("HTTP 502")) : commit(sha));
+    await expect(repo.run()).rejects.toThrow(/HTTP 502/);
+    repo.gh.commit = commit;
+    repo.pulls.get(12)!.sha = "h12b";
+    repo.runs.set("h12b", green);
+    const r = await repo.run();
+    expect(repo.landed).toEqual(["#11"]);
+    expect(r.dropped).toEqual([12]);
+    expect(last(repo, b)).toMatch(/#11 landed on `dev`, and the landing cannot go on \(#12 changed or left the line\)/);
+    expect(r.inFlight).toBe(13); // alone now, rebased onto dev
+  });
+
+  it("lands the ones ahead of a pull request that got new commits, and neither it nor the ones after it", async () => {
+    const { repo, b } = await greenBatch([11, 12, 13, 14]);
+    repo.pulls.get(13)!.sha = "h13b";
+    repo.runs.set("h13b", green);
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(r.merged).toEqual([11, 12]);
+    expect(r.dropped).toEqual([13]); // a new head needs a new review
+    expect(last(repo, b)).toBe("Merge train: #11 #12 landed on `dev`, and the landing stopped there: #13 changed or left the line. #13 #14 did not land; the ones still queued go back to the line.");
+    expect(repo.pulls.get(14)).toMatchObject({ open: true, labels: [LABEL.queue] });
+    expect(r.inFlight).toBe(14);
+  });
+
+  it("stops when a head moves during the landing: the merge names the head the batch holds", async () => {
+    const { repo, b } = await greenBatch();
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n: number, sha: string, title: string, message: string) => {
+      if (n === 12) repo.pulls.get(12)!.sha = "h12b"; // pushed after this run read it
+      return squash(n, sha, title, message);
+    };
+    await repo.run();
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]); // asked once: a moved head is not tried again
+    expect(repo.landed).toEqual(["#11"]);
+    expect(repo.comments.get(b)!.map((c) => c.body)).toContainEqual(
+      "Merge train: #11 landed on `dev`, and the landing stopped there: #12 got new commits since this batch was built. #12 #13 did not land; the ones still queued go back to the line.",
+    );
+    for (const n of [12, 13]) expect(repo.pulls.get(n)).toMatchObject({ open: true });
+    for (const n of [12, 13]) expect(repo.pulls.get(n)!.merged).toBeUndefined();
+  });
+
+  it("lands the ones ahead of a pull request that left the line", async () => {
+    const { repo, b } = await greenBatch();
+    repo.pulls.get(13)!.labels = [];
+    const r = await repo.run();
+    expect(r.merged).toEqual([11, 12]);
+    expect(last(repo, b)).toMatch(/#11 #12 landed on `dev`, and the landing stopped there: #13 changed or left the line\. #13 did not land/);
+    expect(repo.pulls.get(13)).toMatchObject({ open: true });
+    expect(r.inFlight).toBeNull();
+  });
+
+  it("stops at a pull request turned into a draft, which waits in line and keeps its label", async () => {
+    const { repo, b } = await greenBatch();
+    repo.pulls.get(12)!.draft = true;
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11"]); // GitHub merges no draft: not asked
+    expect(last(repo, b)).toMatch(/#11 landed on `dev`, and the landing stopped there: #12 changed or left the line\. #12 #13 did not land/);
+    expect(repo.pulls.get(12)).toMatchObject({ open: true, labels: [LABEL.queue] });
+    expect(last(repo, 12)).toMatch(/Waiting: it is a draft/);
+    expect(r.inFlight).toBe(13);
+  });
+
+  it("closes the batch as before when its first pull request changed, or it is not green yet", async () => {
+    const first = await greenBatch();
+    first.repo.pulls.get(11)!.labels = [];
+    expect((await first.repo.run()).closed).toEqual([first.b]);
+    expect(first.repo.merges).toEqual([]);
+    const pending = await greenBatch();
+    pending.repo.runs.set(pending.repo.pulls.get(pending.b)!.sha, running);
+    pending.repo.pulls.get(12)!.labels = [];
+    expect((await pending.repo.run()).closed).toEqual([pending.b]);
+    expect(pending.repo.merges).toEqual([]);
+  });
+
+  it("falls back to the rebase merge of the batch, with a warning, while the train may not merge past dev's rule", async () => {
+    const { repo, b } = await greenBatch([11, 12], { behind: true });
+    repo.rules.bypass = false;
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11", `rebase #${b}`]); // asked once, then the batch as a whole
+    expect(repo.landed).toEqual(["#11", "#12"]);
+    expect(r.merged).toEqual([11, 12]);
+    expect(r.log).toContain(
+      `::warning::GitHub refused the squash merge of #11 (HTTP 405 Repository rule violations found), so batch #${b} lands by the rebase merge and its commits will not be verified. The queue app must be a bypass actor (pull requests only) of \`dev\`'s ruleset.`,
+    );
+    expect(repo.pulls.get(b)).toMatchObject({ open: false, merged: true });
+    for (const n of [11, 12]) expect(last(repo, n)).toBe(`Merged via #${b}.`);
+  });
+
+  it("never blocks when only the first one could merge without a bypass: the rest go back to the line", async () => {
+    const repo = fakeRepo();
+    repo.rules.bypass = false;
+    repo.add(11); // up to date with dev by itself
+    repo.add(12, { behind: true });
+    repo.add(13, { behind: true });
+    const b = (await repo.run()).inFlight as number;
+    repo.settle();
+    const pauses: number[] = [];
+    const r = await repo.run({ pause: async (ms: number) => void pauses.push(ms) });
+    expect(repo.merges).toEqual(["squash #11", "squash #12", "squash #12", "squash #12"]);
+    expect(pauses).toEqual([5000, 5000]);
+    expect(repo.landed).toEqual(["#11"]);
+    expect(r.closed).toEqual([b]);
+    expect(repo.comments.get(b)!.map((c) => c.body)).toContainEqual(
+      "Merge train: #11 landed on `dev`, and the landing stopped there: GitHub refused to merge #12 (HTTP 405 Repository rule violations found). #12 #13 did not land; the ones still queued go back to the line.",
+    );
+    expect(repo.members()).toEqual([12, 13]); // a new batch at once
+    repo.settle();
+    const again = await repo.run();
+    expect(again.log.join("\n")).toMatch(/::warning::GitHub refused the squash merge of #12 .* lands by the rebase merge/);
+    expect(repo.landed).toEqual(["#11", "#12", "#13"]);
+  });
+
+  it("tries a merge again when GitHub refuses it right after dev moved", async () => {
+    const { repo } = await greenBatch();
+    const squash = repo.gh.squash;
+    let refusals = 2;
+    repo.gh.squash = async (n: number, sha: string, title: string, message: string) => {
+      if (n === 12 && refusals-- > 0) return { ok: false, status: 405, message: "HTTP 405 Base branch was modified. Review and try the merge again." };
+      return squash(n, sha, title, message);
+    };
+    const pauses: number[] = [];
+    const r = await repo.run({ pause: async (ms: number) => void pauses.push(ms) });
+    expect(pauses).toEqual([5000, 5000]);
+    expect(r.merged).toEqual([11, 12, 13]);
+    expect(r.log.join("\n")).not.toMatch(/::(warning|error)::/);
+  });
+
+  it("says for each commit whether GitHub shows it as verified", async () => {
+    const { repo } = await greenBatch();
+    repo.unsigned.add("s12");
+    const r = await repo.run();
+    expect(r.log).toContain("VERIFIED #11: GitHub signed s11 (verified=true)");
+    expect(r.log).toContain("::warning::#12 landed as s12, which is not verified (verified=false, reason: unsigned).");
+    expect(r.log).toContain("VERIFIED #13: GitHub signed s13 (verified=true)");
+    expect(r.merged).toEqual([11, 12, 13]); // a missing signature is a warning: the files are the tested ones
+  });
+
+  it("lands the half that waits behind a green half the same way", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14]) repo.add(n);
+    await repo.run();
+    repo.settle([14]);
+    await repo.run(); // red: [11 12] first, [13 14] noted to go right after
+    repo.settle([14]);
+    const r = await repo.run();
+    expect(r.merged).toEqual([11, 12]);
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(repo.members()).toEqual([13, 14]);
   });
 });
 
@@ -998,8 +1328,8 @@ describe("GitHub over REST", () => {
       return answers.shift();
     };
     const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
-    expect(await gh.squash(7, "abc", "fix: x (#7)", "* one\n* two")).toEqual({ ok: true, sha: "new1", message: "HTTP 200 Pull Request successfully merged" });
-    expect(await gh.squash(8, "def", "fix: y (#8)", "* one")).toEqual({ ok: false, sha: undefined, message: "HTTP 409 Head branch was modified. Review and try the merge again." });
+    expect(await gh.squash(7, "abc", "fix: x (#7)", "* one\n* two")).toEqual({ ok: true, status: 200, sha: "new1", message: "HTTP 200 Pull Request successfully merged" });
+    expect(await gh.squash(8, "def", "fix: y (#8)", "* one")).toEqual({ ok: false, status: 409, sha: undefined, message: "HTTP 409 Head branch was modified. Review and try the merge again." });
     expect(squashMessage({ title: "fix: x", number: 7 }, await gh.pullCommits(7))).toEqual({ title: "fix: x (#7)", message: "* one\n* two" });
     expect(await gh.commit("new1")).toEqual({ verified: true, reason: "valid", tree: "t1" });
     expect(await gh.commit("old1")).toEqual({ verified: false, reason: "unsigned", tree: "t0" });
@@ -1020,6 +1350,52 @@ describe("GitHub over REST", () => {
     expect(await gh.comments(1)).toEqual([]);
     await expect(low.comments(1)).rejects.toBeInstanceOf(BudgetLow);
   });
+});
+
+describe("building a batch with git", () => {
+  it("makes one commit per pull request, and names each one's commit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+    const origin = join(root, "origin");
+    const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const env = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM };
+    try {
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      git(["commit", "-q", "--allow-empty", "-m", "base"]);
+      const prs = [1, 2].map((number) => {
+        git(["checkout", "-q", "-b", `fix-${number}`, "dev"]);
+        for (const part of ["first", "second"]) {
+          writeFileSync(join(origin, `${part}-${number}.txt`), "x\n");
+          git(["add", `${part}-${number}.txt`]);
+          git(["commit", "-q", "-m", `${part} of ${number}`, "-m", "A body that stays out."]);
+        }
+        git(["update-ref", `refs/pull/${number}/head`, "HEAD"]);
+        return { number, title: `fix: number ${number}`, sha: git(["rev-parse", "HEAD"]) };
+      });
+      git(["clone", "-q", "origin", "clone"], root);
+      const clone = join(root, "clone");
+      // A runner with no git identity at all: the train commits as itself, and a merge that is no fast-forward (the
+      // second pull request) asks git for an identity too.
+      writeFileSync(join(root, "gitconfig"), "[user]\n\tuseConfigOnly = true\n");
+      process.env.GIT_CONFIG_GLOBAL = join(root, "gitconfig");
+      process.env.GIT_CONFIG_NOSYSTEM = "1";
+      const layer = gitLayer({ cwd: clone });
+      const built = await layer.build("dev", prs);
+      expect(built.applied).toEqual([1, 2]);
+      // In order, on the base: the second one's commit is the batch's head, and its parent is the first one's.
+      expect(built.commits[2]).toBe(built.sha);
+      expect(git(["rev-parse", `${built.sha}^`], clone)).toBe(built.commits[1]);
+      expect(git(["rev-parse", `${built.commits[1]}^`], clone)).toBe(built.baseSha);
+      expect(git(["log", "-1", "--format=%B", built.commits[1]], clone)).toBe("fix: number 1 (#1)\n\n* first of 1\n* second of 1");
+      expect(batchBody("dev", built.baseSha, built.sha, prs, [], {}, built.commits)).toContain(`{"number":2,"sha":"${prs[1].sha}","commit":"${built.sha}"}`);
+      layer.close();
+    } finally {
+      for (const [key, value] of Object.entries(env)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000); // some forty git calls: slow on a busy machine
 });
 
 describe("a stalled request or git call", () => {
