@@ -1,5 +1,5 @@
 import { readAppStore } from "./store-core/appStore";
-import { APP_ICON_PATH, appViewOf, readAppBundle, type AppBundle, type AppClient, type AppPermission, type AppViewMode } from "./store-core/appBundle";
+import { APP_ICON_PATH, appViewOf, readAppBundle, type AppBundle, type AppPermission, type AppViewMode } from "./store-core/appBundle";
 import { appFingerprint, appRef, appRefPublisher, type SignedAppRevocation } from "./store-core/appStatements";
 
 /*
@@ -55,7 +55,8 @@ export interface StoreApp {
   sequence: number;
   digest: string;
   permissions: AppPermission[];
-  clients: AppClient[];
+  /** As the manifest names them: a later client's name too, which the app accepts (WISP 1200 · Manifest). */
+  clients: string[];
   view: AppViewMode;
   license: string;
   homepage?: string;
