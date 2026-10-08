@@ -148,8 +148,13 @@ it("Automatic in an app with no WebRTC prefers its first native transport, so th
   expect(view().transportAutomatic).toBe(true);
   // Not WebRTC, which this app lacks: the popover's Fallback switch sends this preference back.
   expect(view().preferredTransport).toBe("iroh/1");
+  const before = lines(view());
   await node.setTransportPreference({ linkId: id, preferred: view().preferredTransport!, fallback: false });
   expect(view().transportFallback).toBe(false);
+  // Only the fallback: the chat stays on Automatic, with no row for a choice.
+  expect(view().transportAutomatic).toBe(true);
+  expect((await db.getLinks()).find(l => l.id === id)?.preferredTransport).toBeUndefined();
+  expect(lines(view())).toEqual(before);
 }, 20_000);
 
 describe.each([

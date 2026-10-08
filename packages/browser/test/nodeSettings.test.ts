@@ -246,6 +246,22 @@ describe("one chat's choices", () => {
     expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", true, false, false);
   });
 
+  it("the Fallback switch on an Automatic chat changes only the fallback: still Automatic, no row, no switch intent", async () => {
+    const { node } = engine();
+    const link = stubLink();
+    const chat = await addChat(node, link);
+    const view = () => node.getState().links.find((l) => l.id === chat.id)!;
+    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "webrtc/1", transportFallback: true });
+    // The switch sends back the transport Automatic shows.
+    await node.setTransportPreference({ linkId: chat.id, preferred: view().preferredTransport!, fallback: false });
+    expect(link.setTransportPreference).toHaveBeenLastCalledWith("webrtc/1", false, true, false);
+    const stored = await saved(chat.id);
+    expect(stored?.transportFallback).toBe(false);
+    expect(stored?.preferredTransport).toBeUndefined();
+    expect(stored?.transportLog).toBeUndefined();
+    expect(view()).toMatchObject({ transportAutomatic: true, transportFallback: false });
+  });
+
   it("ways of paying: only known methods and yes/no, merged, saved and told to the contact", async () => {
     const { node } = engine();
     const link = stubLink();

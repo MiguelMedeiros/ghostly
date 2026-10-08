@@ -4,6 +4,55 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.1.6
+
+Ghostly 1.1.6 says what went wrong in a few words of your language, with the technical part behind an ⓘ, everywhere in the app. Groups no longer drop a member who comes back to a busy chat, Linux Desktops and DHT-only chats go live sooner, and a bot can show how much of its quota is left.
+
+### For users
+
+**Everywhere**
+
+- Connection errors in a chat and in a group's member list are short now: a few words saying what happened and what happens next ("Waiting for the relays", "Retrying in 52 s"), in your language. The technical text (relay addresses, error names) is behind an ⓘ, with a Copy button for bug reports.
+- When the app retries by itself (the relays' request budget, a dropped connection), the line is grey, not red.
+- Device and profile errors are short now, with what to do under them: "The devices couldn't connect / Keep both online and make a new code.", "The move stopped / Nothing changed; copied files are kept.", and the unencrypted backup warning "Not encrypted / Anyone with the file gets your keys, chats and money."
+- The rest of the app's errors say what happened in a few words of your language too: identities, Nostr, shared apps, network settings, the pairing retry and the connection timeline. A shared app's refusal keeps its technical reason behind an ⓘ, and the public DID warning is a short line with the details behind an ⓘ.
+- A refused or failed identity check says why again, in your language: "This signature was made by another key", "No Ghostly TXT record in the domain's DNS", "The proof file was not found", or that the account doesn't list the key that signed. The record, address or key it names is behind an ⓘ. The relay settings say "Enter at least one relay address" again. An error the app doesn't know keeps its own words after "Something went wrong".
+
+**Chat**
+
+- File, voice and call errors are short now: "No access to the mic or camera / Allow them in your browser or system settings.", "Too large for your contact's app / Max 64 MB until they update Ghostly.", and a send or a file that failed says why in a few words of your language instead of the engine's English.
+- A bot can say how much of its quota is left: a small meter on its chat's row and in the chat's header (amber when low, red when nearly out), with when it resets and which account behind a tap. Bots report it with `ghostly usage send`.
+
+**Groups**
+
+- Group errors and waiting notes are short now, in your language: "Nobody is online to become admin" with what to do under it, "Group changes are paused" with the technical part (member, epoch) behind an ⓘ, and a shorter line while you wait to be let in.
+
+**Wallets**
+
+- Payment and wallet errors are short now: what happened, then what to do or what is safe ("Couldn't create the Spark wallet", "Nothing was saved. Try again."), in your language. A provider's own technical reply is behind an ⓘ instead of inside the sentence.
+
+### Fixed
+
+**Chat**
+
+- A bot's task or routine card sent while your contact was away no longer stays plain text on their side: once the chat is live again the card goes by itself and replaces the text, with no edit mark.
+- Desktop puts a new record on the Mainline DHT about a second sooner: it no longer waits two seconds for DHT nodes that never answer before storing it. Two Desktops that find each other on the DHT alone go live sooner after an invite.
+- A chat that moves to HyperDHT right after your contact's app restarted no longer waits about 28 seconds. The first HyperDHT connection a newly started app makes sometimes opened and then carried nothing; the Desktop app and the CLI now dial again after 2 seconds, and the chat is live in about 2 seconds.
+- A contact on Ghostly 1.1.4 or older no longer sees "kept on" a connection, or a "transport change timed out" error, when either of you picks the chat's connection twice within a few seconds. Their app read the dropped move as a connection that failed. With such a contact the chat now makes the first move, then the second.
+- Two apps with no WebRTC between them (Linux Desktops) go live sooner after an invite: the app that made it dials the joiner's native transport as soon as the joiner's record says how, instead of first waiting 2.5 seconds for a WebRTC offer that cannot come.
+
+**Groups**
+
+- A member back in a busy group or community no longer loses its connection to the member catching it up ("Session receive limit exceeded"), on older apps too: what it missed comes a few messages at a time, each batch once the last is in.
+- A group member's connection no longer drops with "Session receive limit exceeded" when another member catches it up with many messages at once (a phone back in a busy group). A connection that still gets more than it can take ends without blocking the chat, and is dialled again.
+- The group connection panel says why a member is not reachable in a few words of your language ("Can't reach the relays, retrying…", "Connection dropped, trying again…"), instead of the engine's English with relay addresses and error names.
+- A web app no longer says "Could not publish discovery" for a group member or a chat while one relay is down and the others only wait for their request budget: that is a wait, and the packet goes as soon as a relay frees a request.
+
+**Everywhere**
+
+- Ghostly Desktop no longer says "Could not publish discovery" while one relay is down and the others are only waiting out their rate limit. That is a wait, and the packet goes as soon as a relay takes requests again (as the web app now does).
+- On Linux with WebKitGTK older than 2.52 (Ubuntu 22.04, for example), Ghostly Desktop no longer freezes for seconds when a sound plays after a quiet moment, as at a new chat's first contact. The web app in GNOME Web and other WebKitGTK browsers before 2.52 no longer does either.
+
 ## 1.1.5
 
 Ghostly 1.1.5 gets chats live sooner: two Desktop apps that only find each other on the DHT go live even when Iroh's relay is blocked, a chat is live again in about a second after the app was in the background, and joining a community no longer stalls while your relays are busy.

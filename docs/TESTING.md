@@ -126,7 +126,19 @@ Other workflows:
 | E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
 | E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0 | nightly, before every release, by hand |
 | Desktop on macOS (`desktop-macos.yml`) | as in CI | also nightly, and by hand with `repeat` |
+| Merge queue (`merge-queue.yml`) | updates the next armed pull request into `dev` that fell behind ([below](#the-merge-queue)) | every 10 minutes, on every push to `dev`, when a pull request's CI ends, by hand |
 | Desktop media streaming (`desktop-media.yml`) | a 100 MB video plays and seeks from the stored file in WebKitGTK (Linux) and WebView2 (Windows), `e2e/desktop/video-stream.spec.ts` | pull requests that touch the file stream, the file store or the video bubble (not drafts: leaving draft runs it); nightly; by hand |
+
+### The merge queue
+
+`dev` merges a pull request only when CI Success is green on a branch that is up to date with `dev`, and auto-merge (`gh pr merge --squash --auto`) merges it by itself once that holds. When one merges, the others fall behind. **Merge queue** (`merge-queue.yml`, [`tools/scripts/merge-queue.mjs`](../tools/scripts/merge-queue.mjs)) brings them up to date one at a time:
+
+- it looks only at pull requests that are ready (not drafts) and armed;
+- while one of them is up to date and running CI, or about to merge, it waits;
+- otherwise it updates the oldest one that is behind (`batch/` branches first). One whose CI Success is red on its commit waits for its owner's push;
+- one that conflicts with `dev` is skipped, with one comment per commit asking for a rebase.
+
+So a finished pull request needs `gh pr ready` and `gh pr merge --squash --auto`, and nothing more unless it conflicts or its CI goes red. The workflow acts as a GitHub App (secrets `QUEUE_APP_ID`, `QUEUE_APP_PRIVATE_KEY`): an update made with the workflow's own token would start no CI. Without the secrets each run ends green with the notice "queue app not configured". Run it by hand with **dry run** to see what it would do.
 
 The app's e2e suites do not run on pull requests: they would hold up every merge. See [e2e/README.md](../e2e/README.md#when-they-run).
 

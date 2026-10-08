@@ -3799,11 +3799,19 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * `chosen`: a choice from the chat's Connection menu, a row in its timeline even when it names the transport already
    * set. Left out (the RPC), only a change of transport is: the Fallback switch sends the same preference again, and
-   * is neither a row nor a switch intent.
+   * is neither a row nor a switch intent. On Automatic it sends back the transport Automatic names: only the fallback
+   * changes, and the chat stays on Automatic.
    */
   async setTransportPreference({ linkId, preferred, fallback }: { linkId: string; preferred: PairedTransport; fallback: boolean }, chosen?: boolean): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || !live.link?.availableTransports.includes(preferred) || typeof fallback !== "boolean") throw new Error("Transport unavailable");
+    if (chosen === undefined && live.stored.preferredTransport === undefined && preferred === automaticTransport(live.link.availableTransports)) {
+      await db.patchLink(linkId, { transportFallback: fallback });
+      live.stored = { ...live.stored, transportFallback: fallback }; this.emitState();
+      await live.link.setTransportPreference(preferred, fallback, true, false);
+      this.capsChanged(linkId);
+      return;
+    }
     chosen ??= live.stored.preferredTransport !== preferred;
     const patch = { preferredTransport: preferred, transportFallback: fallback };
     await db.patchLink(linkId, patch);
