@@ -719,6 +719,7 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
      * base). `force` makes new commits even when the head already sits on the tip (a fresh commit for another CI run).
      */
     async rebase(base, p, { force = false } = {}) {
+      signal?.throwIfAborted();
       fetch([`+refs/heads/${base}:${ns}/base`, `+refs/pull/${p.number}/head:${ns}/pr-${p.number}`]);
       const baseSha = git(["rev-parse", `${ns}/base`], cwd);
       if (git(["rev-parse", `${ns}/pr-${p.number}`], cwd) !== p.sha) return { baseSha, dropped: "moved" };
@@ -731,13 +732,14 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
       const plain = ["-c", "rebase.updateRefs=false", "-c", "rebase.autoSquash=false", "-c", "rebase.autoStash=false"];
       try {
         git([...identity(), ...plain, "rebase", "-q", "--no-verify", ...(force ? ["--force-rebase"] : []), baseSha]);
-      } catch {
+      } catch (e) {
         try {
           git(["rebase", "--abort"]);
         } catch {
           // nothing to abort
         }
         git(["reset", "-q", "--hard", baseSha]);
+        if (e.code === "ETIMEDOUT") throw e; // not a conflict
         return { baseSha, dropped: "conflict" };
       }
       const sha = git(["rev-parse", "HEAD"]);
@@ -746,10 +748,12 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
     },
     /** Moves a pull request's branch to `sha`, only while it still points at `expected` (an author's push wins). */
     async pushHead(branch, sha, expected) {
+      signal?.throwIfAborted();
       try {
         git(["push", "-q", `--force-with-lease=refs/heads/${branch}:${expected}`, remote, `${sha}:refs/heads/${branch}`], cwd);
         return { ok: true };
       } catch (e) {
+        if (e.code === "ETIMEDOUT") throw e; // it may have pushed: the next run reads the head against the mark
         const lines = String(e.stderr ?? e.message).trim().split("\n");
         return { ok: false, message: (lines.find((l) => /^\s*!|^error:|^fatal:/.test(l)) ?? lines.at(-1)).trim() };
       }
