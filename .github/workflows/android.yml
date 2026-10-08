@@ -155,10 +155,20 @@ jobs:
         run: |
           apk="$RUNNER_TEMP/apk/$NAME"
           BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)"
-          "$BUILD_TOOLS/aapt2" dump badging "$apk" > "$RUNNER_TEMP/badging.txt"
+          if ! "$BUILD_TOOLS/aapt2" dump badging "$apk" > "$RUNNER_TEMP/badging.txt"; then
+            echo "::error::aapt2 dump badging failed ($BUILD_TOOLS)"
+            exit 1
+          fi
           debuggable=no
           if grep -q '^application-debuggable' "$RUNNER_TEMP/badging.txt"; then debuggable=yes; fi
-          "$BUILD_TOOLS/apksigner" verify --print-certs "$apk" | grep -E 'Signer #1 certificate (DN|SHA-256)' > "$RUNNER_TEMP/certs.txt"
+          if ! "$BUILD_TOOLS/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/apksigner.txt"; then
+            cat "$RUNNER_TEMP/apksigner.txt"
+            echo "::error::apksigner verify failed ($BUILD_TOOLS)"
+            exit 1
+          fi
+          # "Signer #1 certificate ...", or per SDK range ("Signer (minSdkVersion=...) certificate ...") with v3.1.
+          grep -E 'certificate (DN|SHA-256 digest):' "$RUNNER_TEMP/apksigner.txt" | sort -u > "$RUNNER_TEMP/certs.txt" \
+            || cp "$RUNNER_TEMP/apksigner.txt" "$RUNNER_TEMP/certs.txt"
           {
             echo "### Android APK (arm64)"
             echo
