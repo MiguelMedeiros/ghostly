@@ -712,6 +712,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
   const rowRef = useRef<HTMLDivElement>(null);
   const openDetails = () => setDetails(true);
+  // A double click on a control in the message (a file's Accept, Pause or Save, a player's Play, a link) is that
+  // control's: two quick clicks on a button do not open the details too.
+  const detailsOnDoubleClick = (e: React.MouseEvent) => {
+    const control = (e.target as Element).closest("button, a, input, [role=button]");
+    if (!control || !e.currentTarget.contains(control)) openDetails();
+  };
   // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
   const copyable = message.file || message.paymentId || pressed || showsCard(message.card) ? "" : message.text.trim();
   // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
@@ -771,7 +777,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // A click anywhere on the row (a player's button included) chooses it or not; nothing inside it runs.
     onClickCapture: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); selection.onToggle?.(); },
   } : {
-    ref: rowRef, onDoubleClick: openDetails, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
+    ref: rowRef, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
     // The second click of a double click would select a word of the message under the details.
     onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
   };
