@@ -121,7 +121,7 @@ function fakeRepo() {
     },
   };
   /** A pull request with `queue`; its head sits on the base's tip unless it is `behind`. */
-  const add = (number: number, { ci = green, draft = false, priority = false, base = "dev", behind = false } = {}) => {
+  const add = (number: number, { ci = green as object[], draft = false, priority = false, base = "dev", behind = false } = {}) => {
     const sha = `h${number}`;
     pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base });
     events.set(number, [{ event: "labeled", label: { name: LABEL.queue }, created_at: new Date(Date.UTC(2026, 9, 8, 0, 0, clock++)).toISOString() }]);
@@ -550,6 +550,237 @@ describe("a run of the train", () => {
     expect(JSON.stringify([...repo.pulls.values()]) + JSON.stringify([...repo.comments.entries()])).toBe(before);
     expect(repo.landed).toEqual([]);
     expect(r.log.join("\n")).toMatch(/\(dry run\) would merge #9000/);
+  });
+});
+
+describe("one pull request alone", () => {
+  it("merges an up-to-date, green pull request itself: no batch, no new CI run, no comment left", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: running });
+    await repo.run(); // waits in line first, so it has a position comment
+    expect(repo.comments.get(11)).toHaveLength(1);
+    repo.runs.set("h11", green);
+    const r = await repo.run();
+    expect(r.merged).toEqual([11]);
+    expect(r.opened).toEqual([]);
+    expect(r.inFlight).toBeNull();
+    expect(repo.landed).toEqual(["#11"]);
+    expect(repo.tips.dev).toBe("h11");
+    expect(repo.pulls.get(11)).toMatchObject({ open: false, merged: true, labels: [] });
+    expect(repo.comments.get(11)).toEqual([]); // the position comment goes, and no "Merged via"
+    expect(repo.pushes).toEqual([]);
+  });
+
+  it("rebases a pull request that is behind, then merges it once CI is green on exactly that commit", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    const r = await repo.run();
+    expect(r.opened).toEqual([]);
+    expect(r.inFlight).toBe(11);
+    const head = repo.pulls.get(11)!.sha;
+    expect(repo.pushes).toEqual([`fix-11=${head}`]);
+    expect(repo.alone(11)).toMatchObject({ sha: head, baseSha: "dev0", retried: false });
+    expect(repo.comments.get(11)![0].body).toMatch(/next into `dev`, alone/);
+    expect(repo.comments.get(11)![0].body).toMatch(/merge-train:head h11 /); // the reviewed head stays on record
+
+    // A second pull request queued meanwhile waits behind it, and the flight survives a restart (state is re-read).
+    repo.add(12, { behind: true });
+    repo.runs.set(head, running);
+    const wait = await repo.run();
+    expect(wait.inFlight).toBe(11);
+    expect(repo.comments.get(12)![0].body).toMatch(/\*\*1st\*\*/);
+    expect(repo.landed).toEqual([]);
+
+    repo.settle();
+    const done = await repo.run();
+    expect(done.merged).toEqual([11]);
+    expect(repo.landed).toEqual(["#11"]);
+    expect(repo.pulls.get(11)).toMatchObject({ merged: true, labels: [] });
+    expect(repo.comments.get(11)).toEqual([]);
+    expect(done.inFlight).toBe(12); // next, alone: rebased onto the new tip in the same run
+    expect(repo.alone(12)).toMatchObject({ baseSha: head });
+  });
+
+  it("re-evaluates from scratch when the author pushes during the flight: the new head leaves the line", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.pulls.get(11)!.sha = "h11b";
+    repo.runs.set("h11b", green);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(r.inFlight).toBeNull();
+    expect(repo.landed).toEqual([]);
+    expect(repo.pulls.get(11)!.labels).toEqual([]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/new commits after it was queued/)]);
+  });
+
+  it("starts over when its push lost the lease: the reviewed head stays vouched for", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    const push = repo.git.pushHead;
+    repo.git.pushHead = async () => ({ ok: false, message: "! [rejected] (stale info)" });
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/Could not push the rebase of #11/);
+    expect(repo.pulls.get(11)!.sha).toBe("h11");
+    repo.git.pushHead = push;
+    const again = await repo.run();
+    expect(again.dropped).toEqual([]);
+    expect(again.inFlight).toBe(11);
+    expect(repo.pulls.get(11)!.sha).toBe(repo.alone(11)!.sha);
+  });
+
+  it("gives a red pull request one more run on a fresh rebase, then queue:failed", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const first = repo.pulls.get(11)!.sha;
+    repo.settle([11]);
+    await repo.run();
+    const second = repo.pulls.get(11)!.sha;
+    expect(second).not.toBe(first);
+    expect(repo.alone(11)).toMatchObject({ sha: second, retried: true });
+    expect(repo.comments.get(11)![0].body).toMatch(/a second run, after a red one/);
+    repo.settle([11]);
+    const r = await repo.run();
+    expect(r.failed).toEqual([11]);
+    expect(r.opened).toEqual([]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/failed twice with only this pull request on `dev`/)]);
+  });
+
+  it("lands a flake on its second run", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.settle([11]);
+    await repo.run();
+    repo.settle();
+    await repo.run();
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
+  it("blames nobody while the base itself is red", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const head = repo.pulls.get(11)!.sha;
+    repo.runs.set("dev0", red);
+    repo.settle([11]);
+    const held = await repo.run();
+    expect(held.log.join("\n")).toMatch(/HOLD #11: .*itself is red/);
+    expect(repo.pulls.get(11)!.sha).toBe(head);
+    expect(repo.alone(11)!.retried).toBe(false);
+  });
+
+  it("rebases again when the base moves under it, and never lands green on an old tip", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const head = repo.pulls.get(11)!.sha;
+    repo.settle();
+    repo.tips.dev = "dev1";
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.inFlight).toBe(11);
+    expect(repo.pulls.get(11)!.sha).not.toBe(head);
+    expect(repo.alone(11)).toMatchObject({ baseSha: "dev1" });
+  });
+
+  it("rebases again when CI never started on its commit", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run({ now: Date.parse("2026-10-08T00:00:00Z") });
+    const head = repo.pulls.get(11)!.sha;
+    await repo.run({ now: Date.parse("2026-10-08T00:10:00Z") });
+    expect(repo.pulls.get(11)!.sha).toBe(head);
+    await repo.run({ now: Date.parse("2026-10-08T00:30:00Z") });
+    expect(repo.pulls.get(11)!.sha).not.toBe(head);
+  });
+
+  it("takes a pull request that conflicts with the tip out of the line with queue:conflict", async () => {
+    const repo = fakeRepo();
+    repo.conflicts.add(11);
+    repo.add(11, { behind: true });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(r.inFlight).toBeNull();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.conflict]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/conflicts with `dev`/)]);
+  });
+
+  it("still builds a batch for two or more, and never pushes to their branches", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.add(12);
+    const r = await repo.run();
+    expect(r.opened).toHaveLength(1);
+    expect(repo.members()).toEqual([11, 12]);
+    expect(repo.pushes).toEqual([]);
+  });
+
+  it("fast-forwards an epic to the pull request's head, behind or not", async () => {
+    const repo = fakeRepo();
+    let merges = 0;
+    repo.gh.merge = async () => ({ ok: !!++merges });
+    repo.add(11, { base: "epic/x" });
+    await repo.run({ base: "epic/x" });
+    expect(repo.tips["epic/x"]).toBe("h11");
+    repo.add(12, { base: "epic/x", behind: true });
+    await repo.run({ base: "epic/x" });
+    const head = repo.pulls.get(12)!.sha;
+    expect(repo.alone(12)).toMatchObject({ baseSha: "h11" });
+    repo.settle();
+    await repo.run({ base: "epic/x" });
+    expect(merges).toBe(0);
+    expect(repo.landed).toEqual(["#11", "#12"]);
+    expect(repo.tips["epic/x"]).toBe(head);
+  });
+
+  it("sends a pull request whose merge GitHub refuses the batch way, so it never blocks the line", async () => {
+    const repo = fakeRepo();
+    const merge = repo.gh.merge;
+    repo.gh.merge = async (n: number, sha: string) => (repo.pulls.get(n)!.body ? merge(n, sha) : { ok: false, message: "HTTP 405 unsafe rebase" });
+    repo.add(11);
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/Could not merge #11 alone: HTTP 405 unsafe rebase; it goes the batch way/);
+    expect(repo.members()).toEqual([11]);
+  });
+
+  it("goes the batch way for a head the train must never push to", async () => {
+    expect(canGoAlone({ fork: false, branch: "fix-1" })).toBe(true);
+    for (const branch of ["dev", "main", "epic/x", "batch/dev-1"]) expect(canGoAlone({ fork: false, branch })).toBe(false);
+    expect(canGoAlone({ fork: true, branch: "fix-1" })).toBe(false);
+    const repo = fakeRepo();
+    repo.add(11, { base: "epic/x", behind: true });
+    repo.pulls.get(11)!.branch = "dev";
+    await repo.run({ base: "epic/x" });
+    expect(repo.pushes).toEqual([]);
+    expect(repo.members()).toEqual([11]);
+  });
+
+  it("changes nothing in a dry run, and says what it would do", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { base: "epic/x", behind: true });
+    const merged = await repo.run({ dry: true });
+    expect(merged.log.join("\n")).toMatch(/\(dry run\) would merge #11 at h11 \(rebase\)/);
+    const rebased = await repo.run({ dry: true, base: "epic/x" });
+    expect(rebased.log.join("\n")).toMatch(/\(dry run\) would push r12\.\d+ to fix-12/);
+    expect(repo.landed).toEqual([]);
+    expect(repo.pushes).toEqual([]);
+    expect([...repo.comments.values()].flat()).toEqual([]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.queue]);
+  });
+
+  it("trusts only its own alone mark", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.comments.set(11, [{ id: 911, body: `<!-- merge-train:position --><!-- merge-train:head h11 --><!-- merge-train:alone {"sha":"h11","baseSha":"dev0","at":"2026-10-08T00:00:00Z","retried":false} -->`, user: { login: "stranger" } }]);
+    await repo.run();
+    expect(repo.landed).toEqual([]); // the planted mark would say "rebased onto dev0, green": the train rebases it itself
+    expect(repo.pushes).toHaveLength(1);
   });
 });
 
