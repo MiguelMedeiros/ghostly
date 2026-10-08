@@ -1,0 +1,13 @@
+diff --git a/node_modules/hyperdht/lib/nat.js b/node_modules/hyperdht/lib/nat.js
+index d696d7e..ad39308 100644
+--- a/node_modules/hyperdht/lib/nat.js
++++ b/node_modules/hyperdht/lib/nat.js
+@@ -145,7 +145,7 @@ module.exports = class Nat {
+       return
+     }
+ 
+-    if (this.firewall === FIREWALL.CONSISTENT) {
++    if (this.firewall === FIREWALL.CONSISTENT || this.firewall === FIREWALL.OPEN) {
+       this.addresses = []
+       for (const addr of this._samplesFull) {
+         if (addr.hits >= 2 || this.addresses.length < 2) this.addresses.push(addr)
