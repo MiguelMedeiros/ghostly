@@ -34,7 +34,9 @@ import { ciState } from "./merge-queue.mjs";
 export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "queue:conflict", failed: "queue:failed" };
 export const MAX_BATCH = 5;
 const POSITION = "<!-- merge-train:position -->";
-const STATE = /<!-- merge-train:batch (\{.*?\}) -->/;
+const STATE = /<!-- merge-train:batch (\{.*?\}) -->/g;
+/** The bases a train runs for; anything else never reaches a URL path, a refspec or a branch name. */
+const BASE = /^(dev|epic\/[A-Za-z0-9._-]+)$/;
 
 export const ordinal = (n) => {
   const v = n % 100;
@@ -72,20 +74,30 @@ export function bisect(prs) {
   return { culprit: null, first: prs.slice(0, half), second: prs.slice(half) };
 }
 
+// The last mark counts: the train writes it after the members' titles, so a title can't stand in for it.
 export const readState = (body) => {
   try {
-    return JSON.parse((body ?? "").match(STATE)?.[1] ?? "null");
+    return JSON.parse([...(body ?? "").matchAll(STATE)].at(-1)?.[1] ?? "null");
   } catch {
     return null;
   }
 };
 
-export function batchBody(base, baseSha, prs, next) {
-  const state = { base, baseSha, prs: prs.map((p) => ({ number: p.number, sha: p.sha })), next: next.map((p) => p.number) };
+/**
+ * A batch is a pull request the train opened: from this repository, on a `batch/<base>-` branch, with its mark. Only
+ * the mark is not enough, since anyone can write one in a pull request's body (a fork's head could be named `dev`).
+ */
+export const isBatch = (p, base) => !p.fork && p.branch.startsWith(`batch/${base}-`) && readState(p.body)?.base === base;
+
+/** An epic's umbrella (or main) merges into its base with a merge commit, never squashed into a batch. */
+const mergeCommitOnly = (p) => p.branch.startsWith("epic/") || p.branch === "main";
+
+export function batchBody(base, baseSha, head, prs, next) {
+  const state = { base, baseSha, head, prs: prs.map((p) => ({ number: p.number, sha: p.sha })), next: next.map((p) => p.number) };
   return [
     `The merge train lands these pull requests on \`${base}\` together, one commit each, in this order:`,
     "",
-    ...prs.map((p) => `- #${p.number} ${p.title}`),
+    ...prs.map((p) => `- #${p.number} ${p.title.replaceAll("<", "&lt;")}`),
     "",
     next.length ? `If this batch is green, ${next.map((p) => `#${p.number}`).join(" ")} go next (the other half of a red batch).` : "",
     "Green: it merges with the rebase method and the originals close as merged via this one. Red: it is split in halves until the pull request that breaks CI is found.",
@@ -109,6 +121,7 @@ const conflictText = (base, reason) =>
  * in the tests). In a dry run every write is logged instead. Returns the log and what happened.
  */
 export async function tick({ gh, git, base, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [] }) {
+  if (!BASE.test(base)) throw new Error(`Not a train base: ${JSON.stringify(base)}`);
   const log = [];
   const say = (line) => log.push(line);
   const w = dry ? dryWriter(gh, say) : gh;
@@ -116,8 +129,8 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
   const gone = new Set();
 
   const open = await gh.pulls(base);
-  const batches = open.filter((p) => readState(p.body)?.base === base).sort((a, b) => a.number - b.number);
-  const queued = open.filter((p) => !readState(p.body) && (p.labels.includes(LABEL.queue) || also.includes(p.number)));
+  const batches = open.filter((p) => isBatch(p, base)).sort((a, b) => a.number - b.number);
+  const queued = open.filter((p) => !isBatch(p, base) && (p.labels.includes(LABEL.queue) || also.includes(p.number)));
   for (const p of queued) {
     p.queuedAt = queuedAt(await gh.events(p.number), p.createdAt);
     p.priority = p.labels.includes(LABEL.priority);
@@ -139,7 +152,7 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
   const retire = async (batch, text) => {
     await w.comment(batch.number, text);
     await w.closePull(batch.number);
-    await w.deleteBranch(batch.branch);
+    if (batch.branch.startsWith("batch/")) await w.deleteBranch(batch.branch);
     done.closed.push(batch.number);
   };
 
@@ -150,18 +163,24 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
     for (const { number, reason } of built.dropped) {
       say(`DROP #${number} (${reason})`);
       done.dropped.push(number);
-      await leave(byNumber.get(number), LABEL.conflict, conflictText(base, reason));
+      await leave(byNumber.get(number), reason === "empty" ? null : LABEL.conflict, conflictText(base, reason));
     }
     const aboard = prs.filter((p) => built.applied.includes(p.number));
     if (!aboard.length) return board(next);
     const branch = `batch/${base}-${stamp}`;
     await (dry ? say(`(dry run) would push ${built.sha.slice(0, 12)} to ${branch}`) : git.push(branch, built.sha));
     const title = `train: ${aboard.length} into ${base} (${aboard.map((p) => `#${p.number}`).join(" ")})`;
-    const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, aboard, next) });
+    const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next) });
     say(`OPEN #${pr.number} ${title}`);
     done.opened.push(pr.number);
     return { number: pr.number, branch, sha: built.sha, members: aboard };
   };
+
+  for (const p of queued.filter(mergeCommitOnly)) {
+    say(`DROP #${p.number} (merges with a merge commit)`);
+    done.dropped.push(p.number);
+    await leave(p, null, `Merge train: \`${p.branch}\` merges into \`${base}\` with a merge commit, never squashed into a batch, so it left the line; it lands by hand with a merge commit when it is ready.`);
+  }
 
   let inFlight = null;
   for (const extra of batches.slice(1)) await retire(extra, "Merge train: one batch at a time per base; this one closes and its pull requests go back to the line.");
@@ -175,7 +194,9 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
     const tip = await gh.branchSha(base);
     say(`BATCH #${batch.number} [${state.prs.map((s) => `#${s.number}`).join(" ")}] CI ${ci}`);
 
-    if (changed.length) {
+    if (batch.sha !== state.head) {
+      await retire(batch, "Merge train: this batch's branch holds a commit the train did not build, so it closes; its pull requests go back to the line.");
+    } else if (changed.length) {
       await retire(batch, `Merge train: ${changed.map((s) => `#${s.number}`).join(" ")} changed or left the line, so this batch closes; the rest go back to the line.`);
     } else if (ci === "failure") {
       const { culprit, first, second } = bisect(members);
@@ -253,7 +274,13 @@ export function restLayer(token, repo) {
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await r.text();
-    return { ok: r.ok, status: r.status, data: text ? JSON.parse(text) : null };
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { message: text.slice(0, 200) }; // an HTML error page (a 502): keep the status readable
+    }
+    return { ok: r.ok, status: r.status, data };
   };
   const must = async (method, path, body) => {
     const r = await api(method, path, body);

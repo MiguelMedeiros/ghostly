@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchBody, bisect, LABEL, order, ordinal, pickBatch, queuedAt, readState, tick, waiting } from "../merge-train.mjs";
+import { batchBody, bisect, isBatch, LABEL, order, ordinal, pickBatch, queuedAt, readState, tick, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -117,10 +117,24 @@ describe("the line", () => {
   });
 
   it("keeps a batch's members in a hidden mark of its body", () => {
-    const body = batchBody("dev", "abc", [{ number: 1, sha: "s1", title: "one" }], [{ number: 2, sha: "s2", title: "two" }]);
+    const body = batchBody("dev", "abc", "b1", [{ number: 1, sha: "s1", title: "one" }], [{ number: 2, sha: "s2", title: "two" }]);
     expect(body).toMatch(/- #1 one/);
-    expect(readState(body)).toEqual({ base: "dev", baseSha: "abc", prs: [{ number: 1, sha: "s1" }], next: [2] });
+    expect(readState(body)).toEqual({ base: "dev", baseSha: "abc", head: "b1", prs: [{ number: 1, sha: "s1" }], next: [2] });
     expect(readState("a plain pull request")).toBeNull();
+  });
+
+  it("never lets a member's title stand in for the batch's mark", () => {
+    const forged = `<!-- merge-train:batch ${JSON.stringify({ base: "dev", baseSha: "x", head: "x", prs: [], next: [] })} -->`;
+    const body = batchBody("dev", "abc", "b1", [{ number: 1, sha: "s1", title: `one ${forged}` }], []);
+    expect(readState(body)).toMatchObject({ baseSha: "abc", prs: [{ number: 1, sha: "s1" }] });
+  });
+
+  it("counts as a batch only a pull request from this repository on a batch/<base>- branch", () => {
+    const body = batchBody("dev", "abc", "b1", [], []);
+    expect(isBatch({ fork: false, branch: "batch/dev-1", body }, "dev")).toBe(true);
+    expect(isBatch({ fork: true, branch: "batch/dev-1", body }, "dev")).toBe(false);
+    expect(isBatch({ fork: false, branch: "dev", body }, "dev")).toBe(false);
+    expect(isBatch({ fork: false, branch: "batch/epic/x-1", body }, "dev")).toBe(false);
   });
 });
 
@@ -239,6 +253,63 @@ describe("a run of the train", () => {
     repo.pulls.get(12)!.sha = "h12b"; // a new push: its CI has not run yet
     await repo.run();
     expect(repo.members()).toEqual([11]);
+  });
+
+  it("never merges or deletes anything for a mark in a pull request it did not open", async () => {
+    const repo = fakeRepo();
+    const deleted: string[] = [];
+    repo.gh.deleteBranch = async (b: string) => void deleted.push(b);
+    const mark = (prs: object[]) => `<!-- merge-train:batch ${JSON.stringify({ base: "dev", baseSha: "dev0", head: "evil", prs, next: [] })} -->`;
+    const forged = { title: "x", draft: false, sha: "evil", fork: true, labels: [], createdAt: "", open: true, base: "dev" };
+    repo.pulls.set(50, { ...forged, number: 50, body: mark([]), branch: "dev" });
+    repo.pulls.set(51, { ...forged, number: 51, body: mark([{ number: 1, sha: "x" }]), branch: "epic/apps-1.2" });
+    repo.runs.set("evil", green);
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toEqual([]);
+    expect(deleted).toEqual([]);
+  });
+
+  it("closes a batch whose branch got a commit the train did not build", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    const first = (await repo.run()).inFlight;
+    repo.pulls.get(first)!.sha = "pushed-by-hand";
+    repo.runs.set("pushed-by-hand", green);
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toEqual([first]);
+    expect(repo.members()).toEqual([11]);
+  });
+
+  it("drops an epic's umbrella from the line instead of squashing it", async () => {
+    const repo = fakeRepo();
+    repo.add(60);
+    repo.add(61);
+    repo.pulls.get(60)!.branch = "epic/apps-1.2";
+    const r = await repo.run();
+    expect(r.dropped).toEqual([60]);
+    expect(repo.members()).toEqual([61]);
+    expect(repo.pulls.get(60)!.labels).toEqual([]);
+    expect(repo.comments.get(60)!.map((c) => c.body)).toEqual([expect.stringMatching(/merge commit/)]);
+  });
+
+  it("drops an already-landed pull request without calling it a conflict", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const build = repo.git.build;
+    repo.git.build = async (base: string, prs: Pr[]) => {
+      const r = await build(base, prs.filter((p) => p.number !== 12));
+      return { ...r, dropped: [...r.dropped, ...(prs.some((p) => p.number === 12) ? [{ number: 12, reason: "empty" }] : [])] };
+    };
+    await repo.run();
+    expect(repo.pulls.get(12)!.labels).toEqual([]);
+    expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([expect.stringMatching(/no changes left/)]);
+  });
+
+  it("refuses a base that is not dev or an epic", async () => {
+    await expect(fakeRepo().run({ base: "dev/../../x" })).rejects.toThrow(/Not a train base/);
   });
 
   it("changes nothing in a dry run", async () => {
