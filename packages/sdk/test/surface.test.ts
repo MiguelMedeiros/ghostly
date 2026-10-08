@@ -3,6 +3,8 @@ import * as sdk from "../src/index";
 import * as fakes from "../src/fakes";
 import * as testing from "../src/testing";
 import * as core from "../src/core";
+import * as app from "../src/app";
+import { readFileSync } from "node:fs";
 // covers: sdk.package
 
 /** The public surface, by name: a name that leaves here is a breaking change (docs/SDK.md, "Versioning"). */
@@ -21,6 +23,8 @@ const FAKES = [
   "FAKE_ISSUER", "FAKE_RECORD_HOST", "TEST_IDENTITIES_FLAG", "testIdentitiesEnabled",
 ];
 const TESTING = [...FAKES, "describeLightningProvider", "describeOnchainProvider", "describeIdentityProof"];
+/** `@ghostlytools/sdk/app`, what a mini-app bundles: everything else in it is a type. */
+const APP = ["MINI_APP_LIMITS", "MINI_APP_ERROR_CODES", "miniAppErrorCode"];
 
 describe("@ghostlytools/sdk", () => {
   it("exports exactly the documented surface", () => {
@@ -32,4 +36,21 @@ describe("@ghostlytools/sdk", () => {
     for (const name of ["createIdentity", "createLink", "encodeInviteCode", "identityStatement", "RelayTransport", "TRANSPORTS"]) expect(core).toHaveProperty(name);
   });
   it("speaks contract generation 1", () => { expect(sdk.SDK_API).toBe(1); });
+  it("exports the mini-app API under /app, from a module that imports nothing", () => {
+    expect(Object.keys(app).sort()).toEqual([...APP].sort());
+    // An app bundles this module into its one HTML file: an import there would ride along.
+    const miniApp = readFileSync(new URL("../../core/src/miniApp.ts", import.meta.url), "utf8");
+    expect(miniApp).not.toMatch(/^\s*import\b|\bfrom\s+["']/m);
+    // The entry's other imports and exports are types only, which the build erases.
+    const entry = readFileSync(new URL("../src/app.ts", import.meta.url), "utf8");
+    const values = [...entry.matchAll(/^(?:import|export)(\s+type)?\s*\{[^}]*\}\s*from\s*"([^"]+)"/gm)].filter((m) => !m[1]).map((m) => m[2]);
+    expect(values).toEqual(["../../core/src/miniApp"]);
+  });
+  it("names every refusal code the broker answers with, and reads one back", () => {
+    expect(app.MINI_APP_ERROR_CODES).toEqual([...app.MINI_APP_ERROR_CODES].sort());
+    expect(app.miniAppErrorCode(new Error("peer-closed"))).toBe("peer-closed");
+    expect(app.miniAppErrorCode(new Error("peer closed"))).toBeNull();
+    expect(app.miniAppErrorCode("offline")).toBeNull();
+    expect(app.MINI_APP_LIMITS.chatDataBytes).toBe(32 * 1024);
+  });
 });

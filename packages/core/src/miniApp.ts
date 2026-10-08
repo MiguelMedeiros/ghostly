@@ -1,8 +1,9 @@
 /**
  * The mini-app API: what an app in the runner's sandbox can ask the client's broker for, and nothing more.
  *
- * Matches the broker table of WISP 1200 (docs/wisps/1200-marketplace.md, "The runner and the broker"). Types and limits only: the broker (apps/ui) and the apps (apps/mini/*) import this
- * one module, so neither side can drift from the other. It is imported as `@ghostly/core/miniApp`, outside the
+ * Matches the broker table of WISP 1200 (docs/wisps/1200-marketplace.md, "The runner and the broker"). Types, limits and refusal codes only, with no imports: the broker (apps/ui) and
+ * the apps (apps/mini/*) import this one module, so neither side can drift from the other, and app developers get it as
+ * `@ghostlytools/sdk/app`. It is imported as `@ghostly/core/miniApp`, outside the
  * core barrel, because apps bundle it into their single HTML file.
  */
 
@@ -70,8 +71,41 @@ export interface MiniAppRequest {
   args: MiniAppJson[];
 }
 
+/**
+ * Every code a refused request answers with (WISP 1200, "The runner and the broker"). In the sandbox a refusal rejects
+ * the call's promise with an `Error` whose `message` is the code; `miniAppErrorCode` reads it back.
+ *
+ * - `bad-key`: a storage key that is not a string of 1 to 256 bytes.
+ * - `bad-path`: a `file` path that is not a string of 1 to 1024 characters.
+ * - `bad-request`: a request that is not `{id, type, args}` with JSON arguments.
+ * - `failed`: anything else; the client's own words never reach the app.
+ * - `full`: a storage write would take the scope past 5 MiB, so the app can make room.
+ * - `no-file`: the bundle has no such file.
+ * - `not-allowed`: `chat.send` without the `chat` permission, or with the app opened alone.
+ * - `not-open`: `chat.send` before this side's chat has the app open.
+ * - `offline`: `chat.send` while the chat's session is not live. Nothing is kept to send later.
+ * - `peer-closed`: `chat.send` while the contact has not opened the app (or its client does not offer `apps/1`).
+ * - `stopped`: a store removed or the publisher revoked the version running.
+ * - `too-fast`: past 50 requests a second, or past 48 `chat.send` frames a second.
+ * - `too-large`: a request, a stored value or a `chat.send` value past its bound (`MINI_APP_LIMITS`).
+ * - `unknown-type`: a request `type` the broker does not answer.
+ *
+ * A later client may add a code: treat one you do not know as `failed`.
+ */
+export const MINI_APP_ERROR_CODES = [
+  "bad-key", "bad-path", "bad-request", "failed", "full", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped",
+  "too-fast", "too-large", "unknown-type",
+] as const;
+export type MiniAppErrorCode = typeof MINI_APP_ERROR_CODES[number];
+
+/** The code of a refused `ghostly.*` call (the rejection's `Error`), or null for anything that is not one. */
+export function miniAppErrorCode(error: unknown): MiniAppErrorCode | null {
+  const code = error instanceof Error ? error.message : undefined;
+  return (MINI_APP_ERROR_CODES as readonly string[]).includes(code as string) ? code as MiniAppErrorCode : null;
+}
+
 /** The broker's answer to one request. */
-export type MiniAppAnswer = { id: number; ok: true; value?: MiniAppJson } | { id: number; ok: false; error: string };
+export type MiniAppAnswer = { id: number; ok: true; value?: MiniAppJson } | { id: number; ok: false; error: MiniAppErrorCode };
 
 /** An event from the broker. */
 export type MiniAppEvent = { event: "chat.message"; data: MiniAppJson } | { event: "chat.peer"; data: MiniAppPeerEvent };

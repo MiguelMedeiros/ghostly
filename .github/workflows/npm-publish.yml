@@ -15,6 +15,13 @@ name: Publish npm
 #
 # A scoped package is private by default: `--access public` here and
 # `publishConfig.access` in packages/cli/package.json both make it public.
+#
+# The SDK (packages/sdk, `@ghostlytools/sdk`, with the mini-app types at
+# `@ghostlytools/sdk/app`) goes out from the same release in a job of its own,
+# so a problem there never holds the CLI back. It is not on npm yet: the job
+# publishes only once the repository variable SDK_NPM_PUBLISH is "true", which
+# the owner sets when he makes the first publish (docs/RELEASING.md, "npm
+# trusted publishing"). Until then it says so in the run's summary and stops.
 
 on:
   release:
@@ -104,3 +111,91 @@ jobs:
           node_modules/.bin/ghostly --version | tee version.json
           node -e "process.exit(require('./version.json').version === process.env.VERSION ? 0 : 1)"
           echo "@ghostlytools/cli@$VERSION: https://www.npmjs.com/package/@ghostlytools/cli/v/$VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+  publish-sdk:
+    name: "@ghostlytools/sdk to npm"
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # The OIDC token for trusted publishing and the provenance statement.
+      id-token: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      ENABLED: ${{ vars.SDK_NPM_PUBLISH == 'true' }}
+    steps:
+      - name: Publishing the SDK is on
+        id: enabled
+        run: |
+          set -euo pipefail
+          if [[ "$ENABLED" != "true" ]]; then
+            echo "@ghostlytools/sdk: not published, the repository variable SDK_NPM_PUBLISH is not \"true\" (docs/RELEASING.md)." >> "$GITHUB_STEP_SUMMARY"
+            echo "on=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.enabled.outputs.on == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: Setup Node.js
+        if: steps.enabled.outputs.on == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          registry-url: https://registry.npmjs.org
+
+      - name: The tag is the package's version
+        if: steps.enabled.outputs.on == 'true'
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./packages/sdk/package.json').version")
+          if [[ "v$version" != "$TAG" ]]; then
+            echo "::error::packages/sdk/package.json is $version, the release is $TAG: nothing published"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "@ghostlytools/sdk@$version" version >/dev/null 2>&1; then
+            echo "@ghostlytools/sdk@$version is already on npm." >> "$GITHUB_STEP_SUMMARY"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.enabled.outputs.on == 'true' && steps.version.outputs.published == 'false'
+        run: npm ci
+
+      # The pull requests' gate again, on the tag: the tarball installs into the example adapter (contract suites)
+      # and the example mini-app (type checks against /app, whose JavaScript imports nothing). `npm pack` builds it.
+      - name: The tarball works outside the repository
+        if: steps.enabled.outputs.on == 'true' && steps.version.outputs.published == 'false'
+        run: npm run test:sdk-example
+
+      - name: Publish
+        if: steps.enabled.outputs.on == 'true' && steps.version.outputs.published == 'false'
+        env:
+          # Only for the first publish (see the top of this file); empty afterwards, and npm uses OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace @ghostlytools/sdk --provenance --access public
+
+      # What a mini-app gets from `npm install @ghostlytools/sdk`: the registry can take a moment to serve a new version.
+      - name: Installs from npm
+        if: steps.enabled.outputs.on == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          npm init -y >/dev/null
+          for attempt in $(seq 1 12); do
+            if npm install --no-audit --no-fund --prefer-online "@ghostlytools/sdk@$VERSION"; then break; fi
+            if [[ "$attempt" == 12 ]]; then echo "::error::@ghostlytools/sdk@$VERSION does not install from npm"; exit 1; fi
+            sleep 20
+          done
+          node --input-type=module -e 'const app = await import("@ghostlytools/sdk/app"); process.exit(Array.isArray(app.MINI_APP_ERROR_CODES) ? 0 : 1)'
+          echo "@ghostlytools/sdk@$VERSION: https://www.npmjs.com/package/@ghostlytools/sdk/v/$VERSION" >> "$GITHUB_STEP_SUMMARY"
