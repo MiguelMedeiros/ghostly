@@ -506,4 +506,24 @@ describe("with the apps flag on", () => {
     await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
   });
+
+  it("the focus goes back to Add when Add closes, and to the new app's Open after Install from a pasted link", async () => {
+    let apps: InstalledAppView[] = [];
+    fakeEngine.on("appList", () => apps).on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appPreview", () => preview()).on("appInstall", () => { apps = [installed()]; return installed(); });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const add = await screen.findByTestId("apps-add");
+    add.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("apps-add-url")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("apps-add-dialog")).not.toBeInTheDocument();
+    expect(add).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await user.type(screen.getByTestId("apps-add-url"), `${URL_}{Enter}`);
+    await user.click(await screen.findByTestId("app-install-confirm"));
+    await waitFor(() => expect(screen.getByTestId("installed-app-open")).toHaveFocus());
+  });
 });
+

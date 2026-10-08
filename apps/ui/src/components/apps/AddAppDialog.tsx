@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { AppPreview, AppStorePreview } from "@ghostly/browser/engine/apps";
+import type { AppPreview, AppStorePreview, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice, input } from "../wallet/ui";
@@ -20,7 +20,7 @@ function hostOf(url: string): string {
   try { return new URL(url).host; } catch { return url; }
 }
 
-export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; onStoreAdded: () => void }) {
+export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: () => void; onStoreAdded: () => void; onInstalled?: (app: InstalledAppView) => void }) {
   const { t } = useI18n();
   const titleId = useId();
   const fieldId = useId();
@@ -58,7 +58,7 @@ export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; o
     catch (e) { setError(appErrorText(e, t)); } finally { setBusy(false); }
   };
 
-  if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} />;
+  if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="apps-add-dialog"
