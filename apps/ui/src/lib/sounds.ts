@@ -1,5 +1,6 @@
 import { followSpeaker } from "./mediaDevices";
 import { loadSettings } from "./settings";
+import { SoundGate, type SoundKind } from "./soundGate";
 
 /**
  * Original ElevenLabs effects are bundled locally. Synthesis is only a fallback
@@ -136,6 +137,8 @@ let unlocked = false;
 /** Calls ringing (`startRinging`): the output stays open between their rings. */
 let ringing = 0;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
+/** One sound at a time (soundGate.ts): what comes together is one sound, and nothing sounds over a ringing call. */
+const gate = new SoundGate();
 
 /**
  * How long the sounds' audio output stays open after the last sound. A running AudioContext keeps the system's output
@@ -228,14 +231,19 @@ export function installAudioGestures(): () => void {
   };
 }
 
-export function playSound(name: SoundName): () => void {
+/**
+ * Plays a sound, if the gate lets it (soundGate.ts). `kind` overrides what its name makes it: a Settings preview is the
+ * interface's, whatever it previews.
+ */
+export function playSound(name: SoundName, { kind }: { kind?: SoundKind } = {}): () => void {
   if (!loadSettings().notifications.soundEnabled || !context || !unlocked) return () => {};
   const ctx=context, started=Date.now();
   let cancelled=false;
   const sources: (AudioBufferSourceNode | OscillatorNode)[]=[];
   let expiry: ReturnType<typeof setTimeout> | undefined;
-  const stop=()=>{cancelled=true;clearTimeout(expiry);for(const source of sources){try{source.stop();}catch{/* already ended */}}if(playing.delete(stop))idleLater();};
+  const stop=()=>{cancelled=true;clearTimeout(expiry);gate.stopped(stop);for(const source of sources){try{source.stop();}catch{/* already ended */}}if(playing.delete(stop))idleLater();};
   const ended=()=>{if(playing.delete(stop))idleLater();};
+  if(!gate.admit(name,stop,{now:started,ringing:ringing>0,kind})) return ()=>{};
   playing.add(stop);
   void (async()=>{
     let buffer: AudioBuffer | undefined;

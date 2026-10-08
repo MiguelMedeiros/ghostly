@@ -181,14 +181,14 @@ describe("AttentionFeedback in a muted chat", () => {
     expect(await send(event({ linkId: "link-a" }))).toEqual(["message"]);
   });
 
-  it("plays one sound for a chat's messages that come together, and each chat its own", async () => {
+  it("plays one sound for messages that come together, in one chat or in many (the app restarts and every chat catches up)", async () => {
     setup();
     const start = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(start);
-    expect(await send(event({ linkId: "link-a" }), event({ linkId: "link-a" }), event({ linkId: "group:g1" }), event({ linkId: "group:g1" }))).toEqual(["message", "message"]);
+    expect(await send(event({ linkId: "link-a" }), event({ linkId: "link-a" }), event({ linkId: "group:g1" }), event({ linkId: "group:g1" }))).toEqual(["message"]);
     sound.playSound.mockClear();
     clock.mockReturnValue(start + MESSAGE_BURST_MS - 1);
-    expect(await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS - 1 }))).toEqual([]);
+    expect(await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS - 1 }), event({ linkId: "group:g2", at: start + MESSAGE_BURST_MS - 1 }))).toEqual([]);
     sound.playSound.mockClear();
     // A mention is heard inside the burst.
     expect(await send(event({ linkId: "link-a", mention: true, at: start + MESSAGE_BURST_MS - 1 }))).toHaveLength(1);
