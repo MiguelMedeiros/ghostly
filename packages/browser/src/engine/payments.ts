@@ -476,9 +476,10 @@ export class PaymentDesk {
     if (request.target) throw new Error("Review and explicitly approve this payment before sending");
     if (request.state !== "pending") throw new Error("This request is no longer open");
     if (request.lightningPending) throw new Error("A Lightning payment for this request is still pending");
-    // Ecash already sent for it is waiting on the contact's answer; paying again would pay twice.
+    // Ecash already sent for it is waiting on the contact's answer; paying again would pay twice. A failed payment
+    // still holding its token was not taken back yet: the contact may still redeem it.
     const inFlight = [...this.payments.values()].some(
-      (p) => p.kind === "payment" && p.direction === "out" && p.requestId === request.id && p.state !== "reclaimed" && p.state !== "failed",
+      (p) => p.kind === "payment" && p.direction === "out" && p.requestId === request.id && p.state !== "reclaimed" && (p.state !== "failed" || !!p.token),
     );
     if (inFlight) throw new Error("You already paid this request");
     // Real money only once the person confirmed it as such: nothing below runs without it.
