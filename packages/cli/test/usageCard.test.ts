@@ -52,7 +52,7 @@ describe("usage send", () => {
   it("builds the card from flags, the JSON under them", () => {
     expect(params(["Miguel", "--left", "62", "--label", "Claude", "--account", "work", "--window", "5 h", "--resets", "2026-10-07T18:00:00Z",
       "--also", "week=80@2026-10-10T00:00:00Z", "--also", "opus=40", "--json", '{"label":"ignored","used":1,"limit":2}'])).toEqual({
-      chat: "Miguel", all: false, text: undefined, wait: undefined, timeout: undefined,
+      chat: "Miguel", all: false, text: undefined, force: false, wait: undefined, timeout: undefined,
       card: { label: "Claude", account: "work", left: 62, window: "5 h", used: 1, limit: 2, resetsAt: Date.UTC(2026, 9, 7, 18),
         windows: [{ window: "week", left: 80, resetsAt: Date.UTC(2026, 9, 10) }, { window: "opus", left: 40 }] },
     });
