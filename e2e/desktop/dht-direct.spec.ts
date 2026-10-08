@@ -20,12 +20,23 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * a few seconds in, and the record went out a third time: that hid that the second one, with the descriptors, was
  * refused by the DHT while the first was still being put (apps/desktop/src/pkarr_network.rs `put_newest`).
  *
- * Neither page may freeze on the way: no gap over a second in its event loop from the invite to the live chat. Each
+ * Neither page may freeze on the way: no gap over a second in its event loop from the join to the live chat. Each
  * app's first sounds of the chat (the knock, the text, "connected") held the page of WebKitGTK before 2.52 for 5 to 10 s
  * inside `AudioContext.resume()` (r11k, apps/ui/src/lib/sounds.ts `SoundsRelease`).
  */
 
-/** The longest a page may go without running a timer while the pair goes live. */
+/**
+ * The longest a page may go without running a timer from the join on, focused or not: the inviter's window is never
+ * focused once the test drives the other app, and its knock is one of the sounds that froze. Measured over 48 runs of
+ * this spec, 12 per set, debug and release builds, on a 16-core host with 8 other test sessions running (load 5-15), and
+ * pinned to 4 cores with 10 busy workers beside it:
+ * - from the join on, the longest gap was 227 ms (debug 219, release 227) without the squeeze, and 673 ms with it
+ *   (release, the joiner's focused page; the inviter's unfocused page 456 ms);
+ * - before the join, the inviter's page went up to 899 ms unfocused under the squeeze (684 debug, 899 release), while
+ *   the app starts and the invite is made, a second or so before the join: not a freeze a person would feel in the
+ *   chat, so it is reported (`event-loop-gaps`) but not held to the limit.
+ * A second leaves over 300 ms above the worst squeezed gap and stays far under the 5 to 10 s freeze.
+ */
 const MAX_FREEZE_MS = 1_000;
 
 /** How many times the open conversation shows this exact text. */
@@ -86,15 +97,22 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
       await expect.poll(() => p.connection(), { timeout: 180_000, message: `${p.name} goes live` }).toMatch(/Connected · (Iroh|HyperDHT)/);
     }
 
-    for (const p of [a, b]) {
-      expect(await discovery(p), `${p.name}'s panel`).toEqual({ path: "DHT direct", relays: ["ok"] });
-    }
+    // Before the panels: a run that fails on a panel still says how each page ran.
     for (const p of [a, b]) {
       const gaps = await longestEventLoopGap(p.app);
       test.info().annotations.push({ type: "event-loop", description: `${p.name} longest gap ${gaps?.longest} ms from ${gaps?.at} (${gaps?.count} over 300 ms)` });
+      // Each gap over 300 ms, from the join: "+ms after the join: length (h = page hidden, b = not focused)".
+      const each = (gaps?.gaps ?? []).map((g) => `+${g.at - join.at}:${g.ms}${g.visible ? "" : "h"}${g.focused ? "" : "b"}`);
+      test.info().annotations.push({ type: "event-loop-gaps", description: `${p.name} ${each.join(" ") || "none"}` });
       expect(gaps, `${p.name}'s page was watched throughout`).not.toBeNull();
+      // A gap counts if it ends after the join. With more gaps than the list keeps, the longest of all is held instead.
+      const since = gaps!.count > gaps!.gaps.length ? [{ at: gaps!.at, ms: gaps!.longest }] : gaps!.gaps.filter((g) => g.at + g.ms > join.at);
+      const worst = since.reduce((w, g) => (g.ms > w.ms ? g : w), { at: join.at, ms: 0 });
       // `at` is the app's clock, as ghostly.log's: the link steps just before it say what the page was doing.
-      expect(gaps!.longest, `${p.name}'s page froze at ${gaps!.at} (see ${p.name}'s ghostly.log)`).toBeLessThanOrEqual(MAX_FREEZE_MS);
+      expect(worst.ms, `${p.name}'s page froze at ${worst.at} (see ${p.name}'s ghostly.log)`).toBeLessThanOrEqual(MAX_FREEZE_MS);
+    }
+    for (const p of [a, b]) {
+      expect(await discovery(p), `${p.name}'s panel`).toEqual({ path: "DHT direct", relays: ["ok"] });
     }
     // Written to, for browser contacts; never read.
     expect(relay.puts, "the apps publish to the relay too").toBeGreaterThan(0);
