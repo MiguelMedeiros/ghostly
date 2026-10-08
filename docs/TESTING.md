@@ -141,7 +141,7 @@ Other workflows:
 
 So a finished pull request needs `gh pr ready`, a review, and the label. Don't arm auto-merge. After a conflict, a failure or a new push, fix it, get it reviewed, and add `queue` again; it goes to the back of the line. An epic's umbrella pull request never boards: it merges into `dev` with a merge commit.
 
-The workflow acts as a GitHub App (secrets `QUEUE_APP_ID`, `QUEUE_APP_PRIVATE_KEY`): a batch pushed with the workflow's own token would start no CI. Without the secrets each run ends green with the notice "queue app not configured", and one maintainer machine runs the train instead: `node tools/scripts/merge-train.mjs --run --every 300` (with its gh login). It holds a lock, so only one runs per clone, and it stops by itself once the workflow's train job runs. `--dry-run` (or **dry run** when you run the workflow by hand) shows what it would do and changes nothing.
+The workflow acts as a GitHub App (secrets `QUEUE_APP_ID`, `QUEUE_APP_PRIVATE_KEY`): a batch pushed with the workflow's own token would start no CI. Without the secrets each run ends green with the notice "queue app not configured", and one maintainer machine runs the train instead: `node tools/scripts/merge-train.mjs --run --every 300` (with its gh login). It holds a lock, so only one runs per clone, and it stops by itself once the workflow runs a train or finds the queue app configured. `--dry-run` (or **dry run** when you run the workflow by hand) shows what it would do and changes nothing.
 
 The app's e2e suites do not run on pull requests: they would hold up every merge. See [e2e/README.md](../e2e/README.md#when-they-run).
 
