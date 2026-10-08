@@ -108,7 +108,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell).
-- `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only).
+- `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
+  followed).
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,

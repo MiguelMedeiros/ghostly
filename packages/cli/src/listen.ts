@@ -165,7 +165,8 @@ function runExec(command: string, event: GhostlyEvent): Promise<number> {
 async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
+      // A redirect is not followed: it would post the event to wherever it points, off this machine too.
+      const response = await fetch(url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
       if (response.ok) return true;
     } catch { /* retried */ }
     await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
