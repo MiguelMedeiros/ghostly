@@ -63,8 +63,14 @@ const chess = () => {
   return { vector, manifest: read.bundle.manifest, files: read.bundle.files };
 };
 
+/**
+ * A vector with a key or a client name from a later format: a reader takes it, the publisher CLI (a writer) never makes
+ * it. An unknown key is `unknown-key` (named, `runtime.<key>` inside runtime); an unknown client is `bad-field`.
+ */
+const laterKey = (v: { name: string }) => v.name.endsWith("ignored by the reader");
+
 describe("app publish", () => {
-  it.each(bundleVectors.valid.map((v) => [v.name, v] as const))("makes the vector's bundle byte for byte: %s", async (_, vector) => {
+  it.each(bundleVectors.valid.filter((v) => !laterKey(v)).map((v) => [v.name, v] as const))("makes the vector's bundle byte for byte: %s", async (_, vector) => {
     const read = readAppBundle(fromSegments(vector.bytes));
     if (!read.ok) throw new Error(`the vector does not read: ${read.reason}`);
     const dir = appFolder(read.bundle.manifest, read.bundle.files);
@@ -76,6 +82,19 @@ describe("app publish", () => {
     expect(made).toMatchObject({ digest: vector.read.digest, sequence: vector.read.manifest.sequence, previous: null, keyCreated: false });
     // And the bundle it wrote verifies, as a client reads it.
     expect(ok(await ghostly(["app", "verify", join(dir, "app.ghostlyapp")]))).toMatchObject({ valid: true, digest: vector.read.digest });
+  }, 60_000);
+
+  it.each(bundleVectors.valid.filter(laterKey).map((v) => [v.name, v] as const))("verifies, but never publishes, a manifest with a later key: %s", async (_, vector) => {
+    const bytes = fromSegments(vector.bytes);
+    const read = readAppBundle(bytes);
+    if (!read.ok) throw new Error(`the vector does not read: ${read.reason}`);
+    const dir = appFolder(read.bundle.manifest, read.bundle.files);
+    const given = join(tmp(), "app.ghostlyapp");
+    writeFileSync(given, bytes);
+    expect(ok(await ghostly(["app", "verify", given]))).toMatchObject({ valid: true, digest: vector.read.digest });
+    const refused = error(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]), "refused", 1) as { details?: { reason?: string } };
+    expect(refused.details?.reason).toBe(vector.name.includes("client name") ? "bad-field" : "unknown-key");
+    expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
   }, 60_000);
 
   it("raises the sequence by itself, keeps the app's key, and refuses another key's bundle", async () => {
