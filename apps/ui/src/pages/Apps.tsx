@@ -7,6 +7,7 @@ import { Block, Page, PageAction, Section } from "../components/layout";
 import { Button, Notice } from "../components/wallet/ui";
 import { Toast } from "../components/ui/Toast";
 import { useToast } from "../hooks/useToast";
+import { useFocusBack } from "../hooks/useFocusBack";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
@@ -68,7 +69,9 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const focusBack = useFocusBack(busy);
   const work = async (call: () => Promise<unknown>, done?: () => void) => {
+    focusBack();
     setBusy(true);
     try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); }
   };
