@@ -328,6 +328,17 @@
     "wrongPassphraseNext": "请检查密码短语后重试。",
     "wrongPassword": "该资料的锁定密码错误"
   },
+  "proof": {
+    "fileNoProof": "证明文件中没有 Ghostly 证明",
+    "fileNotFound": "未找到证明文件",
+    "fileNotFoundNext": "它已被删除，或尚未上传。",
+    "keyNotListed": "{{login}} 未列出签名所用的密钥",
+    "noDnsRecord": "域名的 DNS 中没有 Ghostly TXT 记录",
+    "noDnsRecordNext": "DNS 更改可能需要几分钟。",
+    "otherKey": "此签名由另一把密钥生成",
+    "otherKeyPgpNext": "不是你提供的公钥。",
+    "otherKeySshNext": "不是你输入的密钥。"
+  },
   "rails": {
     "arkPrepare": "无法准备这笔 Ark 付款。请检查余额、地址和服务商。",
     "balanceChanged": "{{rail}} 余额已变化。请重新审核",
@@ -357,6 +368,9 @@
     "usdtBalanceChanged": "代币或 gas 余额已变化。请重新审核",
     "usdtNonceChanged": "账户 nonce 已变化。请重新审核",
     "usdtRejected": "USDT RPC 拒绝了这个操作"
+  },
+  "relays": {
+    "atLeastOne": "请至少输入一个中继地址"
   },
   "transport": {
     "adapterFailed": "无法启动。重新打开此聊天以重试。",

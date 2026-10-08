@@ -328,6 +328,17 @@
     "wrongPassphraseNext": "تحقق من عبارة المرور وحاول مجددًا.",
     "wrongPassword": "كلمة مرور القفل خاطئة لهذا الملف الشخصي"
   },
+  "proof": {
+    "fileNoProof": "ملف الإثبات لا يحتوي على إثبات Ghostly",
+    "fileNotFound": "لم يُعثر على ملف الإثبات",
+    "fileNotFoundNext": "حُذف، أو لم يُرفع بعد.",
+    "keyNotListed": "{{login}} لا يدرج المفتاح الذي وقّع",
+    "noDnsRecord": "لا يوجد سجل TXT لـ Ghostly في DNS النطاق",
+    "noDnsRecordNext": "قد تستغرق تغييرات DNS بضع دقائق.",
+    "otherKey": "هذا التوقيع صادر عن مفتاح آخر",
+    "otherKeyPgpNext": "ليس عن المفتاح العام الذي قدّمته.",
+    "otherKeySshNext": "ليس عن المفتاح الذي أدخلته."
+  },
   "rails": {
     "arkPrepare": "تعذّر تجهيز دفعة Ark هذه. تحقق من الرصيد والعنوان والمزوّد.",
     "balanceChanged": "تغيّر رصيد {{rail}}. أنشئ مراجعة جديدة",
@@ -357,6 +368,9 @@
     "usdtBalanceChanged": "تغيّر رصيد الرموز أو الغاز. أنشئ مراجعة جديدة",
     "usdtNonceChanged": "تغيّر الـ nonce الخاص بالحساب. أنشئ مراجعة جديدة",
     "usdtRejected": "رفض RPC الخاص بـ USDT العملية"
+  },
+  "relays": {
+    "atLeastOne": "أدخل عنوان مرحّل واحدًا على الأقل"
   },
   "transport": {
     "adapterFailed": "تعذر البدء. أعد فتح هذه الدردشة للمحاولة مجددًا.",

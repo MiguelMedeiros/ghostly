@@ -3,7 +3,7 @@ import { GhostLink, type GhostLinkOptions } from "../../src/ghostlink";
 import type { DataLinkState } from "../../src/datalink";
 import { DHT_POLL_INTERVALS, type PollIntervals } from "../../src/link";
 import { createLink, type LinkParams } from "../../src/invite";
-import { createIdentity, type Identity } from "../../src/identity";
+import { createIdentity, identityFromSeedB64, type Identity } from "../../src/identity";
 import type { GhostRecord, SignedPacket } from "../../src/pkarr";
 import type { PkarrRequestOptions, PkarrTransport } from "../../src/transport";
 import type { PairingProgress } from "../../src/pairingProgress";
@@ -228,13 +228,16 @@ export function killRtc(owner: string, disconnectedAfterMs = 5_000, farFailsAfte
 
 export interface Side { params: LinkParams; seedB64: string; role: "inviter" | "joiner"; createdAt: number; /** An app from before pairing progress: no tracker, the lower key dials. */ old?: boolean }
 
-/** The two sides of a fresh invite: `mine` stays with the inviter, `invite` is what the joiner pastes. */
+/**
+ * The two sides of a fresh invite: `mine` stays with the inviter, `invite` is what the joiner pastes. A `ghostly1` code
+ * carries the inviter's participation key (invite.ts `createChatInvite`): the joiner expects it (`open`).
+ */
 export function invitation(): { inviter: Side; joiner: Side } {
   const made = createLink();
-  const now = Date.now();
+  const now = Date.now(), inviterSeed = createIdentity().seedB64;
   return {
-    inviter: { params: { ...made.mine, profile: "paired-chat/1" }, seedB64: createIdentity().seedB64, role: "inviter", createdAt: now },
-    joiner: { params: { ...made.invite, profile: "paired-chat/1" }, seedB64: createIdentity().seedB64, role: "joiner", createdAt: now },
+    inviter: { params: { ...made.mine, profile: "paired-chat/1" }, seedB64: inviterSeed, role: "inviter", createdAt: now },
+    joiner: { params: { ...made.invite, profile: "paired-chat/1", peerParticipationKeyZ32: identityFromSeedB64(inviterSeed).pubKeyZ32 }, seedB64: createIdentity().seedB64, role: "joiner", createdAt: now },
   };
 }
 
@@ -264,7 +267,9 @@ export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean
   link?: Pick<GhostLinkOptions, "oneShot" | "firstPublish" | "rtcAvailable">; onDataLinkState?: (state: DataLinkState) => void } = {}): Opened {
   const progress: PairingProgress[] = [], pinned: string[] = [];
   const received: Opened["received"] = [], receipts: string[] = [], states: PairingState[] = [];
-  const credentials: PairingCredentials = options.credentials ?? { seedB64: side.seedB64 };
+  // The key the invite named, as the engine passes it (node.ts `expectedPeerKey: stored.peerParticipationKeyZ32`).
+  const expected = side.params.peerParticipationKeyZ32;
+  const credentials: PairingCredentials = options.credentials ?? { seedB64: side.seedB64, ...(expected && { expectedPeerKey: expected }) };
   const result = { dhtState: options.dhtState ?? emptyDhtDeliveryState() } as Opened;
   const link = new GhostLink({
     params: side.params,

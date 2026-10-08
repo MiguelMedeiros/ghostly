@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { problemText, relayCause } from "../../lib/problemText";
+import { problemLine, problemText, relayCause } from "../../lib/problemText";
 import { english } from "../../lib/english";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -82,5 +82,34 @@ describe("problemText: an error in a few words, its English behind the ⓘ", () 
       expect(said.title).not.toBe(en.title);
       expect(`${said.title} ${said.next ?? ""}`).not.toContain("{{");
     }
+  });
+});
+
+describe("problemLine: a problem where only a line fits", () => {
+  /** An identity check's reasons, 2026-10-07: each one a bare "Something went wrong" on the add dialog and the contact's card. */
+  const SPECIFIC: [string, RegExp][] = [
+    ["No Ghostly TXT record at _ghostly.example.com", /TXT record/],
+    ["https://example.com/.well-known/ghostly.json was not found", /proof file was not found/],
+    ["This signature was made by another key (0123ABCD), not the public key given.", /made by another key\. Not the public key you gave\./],
+    ["That signature was made by SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg, not the key you entered (SHA256:x)", /made by another key\. Not the key you entered\./],
+    ["GitHub: octo-cat does not list the key that signed (SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg)", /octo-cat doesn't list the key that signed/],
+    ["Enter at least one relay address (https://…)", /at least one relay/],
+    // None of these is known: their words stay after the title.
+    ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", /_ghostly\.example\.com names another Ghostly key/],
+    ["https://example.com/.well-known/nostr.json names another Nostr key for example.com", /names another Nostr key/],
+    ["Key SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg is not allowed here", /is not allowed here/],
+  ];
+
+  it.each(SPECIFIC)("a reason with an underscore, a URL or a fingerprint is never a bare \"Something went wrong\": %s", (text, said) => {
+    expect(problemLine(text, english)).not.toBe(english("errors.generic"));
+    expect(problemLine(text, english)).toMatch(said);
+    expect(problemLine(new Error(text), pt)).not.toBe(pt("errors.generic"));
+  });
+
+  it("a known reason is said in the language, its address behind the ⓘ where there is one", () => {
+    expect(problemText("No Ghostly TXT record at _ghostly.example.com (DNS changes can take a few minutes)", english)).toEqual({
+      tone: "error", title: "No Ghostly TXT record in the domain's DNS", next: "DNS changes can take a few minutes.", detail: "No Ghostly TXT record at _ghostly.example.com (DNS changes can take a few minutes)",
+    });
+    expect(problemLine("This signature was made by another key, not the public key given.", pt)).toBe(`${pt("errors.proof.otherKey")}. ${pt("errors.proof.otherKeyPgpNext")}`);
   });
 });
