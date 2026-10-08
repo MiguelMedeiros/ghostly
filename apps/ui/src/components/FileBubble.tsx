@@ -213,7 +213,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       </div>
       {offered && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
-          <p className="text-[12px] m-0 mb-1">
+          {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. */}
+          <p className="text-[12px] m-0 mb-1 [overflow-wrap:anywhere]">
             {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size) })}
           </p>
           {typeof transfer.room === "number" && (

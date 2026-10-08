@@ -81,6 +81,14 @@ describe("FileBubble: files/3", () => {
     expect(screen.getByTestId("file-offer")).toHaveTextContent("Your contact wants to send movie.mkv (4.2 GB).");
   });
 
+  it("an offer of a name with nothing to break at wraps inside the bubble", () => {
+    const name = `report_${"x".repeat(150)}.bin`;
+    show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB }, { name });
+    const line = screen.getByText(`Ana wants to send ${name} (4.2 GB).`);
+    // jsdom lays nothing out: the line must be allowed to break inside the name (e2e/web/file-offer-layout.spec.ts measures it).
+    expect(line.className).toContain("[overflow-wrap:anywhere]");
+  });
+
   it("an offer larger than the room here cannot be accepted", () => {
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 1 * GB });
     expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 1.0 GB free on this device");
