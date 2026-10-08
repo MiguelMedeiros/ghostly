@@ -386,8 +386,10 @@ with no framing:
   decoded (up to 40 ms more when a packet is late; a lost one becomes 20 ms of silence).
 
 **Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`,
-`call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, and `call.ended`
-`{call, chat, direction, reason, duration?}` with `reason`:
+`call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, `call.stalled`
+`{call, chat, direction, silentMs}` (a connected call heard no packet from the contact for 5 s: its side may have died;
+`call.get` says `stalled: true`), `call.resumed` `{call, chat, direction, silentMs}` (packets came back after
+`silentMs` without any), and `call.ended` `{call, chat, direction, reason, duration?}` with `reason`:
 
 | `reason` | |
 |---|---|
@@ -397,7 +399,7 @@ with no framing:
 | `rejected` | The contact declined this side's call |
 | `unanswered` | This side's call rang 60 s with no answer |
 | `crossed` | Both sides called at once and the contact's call came first: it rings here instead (`call.incoming` follows) |
-| `failed` | The media did not connect within 30 s, or dropped, or the contact's app could not connect (it hung up saying so) |
+| `failed` | The media did not connect within 30 s, or dropped, or heard no packet from the contact for 15 s, or the contact's app could not connect (it hung up saying so) |
 | `stopped` | The daemon stopped (its calls are hung up first) |
 
 **Rules**, as in the apps: one call per chat, several chats may each have one; a call needs the chat live (the call

@@ -26,7 +26,7 @@ afterAll(() => {
 
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number } } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -42,7 +42,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: (
       if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, heardCallSignal(signal, heardAt())), stacks.delay ?? 5);
     },
   });
-  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials });
+  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall });
   b.calls = new CallManager({ engine: engine(b, () => a, nowA), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), now: stacks.nowB ?? stacks.now });
   return { a, b };
 }
@@ -110,6 +110,34 @@ function refusingStack(refuse: number, ending: "throws" | "fails" = "throws"): (
     return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
   };
   return Object.assign(stack, { refused: () => refused });
+}
+
+/**
+ * The real media stack, but what comes in on the call's tracks can be cut (`deaf(true)`): as when the contact's side
+ * died, nothing arrives, while the connection itself stays up, as libjuice keeps it for about 30 s.
+ */
+function deafStack(): (() => Promise<CallStack | string>) & { deaf: (on: boolean) => void } {
+  let deaf = false;
+  const stack = async () => {
+    const real = await loadCallStack();
+    if (typeof real === "string") return real;
+    const Real = real.ndc.PeerConnection;
+    function PeerConnection(...args: ConstructorParameters<typeof Real>) {
+      const pc = new Real(...args);
+      const add = pc.addTrack.bind(pc);
+      Object.defineProperty(pc, "addTrack", {
+        value: (...trackArgs: Parameters<typeof add>) => {
+          const track = add(...trackArgs);
+          const listen = track.onMessage.bind(track);
+          Object.defineProperty(track, "onMessage", { value: (cb: Parameters<typeof listen>[0]) => listen((message) => { if (!deaf) cb(message); }) });
+          return track;
+        },
+      });
+      return pc;
+    }
+    return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+  };
+  return Object.assign(stack, { deaf: (on: boolean) => { deaf = on; } });
 }
 
 const signalsOf = (side: Side, t: string) => side.signals.filter((s) => s && JSON.parse(s).t === t);
@@ -247,6 +275,45 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(a.calls.list()).toMatchObject([{ state: "connected" }]);
     await a.calls.hangup("chat-ab");
     await until(() => b.events.find((e) => e.type === "call.ended"));
+  });
+
+  it("a contact whose packets stop: the call says it stalled within the wait, resumes when they come back, and ends as failed when they do not", async () => {
+    const stack = deafStack();
+    const { a, b } = pairOfManagers({ a: stack, stall: { afterMs: 800, endMs: 3000 } });
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    const placed = await a.calls.start("chat-ab", {}) as { audio: { socket: string } };
+    const alice = await program(placed.audio.socket);
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+    await new Promise((r) => setTimeout(r, 1200));
+    // The contact's audio comes all along (silence too): nothing stalls.
+    expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected"]);
+    expect(a.calls.get(undefined)).toMatchObject({ state: "connected", stalled: false });
+
+    stack.deaf(true);
+    const cut = Date.now();
+    const stalled = await until(() => a.events.find((e) => e.type === "call.stalled"));
+    expect(Date.now() - cut).toBeLessThan(2000);
+    expect(stalled).toMatchObject({ chat: "chat-ab", direction: "out", silentMs: expect.any(Number) });
+    expect(stalled.silentMs).toBeGreaterThanOrEqual(800);
+    expect(a.calls.get(undefined)).toMatchObject({ state: "connected", stalled: true });
+
+    stack.deaf(false);
+    const resumed = await until(() => a.events.find((e) => e.type === "call.resumed"));
+    expect(resumed.silentMs).toBeGreaterThanOrEqual(800);
+    expect(a.calls.get(undefined)).toMatchObject({ state: "connected", stalled: false });
+
+    stack.deaf(true);
+    const cutAgain = Date.now();
+    const ended = await until(() => a.events.find((e) => e.type === "call.ended"), 10_000);
+    expect(ended).toMatchObject({ reason: "failed" });
+    expect(Date.now() - cutAgain).toBeGreaterThanOrEqual(2900);
+    expect(Date.now() - cutAgain).toBeLessThan(5000);
+    expect(a.events.filter((e) => e.type === "call.stalled")).toHaveLength(2);
+    // The program reads EOF, and the contact's app is told.
+    await alice.ended;
+    expect(signalsOf(a, "h")).toHaveLength(1);
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    stack.deaf(false);
   });
 
   it("a hang-up saying the contact could not connect (an app whose microphone was refused) ends a ringing call as failed", async () => {
