@@ -223,7 +223,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               <span>{state.history.length === 0 ? t("wallet.cashu.history.none") : state.history.length === 1 ? t("wallet.cashu.history.movementsOne") : t("wallet.cashu.history.movements", { count: state.history.length })}</span>
               <span data-testid="wallet-fees-paid">{t("wallet.cashu.history.feesPaid", { amount: formatAmount(state.feesPaid, t.language), unit })}</span>
             </div>
-            <div className="max-h-80 overflow-y-auto divide-y divide-border">
+            {/* Scrolls past a few movements: focusable, so the keys scroll it in WebKit too (as in PayExternally). */}
+            <div tabIndex={0} aria-label={t("wallet.ui.history")} className="max-h-80 overflow-y-auto divide-y divide-border rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
               {state.history.map((tx) => {
                 const incoming = tx.kind === "lightning-in" || tx.kind === "ecash-in" || tx.kind === "reclaimed";
                 const mint = state.mints.find((m) => m.url === tx.mint);
