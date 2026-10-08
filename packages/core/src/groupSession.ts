@@ -376,6 +376,8 @@ export class GroupSession {
   private pendingCommits = new Map<number, GroupCommitFrame>();
   /** When each member was last asked to catch me up, so a stream of unreadable frames is one question, not a loop. */
   private asked = new Map<string, number>();
+  /** The signed leave of each member I last passed on (its signature). In memory only. */
+  private byesPassed = new Map<string, string>();
   private queue = Promise.resolve();
   /** One metadata frame that names a commit or an epoch I do not have yet: tried again when the chain moves. */
   private pendingMeta: { from: string; frame: unknown } | undefined;
@@ -996,6 +998,10 @@ export class GroupSession {
     if (bye.e < this.admittedAt(bye.k)) return;
     // An admin whose admin work is off on this device passes the leave on, as a member does: it commits nothing.
     if (this.isAdmin && this.hooks.adminWork?.() !== false && (await this.commitUnlessTurnUnconfirmed("remove", bye.k))) return;
+    // Passed on the first time only, so it does not go round the hubs while the admin is away; again only from its
+    // member, who says it on every edge to a hub that opens until the admin hears it.
+    if (from !== bye.k && this.byesPassed.get(bye.k) === bye.sig) return;
+    this.byesPassed.set(bye.k, bye.sig);
     this.took(bye);
   }
 
