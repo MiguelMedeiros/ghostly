@@ -15,11 +15,16 @@
 //   if the first half is green. A batch of one that is red is the culprit: `queue:failed`, a comment, `queue` off.
 //   Whatever was not part of the red half goes back to the line at its old place.
 // - One pull request alone (the next batch would hold only it) skips the batch: when its head already holds the base's
-//   tip and CI Success is green on it, the train merges the pull request itself (dev: the rebase merge at that head;
-//   an epic: a fast-forward), with no batch and no new CI run. When it is behind, the train rebases its branch onto the
-//   tip (a push with --force-with-lease, so an author's push wins), waits for CI on exactly that commit, and merges it
-//   the same way. Red there gets one more run on a fresh rebase, then `queue:failed`; a conflict, `queue:conflict`. A
-//   fork, or a head branch the train must never push to (dev, main, an epic, a batch), goes the batch way.
+//   tip and CI Success is green on it, the train merges the pull request itself (dev: GitHub's squash merge at that
+//   head; an epic: a fast-forward), with no batch and no new CI run. When it is behind, the train rebases its branch
+//   onto the tip (a push with --force-with-lease, so an author's push wins), waits for CI on exactly that commit, and
+//   merges it the same way. Red there gets one more run on a fresh rebase, then `queue:failed`; a conflict,
+//   `queue:conflict`. A fork, or a head branch the train must never push to (dev, main, an epic, a batch), goes the
+//   batch way.
+// - Signatures: GitHub writes and signs the commit of a squash merge, so a pull request that lands alone on `dev` shows
+//   as Verified, with the message a batch gives it ("<title> (#n)", then one "* <subject>" line per commit). The train
+//   reads the new commit back and warns when it is not verified. GitHub never signs a rebase merge, and a fast-forward
+//   pushes commits as they are, so a batch's commits and everything that lands on an epic stay unsigned.
 // - Each queued pull request keeps one comment that says where it is ("In line for `dev`: 3rd").
 //
 // The train keeps no state of its own: a batch's members and the half that waits after it live in a hidden mark in
@@ -176,6 +181,16 @@ export const aloneMark = (sticky) => {
 
 /** Whether the train may land a pull request alone: its head is a branch of this repository it may rebase and push. */
 export const canGoAlone = (p) => !p.fork && !BASE.test(p.branch) && p.branch !== "main" && !p.branch.startsWith("batch/");
+
+/**
+ * The message of the one commit a pull request becomes, as `git.build` writes it for a batch: "<title> (#n)", then one
+ * "* <subject>" line per commit of the pull request, oldest first. `commits` are GitHub's (`pullCommits`). Nothing
+ * else goes in: no trailers, and a message given in full keeps GitHub from writing its own.
+ */
+export function squashMessage(p, commits) {
+  const subjects = commits.map((c) => (c.commit?.message ?? "").split("\n")[0].trim()).filter(Boolean);
+  return { title: `${p.title} (#${p.number})`, message: subjects.map((s) => `* ${s}`).join("\n") };
+}
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -359,16 +374,38 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // One pull request alone, with no batch. Each step returns what is in flight now, `null` when the pull request landed
   // or left the line (so the next one may go), or `false` when nothing more boards in this run.
 
-  /** Merges a lone pull request at its head: dev by the rebase merge (refused unless up to date and green), an epic by a fast-forward. */
+  /** Says whether GitHub shows a commit it just made as verified, with a warning when it does not: a regression shows in the log. */
+  const sayVerified = async (number, sha) => {
+    let c;
+    try {
+      c = await gh.commit(sha);
+    } catch (e) {
+      if (e instanceof BudgetLow) throw e;
+      say(`::warning::Could not read whether #${number}'s commit ${sha.slice(0, 12)} is verified: ${e.message}`);
+      return;
+    }
+    if (c.verified) say(`VERIFIED #${number}: GitHub signed ${sha.slice(0, 12)} (verified=true)`);
+    else say(`::warning::#${number} landed as ${sha.slice(0, 12)}, which is not verified (verified=false, reason: ${c.reason ?? "unknown"}).`);
+  };
+
+  /**
+   * Merges a lone pull request at its head. dev: GitHub's squash merge (refused unless up to date and green), so GitHub
+   * writes the commit and signs it. An epic: a fast-forward to the pull request's own commits, which stay unsigned.
+   */
   const landAlone = async (p) => {
-    const r =
-      base === "dev" ? await w.merge(p.number, p.sha) : dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p.number, p.sha);
+    let r;
+    if (base === "dev") {
+      const { title, message } = squashMessage(p, await gh.pullCommits(p.number));
+      r = await w.squash(p.number, p.sha, title, message);
+    } else r = dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p.number, p.sha);
     if (r.ok) {
       say(`MERGED #${p.number} alone`);
       done.merged.push(p.number);
       // Merged already (an epic's pull request shows as merged once the epic holds its head): only the labels and the
       // position comment go.
       await leave(p, null, null);
+      // Last, so a run that stops here (the API budget) leaves nothing undone.
+      if (r.sha) await sayVerified(p.number, r.sha);
     }
     return r;
   };
@@ -382,7 +419,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (!rerun && p.ci === "success" && (await gh.behindBy(tip, p.sha)) === 0) {
       const r = await landAlone(p);
       if (r.ok) return null;
-      // Refused while up to date and green (GitHub calls some rebases unsafe): the squash of a batch always applies.
+      // Refused while up to date and green (squash merges turned off, a merge GitHub has not worked out yet): a batch
+      // lands another way, so it never blocks the line.
       say(`::warning::Could not merge #${p.number} alone: ${r.message}; it goes the batch way.`);
       return (await board([p])) ?? false;
     }
@@ -486,6 +524,7 @@ function dryWriter(gh, say) {
     deleteBranch: async (b) => would(`delete branch ${b}`),
     createPull: async ({ title }) => (would(`open a pull request "${title}"`), { number: `new${++n}` }),
     merge: async (num, sha) => (would(`merge #${num} at ${sha.slice(0, 12)} (rebase)`), { ok: true }),
+    squash: async (num, sha, title) => (would(`merge #${num} at ${sha.slice(0, 12)} (squash) as "${title}"`), { ok: true }),
   };
 }
 
@@ -612,7 +651,22 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       const r = await api("PUT", `/pulls/${n}/merge`, { merge_method: "rebase", sha });
       return { ok: r.ok, message: `HTTP ${r.status} ${r.data?.message ?? ""}` };
     },
-    /** How many commits of `baseSha` the commit `headSha` lacks: 0 when it already holds them (a rebase merge rewrites nothing). */
+    /**
+     * GitHub's squash merge of a pull request at `sha`: GitHub writes the one commit (title and message as given) and
+     * signs it, which it never does for a rebase merge. `sha` in the answer is that commit.
+     */
+    squash: async (n, sha, title, message) => {
+      const r = await api("PUT", `/pulls/${n}/merge`, { merge_method: "squash", sha, commit_title: title, commit_message: message });
+      return { ok: r.ok, sha: r.ok ? r.data?.sha : undefined, message: `HTTP ${r.status} ${r.data?.message ?? ""}` };
+    },
+    /** A pull request's commits, oldest first (GitHub lists at most 250). */
+    pullCommits: (n) => all(`/pulls/${n}/commits`),
+    /** One commit: whether GitHub shows it as verified (and why not), and its tree. */
+    commit: async (sha) => {
+      const { commit } = await must("GET", `/commits/${sha}`);
+      return { verified: commit.verification?.verified === true, reason: commit.verification?.reason ?? null, tree: commit.tree.sha };
+    },
+    /** How many commits of `baseSha` the commit `headSha` lacks: 0 when it already holds them. */
     behindBy: async (baseSha, headSha) => (await must("GET", `/compare/${baseSha}...${headSha}?per_page=1`)).behind_by,
   };
 }
