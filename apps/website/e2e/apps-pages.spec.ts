@@ -1,8 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 /**
@@ -13,7 +12,7 @@ import { expect, test, type Page } from "@playwright/test";
  * GHOSTLY_STORE_FIXTURE is set (CI sets it).
  */
 
-const site = join(dirname(fileURLToPath(import.meta.url)), "..");
+const site = join(__dirname, "..");
 const snapshot = JSON.parse(readFileSync(join(site, "lib", "store-snapshot.json"), "utf8")) as { source: string };
 const fixture = JSON.parse(readFileSync(join(site, "e2e", "fixtures", "store", "fixture.json"), "utf8")) as { key: string };
 const PREFIX = { a: "jmbfdj6xdr6mp3op", b: "nsuz5d3mxqozm68b" };

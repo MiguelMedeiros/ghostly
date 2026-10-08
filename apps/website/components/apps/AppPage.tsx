@@ -14,7 +14,8 @@ const ExternalLink = ({ href }: { href: string }) => (
 /** /apps/<slug>: one app of the store, as the build verified it, and how to install it in Ghostly. */
 export function AppPage({ app, store }: { app: StoreApp; store: string }) {
   const t = apps.app;
-  const permissions = [PERMISSIONS.storage, ...app.permissions.map((p) => PERMISSIONS[p])];
+  // The internet last, as the install screen puts it: the line that says who can learn about the person.
+  const permissions = [PERMISSIONS.storage, ...(["chat", "name", "internet"] as const).filter((p) => app.permissions.includes(p)).map((p) => PERMISSIONS[p])];
   const meta = [
     app.developer && { label: t.by, value: app.developer },
     { label: t.version, value: app.version },
