@@ -146,6 +146,10 @@
     "showQr": "Mostrar QR",
     "title": "Link do grupo"
   },
+  "makeAdmin": {
+    "body": "Você deixa de ser o admin. Só {{name}} vai poder renomear o grupo, mudar a foto e o link, convidar ou remover membros, e devolver o papel.",
+    "title": "Tornar {{name}} o admin?"
+  },
   "member": {
     "connected": "Conectado · {{transport}}",
     "connecting": "Conectando…",
@@ -170,7 +174,7 @@
     "invite": "Convidar um contato",
     "inviteAction": "Convidar",
     "invited": "Convidado…",
-    "makeAdmin": "Tornar admin",
+    "makeAdmin": "Passar admin",
     "missing": "{{count}} faltando",
     "missingHint": "Mensagens desta época que ninguém conseguiu recuperar",
     "needsBothHint": "Grupos precisam dos dois apps conectados e atualizados",
