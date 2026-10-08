@@ -148,6 +148,11 @@ Ghostly next.
     expect(out).toBe("# Changelog\n\n## Unreleased\n\n<!-- New entries: docs/changelog/unreleased/. -->\n\n## 0.5.0\n\n### Fixed\n\n- A crash.\n\n## 0.4.0\n\n- Old.\n");
     // Twice in a row, nothing lost.
     expect(releaseChangelog(out, [fragment("Fixed", "- Another.")], "0.5.1")).toContain("## Unreleased\n\n<!-- New entries: docs/changelog/unreleased/. -->\n\n## 0.5.1\n\n### Fixed\n\n- Another.\n\n## 0.5.0");
+    // A note on several lines stays whole.
+    const long = "# Changelog\n\n## Unreleased\n\n<!-- New entries:\ndocs/changelog/unreleased/. -->\n\n## 0.4.0\n";
+    expect(releaseChangelog(long, [fragment("Fixed", "- A crash.")], "0.5.0")).toBe(
+      "# Changelog\n\n## Unreleased\n\n<!-- New entries:\ndocs/changelog/unreleased/. -->\n\n## 0.5.0\n\n### Fixed\n\n- A crash.\n\n## 0.4.0\n",
+    );
     expect(() => releaseChangelog("# Changelog\n\n## 0.4.0\n", [], "0.5.0")).toThrow(/Unreleased/);
   });
 

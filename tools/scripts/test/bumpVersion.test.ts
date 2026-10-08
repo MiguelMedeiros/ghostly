@@ -77,7 +77,9 @@ describe("bump-version", () => {
       const released = changelog.indexOf(`## ${next}\n`);
       expect(unreleased).toBeGreaterThanOrEqual(0);
       expect(unreleased).toBeLessThan(released);
-      expect(changelog.slice(unreleased, released)).toMatch(/^## Unreleased\n\n(<!--.*-->\n\n)?$/);
+      const top = changelog.slice(unreleased, released);
+      expect(top.startsWith("## Unreleased\n\n")).toBe(true);
+      expect(top.split("\n").filter((line) => line.startsWith("- ") || line.startsWith("### "))).toEqual([]);
       expect(changelog.indexOf("- A test entry.")).toBeGreaterThan(released);
 
       // So the next bump finds its heading: the held entry goes out with its release.

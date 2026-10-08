@@ -212,7 +212,13 @@ export function releaseChangelog(changelog, fragments, version) {
   if (end < 0) end = lines.length;
   const notes = [];
   const entries = [];
-  for (const line of lines.slice(start + 1, end)) (/^<!--.*-->$/.test(line) ? notes : entries).push(line);
+  // The note is an HTML comment (one line or several): it stays with the heading, the rest goes to the release.
+  let inNote = false;
+  for (const line of lines.slice(start + 1, end)) {
+    if (line.startsWith("<!--")) inNote = true;
+    (inNote ? notes : entries).push(line);
+    if (inNote && line.includes("-->")) inNote = false;
+  }
   while (entries.length && entries[0] === "") entries.shift();
   const unreleased = ["## Unreleased", "", ...(notes.length ? [...notes, ""] : [])];
   return [...lines.slice(0, start), ...unreleased, `## ${version}`, "", ...entries, ...lines.slice(end)].join("\n");
