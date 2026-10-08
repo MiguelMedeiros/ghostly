@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createIdentity, encodeCommunityLink, encodeGroupEntryLink } from "@ghostly/core";
+import { MAX_GROUP_NAME_LENGTH, createIdentity, encodeCommunityLink, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { GroupLinkPanel } from "../../components/GroupLinkPanel";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
@@ -323,6 +323,13 @@ describe("NewGroupDialog", () => {
     // A community is what a new group is unless the person picks Private.
     expect(engine.callsTo("createGroup")).toEqual([{ name: "Climbing", profile: "community" }]);
     expect(onCreated).toHaveBeenCalledWith("new-group");
+  });
+
+  it("takes a name as long as Rename does, and no longer", async () => {
+    const { user, engine } = open();
+    engine.on("createGroup", () => ({ groupId: "long" }));
+    await user.type(screen.getByTestId("new-group-name"), `${"x".repeat(MAX_GROUP_NAME_LENGTH)}yz{Enter}`);
+    expect(engine.callsTo("createGroup")).toEqual([{ name: "x".repeat(MAX_GROUP_NAME_LENGTH), profile: "community" }]);
   });
 
   it("makes a private group (up to 32, contacts or a link) when that kind is picked", async () => {
