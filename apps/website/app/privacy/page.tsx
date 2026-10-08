@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { A, Code, ISSUES_URL, LegalPage, Section, Term } from "@/components/site/Legal";
 import { SECURITY_URL } from "@/content/shell";
+import { appsReleased } from "@/lib/appsGate";
 
 const DESCRIPTION =
   "No accounts, no server holding your data, and no cookies or analytics on this site. What stays on your device, what travels the network, and who sees it.";
@@ -26,12 +27,18 @@ export const metadata: Metadata = {
 };
 
 const LAST_UPDATED = "September 29, 2026";
+/** The date of the lines about Apps, which show only once the released Ghostly has them. */
+const LAST_UPDATED_APPS = "October 8, 2026";
 
-export default function PrivacyPage() {
+// Rendered for each visit, so the lines about Apps follow the release gate (lib/appsGate.ts) as the /apps pages do.
+export const revalidate = 0;
+
+export default async function PrivacyPage() {
+  const apps = await appsReleased();
   return (
     <LegalPage
       title="Privacy Policy"
-      updated={LAST_UPDATED}
+      updated={apps ? LAST_UPDATED_APPS : LAST_UPDATED}
       lead={
         <>
           <p>
@@ -78,6 +85,14 @@ export default function PrivacyPage() {
             own privacy policies. To show the latest version, our server asks GitHub at most once an hour. Your
             browser does not.
           </li>
+          {apps && (
+            <li>
+              <Term>The apps pages.</Term> To list the apps of the Ghostly Store, our server reads the store and its
+              apps from GitHub (<Code>raw.githubusercontent.com</Code>) and jsDelivr (<Code>cdn.jsdelivr.net</Code>)
+              when the site is built, and checks their signatures. App icons are served from this site. Your browser
+              does not contact GitHub or jsDelivr for them.
+            </li>
+          )}
         </ul>
       </Section>
 
@@ -219,6 +234,17 @@ export default function PrivacyPage() {
             (<Code>ethereum.publicnode.com</Code>), even before you open the wallet. Making them moves no money. Every
             other wallet waits until you create it.
           </li>
+          {apps && (
+            <li>
+              <Term>Apps and stores.</Term> Ghostly reads the list of a store you have, and the apps you add, install
+              or update, from where they are published: GitHub (<Code>raw.githubusercontent.com</Code>) or jsDelivr
+              (<Code>cdn.jsdelivr.net</Code>), and nowhere else. They see your IP address and which store or app is
+              read. Ghostly makes no such request until you open Apps or install an app; once you have apps, it checks
+              them and your stores about once a day for updates and takedowns. An app runs in a sandbox with no internet unless you grant
+              it the internet permission when you install it; even without it, its publisher may learn your IP
+              address and when you open the app.
+            </li>
+          )}
           <li>
             <Term>Storage you set up.</Term> A backup or held messages in an S3-compatible bucket go to the provider
             you chose, sealed. That provider sees your IP address and the size and timing of what is stored.

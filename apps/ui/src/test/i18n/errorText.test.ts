@@ -21,6 +21,7 @@ const source = (path: string) => readFileSync(join(ROOT, path), "utf8");
 
 const BROWSER = "packages/browser/src";
 const CORE = "packages/core/src";
+const ANDROID_APP = "apps/desktop/gen/android/app/src/main/java/tools/ghostly/app";
 /** The engine's known errors, written once with their codes (@ghostly/core ENGINE_ERRORS) and thrown from there. */
 const CODES = "packages/core/src/engineErrors.ts";
 /** [message as thrown, the file that throws it, the part of the message written there as it is]. */
@@ -40,6 +41,16 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not open the service", "apps/extension/src/host.ts"],
   ["Could not open a tab", "apps/extension/src/background.ts"],
   ["Not a payment link", "apps/extension/src/background.ts"],
+  ["Sign-in timed out. Try again.", `${BROWSER}/proofs/oidc/popup.ts`],
+  ["Sign-in timed out. Try again.", "apps/desktop/src/oidc.rs"],
+  // The app's opener and its Android host.
+  ["No app on this phone opens this link", `${ANDROID_APP}/GhostlyHostPlugin.kt`],
+  ["The file could not be saved there", `${ANDROID_APP}/GhostlyHostPlugin.kt`],
+  ["Not a web link", "apps/desktop/src/commands.rs"],
+  ["Not a Ghostly project link", "apps/desktop/src/commands.rs"],
+  ["Unreadable file path", "apps/desktop/src/android.rs"],
+  ["The Android host is not ready", "apps/desktop/src/android.rs"],
+  ["Not from Android's main thread", "apps/desktop/src/android.rs"],
   ["Ghostly is starting…", `${BROWSER}/platform/engine.ts`],
   ["Lost the Ghostly peer", `${BROWSER}/platform/engine.ts`],
   ["Ghostly is still starting. Try again in a moment.", `${BROWSER}/platform/services.ts`],

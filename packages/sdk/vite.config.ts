@@ -7,7 +7,7 @@ import { defineConfig } from "vite";
  */
 export default defineConfig({
   build: {
-    lib: { entry: { index: "src/index.ts", fakes: "src/fakes.ts", testing: "src/testing.ts", core: "src/core.ts" }, formats: ["es"] },
+    lib: { entry: { index: "src/index.ts", fakes: "src/fakes.ts", testing: "src/testing.ts", core: "src/core.ts", app: "src/app.ts" }, formats: ["es"] },
     outDir: "dist",
     emptyOutDir: false,
     target: "es2022",

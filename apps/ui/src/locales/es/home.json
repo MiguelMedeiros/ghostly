@@ -6,7 +6,6 @@
     "encrypted": "Cifrado de extremo a extremo",
     "onDevice": "Tus mensajes se quedan en tus dispositivos"
   },
-  "linkFailed": "No se pudo abrir el enlace.",
   "unpublishedVersion": "Versión local — ver versiones publicadas",
   "viewRelease": "Ver esta versión",
   "welcome": "Bienvenido a Ghostly"

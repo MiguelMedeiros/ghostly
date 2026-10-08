@@ -247,6 +247,7 @@
     "downloadMp3": "下载为 MP3",
     "downloadPreparing": "仍在准备中",
     "downloadUnconverted": "无法转换",
+    "downloadUnsaved": "未保存。请换个文件夹",
     "edit": "编辑",
     "editPending": "对方还看不到",
     "editPendingGroup": "尚未发送到群组",
@@ -358,7 +359,6 @@
     "shared": "已共享",
     "sharingMany": "你共享了 {{count}} 个应用",
     "sharingOne": "你共享了 1 个应用",
-    "title": "与 {{name}} 共享的应用",
     "titleShared": "与 {{name}} 的共享服务",
     "yours": "你的应用"
   },

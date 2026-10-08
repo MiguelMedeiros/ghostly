@@ -30,12 +30,20 @@ fn opened(app: &tauri::AppHandle, id: String) {
 /// The system's notification settings, where notifications refused once are allowed again.
 #[tauri::command]
 pub fn open_notification_settings() -> Result<(), String> {
-    let url = settings_url().ok_or("No notification settings to open")?;
-    // The tests call every command: they never open System Settings on the machine running them.
-    if cfg!(test) {
-        return Ok(());
+    // Android: the app's own page in Settings, by an intent rather than a URL.
+    #[cfg(target_os = "android")]
+    {
+        crate::android::open_notification_settings()
     }
-    crate::commands::launch(&url)
+    #[cfg(not(target_os = "android"))]
+    {
+        let url = settings_url().ok_or("No notification settings to open")?;
+        // The tests call every command: they never open System Settings on the machine running them.
+        if cfg!(test) {
+            return Ok(());
+        }
+        crate::commands::launch(&url)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -49,7 +57,7 @@ fn settings_url() -> Option<String> {
 }
 
 /// Linux desktops keep notification settings in no one place.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
 fn settings_url() -> Option<String> {
     None
 }
@@ -60,7 +68,15 @@ pub async fn native_notification_permission(request: bool) -> Result<Option<Stri
     {
         mac::permission(request).await.map(Some)
     }
-    #[cfg(not(target_os = "macos"))]
+    // Android 13 and up asks at the first `request` (POST_NOTIFICATIONS); before, notifications are on unless the
+    // person turned them off in Settings.
+    #[cfg(target_os = "android")]
+    {
+        crate::android::notification_permission(request)
+            .await
+            .map(Some)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         let _ = request;
         Ok(None)
@@ -77,7 +93,16 @@ pub async fn native_private_notification(id: String, body: String) -> Result<boo
         mac::show(&id, &body).await?;
         Ok(true)
     }
-    #[cfg(not(target_os = "macos"))]
+    // Android: the app's own notification, on its Messages channel, whose tap opens the chat (android.rs).
+    #[cfg(target_os = "android")]
+    {
+        if crate::android::notification_permission(false).await? != "granted" {
+            return Ok(true);
+        }
+        crate::android::notify(&id, &body).await?;
+        Ok(true)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         let _ = (id, body);
         Ok(false)

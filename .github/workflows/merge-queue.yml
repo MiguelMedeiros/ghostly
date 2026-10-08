@@ -1,48 +1,59 @@
 name: Merge queue
 
-# Brings armed pull requests into dev up to date, one at a time (tools/scripts/merge-queue.mjs). The dev ruleset merges
-# a pull request only when CI Success is green on a branch that is up to date with dev; auto-merge
-# (`gh pr merge --squash --auto`) does the merging, and this workflow updates the oldest armed one that fell behind,
-# once the one ahead of it has merged or failed. Batching green pull requests is not done here yet.
+# Runs the merge train (tools/scripts/merge-train.mjs): pull requests labelled `queue` land on their base (dev or an
+# epic/* branch) in batches of up to 5, in the order they were queued (`queue:priority` first). Each run moves every
+# base's train one step: board a batch, merge a green one, split a red one, and update each queued pull request's
+# place in line. See docs/TESTING.md#the-merge-queue.
 #
 # It acts as a GitHub App (repository secrets QUEUE_APP_ID and QUEUE_APP_PRIVATE_KEY): GitHub starts no workflow for a
-# commit made with the workflow's own GITHUB_TOKEN, so an update made with it would never get its CI Success. Without
-# those secrets every run ends green with a notice and changes nothing.
+# push or a pull request made with the workflow's own GITHUB_TOKEN, so a batch made with it would never get its CI
+# Success. Without those secrets every run ends green with a notice and changes nothing; a Mac can run the train
+# meanwhile (`node tools/scripts/merge-train.mjs --run --every 300`, with its own gh login).
 #
-# There is no pull_request trigger on purpose: these runs hold the app's key, so they only ever run dev's copy of this
-# file. Several triggers at once queue at most one run behind the one running; GitHub cancels the extra waiting ones,
-# which is not a failure.
+# These runs hold the app's key, so they always run the default branch's copy of the script (both checkouts pin it),
+# never a pull request's: there is no pull_request trigger, and pull_request_target (a label added) and pushes take
+# this file from dev or an epic, which only writers change. The train only merges pull requests' commits with git;
+# it never runs their code.
 
 on:
   schedule:
     - cron: "*/10 * * * *"
   push:
-    branches: [dev]
+    branches: [dev, "epic/**"]
   workflow_run:
     workflows: [CI]
     types: [completed]
+  pull_request_target:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       dry_run:
         description: Decide and log, change nothing
         type: boolean
         default: false
+      base:
+        description: Only this base (dev, epic/<name>); empty for every base with a train
+        type: string
+        default: ""
 
 permissions: {}
 
-concurrency:
-  group: merge-queue
-  cancel-in-progress: false
-
 jobs:
-  queue:
-    name: Update the next pull request
-    # A pull request's CI ending can free the queue's head; CI ending on a push to dev cannot (the push already ran this).
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
+  bases:
+    name: Bases with a train
+    # A pull request's CI ending can turn a batch or a queued pull request green; CI on a push already ran this. A label
+    # matters only when it is one of the train's.
+    if: >-
+      (github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request') &&
+      (github.event_name != 'pull_request_target' || startsWith(github.event.label.name, 'queue'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: read
+      pull-requests: read
+    outputs:
+      configured: ${{ steps.app.outputs.configured }}
+      bases: ${{ steps.list.outputs.bases }}
     steps:
       - name: Check the queue app
         id: app
@@ -57,29 +68,78 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Checkout the script
+        if: steps.app.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: tools/scripts/merge-train.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: List the bases
+        id: list
+        if: steps.app.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ inputs.base }}
+        # The assignment on its own line, so a failing --list-bases fails this step (inside `echo` it would not).
+        run: |
+          if [[ -n "$BASE" ]]; then
+            bases=$(jq -cn --arg b "$BASE" '[$b]')
+          else
+            bases=$(node tools/scripts/merge-train.mjs --list-bases)
+          fi
+          echo "bases=$bases" >> "$GITHUB_OUTPUT"
+
+  train:
+    name: Train into ${{ matrix.base }}
+    needs: bases
+    if: needs.bases.outputs.configured == 'true' && needs.bases.outputs.bases != '' && needs.bases.outputs.bases != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        base: ${{ fromJSON(needs.bases.outputs.bases || '[]') }}
+    # One run per base at a time, and at most one waiting behind it (GitHub cancels the extra waiting ones, which is not
+    # a failure). Bases never wait on each other.
+    concurrency:
+      group: merge-train-${{ matrix.base }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Nothing here uses the workflow's own token: the checkout and the train act as the queue app.
+    permissions: {}
+    steps:
       - name: App token
         id: token
-        if: steps.app.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
+          permission-issues: write
           permission-checks: read
 
-      - name: Checkout the script
-        if: steps.app.outputs.configured == 'true'
+      # Full history without file contents: batches merge pull requests onto the base, which needs their merge bases.
+      # The app's token stays in the checkout so the batch push starts CI.
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: tools/scripts/merge-queue.mjs
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.token.outputs.token }}
+          fetch-depth: 0
+          filter: blob:none
 
-      - name: Update the next pull request
-        if: steps.app.outputs.configured == 'true'
+      - name: Run the train
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          BASE: dev
+          # The train trusts only its own position comments: the ones this app's bot wrote.
+          MERGE_TRAIN_LOGIN: ${{ steps.token.outputs.app-slug }}[bot]
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-        run: node tools/scripts/merge-queue.mjs
+          BASE: ${{ matrix.base }}
+        run: |
+          git config user.name "ghostly-merge-train"
+          git config user.email "merge-train@users.noreply.github.com"
+          if [[ "$DRY_RUN" == "true" ]]; then mode=--dry-run; else mode=--run; fi
+          node tools/scripts/merge-train.mjs "$mode" --base "$BASE"

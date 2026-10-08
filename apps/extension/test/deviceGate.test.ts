@@ -43,7 +43,7 @@ describe("a profile with no device set", () => {
     expect(await ensure()).toEqual({ ok: true });
     expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
     expect(log()).toEqual(["start ghostly"]);
-    expect(engineControl().servers[0].options).toEqual({ platform: "extension", irohWeb: true, defaultWallets: expect.any(Function) });
+    expect(engineControl().servers[0].options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function) });
   });
 });
 

@@ -34,7 +34,13 @@ On a branch off `dev`:
 node tools/scripts/bump-version.mjs 1.0.0
 ```
 
-That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`apps/website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves every entry of `docs/changelog/unreleased/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node tools/scripts/changes.mjs --preview` shows the section beforehand.
+That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`apps/website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves the entries of `docs/changelog/unreleased/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0` under a new, empty `## Unreleased`. `node tools/scripts/changes.mjs --preview 1.0.0` shows the section beforehand.
+
+An entry with `release: <major>.<minor>` in its front matter is held for that release: a bump to an older version leaves it in `docs/changelog/unreleased/`, so a patch never announces what it does not ship. The Apps entries say `release: 1.2`, and a 1.1.x patch cut from `dev` leaves them there ([the folder's README](changelog/unreleased/README.md)). Until 1.2.0, `node tools/scripts/changes.mjs` (CI) refuses an Apps entry without it (a `For developers / Apps` section, or text about the apps flag, WISP 1200 or `apps/1`), and any front matter key other than `section` and `release`.
+
+The bump also refuses a version that must not ship a flag that is on (`RELEASE_GUARDS` in `tools/scripts/changes.mjs`). Apps (`APPS_ENABLED` in `packages/browser/src/shared/features.ts`) ship from 1.2.0: while the flag is `true`, a bump to any version before 1.2.0 stops before it changes a file. The other way too: a bump to 1.2.0 or later stops while the flag is still `false` and the Apps entries held for 1.2 would go out. Any refusal (a flag, a broken entry, no `## Unreleased` heading) comes before the first file changes.
+
+The flag stays `false` on `dev` and flips only on the `release/1.2.0` branch, so every 1.1.x patch keeps Apps hidden. There, flip it and bump to 1.2.0 in the same pull request, the flip first: `tools/scripts/test/bumpVersion.test.ts` checks the flag against the repository's own version, so it is red at 1.1.x with the flag on and green at 1.2.0. The same pull request drops the `expect(APPS_ENABLED).toBe(false)` checks in `packages/browser/test/appsEngine.test.ts` and `packages/browser/test/appsStorage.test.ts`. The `Release` workflow runs `node tools/scripts/bump-version.mjs --check` on the tag too, so a tag older than 1.2.0 with the flag on is never built into a release.
 
 Then, by hand:
 
@@ -72,15 +78,25 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
 
 1. The Release workflow is green and the draft has all its assets (twelve from 1.0; v0.4.0 had sixteen, with the Rust CLI binaries), `latest.json` among them.
 2. Download a few and check them: `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` and `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`.
-3. Publish it as the latest release, with the changelog section as notes:
+3. **Apps on macOS, by hand** (releases with Apps on, from 1.2). No e2e covers apps on the macOS Desktop app: `e2e/desktop/apps.spec.ts` runs on Linux only, and `e2e/desktop-macos/` has no apps spec. Install the draft's `.dmg` on a Mac, then:
+   - install Chess from the default store on the Apps page;
+   - open it in a 1:1 chat with a contact on another device: it opens in a window of its own, titled "Chess with" the contact. That is what shows the window was hardened: on macOS, a window that cannot get its content rule list or WebKit configuration never opens. The app shows the reason instead, and `~/Library/Logs/app.ghostly.chat/ghostly.log` has an `app window app-... closed` line with no window before it;
+   - play a few moves each way, close the window and open it again: the game is back.
+
+   If one of these fails, do not publish: fix it and move the tag. A `WebKit has no feature <key>` line in that log (this macOS dropped a switch the window turns off; the window opens anyway) does not block the release by itself. Write the key and the macOS version in the release notes or an issue, and check that the required layers of [WISP 1200](wisps/1200-marketplace.md#per-client), Desktop (the CSP header, the navigation lock, the content rule list), still cover what that switch did.
+4. Publish it as the latest release, with the changelog section as notes:
 
    ```bash
    gh release edit v1.0.0 --draft=false --latest --notes-file notes.md
    ```
 
-4. A download URL (`releases/download/v1.0.0/Ghostly_1.0.0_aarch64.dmg`) answers 200, and so does `releases/latest/download/latest.json`. That address is what every installed app asks, and it only moves to this release once the release is the latest one.
+5. A download URL (`releases/download/v1.0.0/Ghostly_1.0.0_aarch64.dmg`) answers 200, and so does `releases/latest/download/latest.json`. That address is what every installed app asks, and it only moves to this release once the release is the latest one.
 
-5. Publishing the release starts `Publish npm` (`.github/workflows/npm-publish.yml`), which puts the CLI on npm as `@ghostlytools/cli` (the npm organization `ghostlytools`) at the tag's version, with provenance. It refuses a tag that is not `packages/cli/package.json`'s version, skips a version already on npm, and ends by installing it from npm and running `ghostly --version`. To run it again for a tag: `gh workflow run npm-publish.yml -f tag=v1.0.0`.
+6. Publishing the release starts `Publish npm` (`.github/workflows/npm-publish.yml`), which puts the CLI on npm as `@ghostlytools/cli` (the npm organization `ghostlytools`) at the tag's version, with provenance. It refuses a tag that is not `packages/cli/package.json`'s version, skips a version already on npm, and ends by installing it from npm and running `ghostly --version`. To run it again for a tag: `gh workflow run npm-publish.yml -f tag=v1.0.0`.
+
+   The same workflow publishes the SDK as `@ghostlytools/sdk` (with the mini-app types at `@ghostlytools/sdk/app`), under the same rules. `verify-sdk` runs `npm run test:sdk-example` on the tag with no token and keeps the tarball it checked; `publish-sdk` publishes that very file with `--ignore-scripts`, with no checkout or install. It runs only while the repository variable `SDK_NPM_PUBLISH` is `true`; until then it writes "not published" in the run's summary. The SDK is not on npm yet, and `/app` is for Apps, which run from release 1.2: its first publish is the owner's (the steps below, for `@ghostlytools/sdk`, then set the variable).
+
+   Only the two publish jobs can ask for an OIDC token, and both run in the GitHub environment `npm`. The checks that install a package from npm run in jobs without a token.
 
 ### npm trusted publishing
 
@@ -88,8 +104,10 @@ The workflow publishes with npm trusted publishing (OIDC), so no npm token is ke
 
 1. The npm organization `ghostlytools` exists, with the publishing npm account as an owner. The package is scoped to it, so it is private unless published with `--access public` (the workflow does, and `publishConfig` in `packages/cli/package.json` says so too).
 2. Add an npm granular access token with read and write on the `@ghostlytools` scope (allowed to bypass two-factor authentication) as the repository secret `NPM_TOKEN`, and publish the release. The workflow uses it once.
-3. On npmjs.com, `@ghostlytools/cli` → Settings → Trusted Publisher → GitHub Actions: organization or user `MiguelMedeiros`, repository `ghostly`, workflow filename `npm-publish.yml`, no environment.
+3. On npmjs.com, `@ghostlytools/cli` → Settings → Trusted Publisher → GitHub Actions: organization or user `MiguelMedeiros`, repository `ghostly`, workflow filename `npm-publish.yml`, environment `npm`. `@ghostlytools/cli` was first set up with no environment: edit its Trusted Publisher to environment `npm` before the next release.
 4. In the same settings, choose "Require two-factor authentication and disallow tokens", then delete the `NPM_TOKEN` secret and revoke the token.
+
+For `@ghostlytools/sdk` the same four steps apply, with `SDK_NPM_PUBLISH` set to `true` (Settings → Secrets and variables → Actions → Variables) before step 2 and the trusted publisher added on `@ghostlytools/sdk` in step 3. A release then publishes both packages.
 
 The website's download panel asks GitHub for the latest published release (at most once an hour) and uses it once every installer it links to is attached; until then it keeps the version in `apps/website/lib/release.ts`.
 

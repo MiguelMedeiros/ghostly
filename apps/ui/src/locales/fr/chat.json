@@ -247,6 +247,7 @@
     "downloadMp3": "Télécharger en MP3",
     "downloadPreparing": "En préparation",
     "downloadUnconverted": "Conversion impossible",
+    "downloadUnsaved": "Non enregistré. Essayez un autre dossier",
     "edit": "Modifier",
     "editPending": "Pas encore visible pour votre contact",
     "editPendingGroup": "Pas encore envoyé au groupe",
@@ -358,7 +359,6 @@
     "shared": "Partagé",
     "sharingMany": "Vous partagez {{count}} apps",
     "sharingOne": "Vous partagez 1 app",
-    "title": "Apps avec {{name}}",
     "titleShared": "Services partagés avec {{name}}",
     "yours": "Vos apps"
   },

@@ -24,6 +24,8 @@ import { loadSettings } from "./lib/settings";
 import { locales } from "./locales";
 import { translateWith } from "./locales/translate";
 import { servicesPlatform } from "./lib/platform";
+import { androidApp } from "./lib/touchOnly";
+import { followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares } from "./desktop/android";
 
 async function boot() {
   let profile = "";
@@ -32,6 +34,8 @@ async function boot() {
   } catch {
     // running outside Tauri (browser dev) — no profile
   }
+  // A debug e2e start of the Android app keeps WebRTC off the public STUN servers, before anything connects.
+  if (androidApp()) await leaveOutPublicStun(invoke).catch(() => false);
   // GHOSTLY_PROFILE gives this process a space of its own; inside it, the profile chosen in the app (WISP 04).
   setProfileBase(profile);
   // A profile a handoff moved whose pointer was lost is pointed at its state again before anything opens storage. Each
@@ -54,6 +58,13 @@ async function boot() {
   setHandoffProfileHost(handoffProfileHost(version, "desktop"));
   const host = createDesktopHost(version, await nativeCallSupport());
   setBrowserHost(host);
+  // The Android app: its system bars follow the theme, shares from other apps open the Share to… picker, and the
+  // page knows when the app is in the background (its WebView never says so).
+  if (androidApp()) {
+    followSystemBars(invoke);
+    takeIncomingShares(invoke, listen);
+    followAppVisibility(listen);
+  }
   // Mini-apps (WISP 1200) open in windows of their own, each with its broker here (lib/apps/desktopOpener.ts).
   // Its window is named after the app and the contact ("Chess with Ana"), in the profile's language.
   const windowTitle = (title: string, linkId: string | null) => {

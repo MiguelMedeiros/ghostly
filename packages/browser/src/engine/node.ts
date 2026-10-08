@@ -422,7 +422,8 @@ export interface NodeOptions {
   reactions?: boolean;
   /**
    * Mini-apps in 1:1 chats (`apps/1`, WISP 1200 § In a chat): offered on paired sessions, and the `app*` calls. Default:
-   * `APPS_ENABLED` (off until the feature ships); tests turn it on here.
+   * `APPS_ENABLED` (off until the feature ships). A host that runs no mini-app (the CLI, the extension, the Android app) pins it to false
+   * whatever the flag says, and its app calls are refused as "not on this client"; tests turn it on.
    */
   apps?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
@@ -2030,7 +2031,7 @@ export class GhostlyNode implements EngineImplementation {
   private appShelf?: Apps;
   /** The installed apps and stores, refused while the apps feature is off. */
   private get appStore(): Apps {
-    if (!this.appsOn) throw new Error("Apps are unavailable in this release");
+    if (!this.appsOn) throw this.appsOff();
     return this.appShelf ??= new Apps({
       fetch: boundedAppFetch({ fetcher: this.options.appFetch, online: () => this.networkOn }),
       isChat: (scope) => { const stored = this.links.get(scope)?.stored; return !!stored && !stored.group && !!stored.profile && !!stored.pairedPeerKey; },
@@ -4236,9 +4237,14 @@ export class GhostlyNode implements EngineImplementation {
   /** Mini-apps are on in this build (`APPS_ENABLED`) or for this engine (`apps`). */
   private get appsOn(): boolean { return this.options.apps ?? APPS_ENABLED; }
 
+  /** Why an app call is refused: this client runs no mini-app (`apps: false`), or the build has them off. */
+  private appsOff(): Error {
+    return new Error(this.options.apps === false ? "Apps do not run on this client" : "Apps are unavailable in this release");
+  }
+
   /** A paired 1:1 chat and the chat app id of `ref` in it, from the two pinned participation keys (WISP 1200 § In a chat). */
   private appChat(linkId: string, ref: string): { live: LiveLink; app: string } {
-    if (!this.appsOn) throw new Error("Apps are unavailable in this release");
+    if (!this.appsOn) throw this.appsOff();
     const live = typeof linkId === "string" ? this.links.get(linkId) : undefined;
     if (!live || live.stored.group || !live.stored.profile) throw new Error("No such chat");
     if (!isAppRef(ref)) throw new Error("Not an app reference");

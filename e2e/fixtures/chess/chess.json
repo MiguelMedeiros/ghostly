@@ -1,0 +1,12 @@
+{
+  "name": "chess",
+  "version": "1.0.2",
+  "from": {
+    "source": "apps/mini/chess",
+    "inputs": "a963e144a3c775c8cd583111f0d70b2b4250d5371b3f666ac6325937362a7601"
+  },
+  "entry": "index.html",
+  "bytes": 81896,
+  "sha256": "979a336c0065c28667ecc060cda427895593e2c8603c8d7403fd018be7d910d1",
+  "manifestSha256": "0815d25896f8a3195c6125ea990218089d090e1eccffc93396eb85255deb89dd"
+}

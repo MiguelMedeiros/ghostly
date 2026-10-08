@@ -4,7 +4,7 @@ import { OIDC_PROVIDERS, testProvider, type OidcProvider } from '../src/proofs/o
 import { authorizationRequest, callbackParams, completeSignIn, scopeFor, signInForProof, type OidcWindow } from '../src/proofs/oidc/flow';
 import { routeCallback } from '../src/proofs/oidc/popup';
 import { signToken, testKey } from './helpers/oidcIssuer';
-// covers: proofs.oidc, proofs.oidc.nonce, proofs.oidc.callback.web, proofs.oidc.callback.desktop
+// covers: proofs.oidc, proofs.oidc.nonce, proofs.oidc.callback.web, proofs.oidc.callback.desktop, proofs.oidc.callback.android
 
 // Key generation is CPU-bound; give a loaded machine room.
 vi.setConfig({ testTimeout: 60_000 });
@@ -130,5 +130,16 @@ describe('OIDC callback page', () => {
     expect(routeCallback('https://app.ghostly.tools/oidc-callback.html')).toEqual({ kind: 'none' });
     // A crafted state cannot point the forward anywhere but 127.0.0.1.
     expect(routeCallback(`https://app.ghostly.tools/oidc-callback.html#state=d.evil.example.${state}`)).toMatchObject({ kind: 'tab' });
+  });
+
+  it('hands an Android sign-in to the app by its deep link, query and fragment as they came', () => {
+    // covers: proofs.oidc.callback.android
+    const state = 'B'.repeat(43);
+    expect(routeCallback(`https://app.ghostly.tools/oidc-callback.html?code=c&state=a.${state}`)).toEqual({ kind: 'app', target: `ghostly://oidc?code=c&state=a.${state}` });
+    expect(routeCallback(`https://app.ghostly.tools/oidc-callback.html#id_token=t&state=a.${state}`)).toEqual({ kind: 'app', target: `ghostly://oidc#id_token=t&state=a.${state}` });
+    // Not the app's state shape: never sent to the app.
+    for (const other of [`a.${state}x`, `a.${state.slice(1)}`, `a.${state.slice(1)}!`, `b.${state}`]) {
+      expect(routeCallback(`https://app.ghostly.tools/oidc-callback.html#state=${encodeURIComponent(other)}`)).toMatchObject({ kind: 'tab' });
+    }
   });
 });

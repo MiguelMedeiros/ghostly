@@ -63,6 +63,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   const backdrop = useBackdropDismiss(close);
   useEffect(() => () => abort.current?.abort(), []);
 
+  /** Stopped by the person: nothing to do, and nothing was saved. */
+  const cancelled = (): Problem => ({ tone: "error", title: t("identities.add.cancelled") });
   const validity = days || provider?.validity.defaultDays || 30;
   const validityOptions = provider ? [...new Set([...VALIDITY.filter(d => d <= provider.validity.maxDays), provider.validity.defaultDays])].sort((a, b) => a - b) : [];
   const choose = (p: IdentityProofProvider) => { setProvider(p); setSignerId(""); setSubject(p.subject.options?.[0]?.value ?? ""); setDays(0); setError(""); };
@@ -183,7 +185,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               <ProviderMark provider={provider.id} />
               <p className="min-w-0 flex-1 text-sm text-text-primary">{provider.label}</p>
             </div>
-            <ApprovalPanel request={approval} onCancel={() => { abort.current?.abort(); setApproval(null); setProgress(""); setError(t("identities.add.cancelled")); }} />
+            <ApprovalPanel request={approval} onCancel={() => { abort.current?.abort(); setApproval(null); setProgress(""); setError(cancelled()); }} />
           </div>
         ) : (
           <div className="space-y-4">
@@ -230,7 +232,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             <p className="text-xs text-text-muted">{provider.privacy} {t("identities.add.linkable")}</p>
             {provider.experimental && <Notice tone="warning">{t("identities.add.experimental")}</Notice>}
             <div className="flex flex-wrap justify-end gap-2">
-              {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError(t("identities.add.cancelled")); }}>{t("common.cancel")}</Button>}
+              {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError(cancelled()); }}>{t("common.cancel")}</Button>}
               <Button variant="primary" data-testid="add-identity-start" disabled={busy || !signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
                 {busy ? t("identities.waiting") : signer?.action ?? (signer?.kind === "in-app" ? t("identities.add.signWithNamed", { signer: signer.label.replace(/ \(.*\)$/, "") }) : t("identities.add.continue"))}
               </Button>

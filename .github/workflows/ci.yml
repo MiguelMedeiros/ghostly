@@ -4,9 +4,10 @@ on:
   push:
     # dev: where features land (main holds what is released; see .github/CONTRIBUTING.md).
     # claude/security-auto-*: the security routine's fixes; see security-autorelease.yml.
-    branches: [main, master, dev, "claude/security-auto-**"]
+    # epic/*: a large feature's integration branch; its slices merge there before one umbrella PR into dev.
+    branches: [main, master, dev, "claude/security-auto-**", "epic/**"]
   pull_request:
-    branches: [main, master, dev]
+    branches: [main, master, dev, "epic/**"]
     # ready_for_review: a draft runs the fast tier only (see `changes`); leaving draft runs everything.
     # Whether the pull request is a draft is read from the API when `changes` runs, never from the event: a push and
     # `gh pr ready` a second apart start two runs, the later one cancels the other, and the survivor may be the push's
@@ -182,6 +183,10 @@ jobs:
       # the run's summary page: it is not committed.
       - name: Test map (every feature has a test)
         run: npm run test:map -- --summary
+
+      # e2e/fixtures/chess is what apps/mini/chess builds to, byte for byte (tools/scripts/refresh-chess-fixture.mjs).
+      - name: Chess e2e fixture is up to date
+        run: if [[ -f apps/mini/chess/vite.config.ts ]]; then node tools/scripts/refresh-chess-fixture.mjs --check; fi
 
   frontend-tests:
     name: Frontend tests (app)
@@ -599,6 +604,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.website == 'true'
     runs-on: ubuntu-24.04
+    # The /apps pages read the committed test store, not GitHub (scripts/sync-store.mjs).
+    env:
+      GHOSTLY_STORE_FIXTURE: "1"
     defaults:
       run:
         working-directory: apps/website
@@ -632,6 +640,10 @@ jobs:
       - name: App deck copies match the app
         run: node scripts/sync-app-deck.mjs --check
 
+      # The /apps pages check the store with core's own readers, copied (scripts/sync-store-core.mjs).
+      - name: Store reader copies match core
+        run: node scripts/sync-store-core.mjs --check
+
       - name: ESLint
         run: npm run lint
 
@@ -651,6 +663,9 @@ jobs:
     if: needs.changes.outputs.website_e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # The /apps pages read the committed test store, not GitHub (scripts/sync-store.mjs).
+    env:
+      GHOSTLY_STORE_FIXTURE: "1"
     strategy:
       fail-fast: false
       matrix:

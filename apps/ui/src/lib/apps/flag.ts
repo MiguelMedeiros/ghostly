@@ -3,16 +3,35 @@
  * composer entry, no app card (a card reads as its text, as in an older app), and no request at all.
  *
  * The rule is one function, `appsAvailable`, so a later rule (a browser apps are hidden or limited on) is added there
- * and every screen follows. The screens ask it through `useAppsState` / `useAppsAvailable`.
+ * and every screen follows. The screens ask it through `useAppsState` / `useAppsAvailable`. The platforms that run no
+ * apps yet (`appsPlatform`) have the feature off.
  */
 import { useEffect, useSyncExternalStore } from "react";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../platform";
 import { useAppOpener, type AppOpener } from "./open";
 import { runnerPolicy } from "./runnerCheck";
+import { androidApp } from "../touchOnly";
 
-/** The feature is on in this build: `APPS_ENABLED`, or the e2e suite's build (`VITE_APPS_TEST=1`, fixed at build time). */
+/**
+ * Whether this platform runs apps at all (WISP 1200 § Per client). Not Ghostly Desktop on Windows: WebView2's
+ * equivalents of an app window's guards are not measured yet, and `app_open` refuses there
+ * (apps/desktop/src/app_sandbox.rs). Not the native Android app (apps/desktop built for Android): its app commands
+ * answer "Not available on this platform" (apps/desktop/src/mobile.rs). A browser on Windows or Android, and the
+ * installed web app (the PWA), run apps on the web runner: they are not this rule's.
+ */
+export function appsPlatform(): boolean {
+  if (androidApp()) return false;
+  return !(typeof window !== "undefined" && "__TAURI_INTERNALS__" in window && /\bWindows NT\b/.test(navigator.userAgent));
+}
+
+/**
+ * The feature is on in this build: `APPS_ENABLED`, or the e2e suite's build (`VITE_APPS_TEST=1`, fixed at build time).
+ * Never where the platform runs no apps yet (`appsPlatform`), whatever the build: its host runs none either
+ * (desktop/host.ts `desktopApps`).
+ */
 export function appsEnabled(): boolean {
+  if (!appsPlatform()) return false;
   return APPS_ENABLED || import.meta.env?.VITE_APPS_TEST === "1";
 }
 

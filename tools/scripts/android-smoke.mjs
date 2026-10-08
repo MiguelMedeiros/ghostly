@@ -5,7 +5,10 @@
 // - Pkarr over UDP: a packet written to and read from the Mainline DHT only (no relay), then through the relays;
 // - HTTPS from Rust, which checks certificates with Android's own verifier;
 // - the `ghostly-file` scheme: a range request, and a <video> playing from it;
-// - JavaScript timers while the screen is off (an emulator's answer, which a phone has to confirm).
+// - JavaScript timers while the screen is off (an emulator's answer, which a phone has to confirm);
+// - the Android host (A1): the opener's intent, a clipboard round trip, the notification permission and a notification
+//   posted and tapped, the share sheet and "Share to Ghostly", a sign-in's deep link, the system bars, a network change
+//   told to Iroh, and the screen a too-old WebView gets.
 // Every result goes to $ANDROID_SMOKE_OUT/results.json and results.md, with screenshots and the logs. Only the smoke
 // test fails the job (the app does not start or its UI does not render); a measurement records what it saw.
 //
@@ -16,6 +19,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const PKG = "tools.ghostly.app";
+/** A debug e2e start on the public networks (the smoke measures them: MainActivity.kt `e2eEnvironment`). */
+const E2E_START = ["--ez", "ghostly_e2e", "true", "--es", "GHOSTLY_TEST_PUBLIC_NET", "1"];
 const apk = process.env.ANDROID_SMOKE_APK;
 const out = resolve(process.env.ANDROID_SMOKE_OUT ?? "android-smoke");
 if (!apk) throw new Error("ANDROID_SMOKE_APK: the APK to install");
@@ -47,13 +52,17 @@ const write = () => {
 
 let smokeFailed = false;
 let device;
+let appPid = "";
 try {
   record("device", "Android", true, `${adb("shell", "getprop", "ro.build.version.release").trim()} (API ${adb("shell", "getprop", "ro.build.version.sdk").trim()}), ${adb("shell", "getprop", "ro.product.cpu.abi").trim()}`);
   adb("install", "-r", apk);
   adb("logcat", "-c");
-  // `ghostly_e2e`: a debug build's switch for GHOSTLY_E2E=1 (MainActivity.kt): no name step, no default wallets.
-  const started = adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`, "--ez", "ghostly_e2e", "true");
+  // `ghostly_e2e`: a debug build's switch for GHOSTLY_E2E=1 (MainActivity.kt): no name step, no default wallets. It
+  // also keeps the app off public networks unless `GHOSTLY_TEST_PUBLIC_NET=1`, and the smoke measures them on purpose.
+  const started = adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`, ...E2E_START);
   record("smoke", "activity starts", /Status: ok/.test(started), started.match(/TotalTime: \d+/)?.[0] ?? started.trim().split("\n").pop());
+  // The process the probe measures (the WebView-update check starts another at the end).
+  appPid = adb("shell", "pidof", PKG).trim();
 
   [device] = await _android.devices();
   if (!device) throw new Error("no device from adb");
@@ -304,6 +313,156 @@ try {
     record("files", "ghostly-file range requests (206)", served.some((l) => / -> 206 /.test(l)), served.slice(0, 6).join(" / ") || "no request reached the scheme");
   });
 
+  // ---- The Android host (A1, src/android.rs and GhostlyHostPlugin.kt) ----
+  const top = () => adb("shell", "dumpsys", "activity", "activities").match(/topResumedActivity=.*\{[^}]*\}/)?.[0] ?? "";
+  const back = async () => {
+    adb("shell", "am", "start", "-n", `${PKG}/.MainActivity`);
+    await sleep(1_500);
+  };
+  const intentsSince = (mark) => adb("logcat", "-d", "-v", "time", "-T", mark).split("\n").filter((l) => /START u0 \{/.test(l));
+  const logMark = () => adb("shell", "date '+%m-%d %H:%M:%S.000'").trim();
+
+  // Opener: what `launch()` hands Android (ACTION_VIEW), with the desktop's checks before it.
+  await measure("host", "opener: a web link opens in the browser", async () => {
+    const mark = logMark();
+    await invoke("open_web_link", { url: "https://example.com/a1-probe" });
+    await sleep(2_000);
+    // Android's log elides the path ("dat=https://example.com/...").
+    const started = intentsSince(mark).find((l) => /VIEW/.test(l) && /\bdat=https:\/\/example\.com\//.test(l)) ?? "";
+    record("host", "opener: a web link opens in the browser", !!started, `${started.replace(/^.*START u0 /, "").slice(0, 200) || "no VIEW intent"}; top: ${top().slice(0, 160)}`);
+    await back();
+  });
+  await measure("host", "opener: refused before Android sees it", async () => {
+    const refusals = [];
+    for (const [cmd, url] of [["open_web_link", "file:///etc/hosts"], ["open_project_link", "https://example.com/"], ["open_payment_link", "javascript:alert(1)"]]) {
+      refusals.push(`${cmd} ${url}: ${await invoke(cmd, { url }).then(() => "OPENED", (e) => String(e))}`);
+    }
+    record("host", "opener: refused before Android sees it", !refusals.some((r) => r.endsWith("OPENED")), refusals.join(" / "));
+  });
+  await measure("host", "opener: a payment link with no wallet", async () => {
+    const answer = await invoke("open_payment_link", { url: "lightning:lntbs1probe" }).then(() => "opened", (e) => String(e));
+    record("host", "opener: a payment link with no wallet", answer !== "opened" ? true : null, answer);
+    if (answer === "opened") await back();
+  });
+
+  // Clipboard: the page writes (navigator.clipboard), Rust reads Android's clipboard (`read_clipboard_text`).
+  await measure("host", "clipboard round trip", async () => {
+    const text = `ghostly-a1-${Date.now()}`;
+    await page.locator("body").click({ position: { x: 5, y: 5 } }).catch(() => {});
+    const wrote = await page.evaluate((text) => navigator.clipboard.writeText(text).then(() => "ok", (e) => String(e)), text);
+    const read = await invoke("read_clipboard_text").catch((e) => `error: ${e}`);
+    record("host", "clipboard round trip", read === text, `writeText ${wrote}; read_clipboard_text ${JSON.stringify(read).slice(0, 80)}`);
+  });
+
+  // Notifications: not asked at start; asked on request (Android 13+), then posted on the Messages channel.
+  await measure("host", "notifications: permission", async () => {
+    const before = await invoke("native_notification_permission", { request: false });
+    const asking = page.evaluate(() => window.__TAURI_INTERNALS__.invoke("native_notification_permission", { request: true }));
+    await sleep(2_500);
+    const dialog = top();
+    writeFileSync(resolve(out, "notification-ask.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+    // Allow, by its button in the system dialog.
+    const ui = adb("exec-out", "uiautomator", "dump", "/dev/tty");
+    const allow = ui.match(/text="Allow"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    if (allow) adb("shell", "input", "tap", String((+allow[1] + +allow[3]) >> 1), String((+allow[2] + +allow[4]) >> 1));
+    const after = await asking;
+    record("host", "notifications: permission", before !== "granted" && after === "granted", `before ${before}; dialog ${/GrantPermissionsActivity/.test(dialog) ? "shown" : dialog.slice(0, 120)}; after Allow ${after}`);
+  });
+  await measure("host", "notifications: posted, and a tap opens its chat", async () => {
+    await invoke("native_private_notification", { id: "a1-probe", body: "A1 probe: a new message" });
+    await sleep(1_000);
+    const posted = adb("shell", "dumpsys", "notification", "--noredact").split("\n").filter((l) => /tools\.ghostly\.app/.test(l) && /a1-probe|channel=messages|chn=messages/i.test(l));
+    adb("shell", "cmd", "statusbar", "expand-notifications");
+    await sleep(1_500);
+    writeFileSync(resolve(out, "notification.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+    adb("shell", "cmd", "statusbar", "collapse");
+    // The tap's intent, as the notification's PendingIntent sends it: the page hears `notification-open`.
+    await page.evaluate(() => {
+      window.__probeOpened = [];
+      const handler = window.__TAURI_INTERNALS__.transformCallback((event) => window.__probeOpened.push(event.payload));
+      return window.__TAURI_INTERNALS__.invoke("plugin:event|listen", { event: "notification-open", target: { kind: "Any" }, handler });
+    });
+    adb("shell", "am", "start", "-n", `${PKG}/.MainActivity`, "--es", "tools.ghostly.app.notification", "a1-probe");
+    await sleep(1_500);
+    const opened = await page.evaluate(() => window.__probeOpened);
+    record("host", "notifications: posted, and a tap opens its chat", posted.length > 0 && opened.includes("a1-probe"), `${posted.slice(0, 2).join(" / ").trim().slice(0, 240) || "not in dumpsys"}; tap reached the page: ${JSON.stringify(opened)}`);
+  });
+
+  // Share: the system's sheet out; "Share to Ghostly" in, to the page's Share to… picker.
+  await measure("host", "share sheet", async () => {
+    const shown = await invoke("share_text", { text: "https://ghostly.tools/a1-probe" });
+    await sleep(2_000);
+    const sheet = top();
+    writeFileSync(resolve(out, "share-sheet.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+    record("host", "share sheet", shown === true && /Chooser|Resolver|intentresolver/i.test(sheet), `share_text ${shown}; top: ${sheet.slice(0, 160)}`);
+    adb("shell", "input", "keyevent", "KEYCODE_BACK");
+    await back();
+  });
+  await measure("host", "Share to Ghostly (text) opens the picker", async () => {
+    adb("shell", "am", "start", "-a", "android.intent.action.SEND", "-t", "text/plain", "--es", "android.intent.extra.TEXT", "'A1 probe: shared from another app'", "-n", `${PKG}/.MainActivity`);
+    const shared = page.locator('[data-testid="share-text"]').first();
+    await shared.waitFor({ state: "attached", timeout: 15_000 });
+    const text = (await shared.textContent())?.trim();
+    await page.screenshot({ path: resolve(out, "share-picker.png") }).catch(() => {});
+    record("host", "Share to Ghostly (text) opens the picker", /shared from another app/.test(text ?? ""), `${await page.evaluate(() => location.hash)}: ${text}`);
+    await page.locator('[data-testid="share-cancel"]').first().click().catch(() => {});
+  });
+
+  // Sign-in by deep link: Rust waits for the `a.` state it opened the browser with, and takes only that answer.
+  await measure("host", "OIDC deep link reaches the waiting sign-in", async () => {
+    const port = await invoke("oidc_loopback_start");
+    const state = `a.${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")}`;
+    await page.evaluate(([port, state]) => {
+      window.__probeSignIn = window.__TAURI_INTERNALS__.invoke("oidc_loopback_wait", { port, url: "https://example.com/authorize?client_id=probe&redirect_uri=https%3A%2F%2Fapp.ghostly.tools%2Foidc-callback.html", expectedState: state })
+        .then((answer) => ({ answer }), (error) => ({ error: String(error) }));
+    }, [port, state]);
+    await sleep(2_500);
+    const browser = top();
+    // Another state first: dropped, the wait goes on.
+    adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'ghostly://oidc?code=wrong&state=a.${"B".repeat(43)}'`);
+    await sleep(1_500);
+    const t = Date.now();
+    adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'ghostly://oidc?code=probe&state=${state}'`);
+    const result = await page.evaluate(() => Promise.race([window.__probeSignIn, new Promise((done) => setTimeout(() => done({ error: "no answer in 15 s" }), 15_000))]));
+    record("host", "OIDC deep link reaches the waiting sign-in", port === 0 && result.answer === `?code=probe&state=${state}`, `port ${port}; browser ${browser.slice(0, 100)}; ${JSON.stringify(result).slice(0, 160)} after ${Date.now() - t} ms`);
+    await back();
+  });
+
+  // System bars: the page's background and icons that read on it, Dark then Light (screenshots with the bars).
+  await measure("host", "system bars follow the theme", async () => {
+    const shots = [];
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), theme);
+      await sleep(1_500);
+      const file = `bars-${theme}.png`;
+      writeFileSync(resolve(out, file), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+      shots.push(`${file}: ${await page.evaluate(() => getComputedStyle(document.body).backgroundColor)}`);
+    }
+    const appearance = adb("shell", "dumpsys", "window", "windows").match(/APPEARANCE_LIGHT_STATUS_BARS|mAppearance=\S+/g)?.slice(0, 3).join(" ") ?? "";
+    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+    record("host", "system bars follow the theme", null, `${shots.join("; ")}; ${appearance}`);
+  });
+
+  // Touch only: the Android app never puts the caret in a field it opens (lib/touchOnly.ts), whatever the pointer says.
+  record("webview", "touch only, forced in the Android app", env.tauri && /Android/.test(env.userAgent), `any-pointer fine ${env.fine}, ignored`);
+
+  // Network change: Android's callback (Iroh's netwatch is denied the routing table) tells every endpoint.
+  await measure("host", "network change reaches Iroh", async () => {
+    const endpoint = await page.evaluate(async (seedB64) => {
+      const id = window.__TAURI_INTERNALS__.transformCallback(() => {});
+      return await window.__TAURI_INTERNALS__.invoke("paired_iroh_start", { seedB64, events: `__CHANNEL__:${id}` });
+    }, Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"));
+    adb("shell", "cmd", "connectivity", "airplane-mode", "enable");
+    await sleep(4_000);
+    adb("shell", "cmd", "connectivity", "airplane-mode", "disable");
+    await sleep(8_000);
+    const told = adb("shell", "run-as", PKG, "find", ".", "-name", "'*.log'", "-not", "-path", "'./app_webview/*'").trim().split("\n").filter(Boolean)
+      .flatMap((file) => adb("shell", "run-as", PKG, "cat", `'${file.trim()}'`).split("\n"))
+      .filter((l) => /network: changed/.test(l));
+    record("host", "network change reaches Iroh", told.length > 0, told.slice(-3).join(" / ").slice(0, 300) || "no network line in the app log");
+    await invoke("paired_iroh_stop", { endpointId: endpoint.id ?? endpoint }).catch(() => {});
+  });
+
   // Timers with the screen off: an emulator's answer only. A phone (Doze, the maker's battery rules) can differ.
   await measure("background", "JS timers with the screen off (60 s, emulator)", async () => {
     await page.evaluate(() => {
@@ -317,6 +476,19 @@ try {
     record("background", "JS timers with the screen off (60 s, emulator)", ticks >= 50, `${ticks} ticks of 60`);
   });
 
+  // Last, as it starts the app again: the screen a WebView too old for the page gets, before the page loads. The
+  // emulator's is new enough, so a debug build's extra raises the minimum.
+  await measure("host", "WebView too old: the update screen", async () => {
+    adb("shell", "am", "force-stop", PKG);
+    adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`, ...E2E_START, "--ei", "ghostly_min_webview", "999");
+    await sleep(4_000);
+    writeFileSync(resolve(out, "webview-update.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+    const ui = adb("exec-out", "uiautomator", "dump", "/dev/tty");
+    record("host", "WebView too old: the update screen", /Update Android System WebView/.test(ui), (ui.match(/text="[^"]*WebView[^"]*"/g) ?? []).join(" ").slice(0, 300) || "not on screen");
+    adb("shell", "am", "force-stop", PKG);
+    adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`, ...E2E_START);
+  });
+
   writeFileSync(resolve(out, "console.txt"), consoleLines.join("\n"));
 } catch (error) {
   smokeFailed = true;
@@ -326,7 +498,7 @@ try {
   try {
     const logcat = adb("logcat", "-d", "-v", "time");
     writeFileSync(resolve(out, "logcat.txt"), logcat);
-    const pid = adb("shell", "pidof", PKG).trim();
+    const pid = appPid || adb("shell", "pidof", PKG).trim();
     const ours = logcat.split("\n").filter((l) => pid && l.includes(`(${pid.padStart(5)})`));
     writeFileSync(resolve(out, "logcat-app.txt"), ours.join("\n"));
     const netlink = ours.filter((l) => /netlink|netwatch|EACCES|Permission denied|avc: denied/i.test(l));
