@@ -30,8 +30,10 @@ async function look(page: Page, language: string, scheme: "light" | "dark"): Pro
 
 /**
  * What axe finds serious or critical on the page as it is now, one line per rule and element. `frames: false` leaves
- * out what is inside the frames: an app's own page is its publisher's, not Ghostly's (the frame element, its title, is
- * still checked).
+ * out what is inside the frames: an app's own page is its publisher's, not Ghostly's. axe still reads the frames (the
+ * Playwright runner always goes into them, whatever its `iframes` option says), so the findings there are dropped
+ * here: a node in a frame has one selector per document on its way, the frame's and then its own. The frame element
+ * itself (its title) is in the top document, still checked.
  */
 async function findings(page: Page, { frames = true }: { frames?: boolean } = {}): Promise<string[]> {
   // Past the colour transitions and the fade-ins, so contrast is read on the colours as they end. Not past the loops:
@@ -40,9 +42,9 @@ async function findings(page: Page, { frames = true }: { frames?: boolean } = {}
     await new Promise(requestAnimationFrame);
     await Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations === 1).map((a) => a.finished.catch(() => {})));
   });
-  const { violations } = await new AxeBuilder({ page }).withTags(TAGS).options({ iframes: frames }).analyze();
+  const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
   return violations.filter((v) => v.impact === "serious" || v.impact === "critical")
-    .flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(" ")} ${n.failureSummary?.split("\n").slice(1).join(" ").trim() ?? ""}`));
+    .flatMap((v) => v.nodes.filter((n) => frames || n.target.length === 1).map((n) => `${v.id}: ${n.target.join(" ")} ${n.failureSummary?.split("\n").slice(1).join(" ").trim() ?? ""}`));
 }
 
 for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {

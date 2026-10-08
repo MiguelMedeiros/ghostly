@@ -38,15 +38,16 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   const { t } = useI18n();
   const hint = appHint(app, t);
   const color = { muted: "text-text-muted", warning: "text-test-money-ink", danger: "text-danger" }[hint.tone];
+  const versionId = useId();
   const hintId = useId();
   return (
     <div className="flex items-center gap-3 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      {/* Named "Chess: details", which hides the line under it: that line (Stopped, an update that asks) is its description. */}
+      {/* Named "Chess: details", which hides the text in it: its version and the line under it (Stopped, an update that asks) are its description. */}
       <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-1 text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        aria-label={t("apps.page.details", { title: app.title })} aria-describedby={hintId}>
+        aria-label={t("apps.page.details", { title: app.title })} aria-describedby={`${versionId} ${hintId}`}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          <span className="block text-sm text-text-primary truncate">{app.title} <span className="text-text-muted text-xs">{app.version}</span></span>
+          <span className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
           <span id={hintId} data-testid="installed-app-hint" className={`block text-xs truncate ${color}`}>{hint.text}</span>
         </span>
       </button>

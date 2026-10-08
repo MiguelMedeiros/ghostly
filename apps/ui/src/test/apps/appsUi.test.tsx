@@ -438,12 +438,12 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
-  it("an installed app's row is named for its details and describes its line, so a stopped app says so to a screen reader", async () => {
+  it("an installed app's row is named for its details and describes its version and line, so a stopped app says so to a screen reader", async () => {
     const run = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
     fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
     renderApp(<Apps />, { route: "/apps" });
     const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" });
-    expect(details).toHaveAccessibleDescription("Stopped");
+    expect(details).toHaveAccessibleDescription("1.2.0 Stopped");
   });
 
   it("the focus goes to Add once an uninstalled app's row or a removed store's block is gone, not lost on the page", async () => {
