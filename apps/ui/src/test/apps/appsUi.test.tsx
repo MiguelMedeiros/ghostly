@@ -159,12 +159,20 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
-  it("in the Android app shows nothing of it, even in the e2e suite's build: no page, no place, no tab, no composer row, no request", async () => {
+  it.each([
     // The Android app is the Desktop app built for Android: a Tauri page with an Android agent.
-    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36");
+    ["in the Android app", "Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"],
+    // Desktop on Windows: a Tauri page in WebView2.
+    ["on Desktop on Windows", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0"],
+  ])("%s shows nothing of it, even in the e2e suite's build: no page, no place, no tab, no card, no composer row, no request", async (_where, agent) => {
+    // covers: apps.desktop-sandbox
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agent);
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
-    fakeEngine.appRunner = "ghostly-app://localhost/";
-    fakeEngine.appRunnerServed = true;
+    // A runner the app does not serve itself: without the platform rule, its header would be asked.
+    fakeEngine.appRunner = "/app-frame.html";
+    fakeEngine.appRunnerServed = false;
+    const { runnerPolicy } = await import("../../lib/apps/runnerCheck");
+    vi.mocked(runnerPolicy).mockClear();
     try {
       const { user } = renderApp(
         <LockScreenProvider>
@@ -184,10 +192,14 @@ describe("with the apps flag on", () => {
       expect(screen.queryByTestId("apps-page")).not.toBeInTheDocument();
       expect(screen.queryByTestId("account-apps")).not.toBeInTheDocument();
       expect(screen.queryByTestId("mobile-tab-apps")).not.toBeInTheDocument();
+      // The card as its text, as in an older app.
       expect(screen.queryByTestId("app-card")).not.toBeInTheDocument();
+      expect(screen.getByText(/Opened Chess 1\.2\.0 in this chat/)).toBeInTheDocument();
       await user.click(screen.getByTestId("composer-more"));
       expect(screen.queryByTestId("composer-apps")).not.toBeInTheDocument();
       expect(appCalls()).toEqual([]);
+      expect(runnerPolicy).not.toHaveBeenCalled();
+      expect(fetches).toEqual([]);
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }

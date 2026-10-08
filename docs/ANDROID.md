@@ -102,7 +102,7 @@ The page runs the Desktop host (`apps/ui/src/desktop/host.ts`), so each Android 
 | Touch only | Always in the Android app, whatever the pointer query says (`apps/ui/src/lib/touchOnly.ts`) | |
 | WebView too old | Below Chrome 111 (Vite's default build target), `MainActivity` hides the page behind a native "Update Android System WebView" screen with a button to the Play Store (its text in the 8 languages). A debug build takes `--ei ghostly_min_webview <major>` to show it on a newer WebView (the text names the minimum applied). The bars take the screen's own background, light or dark as the system's night mode; the page behind it no longer sets them | |
 
-Apps (mini-apps) are off in the Android app for now (`desktopApps` in `apps/ui/src/desktop/host.ts`, read by `apps/ui/src/lib/apps/flag.ts`): no Apps page, composer entry or app card.
+Apps (mini-apps) are off in the Android app for now (`appsPlatform` in `apps/ui/src/lib/apps/flag.ts`, which `desktopApps` in `apps/ui/src/desktop/host.ts` reads too): no Apps page, composer entry or app card, and no `apps/1` offered to contacts.
 
 The OIDC redirect is the app's own scheme (`ghostly://oidc`) for now. An App Link (`https://app.ghostly.tools/...` opening the app) instead would need `/.well-known/assetlinks.json` on the site with the upload key's SHA-256 fingerprint and `android:autoVerify="true"` on the filter: a deploy, not done yet.
 

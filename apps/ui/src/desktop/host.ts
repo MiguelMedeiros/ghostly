@@ -44,7 +44,7 @@ import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/file
 import { setWindowThemeSink } from "../lib/windowTheme";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
-import { androidApp } from "../lib/touchOnly";
+import { appsPlatform } from "../lib/apps/flag";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -279,10 +279,11 @@ export async function desktopUnderTest(): Promise<boolean> {
  * Mini-apps (WISP 1200) on this app: on Desktop they run in windows of their own on Rust's `ghostly-app` scheme, which
  * serves the runner with its policy (apps/desktop/src/app_sandbox.rs): one address, the policy chosen by what the
  * person granted. The engine has them in the e2e suite's build only (VITE_APPS_TEST, fixed when the build is made),
- * reading its test store. The Android app has none yet, whatever the build: no runner, and the engine told so.
+ * reading its test store. Desktop on Windows and the Android app have none yet (`appsPlatform` false), whatever the
+ * build: no runner, and the engine told so, so no `apps/1` is offered to contacts.
  */
-export function desktopApps(android: boolean) {
-  if (android) return { host: {}, node: { apps: false } };
+export function desktopApps(runsApps: boolean) {
+  if (!runsApps) return { host: {}, node: { apps: false } };
   return {
     host: { appRunner: "ghostly-app://localhost/", appNetRunner: "ghostly-app://localhost/", appRunnerServed: true },
     node: import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {},
@@ -310,7 +311,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
-  const apps = desktopApps(androidApp());
+  const apps = desktopApps(appsPlatform());
   return createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
