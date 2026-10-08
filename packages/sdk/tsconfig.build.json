@@ -29,6 +29,7 @@
     "src/index.ts",
     "src/fakes.ts",
     "src/testing.ts",
-    "src/core.ts"
+    "src/core.ts",
+    "src/app.ts"
   ]
 }

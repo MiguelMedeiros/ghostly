@@ -1186,6 +1186,7 @@
     "packages/react/src/**/*": ["calls.*"],
     "packages/sdk/examples/adapter/src/**/*": ["sdk.*"],
     "packages/sdk/examples/adapter/{package.json,package-lock.json,tsconfig.json,vitest.config.ts}": ["sdk.*"],
+    "packages/sdk/examples/mini-app/**/*": ["sdk.package"],
     "packages/sdk/src/**/*": ["sdk.*"],
     "packages/sdk/{scripts/**,vite.config.ts,tsconfig.build.json}": [],
     "vite.config.ts": ["desktop.*"],

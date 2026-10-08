@@ -18,25 +18,48 @@
 // The train keeps no state of its own: a batch's members and the half that waits after it live in a hidden mark in
 // the batch's body, and everything else is read again each run.
 //
-//   GH_TOKEN=<token> GITHUB_REPOSITORY=owner/repo node tools/scripts/merge-train.mjs --dry-run [--base dev] [--also 12,34]
+//   node tools/scripts/merge-train.mjs --run | --dry-run | --list-bases  [--base dev] [--every 120] [--also 12,34]
 //
-// --dry-run reads the live repo, builds batches in a temporary worktree (never pushed) and prints what it would do;
-// it changes nothing on GitHub. --also pretends the listed pull requests carry `queue` (dry runs only).
+// .github/workflows/merge-queue.yml runs it with the queue app's token (GH_TOKEN); pushes made with the workflow's own
+// GITHUB_TOKEN would start no CI. Until that app exists a Mac runs it with its gh login (`gh auth token` when GH_TOKEN
+// is unset) and its git credentials for `origin`; --every <seconds> repeats the run. Without --base it runs every base
+// that has a queued pull request or a batch open (--list-bases prints them as JSON). --dry-run reads the live repo,
+// builds batches in a temporary worktree (never pushed) and prints what it would do; it changes nothing on GitHub.
+// --also pretends the listed pull requests carry `queue` (dry runs only). GITHUB_REPOSITORY defaults to this repo.
 // tools/scripts/test/merge-train.test.ts drives the train through a fake GitHub and git.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ciState } from "./merge-queue.mjs";
 
 export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "queue:conflict", failed: "queue:failed" };
 export const MAX_BATCH = 5;
 const POSITION = "<!-- merge-train:position -->";
+const HEAD = /<!-- merge-train:head (\w+) -->/;
 const STATE = /<!-- merge-train:batch (\{.*?\}) -->/g;
 /** The bases a train runs for; anything else never reaches a URL path, a refspec or a branch name. */
-const BASE = /^(dev|epic\/[A-Za-z0-9._-]+)$/;
+export const BASE = /^(dev|epic\/[A-Za-z0-9._-]+)$/;
+/** A batch whose CI has not started after this long (the GITHUB_TOKEN trap, a lost event) is rebuilt. */
+export const CI_START_TIMEOUT = 20 * 60_000;
+
+/**
+ * CI on one commit, from its check runs: "success", "failure", "pending" (CI Success has not finished, or has no run
+ * yet while other checks run) or "none" (nothing ran: CI never started). A rerun adds a run with the same name, so
+ * the newest counts; a draft's gate "CI Success (draft)" does not count.
+ */
+export function ciState(runs) {
+  const newest = (a, b) => (Date.parse(b.started_at ?? 0) || 0) - (Date.parse(a.started_at ?? 0) || 0) || (b.id ?? 0) - (a.id ?? 0);
+  const gate = runs.filter((r) => r.name === "CI Success").sort(newest)[0];
+  const running = runs.some((r) => r.status !== "completed");
+  if (!gate) return running ? "pending" : "none";
+  if (gate.status !== "completed") return "pending";
+  if (gate.conclusion === "success") return "success";
+  // A run cancelled by a newer one (a push, a rerun) says nothing about the commit until the newer one ends.
+  if (gate.conclusion === "cancelled" || gate.conclusion === "skipped") return running ? "pending" : "none";
+  return "failure";
+}
 
 export const ordinal = (n) => {
   const v = n % 100;
@@ -92,8 +115,8 @@ export const isBatch = (p, base) => !p.fork && p.branch.startsWith(`batch/${base
 /** An epic's umbrella (or main) merges into its base with a merge commit, never squashed into a batch. */
 const mergeCommitOnly = (p) => p.branch.startsWith("epic/") || p.branch === "main";
 
-export function batchBody(base, baseSha, head, prs, next) {
-  const state = { base, baseSha, head, prs: prs.map((p) => ({ number: p.number, sha: p.sha })), next: next.map((p) => p.number) };
+export function batchBody(base, baseSha, head, prs, next, extra = {}) {
+  const state = { base, baseSha, head, prs: prs.map((p) => ({ number: p.number, sha: p.sha })), next: next.map((p) => p.number), ...extra };
   return [
     `The merge train lands these pull requests on \`${base}\` together, one commit each, in this order:`,
     "",
@@ -105,11 +128,16 @@ export function batchBody(base, baseSha, head, prs, next) {
   ].join("\n");
 }
 
-export function positionText(base, pr, place, batch) {
-  if (batch) return `${POSITION}\nMerge train: in batch #${batch} into \`${base}\`, waiting for its CI.`;
+/** The comment that says where a pull request is. It also records the head the train first saw queued (`head`). */
+export function positionText(base, pr, place, batch, head = pr.sha) {
+  const mark = `<!-- merge-train:head ${head} -->`;
+  if (batch) return `${POSITION}${mark}\nMerge train: in batch #${batch} into \`${base}\`, waiting for its CI.`;
   const why = waiting(pr);
-  return `${POSITION}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : ""}`;
+  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : ""}`;
 }
+
+/** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
+export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -120,9 +148,10 @@ const conflictText = (base, reason) =>
  * One run of the train for one base. `gh` reads and writes GitHub, `git` builds and pushes batches (both are fakes
  * in the tests). In a dry run every write is logged instead. Returns the log and what happened.
  */
-export async function tick({ gh, git, base, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [] }) {
+export async function tick({ gh, git, base, login, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [], now = Date.now(), log = [] }) {
   if (!BASE.test(base)) throw new Error(`Not a train base: ${JSON.stringify(base)}`);
-  const log = [];
+  // The train's own GitHub login: only its comments count as position comments (anyone can write the marks).
+  if (!login) throw new Error("The train's own login is required");
   const say = (line) => log.push(line);
   const w = dry ? dryWriter(gh, say) : gh;
   const done = { merged: [], failed: [], dropped: [], opened: [], closed: [] };
@@ -135,19 +164,24 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
     p.queuedAt = queuedAt(await gh.events(p.number), p.createdAt);
     p.priority = p.labels.includes(LABEL.priority);
     p.ci = ciState(await gh.checkRuns(p.sha));
+    p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
   }
   const byNumber = new Map(queued.map((p) => [p.number, p]));
   const line = () => order(queued.filter((p) => !gone.has(p.number)));
   say(`${base}: ${queued.length} in line, ${batches.length} batch(es) open.`);
 
-  const sticky = async (n) => (await gh.comments(n)).find((c) => (c.body ?? "").includes(POSITION));
   const leave = async (p, label, text) => {
     gone.add(p.number);
     if (label) await w.addLabel(p.number, label);
-    for (const l of [LABEL.queue, LABEL.priority]) if (p.labels.includes(l)) await w.removeLabel(p.number, l);
-    const s = await sticky(p.number);
-    if (s) await w.deleteComment(s.id);
+    for (const l of Object.values(LABEL)) if (l !== label && p.labels.includes(l)) await w.removeLabel(p.number, l);
+    if (p.sticky) await w.deleteComment(p.sticky.id);
     await w.comment(p.number, text);
+  };
+  // Closed first: a run that stops before the labels are off leaves a closed pull request, never an open one out of line.
+  const landed = async (p, batch) => {
+    done.merged.push(p.number);
+    await w.closePull(p.number);
+    await leave(p, null, `Merged via #${batch}.`);
   };
   const retire = async (batch, text) => {
     await w.comment(batch.number, text);
@@ -157,11 +191,14 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
   };
 
   /** Builds a batch from `prs` on the base's tip and opens its pull request; `next` waits behind it. */
-  const board = async (prs, next = []) => {
+  const board = async (prs, next = [], extra = {}) => {
     if (!prs.length) return null;
     const built = await git.build(base, prs);
     for (const { number, reason } of built.dropped) {
       say(`DROP #${number} (${reason})`);
+      // Pushed to after its CI was read: not built now, and on the next run its new head no longer matches the head in
+      // its position comment, so it leaves the line until it is reviewed and queued again.
+      if (reason === "moved") continue;
       done.dropped.push(number);
       await leave(byNumber.get(number), reason === "empty" ? null : LABEL.conflict, conflictText(base, reason));
     }
@@ -170,16 +207,31 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
     const branch = `batch/${base}-${stamp}`;
     await (dry ? say(`(dry run) would push ${built.sha.slice(0, 12)} to ${branch}`) : git.push(branch, built.sha));
     const title = `train: ${aboard.length} into ${base} (${aboard.map((p) => `#${p.number}`).join(" ")})`;
-    const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next) });
+    const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next, extra) });
     say(`OPEN #${pr.number} ${title}`);
     done.opened.push(pr.number);
     return { number: pr.number, branch, sha: built.sha, members: aboard };
   };
 
-  for (const p of queued.filter(mergeCommitOnly)) {
-    say(`DROP #${p.number} (merges with a merge commit)`);
-    done.dropped.push(p.number);
-    await leave(p, null, `Merge train: \`${p.branch}\` merges into \`${base}\` with a merge commit, never squashed into a batch, so it left the line; it lands by hand with a merge commit when it is ready.`);
+  // A run that stopped after landing a batch (a crash, the API budget) left its originals open: close them now.
+  for (const b of (await gh.mergedPulls(base)).filter((p) => isBatch(p, base))) {
+    for (const s of readState(b.body).prs) {
+      const p = byNumber.get(s.number);
+      if (p && p.sha === s.sha && !gone.has(p.number)) await landed(p, b.number);
+    }
+  }
+
+  for (const p of queued.filter((p) => !gone.has(p.number))) {
+    if (mergeCommitOnly(p)) {
+      say(`DROP #${p.number} (merges with a merge commit)`);
+      done.dropped.push(p.number);
+      await leave(p, null, `Merge train: \`${p.branch}\` merges into \`${base}\` with a merge commit, never squashed into a batch, so it left the line; it lands by hand with a merge commit when it is ready.`);
+    } else if (queuedHead(p.sticky) && queuedHead(p.sticky) !== p.sha) {
+      // `queue` vouches for the head that was reviewed: a later push needs a new review.
+      say(`DROP #${p.number} (new head since it was queued)`);
+      done.dropped.push(p.number);
+      await leave(p, null, `Merge train: this pull request got new commits after it was queued (${queuedHead(p.sticky).slice(0, 12)} → ${p.sha.slice(0, 12)}), so it left the line. Add \`queue\` again once this head is reviewed and green.`);
+    }
   }
 
   let inFlight = null;
@@ -187,48 +239,62 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
   const batch = batches[0];
   if (batch) {
     const state = readState(batch.body);
-    const members = state.prs.map((s) => byNumber.get(s.number));
-    const next = state.next.map((n) => byNumber.get(n)).filter((p) => p && !waiting(p));
+    const members = state.prs.map((s) => (gone.has(s.number) ? undefined : byNumber.get(s.number)));
+    const next = state.next.map((n) => byNumber.get(n)).filter((p) => p && !gone.has(p.number) && !waiting(p));
     const ci = ciState(await gh.checkRuns(batch.sha));
     const changed = state.prs.filter((s, i) => !members[i] || members[i].sha !== s.sha);
     const tip = await gh.branchSha(base);
+    const baseCi = ci === "failure" ? ciState(await gh.checkRuns(state.baseSha)) : null;
+    const stay = { number: batch.number, members };
     say(`BATCH #${batch.number} [${state.prs.map((s) => `#${s.number}`).join(" ")}] CI ${ci}`);
 
     if (batch.sha !== state.head) {
       await retire(batch, "Merge train: this batch's branch holds a commit the train did not build, so it closes; its pull requests go back to the line.");
     } else if (changed.length) {
       await retire(batch, `Merge train: ${changed.map((s) => `#${s.number}`).join(" ")} changed or left the line, so this batch closes; the rest go back to the line.`);
+    } else if (tip !== state.baseSha) {
+      // Red on an old tip says nothing about the batch on the new one, and green on an old tip must not land.
+      await retire(batch, `Merge train: \`${base}\` moved, so this batch is rebuilt on its new tip.`);
+      inFlight = await board(members, next, { retried: state.retried });
+    } else if (ci === "failure" && (baseCi === "failure" || baseCi === "pending")) {
+      say(`HOLD #${batch.number}: CI Success on \`${base}\` itself is ${baseCi === "failure" ? "red" : "still running"}; nobody is blamed until it is green.`);
+      inFlight = stay;
     } else if (ci === "failure") {
       const { culprit, first, second } = bisect(members);
-      await retire(batch, culprit ? `Merge train: CI Success failed with only #${culprit.number} on \`${base}\`.` : `Merge train: CI Success failed; trying ${first.map((p) => `#${p.number}`).join(" ")} first.`);
-      if (culprit) {
-        say(`FAILED #${culprit.number}`);
-        done.failed.push(culprit.number);
-        await leave(culprit, LABEL.failed, `Merge train: CI Success failed in batch #${batch.number}, with this pull request alone on \`${base}\`. Fix it, get it reviewed again, and add \`queue\` again.`);
+      if (culprit && !state.retried) {
+        // One rerun before blaming a single pull request: a flake should not cost its author a review round.
+        await retire(batch, `Merge train: CI Success failed with only #${culprit.number} on \`${base}\`; trying once more before calling it.`);
+        inFlight = await board([culprit], [], { retried: true });
       } else {
-        inFlight = await board(first, second);
+        await retire(batch, culprit ? `Merge train: CI Success failed twice with only #${culprit.number} on \`${base}\`.` : `Merge train: CI Success failed; trying ${first.map((p) => `#${p.number}`).join(" ")} first.`);
+        if (culprit) {
+          say(`FAILED #${culprit.number}`);
+          done.failed.push(culprit.number);
+          await leave(culprit, LABEL.failed, `Merge train: CI Success failed twice in a batch with only this pull request on \`${base}\` (last: #${batch.number}). Fix it, get it reviewed again, and add \`queue\` again.`);
+        } else {
+          inFlight = await board(first, second);
+        }
       }
-    } else if (tip !== state.baseSha) {
-      await retire(batch, `Merge train: \`${base}\` moved, so this batch is rebuilt on its new tip.`);
-      inFlight = await board(members, next);
     } else if (ci === "success") {
-      const r = await w.merge(batch.number, batch.sha);
+      // dev: the rebase merge, which its strict ruleset refuses unless the batch is up to date and green. An epic has
+      // no ruleset, so it lands by a fast-forward push of the tested commits: the push fails if the epic moved since.
+      const r =
+        base === "dev" ? await w.merge(batch.number, batch.sha) : dry ? (say(`(dry run) would fast-forward ${base} to ${batch.sha.slice(0, 12)}`), { ok: true }) : await git.land(base, batch.sha);
       if (!r.ok) {
-        say(`::warning::Could not merge #${batch.number}: ${r.message}`);
-        inFlight = { number: batch.number, members };
+        say(`::warning::Could not land #${batch.number}: ${r.message}`);
+        inFlight = stay;
       } else {
         say(`MERGED #${batch.number}`);
         await w.deleteBranch(batch.branch);
-        for (const p of members) {
-          done.merged.push(p.number);
-          await leave(p, null, `Merged via #${batch.number}.`);
-          await w.closePull(p.number);
-        }
+        for (const p of members) await landed(p, batch.number);
         inFlight = await board(next);
       }
+    } else if (ci === "none" && now - Date.parse(batch.createdAt) > CI_START_TIMEOUT) {
+      await retire(batch, "Merge train: CI never started on this batch, so it is rebuilt.");
+      inFlight = await board(members, next, { retried: state.retried });
     } else {
-      if (ci === "none") say(`::warning::CI has not started on batch #${batch.number}.`);
-      inFlight = { number: batch.number, members };
+      if (ci === "none") say(`::warning::CI has not started on batch #${batch.number} yet.`);
+      inFlight = stay;
     }
   }
   if (!inFlight) inFlight = await board(pickBatch(line()));
@@ -236,11 +302,11 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
   const aboard = new Set(inFlight?.members.map((p) => p.number) ?? []);
   let place = 0;
   for (const p of line()) {
-    const text = aboard.has(p.number) ? positionText(base, p, 0, inFlight.number) : positionText(base, p, ++place);
+    const head = queuedHead(p.sticky) ?? p.sha;
+    const text = aboard.has(p.number) ? positionText(base, p, 0, inFlight.number, head) : positionText(base, p, ++place, 0, head);
     if (!p.labels.includes(LABEL.queue)) continue; // --also: pretended, never commented on
-    const s = await sticky(p.number);
-    if (!s) await w.comment(p.number, text);
-    else if (s.body !== text) await w.editComment(s.id, text);
+    if (!p.sticky) await w.comment(p.number, text);
+    else if (p.sticky.body !== text) await w.editComment(p.sticky.id, text);
   }
   say(inFlight ? `IN FLIGHT #${inFlight.number}` : "Nothing to board.");
   return { log, ...done, inFlight: inFlight?.number ?? null };
@@ -265,26 +331,60 @@ function dryWriter(gh, say) {
 
 // --------------------------------------------------------------------------------------------------------------------
 
-/** GitHub over REST (the shared GraphQL quota stays free). */
-export function restLayer(token, repo) {
+/** Whether one merge-queue run's jobs show the workflow's own train: a train job running or done, or the app configured. */
+export const appTrainIn = (jobs) =>
+  jobs.some(
+    (j) =>
+      (j.name.startsWith("Train into") && (j.status === "in_progress" || (j.status === "completed" && j.conclusion !== "skipped"))) ||
+      (j.name === "Bases with a train" && (j.steps ?? []).some((s) => s.name === "Checkout the script" && s.conclusion === "success")),
+  );
+
+/** Thrown when the token's REST budget runs low: the run stops, and the next one goes on from what GitHub shows. */
+export class BudgetLow extends Error {}
+
+/**
+ * GitHub over REST (the shared GraphQL quota stays free). A request that fails to connect (a reset, DNS after a Mac
+ * wakes), a 5xx, a 429 or a rate-limited 403 (primary, or secondary with `Retry-After`) is retried with backoff;
+ * below `budget` calls left the run stops. A POST retried after a 5xx that GitHub did carry out can leave a second
+ * comment, or a 422 "already exists" that fails this run; the next run goes on from GitHub's state. `wait` and
+ * `fetchImpl` are injectable for the tests.
+ */
+export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch } = {}) {
+  const backoff = (attempt, after) => wait(Math.min(60, Number(after) || 2 ** attempt * 5) * 1000);
   const api = async (method, path, body) => {
-    const r = await fetch(`https://api.github.com/repos/${repo}${path}`, {
-      method,
-      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const text = await r.text();
-    let data = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { message: text.slice(0, 200) }; // an HTML error page (a 502): keep the status readable
+    for (let attempt = 0; ; attempt++) {
+      let r;
+      try {
+        r = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
+          method,
+          headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch (e) {
+        if (attempt >= 3) throw e;
+        await backoff(attempt);
+        continue;
+      }
+      const left = Number(r.headers.get("x-ratelimit-remaining") ?? Infinity);
+      const limited = r.status === 429 || (r.status === 403 && (left === 0 || r.headers.has("retry-after")));
+      if ((r.status >= 500 || limited) && attempt < 3) {
+        await backoff(attempt, r.headers.get("retry-after"));
+        continue;
+      }
+      if (left < budget) throw new BudgetLow(`GitHub API budget low (${left} calls left); stopping this run`);
+      const text = await r.text();
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = { message: text.slice(0, 200) }; // an HTML error page (a 502): keep the status readable
+      }
+      return { ok: r.ok, status: r.status, data };
     }
-    return { ok: r.ok, status: r.status, data };
   };
   const must = async (method, path, body) => {
     const r = await api(method, path, body);
-    if (!r.ok && !(method === "DELETE" && r.status === 404)) throw new Error(`${method} ${path}: HTTP ${r.status} ${r.data?.message ?? ""}`);
+    if (!r.ok && !(method === "DELETE" && (r.status === 404 || r.status === 422))) throw new Error(`${method} ${path}: HTTP ${r.status} ${r.data?.message ?? ""}`);
     return r.data;
   };
   const all = async (path) => {
@@ -307,9 +407,25 @@ export function restLayer(token, repo) {
     fork: p.head.repo?.full_name !== repo,
     labels: p.labels.map((l) => l.name),
     createdAt: p.created_at,
+    base: p.base.ref,
   });
   return {
-    pulls: async (base) => (await all(`/pulls?state=open&base=${encodeURIComponent(base)}`)).map(pull),
+    pulls: async (base) => (await all(`/pulls?state=open${base ? `&base=${encodeURIComponent(base)}` : ""}`)).map(pull),
+    /** The last pull requests merged into `base` (one page): where a run that stopped half way finds its batch. */
+    mergedPulls: async (base) =>
+      (await must("GET", `/pulls?state=closed&base=${encodeURIComponent(base)}&sort=updated&direction=desc&per_page=20`)).filter((p) => p.merged_at).map(pull),
+    /**
+     * Whether the workflow runs the train, so a Mac must not run a second one: a train job is running or ran, or a
+     * recent run found the queue app configured (its "Checkout the script" step runs only then), queue empty or not.
+     */
+    appTrainRuns: async () => {
+      const { workflow_runs: runs } = await must("GET", "/actions/workflows/merge-queue.yml/runs?per_page=10");
+      for (const run of runs) {
+        const { jobs } = await must("GET", `/actions/runs/${run.id}/jobs`);
+        if (appTrainIn(jobs)) return true;
+      }
+      return false;
+    },
     events: (n) => all(`/issues/${n}/events`),
     checkRuns: (sha) => all(`/commits/${sha}/check-runs?filter=latest`),
     comments: (n) => all(`/issues/${n}/comments`),
@@ -353,10 +469,12 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
       }
     }
   };
+  // Refs of this run only: another run in the same clone never sees or deletes them.
+  const ns = `refs/merge-train/${process.pid}-${Date.now()}`;
   return {
     async build(base, prs) {
-      fetch([`+refs/heads/${base}:refs/merge-train/base`, ...prs.map((p) => `+refs/pull/${p.number}/head:refs/merge-train/pr-${p.number}`)]);
-      const baseSha = git(["rev-parse", "refs/merge-train/base"], cwd);
+      fetch([`+refs/heads/${base}:${ns}/base`, ...prs.map((p) => `+refs/pull/${p.number}/head:${ns}/pr-${p.number}`)]);
+      const baseSha = git(["rev-parse", `${ns}/base`], cwd);
       if (!dir) {
         dir = mkdtempSync(join(tmpdir(), "merge-train-"));
         git(["worktree", "add", "-q", "--detach", dir, baseSha], cwd);
@@ -365,7 +483,11 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
       const applied = [];
       const dropped = [];
       for (const p of prs) {
-        const ref = `refs/merge-train/pr-${p.number}`;
+        const ref = `${ns}/pr-${p.number}`;
+        if (git(["rev-parse", ref], cwd) !== p.sha) {
+          dropped.push({ number: p.number, reason: "moved" }); // a push after its CI was read: the mark names what was built
+          continue;
+        }
         try {
           git(["merge", "-q", "--squash", ref]);
         } catch {
@@ -387,28 +509,110 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
     async push(branch, sha) {
       git(["push", "-q", "--force", remote, `${sha}:refs/heads/${branch}`], cwd);
     },
+    /** Fast-forwards `base` to `sha` without force: the push is refused if `base` moved since the batch was built. */
+    async land(base, sha) {
+      try {
+        git(["push", "-q", remote, `${sha}:refs/heads/${base}`], cwd);
+        return { ok: true };
+      } catch (e) {
+        // git ends with `hint:` lines; the reason is the `! [rejected]` or `error:` line.
+        const lines = String(e.stderr ?? e.message).trim().split("\n");
+        return { ok: false, message: (lines.find((l) => /^\s*!|^error:|^fatal:/.test(l)) ?? lines.at(-1)).trim() };
+      }
+    },
     close() {
       if (dir) git(["worktree", "remove", "--force", dir], cwd);
       if (dir) rmSync(dir, { recursive: true, force: true });
       dir = null;
-      for (const ref of git(["for-each-ref", "--format=%(refname)", "refs/merge-train/"], cwd).split("\n").filter(Boolean)) git(["update-ref", "-d", ref], cwd);
+      for (const ref of git(["for-each-ref", "--format=%(refname)", `${ns}/`], cwd).split("\n").filter(Boolean)) git(["update-ref", "-d", ref], cwd);
     },
   };
 }
 
+/** The bases with a train to run: `dev` and `epic/<name>` branches with a queued pull request or a batch open. */
+export const trainBases = (pulls) =>
+  [...new Set(pulls.filter((p) => BASE.test(p.base) && (p.labels.includes(LABEL.queue) || isBatch(p, p.base))).map((p) => p.base))].sort();
+
+/** One train per machine: a lock file holding the pid; a lock whose process is gone is taken over. */
+function lock(path) {
+  for (;;) {
+    try {
+      writeFileSync(path, String(process.pid), { flag: "wx" });
+      process.on("exit", () => rmSync(path, { force: true }));
+      return;
+    } catch {
+      const pid = Number(readFileSync(path, "utf8"));
+      try {
+        process.kill(pid, 0);
+        throw new Error(`another merge train runs here (pid ${pid}, ${path})`);
+      } catch (e) {
+        if (e.code !== "ESRCH") throw e;
+        rmSync(path, { force: true });
+      }
+    }
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
-  const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-  const { GH_TOKEN, GITHUB_REPOSITORY: repo = "MiguelMedeiros/ghostly" } = process.env;
-  if (!args.includes("--dry-run")) throw new Error("Only --dry-run for now: it reads the repo and changes nothing.");
-  if (!GH_TOKEN) throw new Error("GH_TOKEN is required");
+  const flag = (name) => args.includes(name);
+  const opt = (name) => (flag(name) ? args[args.indexOf(name) + 1] : undefined);
+  const dry = flag("--dry-run") || process.env.DRY_RUN === "true";
+  if (!dry && !flag("--run") && !flag("--list-bases")) {
+    console.error("usage: merge-train.mjs --run | --dry-run | --list-bases  [--base <branch>] [--every <seconds>] [--also <n,n>]");
+    process.exit(2);
+  }
   const also = (opt("--also") ?? "").split(",").filter(Boolean).map(Number);
-  const git = gitLayer();
-  try {
-    const result = await tick({ gh: restLayer(GH_TOKEN, repo), git, base: opt("--base") ?? "dev", dry: true, also });
-    for (const line of result.log) console.log(line);
-  } finally {
-    git.close();
+  if (also.length && !dry) throw new Error("--also works in dry runs only");
+  const repo = process.env.GITHUB_REPOSITORY || "MiguelMedeiros/ghostly";
+  // On a runner: the queue app's token. On a Mac until the app exists: the local gh login. Never printed: git gets
+  // its credentials from the checkout or the Mac's own helper (never a URL), and errors are scrubbed of the token.
+  const token = process.env.GH_TOKEN || execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+  const scrub = (s) => String(s).replaceAll(token, "***");
+  const gh = restLayer(token, repo);
+  if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls())));
+  const local = !process.env.GITHUB_ACTIONS && !dry;
+  if (local) lock(join(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim(), "merge-train.lock"));
+  // The login the train comments as: the app's bot on a runner (set by the workflow), the gh user on a Mac.
+  const login = process.env.MERGE_TRAIN_LOGIN || execFileSync("gh", ["api", "user", "-q", ".login"], { encoding: "utf8" }).trim();
+
+  const every = Number(opt("--every")) || 0;
+  const print = (base, log) => {
+    const lines = log.map(scrub);
+    console.log(lines.map((l) => (l.startsWith("::") ? l : `[${new Date().toISOString()}] ${l}`)).join("\n"));
+    const summary = process.env.GITHUB_STEP_SUMMARY;
+    if (summary) appendFileSync(summary, [`### Merge train: ${base}${dry ? " (dry run)" : ""}`, "", ...lines.map((l) => `    ${l.replace(/^::\w+::/, "")}`), ""].join("\n"));
+  };
+  const failed = (base, e, log) => {
+    log.push(e instanceof BudgetLow ? `::warning::${base}: ${e.message}` : `::error::${base}: ${e.message}`);
+    if (!(e instanceof BudgetLow) && !every) process.exitCode = 1;
+  };
+  for (;;) {
+    // A round never ends the loop: a network error or a low budget is logged, and the next round tries again.
+    try {
+      if (local && (await gh.appTrainRuns())) {
+        console.log("The merge-queue workflow runs the train now (the queue app is configured); this machine stops.");
+        return;
+      }
+      for (const base of opt("--base") ? [opt("--base")] : trainBases(await gh.pulls())) {
+        const git = gitLayer();
+        const log = [];
+        try {
+          await tick({ gh, git, base, login, dry, also, log });
+        } catch (e) {
+          failed(base, e, log);
+        } finally {
+          git.close();
+        }
+        print(base, log);
+      }
+    } catch (e) {
+      const log = [];
+      failed("train", e, log);
+      print("train", log);
+    }
+    if (!every) break;
+    await new Promise((r) => setTimeout(r, every * 1000));
   }
 }
 

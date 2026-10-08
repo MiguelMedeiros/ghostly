@@ -94,14 +94,20 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
 
 6. Publishing the release starts `Publish npm` (`.github/workflows/npm-publish.yml`), which puts the CLI on npm as `@ghostlytools/cli` (the npm organization `ghostlytools`) at the tag's version, with provenance. It refuses a tag that is not `packages/cli/package.json`'s version, skips a version already on npm, and ends by installing it from npm and running `ghostly --version`. To run it again for a tag: `gh workflow run npm-publish.yml -f tag=v1.0.0`.
 
+   The same workflow publishes the SDK as `@ghostlytools/sdk` (with the mini-app types at `@ghostlytools/sdk/app`), under the same rules. `verify-sdk` runs `npm run test:sdk-example` on the tag with no token and keeps the tarball it checked; `publish-sdk` publishes that very file with `--ignore-scripts`, with no checkout or install. It runs only while the repository variable `SDK_NPM_PUBLISH` is `true`; until then it writes "not published" in the run's summary. The SDK is not on npm yet, and `/app` is for Apps, which run from release 1.2: its first publish is the owner's (the steps below, for `@ghostlytools/sdk`, then set the variable).
+
+   Only the two publish jobs can ask for an OIDC token, and both run in the GitHub environment `npm`. The checks that install a package from npm run in jobs without a token.
+
 ### npm trusted publishing
 
 The workflow publishes with npm trusted publishing (OIDC), so no npm token is kept. npm only lets a package that exists trust a workflow, so the first time:
 
 1. The npm organization `ghostlytools` exists, with the publishing npm account as an owner. The package is scoped to it, so it is private unless published with `--access public` (the workflow does, and `publishConfig` in `packages/cli/package.json` says so too).
 2. Add an npm granular access token with read and write on the `@ghostlytools` scope (allowed to bypass two-factor authentication) as the repository secret `NPM_TOKEN`, and publish the release. The workflow uses it once.
-3. On npmjs.com, `@ghostlytools/cli` → Settings → Trusted Publisher → GitHub Actions: organization or user `MiguelMedeiros`, repository `ghostly`, workflow filename `npm-publish.yml`, no environment.
+3. On npmjs.com, `@ghostlytools/cli` → Settings → Trusted Publisher → GitHub Actions: organization or user `MiguelMedeiros`, repository `ghostly`, workflow filename `npm-publish.yml`, environment `npm`. `@ghostlytools/cli` was first set up with no environment: edit its Trusted Publisher to environment `npm` before the next release.
 4. In the same settings, choose "Require two-factor authentication and disallow tokens", then delete the `NPM_TOKEN` secret and revoke the token.
+
+For `@ghostlytools/sdk` the same four steps apply, with `SDK_NPM_PUBLISH` set to `true` (Settings → Secrets and variables → Actions → Variables) before step 2 and the trusted publisher added on `@ghostlytools/sdk` in step 3. A release then publishes both packages.
 
 The website's download panel asks GitHub for the latest published release (at most once an hour) and uses it once every installer it links to is attached; until then it keeps the version in `apps/website/lib/release.ts`.
 

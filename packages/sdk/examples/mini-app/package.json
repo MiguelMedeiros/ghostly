@@ -1,0 +1,16 @@
+{
+  "name": "ghostly-example-mini-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A mini-app for Ghostly typed with @ghostlytools/sdk/app alone: the example of an app built outside the app's repository.",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.nodenext.json"
+  },
+  "dependencies": {
+    "@ghostlytools/sdk": "file:vendor/ghostly-sdk.tgz"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
