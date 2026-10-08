@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { RpcResponse } from "@ghostly/browser/shared/rpc";
+import { ENGINE_METHODS } from "../src/engineMethods";
 import { profilePaths } from "../src/profiles";
 import type { Runtime } from "../src/runtime/engine";
 import { isolatedNetworkEnv } from "./support/network";
@@ -51,11 +52,9 @@ describe("the CLI's engine with APPS_ENABLED on", () => {
       return answers.get(request.id)?.error;
     };
     try {
-      for (const [method, params] of [
-        ["appList", undefined], ["appStoreList", undefined], ["appStoreAdd", { url: "https://raw.githubusercontent.com/o/r/HEAD/index.json" }],
-        ["appId", { linkId: "x", ref: "x/chess" }], ["appOpen", { linkId: "x", ref: "x/chess", version: "1.0.0" }], ["appSend", { linkId: "x", ref: "x/chess", data: 1 }],
-      ] as const)
-        expect(await errorOf(method, params), method).toBe("Apps are unavailable in this release");
+      const methods = ENGINE_METHODS.filter((method) => /^app[A-Z]/.test(method));
+      expect(methods.length).toBeGreaterThan(20);
+      for (const method of methods) expect(await errorOf(method, {}), method).toBe("Apps do not run on this client");
     } finally { server.detach(page); }
   });
 });

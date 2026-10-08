@@ -31,7 +31,7 @@ describe("apps pinned off in an engine, with APPS_ENABLED on", () => {
       ["appId", { linkId: id, ref }], ["appOpen", { linkId: id, ref, version: "1.0.0" }], ["appClose", { linkId: id, ref }], ["appSend", { linkId: id, ref, data: 1 }],
       ["appList", undefined], ["appStoreList", undefined], ["appStoreAdd", { url: "https://raw.githubusercontent.com/o/r/HEAD/index.json" }],
     ] as const)
-      await expect(call(method, params), method).rejects.toThrow("Apps are unavailable in this release");
+      await expect(call(method, params), method).rejects.toThrow("Apps do not run on this client");
     contact.openApp(app, "1.0.0");
     (contact as unknown as { channel: { send(data: string): void } }).channel.send(JSON.stringify({ t: "paired-app", a: app, o: "open", v: "1.0.0" }));
     await new Promise(resolve => setTimeout(resolve, 50));
