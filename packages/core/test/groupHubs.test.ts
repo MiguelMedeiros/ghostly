@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createIdentity } from "../src/identity";
+import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { epochKeys } from "../src/groupCrypto";
 import { toBase64Url } from "../src/bytes";
 import { encodeGroupMetaBody, parseGroupMetaBody } from "../src/groupMeta";
@@ -169,6 +169,37 @@ describe("what a session hands a hub to pass on", { timeout: 60_000 }, () => {
     expect(alice.roster.some(([k]) => k === carol.myKey)).toBe(false);
     // Again, once out: nothing.
     expect(await bob.handle(alice.myKey, clone(bye))).toEqual([]);
+  });
+
+  it("a signed leave from before its member was invited back is dropped: nobody else can take the member out with it", async () => {
+    const { mesh, alice, bob } = await hubbed();
+    const seed = createIdentity().seedB64, erin = identityFromSeedB64(seed).pubKeyZ32;
+    const invite = async () => {
+      const welcome = await alice.admit(erin);
+      const joined = GroupSession.join({ name: alice.name, admin: alice.myKey }, welcome.slice(0, -1), welcome[welcome.length - 1], seed);
+      if ("error" in joined) throw new Error(joined.error);
+      mesh.sessions.delete(erin);
+      const session = mesh.add(joined.state, "Erin");
+      await mesh.settle();
+      return session;
+    };
+    const old = (await invite()).byeFrame();
+    // Erin leaves: Bob, a hub, passes her leave on, so he keeps a copy; Alice takes her out.
+    expect(await bob.handle(erin, clone(old))).toEqual([old]);
+    await alice.handle(bob.myKey, clone(old)); await mesh.settle();
+    expect(alice.roster.some(([k]) => k === erin)).toBe(false);
+    // Alice invites her back. Bob says the old leave again: nobody takes it, nor passes it on.
+    const back = await invite();
+    expect(old.e).toBeLessThan(alice.epoch);
+    expect(await alice.handle(bob.myKey, clone(old))).toEqual([]);
+    await mesh.settle();
+    expect(alice.roster.some(([k]) => k === erin)).toBe(true);
+    expect(await bob.handle(alice.myKey, clone(old))).toEqual([]);
+    // Her leave of now still takes her out.
+    const now = back.byeFrame();
+    expect(await bob.handle(erin, clone(now))).toEqual([now]);
+    await alice.handle(bob.myKey, clone(now)); await mesh.settle();
+    expect(alice.roster.some(([k]) => k === erin)).toBe(false);
   });
 
   it("a metadata statement, and the admin's pins and exclusions in it", async () => {
