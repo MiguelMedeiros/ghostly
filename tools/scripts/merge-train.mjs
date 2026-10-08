@@ -883,7 +883,9 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
           continue;
         }
         try {
-          git(["merge", "-q", "--squash", ref]);
+          // git asks for an identity before any merge that is not a fast-forward, squashed or not: without one a
+          // runner would call every such pull request a conflict.
+          git([...identity(), "merge", "-q", "--squash", ref]);
         } catch (e) {
           if (e.code === "ETIMEDOUT") throw e; // not a conflict
           git(["reset", "-q", "--hard", "HEAD"]);

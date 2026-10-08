@@ -1357,6 +1357,7 @@ describe("building a batch with git", () => {
     const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
     const origin = join(root, "origin");
     const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const env = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM };
     try {
       git(["init", "-q", "-b", "dev", "origin"], root);
       git(["commit", "-q", "--allow-empty", "-m", "base"]);
@@ -1372,6 +1373,11 @@ describe("building a batch with git", () => {
       });
       git(["clone", "-q", "origin", "clone"], root);
       const clone = join(root, "clone");
+      // A runner with no git identity at all: the train commits as itself, and a merge that is no fast-forward (the
+      // second pull request) asks git for an identity too.
+      writeFileSync(join(root, "gitconfig"), "[user]\n\tuseConfigOnly = true\n");
+      process.env.GIT_CONFIG_GLOBAL = join(root, "gitconfig");
+      process.env.GIT_CONFIG_NOSYSTEM = "1";
       const layer = gitLayer({ cwd: clone });
       const built = await layer.build("dev", prs);
       expect(built.applied).toEqual([1, 2]);
@@ -1383,6 +1389,10 @@ describe("building a batch with git", () => {
       expect(batchBody("dev", built.baseSha, built.sha, prs, [], {}, built.commits)).toContain(`{"number":2,"sha":"${prs[1].sha}","commit":"${built.sha}"}`);
       layer.close();
     } finally {
+      for (const [key, value] of Object.entries(env)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000); // some forty git calls: slow on a busy machine
