@@ -16,11 +16,30 @@ export function timeLeft(seconds: number, tr: Translate = englishT): string {
 const percent = (transfer: FileTransferState) => Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100);
 
 /**
+ * A group's file (WISP 503), by its local id (`group-<group>-in-…`, `group-<group>-out-…`). Each member's app fetches it
+ * from whoever holds it: it is downloaded, never declined, paused, cancelled or sent again.
+ */
+export const isGroupFile = (file: Pick<ChatFile, "id">): boolean => file.id.startsWith("group-");
+
+/** A group's file this device has not fetched, waiting for its person's Download. */
+export const groupFileOffered = (file: Pick<ChatFile, "id">, transfer: FileTransferState | null): boolean =>
+  isGroupFile(file) && transfer?.state === "transferring" && transfer.direction === "in" && transfer.stage === "asking";
+
+/**
  * Whether a file sent from here that did not go can be sent again: not one the contact declined or the sender
- * cancelled (files/3 says so with `retry`), and only where the platform sends files.
+ * cancelled (files/3 says so with `retry`), and only where the platform sends files. Never a group's: it is announced
+ * once, and members fetch it from whoever has it.
  */
 export function canRetryFile(file: ChatFile, transfer: FileTransferState | null, platform: ServicesPlatform | null): boolean {
-  return transfer?.state === "failed" && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+  return transfer?.state === "failed" && file.id.includes("-out-") && !isGroupFile(file) && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+}
+
+/**
+ * Why a group's file waits, behind its ⓘ: what comes next while nobody this device is connected to has it. Null for
+ * any other file or state.
+ */
+export function groupFileHint(file: Pick<ChatFile, "id">, transfer: FileTransferState | null, tr: Translate = englishT): string | null {
+  return isGroupFile(file) && transfer?.state === "transferring" && transfer.stage === "waiting" && transfer.note ? tr("chat.file.nobodyHasHint") : null;
 }
 
 /**
@@ -57,6 +76,12 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
   const done = `${percent(transfer)}%`;
   const incoming = transfer.direction === "in";
   const of = tr("chat.file.of", { done, size });
+  // A group's file on its way here (WISP 503): not fetched yet, asked of a member, or nobody reachable has it.
+  if (isGroupFile(file) && incoming) {
+    if (transfer.stage === "asking") return tr("chat.file.notDownloaded", { size });
+    if (transfer.stage === "queued") return tr("chat.file.askingMember");
+    if (transfer.stage === "waiting" && transfer.note) return tr("chat.file.nobodyHas");
+  }
   switch (transfer.stage) {
     case "preparing": return tr("chat.file.preparing", { progress: of });
     case "waiting": return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });

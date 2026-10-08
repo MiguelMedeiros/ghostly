@@ -14,7 +14,6 @@
     "memberCount": "{{count}} members",
     "memberOne": "1 member",
     "membersButton": "Members",
-    "noFiles": "Files are not part of groups yet",
     "nobodyElse": "Nobody else is in the group yet",
     "reachable": "{{members}} · {{reachable}} of {{total}} reachable",
     "removedCommunity": "You were removed. Open the group's link to join again.",

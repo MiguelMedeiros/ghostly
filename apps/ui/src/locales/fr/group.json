@@ -14,7 +14,6 @@
     "memberCount": "{{count}} membres",
     "memberOne": "1 membre",
     "membersButton": "Membres",
-    "noFiles": "Les fichiers ne sont pas encore pris en charge dans les groupes",
     "nobodyElse": "Personne d'autre n'est encore dans le groupe",
     "reachable": "{{members}} · {{reachable}} sur {{total}} joignables",
     "removedCommunity": "Vous avez été retiré. Ouvrez le lien du groupe pour le rejoindre à nouveau.",

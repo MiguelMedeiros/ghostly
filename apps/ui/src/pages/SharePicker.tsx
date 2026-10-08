@@ -12,7 +12,7 @@ const WAIT_MS = 5000;
 /**
  * "Share to…": something another app shared into Ghostly waits here for a chat. Picking one opens it with the
  * text in the draft and the files on the attachment sheet, to look over and send there; nothing is sent from
- * here. Groups take text only (files are not part of groups yet), so a share with files lists 1:1 chats.
+ * here. Groups take files as chats do (WISP 503).
  * A chat is never picked for the person, not even when there is only one: any website can post a share.
  */
 export function SharePicker() {
@@ -26,7 +26,7 @@ export function SharePicker() {
   }, []);
 
   const hasFiles = !!share?.files.length;
-  const targets = useChatTargets({ files: hasFiles });
+  const targets = useChatTargets();
   const preview = share ? shareText(share) : "";
 
   const pick = (chat: string, path: string) => {

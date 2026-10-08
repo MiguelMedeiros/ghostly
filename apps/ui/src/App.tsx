@@ -23,6 +23,7 @@ import { useComputerAwake } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
+import { useGroupDownloadsSync } from "./lib/groupDownloads";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -161,6 +162,8 @@ function useLoadedChats() {
 export function App() {
   useHoldStorageSync();
   useProfileNameSync();
+  // Download automatically in groups, Wi-Fi only: the engine's switch follows the connection (WISP 503).
+  useGroupDownloadsSync();
   const isMobile = useIsMobile();
   const { pathname } = useLocation();
   useViewportHeight();

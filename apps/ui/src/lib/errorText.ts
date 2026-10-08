@@ -298,6 +298,12 @@ const RULES: readonly Rule[] = [
   exact("Share the group's link with them: anyone who opens it joins", "errors.group.shareLinkInstead"),
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
+  // Files in groups (packages/browser/src/engine/groupFiles.ts, node.ts `sendGroupFile`, platform/services.ts).
+  exact("You sent many files to this group just now. Wait a minute.", "errors.group.filesPaced", "errors.group.filesPacedNext"),
+  exact("Not enough space on this device for this file", "errors.group.fileNoRoom", "errors.group.fileNoRoomNext"),
+  exact("An empty file cannot go to a group", "errors.group.fileEmpty"),
+  exact("This app takes no group files", "errors.group.filesUnsupported", "errors.group.filesUnsupportedNext"),
+  { match: /^A group takes files of up to (?<size>[\d.]+ [KMGT]?B)$/, key: "errors.group.fileTooLarge" },
 
   // Making a wallet, connecting its source and reading it (engine/node.ts, paymentAdapters/**): why a kind could not be made or offered, and what a card says while it connects.
   { match: /^(?:You already have a|There is already a) (?<network>Mainnet|Testnet) (?<kind>Cashu|Lightning|Ark|Bark|Spark|Bitcoin|Fedimint|USDT) wallet$/, key: "errors.wallet.alreadyHave" },
