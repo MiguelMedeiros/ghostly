@@ -10,9 +10,14 @@ import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../platform";
 import { useAppOpener, type AppOpener } from "./open";
 import { runnerPolicy } from "./runnerCheck";
+import { androidApp } from "../touchOnly";
 
-/** The feature is on in this build: `APPS_ENABLED`, or the e2e suite's build (`VITE_APPS_TEST=1`, fixed at build time). */
+/**
+ * The feature is on in this build: `APPS_ENABLED`, or the e2e suite's build (`VITE_APPS_TEST=1`, fixed at build time).
+ * Never in the Android app yet, whatever the build (its host runs no apps either: desktop/host.ts `desktopApps`).
+ */
 export function appsEnabled(): boolean {
+  if (androidApp()) return false;
   return APPS_ENABLED || import.meta.env?.VITE_APPS_TEST === "1";
 }
 

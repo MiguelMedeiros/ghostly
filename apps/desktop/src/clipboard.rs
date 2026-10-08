@@ -16,8 +16,15 @@ pub const MAX_CLIPBOARD_BYTES: usize = 64 * 1024;
 pub struct ClipboardSource(Arc<dyn Fn() -> Result<String, String> + Send + Sync>);
 
 impl ClipboardSource {
-    /// Android and iOS: no arboard; the page reads the clipboard itself until the mobile host has a native one.
-    #[cfg(mobile)]
+    /// Android: no arboard; Android's own clipboard, through the app's host (android.rs). The WebView gives the page
+    /// no `readText()`.
+    #[cfg(target_os = "android")]
+    pub fn system() -> Self {
+        Self(Arc::new(crate::android::clipboard_text))
+    }
+
+    /// iOS: no native clipboard yet.
+    #[cfg(target_os = "ios")]
     pub fn system() -> Self {
         Self(Arc::new(|| {
             Err("No native clipboard on this platform".into())
@@ -301,6 +308,71 @@ pub async fn read_clipboard_files<R: tauri::Runtime>(
     })
 }
 
+/// Something another app shared into Ghostly (Android's "Share to Ghostly"), for the page's share picker: its text,
+/// and its files on the shelf, which the page reads by token as a paste's ([`read_pasted_bytes`]).
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct IncomingShare {
+    pub title: String,
+    pub text: String,
+    pub files: Vec<PastedItem>,
+}
+
+/// A share's files on the shelf: regular files only, each once, at most [`MAX_PASTED_FILES`] (as a paste's), with
+/// the type the sharing app gave each.
+#[cfg_attr(not(any(test, target_os = "android")), allow(dead_code))]
+pub fn shelve_share(
+    shelf: &PasteShelf,
+    title: String,
+    text: String,
+    files: Vec<(PathBuf, Option<String>)>,
+) -> IncomingShare {
+    let mimes: std::collections::HashMap<PathBuf, Option<String>> = files.iter().cloned().collect();
+    let files = pasted_files(files.into_iter().map(|(path, _)| path).collect())
+        .into_iter()
+        .map(|(path, name, size)| {
+            let mime = mimes.get(&path).cloned().flatten();
+            PastedItem {
+                token: shelf.put(Held::Path(path)),
+                name: Some(name),
+                size,
+                mime,
+            }
+        })
+        .collect();
+    IncomingShare { title, text, files }
+}
+
+/// The share another app made that waits for the page, taken: the page asks when it starts and whenever it hears
+/// `incoming-share`. None when there is none (and always on Desktop, which is no share target).
+#[tauri::command]
+pub fn incoming_share_take<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+) -> Result<Option<IncomingShare>, String> {
+    if window.label() != "main" {
+        return Err("Not allowed from this window".into());
+    }
+    #[cfg(target_os = "android")]
+    {
+        let Some(shared) = window
+            .try_state::<crate::android::Incoming>()
+            .and_then(|incoming| incoming.take())
+        else {
+            return Ok(None);
+        };
+        let shelf = window
+            .try_state::<PasteShelf>()
+            .ok_or("Clipboard unavailable")?;
+        let files = shared
+            .files
+            .into_iter()
+            .map(|file| (PathBuf::from(file.path), file.mime))
+            .collect();
+        Ok(Some(shelve_share(&shelf, shared.title, shared.text, files)))
+    }
+    #[cfg(not(target_os = "android"))]
+    Ok(None)
+}
+
 /// A step of what a paste brought ([`read_clipboard_files`]), as raw bytes: at most 16 MiB
 /// from `offset`, fewer at the end.
 #[tauri::command]
@@ -502,6 +574,46 @@ mod tests {
         let info = reader.next_frame(&mut out).unwrap();
         out.truncate(info.buffer_size());
         (info.width, info.height, out)
+    }
+
+    /// Android's "Share to Ghostly": the files the share brought are read by token, as a paste's, with the type the
+    /// sharing app gave; a folder or a missing file is left out. Desktop has no share waiting, ever.
+    #[test]
+    fn a_share_from_another_app_is_read_like_a_paste() {
+        // covers: app.android.share-target
+        let dir = scratch();
+        std::fs::write(dir.join("photo.jpg"), b"jpeg bytes").unwrap();
+        std::fs::create_dir(dir.join("folder")).unwrap();
+        let app = paste_app(PasteSource::fixed(|| Ok(Pasted::Nothing)));
+        let main = main_window(&app);
+        let share = shelve_share(
+            &app.state::<PasteShelf>(),
+            "A title".into(),
+            "Look at this https://example.com".into(),
+            vec![
+                (dir.join("photo.jpg"), Some("image/jpeg".into())),
+                (dir.join("folder"), None),
+                (dir.join("gone.txt"), Some("text/plain".into())),
+            ],
+        );
+        assert_eq!(share.title, "A title");
+        assert_eq!(share.text, "Look at this https://example.com");
+        assert_eq!(share.files.len(), 1);
+        let file = &share.files[0];
+        assert_eq!(
+            (file.name.as_deref(), file.size, file.mime.as_deref()),
+            (Some("photo.jpg"), 10, Some("image/jpeg"))
+        );
+        assert_eq!(bytes(&main, &file.token, 4).unwrap(), b"jpeg bytes");
+        assert_eq!(incoming_share_take(main), Ok(None));
+        let url = "ghostly-svc://atlas.peer/".parse().unwrap();
+        let other = WebviewWindowBuilder::new(&app, "svc-1", WebviewUrl::CustomProtocol(url))
+            .build()
+            .unwrap();
+        assert_eq!(
+            incoming_share_take(other),
+            Err("Not allowed from this window".into())
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ Open **https://app.ghostly.tools** in any modern browser.
   - iPhone and iPad: in Safari, tap Share, then *Add to Home Screen*.
   - What installing adds (offline start, Share to Ghostly, `web+ghostly:` links, shortcuts, the unread badge): [WEB.md](WEB.md#install-it).
 - Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
-- **Self-hosted:** `docker compose -f infra/docker-compose.yml up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
+- **Self-hosted:** `docker compose -f infra/docker-compose.yml up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)). Another web server needs the apps runner's headers, or it gets no Apps: [WEB.md](WEB.md#apps-on-your-own-server).
 
 ## Android
 

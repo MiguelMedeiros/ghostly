@@ -6,6 +6,12 @@
 //! server) to a listener here on 127.0.0.1. The listener accepts one answer
 //! carrying the state the WebView expects, hands it back, and closes. It never
 //! sees or keeps anything but that one redirect.
+//!
+//! Android has no listener: a phone's browser would leave the app in the
+//! background, where Android may freeze it. The callback page hands the answer
+//! to the app by a deep link instead (`ghostly://oidc?…#…`, the app's own
+//! scheme), which brings it forward; the page asked with an `a.` state, and
+//! only the answer for the awaited state is taken ([`OidcState::answer`]).
 
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
@@ -13,18 +19,80 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::sync::oneshot;
 
 const WAIT: Duration = Duration::from_secs(10 * 60);
 const MAX_REQUEST: usize = 32 * 1024;
 const PATH: &str = "/oidc-callback";
+/// The "port" a deep-link sign-in reports to the page, which then asks with an [`APP_STATE`] state.
+const DEEP_LINK: u16 = 0;
+/// A deep-link sign-in's state starts with this (the page's `statePrefix`; the callback page reads it).
+const APP_STATE: &str = "a.";
+/// Where the callback page sends a deep-link sign-in's answer.
+const DEEP_LINK_PREFIX: &str = "ghostly://oidc";
 
 struct Pending {
     listener: Option<TcpListener>,
     cancelled: Arc<AtomicBool>,
 }
 
+/// A deep-link sign-in waiting for its answer: the state it expects, and where the answer goes.
+struct LinkWait {
+    state: String,
+    answer: oneshot::Sender<String>,
+}
+
 #[derive(Default)]
-pub struct OidcState(Mutex<HashMap<u16, Pending>>);
+pub struct OidcState(Mutex<HashMap<u16, Pending>>, Mutex<Option<LinkWait>>);
+
+impl OidcState {
+    /// Waits for the deep link answering `state`. One sign-in at a time: one waiting before is dropped (its wait
+    /// ends as cancelled).
+    fn link_begin(&self, state: &str) -> oneshot::Receiver<String> {
+        let (answer, waiting) = oneshot::channel();
+        *self.1.lock().unwrap() = Some(LinkWait {
+            state: state.to_string(),
+            answer,
+        });
+        waiting
+    }
+
+    /// A deep link's answer ("?query#fragment"): handed to the sign-in waiting for its state, and true; any other
+    /// (another state, none waiting, a second answer) is dropped, and false.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub fn answer(&self, answer: &str) -> bool {
+        let mut waiting = self.1.lock().unwrap();
+        let matches = waiting
+            .as_ref()
+            .is_some_and(|wait| state_of(answer).as_deref() == Some(wait.state.as_str()));
+        if !matches {
+            return false;
+        }
+        let wait = waiting.take().expect("checked above");
+        wait.answer.send(answer.to_string()).is_ok()
+    }
+
+    /// Stops waiting for a deep link.
+    fn link_cancel(&self) {
+        self.1.lock().unwrap().take();
+    }
+}
+
+/// The answer in a deep link (`ghostly://oidc?query#fragment`), as the loopback listener hands one back:
+/// "?query#fragment". None for any other link, or one too long to be a sign-in's.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn deep_link_answer(link: &str) -> Option<String> {
+    if link.len() > MAX_REQUEST {
+        return None;
+    }
+    let rest = link.strip_prefix(DEEP_LINK_PREFIX)?;
+    // Only the link itself: `ghostly://oidc?…`, `ghostly://oidc/?…` or `ghostly://oidc#…`, not `ghostly://oidcx`.
+    let rest = rest.strip_prefix('/').unwrap_or(rest);
+    if !(rest.starts_with('?') || rest.starts_with('#')) {
+        return None;
+    }
+    state_of(rest).map(|_| rest.to_string())
+}
 
 /// The page the browser lands on. The provider's answer is in its fragment,
 /// which only a script can read; it posts it back to this same listener and
@@ -181,21 +249,29 @@ fn open_in_browser(url: &str) -> Result<(), String> {
     let result = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
         .spawn();
-    // Android and iOS: no opener process; sign-in there goes through a deep link (the mobile host's own work).
-    #[cfg(mobile)]
+    // Android: the browser Android has for the address. iOS: none yet.
+    #[cfg(target_os = "android")]
+    return crate::android::view(url);
+    #[cfg(target_os = "ios")]
     let result: std::io::Result<std::process::Child> = Err(std::io::Error::other(format!(
         "No browser to open {} from here",
         url.split('?').next().unwrap_or_default()
     )));
     // The opener exits at once; waiting for it keeps no zombie behind until the app quits.
+    #[cfg(not(target_os = "android"))]
     result
         .map(|mut child| drop(std::thread::spawn(move || child.wait())))
         .map_err(|e| e.to_string())
 }
 
-/// Listens on a free loopback port for one sign-in answer. Returns the port.
+/// Listens on a free loopback port for one sign-in answer. Returns the port. Android and iOS listen for the app's
+/// deep link instead, and say so with port 0 ([`DEEP_LINK`]): the page asks with an `a.` state then.
 #[tauri::command]
 pub fn oidc_loopback_start(state: tauri::State<'_, OidcState>) -> Result<u16, String> {
+    if cfg!(mobile) {
+        state.link_cancel();
+        return Ok(DEEP_LINK);
+    }
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let mut pending = state.0.lock().map_err(|e| e.to_string())?;
@@ -229,6 +305,9 @@ pub async fn oidc_loopback_wait(
     if expected_state.len() < 22 || expected_state.len() > 64 {
         return Err("Invalid sign-in state".into());
     }
+    if cfg!(mobile) && port == DEEP_LINK {
+        return wait_for_link(&state, &url, &expected_state, open_in_browser).await;
+    }
     let (listener, cancelled) = {
         let mut pending = state.0.lock().map_err(|e| e.to_string())?;
         let entry = pending
@@ -259,9 +338,39 @@ pub async fn oidc_loopback_wait(
     result
 }
 
-/// Stops waiting; the port closes.
+/// A deep-link sign-in (Android, iOS): the provider's page opens in the browser, and the wait ends with the answer
+/// [`OidcState::answer`] takes for `expected` (an `a.` state), a cancel, or the time out.
+async fn wait_for_link(
+    state: &OidcState,
+    url: &str,
+    expected: &str,
+    open: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    if !expected.starts_with(APP_STATE) {
+        return Err("Invalid sign-in state".into());
+    }
+    let waiting = state.link_begin(expected);
+    if let Err(error) = open(url) {
+        state.link_cancel();
+        return Err(error);
+    }
+    match tokio::time::timeout(WAIT, waiting).await {
+        Ok(Ok(answer)) => Ok(answer),
+        Ok(Err(_)) => Err("Sign-in cancelled".into()),
+        Err(_) => {
+            state.link_cancel();
+            Err("Sign-in timed out. Try again.".into())
+        }
+    }
+}
+
+/// Stops waiting; the port closes (port 0: the deep link is no longer awaited).
 #[tauri::command]
 pub fn oidc_loopback_cancel(state: tauri::State<'_, OidcState>, port: u16) -> Result<(), String> {
+    if cfg!(mobile) && port == DEEP_LINK {
+        state.link_cancel();
+        return Ok(());
+    }
     let mut pending = state.0.lock().map_err(|e| e.to_string())?;
     if let Some(entry) = pending.remove(&port) {
         entry.cancelled.store(true, Ordering::SeqCst);
@@ -602,6 +711,94 @@ mod command_tests {
         );
         assert_eq!(state_of("#a=1&state=x%2By").as_deref(), Some("x+y"));
         assert_eq!(state_of(""), None);
+    }
+
+    const APP: &str = "a.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    #[test]
+    fn a_deep_link_hands_back_its_query_and_fragment_and_nothing_else() {
+        // covers: proofs.oidc.callback.android
+        assert_eq!(
+            deep_link_answer(&format!("ghostly://oidc?code=c&state={APP}")).as_deref(),
+            Some(format!("?code=c&state={APP}").as_str())
+        );
+        assert_eq!(
+            deep_link_answer(&format!("ghostly://oidc/#id_token=t&state={APP}")).as_deref(),
+            Some(format!("#id_token=t&state={APP}").as_str())
+        );
+        assert_eq!(
+            deep_link_answer(&format!("ghostly://oidc?x=1#id_token=t&state={APP}")).as_deref(),
+            Some(format!("?x=1#id_token=t&state={APP}").as_str())
+        );
+        for link in [
+            "ghostly://oidc".to_string(),
+            "ghostly://oidc?code=c".to_string(),
+            format!("ghostly://oidcx?state={APP}"),
+            format!("ghostly://other?state={APP}"),
+            format!("https://app.ghostly.tools/oidc?state={APP}"),
+            format!("ghostly://oidc/more?state={APP}"),
+            format!("ghostly://oidc?state={APP}&pad={}", "a".repeat(MAX_REQUEST)),
+        ] {
+            assert_eq!(deep_link_answer(&link), None, "{link}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_deep_link_sign_in_takes_only_the_answer_for_its_state() {
+        // covers: proofs.oidc.callback.android
+        let state = Arc::new(OidcState::default());
+        // Nobody waits yet: an answer goes nowhere.
+        assert!(!state.answer(&format!("?code=c&state={APP}")));
+        let opened = Arc::new(Mutex::new(None));
+        let waiting = {
+            let (state, opened) = (state.clone(), opened.clone());
+            tokio::spawn(async move {
+                wait_for_link(&state, AUTHORIZE, APP, |url| {
+                    *opened.lock().unwrap() = Some(url.to_string());
+                    Ok(())
+                })
+                .await
+            })
+        };
+        while opened.lock().unwrap().is_none() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(opened.lock().unwrap().as_deref(), Some(AUTHORIZE));
+        assert!(!state.answer("?code=c&state=a.other"), "another state");
+        assert!(!state.answer("?code=c"), "no state");
+        assert!(state.answer(&format!("?code=c&state={APP}")));
+        assert!(
+            !state.answer(&format!("?code=again&state={APP}")),
+            "taken once"
+        );
+        assert_eq!(
+            waiting.await.unwrap().unwrap(),
+            format!("?code=c&state={APP}")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_deep_link_sign_in_ends_when_cancelled_refused_or_replaced() {
+        // covers: proofs.oidc.callback.android
+        let state = Arc::new(OidcState::default());
+        // A loopback state is not a deep link's: refused before any browser opens.
+        let refused = wait_for_link(&state, AUTHORIZE, STATE, |_| panic!("no browser")).await;
+        assert_eq!(refused.unwrap_err(), "Invalid sign-in state");
+        // The browser could not be opened: nothing is left waiting.
+        let failed = wait_for_link(&state, AUTHORIZE, APP, |_| Err("No app".into())).await;
+        assert_eq!(failed.unwrap_err(), "No app");
+        assert!(!state.answer(&format!("?code=c&state={APP}")));
+        // Cancelled (the page's cancel, or a new sign-in starting), the wait ends.
+        let waiting = {
+            let state = state.clone();
+            tokio::spawn(async move { wait_for_link(&state, AUTHORIZE, APP, |_| Ok(())).await })
+        };
+        while state.1.lock().unwrap().is_none() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        state.link_cancel();
+        assert_eq!(waiting.await.unwrap().unwrap_err(), "Sign-in cancelled");
+        assert!(!state.answer(&format!("?code=c&state={APP}")));
     }
 
     #[test]

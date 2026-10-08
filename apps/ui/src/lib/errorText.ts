@@ -52,6 +52,9 @@ const PARTS: Record<string, TranslationKey> = {
 };
 const readParts = (parts: string, t: Translate) => parts.split(", ").map((part) => (PARTS[part] ? t(PARTS[part]) : part)).join(", ");
 
+/** A copy the app could not save where the person chose (Android's document picker, apps/desktop android.rs). */
+export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable file path)$/;
+
 const NETWORK = "(?<network>Mainnet|Testnet)";
 const HOST = "(?<host>[^\\s:/]+(?::\\d+)?)";
 
@@ -66,6 +69,15 @@ const RULES: readonly Rule[] = [
   exact("Could not open the service", "errors.extension.openService"),
   exact("Could not open a tab", "errors.extension.openTab"),
   exact("Not a payment link", "errors.extension.notPaymentLink"),
+  // The OIDC wait, the web popup's (proofs/oidc/popup.ts) and the app's (apps/desktop/src/oidc.rs).
+  exact("Sign-in timed out. Try again.", "errors.extension.signInTimedOut", "errors.extension.signInTimedOutNext"),
+
+  // The app's opener, its file saving and its Android host (apps/desktop: commands.rs, android.rs,
+  // GhostlyHostPlugin.kt). Their reasons stay English, behind the ⓘ.
+  { match: /^No app on this phone opens this link$/, key: "errors.host.noApp", next: "errors.host.noAppNext", detail: true },
+  { match: /^Not a (?:web|Ghostly project) link$/, key: "errors.host.openFailed", next: "errors.host.openFailedNext", detail: true },
+  { match: SAVE_REFUSED, key: "errors.host.saveFailed", next: "errors.host.saveFailedNext", detail: true },
+  { match: /^(?:The Android host is not ready|Not from Android's main thread)$/, key: "errors.app.stillStarting", detail: true },
 
   // The page's way to the peer and its services (packages/browser/src/platform).
   exact("Ghostly is starting…", "errors.app.starting"),

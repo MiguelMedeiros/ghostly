@@ -247,6 +247,7 @@
     "downloadMp3": "تنزيل بصيغة MP3",
     "downloadPreparing": "لا يزال قيد التحضير",
     "downloadUnconverted": "تعذّر التحويل",
+    "downloadUnsaved": "لم يُحفظ. جرّب مجلدًا آخر",
     "edit": "تعديل",
     "editPending": "لم تظهر لجهة الاتصال بعد",
     "editPendingGroup": "لم تُرسل إلى المجموعة بعد",
