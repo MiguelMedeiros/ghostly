@@ -2,7 +2,7 @@
 
 `@ghostlytools/sdk` (`packages/sdk`) is what someone building *for* Ghostly needs, without reading its
 internals: the adapter contracts, the fakes and contract test suites the app tests itself with, the
-plugin registry, and the protocol library for a minimal client. The app imports the very same code;
+plugin registry, the protocol library for a minimal client, and the mini-app API. The app imports the very same code;
 the package is a build of it, not a copy.
 
 | Entry point | What is in it | Needs |
@@ -11,11 +11,12 @@ the package is a build of it, not a copy.
 | `@ghostlytools/sdk/fakes` | the fake sources (`FakeLightningProvider`, `FakeOnchainProvider`, `fakeInvoice`, `fakeAddress`) and fake identities (`fakeKey`, `fakeAccount`, `fakeRecord`) | nothing |
 | `@ghostlytools/sdk/testing` | the fakes plus the contract suites: `describeLightningProvider`, `describeOnchainProvider`, `describeIdentityProof` | vitest (peer) |
 | `@ghostlytools/sdk/core` | the whole protocol library (`packages/core`): identities and records, invites, Pkarr rendezvous, the data link and its frames, paired sessions and capabilities, payments, identity proofs | nothing |
+| `@ghostlytools/sdk/app` | the mini-app API (WISP 1200): the `window.ghostly` type (`MiniAppApi`), the broker's messages, its refusal codes (`MiniAppErrorCode`, `miniAppErrorCode`), `MINI_APP_LIMITS`, and the manifest's types (`AppManifestSource` for `ghostly-app.json`) | nothing; imports nothing at run time |
 
 The vocabulary is the [adapter roadmap](wisps/ADAPTER-ROADMAP.md)'s: a **WISP** is a contract; a
 **capability** is what a running client advertises; an **adapter** implements a contract with a
 technology; a **provider** operates a service or a wallet; a **signer** authorizes one cryptographic
-operation; a **plugin** packages adapters for distribution. This SDK is for adapters and plugins.
+operation; a **plugin** packages adapters for distribution. This SDK is for adapters, plugins and mini-apps.
 
 ## Getting it
 
@@ -30,7 +31,8 @@ cd your-adapter && npm install /tmp/ghostly-sdk/ghostlytools-sdk-*.tgz
 [`packages/sdk/examples/adapter`](../packages/sdk/examples/adapter) is a complete project that does exactly this: a
 Lightning source and an identity proof, their contract tests, and a plugin the app loads.
 `npm run test:sdk-example` at the repository root packs the SDK, installs the tarball into the example
-and runs its checks; CI runs it on every pull request.
+and runs its checks, then does the same for [`packages/sdk/examples/mini-app`](../packages/sdk/examples/mini-app) in a
+temporary folder; CI runs it on every pull request.
 
 ## Trust model, first
 
@@ -221,6 +223,38 @@ section says so rather than pretend.
 A **minimal client** that implements only the WISP contracts it needs uses `@ghostlytools/sdk/core`: the
 protocol library the apps and the CLI are built on. It follows the WISP drafts it implements, and
 [PROTOCOL.md](PROTOCOL.md) describes the wire.
+
+## A mini-app
+
+A mini-app (WISP 1200, [Apps](wisps/1200-marketplace.md)) is one HTML file the client runs in a sandbox with no
+network. It reaches the client only through `window.ghostly`, the broker. Apps run in Ghostly from release 1.2.
+`@ghostlytools/sdk/app` types that API:
+
+```ts
+import { miniAppErrorCode, type MiniAppApi } from "@ghostlytools/sdk/app";
+declare global { interface Window { ghostly: MiniAppApi } }
+
+try {
+  await window.ghostly.chat.send({ move: "e4" });
+} catch (error) {
+  if (miniAppErrorCode(error) === "offline") showWaiting();   // the other codes: MINI_APP_ERROR_CODES
+}
+```
+
+- A failed call rejects with an `Error` whose `message` is one of `MINI_APP_ERROR_CODES` (`offline`, `peer-closed`,
+  `too-large`, `full`...). The runner's own failures (no answer from the client) are `failed`, and arguments that are
+  not JSON are `bad-request`. A later client may add a code: treat one you do not know as `failed`.
+- `MiniAppAnswer` and `MiniAppEvent` are the broker's messages, for a test harness that stands in for it. A `file`
+  answer carries an `ArrayBuffer` on the port, or base64 `bytes` on Desktop; the app gets an `ArrayBuffer` either way.
+- `MINI_APP_LIMITS` holds the broker's bounds (64 KiB a request, 50 a second, 64 KiB a stored value, 5 MiB a scope,
+  32 KiB a chat frame).
+- `AppManifestSource` is `ghostly-app.json`: `satisfies AppManifestSource` checks it as you write it.
+  `ghostly app publish` adds `publisher`, `files` and the next `sequence`, and signs the bundle.
+- The entry imports nothing at run time, so an app's single-file bundle takes only the few constants it uses.
+
+[`packages/sdk/examples/mini-app`](../packages/sdk/examples/mini-app) is a small app typed this way.
+[`apps/mini/chess`](../apps/mini/chess) is a complete one, with its single-file build. To list an app in a store, see
+[APPS.md](APPS.md).
 
 ## Testing
 
