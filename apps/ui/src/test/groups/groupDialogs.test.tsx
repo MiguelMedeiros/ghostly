@@ -62,6 +62,7 @@ describe("GroupMembersDialog", () => {
     engine.on("makeGroupAdmin", () => undefined).on("removeGroupMember", () => undefined);
     expect(within(row(ME)).queryByRole("button")).not.toBeInTheDocument();
     await user.click(within(row(ALICE)).getByTestId("group-make-admin"));
+    await user.click(screen.getByTestId("group-make-admin-confirm"));
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
     await user.click(screen.getByTestId("group-remove-confirm"));
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
@@ -87,6 +88,32 @@ describe("GroupMembersDialog", () => {
     expect(screen.getByTestId("group-members-dialog")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(engine.callsTo("removeGroupMember")).toEqual([]);
+  });
+
+  it.each(["mesh", "community"] as const)("asks before handing the admin role over (%s), naming who gets it and what the admin gives up; Cancel and Escape change nothing", async profile => {
+    const { user, engine, onClose } = members_(groupView({ status: "active", isAdmin: true, profile, members }));
+    engine.on("makeGroupAdmin", () => undefined);
+    const button = within(row(BOB)).getByTestId("group-make-admin");
+    expect(button, "the label says the role moves, not that an admin is added").toHaveTextContent("Hand over admin");
+    await user.click(button);
+    const ask = screen.getByTestId("group-make-admin-dialog");
+    expect(ask).toHaveAccessibleName("Make Bob the admin?");
+    expect(ask).toHaveAccessibleDescription("You will no longer be the admin. Only Bob can then rename the group, change its picture and link, invite or remove members, and give the role back.");
+    expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(engine.callsTo("makeGroupAdmin")).toEqual([]);
+    await user.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-make-admin-dialog")).not.toBeInTheDocument();
+    await user.click(within(row(ALICE)).getByTestId("group-make-admin"));
+    expect(screen.getByTestId("group-make-admin-dialog")).toHaveAccessibleName("Make Alice the admin?");
+    // Escape, as the browser says it to the topmost dialog: only the question closes.
+    act(() => { screen.getByTestId("group-make-admin-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.queryByTestId("group-make-admin-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-members-dialog")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(engine.callsTo("makeGroupAdmin")).toEqual([]);
+    await user.click(within(row(ALICE)).getByTestId("group-make-admin"));
+    await user.click(within(screen.getByTestId("group-make-admin-dialog")).getByRole("button", { name: "Hand over admin" }));
+    expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
   });
 
   it("gives a community group's member the link's QR too, and none of the admin's controls", async () => {

@@ -146,6 +146,10 @@
     "showQr": "QR を表示",
     "title": "グループリンク"
   },
+  "makeAdmin": {
+    "body": "あなたは管理者ではなくなります。グループ名・写真・リンクの変更、メンバーの招待や削除、管理者を戻すことができるのは {{name}} だけになります。",
+    "title": "{{name}} を管理者にしますか?"
+  },
   "member": {
     "connected": "接続済み · {{transport}}",
     "connecting": "接続中…",
@@ -170,7 +174,7 @@
     "invite": "連絡先を招待",
     "inviteAction": "招待",
     "invited": "招待済み…",
-    "makeAdmin": "管理者にする",
+    "makeAdmin": "管理者を譲る",
     "missing": "{{count}} 件欠落",
     "missingHint": "このエポックで誰も復元できなかったメッセージ",
     "needsBothHint": "グループには双方のアプリが接続済みで最新である必要があります",
