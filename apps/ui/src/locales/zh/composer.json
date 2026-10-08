@@ -70,5 +70,6 @@
   "skinTone": "肤色",
   "takePhoto": "拍照",
   "tooLong": "内容过长，无法发送（{{count}} 个字符，上限为 {{max}}）。",
+  "tooLongBytes": "内容过长，无法发送（{{bytes}} 字节，上限为 {{max}}）。请缩短，或作为文件发送。",
   "tooLongDht": "对 DHT 来说太长。直接连接后即可发送。"
 }
