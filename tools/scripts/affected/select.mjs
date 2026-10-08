@@ -108,6 +108,14 @@ export const UNIT_PROJECTS = [
     whole: ["apps/mini/chess/package.json", "apps/mini/chess/vitest.config.ts", "apps/mini/chess/vite.config.ts", "tools/vitest.shared.ts"],
     tests: ["apps/mini/chess/test/**"],
   },
+  {
+    // The pinned Chess the e2e runs (e2e/fixtures/chess): its test reads apps/mini/chess and the fixture from disk,
+    // which no import graph shows, so a change to either runs it (whole: that one file).
+    name: "chess fixture", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/chessFixture.test.ts"],
+    sources: [],
+    whole: ["apps/mini/chess/{ghostly-app.json,index.html,package.json,tsconfig.json,vite.config.ts}", "apps/mini/chess/src/**", "e2e/fixtures/chess/**"],
+    tests: [],
+  },
 ];
 
 /** `npm run lint`'s scope: what eslint is given, and what makes the whole lint run. */
@@ -444,9 +452,9 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
     if (p.startsWith("e2e/")) {
       const reach = /\.[cm]?[jt]sx?$/.test(p) ? [...specsImporting(p, e2eFiles)].filter(isSuiteSpec).sort() : [];
       for (const s of reach) e2e.specs.add(s);
-      if (reach.length) e2e.because.push(`${p}: imported by ${reach.join(", ")}`);
-      else e2e.none.push(p);
-      continue;
+      if (reach.length) { e2e.because.push(`${p}: imported by ${reach.join(", ")}`); continue; }
+      // A file the specs read from disk (e2e/fixtures/chess) reaches them through the paths map, as source does.
+      if (!globs.some((g) => g.re.test(p))) { e2e.none.push(p); continue; }
     }
     const hits = globs.filter((g) => g.re.test(p));
     if (!hits.length) { e2e.unmapped.push(p); continue; }
