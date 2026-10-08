@@ -171,6 +171,7 @@
     "admin": "admin",
     "changePicture": "Cambia foto",
     "epoch": "epoca {{epoch}}",
+    "fullInvited": "Il gruppo è pieno ({{max}} su {{max}}), contando gli inviti ancora senza risposta ({{invited}}). Nessun altro può essere invitato finché qualcuno non esce.",
     "invite": "Invita un contatto",
     "inviteAction": "Invita",
     "invited": "Invitato…",
