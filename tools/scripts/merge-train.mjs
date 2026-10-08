@@ -241,6 +241,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.priority = p.labels.includes(LABEL.priority);
     p.ci = ciState(await gh.checkRuns(p.sha));
     p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    // Written before the latest `queue` (taken off and added again): it speaks for an earlier head, and the label
+    // added since vouches for the one it was added on. It is rewritten (or deleted) like any position comment.
+    const relabeled = p.labels.includes(LABEL.queue) ? queuedAt(events, null) : null;
+    if (p.sticky && relabeled && Date.parse(p.sticky.updated_at ?? p.sticky.created_at) < Date.parse(relabeled)) [p.stale, p.sticky] = [p.sticky, undefined];
     p.alone = aloneMark(p.sticky);
     // No position comment records the queued head yet: tell it by time, the head's first CI against the label.
     if (!p.sticky && p.labels.includes(LABEL.queue)) {
@@ -256,13 +260,16 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     gone.add(p.number);
     if (label) await w.addLabel(p.number, label);
     for (const l of Object.values(LABEL)) if (l !== label && p.labels.includes(l)) await w.removeLabel(p.number, l);
-    if (p.sticky) await w.deleteComment(p.sticky.id);
+    if (p.sticky ?? p.stale) await w.deleteComment((p.sticky ?? p.stale).id);
     if (text) await w.comment(p.number, text);
   };
   /** Posts or edits a pull request's position comment, and keeps the copy read at the start of the run current. */
   const setSticky = async (p, text) => {
     if (!p.labels.includes(LABEL.queue)) return; // --also: pretended, never commented on
-    if (!p.sticky) p.sticky = { id: (await w.comment(p.number, text))?.id, body: text };
+    if (!p.sticky && p.stale) {
+      await w.editComment(p.stale.id, text);
+      p.sticky = { ...p.stale, body: text };
+    } else if (!p.sticky) p.sticky = { id: (await w.comment(p.number, text))?.id, body: text };
     else if (p.sticky.body !== text) {
       await w.editComment(p.sticky.id, text);
       p.sticky = { ...p.sticky, body: text };
