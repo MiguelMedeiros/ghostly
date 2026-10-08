@@ -32,7 +32,7 @@ Every new chat is the same kind: it comes from one ghostly1 invite, starts on th
 - **Available**: Install the web app; a contact's message or call, or a mention in a private group, can wake it with a push that carries no content while it is closed (off by default)
 - **Available**: A headless CLI for bots that joins the same chats, calls included
 - **Planned**: Presence, a capability of its own that you can keep private
-- **Planned**: Native apps for iOS and Android (route to be decided)
+- **Planned**: A native Android app (Tauri, in testing for 1.2) and a native iOS app (route to be decided)
 
 Gate: Every client tested against every other one, on each transport it offers.
 
