@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The merge train: the only way pull requests land on `dev` (and on each `epic/*` branch). A reviewer adds the label
-// `queue` to an approved, green pull request; the train lines them up and lands them in batches.
+// `queue` to an approved, green pull request; the train lines them up and lands them in batches, or alone when only one
+// is in line.
 //
 // - The line, per base: `queue:priority` first, then by the time each got `queue` (the latest `labeled` event, so
 //   taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request whose CI
@@ -411,6 +412,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const stay = { number: p.number, members: [p], alone: true };
     const tip = await gh.branchSha(base);
     say(`ALONE #${p.number} at ${p.sha.slice(0, 12)} CI ${p.ci}`);
+    // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place.
+    if (p.draft) return null;
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried });
     if (p.ci === "failure") {
@@ -419,7 +422,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         say(`HOLD #${p.number}: CI Success on \`${base}\` itself is ${baseCi === "failure" ? "red" : "still running"}; nobody is blamed until it is green.`);
         return stay;
       }
-      // One more run before blaming it: a flake should not cost its author a review round.
+      // One more run before blaming it: a flake should not cost its author a review round. The queue app may not rerun
+      // workflows, so the rerun is a fresh rebase (a new committer time, so a new sha: a CI run has passed since).
       if (!mark.retried) return goAlone(p, { retried: true, rerun: true });
       say(`FAILED #${p.number}`);
       done.failed.push(p.number);

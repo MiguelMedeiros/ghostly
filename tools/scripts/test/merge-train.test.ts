@@ -687,6 +687,25 @@ describe("one pull request alone", () => {
     expect(repo.alone(11)).toMatchObject({ baseSha: "dev1" });
   });
 
+  it("lets one turned into a draft mid-flight wait in line, its rebased head still vouched for", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const head = repo.pulls.get(11)!.sha;
+    repo.settle();
+    repo.pulls.get(11)!.draft = true;
+    repo.add(12);
+    const r = await repo.run();
+    expect(repo.landed).toEqual(["#12"]); // a draft waits and others go, as in the batch line
+    expect(repo.comments.get(11)![0].body).toMatch(/1st\*\*\. Waiting: it is a draft/);
+    repo.pulls.get(11)!.draft = false;
+    const again = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(again.dropped).toEqual([]);
+    expect(again.inFlight).toBe(11); // dev moved (#12): rebased again from the train's own head
+    expect(repo.pulls.get(11)!.sha).not.toBe(head);
+  });
+
   it("rebases again when CI never started on its commit", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
