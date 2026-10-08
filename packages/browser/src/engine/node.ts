@@ -3074,20 +3074,28 @@ export class GhostlyNode implements EngineImplementation {
    * message goes again as an edit of its card alone: the same text, so no version and no edit mark. Once per message (the
    * row says so, across restarts); the edit queue carries it (a card's edit goes only live, and a later edit of the
    * author's replaces it, the highest number winning). A contact whose app does not show the kind (it would drop the card
-   * and mark the text edited) gets none: the row waits for one that does. Bounded: the newest `CARD_RESTORE_MOST` such
-   * messages of the last `CARD_RESTORE_MS`; older ones are given up. The edit is marked `restore`: the bot's own event
-   * stream says nothing of it, while its number counts, so a later edit of the bot's takes the next one.
+   * and mark the text edited) gets none: the row waits for one that does. Bounded: only the newest message of each card
+   * (kind and id: a bot may send a task again as a new message), the newest `CARD_RESTORE_MOST` such cards of the last
+   * `CARD_RESTORE_MS`; the others are given up. The edit queue spaces them (`CARD_RESTORE_GAP_MS`), so a reconnect does
+   * not burst. The edit is marked `restore`: the bot's own event stream says nothing of it, while its number counts, so a
+   * later edit of the bot's takes the next one.
    */
   private async restoreCards(linkId: string): Promise<void> {
     const live = this.links.get(linkId), link = live?.link;
     const offers = link?.sessionOffers.peer;
     if (!live?.stored.profile || live.stored.group || !link?.supportsEdits || !offers) return;
-    const due = (await db.getMessages(linkId)).filter(m => m.sender === "me" && (m.cardRestore ?? m.buttonsRestore) === "due")
-      .sort((a, b) => b.timestamp - a.timestamp);
+    const mine = (await db.getMessages(linkId)).filter(m => m.sender === "me").sort((a, b) => b.timestamp - a.timestamp);
     const since = Date.now() - CARD_RESTORE_MS;
     const changed: string[] = [];
-    for (const [index, message] of due.entries()) {
-      const stale = index >= CARD_RESTORE_MOST || message.timestamp < since;
+    // Only the newest message of each card goes again: an older one of the same card is an older version, given up.
+    const cards = new Set<string>();
+    let kept = 0;
+    for (const message of mine) {
+      const key = message.card && `${message.card.kind}\n${message.card.id}`;
+      const superseded = !!key && cards.has(key);
+      if (key) cards.add(key);
+      if ((message.cardRestore ?? message.buttonsRestore) !== "due") continue;
+      const stale = superseded || kept++ >= CARD_RESTORE_MOST || message.timestamp < since;
       if (!stale && message.card && !offers.includes(GhostlyNode.cardCapability(message.card))) continue;
       const at = Date.now();
       const patched = await db.patchMessage(linkId, message.id, current => {
