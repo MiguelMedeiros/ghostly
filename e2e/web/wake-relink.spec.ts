@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { endpoints } from "../infra/env.mjs";
+import { linkTrace, watchLink } from "../support/callTrace";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 
 /**
@@ -31,10 +32,32 @@ async function setHidden(page: Page, hidden: boolean): Promise<void> {
   }, hidden);
 }
 
-/** When (`Date.now()`) the chat's icon says it is live, polled every 50 ms: the time the page shows it, not a retry's. */
-async function liveAt(peer: Peer, timeout: number): Promise<number> {
-  await peer.page.waitForFunction(() => /Connected/.test(document.querySelector("[data-testid=connection-options]")?.getAttribute("aria-label") ?? ""), undefined, { polling: 50, timeout });
-  return Date.now();
+/**
+ * Every label the chat's icon takes from now on, with the time (`Date.now()`) the page showed it. A frozen page runs
+ * nothing, so right after it is shown again its icon still says what it said before it went: live. Only a label seen
+ * after the session's end tells when the chat is live again.
+ */
+async function watchIcon(peer: Peer): Promise<void> {
+  await peer.page.evaluate(() => {
+    const seen: [number, string][] = [];
+    (window as unknown as { __iconLabels: [number, string][] }).__iconLabels = seen;
+    const note = () => {
+      const label = document.querySelector("[data-testid=connection-options]")?.getAttribute("aria-label") ?? "";
+      if (label !== seen.at(-1)?.[1]) seen.push([Date.now(), label]);
+    };
+    note();
+    new MutationObserver(note).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-label"] });
+  });
+}
+
+/** When the chat's icon, having said it is not live (`after` on), says it is live again. */
+async function liveAgainAt(peer: Peer, after: number, timeout: number): Promise<number> {
+  const handle = await peer.page.waitForFunction((after) => {
+    const seen = (window as unknown as { __iconLabels: [number, string][] }).__iconLabels.filter(([at]) => at >= after);
+    const down = seen.findIndex(([, label]) => !/Connected/.test(label));
+    return down >= 0 && seen.slice(down).find(([, label]) => /Connected/.test(label))?.[0];
+  }, after, { polling: 100, timeout });
+  return (await handle.jsonValue()) as number;
 }
 
 test("a chat back from the background is live again within 2 s, and messages go both ways", {
@@ -59,8 +82,11 @@ test("a chat back from the background is live again within 2 s, and messages go 
   await expect(alice.page.getByTestId("connection-options")).toBeHidden();
 
   // Bob's tab goes to the background and the browser freezes it, as a phone does: nothing on the page runs.
+  await Promise.all([alice, bob].map((p) => watchLink({ kind: "web", ...p })));
+  await watchIcon(bob);
   await setHidden(bob.page, true);
   const cdp = await bob.context.newCDPSession(bob.page);
+  const frozen = Date.now();
   await cdp.send("Page.setWebLifecycleState", { state: "frozen" });
   await alice.page.waitForTimeout(AWAY_MS);
 
@@ -68,9 +94,17 @@ test("a chat back from the background is live again within 2 s, and messages go 
   await cdp.send("Page.setWebLifecycleState", { state: "active" });
   const shown = Date.now();
   await setHidden(bob.page, false);
-  // Bob's chat says live once the session is up on both sides (it is authenticated both ways first). Alice stays on her
-  // list meanwhile: opening the chat would read Bob's packet at once, which is not what a contact elsewhere does.
-  const took = await liveAt(bob, 120_000) - shown;
+  // Bob's chat hears that the session went, then says live once one is up on both sides (it is authenticated both ways
+  // first). Alice stays on her list meanwhile: opening the chat would read Bob's packet at once, which is not what a
+  // contact elsewhere does.
+  const live = await liveAgainAt(bob, frozen, 120_000).catch((error: Error) => error);
+  for (const p of [alice, bob]) await test.info().attach(`${p.name}-link-trace.txt`, { body: await linkTrace({ kind: "web", ...p }), contentType: "text/plain" });
+  const labels = await bob.page.evaluate(() => (window as unknown as { __iconLabels: [number, string][] }).__iconLabels);
+  const icon = labels.map(([at, label]) => `${at - shown} ms ${label}`).join("\n");
+  await test.info().attach("bob-icon.txt", { body: icon, contentType: "text/plain" });
+  console.log(`[wake-relink] bob's icon, from shown again:\n${icon}`);
+  if (live instanceof Error) throw live;
+  const took = live - shown;
   test.info().annotations.push({ type: "live again", description: `away ${AWAY_MS / 1000} s, shown again: ${took} ms` });
   console.log(`[wake-relink] bob shown again after ${AWAY_MS / 1000} s, live again in ${took} ms`);
   expect(took, "from shown again to live").toBeLessThan(LIVE_AGAIN_MS);
