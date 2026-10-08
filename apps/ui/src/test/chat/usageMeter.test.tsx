@@ -145,6 +145,17 @@ describe("a usage card in the chat", () => {
     expect(screen.getByTestId("usage-details")).toBeInTheDocument();
   });
 
+  it("in Arabic, a window's words run right to left with the page: only bare numbers are kept left to right", async () => {
+    const c = usage({ left: 62, window: "5 h", resetsAt: NOW + 2 * HOUR, windows: [{ window: "week", left: 80, resetsAt: NOW + 50 * HOUR }, { window: "opus", left: 12 }] });
+    const { user } = renderApp(<MessageBubble message={message(c)} peerPubKey="peer" />, { language: "ar" });
+    await user.click(within(screen.getByTestId("status-card")).getByTestId("status-card-toggle"));
+    const details = screen.getByTestId("usage-details");
+    expect(within(details).getByTestId("usage-details-window-0")).toHaveTextContent("تبقّى 80%");
+    // A phrase of the app's language forced left to right reads backwards in Arabic ("%تبقّى 80" on screen).
+    const forced = [...details.querySelectorAll('[dir="ltr"]')].map((el) => el.textContent ?? "").filter((text) => /[\u0600-\u06FF]/.test(text));
+    expect(forced).toEqual([]);
+  });
+
   it("is no task: the Tasks button stays away, and its line elsewhere is the label and percent", () => {
     renderApp(<TasksButton rows={[{ id: "m1", card: usage(), sender: "peer", timestamp: NOW }]} />);
     expect(screen.queryByTestId("chat-tasks")).not.toBeInTheDocument();

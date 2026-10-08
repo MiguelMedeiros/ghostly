@@ -64,8 +64,10 @@ test("the BDK wallet is offered on Testnet only, shows a new wallet's words once
   // A server that does not answer (nothing listens on port 1): nothing is saved, and it says why.
   await form.getByLabel("Esplora server").fill("http://127.0.0.1:1");
   await form.getByTestId("provider-save").click();
-  await expect(error).toContainText("nothing answers at 127.0.0.1:1: the local Esplora server is not running", { timeout: 30_000 });
-  await expect(error).toContainText("Nothing was saved");
+  // In a few words: what failed, then why and what is safe (lib/problemText.ts).
+  await expect(error.getByTestId("new-wallet-error-title")).toHaveText("Couldn't create the Testnet Bitcoin wallet", { timeout: 30_000 });
+  await expect(error.getByTestId("new-wallet-error-next")).toContainText("Nothing answers at 127.0.0.1:1: the local Esplora server is not running");
+  await expect(error.getByTestId("new-wallet-error-next")).toContainText("Nothing was saved");
   await expect(alice.page.locator("[data-testid^=wallet-card-bitcoin-]")).toHaveCount(0);
 
   // Restoring: a phrase that is not BIP39 is refused.
@@ -121,7 +123,7 @@ test("a BDK wallet whose Esplora is down at start-up shows Connecting…, connec
   await expect(connecting).toHaveAttribute("data-status", "connecting");
   await expect(connecting).toContainText("Connecting to BDK wallet…");
   await expect(panel(alice).getByTestId("bitcoin-last-balance")).toContainText("Last known balance: 50,000 test sats");
-  await expect(panel(alice).getByTestId("bitcoin-connect-error")).toContainText("the Esplora server at esplora-a.ghostly.test did not answer", { timeout: 30_000 });
+  await expect(panel(alice).getByTestId("bitcoin-connect-error")).toContainText("The Esplora server at esplora-a.ghostly.test didn't answer", { timeout: 30_000 });
   await expect(status).toContainText("trying again by itself");
   await expect(panel(alice).getByTestId("bitcoin-retry")).toBeVisible();
   await expect(connecting).toHaveAttribute("data-status", "connecting");

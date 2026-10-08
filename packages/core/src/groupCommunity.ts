@@ -13,8 +13,10 @@ import { mentionsBytes, validMentions, wireMentions, type GroupMention } from ".
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
 import { cardEditNumber, readStatusCard, statusCardBytes, type StatusCard } from "./statusCards";
+import { readGroupFileMeta, type GroupFileMeta } from "./groupFiles";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
 import { RateWindow, validEditNumber } from "./pairedEdits";
+import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers } from "./catchUp";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, nextGroupMetaRevision, groupMetaTag, groupName, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
@@ -77,6 +79,14 @@ export const COMMUNITY_LIMITS = {
    */
   syncAnswers: 16,
   syncWindowMs: 60_000,
+  /**
+   * Frames of one catch-up answer in a slice (`CommunitySessionHooks.handled`), two slices at most not handled yet by
+   * the member's app: a member back after the store filled was handed 258 at once, and an app holds 64 waiting at most
+   * before 2026-10-07 (more ends the session). As a private group's (`GROUP_LIMITS.catchUpSlice`).
+   */
+  catchUpSlice: CATCH_UP_SLICE,
+  /** Between two slices, when the member's app cannot say it handled one (`handled` resolves `false`). */
+  catchUpPauseMs: CATCH_UP_PAUSE_MS,
 } as const;
 
 /** What every member should know about who can read what, and what the link does, in the words the apps show. */
@@ -301,7 +311,7 @@ export interface CommunityState {
   meta?: GroupMeta;
 }
 
-export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard }
+export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta }
 /**
  * What an application sends through the group rather than as text: `frame` for everyone in the epoch (the group
  * reads it, as it reads text), or, in `pair`, a payload only `to` can open. Delivered once, like a message: the
@@ -314,8 +324,8 @@ export interface CommunitySessionHooks {
   save(state: CommunityState): Promise<void>;
   /** To everyone this member has an edge to (hubs relay it on). Returns how many edges took it; nothing when the host does not say. */
   broadcast(frame: CommunityFrame): number | void;
-  /** To the member at the other end of an edge, if there is one. */
-  direct(to: string, frame: CommunityFrame): void;
+  /** To the member at the other end of an edge, if there is one: `false` when the edge did not take it. */
+  direct(to: string, frame: CommunityFrame): boolean | void;
   /** To one member, wherever they are: over their edge if I have it, else to the hubs with `to`. */
   addressed(to: string, frame: CommunitySecretFrame | CommunityEntryFrame): void;
   message(message: CommunityIncomingMessage): Promise<void> | void;
@@ -349,6 +359,12 @@ export interface CommunitySessionHooks {
    * (`groupTurnUnconfirmed`), and leave requests wait for the next try. Absent: yes.
    */
   adminTurn?(): Promise<boolean>;
+  /**
+   * Resolves once the member's app handled every frame sent to it so far (it answers a ping in the order frames come),
+   * or `false` when it cannot tell (no session, or an app that answers no ping): a catch-up answer then waits
+   * `COMMUNITY_LIMITS.catchUpPauseMs` between slices. Absent: an answer goes all at once, as before 2026-10-07.
+   */
+  handled?(to: string): Promise<boolean>;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;
@@ -432,6 +448,8 @@ export class CommunitySession {
   private asked = new Map<string, number>();
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
+  /** Catch-up answers still going out, a slice at a time (`receiveSync`). */
+  private readonly answers: CatchUpAnswers<CommunityFrame>;
   private queue = Promise.resolve();
   /** When the commit I follow last changed (`adopt`), by `hooks.clock`. */
   private chainMovedAt = 0;
@@ -444,6 +462,11 @@ export class CommunitySession {
   constructor(state: CommunityState, private readonly hooks: CommunitySessionHooks) {
     this.state = state;
     this.identity = identityFromSeedB64(state.seedB64);
+    this.answers = new CatchUpAnswers({
+      send: (to, frame) => hooks.direct(to, frame),
+      ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
+      active: () => this.state.status === "active",
+    });
     this.rebuild();
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
     if ((state.status === "active" || state.status === "lost") && this.bestBranch().tip !== this.topHash) void this.serialize(() => this.chooseBranch());
@@ -539,6 +562,15 @@ export class CommunitySession {
   isRecentMember(key: string): boolean {
     for (const roster of this.rosters.values()) if (rosterHas(roster, key)) return true;
     return false;
+  }
+  /**
+   * Whether `key` could read message `messageId` (`<s>:<e>:<h>:<n>`) and still can: a member of the roster it was sealed
+   * for, and of the roster now. A holder serves a group file only to such a member (WISP 503 § Asking).
+   */
+  couldRead(key: string, messageId: string): boolean {
+    const [, e, h] = messageId.split(":");
+    const found = h === undefined ? undefined : this.commitByShort(Number(e), h);
+    return !!found && rosterHas(this.rosterAt(found.hash) ?? [], key) && rosterHas(this.roster, key);
   }
   /** Someone the chain took out (removed or left) and who is not back in. */
   wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
@@ -1028,20 +1060,25 @@ export class CommunitySession {
    * count against the text's 16 KiB, so the box stays within what older apps accept. `reply`: the message it
    * answers (`r`), counted the same way. `forwarded`: a forwarded text's hop count (`fw`, WISP 903 § Forwards). `card`:
    * a status card, checked by the caller (`sc`, WISP 405 · Status Cards), counted the same way; the text is its fallback.
+   * `file`: a file or voice message the text announces (`fl`, WISP 503 · Group Files), counted the same way; the text is
+   * its caption, or the line an older app shows.
    */
-  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ id: string } | { error: string }> {
+  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard, file?: GroupFileMeta): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       const trimmed = text.trim();
       if (!trimmed) return { error: "Nothing to send" };
+      const described = file === undefined ? undefined : readGroupFileMeta(file);
+      if (file !== undefined && !described) return { error: "That file cannot go to a group" };
       const named = validMentions(wireMentions(mentions), trimmed, false);
       const answers = reply && readReply(wireReply(reply), groupReplyAuthor);
       const replyBytes = answers ? utf8Encode(JSON.stringify(answers)).length : 0;
+      const fileBytes = described ? utf8Encode(JSON.stringify(described)).length + 8 : 0;
       const hops = readForwarded(forwarded);
-      if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + (hops ? 16 : 0) + (card ? statusCardBytes(card) + 8 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
-      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}) }), nick, now);
+      if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + fileBytes + (hops ? 16 : 0) + (card ? statusCardBytes(card) + 8 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
+      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}), ...(described ? { fl: described } : {}) }), nick, now);
       if ("error" in sent) return sent;
-      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}) });
+      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}) });
       await this.say(sent.frame);
       return { id: sent.id };
     });
@@ -1308,7 +1345,7 @@ export class CommunitySession {
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
     if (payload === null) return false;
-    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown; fw?: unknown; sc?: unknown; o?: unknown };
+    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown; fw?: unknown; sc?: unknown; fl?: unknown; o?: unknown };
     try { parsed = JSON.parse(payload) as typeof parsed; } catch { return false; }
     if (!isObject(parsed)) return false;
     // Said again under a newer commit (its author was behind): the message it first was, by that one's identity. Taken
@@ -1333,7 +1370,9 @@ export class CommunitySession {
       const forwarded = readForwarded(parsed.fw);
       // A card that does not hold is left out: the text, its fallback, shows.
       const card = parsed.sc === undefined ? undefined : readStatusCard(parsed.sc);
-      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}) });
+      // A file that does not hold is left out too (WISP 503): the text, its caption or fallback line, shows.
+      const file = parsed.fl === undefined ? undefined : readGroupFileMeta(parsed.fl) ?? undefined;
+      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}) });
     }
     else if (isObject(parsed.x)) await this.hooks.app?.({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x });
     else {
@@ -1397,10 +1436,15 @@ export class CommunitySession {
   catchUp(to: string): void { this.ask(to); }
 
   private ask(from: string): void {
+    const sync = this.question(from);
+    if (sync) this.hooks.direct(from, sync);
+  }
+  /** My sync for a member, unless I asked it a moment ago. */
+  private question(from: string): CommunitySyncFrame | null {
     const now = this.hooks.clock?.() ?? Date.now();
-    if (now - (this.asked.get(from) ?? 0) < 5_000) return;
+    if (now - (this.asked.get(from) ?? 0) < 5_000) return null;
     this.asked.set(from, now);
-    this.hooks.direct(from, this.syncFrame());
+    return this.syncFrame();
   }
 
   private async replayWaiting(): Promise<void> {
@@ -1417,6 +1461,10 @@ export class CommunitySession {
     let answered = this.syncsAnswered.get(from);
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(COMMUNITY_LIMITS.syncAnswers, COMMUNITY_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
+    // The answer, in this order, goes out a slice at a time (`CatchUpAnswers`): a member back after the store filled
+    // was handed 258 frames at once, and an app before 2026-10-07 ends a session holding 64 waiting.
+    const answer: CommunityFrame[] = [];
+    const ask = () => { const sync = this.question(from); if (sync) answer.push(sync); };
     const theirs = this.known.get(frame.h);
     let start: number;
     if (theirs && this.mainIndex.has(frame.h)) start = this.mainIndex.get(frame.h)! + 1;
@@ -1429,21 +1477,21 @@ export class CommunitySession {
       // locator says), or my recent commits; my sync makes them send theirs.
       const common = (Array.isArray(frame.loc) ? frame.loc : []).find(x => typeof x === "string" && this.mainIndex.has(x));
       start = common !== undefined ? this.mainIndex.get(common)! + 1 : Math.max(0, this.state.chain.length - COMMUNITY_LIMITS.side);
-      this.ask(from);
+      ask();
     }
     for (let i = start; i < this.state.chain.length; i++) {
       const commit = this.state.chain[i], h = communityCommitHash(commit);
-      this.hooks.direct(from, { t: "group-commit", v: 2, g: this.id, commit });
+      answer.push({ t: "group-commit", v: 2, g: this.id, commit });
       const secret = this.state.secrets[h];
       if (secret && rosterHas(this.rosterAt(h) ?? [], from) && FRESH.has(commit.k))
-        this.hooks.direct(from, { t: "group-secret", v: 2, g: this.id, to: from, h, s: sealSecret(from, fromBase64Url(secret), secretAad(this.id, h, from)) });
+        answer.push({ t: "group-secret", v: 2, g: this.id, to: from, h, s: sealSecret(from, fromBase64Url(secret), secretAad(this.id, h, from)) });
     }
     // Secrets of the window they were in and lack (derived ones included: they may lack the parent).
     const held = new Set(Array.isArray(frame.secrets) ? frame.secrets.filter(x => typeof x === "string") : []);
     const secrets = this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c))
       .filter(h => this.state.secrets[h] && !held.has(shortHash(h)) && rosterHas(this.rosterAt(h) ?? [], from))
       .map(h => ({ h, s: sealSecret(from, fromBase64Url(this.state.secrets[h]), secretAad(this.id, h, from)) }));
-    if (secrets.length) this.hooks.direct(from, { t: "group-secrets", v: 2, g: this.id, secrets: secrets.slice(-COMMUNITY_LIMITS.secrets) });
+    if (secrets.length) answer.push({ t: "group-secrets", v: 2, g: this.id, secrets: secrets.slice(-COMMUNITY_LIMITS.secrets) });
     // What was said while they were away, by anyone, for epochs they were in.
     const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
     // A frame sealed on a branch I do not follow (two members committed one leave apart, each with a fresh secret,
@@ -1461,30 +1509,32 @@ export class CommunitySession {
       if (!reads && !(mine && rosterHas(this.roster, from))) continue;
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
       if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
-      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed);
-      this.hooks.direct(from, stored);
+      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer);
+      answer.push(stored);
       // Handed to a member it was written for: heard.
       if (mine && reads) unheard.delete(frameKey(stored));
     }
     if (unheard.size !== (this.state.unheard?.length ?? 0)) { this.state.unheard = [...unheard]; this.persistSoon(); }
     // The link's seed, so they can answer it too.
-    if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) this.hooks.direct(from, entry); }
+    if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) answer.push(entry); }
     // Pending leaves travel too, so whoever commits next can.
-    for (const request of this.state.pendingLeaves) this.hooks.direct(from, { t: "group-leave", v: 2, g: this.id, ...request });
+    for (const request of this.state.pendingLeaves) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
     // The group's picture, when theirs is older (after the commits and secrets above, which it may need).
-    this.offerMeta(from, frame.mt);
+    const meta = this.metaFor(from, frame.mt);
+    if (meta) answer.push(meta);
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
-    this.ask(from);
+    ask();
+    this.answers.handOut(from, answer);
   }
 
-  /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in. */
-  private handSide(to: string, tip: string, handed: Set<string>): void {
+  /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in, onto `answer`. */
+  private handSide(to: string, tip: string, handed: Set<string>, answer: CommunityFrame[]): void {
     for (const h of this.pathToMain(tip) ?? []) {
       if (handed.has(h)) continue;
       handed.add(h);
-      this.hooks.direct(to, { t: "group-commit", v: 2, g: this.id, commit: this.known.get(h)! });
+      answer.push({ t: "group-commit", v: 2, g: this.id, commit: this.known.get(h)! });
       const secret = this.state.secrets[h];
-      if (secret && rosterHas(this.rosterAt(h) ?? [], to)) this.hooks.direct(to, { t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
+      if (secret && rosterHas(this.rosterAt(h) ?? [], to)) answer.push({ t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
     }
   }
 
@@ -1561,12 +1611,11 @@ export class CommunitySession {
     return meta && secret ? wrapGroupMeta(meta, this.topHash, epochKeys(fromBase64Url(secret), this.id, this.epoch).message, true) : null;
   }
 
-  /** My statement, to a member whose sync says it holds an older one (or none); nothing to an app that says nothing. */
-  private offerMeta(to: string, theirTag: unknown): void {
+  /** My statement, for a member whose sync says it holds an older one (or none); none for an app that says nothing. */
+  private metaFor(to: string, theirTag: unknown): GroupMetaFrame | null {
     const meta = this.state.meta, theirs = parseGroupMetaTag(theirTag);
-    if (!meta || theirs === null || !groupMetaNewer(meta, theirs) || !this.isMember || !rosterHas(this.roster, to)) return;
-    const frame = this.metaFrame();
-    if (frame) this.hooks.direct(to, frame);
+    if (!meta || theirs === null || !groupMetaNewer(meta, theirs) || !this.isMember || !rosterHas(this.roster, to)) return null;
+    return this.metaFrame();
   }
 
   /**

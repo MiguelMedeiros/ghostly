@@ -307,8 +307,12 @@ jobs:
         run: command -v tauri-driver || cargo install tauri-driver --locked
 
       # Also installs the HyperDHT runtime (tools/scripts/prepare-native-runtime.mjs), whose testnet the scenarios use.
+      # VITE_APPS_TEST: the e2e suite's build, as the E2E workflow's Desktop job makes it, with mini-apps on and their
+      # test store (e2e/desktop/apps.spec.ts needs the Apps page); never shipped.
       - name: Build the Desktop app
         run: npm run tauri -- build --debug --no-bundle
+        env:
+          VITE_APPS_TEST: "1"
 
       - name: Run the Desktop scenarios
         env:

@@ -76,7 +76,7 @@ export function UsageDetails({ entry, now }: { entry: UsageEntry; now: number })
     ...(card.used !== undefined && card.limit !== undefined ? [[t("cards.usage.usedLabel"), t("cards.usage.used", { used: card.used, limit: card.limit }), "used"] as [string, ReactNode, string]] : []),
     ...(card.resetsAt ? [[t("cards.usage.resetsLabel"), when(card.resetsAt), "resets"] as [string, ReactNode, string]] : []),
     ...(card.account ? [[t("cards.usage.accountLabel"), <bdi>{card.account}</bdi>, "account"] as [string, ReactNode, string]] : []),
-    ...(card.windows ?? []).map((w, i) => [w.window, <><span dir="ltr">{t("cards.usage.left", { left: w.left })}</span>{w.resetsAt && <> · {t("cards.usage.resets", { time: resetTime(w.resetsAt, now, language) })}</>}</>, `window-${i}`] as [string, ReactNode, string]),
+    ...(card.windows ?? []).map((w, i) => [w.window, <>{t("cards.usage.left", { left: w.left })}{w.resetsAt && <> · {t("cards.usage.resets", { time: resetTime(w.resetsAt, now, language) })}</>}</>, `window-${i}`] as [string, ReactNode, string]),
     [t("cards.usage.updatedLabel"), ago(usageReadAt(entry) / 1000, now / 1000), "updated"],
   ];
   return (

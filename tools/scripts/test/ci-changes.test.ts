@@ -87,15 +87,28 @@ describe("plan", () => {
     expect(plan(["packages/core/src/invite.ts"], ready)).toMatchObject({ website: true, app: true });
   });
 
-  it("the workflow runs everything, even in a draft", () => {
-    expect(plan([".github/workflows/ci.yml"], draft)).toMatchObject({ rust: true, website: true, app: true, packages: true });
+  it("a ready pull request runs the full tier, whatever it changes", () => {
+    expect(plan(["apps/ui/src/App.tsx"], ready)).toMatchObject({ rust: true, full: true, affected: false, packages: true, app: true });
+    expect(plan([".github/workflows/ci.yml"], ready)).toMatchObject({ rust: true, website: true, website_e2e: true, app: true, packages: true, full: true, affected: false });
   });
 
-  it("only a draft skips the Rust jobs", () => {
+  it("a draft runs the fast tier only, even when it changes the workflow", () => {
+    const fast = { full: false, affected: true, packages: false, app: false, website_e2e: false };
+    expect(plan(["packages/core/src/invite.ts"], draft)).toMatchObject({ ...fast, rust: false, website: true });
+    expect(plan([".github/workflows/ci.yml"], draft)).toMatchObject({ ...fast, rust: false, website: true });
+    expect(plan(["apps/ui/src/App.tsx"], draft)).toMatchObject({ ...fast, rust: false, website: false });
+  });
+
+  it("only a draft skips the Rust jobs, unless it changed Rust", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft).rust).toBe(false);
     expect(plan(["apps/ui/src/App.tsx"], ready).rust).toBe(true);
     expect(plan(["apps/desktop/src/lib.rs"], draft).rust).toBe(true);
     expect(plan(["Cargo.lock"], draft).rust).toBe(true);
+  });
+
+  it("no file list (a push, too many files) turns every path gate on, and the tier still applies", () => {
+    expect(plan(null, ready)).toMatchObject({ rust: true, website: true, website_e2e: true, app: true, packages: true, full: true, affected: false });
+    expect(plan(null, draft)).toMatchObject({ rust: false, website: true, website_e2e: false, app: false, packages: false, full: false, affected: true });
   });
 
   it("only docs/ and the site's own files skip the packages' tests", () => {
@@ -104,7 +117,7 @@ describe("plan", () => {
     expect(plan(["apps/website/lib/invite.ts"], ready).packages).toBe(true);
     expect(plan(["apps/website/public/oauth/client-metadata.json"], ready).packages).toBe(true);
     expect(plan(["docs/TESTING.md", "e2e/support/avatar-fixtures/avatar-extended.webp"], ready).packages).toBe(true);
-    expect(plan(["README.md"], draft).packages).toBe(true);
+    expect(plan(["README.md"], ready).packages).toBe(true);
   });
 
   it("the Desktop workflow is not the site", () => {

@@ -1,20 +1,27 @@
-// Which of CI's path-gated jobs a pull request needs, from the files it changes. ci.yml's "Changed paths" job
-// runs this on every pull request; pushes (dev, main) skip it and run everything.
+// Which of CI's jobs a pull request needs, from the files it changes and whether it is a draft. ci.yml's "Changed
+// paths" job runs this on every run: pull requests and merge queue entries with their files, pushes with --all.
 //
 //   gh api --paginate repos/o/r/pulls/N/files --jq '.[].filename' | node tools/scripts/ci-changes.mjs --draft=false
+//   node tools/scripts/ci-changes.mjs --draft=false --all     # no file list: every path gate on
 //
-// writes `rust=`, `website=`, `app=` and `packages=` to $GITHUB_OUTPUT (and prints them), with a notice for each job it
-// skips. A gate may only leave a job out when that job cannot read any of the changed files:
-// tools/scripts/test/ci-changes.test.ts holds the website's list to what the site's scripts actually read.
+// writes one `<gate>=true|false` line per gate (`rust=`, `website=`, `website_e2e=`, `app=`, `packages=`, `full=`,
+// `affected=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path gate may only leave a
+// job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts holds the
+// website's list to what the site's scripts actually read.
+//
+// A draft gets the fast tier: lint and types, the unit tests the change can reach (test-affected.mjs), the site's checks
+// when the site changed, and the Rust job when Rust changed. Everything else waits for the pull request to leave
+// draft, whose run (ready_for_review) plans everything again. Drafts are pushed often, by many sessions at once: the
+// full run is about 14 jobs, 2 of them on macOS, and the free plan runs about 20 jobs at a time, 5 on macOS.
 
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /**
  * The Rust job (Tauri Backend). Only a draft skips it without one of these: `ready_for_review` runs
- * everything again.
+ * everything again. ci.yml is not among them: a draft that changes the workflow gets the fast tier too.
  */
-export const RUST = /^(apps\/desktop\/|native\/transports\/|Cargo\.(toml|lock)$|\.github\/workflows\/ci\.yml$)/;
+export const RUST = /^(apps\/desktop\/|native\/transports\/|Cargo\.(toml|lock)$)/;
 
 /**
  * Everything the Website jobs (checks and browser checks) read: a directory ends in `/`. The site builds from
@@ -73,24 +80,46 @@ export const PACKAGES_READ_FROM_SITE = [
 
 export const covers = (inputs, file) => inputs.some((p) => (p.endsWith("/") ? file.startsWith(p) : file === p));
 
-/** @param {string[]} files @param {{ draft: boolean }} options */
+/**
+ * @param {string[] | null} files  null: the files are not known (a push, a list too long to read): every path gate is on
+ * @param {{ draft: boolean }} options
+ */
 export function plan(files, { draft }) {
   const why = [];
-  const rust = !draft || files.some((f) => RUST.test(f));
-  if (!rust) why.push("Draft without Rust changes: Tauri Backend skipped");
-  const website = files.some((f) => covers(WEBSITE_INPUTS, f));
-  if (!website) why.push("Nothing the website reads changed: Website skipped");
-  const app = files.some((f) => !NOT_APP.test(f));
-  if (!app) why.push("Only apps/website/ and docs/ changed: the Desktop jobs on macOS skipped");
-  const packages = files.some((f) => !NOT_APP.test(f) || covers(PACKAGES_READ_FROM_SITE, f));
-  if (!packages) why.push("Nothing the packages' tests read changed: the packages shards skipped");
-  return { rust, website, app, packages, why };
+  const all = files === null;
+  const any = (test) => all || files.some(test);
+  // The path gates, as for a pull request that is ready.
+  const site = any((f) => covers(WEBSITE_INPUTS, f));
+  if (!site) why.push("Nothing the website reads changed: Website skipped");
+  const desktop = any((f) => !NOT_APP.test(f));
+  if (!desktop) why.push("Only apps/website/ and docs/ changed: the Desktop jobs on macOS skipped");
+  const shards = any((f) => !NOT_APP.test(f) || covers(PACKAGES_READ_FROM_SITE, f));
+  if (!shards) why.push("Nothing the packages' tests read changed: the packages shards skipped");
+  // Then the tier: a draft keeps only the fast jobs.
+  const rust = !draft || (!all && files.some((f) => RUST.test(f)));
+  if (draft) {
+    why.push("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
+    if (!rust) why.push("Draft without Rust changes: Tauri Backend skipped");
+  }
+  return {
+    rust,
+    website: site,
+    website_e2e: site && !draft,
+    app: desktop && !draft,
+    packages: shards && !draft,
+    full: !draft,
+    affected: draft,
+    why,
+  };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const draft = process.argv.includes("--draft=true");
-  const files = (await new Response(process.stdin).text()).split("\n").filter(Boolean);
-  if (!files.length) throw new Error("no changed files on stdin");
+  let files = null;
+  if (!process.argv.includes("--all")) {
+    files = (await new Response(process.stdin).text()).split("\n").filter(Boolean);
+    if (!files.length) throw new Error("no changed files on stdin");
+  }
   const { why, ...jobs } = plan(files, { draft });
   for (const line of why) console.log(`::notice::${line}`);
   const lines = Object.entries(jobs).map(([job, run]) => `${job}=${run}`);

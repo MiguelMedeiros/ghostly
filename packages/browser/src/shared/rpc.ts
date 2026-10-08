@@ -190,11 +190,20 @@ export interface EngineApi {
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
   sendFile(params: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string; forwarded?: number }): Promise<void>;
   /**
+   * Announces a file or voice message in a group (WISP 503) whose bytes the caller already put in the `files` store under
+   * `file.id` (`group-<group>-out-…`, its `linkId` `group:<group>`). `caption`: the text under it. Members fetch the
+   * bytes from this device and from each other.
+   */
+  sendGroupFile(params: { groupId: string; file: MessageFile; caption?: string; replyTo?: string; forwarded?: number }): { error: string | null; messageId?: string; refused?: boolean };
+  /**
    * Forwards messages of a chat (or `group:<id>`) to up to 5 chats and groups (WISP 400 § Forwards): new messages of
    * mine with a hop count, files from the bytes here. Each target says which messages it got and its first problem.
    */
   forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): { results: { to: string; messageIds: string[]; error: string | null }[] };
-  /** files/3: answers an offer (`accept`, `decline`), or pauses, resumes or cancels a transfer, either way. */
+  /**
+   * files/3: answers an offer (`accept`, `decline`), or pauses, resumes or cancels a transfer, either way. A group's file
+   * (`linkId` `group:<id>`) takes `accept` and `request`: it is asked for (Download), or asked for again.
+   */
   fileAction(params: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void;
   setDeliveryMode(params: { linkId: string; mode: DeliveryMode }): void;
   setTransportPreference(params: { linkId: string; preferred: PairedTransport; fallback: boolean }): void;

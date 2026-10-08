@@ -36,6 +36,7 @@ import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nati
 import { setDeviceSource } from "../lib/mediaDevices";
 import { setAppBadgeTarget } from "../lib/appBadge";
 import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
+import { webkitGtkSoundsRelease } from "../lib/webkitGtk";
 import { dockBadge } from "./dockBadge";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
@@ -241,9 +242,7 @@ export function macPeerBudget(agent = typeof navigator === "undefined" ? "" : na
  */
 export function soundsRelease(webkit: readonly number[] | null, agent = typeof navigator === "undefined" ? "" : navigator.userAgent): SoundsRelease {
   if (!/Linux/.test(agent) || /Android/.test(agent)) return "suspend";
-  if (!webkit) return "keep";
-  const [major = 0, minor = 0] = webkit;
-  return major > 2 || (major === 2 && minor >= 52) ? "suspend" : "keep";
+  return webkitGtkSoundsRelease(webkit);
 }
 
 /**

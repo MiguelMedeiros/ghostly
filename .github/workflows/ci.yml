@@ -7,7 +7,7 @@ on:
     branches: [main, master, dev, "claude/security-auto-**"]
   pull_request:
     branches: [main, master, dev]
-    # ready_for_review: a draft may have skipped the Rust jobs (see `changes`); leaving draft runs everything.
+    # ready_for_review: a draft runs the fast tier only (see `changes`); leaving draft runs everything.
     # Whether the pull request is a draft is read from the API when `changes` runs, never from the event: a push and
     # `gh pr ready` a second apart start two runs, the later one cancels the other, and the survivor may be the push's
     # run, whose payload still says draft (#742, #737, #759).
@@ -38,16 +38,20 @@ jobs:
   # ============================================
   # Which of the path-gated jobs a pull request needs
   # ============================================
-  # tools/scripts/ci-changes.mjs decides, from the files the pull request changes (a renamed file counts by both names):
-  # - Tauri: drafts get pushed often and mostly touch TypeScript, so a draft skips it unless it changed
-  #   something it builds. Leaving draft (ready_for_review) runs it again.
+  # tools/scripts/ci-changes.mjs decides, from the files the pull request changes (a renamed file counts by both names)
+  # and whether it is a draft:
+  # - A draft gets the fast tier: lint and types, the unit tests the change can reach (affected-tests), the site's
+  #   checks when the site changed, and Tauri when Rust changed. The app's tests, the packages shards, the CLI on ARM64,
+  #   the builds, the site's browser checks and the macOS jobs wait for ready_for_review, whose run plans everything.
+  #   Many sessions push drafts at once, and the free plan runs about 20 jobs at a time (5 on macOS).
   # - Website: runs when the pull request changes something the site reads (apps/website/, docs/, the files its
   #   scripts copy or quote; the list is tested against those scripts).
   # - The Desktop jobs on macOS: skipped only when every change is in apps/website/ or docs/, which the app never reads.
   # - The packages' unit tests: skipped when every change is in docs/ or in apps/website/ outside the few site files their
   #   tests read (the list is tested against what they name).
-  # A skipped job still reports its check, and CI Success accepts it only when this job said so. Pushes (dev, main)
-  # run everything. If the lookup fails, so does this job, and CI Success with it: nothing is skipped by accident.
+  # A skipped job still reports its check, and the gate job (CI Success) accepts it only when this job said so. Pushes
+  # (dev, main) run everything. If the lookup fails, so does this job, and CI Success with it: nothing is skipped by
+  # accident.
   # A merge queue entry plans from everything it would put on dev (its base against its head: every queued pull
   # request up to it) and is never a draft. If that diff cannot be read it runs everything instead of failing, which
   # would drop it and every pull request behind it from the queue.
@@ -60,12 +64,14 @@ jobs:
     outputs:
       rust: ${{ steps.plan.outputs.rust }}
       website: ${{ steps.plan.outputs.website }}
+      website_e2e: ${{ steps.plan.outputs.website_e2e }}
       app: ${{ steps.plan.outputs.app }}
       packages: ${{ steps.plan.outputs.packages }}
+      full: ${{ steps.plan.outputs.full }}
+      affected: ${{ steps.plan.outputs.affected }}
       draft: ${{ steps.plan.outputs.draft }}
     steps:
       - name: Checkout the gate
-        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: tools/scripts/ci-changes.mjs
@@ -94,12 +100,13 @@ jobs:
               node tools/scripts/ci-changes.mjs --draft=false <<< "$files"
             else
               echo "::notice::Could not list what the merge group changes against $BASE_SHA: everything runs"
-              printf 'rust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
+              node tools/scripts/ci-changes.mjs --draft=false --all
             fi
             exit 0
           fi
           if [[ "$EVENT" != "pull_request" ]]; then
-            printf 'draft=false\nrust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+            node tools/scripts/ci-changes.mjs --draft=false --all
             exit 0
           fi
           # The draft state now, not the event's: see `on.pull_request` above.
@@ -108,17 +115,17 @@ jobs:
           echo "Draft: $draft (the event said $PAYLOAD_DRAFT)"
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
           # A pull request that changes no file (main merged back into dev after a release) gives nothing to plan
-          # from: everything runs.
+          # from: every path gate is on (a draft still gets the fast tier).
           if (( CHANGED == 0 )); then
-            echo "::notice::This pull request changes no file: everything runs"
-            printf 'rust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
+            echo "::notice::This pull request changes no file: every path gate is on"
+            node tools/scripts/ci-changes.mjs --draft="$draft" --all
             exit 0
           fi
           gh api --paginate "$FILES_URL" --jq '.[] | "\(.filename)\t\(.previous_filename // "")"' > "$RUNNER_TEMP/files.tsv"
           # The files API lists at most 3000 files: a longer pull request runs everything.
           if (( $(wc -l < "$RUNNER_TEMP/files.tsv") < CHANGED )); then
-            echo "::notice::More files changed than the files API lists: everything runs"
-            printf 'rust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
+            echo "::notice::More files changed than the files API lists: every path gate is on"
+            node tools/scripts/ci-changes.mjs --draft="$draft" --all
             exit 0
           fi
           files=$(tr '\t' '\n' < "$RUNNER_TEMP/files.tsv" | grep -v '^$')
@@ -129,8 +136,9 @@ jobs:
   # Frontend (src, packages, extension) - React + Vite + TypeScript
   # ============================================
   # Jobs side by side instead of one in a row (6 minutes): lint and types, the app's unit tests, the packages' unit
-  # tests in shards, and the builds. All but the packages shards run on every pull request: the app's tests read
-  # files from all over the repository, apps/website/ too.
+  # tests in shards, and the builds. Lint and types run on every pull request, drafts included; the others on every
+  # ready one (the app's tests read files from all over the repository, apps/website/ too). A draft runs
+  # affected-tests instead.
   frontend-checks:
     name: Frontend lint and types
     runs-on: ubuntu-24.04
@@ -147,11 +155,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: ESLint
-        run: npm run lint
-
-      - name: TypeScript check
-        run: npm run typecheck
+      # Side by side: each is one process at a time (eslint, then tsc after tsc), the runner has 4 cores, and in a row they
+      # took 71 + 144 s. Each one's output is printed whole once both are done, so the annotations still come from it.
+      - name: ESLint and TypeScript check
+        run: |
+          npm run lint > "$RUNNER_TEMP/lint.log" 2>&1 &
+          lint=$!
+          npm run typecheck > "$RUNNER_TEMP/types.log" 2>&1 &
+          types=$!
+          lint_result=passed
+          wait "$lint" || lint_result=failed
+          types_result=passed
+          wait "$types" || types_result=failed
+          echo "::group::ESLint ($lint_result)"; cat "$RUNNER_TEMP/lint.log"; echo "::endgroup::"
+          echo "::group::TypeScript check ($types_result)"; cat "$RUNNER_TEMP/types.log"; echo "::endgroup::"
+          [[ $lint_result == passed ]] || echo "::error::ESLint failed (npm run lint): see its group above"
+          [[ $types_result == passed ]] || echo "::error::The TypeScript check failed (npm run typecheck): see its group above"
+          [[ $lint_result == passed && $types_result == passed ]]
 
       # docs/changelog/unreleased/<slug>.md: one file per changelog entry, put into CHANGELOG.md at release
       # (tools/scripts/changes.mjs).
@@ -165,6 +185,8 @@ jobs:
 
   frontend-tests:
     name: Frontend tests (app)
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -233,6 +255,37 @@ jobs:
           path: ${{ runner.temp }}/test-reports
           retention-days: 14
           if-no-files-found: ignore
+
+  # A draft's unit tests: only the ones its change can reach (tools/scripts/test-affected.mjs, what sessions run before
+  # they push), on one runner instead of the five above. `vitest related` per project; a project's config, setup or the
+  # lock file runs that project whole. Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no
+  # pull request's. Leaving draft runs the full suites above instead.
+  affected-tests:
+    name: Affected unit tests (draft)
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # The pull request's merge commit and its first parent, the base it is merged onto: their difference is the change.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests the change reaches
+        env:
+          JOBS: "4"
+        run: node tools/scripts/test-affected.mjs --base HEAD^1 --no-e2e --no-rust --no-lint --no-typecheck
 
   # ============================================
   # The headless CLI on Linux ARM64 (Graviton, Ampere, Hetzner ARM, a Raspberry Pi)
@@ -312,6 +365,8 @@ jobs:
 
   frontend-build:
     name: Frontend builds
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -537,8 +592,8 @@ jobs:
   # ============================================
   # Website - Next.js
   # ============================================
-  # Only when the pull request changes something the site reads (see `changes`). The checks here, the browser
-  # checks in website-e2e.
+  # Only when the pull request changes something the site reads (see `changes`). The checks here (drafts too), the
+  # browser checks in website-e2e (not in a draft).
   website:
     name: Website
     needs: changes
@@ -593,7 +648,7 @@ jobs:
   website-e2e:
     name: Website browser checks (${{ matrix.shard }}/4)
     needs: changes
-    if: needs.changes.outputs.website == 'true'
+    if: needs.changes.outputs.website_e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -698,29 +753,34 @@ jobs:
   # ============================================
   # All checks passed
   # ============================================
+  # On a draft this job is named "CI Success (draft)", so a draft run never reports the check the dev ruleset requires.
+  # A green "CI Success" from a draft run let `gh pr ready` + `gh pr merge --auto` merge at once, before the full run
+  # that leaving draft starts had made its own (#590, 2026-09-29). And a skipped job would not do: GitHub counts a
+  # skipped required check as passed. `changes` read the draft state from the API when it planned this run, so the
+  # name and the plan agree: "CI Success" only ever comes from a run that planned the full tier.
   ci-success:
-    name: CI Success
+    name: ${{ needs.changes.outputs.draft == 'true' && 'CI Success (draft)' || 'CI Success' }}
     runs-on: ubuntu-24.04
-    needs: [changes, frontend-checks, frontend-tests, packages-tests, cli-linux-arm64, frontend-build, tauri, website, website-e2e, desktop-media, desktop-macos]
+    needs: [changes, frontend-checks, frontend-tests, packages-tests, affected-tests, cli-linux-arm64, frontend-build, tauri, website, website-e2e, desktop-media, desktop-macos]
     # Not always(): that also runs in a run cancelled by a newer push, where it would mark the superseded commit
     # failed. A failed job still gets here, and fails this one.
     if: ${{ !cancelled() }}
     steps:
       - name: Check all jobs passed
         env:
-          # A draft's run may skip jobs (see `changes`). Its CI Success must not count: the dev ruleset asks for a green
-          # CI Success, so a green one from the draft run let `gh pr ready` + `gh pr merge --auto` merge at once, before
-          # the full run that leaving draft starts had finished (#590, 2026-09-29). `changes` read the draft state from
-          # the API when it planned this run, so a run that skipped jobs for a draft never passes here.
           DRAFT: ${{ needs.changes.outputs.draft }}
           CHANGES: ${{ needs.changes.result }}
+          FULL: ${{ needs.changes.outputs.full }}
+          AFFECTED_GATE: ${{ needs.changes.outputs.affected }}
           RUST: ${{ needs.changes.outputs.rust }}
           WEBSITE_GATE: ${{ needs.changes.outputs.website }}
+          WEBSITE_E2E_GATE: ${{ needs.changes.outputs.website_e2e }}
           APP: ${{ needs.changes.outputs.app }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
           FRONTEND_CHECKS: ${{ needs.frontend-checks.result }}
           FRONTEND_TESTS: ${{ needs.frontend-tests.result }}
           PACKAGES_TESTS: ${{ needs.packages-tests.result }}
+          AFFECTED: ${{ needs.affected-tests.result }}
           CLI_ARM64: ${{ needs.cli-linux-arm64.result }}
           FRONTEND_BUILD: ${{ needs.frontend-build.result }}
           TAURI: ${{ needs.tauri.result }}
@@ -729,18 +789,23 @@ jobs:
           DESKTOP_MEDIA: ${{ needs.desktop-media.result }}
           DESKTOP_MACOS: ${{ needs.desktop-macos.result }}
         run: |
-          if [[ "$DRAFT" == "true" ]]; then
-            echo "::notice::Draft: the jobs this change needs ran, but CI Success only passes on a run planned after the pull request left draft. Leaving draft starts one; otherwise push, or re-run all jobs (re-running only the failed ones keeps this plan)."
+          # Not a draft (this job is "CI Success"): the plan must be the full tier, or nothing passes.
+          if [[ "$DRAFT" != "true" && ( "$FULL" != "true" || "$AFFECTED_GATE" != "false" ) ]]; then
+            echo "::error::A run planned with draft=$DRAFT full=$FULL affected=$AFFECTED_GATE cannot pass CI Success"
             exit 1
           fi
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
-          summary="changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
-          if [[ "$CHANGES" != "success" || "$FRONTEND_CHECKS" != "success" || "$FRONTEND_TESTS" != "success" || "$FRONTEND_BUILD" != "success" ]] || \
+          summary="draft=$DRAFT changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
+          if [[ "$CHANGES" != "success" || "$FRONTEND_CHECKS" != "success" ]] || \
+             ! ok "$FRONTEND_TESTS" "$FULL" || ! ok "$FRONTEND_BUILD" "$FULL" || ! ok "$AFFECTED" "$AFFECTED_GATE" || \
              ! ok "$PACKAGES_TESTS" "$PACKAGES" || ! ok "$CLI_ARM64" "$PACKAGES" || ! ok "$TAURI" "$RUST" || \
-             ! ok "$WEBSITE" "$WEBSITE_GATE" || ! ok "$WEBSITE_E2E" "$WEBSITE_GATE" || \
+             ! ok "$WEBSITE" "$WEBSITE_GATE" || ! ok "$WEBSITE_E2E" "$WEBSITE_E2E_GATE" || \
              ! ok "$DESKTOP_MEDIA" "$APP" || ! ok "$DESKTOP_MACOS" "$APP"; then
             echo "One or more jobs failed: $summary"
             exit 1
+          fi
+          if [[ "$DRAFT" == "true" ]]; then
+            echo "::notice::Draft: the fast tier passed. The required CI Success comes from the full run that leaving draft (gh pr ready) starts."
           fi
           echo "All jobs passed! ($summary)"

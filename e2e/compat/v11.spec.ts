@@ -1,8 +1,9 @@
-import { chat, expect, openPeer, say, test, type Peer } from "../support/fixtures";
+import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { APP_URL, serveStore, testStore } from "../support/appStore";
 import { installFromStore } from "../support/chessApp";
+import { oldPeer } from "./release";
 
 /**
  * The current app, with mini-apps on, and a real v1.1.4: the last release with no apps/1 and no `app` card kind
@@ -11,15 +12,6 @@ import { installFromStore } from "../support/chessApp";
  * The other way, + → Apps in the current app names the contact whose app can't run apps, rather than asking for
  * them both online, and opening an app with that contact still works: it waits for a contact who never comes.
  */
-
-/** v1.1.4, beside the current app (playwright.compat.config.ts serves it). */
-async function oldPeer(browser: Parameters<typeof openPeer>[0], relay: Parameters<typeof openPeer>[1], name: string): Promise<Peer> {
-  const url = test.info().config.metadata.compat11URL as string;
-  const peer = await openPeer(browser, relay, url, name);
-  // The old app is the one we think it is.
-  expect(await peer.page.evaluate(async () => (await (await fetch("/version.json")).json()) as { version: string })).toMatchObject({ version: "1.1.4" });
-  return peer;
-}
 
 async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/settings");
@@ -31,7 +23,7 @@ test("an app card reaches v1.1.4 as its text with a link, apps/1 is never offere
   tag: ["@feature:chat.compat.v11", "@feature:apps.card", "@feature:apps.chat.wire"],
 }, async ({ browser, relay, peer }) => {
   const store = await testStore();
-  const [nina, olga] = await Promise.all([peer("nina"), oldPeer(browser, relay, "olga")]);
+  const [nina, olga] = await Promise.all([peer("nina"), oldPeer(browser, relay, "1.1.4", "olga")]);
   await serveStore(nina.context, store);
   // Anything 1.1.4 asks of GitHub's raw host is counted (and answered from the test, never the real one).
   const olgaAsked = await serveStore(olga.context, store);

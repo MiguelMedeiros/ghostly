@@ -5,6 +5,7 @@ import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { Root } from "../../ui/src/Root";
 import { PeerLockUnavailable, becomeThePeer } from "@ghostly/browser/inPageHost";
 import { webHost } from "./host";
+import { gateSounds } from "./sounds";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { handoffProfileHost, recoverHandoffPointer } from "../../ui/src/lib/handoffProfile";
@@ -36,6 +37,8 @@ watchInstallPrompt();
 registerServiceWorker();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
 setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
+// GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
+gateSounds();
 
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
 // default profile keeps the original names, so nothing existing moves. A profile a handoff moved whose pointer was lost
