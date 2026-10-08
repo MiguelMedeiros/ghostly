@@ -6,7 +6,7 @@ on:
   push:
     branches: [main, dev, "claude/security-auto-**"]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, "epic/**"]
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
