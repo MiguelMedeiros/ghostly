@@ -535,6 +535,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(flat.json.warning).toBeUndefined();
     expect(flat.stderr).toMatch(/^ghostly: Sent without a waveform: could not read the sound/m);
     expect(error(await as(alice, "file", "send", "bob", noise, "--voice"), "bad_request", 1).message).toMatch(/give its length as --voice <ms>/);
+    // A file this user may not read: refused, naming it (root reads anything, so only checked as another user).
+    if (process.getuid?.() !== 0) {
+      const locked = join(alice, "locked.bin");
+      writeFileSync(locked, randomBytes(1000), { mode: 0o000 });
+      expect(error(await as(alice, "file", "send", "bob", locked), "refused", 1).message).toBe(`Not allowed to write or read ${locked}`);
+    }
   });
 
   it("prove an SSH key with ssh-keygen and show it to the contact, who checks it", async () => {
