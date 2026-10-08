@@ -678,8 +678,16 @@ export class Apps {
       fail("equivocation", `Two different versions ${version.sequence} exist. Ghostly kept the one you have.`);
     }
     if (decision === "same" && installed) {
-      // A restored profile's app that needs its files gets them back.
-      if (!(await this.hasBundle(installed.bytes, digest))) await this.putApp({ ...installed, bytes: await this.writeBundle(digest, bytes) });
+      // A restored profile's app that needs its files gets them back. The same version from a store's listing pins its
+      // updates to that store (one by URL or card leaves the record as it is).
+      const files = await this.hasBundle(installed.bytes, digest) ? null : await this.writeBundle(digest, bytes);
+      const pin = fromStore !== undefined && installed.store !== fromStore;
+      if (files || pin) {
+        const { pending, ...rest } = installed;
+        // A newer version found under the other rule does not wait any more.
+        if (pin && pending) await this.removeBundle(pending.bytes, pending.digest);
+        await this.putApp({ ...(pin ? rest : installed), ...(files && { bytes: files }), ...(pin && { store: fromStore }) });
+      }
       this.staged.delete(digest);
       return this.view((await this.app(version.ref))!, stores);
     }

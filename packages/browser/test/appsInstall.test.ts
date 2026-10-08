@@ -371,6 +371,32 @@ describe("an app installed from a store updates only to the version that store l
     expect(await bundleIds()).toEqual([`app-${u2.digest}`]);
     await expect(again.acceptUpdate({ ref: u2.ref })).rejects.toThrow(/^no-update/);
   });
+
+  it("the version installed, taken again from a store's listing, pins it to that store", async () => {
+    const u1 = await bundle({ sources: [HEAD] });
+    net.put(HEAD, u1.bytes);
+    const store = apps(net);
+    await store.preview({ url: HEAD });
+    await store.install({ digest: u1.digest, grant: ["chat"] });
+    const u3 = await bundle({ sequence: 3, permissions: ["chat", "name"], sources: [HEAD] });
+    net.put(HEAD, u3.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    net.put(PINNED_URL, u1.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(u1, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect(await store.preview({ store: keyOf(STORE_KEY), ref: u1.ref })).toMatchObject({ install: "same" });
+    const view = await store.install({ digest: u1.digest, grant: ["chat"] });
+    expect(view).toMatchObject({ sequence: 1, digest: u1.digest });
+    expect(view.pending, "the version waiting from the sources goes").toBeUndefined();
+    expect(await pinnedTo()).toBe(keyOf(STORE_KEY));
+    expect(await bundleIds()).toEqual([`app-${u1.digest}`]);
+    expect((await store.checkUpdates())[0]!.outcome, "HEAD's 3 is not listed").toBe("none");
+    // The same version by URL again leaves the pin.
+    net.put(HEAD, u1.bytes);
+    await store.preview({ url: HEAD });
+    await store.install({ digest: u1.digest, grant: ["chat"] });
+    expect(await pinnedTo()).toBe(keyOf(STORE_KEY));
+  });
 });
 
 describe("before a run", () => {
