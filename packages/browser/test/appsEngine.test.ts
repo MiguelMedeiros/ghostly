@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { APPS_CAPABILITY, GhostLink, chatAppId, createIdentity, createLink, identityFromSeedB64, toZ32, type AppFrameEvent, type PairingState } from "@ghostly/core";
 import { EngineServer, type EngineClientSink } from "../src/engine/server";
 import { db } from "../src/engine/db";
+import { APPS_ENABLED } from "../src/shared/features";
 import type { EngineEvent, RpcResponse } from "../src/shared/rpc";
 import { FakeNativeNet } from "./helpers/fakeNative";
 // covers: apps.chat.wire
@@ -13,6 +14,9 @@ import { FakeNativeNet } from "./helpers/fakeNative";
  * events. A real engine and its contact's link over a stand-in for Iroh, as reactions.test.ts does. Behind a flag
  * (`NodeOptions.apps`, by default `APPS_ENABLED`): off, nothing is offered and every call is refused.
  */
+
+// The build's flag, off here whatever the constant says: a test that passes no `apps` reaches the default as dev ships it.
+vi.mock("../src/shared/features", async (actual) => ({ ...await actual<typeof import("../src/shared/features")>(), APPS_ENABLED: false }));
 
 Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: async () => ({ quota: 50 * 1024 ** 3, usage: 10 * 1024 ** 3 }) }, configurable: true });
 
@@ -88,6 +92,18 @@ describe("apps in the engine (apps/1)", () => {
     (contact as unknown as { channel: { send(data: string): void } }).channel.send(JSON.stringify({ t: "paired-app", a: app, o: "open", v: "1.0.0" }));
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(appEvents()).toEqual([]);
+  });
+
+  it("an engine that does not say follows the build's flag: off, nothing is offered and every call is refused", async () => {
+    // No `apps` option, as the pages', the server's and the CLI's engines are made: the default is APPS_ENABLED (mocked off).
+    expect(APPS_ENABLED).toBe(false);
+    const { call, contact, id, ref } = await setup();
+    expect(contact.sessionOffers.peer).not.toContain(APPS_CAPABILITY);
+    expect(contact.supportsApps).toBe(false);
+    for (const [method, params] of [
+      ["appId", { linkId: id, ref }], ["appOpen", { linkId: id, ref, version: "1.0.0" }], ["appList", undefined], ["appStoreList", undefined],
+    ] as const)
+      await expect(call(method, params), method).rejects.toThrow("Apps are unavailable in this release");
   });
 
   it("on: the page opens an app by its reference, the contact hears it under the same chat app id, and they talk", async () => {
