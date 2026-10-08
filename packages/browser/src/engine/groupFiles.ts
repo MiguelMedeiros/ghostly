@@ -54,8 +54,11 @@ export interface GroupFileStore {
   patch(id: string, fields: Pick<StoredFile, "transfer" | "group">): Promise<void>;
   /** The record and its bytes. */
   remove(id: string): Promise<void>;
-  /** Writes a file from its first byte (whatever was there goes), in order. */
-  write(id: string): Promise<GroupFileWriter>;
+  /**
+   * Writes a file in order: from its first byte (whatever was there goes), or with `resume` after what an earlier
+   * transfer stored (the writer's `offset`).
+   */
+  write(id: string, resume?: boolean): Promise<GroupFileWriter>;
   /** At most `length` bytes of a kept file from `offset`. */
   read(file: StoredFile, offset: number, length: number): Promise<Uint8Array>;
   /** Bytes this device can still take for files, or null when the platform does not say. */
@@ -63,10 +66,14 @@ export interface GroupFileStore {
 }
 
 export interface GroupFileWriter {
+  /** Where it writes from: the bytes already stored. */
+  offset: number;
   append(bytes: Uint8Array): Promise<void>;
   flush(): Promise<void>;
   /** SHA-256 of what was stored, read back from storage, base64url. */
   digest(): Promise<string>;
+  /** Done writing for now: what is stored stays. */
+  close(): Promise<void>;
   discard(): Promise<void>;
 }
 
@@ -77,16 +84,20 @@ export const storedGroupFiles: GroupFileStore = {
   put: file => fileStore.put(file),
   patch: (id, fields) => fileStore.patch(id, fields),
   remove: id => removeStored(id),
-  async write(id) {
+  async write(id, resume = false) {
     const stored = await fileStore.get(id);
     const bytes = (stored?.bytes && await fileBytesOf(stored.bytes)) || await fileBytes();
-    if ((await bytes.size(id)) !== null) await bytes.truncate(id, 0);
+    const size = await bytes.size(id);
+    const offset = resume && size !== null ? size : 0;
+    if (size !== null && size !== offset) await bytes.truncate(id, offset);
     if (stored && stored.bytes !== bytes.kind) await fileStore.patch(id, { bytes: bytes.kind });
-    const appender = new FileAppender(bytes, id, 0);
+    const appender = new FileAppender(bytes, id, offset);
     return {
+      offset,
       append: chunk => appender.append(chunk),
       flush: () => appender.flush(),
       digest: async () => { await appender.close(); return bytes.digest(id); },
+      close: () => appender.close(),
       discard: async () => { await appender.close().catch(() => {}); await bytes.remove(id); },
     };
   },
@@ -147,6 +158,15 @@ interface Kept {
   holders: string[];
   /** A discard of what an earlier transfer stored, which the next one waits for. */
   idle?: Promise<void>;
+  /** Bytes a transfer stored here that the next one goes on from, shown while it waits for a holder. */
+  stored?: number;
+  /**
+   * The bytes kept from an earlier holder did not check out with the next one's tail: who served the bad part is not
+   * known, so the next transfer starts from 0 (`fresh`) and the holder whose tail failed is not counted as damaged
+   * (`unclear`, read once by `transferChanged`).
+   */
+  fresh?: boolean;
+  unclear?: boolean;
 }
 
 /** A file being asked for: of one holder at a time. */
@@ -429,11 +449,11 @@ export class GroupFileDesk {
       if (!linkId || !this.deps.ready(linkId) || !this.edgesById.get(linkId)?.files.live) continue;
       if (!this.deps.send(linkId, { t: GROUP_WANT_FRAME, g: kept.groupId, id: kept.message })) { want.tried.add(key); continue; }
       Object.assign(want, { holder: key, linkId, at: this.deps.now() });
-      this.show(kept, { state: "transferring", stage: "queued", transferred: 0, size: kept.meta.size, direction: "in" });
+      this.show(kept, { state: "transferring", stage: "queued", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in" });
       return;
     }
     Object.assign(want, { holder: undefined, linkId: undefined, at: this.deps.now() });
-    this.show(kept, { state: "transferring", stage: "waiting", transferred: 0, size: kept.meta.size, direction: "in", note: NOBODY_CONNECTED });
+    this.show(kept, { state: "transferring", stage: "waiting", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in", note: NOBODY_CONNECTED });
   }
 
   /** A holder's no: the next one is asked. One that deleted the file is no holder any more. */
@@ -568,17 +588,25 @@ export class GroupFileDesk {
   private async openTarget(edge: Edge, record: FileTransferRecord): Promise<IncomingTarget> {
     const kept = this.kept.get(edge.taking.get(record.id) ?? "");
     if (!kept) throw new Error("No such file");
-    // What an earlier holder's transfer left is gone first.
+    // What an earlier holder's transfer stored stays, and this one goes on from there (WISP 503: the asker accepts from
+    // the offset it stored): every holder serves the author's bytes, and the whole file is checked at the end.
     await kept.idle;
-    const writer = await this.deps.store.write(kept.id);
+    const writer = await this.deps.store.write(kept.id, !kept.fresh);
+    kept.fresh = false;
+    const resumed = writer.offset > 0;
+    let damaged = false;
     return {
-      offset: 0,
+      offset: writer.offset,
       append: bytes => writer.append(bytes),
       flush: () => writer.flush(),
       // Against the author's digest, read back from storage, not the holder's word: a holder can withhold a file, never
       // serve another one.
-      verify: async () => (await writer.digest()) === kept.meta.d,
-      discard: () => (kept.idle = writer.discard().catch(() => {})),
+      verify: async () => { damaged = (await writer.digest()) !== kept.meta.d; return !damaged; },
+      // Only damaged bytes go. Left with a holder that stalled or stopped, what came is kept for the next holder.
+      discard: () => {
+        if (damaged) { kept.stored = 0; if (resumed) kept.fresh = kept.unclear = true; }
+        return (kept.idle = (damaged ? writer.discard() : writer.close()).catch(() => {}));
+      },
     };
   }
 
@@ -604,6 +632,7 @@ export class GroupFileDesk {
     // A transfer this device moved on from (the holder stalled, then went on) changes nothing.
     if (!kept || !want || want.wire !== record.id || want.linkId !== edge.linkId) return;
     if (transferred !== want.moved) { want.moved = transferred; want.movedAt = this.deps.now(); }
+    if (record.state !== "failed" && record.state !== "declined" && record.state !== "cancelled") kept.stored = transferred;
     const { size } = kept.meta;
     switch (record.state) {
       case "done": {
@@ -618,7 +647,9 @@ export class GroupFileDesk {
       case "failed": case "declined": case "cancelled":
         // Damaged (refused, its bytes deleted), stopped by the holder or left here: the next holder is asked.
         edge.taking.delete(record.id);
-        if (want.holder) want.tried.add(want.holder);
+        // A resumed file that failed its check may owe its bad bytes to the earlier holder: this one is asked again, from 0.
+        if (want.holder && !kept.unclear) want.tried.add(want.holder);
+        kept.unclear = false;
         Object.assign(want, { wire: undefined, holder: undefined, linkId: undefined, moved: 0 });
         this.ask(kept);
         return;

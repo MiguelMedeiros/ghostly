@@ -28,14 +28,17 @@ class MemoryFiles implements GroupFileStore {
   async put(file: StoredFile) { this.records.set(file.id, { ...file }); }
   async patch(id: string, fields: Pick<StoredFile, "transfer" | "group">) { const record = this.records.get(id); if (record) this.records.set(id, { ...record, ...fields }); }
   async remove(id: string) { this.records.delete(id); this.bytes.delete(id); }
-  async write(id: string): Promise<GroupFileWriter> {
-    const parts: Uint8Array[] = [];
+  async write(id: string, resume = false): Promise<GroupFileWriter> {
+    const before = resume ? this.bytes.get(id) : undefined;
+    const parts: Uint8Array[] = before ? [before] : [];
     this.bytes.delete(id);
     const keep = () => this.bytes.set(id, concat(parts));
     return {
+      offset: before?.length ?? 0,
       append: async bytes => { parts.push(bytes.slice()); },
       flush: async () => { keep(); },
       digest: async () => { keep(); return sha(this.bytes.get(id)!); },
+      close: async () => { keep(); },
       discard: async () => { parts.length = 0; this.bytes.delete(id); },
     };
   }
@@ -187,6 +190,45 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
     expect(t.seen.some(s => s.from === "carol" && s.to === "alice" && s.frame.t === "pf-refuse" && s.frame.why === "damaged")).toBe(true);
     expect(t.seen.filter(s => s.to === "carol" && s.frame.t === "pf-offer").map(s => s.from)).toEqual(["alice", "bob"]);
+  });
+
+  it("a holder that stalls mid-way is left, and the next holder goes on from the bytes stored here", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const size = 600_000, cut = 256 * 1024;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 11));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    // Alice's bytes to Carol stop coming past the first 256 KiB, as when her app is killed mid-way.
+    t.hold = (from, to, frame) => from === alice && to === carol && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    t.world.reopen(carol);
+    await t.world.until(() => t.seen.some(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-accept"), 5 * 60_000);
+    const accepted = t.seen.find(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-accept")!.frame;
+    expect(accepted.offset).toBe(cut);
+    await t.world.until(() => t.done(carol, id, messageId), 5 * 60_000);
+    expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
+    const fromBob = t.seen.filter(s => s.from === "bob" && s.to === "carol" && s.frame.t === "pf-data").map(s => s.frame.offset as number);
+    expect(Math.min(...fromBob)).toBe(cut);
+  });
+
+  it("a holder serving bad bytes then stalling does not get the next holder blamed", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const size = 600_000, cut = 256 * 1024;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 11));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    // Alice's first byte goes bad, then her bytes to Carol stop past the first 256 KiB.
+    t.files.get(alice)!.store.corrupt = true;
+    t.hold = (from, to, frame) => from === alice && to === carol && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    t.world.reopen(carol);
+    await t.world.until(() => t.done(carol, id, messageId), 10 * 60_000);
+    expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
+    // Bob's tail on Alice's bad prefix failed the check: Bob was asked again from 0, never refused as damaged twice.
+    const toBob = t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-accept").map(s => s.frame.offset);
+    expect(toBob).toEqual([cut, 0]);
   });
 
   it("an offer nobody asked for is refused, and nothing is stored", async () => {
