@@ -77,7 +77,7 @@ pub fn dialog_text(origin: &str, reason: Reason) -> (String, String) {
             format!("Let contacts reach {at}?"),
             format!(
                 "A contact is asking for the app at {at}. This address is not on your list of \
-                 shared apps: Ghostly now asks once for each address it may reach.\n\n\
+                 shared services: Ghostly now asks once for each address it may reach.\n\n\
                  Allow only if you shared this app in Ghostly."
             ),
         ),

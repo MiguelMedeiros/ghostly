@@ -7,7 +7,7 @@ is built this way, is [WISP 1100](../../docs/wisps/1100-headless.md). A guided t
 
 > Status: phases 1 to 5 (profiles, pictures and backups, invites, one chat, private and community groups with their
 > admin tools and hubs, the event stream, hooks and agent turns, wallets and payments, files and voice notes, identity
-> proofs, shared web apps, voice calls, typing, replies, edits, reactions and forwards, Pkarr over the Mainline DHT;
+> proofs, shared services, voice calls, typing, replies, edits, reactions and forwards, Pkarr over the Mainline DHT;
 > the npm package `@ghostlytools/cli`, published since 1.0); every engine call is already
 > reachable through `ghostly engine <method>`. The older Rust `ghostly-cli`, the client for v0.4 chats, was
 > removed after 1.0.

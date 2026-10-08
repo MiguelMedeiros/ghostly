@@ -13,6 +13,8 @@ import { InstalledAppDialog, AppInstallDialog } from "../../components/apps/AppI
 import { Apps } from "../../pages/Apps";
 import { AddAppDialog } from "../../components/apps/AddAppDialog";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { UpdateProvider } from "../../contexts/UpdateContext";
+import { Settings } from "../../pages/Settings";
 import { setAppOpener } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
@@ -51,6 +53,16 @@ const ready = { status: "ready", transport: "iroh/1" } as NonNullable<LinkView["
 /** A paired chat with Ana; `live`: connected, both apps offering apps/1. */
 const ana = (live: boolean) => linkView({ id: "link-1", peerPubKeyZ32: "peer", profile: "paired-chat/1", pairing: live ? ready : { status: "waiting" } as never,
   dataLink: live ? "open" : "idle", sessionOffers: { mine: ["apps/1"], peer: live ? ["apps/1"] : null }, capabilities: { files: true, payments: false } });
+
+/** Settings' storage section with Clear all data asked: its list of what goes. */
+async function openClearAllData(): Promise<HTMLElement> {
+  const { user } = renderApp(
+    <LockScreenProvider><UpdateProvider><Routes><Route path="/settings/:section?" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>,
+    { route: "/settings/storage" },
+  );
+  await user.click(await screen.findByTestId("clear-all-data"));
+  return screen.getByTestId("clear-all-data-list");
+}
 
 /** Every engine call about apps so far. */
 const appCalls = () => fakeEngine.calls.filter((c) => c.method.startsWith("app")).map((c) => c.method);
@@ -137,10 +149,19 @@ describe("with the apps flag off", () => {
     expect(screen.getByRole("link", { name: /raw\.githubusercontent\.com/ })).toBeInTheDocument();
     await user.click(screen.getByTestId("composer-more"));
     expect(screen.queryByTestId("composer-apps")).not.toBeInTheDocument();
-    // The Shared services dialog keeps its old name.
-    expect(screen.getByRole("heading", { name: "Apps with Ana" })).toBeInTheDocument();
+    // The Shared services dialog has that name with the flag off too.
+    expect(screen.getByRole("heading", { name: "Shared services with Ana" })).toBeInTheDocument();
     expect(appCalls()).toEqual([]);
     expect(fetches).toEqual([]);
+  });
+
+  it("Clear all data says nothing of installed apps", async () => {
+    fakeEngine.appRunner = "/app-frame.html";
+    setAppOpener(vi.fn(async () => {}));
+    const list = await openClearAllData();
+    expect(within(list).getByText("Shared services")).toBeInTheDocument();
+    expect(within(list).queryByText("Installed apps and their data")).not.toBeInTheDocument();
+    expect(list.querySelector('[data-item="appsData"]')).toBeNull();
   });
 });
 
@@ -193,10 +214,16 @@ describe("with the apps flag on", () => {
     }
   });
 
-  it("renames the shared-apps dialog Shared services", async () => {
+  it("keeps the dialog's name Shared services", async () => {
     renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
     act(() => fakeEngine.update({ links: [ana(true)] }));
     expect(await screen.findByRole("heading", { name: "Shared services with Ana" })).toBeInTheDocument();
+  });
+
+  it("Clear all data lists the installed apps and their data", async () => {
+    const list = await openClearAllData();
+    expect(within(list).getByText("Shared services")).toBeInTheDocument();
+    expect(await within(list).findByText("Installed apps and their data")).toBeInTheDocument();
   });
 
   it("puts Apps beside Services under the list, and in Services' tab on a phone (five tabs)", async () => {

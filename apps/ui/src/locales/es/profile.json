@@ -21,7 +21,7 @@
     "downloaded": "Descargado {{name}} · {{size}}",
     "emptyFile": "Este archivo está vacío. Elige un archivo de copia.",
     "fromFile": "Archivo",
-    "holds": "Incluye: chats y sus claves, mensajes, archivos de cualquier tamaño, monederos, apps compartidas y ajustes. No incluye: las claves del almacenamiento S3, la suscripción de notificaciones de este dispositivo, archivos que aún están llegando y los datos locales de los monederos Bark, Spark y Fedimint, que vuelven con su frase de recuperación (la frase sí está en la copia).",
+    "holds": "Incluye: chats y sus claves, mensajes, archivos de cualquier tamaño, monederos, servicios compartidos y ajustes. No incluye: las claves del almacenamiento S3, la suscripción de notificaciones de este dispositivo, archivos que aún están llegando y los datos locales de los monederos Bark, Spark y Fedimint, que vuelven con su frase de recuperación (la frase sí está en la copia).",
     "keepOne": "¿Sigue aquí el original? Usa solo uno: comparten monederos.",
     "list": "Listar",
     "noneYet": "Ninguna todavía.",

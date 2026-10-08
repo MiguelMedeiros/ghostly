@@ -1,0 +1,1 @@
+The feature that lets a contact open a local web app over the chat is now called Shared services in the text, to match its row in the composer and its place in Clear all data: the dialog the composer's + opens is the Shared services dialog, and the session carries calls and shared services. The wire identifier stays `services/1`; nothing on the wire changes.

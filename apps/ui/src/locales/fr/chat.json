@@ -359,7 +359,6 @@
     "shared": "Partagé",
     "sharingMany": "Vous partagez {{count}} apps",
     "sharingOne": "Vous partagez 1 app",
-    "title": "Apps avec {{name}}",
     "titleShared": "Services partagés avec {{name}}",
     "yours": "Vos apps"
   },

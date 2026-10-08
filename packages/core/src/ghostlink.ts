@@ -2487,7 +2487,7 @@ export class GhostLink {
     if (this.options.params.profile) {
       await this.connect();
       if (!this.supportsServices) throw new GhostlyHttpError("unavailable", this.isDataLinkOpen
-        ? "Your contact's app cannot share web apps in this chat, or needs an updated Ghostly" : "Shared apps need a live connection");
+        ? "Your contact's app cannot share services in this chat, or needs an updated Ghostly" : "Shared services need a live connection");
       if (!this.pairedHttp) throw new GhostlyHttpError("closed", "Data link is closed");
       return this.pairedHttp.client.request(serviceId, request);
     }

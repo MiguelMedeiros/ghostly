@@ -359,7 +359,6 @@
     "shared": "共有中",
     "sharingMany": "{{count}} 個のアプリを共有中",
     "sharingOne": "1 個のアプリを共有中",
-    "title": "{{name}} とのアプリ",
     "titleShared": "{{name}} との共有サービス",
     "yours": "あなたのアプリ"
   },

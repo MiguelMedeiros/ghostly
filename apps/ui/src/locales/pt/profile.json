@@ -21,7 +21,7 @@
     "downloaded": "Baixado {{name}} · {{size}}",
     "emptyFile": "Este arquivo está vazio. Escolha um arquivo de backup.",
     "fromFile": "Arquivo",
-    "holds": "Inclui: conversas e suas chaves, mensagens, arquivos de qualquer tamanho, carteiras, apps compartilhados e ajustes. Não inclui: as chaves do armazenamento S3, a inscrição de notificações deste dispositivo, arquivos que ainda estão chegando e os dados locais das carteiras Bark, Spark e Fedimint, que voltam pela frase de recuperação (a frase está no backup).",
+    "holds": "Inclui: conversas e suas chaves, mensagens, arquivos de qualquer tamanho, carteiras, serviços compartilhados e ajustes. Não inclui: as chaves do armazenamento S3, a inscrição de notificações deste dispositivo, arquivos que ainda estão chegando e os dados locais das carteiras Bark, Spark e Fedimint, que voltam pela frase de recuperação (a frase está no backup).",
     "keepOne": "O original ainda está aqui? Use só um: eles compartilham as carteiras.",
     "list": "Listar",
     "noneYet": "Nenhum ainda.",
