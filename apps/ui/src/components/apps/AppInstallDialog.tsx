@@ -163,7 +163,7 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
     <div className="flex items-center gap-3">
       <AppIcon size={48} icon={icon} installed={installed} />
       <div className="min-w-0">
-        <h2 id={titleId} className="text-lg font-medium text-text-primary truncate">{title}</h2>
+        <h2 id={titleId} className="text-lg font-medium text-text-primary break-words">{title}</h2>
         {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
         {tagline && <p className="text-sm text-text-secondary">{tagline}</p>}
       </div>
