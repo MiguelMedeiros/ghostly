@@ -18,6 +18,7 @@
  * - comes less than MIN_HOURS after the previous automatic release
  * - did not pass the Security workflow on the same commit
  */
+import { randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
 
 const MAX_LINES = 600;
@@ -123,6 +124,10 @@ const section = changelog.split(/^## /m).find((s) => s.startsWith(`${next}\n`) |
 const notes = section.split("\n").slice(1).join("\n").trim();
 console.log(`✓ ${branch} @ ${sha.slice(0, 7)}: v${next}, ${files.length} files, ${lines} lines outside lock files, mode ${MODE}`);
 if (process.env.GITHUB_OUTPUT) {
+  // The notes come from the branch: a fixed delimiter would let a line of them end the block and set `version` (or
+  // anything else) after the checks above. A random one per run can't be written in advance.
+  const eof = `GHOSTLY_EOF_${randomBytes(16).toString("hex")}`;
+  if (notes.split(/\r?\n/).includes(eof)) refuse("the release notes hold the output delimiter");
   appendFileSync(process.env.GITHUB_OUTPUT, `version=${next}\n`);
-  appendFileSync(process.env.GITHUB_OUTPUT, `notes<<GHOSTLY_EOF\n${notes}\nGHOSTLY_EOF\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `notes<<${eof}\n${notes}\n${eof}\n`);
 }
