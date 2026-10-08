@@ -1,13 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * The current web app against real older releases (e2e/compat/): v0.4.0 (WISP 402) and v1.1.4, the last release
- * without mini-apps (WISP 1200), each built from its tag by tools/scripts/build-compat-web.mjs (a minute or two the
- * first time, cached after that) and served beside the current build. The current build is the e2e suite's, with
- * mini-apps on (VITE_APPS_TEST). Peers meet on the test's Pkarr relay, as in the main suite: nothing leaves the machine.
+ * The current web app against real older releases (e2e/compat/): v0.4.0 (WISP 402), v1.1.4, the last release
+ * without mini-apps (WISP 1200), and v1.1.5, the last release, each built from its tag by
+ * tools/scripts/build-compat-web.mjs (a minute or two the first time, cached after that) and served beside the current
+ * build. The current build is the e2e suite's, with mini-apps on (VITE_APPS_TEST). Peers meet on the test's Pkarr
+ * relay, as in the main suite: nothing leaves the machine.
  *
  *   npm run test:e2e:compat
- *   E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 npm run test:e2e:compat
+ *   E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 E2E_COMPAT_115_PORT=50313 npm run test:e2e:compat
  *
  * A config of its own because the main suite would otherwise wait on the old build for every run. It runs in
  * the E2E workflow (the release gate) and nightly in E2E (full); see e2e/README.md → "Compatibility".
@@ -15,6 +16,7 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.E2E_WEB_PORT || 4183);
 const compatPort = Number(process.env.E2E_COMPAT_PORT || 4184);
 const compat11Port = Number(process.env.E2E_COMPAT_11_PORT || 4185);
+const compat115Port = Number(process.env.E2E_COMPAT_115_PORT || 4186);
 const deployed = process.env.E2E_WEB_URL;
 
 export default defineConfig({
@@ -38,7 +40,11 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
     launchOptions: { args: ["--disable-features=WebRtcHideLocalIpsWithMdns"] },
   },
-  metadata: { compatURL: `http://localhost:${compatPort}`, compat11URL: `http://localhost:${compat11Port}` },
+  // e2e/compat/release.ts opens a v1.1.x peer from `releases`.
+  metadata: {
+    compatURL: `http://localhost:${compatPort}`,
+    releases: { "1.1.4": `http://localhost:${compat11Port}`, "1.1.5": `http://localhost:${compat115Port}` },
+  },
   webServer: [
     ...(deployed ? [] : [{
       command: `npm run build:web && npx vite preview apps/web --port ${port} --strictPort`,
@@ -60,6 +66,13 @@ export default defineConfig({
       command: `node tools/scripts/build-compat-web.mjs --tag v1.1.4 --serve ${compat11Port}`,
       cwd: "..",
       url: `http://localhost:${compat11Port}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 5 * 60_000,
+    },
+    {
+      command: `node tools/scripts/build-compat-web.mjs --tag v1.1.5 --serve ${compat115Port}`,
+      cwd: "..",
+      url: `http://localhost:${compat115Port}`,
       reuseExistingServer: !process.env.CI,
       timeout: 5 * 60_000,
     },

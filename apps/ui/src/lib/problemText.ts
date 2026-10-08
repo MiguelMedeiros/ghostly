@@ -85,7 +85,11 @@ export function problemText(cause: unknown, t: Translate = english, fallback: Pr
 
 /** A problem as one line, where only a line fits (a status under a name, a hint): its title and next line together. */
 export function problemLine(cause: unknown, t: Translate = english, fallback: ProblemFallback = "generic"): string {
-  const { title, next } = problemText(cause, t, fallback);
+  const { title, next: said, detail } = problemText(cause, t, fallback);
+  // A line has no ⓘ: an error nothing here knows keeps its words after the generic title, never a bare "Something went
+  // wrong" in their place (an identity check's "No Ghostly TXT record at _ghostly.…" was lost that way, 2026-10-07).
+  const generic = !said && detail !== undefined && title === t(fallback === "connect" ? "errors.problem.connectFailed" : "errors.generic");
+  const next = generic ? detail : said;
   if (!next) return title;
   if (/[.!?…。！？]$/.test(title)) return `${title} ${next}`;
   return t.language === "ja" || t.language === "zh" ? `${title}。${next}` : `${title}. ${next}`;

@@ -328,6 +328,17 @@
     "wrongPassphraseNext": "パスフレーズを確認して再試行してください。",
     "wrongPassword": "そのプロフィールのロック用パスワードが違います"
   },
+  "proof": {
+    "fileNoProof": "証明ファイルに Ghostly の証明がありません",
+    "fileNotFound": "証明ファイルが見つかりません",
+    "fileNotFoundNext": "削除されたか、まだアップロードされていません。",
+    "keyNotListed": "{{login}} は署名した鍵を公開していません",
+    "noDnsRecord": "ドメインの DNS に Ghostly の TXT レコードがありません",
+    "noDnsRecordNext": "DNS の変更には数分かかることがあります。",
+    "otherKey": "この署名は別の鍵で作られています",
+    "otherKeyPgpNext": "あなたが渡した公開鍵ではありません。",
+    "otherKeySshNext": "入力した鍵ではありません。"
+  },
   "rails": {
     "arkPrepare": "この Ark の支払いを準備できませんでした。残高、アドレス、プロバイダーを確認してください。",
     "balanceChanged": "{{rail}} の残高が変わりました。新しい確認を作成してください",
@@ -357,6 +368,9 @@
     "usdtBalanceChanged": "トークンまたはガスの残高が変わりました。新しい確認を作成してください",
     "usdtNonceChanged": "アカウントの nonce が変わりました。新しい確認を作成してください",
     "usdtRejected": "USDT の RPC が操作を拒否しました"
+  },
+  "relays": {
+    "atLeastOne": "リレーのアドレスを 1 つ以上入力してください"
   },
   "transport": {
     "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",

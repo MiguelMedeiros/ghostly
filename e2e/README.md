@@ -227,6 +227,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
 | `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v11.spec.ts` | the current app (mini-apps on) with a real v1.1.4, which has no apps/1: an app card reaches it as its text with the bundle URL a link, the chat goes on both ways, and + → Apps says the contact's app can't run apps. See [Compatibility with older releases](#compatibility-with-older-releases) |
+| `compat/v115.spec.ts` | the current app with a real v1.1.5: a chat from either side's invite, texts delivered both ways; in a private group the 1.1.5 member back after its app was closed catches up from a current member, and a current member from the 1.1.5 one. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT. See [Desktop on macOS](#desktop-on-macos) |
 | `desktop-macos/external-links.spec.ts` | macOS only: a link in a message and Settings → About → GitHub go to the system browser (`open_web_link`), not to a dropped new window |
 | `desktop-macos/headless-call.spec.ts` | macOS only: the Desktop app and a headless bot (`packages/cli`) call each other both ways, tones checked on the bot's audio socket and in the app's stats |
@@ -395,11 +396,13 @@ A contact still on v0.4.0 can only make the old kind of chat, with a prefix-less
 one (WISP 402). `compat/v04.spec.ts` checks that against v0.4.0 itself rather than a stand-in
 (`web/compat-chat.spec.ts` plays the 0.4 side with a prefix-less session in the current app). A contact on v1.1.4, the
 last release with no mini-apps, gets an app card as its text and never offers `apps/1` (WISP 1200, WISP 405 § An app):
-`compat/v11.spec.ts` checks that, and what + → Apps says about such a contact.
+`compat/v11.spec.ts` checks that, and what + → Apps says about such a contact. A contact on v1.1.5, the last release,
+pairs from either side's invite with texts delivered both ways, and in a private group each side catches the other up
+(WISP 902): `compat/v115.spec.ts`. `compat/release.ts` opens a peer on a v1.1.x build.
 
 ```bash
-npm run test:e2e:compat                                        # builds v0.4.0 and v1.1.4 the first time (a few minutes)
-E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 npm run test:e2e:compat  # other ports (defaults 4183, 4184, 4185)
+npm run test:e2e:compat                                        # builds v0.4.0, v1.1.4 and v1.1.5 the first time (a few minutes)
+E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 E2E_COMPAT_115_PORT=50313 npm run test:e2e:compat  # other ports (defaults 4183-4186)
 ```
 
 - **The old builds.** A release attaches no web build, so `tools/scripts/build-compat-web.mjs` exports the tag with
@@ -407,9 +410,9 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 npm run test:e
   `web/dist` or, after the 2026-09-30 layout, `apps/web/dist`) in `~/.cache/ghostly/compat/<tag>/dist`
   (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it, `--force` rebuilds. `--serve <port>`
   serves it with a small static server: the export keeps no `node_modules`.
-- **The config.** `playwright.compat.config.ts` starts three servers (the current build, with mini-apps on as in the
-  main suite, v0.4.0 and v1.1.4) and hands the old ones' addresses to the specs as `config.metadata.compatURL` and
-  `compat11URL`. The apps meet on the test's Pkarr relay, as everywhere.
+- **The config.** `playwright.compat.config.ts` starts four servers (the current build, with mini-apps on as in the
+  main suite, v0.4.0, v1.1.4 and v1.1.5) and hands the old ones' addresses to the specs as `config.metadata.compatURL`
+  and `releases` (by version). The apps meet on the test's Pkarr relay, as everywhere.
 - **In CI** `e2e-compat.yml` (both old builds cached by tag) runs nightly on `dev`, as a job of the E2E workflow (so
   before every release), and by hand. Not on pull requests, like the rest of the app's e2e: the old releases never
   change, only `dev` can break them, and a night is soon enough to hear about it.
@@ -447,7 +450,7 @@ The app's e2e suites do not run on pull requests: they would hold up every merge
 | Web and extension (`E2E`, `e2e.yml`) | before every release (`release.yml` runs it first; no draft release and no web image unless it passes), and by hand (Actions → E2E → Run workflow, optionally with the URL of a deployed web app) |
 | Desktop specs on Linux (`e2e/desktop/`) | a job of its own in `E2E` (a Rust build never holds up the browser tests), and nightly after the Desktop scenarios of E2E (full) |
 | Everything, gated suites included (`E2E (full)`, `npm run e2e:full`) | nightly on `dev`, and by hand |
-| Compatibility with v0.4.0 and v1.1.4 | nightly, before every release, and by hand ([Compatibility with older releases](#compatibility-with-older-releases)) |
+| Compatibility with v0.4.0, v1.1.4 and v1.1.5 | nightly, before every release, and by hand ([Compatibility with older releases](#compatibility-with-older-releases)) |
 | Desktop on macOS | on every pull request and push, as part of CI (required), nightly, and by hand ([Desktop on macOS](#desktop-on-macos)) |
 
 `npm run check:desktop-bundle` also runs on every pull request (Frontend builds): it takes seconds.
