@@ -1,4 +1,4 @@
-import type { AppClient, AppPermission, AppViewMode } from "@/lib/store-core/appBundle";
+import { APP_CLIENTS, type AppClient, type AppPermission, type AppViewMode } from "@/lib/store-core/appBundle";
 import { APP_URL } from "./shell";
 
 /** The official store's repository: where apps are submitted, and where its index lives. */
@@ -86,5 +86,11 @@ export const CLIENTS: Record<AppClient, string> = {
   desktop: "Desktop",
   extension: "Browser extension",
 };
+
+/**
+ * A client's name on an app's page: the known ones in words, a later one (WISP 1200 · Manifest) as the manifest writes
+ * it. Only the known names are looked up, so a name `CLIENTS` inherits (`constructor`) stays a name.
+ */
+export const clientLabel = (c: string): string => ((APP_CLIENTS as readonly string[]).includes(c) ? CLIENTS[c as AppClient] : c);
 
 export { APP_URL };

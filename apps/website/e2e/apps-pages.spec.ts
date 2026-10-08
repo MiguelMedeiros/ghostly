@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { clientLabel } from "../content/apps";
 import { APPS_RELEASE, versionAtLeast } from "../lib/appsGate";
 import { VERSION } from "../lib/release";
 
@@ -169,6 +170,7 @@ test.describe("once the released Ghostly has Apps", () => {
     ]);
     await expect(main).toContainText("No internet access. Its publisher may still learn your IP address and when you open it.");
     await expect(main).toContainText("Inside a one-to-one chat, with a contact who has it too.");
+    await expect(main).toContainText("Made for: Web, Desktop.");
     const fingerprint = `${PREFIX.a.slice(0, 4)} ${PREFIX.a.slice(4, 8)} ${PREFIX.a.slice(8, 12)} ${PREFIX.a.slice(12, 16)}`;
     await expect(main.locator(".ap-steps li")).toHaveCount(4);
     await expect(main.locator(".ap-steps li").nth(2)).toHaveText(`Find Test Chess, check that its publisher key starts with ${fingerprint}, and press Install.`);
@@ -179,6 +181,12 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect(main).toContainText("Clocks for both players.");
     await expect(main).toContainText("Listed by Test Store, reviewed by its maintainers.");
     expect(others()).toEqual([]);
+  });
+
+  test("a client the site doesn't know is shown as the manifest names it, an inherited name too", () => {
+    expect(["web", "desktop", "extension"].map(clientLabel)).toEqual(["Web", "Desktop", "Browser extension"]);
+    // Both pass WISP 1200's reader. CLIENTS is a plain object: `constructor` must not reach its prototype.
+    for (const name of ["android", "constructor"]) expect(clientLabel(name)).toBe(name);
   });
 
   test("an app with the internet permission says so, and one without an icon shows its letter", async ({ page, request }) => {

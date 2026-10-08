@@ -282,7 +282,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     sequence,
     files: contents.map((f) => ({ path: f.path, size: f.bytes.length, sha256: toBase64Url(createHash("sha256").update(f.bytes).digest()) })),
   };
-  const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)));
+  const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)), { strict: true });
   if (!checked.ok) throw refused(`${sourcePath} and the folder's files make no valid manifest`, checked);
 
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, checked.manifest, key.signer);
@@ -392,7 +392,7 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   }
   index.key = key.key;
 
-  const checked = checkAppStoreIndex(index);
+  const checked = checkAppStoreIndex(index, { strict: true });
   if (!checked.ok) throw refused(`${indexPath} is not a valid store index`, checked);
   const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer);
   const read = readAppStore(indexBytes, sigBytes, now, key.key);
