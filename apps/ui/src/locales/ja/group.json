@@ -171,6 +171,7 @@
     "admin": "管理者",
     "changePicture": "写真を変更",
     "epoch": "エポック {{epoch}}",
+    "fullInvited": "グループは満員です（{{max}} / {{max}}、まだ返事のない招待 {{invited}} 件を含む）。誰かが抜けるまで、これ以上招待できません。",
     "invite": "連絡先を招待",
     "inviteAction": "招待",
     "invited": "招待済み…",

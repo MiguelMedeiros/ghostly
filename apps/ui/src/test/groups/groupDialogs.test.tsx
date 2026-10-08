@@ -209,6 +209,17 @@ describe("GroupMembersDialog", () => {
     const most = Array.from({ length: 31 }, (_, i) => member({ key: String(i).padEnd(52, "y"), me: i === 0 }));
     members_(groupView({ status: "active", isAdmin: true, members: most, invited: ["link-pending"] }), [paired({ id: "link-carol" }), paired({ id: "link-pending" })]);
     expect(screen.getByTestId("group-invite")).toBeDisabled();
+    expect(screen.getByTestId("group-invite-full")).toHaveTextContent("The group is full (32 of 32), counting invitations not answered yet (1). Nobody else can be invited until someone leaves.");
+  });
+
+  it("says a group of 32 members is full, and nothing while there is room", () => {
+    const all = Array.from({ length: 32 }, (_, i) => member({ key: String(i).padEnd(52, "y"), me: i === 0 }));
+    const { unmount } = members_(groupView({ status: "active", isAdmin: true, members: all }), [paired({ id: "link-carol" })]);
+    expect(screen.getByTestId("group-invite-full")).toHaveTextContent("The group is full (32 of 32). Nobody joins until someone leaves.");
+    unmount();
+    members_(groupView({ status: "active", isAdmin: true, members: all.slice(0, 30), invited: ["link-pending"] }), [paired({ id: "link-carol" })]);
+    expect(screen.queryByTestId("group-invite-full")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-invite")).toBeEnabled();
   });
 
   it("says when there is nobody left to invite", () => {
