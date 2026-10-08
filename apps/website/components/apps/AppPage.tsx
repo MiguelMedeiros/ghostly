@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
-import { APP_URL, CLIENTS, NO_INTERNET, PERMISSIONS, VIEWS, apps } from "@/content/apps";
+import { APP_URL, NO_INTERNET, PERMISSIONS, VIEWS, apps, clientLabel } from "@/content/apps";
 import type { StoreApp } from "@/lib/storeRead";
 import { AppIcon } from "./AppIcon";
 import "@/app/apps.css";
@@ -79,7 +79,7 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
             </h2>
             <p className="muted">{VIEWS[app.view]}</p>
             <p className="note">
-              {t.madeFor}: {app.clients.map((c) => (CLIENTS as Record<string, string>)[c] ?? c).join(", ")}. {apps.where}
+              {t.madeFor}: {app.clients.map(clientLabel).join(", ")}. {apps.where}
             </p>
           </section>
 
