@@ -328,7 +328,7 @@ try {
     await invoke("open_web_link", { url: "https://example.com/a1-probe" });
     await sleep(2_000);
     // Android's log elides the path ("dat=https://example.com/...").
-    const started = intentsSince(mark).find((l) => /VIEW/.test(l) && l.includes("example.com")) ?? "";
+    const started = intentsSince(mark).find((l) => /VIEW/.test(l) && /\bdat=https:\/\/example\.com\//.test(l)) ?? "";
     record("host", "opener: a web link opens in the browser", !!started, `${started.replace(/^.*START u0 /, "").slice(0, 200) || "no VIEW intent"}; top: ${top().slice(0, 160)}`);
     await back();
   });
