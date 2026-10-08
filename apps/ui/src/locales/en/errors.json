@@ -380,7 +380,8 @@
     "usdtRejected": "USDT RPC rejected the operation"
   },
   "relays": {
-    "atLeastOne": "Enter at least one relay address"
+    "atLeastOne": "Enter at least one relay address",
+    "useHttps": "Use an https:// relay address: {{address}}"
   },
   "transport": {
     "adapterFailed": "Couldn't start. Reopen this chat to retry.",
