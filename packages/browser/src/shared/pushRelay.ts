@@ -10,5 +10,5 @@ export function pushRelayProblem(url: string): string | null {
   if (parsed.username || parsed.password) return "Leave the user and password out of the address";
   if (parsed.protocol === "https:") return null;
   if (parsed.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) return null;
-  return "Use an https:// relay address";
+  return `Use an https:// relay address: ${url}`;
 }

@@ -74,6 +74,33 @@ describe("Settings, Network: Iroh relays", () => {
     await user.click(screen.getByTestId("network-save"));
     expect(screen.getByTestId("network-error").textContent).toBe("Use an https:// relay address: http://relay.example.org/");
   });
+
+  it("says a relay that is not an address in the app's language, with what was typed", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    engine.on("updateSettings", ({ settings }) => {
+      const problem = (settings as { irohRelays?: string[] }).irohRelays?.map(irohRelayProblem).find(Boolean);
+      if (problem) throw new Error(problem);
+    });
+    const field = screen.getByTestId("network-iroh-relays");
+    await user.clear(field);
+    await user.type(field, "relay.example.org");
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error").textContent).toBe("Não é um endereço de relay: relay.example.org");
+  });
+});
+
+describe("Settings, Network: push relay", () => {
+  const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS };
+
+  it("refuses a plain http:// push relay before saving, in the app's language, with what was typed", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    await user.type(screen.getByTestId("network-push-relay"), "http://push.example.org/");
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error").textContent).toBe("Use https:// no endereço do relay: http://push.example.org/");
+    expect(engine.callsTo("updateSettings")).toEqual([]);
+  });
 });
 
 describe("Settings, Network: Iroh relays on the Desktop", () => {

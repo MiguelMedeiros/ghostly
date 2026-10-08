@@ -381,6 +381,7 @@
   },
   "relays": {
     "atLeastOne": "Enter at least one relay address",
+    "notAddress": "Not a relay address: {{address}}",
     "useHttps": "Use an https:// relay address: {{address}}"
   },
   "transport": {
