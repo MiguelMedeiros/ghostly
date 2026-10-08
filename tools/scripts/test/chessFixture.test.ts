@@ -1,24 +1,25 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildAppBundle, seedSigner, toZ32, utf8Encode } from "@ghostly/core";
-import { CHESS_PUBLISHER, FIXTURE_DIR, FIXTURE_ENTRY, ROOT, chessInputs, fromBundle, isPinnedUrl } from "../refresh-chess-fixture.mjs";
+import { CHESS_PUBLISHER, CHESS_SOURCE, FIXTURE_DIR, FIXTURE_ENTRY, FIXTURE_MANIFEST, ROOT, chessInputs, fromBundle, isPinnedUrl } from "../refresh-chess-fixture.mjs";
 // covers: apps.chess
 
 /*
  * e2e/fixtures/chess, the pinned Chess the end-to-end tests run (tools/scripts/refresh-chess-fixture.mjs writes it):
- * chess.json matches index.html.txt, the page passes the checks a bundle of Chess has to (the same as
- * apps/mini/chess/test/bundle.test.ts), and while apps/mini/chess is in this repository the fixture was built from
- * what is there now.
+ * chess.json matches index.html.txt and ghostly-app.json, the page passes the checks a bundle of Chess has to (the
+ * same as apps/mini/chess/test/bundle.test.ts), and while apps/mini/chess is in this repository the fixture was built
+ * from what is there now. CI's `refresh-chess-fixture.mjs --check` (Frontend lint and types) also rebuilds it and
+ * compares the bytes.
  */
 
 const dir = join(ROOT, FIXTURE_DIR);
 const page = readFileSync(join(dir, FIXTURE_ENTRY), "utf8");
 const meta = JSON.parse(readFileSync(join(dir, "chess.json"), "utf8")) as {
-  name: string; version: string; entry: string; bytes: number; sha256: string;
+  name: string; version: string; entry: string; bytes: number; sha256: string; manifestSha256: string;
   from: { source?: string; inputs?: string; bundle?: string; ref?: string; sequence?: number; digest?: string };
 };
 
@@ -30,6 +31,12 @@ describe("the Chess fixture", () => {
     expect(meta.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 
+  it("carries the manifest chess.json describes, for the same name and version", () => {
+    const bytes = readFileSync(join(dir, FIXTURE_MANIFEST));
+    expect(meta.manifestSha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+    expect(JSON.parse(bytes.toString("utf8"))).toMatchObject({ name: meta.name, version: meta.version, entry: "index.html", kind: "mini-app" });
+  });
+
   it("came from apps/mini/chess as it is now, or from a bundle Chess's key signed", () => {
     const inputs = chessInputs();
     if (meta.from.source) {
@@ -37,8 +44,9 @@ describe("the Chess fixture", () => {
       if (inputs === null) throw new Error("apps/mini/chess is gone: refresh the fixture from a signed bundle (--bundle)");
       const stale = "apps/mini/chess changed since e2e/fixtures/chess was built: run node tools/scripts/refresh-chess-fixture.mjs";
       expect(meta.from.inputs, stale).toBe(inputs);
-      const manifest = JSON.parse(readFileSync(join(ROOT, "apps/mini/chess/ghostly-app.json"), "utf8")) as { version: string };
-      expect(meta.version).toBe(manifest.version);
+      const manifest = readFileSync(join(ROOT, "apps/mini/chess/ghostly-app.json"), "utf8").replace(/\r\n/g, "\n");
+      expect(readFileSync(join(dir, FIXTURE_MANIFEST), "utf8"), stale).toBe(manifest);
+      expect(meta.version).toBe((JSON.parse(manifest) as { version: string }).version);
     } else {
       expect(meta.from.ref).toBe(`${CHESS_PUBLISHER}/chess`);
       expect(meta.from.sequence).toBeGreaterThan(0);
@@ -113,6 +121,18 @@ describe("refresh-chess-fixture.mjs", () => {
     bytes[bytes.length - 3] ^= 1;
     writeFileSync(file, bytes);
     await expect(fromBundle(file, toZ32(signer.publicKey))).rejects.toThrow(/not a valid bundle: file-hash/);
+  });
+
+  it.skipIf(chessInputs() === null)("hashes what the build reads: not package.json's version or devDependencies, which releases and dependabot move", () => {
+    const copy = join(tmp, "root");
+    cpSync(join(ROOT, CHESS_SOURCE), join(copy, CHESS_SOURCE), { recursive: true, filter: (src) => !/[\\/](?:node_modules|dist)$/.test(src) });
+    const file = join(copy, CHESS_SOURCE, "package.json");
+    const pkg = JSON.parse(readFileSync(file, "utf8")) as { version: string; dependencies: Record<string, string>; devDependencies: Record<string, string> };
+    expect(chessInputs(copy)).toBe(chessInputs());
+    writeFileSync(file, `${JSON.stringify({ ...pkg, version: "9.9.9", devDependencies: { ...pkg.devDependencies, vite: "^99.0.0" } }, null, 2)}\n`);
+    expect(chessInputs(copy)).toBe(chessInputs());
+    writeFileSync(file, `${JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, "chess.js": "9.9.9" } }, null, 2)}\n`);
+    expect(chessInputs(copy)).not.toBe(chessInputs());
   });
 
   it("takes only a URL that names one commit", async () => {

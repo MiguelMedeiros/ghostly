@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * The Chess the end-to-end tests run: e2e/fixtures/chess/index.html.txt, its one self-contained HTML file, with
- * e2e/fixtures/chess/chess.json saying where it came from. The e2e specs (e2e/support/chessFixture.ts) and the
- * store-keys test read this pinned copy instead of building Chess on the fly, so they keep working once Chess lives in
- * a repository of its own. It is kept as .txt so code scanning does not read the code it inlines (chess.js, minified)
- * as this repository's own.
+ * The Chess the end-to-end tests run: e2e/fixtures/chess/index.html.txt, its one self-contained HTML file,
+ * e2e/fixtures/chess/ghostly-app.json, the manifest it is published with, and e2e/fixtures/chess/chess.json saying
+ * where both came from. The e2e specs (e2e/support/chessFixture.ts) and the store-keys test (CHESS_DIST and
+ * CHESS_MANIFEST) read this pinned copy instead of apps/mini/chess, so they keep working once Chess lives in a
+ * repository of its own. The page is kept as .txt so code scanning does not read the code it inlines (chess.js,
+ * minified) as this repository's own.
  *
  *   node tools/scripts/refresh-chess-fixture.mjs                      build it from apps/mini/chess (today's source)
  *   node tools/scripts/refresh-chess-fixture.mjs --bundle <file|url>  take it from a signed Chess bundle
@@ -16,6 +17,7 @@
  *
  * Built from source, chess.json keeps the hash of the build's inputs (chessInputs), and
  * tools/scripts/test/chessFixture.test.ts fails while apps/mini/chess differs from what the fixture was built from.
+ * CI also runs --check, which builds apps/mini/chess and compares the result byte for byte with the fixture.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -28,14 +30,20 @@ export const CHESS_SOURCE = "apps/mini/chess";
 export const FIXTURE_DIR = "e2e/fixtures/chess";
 /** The fixture's copy of Chess's entry (index.html in its bundle). */
 export const FIXTURE_ENTRY = "index.html.txt";
+/** The manifest Chess is published with (its ghostly-app.json). */
+export const FIXTURE_MANIFEST = "ghostly-app.json";
 /** Chess's publisher key in the official store (ghostly-store apps/chess.odcgw6wjw8dynqop). */
 export const CHESS_PUBLISHER = "odcgw6wjw8dynqop84r47jbjcdqossbgrfiejd367e14hgxmjcho";
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-/** The files of apps/mini/chess the built index.html (and chess.json's version) comes from: not its tests. */
+/**
+ * The files of apps/mini/chess the built index.html and the fixture's manifest come from: not its tests, and not
+ * package.json, whose version a release bump rewrites and whose devDependencies dependabot moves (chessInputs hashes
+ * its dependencies, the code that gets bundled).
+ */
 function inputFiles(dir) {
-  const out = ["ghostly-app.json", "index.html", "package.json", "tsconfig.json", "vite.config.ts"].filter((f) => existsSync(join(dir, f)));
+  const out = ["ghostly-app.json", "index.html", "tsconfig.json", "vite.config.ts"].filter((f) => existsSync(join(dir, f)));
   const walk = (sub) => {
     for (const entry of readdirSync(join(dir, sub), { withFileTypes: true })) {
       const path = `${sub}/${entry.name}`;
@@ -48,8 +56,8 @@ function inputFiles(dir) {
 }
 
 /**
- * One SHA-256 over the build's inputs in apps/mini/chess (each file's path and its text with \n line ends), or null
- * when the folder is gone (Chess moved to its own repository).
+ * One SHA-256 over the build's inputs in apps/mini/chess (each file's path and its text with \n line ends, then
+ * package.json's dependencies with sorted keys), or null when the folder is gone (Chess moved to its own repository).
  */
 export function chessInputs(root = ROOT) {
   const dir = join(root, CHESS_SOURCE);
@@ -59,6 +67,9 @@ export function chessInputs(root = ROOT) {
     const text = readFileSync(join(dir, file), "utf8").replace(/\r\n/g, "\n");
     hash.update(`${file}\0${Buffer.byteLength(text)}\0`).update(text);
   }
+  const deps = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).dependencies ?? {};
+  const text = JSON.stringify(Object.fromEntries(Object.keys(deps).sort().map((k) => [k, deps[k]])));
+  hash.update(`package.json#dependencies\0${Buffer.byteLength(text)}\0`).update(text);
   return hash.digest("hex");
 }
 
@@ -72,8 +83,8 @@ export function isPinnedUrl(url) {
   return false;
 }
 
-/** Builds apps/mini/chess with its own Vite config: its one HTML file and chess.json. */
-async function fromSource() {
+/** Builds apps/mini/chess with its own Vite config: its one HTML file, its manifest and chess.json's fields. */
+export async function fromSource() {
   const { build } = await import("vite");
   const dir = join(ROOT, CHESS_SOURCE);
   if (!existsSync(join(dir, "vite.config.ts"))) throw new Error(`${CHESS_SOURCE} is not here: refresh from a signed bundle (--bundle)`);
@@ -81,8 +92,9 @@ async function fromSource() {
   try {
     await build({ configFile: join(dir, "vite.config.ts"), root: dir, logLevel: "error", build: { outDir: out, emptyOutDir: true } });
     const html = readFileSync(join(out, "index.html"));
-    const { name, version } = JSON.parse(readFileSync(join(dir, "ghostly-app.json"), "utf8"));
-    return { html, meta: { name, version, from: { source: CHESS_SOURCE, inputs: chessInputs() } } };
+    const manifest = readFileSync(join(dir, "ghostly-app.json"), "utf8").replace(/\r\n/g, "\n");
+    const { name, version } = JSON.parse(manifest);
+    return { html, manifest, meta: { name, version, from: { source: CHESS_SOURCE, inputs: chessInputs() } } };
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
@@ -110,8 +122,11 @@ export async function fromBundle(where, publisher = CHESS_PUBLISHER) {
   if (manifest.publisher !== publisher) throw new Error(`signed by ${manifest.publisher}, not Chess's publisher key ${publisher}`);
   if (manifest.name !== "chess") throw new Error(`the bundle is "${manifest.name}", not "chess"`);
   const html = read.bundle.files.get(manifest.entry);
+  // The draft it was published from: the bundle's manifest without what the bundle's contents decide.
+  const { ghostlyApp: _format, publisher: _key, files: _files, ...draft } = manifest;
   return {
     html: Buffer.from(html),
+    manifest: `${JSON.stringify(draft, null, 2)}\n`,
     meta: {
       name: manifest.name, version: manifest.version,
       from: { bundle: /^https?:/i.test(where) ? where : basename(where), ref: `${manifest.publisher}/${manifest.name}`, sequence: manifest.sequence, digest },
@@ -119,20 +134,21 @@ export async function fromBundle(where, publisher = CHESS_PUBLISHER) {
   };
 }
 
-/** chess.json for `html`: what it is, where it came from, and its size and hash. */
-function describe(html, meta) {
-  return `${JSON.stringify({ ...meta, entry: "index.html", bytes: html.length, sha256: sha256(html) }, null, 2)}\n`;
+/** chess.json for `html` and its manifest: what they are, where they came from, and their sizes and hashes. */
+function describe(html, manifest, meta) {
+  return `${JSON.stringify({ ...meta, entry: "index.html", bytes: html.length, sha256: sha256(html), manifestSha256: sha256(manifest) }, null, 2)}\n`;
 }
 
 async function main(args) {
   const at = args.indexOf("--bundle");
   const check = args.includes("--check");
   if (at >= 0 && !args[at + 1]) throw new Error("--bundle needs a file or a URL");
-  const { html, meta } = at >= 0 ? await fromBundle(args[at + 1]) : await fromSource();
+  const { html, manifest, meta } = at >= 0 ? await fromBundle(args[at + 1]) : await fromSource();
   const dir = join(ROOT, FIXTURE_DIR);
-  const json = describe(html, meta);
+  const json = describe(html, manifest, meta);
   if (check) {
-    const same = existsSync(join(dir, FIXTURE_ENTRY)) && readFileSync(join(dir, FIXTURE_ENTRY)).equals(html) && readFileSync(join(dir, "chess.json"), "utf8") === json;
+    const read = (file) => (existsSync(join(dir, file)) ? readFileSync(join(dir, file)) : null);
+    const same = read(FIXTURE_ENTRY)?.equals(html) && read(FIXTURE_MANIFEST)?.toString("utf8") === manifest && read("chess.json")?.toString("utf8") === json;
     if (!same) {
       console.error(`${FIXTURE_DIR} is stale: run node tools/scripts/refresh-chess-fixture.mjs${at >= 0 ? ` --bundle ${args[at + 1]}` : ""}`);
       process.exitCode = 1;
@@ -143,6 +159,7 @@ async function main(args) {
   }
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, FIXTURE_ENTRY), html);
+  writeFileSync(join(dir, FIXTURE_MANIFEST), manifest);
   writeFileSync(join(dir, "chess.json"), json);
   console.log(`Wrote ${FIXTURE_DIR}: ${meta.name} ${meta.version}, ${html.length} bytes, sha256 ${sha256(html)}`);
 }

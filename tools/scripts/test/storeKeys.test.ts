@@ -24,10 +24,12 @@ beforeAll(async () => {
   // The CLI's build leaves its npm dependencies out, so it runs from under the repository, where they resolve.
   mkdirSync(join(root, "node_modules/.cache"), { recursive: true });
   cli = mkdtempSync(join(root, "node_modules/.cache/store-keys-cli-"));
-  // Chess's pinned build (e2e/fixtures/chess, tools/scripts/refresh-chess-fixture.mjs), as the index.html it publishes.
+  // Chess's pinned build (e2e/fixtures/chess, tools/scripts/refresh-chess-fixture.mjs): the index.html it publishes and
+  // its manifest, so this test does not read apps/mini/chess.
   chess = join(tmp, "chess");
   mkdirSync(chess);
   copyFileSync(join(root, "e2e/fixtures/chess/index.html.txt"), join(chess, "index.html"));
+  copyFileSync(join(root, "e2e/fixtures/chess/ghostly-app.json"), join(chess, "ghostly-app.json"));
   await build({ configFile: join(root, "packages/cli/vite.config.ts"), root: join(root, "packages/cli"), logLevel: "silent", build: { outDir: cli, emptyOutDir: true } });
 }, 180_000);
 
@@ -49,7 +51,7 @@ function run(keys: string, store: string) {
   const result = spawnSync("bash", [script, "--keys", keys, "--store", store], {
     encoding: "utf8",
     timeout: 120_000,
-    env: { ...process.env, GHOSTLY_CLI: join(cli, "ghostly.mjs"), CHESS_DIST: chess, STORE_SKIP_CHECK: "1" },
+    env: { ...process.env, GHOSTLY_CLI: join(cli, "ghostly.mjs"), CHESS_DIST: chess, CHESS_MANIFEST: join(chess, "ghostly-app.json"), STORE_SKIP_CHECK: "1" },
   });
   return { status: result.status, out: result.stdout, err: result.stderr };
 }
