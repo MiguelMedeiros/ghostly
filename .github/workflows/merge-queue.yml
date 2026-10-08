@@ -1,0 +1,85 @@
+name: Merge queue
+
+# Brings armed pull requests into dev up to date, one at a time (tools/scripts/merge-queue.mjs). The dev ruleset merges
+# a pull request only when CI Success is green on a branch that is up to date with dev; auto-merge
+# (`gh pr merge --squash --auto`) does the merging, and this workflow updates the oldest armed one that fell behind,
+# once the one ahead of it has merged or failed. Batching green pull requests is not done here yet.
+#
+# It acts as a GitHub App (repository secrets QUEUE_APP_ID and QUEUE_APP_PRIVATE_KEY): GitHub starts no workflow for a
+# commit made with the workflow's own GITHUB_TOKEN, so an update made with it would never get its CI Success. Without
+# those secrets every run ends green with a notice and changes nothing.
+#
+# There is no pull_request trigger on purpose: these runs hold the app's key, so they only ever run dev's copy of this
+# file. Several triggers at once queue at most one run behind the one running; GitHub cancels the extra waiting ones,
+# which is not a failure.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  push:
+    branches: [dev]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Decide and log, change nothing
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: merge-queue
+  cancel-in-progress: false
+
+jobs:
+  queue:
+    name: Update the next pull request
+    # A pull request's CI ending can free the queue's head; CI ending on a push to dev cannot (the push already ran this).
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check the queue app
+        id: app
+        env:
+          APP_ID: ${{ secrets.QUEUE_APP_ID }}
+          APP_KEY: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$APP_ID" || -z "$APP_KEY" ]]; then
+            echo "::notice::queue app not configured"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: App token
+        id: token
+        if: steps.app.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.QUEUE_APP_ID }}
+          private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-checks: read
+
+      - name: Checkout the script
+        if: steps.app.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools/scripts/merge-queue.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Update the next pull request
+        if: steps.app.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          BASE: dev
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: node tools/scripts/merge-queue.mjs
