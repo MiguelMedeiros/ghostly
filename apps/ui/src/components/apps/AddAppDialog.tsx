@@ -2,6 +2,7 @@ import { useId, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppPreview, AppStorePreview, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { useFocusBack } from "../../hooks/useFocusBack";
 import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice, input } from "../wallet/ui";
 import { AppInstallDialog } from "./AppInstallDialog";
@@ -29,6 +30,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   useDialogFocus(ref, onClose);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const focusBack = useFocusBack(busy);
   const [error, setError] = useState<string | null>(null);
   const [app, setApp] = useState<{ url: string; preview: AppPreview } | null>(null);
   const [store, setStore] = useState<AppStorePreview | null>(null);
@@ -36,6 +38,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   const check = async () => {
     const link = url.trim();
     if (!link) return;
+    focusBack();
     setBusy(true); setError(null); setStore(null);
     try {
       if (!/\.json(?:[?#].*)?$/i.test(link)) {
@@ -53,6 +56,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
 
   const addStore = async () => {
     if (!store) return;
+    focusBack();
     setBusy(true); setError(null);
     try { await engine.call("appStoreAdd", { url: store.url, key: store.key }); onStoreAdded(); onClose(); }
     catch (e) { setError(appErrorText(e, t)); } finally { setBusy(false); }

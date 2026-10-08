@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppListedBy, AppPreview, AppRunStatus, AppSource, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { useFocusBack } from "../../hooks/useFocusBack";
 import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18nContext";
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
@@ -193,6 +194,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   const [preview, setPreview] = useState<AppPreview | null>(fetched ?? null);
   const [error, setError] = useState<AppErrorView | null>(null);
   const [busy, setBusy] = useState(false);
+  const focusBack = useFocusBack(busy);
   const key = JSON.stringify(source);
   const have = !!fetched;
   // Fetched once per source: a new language while it loads must not fetch it again.
@@ -208,6 +210,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
 
   const install = async () => {
     if (!preview) return;
+    focusBack();
     setBusy(true); setError(null);
     try {
       const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions] });
@@ -266,7 +269,9 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const [error, setError] = useState<AppErrorView | null>(null);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const focusBack = useFocusBack(busy);
   const act = async (work: () => Promise<unknown>, close = false) => {
+    focusBack();
     setBusy(true); setError(null);
     try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
   };
