@@ -484,6 +484,19 @@ describe("GroupChat: history and sending", () => {
     ]));
   });
 
+  it("says a fork or a removal with the core's own reason in the app's language", () => {
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "forked", text: "Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group." }),
+      stored({ id: "e2", event: "forked", text: "The admin signed two different changes after epoch 5. Membership changes are halted; the admin must re-form the group.", timestamp: 1_700_000_000_001 }),
+      stored({ id: "e3", event: "removed", text: "Removed by a reason this app does not know", timestamp: 1_700_000_000_002 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active()] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
+      "O histórico de membros se bifurcou", "O histórico de membros se bifurcou", "Você foi removido deste grupo",
+    ]));
+  });
+
   it("sends what is typed to the group", async () => {
     const { user, engine } = openGroup(active());
     engine.on("sendGroupMessage", () => ({ error: null }));
