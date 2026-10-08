@@ -328,6 +328,17 @@
     "wrongPassphraseNext": "Revisa la frase y vuelve a intentarlo.",
     "wrongPassword": "Contraseña de bloqueo incorrecta para ese perfil"
   },
+  "proof": {
+    "fileNoProof": "El archivo de prueba no contiene ninguna prueba de Ghostly",
+    "fileNotFound": "No se encontró el archivo de prueba",
+    "fileNotFoundNext": "Se borró, o aún no se subió.",
+    "keyNotListed": "{{login}} no muestra la clave que firmó",
+    "noDnsRecord": "No hay registro TXT de Ghostly en el DNS del dominio",
+    "noDnsRecordNext": "Los cambios de DNS pueden tardar unos minutos.",
+    "otherKey": "Esta firma la hizo otra clave",
+    "otherKeyPgpNext": "No la clave pública que diste.",
+    "otherKeySshNext": "No la clave que escribiste."
+  },
   "rails": {
     "arkPrepare": "No se pudo preparar este pago Ark. Revisa los fondos, la dirección y el proveedor.",
     "balanceChanged": "El saldo de {{rail}} cambió. Crea una nueva revisión",
@@ -357,6 +368,9 @@
     "usdtBalanceChanged": "El saldo de tokens o de gas cambió. Crea una nueva revisión",
     "usdtNonceChanged": "El nonce de la cuenta cambió. Crea una nueva revisión",
     "usdtRejected": "El RPC de USDT rechazó la operación"
+  },
+  "relays": {
+    "atLeastOne": "Escribe al menos una dirección de relay"
   },
   "transport": {
     "adapterFailed": "No se inició. Vuelve a abrir este chat para reintentar.",

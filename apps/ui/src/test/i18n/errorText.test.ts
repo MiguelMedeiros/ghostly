@@ -299,6 +299,15 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Rate limited: the faucet is busy. Try again in a minute.", `${BROWSER}/engine/paymentAdapters/testCoins.ts`],
   ["The faucet did not answer: Failed to fetch", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not answer: "],
   ["The faucet did not pay: empty", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not pay: "],
+  ["This signature was made by another key (0123ABCD), not the public key given.", `${BROWSER}/proofs/openpgp.ts`, "This signature was made by another key ("],
+  ["That signature was made by SHA256:abc, not the key you entered (SHA256:def)", `${BROWSER}/proofs/providers/ssh.ts`, ", not the key you entered ("],
+  ["No Ghostly TXT record at _ghostly.example.com (DNS changes can take a few minutes)", `${BROWSER}/proofs/domain.ts`, "No Ghostly TXT record at ${"],
+  ["https://example.com/.well-known/ghostly.json was not found", `${BROWSER}/proofs/domain.ts`, " was not found`"],
+  ["https://example.com/.well-known/ghostly/ab12.json was not found: it was deleted, or not uploaded yet", `${BROWSER}/proofs/providers/did.ts`, " was not found: it was deleted, or not uploaded yet"],
+  ["https://example.com/.well-known/ghostly.json names no Ghostly proof", `${BROWSER}/proofs/domain.ts`, " names no Ghostly proof`"],
+  ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
+  ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
+  ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));

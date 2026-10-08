@@ -137,7 +137,11 @@ test("a did:web proven by a file beside its did.json is fetched from the domain,
 
   // Not uploaded yet: nothing is saved, and the person is told where it was looked for.
   await add.getByTestId("add-identity-finish").click();
-  await expect(add.getByTestId("add-identity-error")).toContainText(`${url} was not found`);
+  // In a few words; the file's address behind the ⓘ.
+  const error = add.getByTestId("add-identity-error");
+  await expect(error).toContainText("The proof file was not found");
+  await error.getByTestId("add-identity-error-info").click();
+  await expect(error.getByTestId("add-identity-error-details")).toContainText(`${url} was not found`);
   site.files.set(path, file);
   await add.getByTestId("add-identity-finish").click();
   await expect(add).toHaveCount(0);

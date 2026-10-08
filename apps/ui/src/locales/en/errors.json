@@ -328,6 +328,17 @@
     "wrongPassphraseNext": "Check the passphrase and try again.",
     "wrongPassword": "Wrong lock password for that profile"
   },
+  "proof": {
+    "fileNoProof": "The proof file names no Ghostly proof",
+    "fileNotFound": "The proof file was not found",
+    "fileNotFoundNext": "It was deleted, or not uploaded yet.",
+    "keyNotListed": "{{login}} doesn't list the key that signed",
+    "noDnsRecord": "No Ghostly TXT record in the domain's DNS",
+    "noDnsRecordNext": "DNS changes can take a few minutes.",
+    "otherKey": "This signature was made by another key",
+    "otherKeyPgpNext": "Not the public key you gave.",
+    "otherKeySshNext": "Not the key you entered."
+  },
   "rails": {
     "arkPrepare": "Could not prepare this Ark payment. Check funds, address and provider.",
     "balanceChanged": "{{rail}} balance changed. Create a new review",
@@ -357,6 +368,9 @@
     "usdtBalanceChanged": "Token or gas balance changed. Create a new review",
     "usdtNonceChanged": "Account nonce changed. Create a new review",
     "usdtRejected": "USDT RPC rejected the operation"
+  },
+  "relays": {
+    "atLeastOne": "Enter at least one relay address"
   },
   "transport": {
     "adapterFailed": "Couldn't start. Reopen this chat to retry.",
