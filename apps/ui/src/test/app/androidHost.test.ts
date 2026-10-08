@@ -100,6 +100,39 @@ describe("a share from another app", () => {
     await vi.waitFor(() => expect(incomingShare()?.text).toBe("second"));
   });
 
+  it("taken later wins over a big one still being read, and an emptied late one clears nothing", async () => {
+    const shares: unknown[] = [{ title: "", text: "", files: [{ token: "video", name: "VID_1.mp4", size: 4, mime: "video/mp4" }] }];
+    let videoRead: (bytes: number[]) => void = () => {};
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      if (command === "read_pasted_bytes") {
+        if (args!.token === "video") return new Promise<number[]>((resolve) => { videoRead = resolve; });
+        return args!.offset === 0 ? [1, 2, 3] : [];
+      }
+      throw new Error(command);
+    });
+    let arrived: () => void = () => {};
+    takeIncomingShares(invoke as never, async (_event, handler) => { arrived = handler; });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("read_pasted_bytes", expect.objectContaining({ token: "video" })));
+
+    // The person changed their mind: a photo, read at once.
+    shares.push({ title: "", text: "", files: [{ token: "photo", name: "IMG_1.jpg", size: 3, mime: "image/jpeg" }] });
+    arrived();
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]));
+
+    // The video's read ends after it: the photo stays.
+    videoRead([1, 2, 3, 4]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]);
+
+    // An older share that reached Rust last, its file gone: nothing in it, so the photo still waits.
+    shares.push({ title: "", text: "", files: [] });
+    arrived();
+    await vi.waitFor(() => expect(shares).toHaveLength(0));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]);
+  });
+
   it("is nothing when none waits", async () => {
     const invoke = vi.fn(async () => null);
     takeIncomingShares(invoke as never, async () => undefined);
