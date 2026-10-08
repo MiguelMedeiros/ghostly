@@ -228,7 +228,7 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     act(() => fakeEngine.update({ settings: { nick: "Bia" } }));
     await act(() => open(REF, "link-1"));
     expect(started[0]!.chat).toEqual({ linkId: "link-1", name: "Bia" });
-    act(() => { started[0]!.stop(); });
+    act(() => { chatApp("link-1")!.running.stop(); });
     act(() => fakeEngine.update({ settings: { nick: "Bia", shareProfile: false } }));
     await act(() => open(REF, "link-1"));
     expect(started[1]!.chat?.linkId).toBe("link-1");
