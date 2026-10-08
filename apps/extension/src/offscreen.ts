@@ -36,7 +36,9 @@ const server = new Promise<PeerServer>((resolve, reject) => {
     // not the active one gets device-link-only mode, which opens no peer database and starts no wallet.
     // Iroh through a relay (WISP 102), over WebSockets from this document; the wasm loads on first use.
     // A new profile gets its default Mainnet wallets; never in a test build or an automated browser.
-    void createPeerServer({ platform: "extension", irohWeb: true, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e") }).then((peer) => {
+    // No mini-app runner here yet (WISP 1200 § Per client: Extension, and the TODO below): the engine offers no apps/1
+    // and refuses the app calls, whatever the build's APPS_ENABLED says.
+    void createPeerServer({ platform: "extension", irohWeb: true, apps: false, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e") }).then((peer) => {
       running = peer;
       // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
       if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
