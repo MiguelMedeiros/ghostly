@@ -55,7 +55,7 @@ Releases: [docs/RELEASING.md](../docs/RELEASING.md).
 | `npm run test:ui` | only the UI's component tests ([apps/ui/src/test/README.md](../apps/ui/src/test/README.md)) |
 | `npm run test:map` | every feature in `e2e/features.json` has a test, and the file is sorted (`-- --fix` sorts it) |
 | `npm run locales:sort` | sorts the keys of every locale file |
-| `node tools/scripts/changes.mjs` | checks the changelog entries in `docs/changelog/unreleased/` (`--preview` prints the release notes they make) |
+| `node tools/scripts/changes.mjs` | checks the changelog entries in `docs/changelog/unreleased/` (`--preview [<version>]` prints the release notes they make) |
 | `npm run test:e2e` | end-to-end: real browsers, the web app and the extension ([e2e/README.md](../e2e/README.md)) |
 | `npm run e2e:full` | end-to-end with the gated suites, on a local Docker stack of regtest services |
 | `npm run build && npm run check:desktop-bundle` | Desktop got its Desktop wiring, not a browser stand-in (seconds, runs anywhere) |
