@@ -659,6 +659,20 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     await cutOff(store, v1.ref);
   });
 
+  it("the stores are not read again at each call (an index may be 4 MiB), and a refresh's removal still stops the next one", async () => {
+    const { v1, store } = await running();
+    await net.putStore(await storeFiles());
+    await store.addStore({ url: STORE_URL });
+    const getAll = vi.spyOn(IDBObjectStore.prototype, "getAll");
+    const storeReads = () => getAll.mock.contexts.filter((s) => (s as IDBObjectStore).name === "appStores").length;
+    for (let i = 0; i < 20; i++) await store.storageGet({ ref: v1.ref, scope: "chat-1", key: "game" });
+    await store.chatRunnable({ ref: v1.ref });
+    expect(storeReads()).toBe(1);
+    await net.putStore(await storeFiles({ sequence: 2, removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.refreshStores();
+    await cutOff(store, v1.ref);
+  });
+
   it("an app that is not installed here (a bot's reference) is not refused for chat", async () => {
     const store = apps(net);
     await store.chatRunnable({ ref: `${keyOf(PUBLISHER)}/other` });

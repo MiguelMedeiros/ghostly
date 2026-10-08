@@ -285,6 +285,7 @@ export class Apps {
   private checking: Promise<AppCheckResult[]> | null = null;
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
+  private views: Promise<AppStoreView[]> | null = null;
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -351,7 +352,7 @@ export class Apps {
    * or not the page stops its frame.
    */
   private async stillRunnable(app: InstalledApp): Promise<InstalledApp> {
-    const run = this.runStatus(app, await this.stores(), app.revocations);
+    const run = this.runStatus(app, await this.heldViews(), app.revocations);
     if (run.status === "revoked") fail("stopped", "Its publisher revoked this version");
     if (run.status === "removed" && !this.anyway.has(`${app.ref} ${app.digest}`)) fail("stopped", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     return app;
@@ -377,6 +378,18 @@ export class Apps {
   }
   private async putStore(record: AddedAppStore): Promise<void> {
     await wrap((await store(STORES.appStores, "readwrite")).put(record));
+    this.views = null;
+  }
+  private async deleteStore(key: string): Promise<void> {
+    await wrap((await store(STORES.appStores, "readwrite")).delete(key));
+    this.views = null;
+  }
+  /**
+   * The stores' views, read once and again after a store is written here (the only writer: pages in other tabs share
+   * this engine). An app's every storage call and chat frame checks them, and an index may be 4 MiB.
+   */
+  private heldViews(): Promise<AppStoreView[]> {
+    return this.views ??= this.stores().then((s) => this.storeViews(s), (error: unknown) => { this.views = null; throw error; });
   }
   /** The stores the person has (a removed default is not one). */
   private async stores(): Promise<AddedAppStore[]> {
@@ -392,8 +405,8 @@ export class Apps {
     return stores.filter((s) => s.index?.apps.some((a) => a.ref === ref)).map((s) => ({ key: s.key, name: s.index!.name, kind: s.index!.kind }));
   }
 
-  private runStatus(version: AppVersion, stores: AddedAppStore[], revocations: readonly SignedAppRevocation[] = []): AppRunStatus {
-    const check = checkAppBeforeRun(version, this.storeViews(stores), revocations);
+  private runStatus(version: AppVersion, views: AppStoreView[], revocations: readonly SignedAppRevocation[] = []): AppRunStatus {
+    const check = checkAppBeforeRun(version, views, revocations);
     if (check.status === "revoked") return { status: "revoked", ...(check.revocation.statement.reason && { reason: check.revocation.statement.reason }) };
     return check;
   }
@@ -570,7 +583,7 @@ export class Apps {
     const held = await this.storeRecord(key);
     if (!held) return;
     if (held.preloaded) await this.putStore({ key: held.key, url: held.url, addedAt: held.addedAt, preloaded: true, removed: true });
-    else await wrap((await store(STORES.appStores, "readwrite")).delete(key));
+    else await this.deleteStore(key);
     // The person no longer takes this store's curation: an app installed from it updates from its sources and the other
     // stores again (WISP 1200 § Updates and rollback), so its security fixes still arrive. A newer version waiting stays:
     // a valid newer version is one under that rule too.
@@ -668,7 +681,7 @@ export class Apps {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
       icon: bundle.files.get("icon.png")?.slice() ?? null,
       install, asks,
-      run: this.runStatus(version, stores, installed?.revocations),
+      run: this.runStatus(version, this.storeViews(stores), installed?.revocations),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
     };
   }
@@ -686,7 +699,7 @@ export class Apps {
     if (!Array.isArray(grant) || !manifest.permissions.every((p) => grant.includes(p))) fail("permissions", "Every permission the app asks for must be granted");
     const version = versionOf(manifest, digest);
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
-    const run = this.runStatus(version, stores, installed?.revocations);
+    const run = this.runStatus(version, this.storeViews(stores), installed?.revocations);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     const pendingClash = installed?.pending && installed.pending.sequence === version.sequence && installed.pending.digest !== digest;
@@ -757,7 +770,7 @@ export class Apps {
     // An app installed from a store takes only what that store lists now: an update it no longer lists is not installed
     // (the next check drops it and looks at what the store lists instead).
     if (installed.store !== undefined && this.pinnedListing(installed, stores)?.digest !== pending.digest) fail("unlisted", "The store no longer lists this update");
-    const run = this.runStatus(versionOf(read.bundle.manifest, pending.digest), stores, installed.revocations);
+    const run = this.runStatus(versionOf(read.bundle.manifest, pending.digest), this.storeViews(stores), installed.revocations);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     const plan = planAppUpdate(installed, { ...versionOf(read.bundle.manifest, pending.digest), permissions: read.bundle.manifest.permissions });
@@ -850,7 +863,7 @@ export class Apps {
           if (plan.decision === "equivocation") { app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } }; outcome = "equivocation"; }
           continue;
         }
-        if (this.runStatus(version, stores, app.revocations).status !== "ok") continue;
+        if (this.runStatus(version, this.storeViews(stores), app.revocations).status !== "ok") continue;
         if (app.pending && version.sequence < app.pending.sequence) continue;
         const kind = await this.writeBundle(version.digest, bytes);
         if (plan.action === "install") {
@@ -919,7 +932,7 @@ export class Apps {
 
   private async runCheckOf(app: InstalledApp, stores: AddedAppStore[]): Promise<AppRunStatus> {
     if (!(await this.hasBundle(app.bytes, app.digest))) return { status: "needs-files" };
-    return this.runStatus(app, stores, app.revocations);
+    return this.runStatus(app, this.storeViews(stores), app.revocations);
   }
 
   /** Before an app runs (WISP 1200 § Takedowns): revoked stops it, removed by a store of the person's warns. No request. */
