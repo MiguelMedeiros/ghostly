@@ -14,9 +14,9 @@
 //   a commit GitHub wrote and signed. Before the first merge dev's tip must be the batch's base. After each one, dev's
 //   new commit must hold exactly the files (the same tree) of the batch's commit of that pull request: what CI tested
 //   is what landed. If it does not, the landing stops with an error, nothing is reverted, the rest go back to the line
-//   and the batch closes with a comment that says what happened. A pull request that changed or left the line stops
-//   the landing too: the ones ahead of it land, it and the ones after it do not. When all landed, the batch closes
-//   with a comment that lists them.
+//   and the batch closes with a comment that says what happened. A pull request that changed or left the line (new
+//   commits, `queue` taken off, turned into a draft) stops the landing too: the ones ahead of it land, it and the
+//   ones after it do not. When all landed, the batch closes with a comment that lists them.
 //   - A pull request of a batch is seldom up to date with dev by itself, which dev's ruleset asks for, so the queue
 //     app must be on that ruleset's bypass list (pull requests only). Until it is, GitHub refuses the first merge and
 //     the batch lands the old way with a warning: its own rebase merge, whose commits GitHub does not sign, and each
@@ -384,7 +384,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       }
     }
     // Among the ones still to land: which changed or left the line, and the first of them. Nothing lands from it on.
-    const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha));
+    // One turned into a draft counts where each is merged by itself: GitHub merges no draft.
+    const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha || (bySquash && members[i].draft)));
     const stop = changed.length ? state.prs.indexOf(changed[0]) : state.prs.length;
 
     /** The batch's commit of each pull request, as GitHub lists them: { sha, tree, title, message }; null when one is missing. */
@@ -522,6 +523,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     } else if (ci === "success") {
       // The base's tip is the batch's base here (checked above): the first merge starts from what CI tested on.
       const tested = bySquash ? await readTested() : null;
+      if (base === "dev" && !tested) {
+        const why = bySquash ? "GitHub does not list the commits its mark names" : "its mark names no commits (an older train opened it)";
+        say(`::warning::Batch #${batch.number} lands by the rebase merge, so its commits will not be verified: ${why}.`);
+      }
       inFlight = tested ? await landEach(tested, 0) : await landWhole();
     } else if (ci === "none" && now - Date.parse(batch.createdAt) > CI_START_TIMEOUT) {
       await retire(batch, "Merge train: CI never started on this batch, so it is rebuilt.");

@@ -582,7 +582,21 @@ describe("a run of the train", () => {
     expect(repo.merges).toEqual([`rebase #${b}`]);
     expect(repo.landed).toEqual(["#11", "#12"]);
     expect(repo.comments.get(11)!.at(-1)!.body).toBe(`Merged via #${b}.`);
-    expect(r.log.join("\n")).not.toMatch(/verified/i); // GitHub signs no rebase merge: nothing to check
+    // GitHub signs no rebase merge: nothing to read back, and the log says why these commits are not verified.
+    expect(r.log).toContain(`::warning::Batch #${b} lands by the rebase merge, so its commits will not be verified: its mark names no commits (an older train opened it).`);
+    expect(r.log.join("\n")).not.toMatch(/VERIFIED/);
+  });
+
+  it("warns and lands by the rebase merge when GitHub does not list the commits the mark names", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const b = (await repo.run()).inFlight;
+    repo.settle();
+    repo.made.clear();
+    const r = await repo.run();
+    expect(repo.merges).toEqual([`rebase #${b}`]);
+    expect(r.log).toContain(`::warning::Batch #${b} lands by the rebase merge, so its commits will not be verified: GitHub does not list the commits its mark names.`);
   });
 
   it("lands an epic's batch by a fast-forward of exactly the tested commits", async () => {
@@ -796,6 +810,17 @@ describe("a green batch landing on dev", () => {
     expect(last(repo, b)).toMatch(/#11 #12 landed on `dev`, and the landing stopped there: #13 changed or left the line\. #13 did not land/);
     expect(repo.pulls.get(13)).toMatchObject({ open: true });
     expect(r.inFlight).toBeNull();
+  });
+
+  it("stops at a pull request turned into a draft, which waits in line and keeps its label", async () => {
+    const { repo, b } = await greenBatch();
+    repo.pulls.get(12)!.draft = true;
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11"]); // GitHub merges no draft: not asked
+    expect(last(repo, b)).toMatch(/#11 landed on `dev`, and the landing stopped there: #12 changed or left the line\. #12 #13 did not land/);
+    expect(repo.pulls.get(12)).toMatchObject({ open: true, labels: [LABEL.queue] });
+    expect(last(repo, 12)).toMatch(/Waiting: it is a draft/);
+    expect(r.inFlight).toBe(13);
   });
 
   it("closes the batch as before when its first pull request changed, or it is not green yet", async () => {
