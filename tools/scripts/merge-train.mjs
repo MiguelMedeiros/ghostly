@@ -164,7 +164,7 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
   const leave = async (p, label, text) => {
     gone.add(p.number);
     if (label) await w.addLabel(p.number, label);
-    for (const l of [LABEL.queue, LABEL.priority]) if (p.labels.includes(l)) await w.removeLabel(p.number, l);
+    for (const l of Object.values(LABEL)) if (l !== label && p.labels.includes(l)) await w.removeLabel(p.number, l);
     const s = await sticky(p.number);
     if (s) await w.deleteComment(s.id);
     await w.comment(p.number, text);
@@ -304,7 +304,7 @@ export function restLayer(token, repo) {
   };
   const must = async (method, path, body) => {
     const r = await api(method, path, body);
-    if (!r.ok && !(method === "DELETE" && r.status === 404)) throw new Error(`${method} ${path}: HTTP ${r.status} ${r.data?.message ?? ""}`);
+    if (!r.ok && !(method === "DELETE" && (r.status === 404 || r.status === 422))) throw new Error(`${method} ${path}: HTTP ${r.status} ${r.data?.message ?? ""}`);
     return r.data;
   };
   const all = async (path) => {

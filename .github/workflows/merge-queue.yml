@@ -96,7 +96,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        base: ${{ fromJSON(needs.bases.outputs.bases) }}
+        base: ${{ fromJSON(needs.bases.outputs.bases || '[]') }}
     # One run per base at a time, and at most one waiting behind it (GitHub cancels the extra waiting ones, which is not
     # a failure). Bases never wait on each other.
     concurrency:
@@ -104,8 +104,8 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    permissions:
-      contents: read
+    # Nothing here uses the workflow's own token: the checkout and the train act as the queue app.
+    permissions: {}
     steps:
       - name: App token
         id: token
