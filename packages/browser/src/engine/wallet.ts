@@ -19,7 +19,7 @@ import {
   type SwapPreview,
 } from "@cashu/cashu-ts";
 import { STORES, openDb, store, transact, wrap } from "../shared/idb";
-import { PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "./paymentAdapters/cashu";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
 import type {
@@ -892,16 +892,18 @@ export class CashuWallet {
 
   /**
    * Splits `amount`, with the fee its receiver will pay to redeem it, out of `proofs`. Coins that add up exactly need
-   * no mint. Otherwise it is a swap: written down, with its inputs reserved, before the mint is asked. The caller
-   * stores the result in one transaction: `inputs` out, `keep` in, `send` where it goes, and `swap` deleted.
-   * Runs under the mint's lock.
+   * no mint, as long as their token fits in a payment frame: a wallet of many small coins can add up exactly in
+   * hundreds of them, a token the contact's app drops unread. Otherwise it is a swap, which sends a few coins: written
+   * down, with its inputs reserved, before the mint is asked. The caller stores the result in one transaction: `inputs`
+   * out, `keep` in, `send` where it goes, and `swap` deleted. Runs under the mint's lock.
    */
   private async split(mint: string, amount: number, proofs: StoredProof[]): Promise<{ inputs: StoredProof[]; keep: Proof[]; send: Proof[]; swap?: PendingSwap }> {
     const wallet = await this.wallet(mint);
     const among = (chosen: { secret: string }[]) => { const secrets = new Set(chosen.map((p) => p.secret)); return proofs.filter((p) => secrets.has(p.secret)); };
     try {
       const { send } = wallet.sendOffline(amount, asProofLike(proofs), { includeFees: true, exactMatch: true });
-      if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber()) return { inputs: among(send), keep: [], send };
+      if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber()
+        && getEncodedToken({ mint, proofs: send, unit: UNIT }).length <= LIMITS.maxPaymentEndpointChars) return { inputs: among(send), keep: [], send };
     } catch {
       // no exact coins: the mint makes them
     }
