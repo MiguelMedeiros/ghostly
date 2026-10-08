@@ -15,12 +15,15 @@ execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['ci', '--omit=de
 const patches = resolve(source, 'node_modules/.ghostly-patches')
 await rm(patches, { recursive: true, force: true })
 await mkdir(patches)
-for (const name of await readdir('tools/patches')) {
-  const pkg = /^(.+)\+[^+]+\.patch$/.exec(name)?.[1].replaceAll('+', '/')
-  if (pkg && existsSync(resolve(source, 'node_modules', pkg))) await copyFile(resolve('tools/patches', name), resolve(patches, name))
+try {
+  for (const name of await readdir('tools/patches')) {
+    const pkg = /^(.+)\+[^+]+\.patch$/.exec(name)?.[1].replaceAll('+', '/')
+    if (pkg && existsSync(resolve(source, 'node_modules', pkg))) await copyFile(resolve('tools/patches', name), resolve(patches, name))
+  }
+  execFileSync(process.execPath, [resolve('node_modules/patch-package/index.js'), '--patch-dir', 'node_modules/.ghostly-patches', '--error-on-fail'], { cwd: source, stdio: 'inherit' })
+} finally {
+  await rm(patches, { recursive: true, force: true })
 }
-execFileSync(process.execPath, [resolve('node_modules/patch-package/index.js'), '--patch-dir', 'node_modules/.ghostly-patches', '--error-on-fail'], { cwd: source, stdio: 'inherit' })
-await rm(patches, { recursive: true, force: true })
 await mkdir(target, { recursive: true })
 await copyFile(process.execPath, resolve(target, process.platform === 'win32' ? 'node.exe' : 'node'))
 await chmod(resolve(target, process.platform === 'win32' ? 'node.exe' : 'node'), 0o755)
