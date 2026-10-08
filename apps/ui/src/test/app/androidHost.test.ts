@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RTC_CONFIG } from "@ghostly/core";
-import { cssColorHex, followSystemBars, leaveOutPublicStun, takeIncomingShares, withoutPublicStun } from "../../desktop/android";
+import { cssColorHex, followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares, withoutPublicStun } from "../../desktop/android";
 import { incomingShare, resetIncomingShare } from "../../lib/incomingShare";
 import { androidApp, touchOnly } from "../../lib/touchOnly";
 
@@ -118,6 +118,26 @@ describe("touch only", () => {
     expect(touchOnly()).toBe(true);
     setAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15");
     expect(androidApp()).toBe(false);
+  });
+});
+
+describe("the app in the background", () => {
+  it("reads as a hidden, unfocused page while the activity is stopped, and visible again when it comes back", async () => {
+    const doc = document.implementation.createHTMLDocument("app");
+    doc.hasFocus = () => true;
+    let heard: ((event: { payload: string }) => void) | undefined;
+    const listen = vi.fn(async (event: string, handler: (event: { payload: string }) => void) => { if (event === "app-visibility") heard = handler; return () => {}; });
+    const changes: string[] = [];
+    doc.addEventListener("visibilitychange", () => changes.push(doc.visibilityState));
+    followAppVisibility(listen as never, doc);
+    await vi.waitFor(() => expect(heard).toBeDefined());
+    expect([doc.visibilityState, doc.hidden, doc.hasFocus()]).toEqual(["visible", false, true]);
+    heard!({ payload: "hidden" });
+    expect([doc.visibilityState, doc.hidden, doc.hasFocus()]).toEqual(["hidden", true, false]);
+    heard!({ payload: "hidden" });
+    heard!({ payload: "visible" });
+    expect([doc.visibilityState, doc.hidden, doc.hasFocus()]).toEqual(["visible", false, true]);
+    expect(changes).toEqual(["hidden", "visible"]);
   });
 });
 

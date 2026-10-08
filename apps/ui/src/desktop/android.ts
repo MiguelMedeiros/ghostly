@@ -10,6 +10,30 @@ import { PLATFORM_PASTE_MAX, readPlatformFiles } from "../lib/pastedFiles";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = (event: string, handler: () => void) => Promise<unknown>;
+type ListenWith = <T>(event: string, handler: (event: { payload: T }) => void) => Promise<unknown>;
+
+/**
+ * Away and back. Android's WebView leaves `document.visibilityState` "visible" and `hasFocus()` true while the app is
+ * in the background (Home, another app, the screen off), so the page never knew it was away: a message that came then
+ * made no notification (AttentionFeedback, `windowAway`, the call notice all ask those two). The activity says when it
+ * stops and comes back (Rust's `app-visibility`, "hidden" or "visible"); the page's document then answers as a
+ * browser tab's does, and fires `visibilitychange`.
+ */
+export function followAppVisibility(listen: ListenWith, doc: Document = document): void {
+  let away = false;
+  const own = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+  const ownHidden = Object.getOwnPropertyDescriptor(Document.prototype, "hidden");
+  const hasFocus = doc.hasFocus.bind(doc);
+  Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => (away ? "hidden" : own?.get?.call(doc) ?? "visible") });
+  Object.defineProperty(doc, "hidden", { configurable: true, get: () => away || !!ownHidden?.get?.call(doc) });
+  doc.hasFocus = () => !away && hasFocus();
+  void listen<string>("app-visibility", ({ payload }) => {
+    const next = payload === "hidden";
+    if (next === away) return;
+    away = next;
+    doc.dispatchEvent(new Event("visibilitychange"));
+  }).catch(() => {});
+}
 
 /** A share from another app as Rust hands it over: its text, and its files on the paste shelf, by token. */
 interface Shared {

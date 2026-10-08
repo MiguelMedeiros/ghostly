@@ -18,6 +18,7 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 const SHARE_EVENT: &str = "incoming-share";
 /// As on macOS (notifications.rs): the page opens the chat of the notification tapped.
 const OPEN_EVENT: &str = "notification-open";
+const VISIBILITY_EVENT: &str = "app-visibility";
 
 /// Registered before the app's own `setup`: the Kotlin half loads with it and may report an intent at once (the one
 /// that started the app), so the app handle is kept first.
@@ -189,6 +190,11 @@ fn received(kind: &str, value: String) {
         }
         "notification" => {
             let _ = app.emit_to("main", OPEN_EVENT, value);
+        }
+        // The activity stopped ("hidden") or came back ("visible"): Android's WebView never changes the page's own
+        // visibility, so the page keeps this one (apps/ui/src/desktop/android.ts `followAppVisibility`).
+        "visibility" => {
+            let _ = app.emit_to("main", VISIBILITY_EVENT, value);
         }
         "share" => match serde_json::from_str::<Shared>(&value) {
             Ok(shared) => {

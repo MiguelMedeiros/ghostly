@@ -25,7 +25,7 @@ import { locales } from "./locales";
 import { translateWith } from "./locales/translate";
 import { servicesPlatform } from "./lib/platform";
 import { androidApp } from "./lib/touchOnly";
-import { followSystemBars, leaveOutPublicStun, takeIncomingShares } from "./desktop/android";
+import { followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares } from "./desktop/android";
 
 async function boot() {
   let profile = "";
@@ -58,10 +58,12 @@ async function boot() {
   setHandoffProfileHost(handoffProfileHost(version, "desktop"));
   const host = createDesktopHost(version, await nativeCallSupport());
   setBrowserHost(host);
-  // The Android app: its system bars follow the theme, and shares from other apps open the Share to… picker.
+  // The Android app: its system bars follow the theme, shares from other apps open the Share to… picker, and the
+  // page knows when the app is in the background (its WebView never says so).
   if (androidApp()) {
     followSystemBars(invoke);
     takeIncomingShares(invoke, listen);
+    followAppVisibility(listen);
   }
   // Mini-apps (WISP 1200) open in windows of their own, each with its broker here (lib/apps/desktopOpener.ts).
   // Its window is named after the app and the contact ("Chess with Ana"), in the profile's language.

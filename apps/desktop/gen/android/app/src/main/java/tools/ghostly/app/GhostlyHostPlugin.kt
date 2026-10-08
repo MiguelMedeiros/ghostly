@@ -106,6 +106,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     take(intent)
   }
 
+  /*
+   * Away and back. Android's WebView keeps `document.visibilityState` "visible" and `hasFocus()` true when the app goes
+   * to the background (Home, another app, the screen off): the page would never know it is away, so a message that
+   * comes then gets no notification (AttentionFeedback notifies only while away). The activity's stop and restart (its
+   * start again after a stop) say it.
+   */
+  override fun onStop() {
+    received("visibility", "hidden")
+  }
+
+  override fun onRestart() {
+    received("visibility", "visible")
+  }
+
   private fun take(intent: Intent?) {
     if (intent == null || intent.getBooleanExtra(EXTRA_HANDLED, false)) return
     when {
