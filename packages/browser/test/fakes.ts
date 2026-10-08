@@ -104,7 +104,9 @@ export class FakeWallet {
   checkMeltQuoteBolt11 = (...args: unknown[]) => mint.checkMeltQuoteBolt11(...args);
   createMeltQuoteBolt11 = (...args: unknown[]) => mint.createMeltQuoteBolt11(this.url, ...args);
   /** No coins ever add up by themselves here: every send is a swap, which `mint.send` answers. */
-  sendOffline(): never { throw new Error("No exact coins"); }
+  sendOffline(..._args: unknown[]): { send: unknown[] } { throw new Error("No exact coins"); }
+  /** A mint with no input fee. */
+  getFeesForProofs(): { toNumber(): number } { return { toNumber: () => 0 }; }
   async prepareSwapToSend(amount: number, proofs: { secret: string; amount: number }[], config: unknown) {
     const { Amount } = await real();
     prepared.set(spends(proofs), { kind: "send", args: [amount, proofs, config] });
