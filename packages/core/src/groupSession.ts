@@ -541,6 +541,23 @@ export class GroupSession {
     return out;
   }
 
+  /** What a sync names in `miss` for one sender now: per epoch, the newest `GROUP_LIMITS.miss` numbers that never arrived. */
+  missOf(sender: string): Record<string, number[]> {
+    const out: Record<string, number[]> = {};
+    for (const [e, entry] of Object.entries(this.state.seen[sender] ?? {})) { const gaps = this.gaps(entry); if (gaps.length) out[e] = gaps; }
+    return out;
+  }
+
+  /** Whether any of `asked` (per epoch, as `missOf` gave them) arrived since: the member asked holds what is missing. */
+  filledSince(sender: string, asked: Record<string, number[]>): boolean {
+    return Object.entries(asked).some(([e, numbers]) => {
+      const entry = this.state.seen[sender]?.[e];
+      if (!entry) return false;
+      const got = new Set(entry.window);
+      return numbers.some(n => got.has(n));
+    });
+  }
+
   private serialize<T>(run: () => Promise<T>): Promise<T> {
     const operation = this.queue.then(run);
     this.queue = operation.then(() => {}, () => {});
