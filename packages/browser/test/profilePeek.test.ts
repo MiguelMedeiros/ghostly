@@ -109,7 +109,8 @@ it("counts items held for the profile from the sender's hold pointer, without fe
   await w.dht.transport.publish(sender.identity, sender.pointerRecords({ rev: 3, issued: now, expires: now + 86_400_000, manifestUrl: "https://s3.example/m", top: 4, ack: 0, count: 3, bytes: 90, refused: [] }));
   const result = await new ProfilePeek(host(w.dht.transport, () => [stored])).peek("b", "ghostly_b");
   expect(result.chats[0].held).toBe(3);
-  expect(result.reads).toBe(2);
+  // Both mailboxes (the inviter's envelope sealed to B said it can use the pinned one), then the pointer.
+  expect(result.reads).toBe(3);
 });
 
 it("skips a profile that reads the network another way, and says why", async () => {
