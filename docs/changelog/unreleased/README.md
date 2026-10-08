@@ -22,6 +22,9 @@ section: For users / Chat
 - `release: <major>.<minor>` (optional, after `section`) holds the entry for that release, for a change that ships
   behind a flag until then. A bump to an older version leaves the file here (`release: 1.2` stays through every
   1.1.x patch), and the bump to 1.2.0 or later takes it. Without it, the next release takes the entry.
+- Until 1.2.0, an Apps entry (section `... / Apps`, or text about the apps flag, WISP 1200 or `apps/1`) must say
+  `release: 1.2`, and `section` and `release` are the only keys: the check refuses anything else, so a misspelled
+  `release` never lets an entry out early.
 
 ```markdown
 ---

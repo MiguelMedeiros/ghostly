@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assembleChangelog, heldFor, parseFragment, readFragments, splitFragments, strayFragments, versionBefore } from "../changes.mjs";
+import { assembleChangelog, heldFor, parseFragment, readFragments, releaseChangelog, splitFragments, strayFragments, versionBefore } from "../changes.mjs";
 
 const CHANGELOG = `# Changelog
 
@@ -113,6 +113,42 @@ Ghostly next.
     expect(held("10.12")).toMatchObject({ release: "10.12", problems: [] });
     expect(fragment("Fixed", "- A.").release).toBeUndefined();
     for (const wrong of ["1.2.0", "1", "next", '"1.2"', "v1.2", ""]) expect(held(wrong).problems, wrong).toEqual([expect.stringMatching(/"release"/)]);
+  });
+
+  it("refuses a front matter key it does not know, or one given twice", () => {
+    const front = (lines: string) => parseFragment("docs/changelog/unreleased/x.md", `---\n${lines}\n---\n- A.\n`).problems;
+    expect(front("section: Fixed\nrelease: 1.2")).toEqual([]);
+    expect(front("section: Fixed\nRelease: 1.2")).toEqual([expect.stringMatching(/"Release: 1\.2"/)]);
+    expect(front("section: Fixed\nrelase: 1.2")).toEqual([expect.stringMatching(/"relase" is not a front matter key/)]);
+    expect(front("section: Fixed\nreleases: 1.2")).toEqual([expect.stringMatching(/"releases" is not a front matter key/)]);
+    expect(front("section: Fixed\n release: 1.2")).toEqual([expect.stringMatching(/" release: 1\.2"/)]);
+    expect(front("section: Fixed\nrelease : 1.2")).toEqual([expect.stringMatching(/"release : 1\.2"/)]);
+    expect(front("section: Fixed\nrelease: 1.2\nrelease: 1.1")).toEqual([expect.stringMatching(/"release" appears twice/)]);
+  });
+
+  it("holds an Apps entry for 1.2 while the repository is before it", () => {
+    const entry = (section: string, body: string, version?: string, release?: string) =>
+      parseFragment("docs/changelog/unreleased/x.md", `---\nsection: ${section}\n${release ? `release: ${release}\n` : ""}---\n${body}\n`, version).problems;
+    const hold = /an Apps entry says "release: 1\.2"/;
+    expect(entry("For developers / Apps", "- A store.", "1.1.6")).toEqual([expect.stringMatching(hold)]);
+    expect(entry("For developers / Apps", "- A store.")).toEqual([expect.stringMatching(hold)]);
+    expect(entry("For users / Chat", "- Behind the apps flag: a card.", "1.1.6")).toEqual([expect.stringMatching(hold)]);
+    expect(entry("For developers / WISPs", "- WISP 1200 gains a field.", "1.1.6")).toEqual([expect.stringMatching(hold)]);
+    expect(entry("For developers / Apps", "- A store.", "1.1.6", "1.1")).toEqual([expect.stringMatching(hold)]);
+    expect(entry("For developers / Apps", "- A store.", "1.1.6", "1.2")).toEqual([]);
+    expect(entry("For developers / Apps", "- A store.", "1.1.6", "1.3")).toEqual([]);
+    // From 1.2.0 on, Apps ship: an entry about them goes out with the next release like any other.
+    expect(entry("For developers / Apps", "- A store.", "1.2.0")).toEqual([]);
+    expect(entry("For users / Chat", "- Shared apps open faster.", "1.1.6")).toEqual([]);
+  });
+
+  it("keeps a new Unreleased heading, with its note, above the release", () => {
+    const changelog = "# Changelog\n\n## Unreleased\n\n<!-- New entries: docs/changelog/unreleased/. -->\n\n## 0.4.0\n\n- Old.\n";
+    const out = releaseChangelog(changelog, [fragment("Fixed", "- A crash.")], "0.5.0");
+    expect(out).toBe("# Changelog\n\n## Unreleased\n\n<!-- New entries: docs/changelog/unreleased/. -->\n\n## 0.5.0\n\n### Fixed\n\n- A crash.\n\n## 0.4.0\n\n- Old.\n");
+    // Twice in a row, nothing lost.
+    expect(releaseChangelog(out, [fragment("Fixed", "- Another.")], "0.5.1")).toContain("## Unreleased\n\n<!-- New entries: docs/changelog/unreleased/. -->\n\n## 0.5.1\n\n### Fixed\n\n- Another.\n\n## 0.5.0");
+    expect(() => releaseChangelog("# Changelog\n\n## 0.4.0\n", [], "0.5.0")).toThrow(/Unreleased/);
   });
 
   it("compares versions number by number", () => {
