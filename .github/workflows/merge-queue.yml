@@ -8,7 +8,7 @@ name: Merge queue
 # It acts as a GitHub App (repository secrets QUEUE_APP_ID and QUEUE_APP_PRIVATE_KEY): GitHub starts no workflow for a
 # push or a pull request made with the workflow's own GITHUB_TOKEN, so a batch made with it would never get its CI
 # Success. Without those secrets every run ends green with a notice and changes nothing; a Mac can run the train
-# meanwhile (`node tools/scripts/merge-train.mjs --run --every 120`, with its own gh login).
+# meanwhile (`node tools/scripts/merge-train.mjs --run --every 300`, with its own gh login).
 #
 # These runs hold the app's key, so they only ever run the default branch's copy of this file and of the script: there
 # is no pull_request trigger, and pull_request_target (a label added) checks out the base, never the pull request.
