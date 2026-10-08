@@ -320,6 +320,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
   ["Use an https:// relay address: http://relay.example.org/", `${BROWSER}/platform/irohWeb.ts`, "Use an https:// relay address: ${value}"],
+  ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
+  ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
+  ["Not a relay address: ftp//x", `${BROWSER}/nostr/relay.ts`, "Not a relay address: ${value.slice(0, 40)}"],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));

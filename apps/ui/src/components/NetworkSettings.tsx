@@ -8,6 +8,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { Block, Field, FieldGrid, Row, Section } from "./layout";
 import { Switch } from "./wallet/ui";
 import { problemLine } from "../lib/problemText";
+import { errorText } from "../lib/errorText";
 import { clockOffTexts } from "../lib/clockOff";
 
 /**
@@ -57,7 +58,7 @@ export function NetworkSettings() {
     const relay = hyperdhtRelay.trim();
     const push = pushRelay.trim();
     const problem = (server ? iceServerProblem(server) : null) ?? (relay ? hyperdhtRelayProblem(relay) : null) ?? (push ? pushRelayProblem(push) : null);
-    if (problem) { setError(problem); return; }
+    if (problem) { setError(errorText(problem, t)); return; }
     try {
       const irohRelays = iroh.split(/\s+/).filter(Boolean);
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.

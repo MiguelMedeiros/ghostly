@@ -381,7 +381,8 @@
   },
   "relays": {
     "atLeastOne": "Inserisci almeno un indirizzo di relay",
-    "useHttps": "Usa un indirizzo di relay https://: {{address}}"
+    "notAddress": "Non è un indirizzo di relay: {{address}}",
+    "useHttps": "Usa https:// nell'indirizzo del relay: {{address}}"
   },
   "transport": {
     "adapterFailed": "Avvio non riuscito. Riapri questa chat per riprovare.",
