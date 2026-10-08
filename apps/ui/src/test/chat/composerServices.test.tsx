@@ -77,7 +77,7 @@ describe("the composer's Shared services row", () => {
     await view.user.click(row);
     expect(screen.queryByTestId("composer-menu")).not.toBeInTheDocument();
     const dialog = screen.getByTestId("chat-services");
-    expect(within(dialog).getByRole("heading", { name: "Apps with Ana" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Shared services with Ana" })).toBeInTheDocument();
     expect(screen.queryByTestId("chat-services-unavailable")).not.toBeInTheDocument();
     await view.user.click(within(dialog).getByTestId("chat-service-toggle"));
     expect(view.engine.callsTo("setServiceShared")).toEqual([{ serviceId: "atlas", peerPubKeyZ32: "peer", shared: true }]);

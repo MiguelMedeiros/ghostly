@@ -1,0 +1,1 @@
+The section on calls and hosted local services is now "Calls and shared services" (its anchor moves with it), and the text calls the `services/1` feature shared services, as the apps now do. Nothing on the wire changes: `services/1` keeps its name.

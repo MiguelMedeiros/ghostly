@@ -21,7 +21,7 @@
     "downloaded": "Téléchargé {{name}} · {{size}}",
     "emptyFile": "Ce fichier est vide. Choisissez un fichier de sauvegarde.",
     "fromFile": "Fichier",
-    "holds": "Contient : les discussions et leurs clés, les messages, les fichiers de toute taille, les portefeuilles, les apps partagées et les réglages. Ne contient pas : les clés du stockage S3, l'abonnement aux notifications de cet appareil, les fichiers en cours d'arrivée, ni les données locales des portefeuilles Bark, Spark et Fedimint, qui reviennent avec leur phrase de récupération (la phrase est dans la sauvegarde).",
+    "holds": "Contient : les discussions et leurs clés, les messages, les fichiers de toute taille, les portefeuilles, les services partagés et les réglages. Ne contient pas : les clés du stockage S3, l'abonnement aux notifications de cet appareil, les fichiers en cours d'arrivée, ni les données locales des portefeuilles Bark, Spark et Fedimint, qui reviennent avec leur phrase de récupération (la phrase est dans la sauvegarde).",
     "keepOne": "L’original est toujours là ? N’en utilisez qu’un : ils partagent les portefeuilles.",
     "list": "Lister",
     "noneYet": "Aucune pour l’instant.",

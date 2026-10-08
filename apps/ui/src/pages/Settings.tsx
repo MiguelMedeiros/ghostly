@@ -34,6 +34,7 @@ import { focusToRetype } from "../lib/focus";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
+import { useAppsAvailable } from "../lib/apps/flag";
 import { lockPasswordMin, useDeviceSet } from "../lib/devices";
 import { useEngineState } from "../lib/identities";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -66,7 +67,7 @@ import { SettingsIndex, SettingsMenu, SettingsSearch } from "../components/setti
 type PasswordField = "current" | "new" | "confirm";
 
 /** What "Clear all data" erases, as its confirmation lists it (lib/clearData.ts). */
-const CLEAR_ITEMS = ["chats", "groups", "apps", "profile", "identities", "settings", "storage"] as const;
+const CLEAR_ITEMS = ["chats", "groups", "services", "profile", "identities", "settings", "storage"] as const;
 
 /** Which sections are drawn: on a phone the one its address names (none on the menu), on a wider screen all of them. */
 interface SectionView { phone: boolean; section: SettingsSection | null }
@@ -222,6 +223,8 @@ export function Settings() {
   const desktopUsed = desktopStorage && storageBreakdown(desktopStorage);
   const [protecting, setProtecting] = useState(false);
   const [confirmClearData, setConfirmClearData] = useState(false);
+  // Installed mini-apps and their data go too; the line shows only where Apps does.
+  const appsOn = useAppsAvailable();
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
   const [chatCount, setChatCount] = useState(0);
   const [noticePermission, setNoticePermission] = useState<NoticePermission>("default");
@@ -697,6 +700,7 @@ export function Settings() {
               <p className="font-semibold text-text-primary">{t("settings.clearAllDataConfirm")}</p>
               <ul className="list-disc ps-5 space-y-0.5 text-text-secondary">
                 {CLEAR_ITEMS.map((item) => <li key={item} data-item={item}>{t(`settings.clearAllDataItems.${item}`)}</li>)}
+                {appsOn && <li data-item="appsData">{t("settings.clearAllDataItems.appsData")}</li>}
               </ul>
               <p className="text-xs text-text-muted">{t("settings.clearAllDataKeeps")}</p>
               <ButtonGroup>

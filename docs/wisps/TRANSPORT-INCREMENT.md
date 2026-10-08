@@ -7,7 +7,7 @@
 > - Web app and extension: Iroh relay-only, on by default through n0's relays (#225); HyperDHT only through a HyperDHT relay the person sets (#231). A web chat reaches a Desktop over relayed Iroh (#270).
 > - First contact: native descriptors travel in the layer-0 capability record, so two Desktop apps go live on Iroh or HyperDHT with no WebRTC first (#209, #229, #235, #244).
 > - Desktop reads the Mainline DHT directly (#289).
-> - Files, payments and shared apps run on every transport; calls signal on the session and carry media on a WebRTC connection of their own (#207).
+> - Files, payments and shared services run on every transport; calls signal on the session and carry media on a WebRTC connection of their own (#207).
 >
 > The sections below describe the 2026-09-20 increment; where they say otherwise, this note wins.
 
@@ -85,4 +85,4 @@ Manual validation in two separate Tauri bundles used the public default infrastr
 
 ## Deliberate limits
 
-This increment exposed only paired text chat on these adapters; files, payments, shared apps and call signals followed (note above). External proofs and groups are not part of this profile. Existing legacy features remain separate. Bootstrap credentials are still retained; signed discovery and pinned participation prevent invite reuse from impersonating the paired participant but do not prevent DHT suppression or erase old records. Receipts mean remote local persistence; device loss and deleted history limit deduplication. No distributed exactly-once, global revocation, erasure, independent crypto audit or uninterrupted hot migration is claimed.
+This increment exposed only paired text chat on these adapters; files, payments, shared services and call signals followed (note above). External proofs and groups are not part of this profile. Existing legacy features remain separate. Bootstrap credentials are still retained; signed discovery and pinned participation prevent invite reuse from impersonating the paired participant but do not prevent DHT suppression or erase old records. Receipts mean remote local persistence; device loss and deleted history limit deduplication. No distributed exactly-once, global revocation, erasure, independent crypto audit or uninterrupted hot migration is claimed.

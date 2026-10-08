@@ -332,7 +332,7 @@ ghostly chat pay-request alice <payment id>        # pay the contact's request
 
 A complete payment bot: the package's `examples/payment-bot.mjs`.
 
-### Voice calls, identities and shared apps
+### Voice calls, identities and shared services
 
 ```bash
 ghostly call auto on --from alice                  # answer alice's calls by themselves (needs the daemon)
