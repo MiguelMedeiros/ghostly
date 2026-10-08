@@ -519,10 +519,32 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
     const began = Date.now();
     await node.shutdown();
     nodes.splice(nodes.indexOf(node), 1);
-    // One by one this was 17 waits of 300 ms (5 s); a daemon's stop is under a second.
+    // One by one this was 17 waits of 300 ms (5 s).
     expect(Date.now() - began).toBeLessThan(1_000);
     expect(linkOf(chat.id).stop).toHaveBeenCalled();
   }, 15_000);
+
+  it("does not wait for a native listener still starting, and dials nothing once it is up: it is closed", async () => {
+    // HyperDHT takes seconds to listen on a busy machine: a daemon stopped soon after it started waited 3 to 5 s for it.
+    const close = vi.fn(async () => {});
+    const made = { transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
+      connect: vi.fn(), close, onConnection: null, onDescriptor: null };
+    const iroh = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(made), 2_000)));
+    // The side that dials a native contact as soon as its listeners are up (the lower key).
+    const [mine, theirs] = [createIdentity(), createIdentity()].sort((a, b) => (a.pubKeyZ32 < b.pubKeyZ32 ? -1 : 1));
+    const chat = row({ seedB64: mine.seedB64, peerPubKeyZ32: theirs.pubKeyZ32, pairedPeerKey: createIdentity().pubKeyZ32, peerTransports: ["iroh/1"] });
+    const { node, linkOf } = await startedWith({ nativeTransports: { "iroh/1": iroh } } as unknown as Partial<NodeOptions>, chat);
+    await vi.waitFor(() => expect(iroh).toHaveBeenCalled());
+    let done = false;
+    const stopping = node.shutdown().then(() => { done = true; });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(done).toBe(true);
+    await vi.waitFor(() => expect(close).toHaveBeenCalled(), { timeout: 3_000 });
+    // A dial after the goodbye was an offer published 3 s after it (#1452).
+    expect(linkOf(chat.id).connect).not.toHaveBeenCalled();
+    await stopping;
+    nodes.splice(nodes.indexOf(node), 1);
+  });
 });
 
 describe("the capability record of a chat (WISP 03)", () => {

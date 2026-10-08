@@ -628,6 +628,9 @@ export class GhostlyNode implements EngineImplementation {
   /** Every listener start asked for so far has ended. */
   private get nativeQueue(): Promise<void> { return Promise.all(this.nativeQueues.values()).then(() => {}); }
   private shuttingDown = false;
+  /** Settles as `shutdown` begins: what is still starting is not waited for past it. */
+  private stopBegan!: () => void;
+  private readonly stopping = new Promise<null>((resolve) => { this.stopBegan = () => resolve(null); });
   /** `start` has put the kept transfers back (EngineState.transfersRestored). */
   private transfersRestored = false;
   private readonly feedbackStartedAt = Date.now();
@@ -1948,13 +1951,14 @@ export class GhostlyNode implements EngineImplementation {
   async shutdown(options: { quiet?: boolean } = {}): Promise<void> {
     const quiet = options.quiet === true || this.gatedOut;
     this.shuttingDown = true;
+    this.stopBegan();
     if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
     this.appShelf?.stop();
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     if (!quiet) this.depart();
     // Then every link stops, its record too, still before anything that waits: the leave packet is the last thing a link
-    // publishes. Stopped last, a daemon's link offered and published again 4 s after its goodbye, while the stop waited
-    // for the wallets (#1452).
+    // publishes. Stopped last, a daemon's link offered and published again 3 s after its goodbye, while the stop waited
+    // for a native listener still starting (#1452).
     const linksStopped = Promise.allSettled([...this.links.values()].map(async (live) => {
       live.carried?.stop();
       await Promise.all([live.link?.stop(!quiet), live.caps?.stop()]);
@@ -1994,7 +1998,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const queue of this.editQueues.values()) queue.stop();
     this.groupEdits.stop();
     this.cardEdits.stop();
-    // What is still being written is waited for, side by side: one after another, a daemon's stop took 4 to 6 s.
+    // What is still being written is waited for, side by side: the stop takes as long as the slowest, not their sum.
     await Promise.allSettled([
       linksStopped,
       links?.stop(),
@@ -6686,7 +6690,8 @@ export class GhostlyNode implements EngineImplementation {
       }
     }
     void nativeUp?.then(() => {
-      if (live.link === link && stored.peerTransports && stored.preferredTransport !== "webrtc/1" && live.myPubKeyZ32 < stored.peerPubKeyZ32)
+      // Stopping: no dial after the goodbye (its offer went out 3 s after it, #1452).
+      if (!this.shuttingDown && live.link === link && stored.peerTransports && stored.preferredTransport !== "webrtc/1" && live.myPubKeyZ32 < stored.peerPubKeyZ32)
         void link.connect().catch(() => {});
     });
   }
@@ -6950,7 +6955,11 @@ export class GhostlyNode implements EngineImplementation {
       const transportSeeds = { ...live.stored.transportSeeds, [key]: seed };
       live.stored = { ...live.stored, transportSeeds };
       await db.patchLink(linkId, { transportSeeds });
-      const endpoint = await factory(seed);
+      // A stop does not wait for a listener still starting (HyperDHT takes seconds to listen on a busy machine, and a
+      // daemon stopped soon after it started waited 3 to 5 s for it): it is closed once it is up, its seed already saved.
+      const starting = factory(seed);
+      const endpoint = await Promise.race([starting, this.stopping]);
+      if (!endpoint) { void starting.then((late) => late.close(), () => {}); return false; }
       if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId)) { await endpoint.close(); return false; }
       link.registerEndpoint(endpoint);
       delete live.transportErrors[key];
