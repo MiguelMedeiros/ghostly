@@ -5,18 +5,21 @@
  * - A notice (anything the app hears about: a message, a mention, a coin, a cue, connected) holds the gate for
  *   `NOTICE_GAP_MS` after it starts. Another notice in that time is dropped, not queued: a late pile-up is as bad.
  * - Except right at the start: a more important notice that arrives within `TOGETHER_MS` of the one holding the gate
- *   takes its place (a mention over a message, a payment over a message). It stops the first one, which by then has
- *   most likely not been heard yet.
+ *   takes its place (a mention over a message, a payment over a message). It fades the first one out (sounds.ts), which
+ *   by then has most likely not been heard yet. A connection's own sound (connected, back, switched) tells no news, so
+ *   anything more important takes its place for as long as it holds the gate: a chat goes live, and its first message
+ *   a moment later is still heard.
  * - A call's sounds (ring, ringback, hangup) are never dropped: they stop whatever sounds and hold the gate, and while a
  *   call rings no other sound plays.
  * - The interface's own sounds, played by a person's click (a card sliding or turning over, a spoiler, a delete, "Send
- *   real money", what I sent, a Settings preview), keep their own repeat rule (cues.ts REPEAT_MS) but never sound on top
+ *   real money", what I sent), keep their own repeat rule (cues.ts REPEAT_MS) but never sound on top
  *   of a notice or a call: they are dropped while one holds the gate, and a notice that comes stops them. One replaces
  *   the other, so quick clicks do not stack either.
+ * - A Settings ▶ preview is asked for by name: it always plays (not over a ringing call), and stops whatever sounds.
  */
 import type { SoundName } from "./sounds";
 
-export type SoundKind = "call" | "notice" | "interface";
+export type SoundKind = "call" | "notice" | "interface" | "preview";
 
 /**
  * How long a notice holds the gate after it starts. The longest notice is 0.91 s ("connected"; most are 0.52 s, a
@@ -29,10 +32,13 @@ export const TOGETHER_MS = 250;
 const CALL: ReadonlySet<SoundName> = new Set<SoundName>(["ring", "ringback", "hangup"]);
 const INTERFACE: ReadonlySet<SoundName> = new Set<SoundName>(["slide", "flip", "wallet", "spoiler", "deleted", "realmoney", "sent"]);
 
+/** A connection's own sounds' priority: they give way to anything more important for as long as they hold the gate. */
+const AMBIENT = 0;
+
 /** Which notice wins when they come together. Anything not named here is 2. */
 const PRIORITY: Partial<Record<SoundName, number>> = {
   // A connection's ambient sounds.
-  connected: 0, back: 0, switched: 0,
+  connected: AMBIENT, back: AMBIENT, switched: AMBIENT,
   message: 1,
   // Someone named me, or money moved.
   mention: 3, coin: 3, testcoins: 3, request: 3, paid: 3, confirmed: 3, failed: 3,
@@ -64,14 +70,15 @@ export class SoundGate {
     }
     if (ringing) return false;
     const held = this.held && now - this.held.at < NOTICE_GAP_MS ? this.held : undefined;
-    if (kind === "interface") {
-      if (held) return false;
+    if (kind === "preview") this.silence();
+    else if (kind === "interface" && held) return false;
+    if (kind === "interface" || kind === "preview") {
       this.cue?.();
       this.cue = stop;
       return true;
     }
     const priority = soundPriority(name);
-    if (held && !(priority > held.priority && now - held.at < TOGETHER_MS)) return false;
+    if (held && !(priority > held.priority && (now - held.at < TOGETHER_MS || held.priority === AMBIENT))) return false;
     this.silence();
     this.held = { priority, at: now, stop };
     return true;

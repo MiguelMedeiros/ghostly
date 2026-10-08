@@ -565,7 +565,7 @@ export function Settings() {
           const name = t(`settings.cues.${category}` as const), off = !settings.notifications.soundEnabled;
           return (
             <Row key={category} label={name} hint={t(`settings.cues.${category}Hint` as const)} testId={`settings-cues-${category}-row`}>
-              <button type="button" data-testid={`settings-cues-${category}-preview`} disabled={off} onClick={() => playSound(CATEGORY_PREVIEW[category], { kind: "interface" })}
+              <button type="button" data-testid={`settings-cues-${category}-preview`} disabled={off} onClick={() => playSound(CATEGORY_PREVIEW[category], { kind: "preview" })}
                 aria-label={t("settings.cues.preview", { name })} title={t("settings.cues.preview", { name })}
                 className="grid place-items-center w-8 h-8 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" /></svg>

@@ -104,6 +104,21 @@ describe("notification sounds that come together", () => {
     expect(context().stopped).toEqual([]);
   });
 
+  it("let a message through over a chat's connected sound: the chat went live, and its first message comes a moment later", async () => {
+    sounds.playSound("connected");
+    await flush();
+    await vi.advanceTimersByTimeAsync(gate.NOTICE_GAP_MS / 2);
+    sounds.playSound("message");
+    await flush();
+    expect(context().started).toEqual([587, 784, 784, ...MESSAGE]);
+    // Faded out, not left under the message.
+    expect(context().stopped).toEqual([587, 784, 784]);
+    // Another connected sound does not take the message's place.
+    sounds.playSound("connected");
+    await flush();
+    expect(context().started).toEqual([587, 784, 784, ...MESSAGE]);
+  });
+
   it("let the next one play once the gap is over", async () => {
     sounds.playSound("message");
     await flush();
@@ -168,17 +183,32 @@ describe("the interface's own sounds", () => {
     expect(context().started).toEqual([...MESSAGE, 2794, ...MESSAGE]);
   });
 
-  it("follow one another as quickly as a person clicks, each stopping the last, and a Settings preview is one of them", async () => {
+  it("follow one another as quickly as a person clicks, each stopping the last", async () => {
     sounds.playSound("flip");
     await flush();
     sounds.playSound("slide");
     await flush();
-    sounds.playSound("knock", { kind: "interface" });
+    sounds.playSound("flip");
     await flush();
-    sounds.playSound("knock", { kind: "interface" });
+    expect(context().started).toEqual([2794, 2960, 2794]);
+    expect(context().stopped).toEqual([2794, 2960]);
+  });
+
+  it("a Settings preview always plays, over a notice too (which it stops), but not over a ringing call", async () => {
+    sounds.playSound("knock");
     await flush();
-    expect(context().started).toEqual([2794, 2960, 392, 415, 392, 415]);
-    expect(context().stopped).toEqual([2794, 2960, 392, 415]);
+    sounds.playSound("knock", { kind: "preview" });
+    await flush();
+    sounds.playSound("knock", { kind: "preview" });
+    await flush();
+    expect(context().started).toEqual([392, 415, 392, 415, 392, 415]);
+    expect(context().stopped).toEqual([392, 415, 392, 415]);
+    const stop = sounds.startRinging("ringback");
+    await flush();
+    sounds.playSound("knock", { kind: "preview" });
+    await flush();
+    expect(context().started.slice(-1)).toEqual([440]);
+    stop();
   });
 });
 
