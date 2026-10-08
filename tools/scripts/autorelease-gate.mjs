@@ -11,7 +11,7 @@
  * Refuses when the branch:
  * - moved since CI ran, or is not on top of the current main
  * - touches CI, release, the scanner, this gate or the advisory allowlist
- * - adds a dependency (only versions of existing ones may change)
+ * - adds a dependency, or takes an existing one from somewhere else (only versions may change)
  * - changes more than MAX_LINES lines outside lock files
  * - in "deps" mode, touches anything but manifests, lock files and release notes, or changes more than versions in them
  * - does not bump the version by exactly one patch, with a changelog entry
@@ -78,15 +78,43 @@ if (MODE === "deps") {
 const lines = compare.files.filter((f) => !LOCKFILES.has(f.filename)).reduce((n, f) => n + f.additions + f.deletions, 0);
 if (lines > MAX_LINES) refuse(`${lines} changed lines outside lock files (max ${MAX_LINES})`);
 
-// Only versions may change in lock files: a new name is a new dependency someone should look at.
-const npmNames = (text) =>
-  new Set(Object.keys(JSON.parse(text).packages ?? {}).filter((p) => p.includes("node_modules/")).map((p) => p.slice(p.lastIndexOf("node_modules/") + 13)));
-const cargoNames = (text) => new Set([...text.matchAll(/^name = "([^"]+)"$/gm)].map((m) => m[1]));
+// Only versions may change in lock files: a new name is a new dependency someone should look at, and so is an existing
+// name that now comes from somewhere else (an npm alias to another package, another registry or a git repository, a
+// workspace link turned into a download, a crate off crates.io). Each name maps to every place it comes from.
+const npmSources = (text) => {
+  const sources = new Map();
+  for (const [path, entry] of Object.entries(JSON.parse(text).packages ?? {})) {
+    if (!path.includes("node_modules/")) continue;
+    const name = path.slice(path.lastIndexOf("node_modules/") + 13);
+    const real = entry.name ?? name;
+    const from = entry.link
+      ? `link:${entry.resolved}`
+      : !entry.resolved
+        ? `${real}, no source`
+        : entry.resolved.startsWith(`https://registry.npmjs.org/${real}/-/`)
+          ? `npm:${real}`
+          : entry.resolved;
+    sources.set(name, (sources.get(name) ?? new Set()).add(from));
+  }
+  return sources;
+};
+const cargoSources = (text) => {
+  const sources = new Map();
+  for (const block of text.split(/^\[\[package\]\]$/m).slice(1)) {
+    const name = block.match(/^name = "([^"]+)"$/m)?.[1];
+    if (!name) continue;
+    sources.set(name, (sources.get(name) ?? new Set()).add(block.match(/^source = "([^"]+)"$/m)?.[1] ?? "workspace"));
+  }
+  return sources;
+};
 for (const lock of files.filter((f) => LOCKFILES.has(f))) {
-  const names = lock === "Cargo.lock" ? cargoNames : npmNames;
-  const before = names(await raw(lock, "main"));
-  const added = [...names(await raw(lock, sha))].filter((n) => !before.has(n));
+  const sources = lock === "Cargo.lock" ? cargoSources : npmSources;
+  const before = sources(await raw(lock, "main"));
+  const after = sources(await raw(lock, sha));
+  const added = [...after.keys()].filter((n) => !before.has(n));
   if (added.length) refuse(`${lock} adds dependencies: ${added.join(", ")}`);
+  const moved = [...after].filter(([name, from]) => [...from].some((s) => !before.get(name).has(s))).map(([name]) => name);
+  if (moved.length) refuse(`${lock} changes where dependencies come from: ${moved.join(", ")}`);
 }
 
 const version = (text) => JSON.parse(text).version;
