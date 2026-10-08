@@ -6,7 +6,6 @@ import { APP_SCOPE_ALONE, APP_STORAGE_LIMITS, type Apps } from "../src/engine/ap
 import { db } from "../src/engine/db";
 import { GhostlyNode } from "../src/engine/node";
 import { snapshotDatabase } from "../src/backup/database";
-import { APPS_ENABLED } from "../src/shared/features";
 import { DB_VERSION, PROFILE_STORES, STORES, clearProfileStores, databaseName, openDb, wrap } from "../src/shared/idb";
 import { BUNDLE_URL, FakeNet, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, storageRows, storeFiles, type Built } from "./appsSupport";
 // covers: apps.engine.storage, apps.engine.installed
@@ -228,9 +227,9 @@ describe("the engine", () => {
     return peer;
   }
 
-  it("is off in this build: every app call is refused", async () => {
-    expect(APPS_ENABLED).toBe(false);
-    const peer = await node();
+  it("is off: every app call is refused", async () => {
+    // Off by the engine's option, so this holds whatever the build's APPS_ENABLED says.
+    const peer = await node({ apps: false });
     await expect(Promise.resolve().then(() => peer.appList())).rejects.toThrow("Apps are unavailable in this release");
     await expect(Promise.resolve().then(() => peer.appStoreAdd({ url: STORE_URL }))).rejects.toThrow("Apps are unavailable in this release");
     await peer.shutdown({ quiet: true });

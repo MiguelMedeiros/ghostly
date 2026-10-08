@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { APPS_CAPABILITY, GhostLink, chatAppId, createIdentity, createLink, identityFromSeedB64, toZ32, type AppFrameEvent, type PairingState } from "@ghostly/core";
 import { EngineServer, type EngineClientSink } from "../src/engine/server";
 import { db } from "../src/engine/db";
-import { APPS_ENABLED } from "../src/shared/features";
 import type { EngineEvent, RpcResponse } from "../src/shared/rpc";
 import { FakeNativeNet } from "./helpers/fakeNative";
 // covers: apps.chat.wire
@@ -11,8 +10,8 @@ import { FakeNativeNet } from "./helpers/fakeNative";
 /**
  * Mini-apps in the engine (WISP 1200 § In a chat: `apps/1`): the pages open an app in a paired chat by its reference,
  * talk to the same app on the contact's side through the engine's calls, and hear the contact's frames as `app-frame`
- * events. A real engine and its contact's link over a stand-in for Iroh, as reactions.test.ts does. Behind a flag:
- * off, nothing is offered and every call is refused.
+ * events. A real engine and its contact's link over a stand-in for Iroh, as reactions.test.ts does. Behind a flag
+ * (`NodeOptions.apps`, by default `APPS_ENABLED`): off, nothing is offered and every call is refused.
  */
 
 Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: async () => ({ quota: 50 * 1024 ** 3, usage: 10 * 1024 ** 3 }) }, configurable: true });
@@ -77,9 +76,9 @@ async function setup({ apps, contactApps = true, beforeLive }: { apps?: boolean;
 }
 
 describe("apps in the engine (apps/1)", () => {
-  it("are off in this build: nothing is offered, every call is refused", async () => {
-    expect(APPS_ENABLED).toBe(false);
-    const { call, contact, id, ref, app, appEvents } = await setup();
+  it("off: nothing is offered, every call is refused", async () => {
+    // Off by the engine's option, so this holds whatever the build's APPS_ENABLED says.
+    const { call, contact, id, ref, app, appEvents } = await setup({ apps: false });
     expect(contact.sessionOffers.peer).not.toContain(APPS_CAPABILITY);
     expect(contact.supportsApps).toBe(false);
     for (const [method, params] of [["appId", { linkId: id, ref }], ["appOpen", { linkId: id, ref, version: "1.0.0" }], ["appClose", { linkId: id, ref }], ["appSend", { linkId: id, ref, data: 1 }]] as const)
