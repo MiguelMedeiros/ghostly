@@ -22,7 +22,7 @@ describe("the merge queue's choice", () => {
   });
 
   it("waits while an up-to-date pull request runs CI or is about to merge", () => {
-    for (const head of [pr({ number: 2, state: "blocked", ci: "pending" }), pr({ number: 2, state: "clean" }), pr({ number: 2, state: "unstable" })]) {
+    for (const head of [pr({ number: 2, state: "blocked", ci: "pending" }), pr({ number: 2, state: "blocked", ci: "success" }), pr({ number: 2, state: "clean" }), pr({ number: 2, state: "unstable" })]) {
       const { update, log } = decide([head, pr({ number: 5, state: "behind" })]);
       expect(update).toBeNull();
       expect(log.join("\n")).toMatch(/BUSY: #2/);

@@ -68,7 +68,8 @@ export function decide(prs) {
   if (conflicts.length) log.push(`CONFLICT ${conflicts.map((p) => `#${p.number}`).join(" ")} (skipped until rebased)`);
 
   const unknown = prs.filter((p) => !p.state || p.state === "unknown");
-  const busy = prs.filter((p) => UP_TO_DATE.has(p.state) && (p.state !== "blocked" || p.ci === "pending"));
+  // `blocked` with CI Success green is the moment before GitHub calls it `clean`: about to merge, so busy too.
+  const busy = prs.filter((p) => UP_TO_DATE.has(p.state) && (p.state !== "blocked" || p.ci === "pending" || p.ci === "success"));
   for (const p of prs.filter((p) => p.state === "blocked" && p.ci === "failure")) log.push(`RED #${p.number} (up to date, CI Success failed)`);
   for (const p of prs.filter((p) => p.state === "blocked" && p.ci === "none")) log.push(`STALLED #${p.number} (up to date, CI never started)`);
 
@@ -83,7 +84,7 @@ export function decide(prs) {
     return { update: null, conflicts, log };
   }
   if (busy.length) {
-    const what = (p) => `#${p.number} ${p.state === "blocked" ? "running CI" : "merging"}`;
+    const what = (p) => `#${p.number} ${p.state === "blocked" && p.ci === "pending" ? "running CI" : "merging"}`;
     log.push(`BUSY: ${busy.map(what).join(", ")} (up to date); ${ready.length} behind wait.`);
     return { update: null, conflicts, log };
   }
