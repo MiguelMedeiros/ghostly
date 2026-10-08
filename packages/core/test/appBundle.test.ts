@@ -127,6 +127,8 @@ async function build(): Promise<Vectors> {
   // Kept by a reader that ignores them, these would name an object's prototype when spread: refused in every mode.
   no("a __proto__ key", "unknown-key", "Never a manifest's key, in any format", await hand(JSON.parse("{\"__proto__\":{\"polluted\":true}}") as Record<string, unknown>));
   no("a constructor key in runtime", "unknown-key", "Never a key, in runtime either", await hand({ runtime: { clients: ["web"], host: ">=1.2", constructor: 1 } }));
+  no("a __proto__ key two levels inside a later key", "unknown-key", "At any level, in a value the reader ignores too", await hand({ later: { a: JSON.parse("{\"__proto__\":{\"polluted\":true}}") as unknown } }));
+  no("a constructor key two levels inside a later key", "unknown-key", "At any level, in a value the reader ignores too", await hand({ later: { a: { constructor: 1 } } }));
   const later = await hand({ later: "a" });
   const laterAt = new TextDecoder().decode(later).indexOf("\"later\":\"a\"") + "\"later\":\"".length;
   const laterChanged = new Uint8Array(later);
@@ -285,6 +287,8 @@ describe("building a bundle", () => {
       expect(reason(checkAppManifest(JSON.parse(JSON.stringify({ ...plain, __placeholder: 1 }).replace("__placeholder", "__proto__")), { strict })), "__proto__").toBe("unknown-key");
       expect(reason(checkAppManifest({ ...plain, prototype: 1 }, { strict })), "prototype").toBe("unknown-key");
       expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, constructor: 1 } }, { strict })), "constructor in runtime").toBe("unknown-key");
+      expect(checkAppManifest({ ...plain, later: [{ a: JSON.parse("{\"__proto__\":1}") as unknown }] }, { strict }), "__proto__ inside a later key").toEqual({ ok: false, reason: "unknown-key", detail: "later.0.a.__proto__" });
+      expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, later: { a: { prototype: 1 } } } }, { strict })), "prototype inside a later runtime key").toBe("unknown-key");
       expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, clients: ["web", "web"] } }, { strict })), "a client twice").toBe("bad-field");
       expect(reason(checkAppManifest({ ...plain, recovery: appKey("recovery") }, { strict })), "reserved").toBe("reserved-key");
       expect(reason(checkAppManifest({ ...plain, later: 1, sequence: "2" }, { strict })), "a known key's type").toBe(strict ? "unknown-key" : "bad-field");

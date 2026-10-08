@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { toBase64Url, toZ32 } from "./bytes";
 import { canonicalJsonBytes, readCanonicalJson, type JsonValue } from "./canonicalJson";
-import { APP_FORBIDDEN_KEYS, isAppUrl } from "./appBundle";
+import { findAppForbiddenKey, isAppUrl } from "./appBundle";
 import {
   APP_PREFIXES, isAppHash, isAppKey, isAppRef, readAppRevocation, readAppSignature, signAppObject, verifyAppSignature,
   type AppSignature, type SignedAppRevocation,
@@ -83,14 +83,16 @@ const fine: Check = { ok: true };
  * add an optional key without a client refusing the whole signed index; the signature still covers the bytes as they
  * are, unknown keys included. A writer (`signAppStore`, the CLI, a store's check of a `listing.json` through
  * `readAppListing`) passes `strict` and refuses it, so a misspelt key is caught before anything is signed. Required
- * keys, their types and their bounds hold in both, and `APP_FORBIDDEN_KEYS` are refused in both.
+ * keys, their types and their bounds hold in both, and `APP_FORBIDDEN_KEYS` are refused in both, at any level.
  */
 export interface AppFormatOptions { strict?: boolean }
 
 function keysOf(value: Record<string, unknown>, required: readonly string[], optional: readonly string[], options: AppFormatOptions = {}): Check {
+  // `__proto__` and its kin are refused in both modes, at any level (`findAppForbiddenKey`): a reader keeps what it ignores.
+  const forbidden = findAppForbiddenKey(value);
+  if (forbidden !== undefined) return { ok: false, reason: "unknown-key", detail: forbidden };
   for (const k of Object.keys(value)) {
-    // `__proto__` and its kin are refused in both modes (`APP_FORBIDDEN_KEYS`): a reader keeps what it ignores.
-    if ((options.strict || APP_FORBIDDEN_KEYS.includes(k)) && !required.includes(k) && !optional.includes(k)) return { ok: false, reason: "unknown-key", detail: k };
+    if (options.strict && !required.includes(k) && !optional.includes(k)) return { ok: false, reason: "unknown-key", detail: k };
   }
   for (const k of required) if (!(k in value)) return { ok: false, reason: "missing-key", detail: k };
   return fine;
