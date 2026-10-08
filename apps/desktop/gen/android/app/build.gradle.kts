@@ -26,6 +26,19 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    // A release build is signed with the upload key when ANDROID_KEYSTORE names a keystore file (CI's android.yml
+    // sets it from the repository's secrets; docs/ANDROID.md); without it, the release APK comes out unsigned.
+    val uploadKeystore = providers.environmentVariable("ANDROID_KEYSTORE").orNull?.takeIf { it.isNotEmpty() }
+    signingConfigs {
+        if (uploadKeystore != null) {
+            create("upload") {
+                storeFile = file(uploadKeystore)
+                storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+                keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+                keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -40,6 +53,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfigs.findByName("upload")?.let { signingConfig = it }
             optimization {
                enable = true
             }

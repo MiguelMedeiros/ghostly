@@ -236,9 +236,10 @@ jobs:
           path: ghostly-browser-extension-*.zip
 
   # ============================================
-  # Android (the web app in a Trusted Web Activity)
+  # Android (the native app, arm64)
   # ============================================
-  # Signed with the upload key when the repository has it (docs/ANDROID.md); the release takes only a signed APK.
+  # Signed with the upload key when the repository has it (docs/ANDROID.md); without it, a debug APK, which the
+  # release attaches under a -debug name and calls out in its notes.
   build-android:
     name: Build Android APK
     uses: ./.github/workflows/android.yml
@@ -323,7 +324,7 @@ jobs:
           path: artifacts/extension
 
       - name: Download Android artifact
-        if: needs.build-android.result == 'success' && needs.build-android.outputs.signed == 'true'
+        if: needs.build-android.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: android
@@ -342,8 +343,9 @@ jobs:
           # Browser extension (load unpacked, or upload to a store)
           cp artifacts/extension/*.zip release-assets/ 2>/dev/null || true
 
-          # Android: the APK signed with the upload key only, never a debug build
-          cp artifacts/android/ghostly-*-android.apk release-assets/ 2>/dev/null || true
+          # Android: ghostly-<version>-android-arm64.apk, signed with the upload key, or a debug build named
+          # ghostly-<version>-android-arm64-debug.apk when the repository has no upload key
+          cp artifacts/android/ghostly-*-android-arm64*.apk release-assets/ 2>/dev/null || true
 
           # No CLI binaries: the Rust ghostly-cli was removed after 1.0
           # (S17 in docs/SECURITY-REVIEW.md). The supported CLI, packages/cli, goes to npm.
@@ -391,12 +393,29 @@ jobs:
             echo "GPG_PRIVATE_KEY not set, skipping GPG signing"
           fi
 
+      # Said in the notes when the Android APK is a debug build, or missing; the generated notes follow.
+      - name: Android note
+        id: android-note
+        env:
+          ANDROID_RESULT: ${{ needs.build-android.result }}
+          ANDROID_SIGNED: ${{ needs.build-android.outputs.signed }}
+        run: |
+          if [ "$ANDROID_RESULT" != "success" ]; then
+            note="**Android:** no APK in this release (its build did not succeed)."
+          elif [ "$ANDROID_SIGNED" != "true" ]; then
+            note="**Android:** the APK is a **debug build** (\`-debug.apk\`), signed with the Android debug key, not Ghostly's: to try the app, not for daily use. A later signed APK will not install over it; uninstall it first."
+          else
+            note=""
+          fi
+          echo "note=$note" >> "$GITHUB_OUTPUT"
+
       - name: Create Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Release ${{ env.RELEASE_TAG }}
           draft: ${{ !inputs.publish }}
+          body: ${{ steps.android-note.outputs.note }}
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: false
@@ -412,6 +431,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Release ${{ env.RELEASE_TAG }}
           draft: ${{ !inputs.publish }}
+          body: ${{ steps.android-note.outputs.note }}
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: false
