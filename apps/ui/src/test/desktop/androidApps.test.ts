@@ -15,8 +15,9 @@ vi.mock("@ghostly/browser/inPageHost", () => ({ createInPageHost: (options: unkn
 import { createDesktopHost } from "../../desktop/host";
 
 /*
- * Mini-apps (WISP 1200) are not in the Android app yet: its host frames none and tells the engine so, even in the e2e
- * suite's build (VITE_APPS_TEST, which the Android e2e builds with) and once the feature is on in every build.
+ * Mini-apps (WISP 1200) are not in the Android app nor in Desktop on Windows yet: their host frames none and tells the
+ * engine so, even in the e2e suite's build (VITE_APPS_TEST, which the Android e2e builds with) and once the feature is
+ * on in every build.
  */
 
 const agent = navigator.userAgent;
@@ -40,9 +41,12 @@ describe("the Desktop host's mini-apps", () => {
     expect(host.node.apps).toBe(true);
   });
 
-  it("in the Android app, even in the e2e suite's build: no runner, and the engine told apps are off", () => {
+  it.each([
+    ["in the Android app", "Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64; wv) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36"],
+    ["on Desktop on Windows", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0"],
+  ])("%s, even in the e2e suite's build: no runner, and the engine told apps are off", (_where, agent) => {
     vi.stubEnv("VITE_APPS_TEST", "1");
-    setAgent("Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64; wv) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36");
+    setAgent(agent);
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     const host = made();
     expect(host.appRunner).toBeUndefined();
