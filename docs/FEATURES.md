@@ -47,7 +47,7 @@ More: [Identities](IDENTITIES.md).
 - Installs as an app: offline start, Share to Ghostly, `web+ghostly:` links, shortcuts and an unread badge.
 - **Wake me while closed**: a contact's message or call, or a mention in a private group, wakes the closed web app with a push that carries no content, sent by the other person's own app.
 
-- **Android:** an APK that opens the web app in a Trusted Web Activity, with its own icon. Releases attach it once its signing key is set up ([ANDROID.md](ANDROID.md)).
+- **Android:** the Desktop app built for Android (Tauri), arm64, with native Iroh and Mainline DHT. Releases attach the APK ([ANDROID.md](ANDROID.md)).
 
 More: [On the web](WEB.md#install-it).
 

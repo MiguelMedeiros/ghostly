@@ -19,6 +19,8 @@ A release made while the repository has no upload key attaches a **debug** APK i
 
 The app keeps its own data; the web app's (the PWA installed from Chrome) stays in Chrome. To move a profile, use [Several devices](DEVICES.md).
 
+An earlier APK, built from source before 1.2 and never attached to a release, opened the web app in a Chrome window under the same package id. It was signed with a debug key, so Android refuses this app over it: uninstall it first. Its profile is Chrome's data for app.ghostly.tools, which uninstalling it leaves in place: open app.ghostly.tools in Chrome and add this app as a device.
+
 ## What CI does
 
 Two workflows build the app:

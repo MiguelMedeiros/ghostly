@@ -15,7 +15,7 @@ Open **https://app.ghostly.tools** in any modern browser.
 
 ## Android
 
-The Android app is the web app in a Trusted Web Activity: a small APK with its own icon that opens app.ghostly.tools full screen, with the web app's limits (no native Iroh, no direct HyperDHT). Releases attach it once its signing key is set up; until then, CI builds a debug APK to try it, never to publish. Details: [ANDROID.md](ANDROID.md). Installing the web app from Chrome, above, gives the same app today.
+The Android app is the Desktop app built for Android: the same UI and engine, with native Iroh and direct Mainline DHT (no HyperDHT yet). Releases attach `ghostly-<version>-android-arm64.apk`; one made without the signing key attaches a debug APK, named `-debug.apk`, to try it only. Details: [ANDROID.md](ANDROID.md).
 
 ## Browser extension (Chrome, Brave, Edge)
 
