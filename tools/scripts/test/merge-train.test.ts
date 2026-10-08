@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { batchBody, bisect, isBatch, LABEL, order, ordinal, pickBatch, queuedAt, readState, tick, waiting } from "../merge-train.mjs";
+import { appTrainIn, batchBody, bisect, BudgetLow, ciState, isBatch, LABEL, order, ordinal, pickBatch, queuedAt, readState, restLayer, tick, trainBases, waiting } from "../merge-train.mjs";
 
-type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string };
+type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const red = [{ name: "CI Success", status: "completed", conclusion: "failure", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const running = [{ name: "CI Success", status: "in_progress", conclusion: null, started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -10,20 +10,21 @@ const running = [{ name: "CI Success", status: "in_progress", conclusion: null, 
 function fakeRepo() {
   const pulls = new Map<number | string, Pr>();
   const events = new Map<number, { event: string; label: { name: string }; created_at: string }[]>();
-  const comments = new Map<number | string, { id: number; body: string }[]>();
+  const comments = new Map<number | string, { id: number; body: string; user?: { login: string } }[]>();
   const runs = new Map<string, object[]>();
-  const tips: Record<string, string> = { dev: "dev0" };
+  const tips: Record<string, string> = { dev: "dev0", "epic/x": "epic0" };
   const landed: string[] = [];
   let ids = 1;
   let next = 9000;
   let clock = 0;
   const gh = {
     pulls: async (base: string) => [...pulls.values()].filter((p) => p.open && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
+    mergedPulls: async (base: string) => [...pulls.values()].filter((p) => p.merged && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     events: async (n: number) => events.get(n) ?? [],
     checkRuns: async (sha: string) => runs.get(sha) ?? [],
     comments: async (n: number) => comments.get(n) ?? [],
     branchSha: async (base: string) => tips[base],
-    comment: async (n: number, body: string) => void comments.set(n, [...(comments.get(n) ?? []), { id: ids++, body }]),
+    comment: async (n: number, body: string) => void comments.set(n, [...(comments.get(n) ?? []), { id: ids++, body, user: { login: "train" } }]),
     editComment: async (id: number, body: string) => {
       for (const list of comments.values()) for (const c of list) if (c.id === id) c.body = body;
     },
@@ -46,6 +47,7 @@ function fakeRepo() {
       for (const m of state.prs) landed.push(`#${m.number}`);
       tips[p.base] = `${tips[p.base]}+${state.prs.map((m: { number: number }) => m.number).join("+")}`;
       p.open = false;
+      p.merged = true;
       return { ok: true };
     },
   };
@@ -59,10 +61,20 @@ function fakeRepo() {
       return { baseSha: tips[base], sha: lastSha, applied, dropped: prs.filter((p) => conflicts.has(p.number)).map((p) => ({ number: p.number, reason: "conflict" })) };
     },
     push: async (branch: string, sha: string) => void built.set(branch, sha),
+    /** An epic's fast-forward: refused unless the epic's tip is the batch's base. */
+    land: async (base: string, sha: string) => {
+      const p = [...pulls.values()].find((x) => x.open && x.sha === sha)!;
+      const state = readState(p.body);
+      if (tips[base] !== state.baseSha) return { ok: false, message: "rejected (fetch first)" };
+      for (const m of state.prs) landed.push(`#${m.number}`);
+      tips[base] = sha;
+      Object.assign(p, { open: false, merged: true });
+      return { ok: true };
+    },
   };
-  const add = (number: number, { ci = green, draft = false, priority = false } = {}) => {
+  const add = (number: number, { ci = green, draft = false, priority = false, base = "dev" } = {}) => {
     const sha = `h${number}`;
-    pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base: "dev" });
+    pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base });
     events.set(number, [{ event: "labeled", label: { name: LABEL.queue }, created_at: new Date(Date.UTC(2026, 9, 8, 0, 0, clock++)).toISOString() }]);
     runs.set(sha, ci);
   };
@@ -76,7 +88,7 @@ function fakeRepo() {
   const batch = () => [...pulls.values()].find((p) => p.open && readState(p.body));
   const members = () => readState(batch()?.body)?.prs.map((m: { number: number }) => m.number) ?? [];
   let stamp = 0;
-  const run = (opts = {}) => tick({ gh, git, base: "dev", stamp: String(stamp++), ...opts });
+  const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), ...opts });
   return { gh, git, pulls, comments, runs, tips, landed, conflicts, add, settle, batch, members, run };
 }
 
@@ -195,10 +207,11 @@ describe("a run of the train", () => {
       await repo.run();
       seen.push(repo.members());
     }
-    expect(seen).toEqual([[11, 12, 13, 14], [11, 12], [13, 14], [13], [14], []]);
+    // [13] alone is red twice (one rerun for a flake) before it is called the culprit.
+    expect(seen).toEqual([[11, 12, 13, 14], [11, 12], [13, 14], [13], [13], [14], []]);
     expect(repo.landed).toEqual(["#11", "#12", "#14"]);
     expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
-    expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/failed .* alone on `dev`/);
+    expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/failed twice in a batch with only this pull request on `dev`/);
   });
 
   it("never lets a newer pull request overtake an older one (FIFO)", async () => {
@@ -312,6 +325,121 @@ describe("a run of the train", () => {
     await expect(fakeRepo().run({ base: "dev/../../x" })).rejects.toThrow(/Not a train base/);
   });
 
+  it("blames nobody while the base itself is red, and goes on once it is green", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12]) repo.add(n);
+    await repo.run();
+    repo.runs.set("dev0", red);
+    repo.settle([11, 12]);
+    const held = await repo.run();
+    expect(held.log.join("\n")).toMatch(/HOLD .*itself is red/);
+    expect(held.failed).toEqual([]);
+    expect(repo.members()).toEqual([11, 12]);
+    repo.runs.set("dev0", green);
+    await repo.run();
+    expect(repo.members()).toEqual([11]); // now it bisects
+  });
+
+  it("tries a single red pull request once more before failing it (a flake lands)", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    await repo.run();
+    repo.settle([11]);
+    await repo.run();
+    expect(readState(repo.batch()!.body)).toMatchObject({ prs: [{ number: 11 }], retried: true });
+    repo.settle();
+    await repo.run();
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
+  it("trusts only its own position comments: a planted mark neither drops a pull request nor vouches for a head", async () => {
+    const repo = fakeRepo();
+    const plant = (n: number, head: string) => repo.comments.set(n, [{ id: 900 + n, body: `<!-- merge-train:position --><!-- merge-train:head ${head} -->`, user: { login: "stranger" } }]);
+    repo.add(11);
+    plant(11, "0000000"); // would read as "new commits since queued"
+    repo.add(12);
+    plant(12, "h12later"); // would pre-approve a head nobody reviewed
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.members()).toEqual([11, 12]);
+    for (const n of [11, 12]) expect(repo.comments.get(n)![0].user!.login).toBe("stranger"); // never deleted by the train
+    repo.pulls.get(12)!.sha = "h12later";
+    repo.runs.set("h12later", green);
+    const again = await repo.run();
+    expect(again.dropped).toEqual([12]); // the train's own record (h12) counts, not the planted one
+  });
+
+  it("needs its own login", async () => {
+    await expect(fakeRepo().run({ login: "" })).rejects.toThrow(/own login/);
+  });
+
+  it("drops a pull request that got new commits after it was queued: queue vouches for the reviewed head", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: red }); // waits in line, so its position comment records h11
+    await repo.run();
+    expect(repo.comments.get(11)![0].body).toMatch(/merge-train:head h11 /);
+    repo.pulls.get(11)!.sha = "abc123def";
+    repo.runs.set("abc123def", green);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(repo.pulls.get(11)!.labels).toEqual([]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/new commits after it was queued/)]);
+    expect(repo.batch()).toBeUndefined();
+  });
+
+  it("finishes a landing that a run left half done", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12]) repo.add(n);
+    const b = (await repo.run()).inFlight;
+    repo.settle();
+    await repo.gh.merge(b, repo.pulls.get(b)!.sha); // the run stopped right after this merge
+    const r = await repo.run();
+    expect(r.merged).toEqual([11, 12]);
+    for (const n of [11, 12]) expect(repo.pulls.get(n)!.open).toBe(false);
+    expect(repo.comments.get(11)!.at(-1)!.body).toBe(`Merged via #${b}.`);
+    expect(r.opened).toEqual([]);
+  });
+
+  it("rebuilds a batch whose CI never started", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    const first = (await repo.run()).inFlight;
+    repo.pulls.get(first)!.createdAt = "2026-10-08T00:00:00Z";
+    expect((await repo.run({ now: Date.parse("2026-10-08T00:10:00Z") })).closed).toEqual([]);
+    const r = await repo.run({ now: Date.parse("2026-10-08T00:30:00Z") });
+    expect(r.closed).toEqual([first]);
+    expect(repo.members()).toEqual([11]);
+  });
+
+  it("lands an epic's batch by a fast-forward of exactly the tested commits", async () => {
+    const repo = fakeRepo();
+    let merges = 0;
+    repo.gh.merge = async () => ({ ok: !!++merges });
+    repo.add(11, { base: "epic/x" });
+    const b = (await repo.run({ base: "epic/x" })).inFlight;
+    const tested = repo.pulls.get(b)!.sha;
+    repo.settle();
+    await repo.run({ base: "epic/x" });
+    expect(merges).toBe(0);
+    expect(repo.landed).toEqual(["#11"]);
+    expect(repo.tips["epic/x"]).toBe(tested);
+  });
+
+  it("leaves a pull request in line when its branch moved after its CI was read", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const build = repo.git.build;
+    repo.git.build = async (base: string, prs: Pr[]) => {
+      const r = await build(base, prs.filter((p) => p.number !== 11));
+      return { ...r, dropped: [...r.dropped, { number: 11, reason: "moved" }] };
+    };
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.members()).toEqual([12]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.queue]);
+  });
+
   it("changes nothing in a dry run", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12]) repo.add(n);
@@ -322,5 +450,104 @@ describe("a run of the train", () => {
     expect(JSON.stringify([...repo.pulls.values()]) + JSON.stringify([...repo.comments.entries()])).toBe(before);
     expect(repo.landed).toEqual([]);
     expect(r.log.join("\n")).toMatch(/\(dry run\) would merge #9000/);
+  });
+});
+
+describe("CI on a commit", () => {
+  const run = (name: string, status: string, conclusion: string | null = null, started_at = "2026-10-07T10:00:00Z", id = 1) => ({ name, status, conclusion, started_at, id });
+
+  it("reads CI Success, the newest run of it", () => {
+    expect(ciState([run("CI Success", "completed", "success")])).toBe("success");
+    expect(ciState([run("CI Success", "completed", "failure")])).toBe("failure");
+    expect(ciState([run("CI Success", "in_progress")])).toBe("pending");
+    expect(ciState([run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 1), run("CI Success", "completed", "success", "2026-10-07T11:00:00Z", 2)])).toBe("success");
+  });
+
+  it("ignores the draft gate", () => {
+    expect(ciState([run("CI Success (draft)", "completed", "success")])).toBe("none");
+  });
+
+  it("is pending while CI runs before its gate exists, and none when nothing ever started", () => {
+    expect(ciState([run("Frontend lint and types", "in_progress")])).toBe("pending");
+    expect(ciState([])).toBe("none");
+    expect(ciState([run("Security", "completed", "success")])).toBe("none");
+  });
+
+  it("does not count a cancelled run as red", () => {
+    expect(ciState([run("CI Success", "completed", "cancelled"), run("Changed paths", "queued")])).toBe("pending");
+    expect(ciState([run("CI Success", "completed", "cancelled")])).toBe("none");
+  });
+});
+
+describe("the bases with a train", () => {
+  it("are dev and epic branches with a queued pull request or an open batch", () => {
+    const pr = (base: string, labels: string[] = [], body = "", branch = "fix", fork = false) => ({ base, labels, body, branch, fork });
+    const batch = batchBody("epic/apps-1.2", "abc", "b1", [], []);
+    const pulls = [pr("dev", [LABEL.queue]), pr("dev", [LABEL.queue]), pr("epic/apps-1.2", [], batch, "batch/epic/apps-1.2-1"), pr("epic/x"), pr("main", [LABEL.queue]), pr("dev")];
+    expect(trainBases(pulls)).toEqual(["dev", "epic/apps-1.2"]);
+    expect(trainBases([pr("dev", ["bug"])])).toEqual([]);
+    // Only bases tick accepts, so a strange epic name never turns the workflow red; a forged batch names no base.
+    expect(trainBases([pr("epic/a/b", [LABEL.queue]), pr("epic/z", [], batchBody("epic/z", "a", "b", [], []), "batch/epic/z-1", true)])).toEqual([]);
+  });
+});
+
+describe("GitHub over REST", () => {
+  const reply = (status: number, body: object | string, headers: Record<string, string> = {}) => ({
+    status,
+    ok: status < 300,
+    headers: new Headers({ "x-ratelimit-remaining": "4000", ...headers }),
+    text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
+  });
+
+  it("retries a request that failed to connect, and a secondary rate limit", async () => {
+    let calls = 0;
+    const answers = [reply(403, { message: "secondary rate limit" }, { "retry-after": "3" }), reply(200, { object: { sha: "abc" } })];
+    const waits: number[] = [];
+    const fetchImpl = async () => {
+      if (++calls === 1) throw new TypeError("fetch failed");
+      return answers.shift();
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async (ms: number) => void waits.push(ms) });
+    expect(await gh.branchSha("dev")).toBe("abc");
+    expect(waits).toEqual([5000, 3000]);
+    const down = restLayer("t", "o/r", { fetchImpl: async () => Promise.reject(new TypeError("fetch failed")), wait: async () => {} });
+    await expect(down.branchSha("dev")).rejects.toThrow(/fetch failed/);
+  });
+
+  it("retries a 502 and a rate-limited 403 with backoff, then answers", async () => {
+    const answers = [reply(502, "<html>bad gateway</html>"), reply(403, { message: "rate" }, { "x-ratelimit-remaining": "0", "retry-after": "7" }), reply(200, { object: { sha: "abc" } })];
+    const waits: number[] = [];
+    const gh = restLayer("t", "o/r", { budget: 0, fetchImpl: async () => answers.shift(), wait: async (ms: number) => void waits.push(ms) });
+    expect(await gh.branchSha("dev")).toBe("abc");
+    expect(waits).toEqual([5000, 7000]);
+  });
+
+  it("keeps the status of an HTML error page readable once retries run out", async () => {
+    const gh = restLayer("t", "o/r", { fetchImpl: async () => reply(502, "<html>bad gateway</html>"), wait: async () => {} });
+    await expect(gh.branchSha("dev")).rejects.toThrow(/HTTP 502 <html>bad gateway/);
+  });
+
+  it("stops the run when the token's budget runs low", async () => {
+    const gh = restLayer("t", "o/r", { fetchImpl: async () => reply(200, []), wait: async () => {} });
+    const low = restLayer("t", "o/r", { fetchImpl: async () => reply(200, [], { "x-ratelimit-remaining": "40" }), wait: async () => {} });
+    expect(await gh.comments(1)).toEqual([]);
+    await expect(low.comments(1)).rejects.toBeInstanceOf(BudgetLow);
+  });
+});
+
+describe("the Mac's stop signal", () => {
+  const job = (name: string, status: string, conclusion: string | null, steps: object[] = []) => ({ name, status, conclusion, steps });
+  const checkout = (conclusion: string) => [{ name: "Check the queue app", conclusion: "success" }, { name: "Checkout the script", conclusion }];
+
+  it("is a configured app, queue empty or not, or a train job running or done", () => {
+    expect(appTrainIn([job("Bases with a train", "completed", "success", checkout("success")), job("Train into ${{ matrix.base }}", "completed", "skipped")])).toBe(true);
+    expect(appTrainIn([job("Train into dev", "in_progress", null)])).toBe(true);
+    expect(appTrainIn([job("Train into dev", "completed", "failure")])).toBe(true);
+  });
+
+  it("is not an unconfigured app, or a train job that only waits to be skipped", () => {
+    expect(appTrainIn([job("Bases with a train", "completed", "success", checkout("skipped")), job("Train into ${{ matrix.base }}", "completed", "skipped")])).toBe(false);
+    expect(appTrainIn([job("Train into ${{ matrix.base }}", "queued", null)])).toBe(false);
+    expect(appTrainIn([])).toBe(false);
   });
 });

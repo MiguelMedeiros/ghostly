@@ -131,7 +131,7 @@ Other workflows:
 
 ### The merge queue
 
-`dev` merges a pull request only when CI Success is green on a branch that is up to date with `dev`, and auto-merge (`gh pr merge --squash --auto`) merges it by itself once that holds. When one merges, the others fall behind. **Merge queue** (`merge-queue.yml`, [`tools/scripts/merge-queue.mjs`](../tools/scripts/merge-queue.mjs)) brings them up to date one at a time:
+`dev` merges a pull request only when CI Success is green on a branch that is up to date with `dev`, and auto-merge (`gh pr merge --squash --auto`) merges it by itself once that holds. When one merges, the others fall behind. **Merge queue** (`merge-queue.yml`, [`tools/scripts/merge-train.mjs`](../tools/scripts/merge-train.mjs)) brings them up to date one at a time:
 
 - it looks only at pull requests that are ready (not drafts) and armed;
 - while one of them is up to date and running CI, or about to merge, it waits;
