@@ -363,6 +363,22 @@ describe("GroupChat: leaving", () => {
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
   });
 
+  it("says in red that a private group's admin must act first", async () => {
+    const { user } = openGroup(adminOf([member({ key: BOB, nick: "Bob" })]));
+    expect(within(await leaveFromMenu(user)).getByTestId("leave-blocked")).toHaveAttribute("data-tone", "error");
+  });
+
+  it("says a community's wait for a hub in the wait tone, not in red", async () => {
+    // Nobody at a hub: the button comes back by itself once one is reached, nothing for the person to do meanwhile.
+    const { user } = openGroup(active({ profile: "community", isAdmin: true, community: { hub: false, hubs: 1, connected: 0 },
+      members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: BOB, nick: "Bob" })] }));
+    const dialog = await leaveFromMenu(user);
+    expect(dialog).toHaveTextContent("Nobody is online to take your leave" + "Try again in a moment.");
+    expect(within(dialog).getByTestId("leave-blocked")).toHaveAttribute("data-tone", "wait");
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
+  });
+
   it("lets the admin of a group of one simply leave", async () => {
     const { user } = openGroup(adminOf([]));
     const dialog = await leaveFromMenu(user);
