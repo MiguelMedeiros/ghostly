@@ -30,6 +30,17 @@ Its log names no one: each request is one line with the time, the method, the fi
 
 `npm run test:e2e` checks every feature of the web app in real browsers, and the web app against the extension ([e2e/README.md](../e2e/README.md)). `E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.config.ts --project=web` runs the same tests against a deployed copy.
 
+### Apps on your own server
+
+From 1.2, apps ([APPS.md](APPS.md)) run in a sandboxed page, the runner, and the runner's sandbox is an HTTP header. The Docker image sends it. Any other server needs two locations, copied from `apps/web/nginx.conf`:
+
+- `/app-frame.html`, with the runner's `Content-Security-Policy` header and the other headers of that location.
+- `/app-frame-net.html`, the same file (`app-frame.html`; there is no `app-frame-net.html` in the build) with the network runner's header, for apps granted the internet.
+
+The client asks `/app-frame.html` once for its header. When it is missing, or looser in the directives the client checks, the client hides Apps. It does not check every directive, so copy the whole value as it is. The client asks `/app-frame-net.html` only when an app granted the internet opens, so without that location such an app does not open, and Apps still shows. Send one `Content-Security-Policy` on those two paths (not the site's as well), and keep a proxy or CDN from adding or rewriting it. Every other path keeps the site's own policy from `apps/web/nginx-headers.conf`, whose `frame-src 'self'` lets the page frame the runner: a site policy that blocks frames (`frame-src 'none'`, `child-src 'none'`) breaks every app, even though Apps shows.
+
+`curl -sI https://<your-host>/app-frame.html` shows what is sent. `curl -sI https://<your-host>/app-frame-net.html` must show the network runner's policy (`connect-src https: wss:`), not the plain runner's and not the site's. `npm run dev -w @ghostly/web` and `npm run preview -w @ghostly/web` send both headers by themselves.
+
 ## How it shares code
 
 ```
