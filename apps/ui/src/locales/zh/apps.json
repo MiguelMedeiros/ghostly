@@ -62,7 +62,8 @@
     "storage": "此浏览器无法在这里保存应用（无痕浏览？）。请试试普通窗口。",
     "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。请在普通窗口中打开 Ghostly，并在那里安装应用。",
     "storeKey": "该商店由另一把密钥签名。",
-    "tooLarge": "太大了。"
+    "tooLarge": "太大了。",
+    "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
   },
   "install": {
     "equivocation": "存在两个不同的版本 {{sequence}}。Ghostly 保留了你已有的那个。",

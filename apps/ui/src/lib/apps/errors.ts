@@ -19,6 +19,7 @@ const KEYS: Record<string, TranslationKey> = {
   revoked: "apps.errors.revoked",
   removed: "apps.errors.removed",
   "not-listed": "apps.errors.notListed",
+  unlisted: "apps.errors.unlistedVersion",
   "store-key": "apps.errors.storeKey",
   "bad-signature": "apps.errors.notSigned",
   "signature-key": "apps.errors.notSigned",
