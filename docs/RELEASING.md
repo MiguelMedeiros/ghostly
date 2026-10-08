@@ -34,7 +34,11 @@ On a branch off `dev`:
 node tools/scripts/bump-version.mjs 1.0.0
 ```
 
-That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`apps/website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves every entry of `docs/changelog/unreleased/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node tools/scripts/changes.mjs --preview` shows the section beforehand.
+That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`apps/website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves the entries of `docs/changelog/unreleased/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node tools/scripts/changes.mjs --preview 1.0.0` shows the section beforehand.
+
+An entry with `release: <major>.<minor>` in its front matter is held for that release: a bump to an older version leaves it in `docs/changelog/unreleased/`, so a patch never announces what it does not ship. The Apps entries say `release: 1.2`, and a 1.1.x patch cut from `dev` leaves them there ([the folder's README](changelog/unreleased/README.md)).
+
+The bump also refuses a version that must not ship a flag that is on (`RELEASE_GUARDS` in the script). Apps (`APPS_ENABLED` in `packages/browser/src/shared/features.ts`) ship from 1.2.0: while the flag is `true`, a bump to any version before 1.2.0 stops before it changes a file. The flag stays `false` on `dev` and flips only on the `release/1.2.0` branch, so every 1.1.x patch keeps Apps hidden.
 
 Then, by hand:
 

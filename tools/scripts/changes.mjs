@@ -15,8 +15,12 @@
  * exist yet is added at the end. The body is one or more Markdown list items, added at the end of that section, in
  * the files' name order.
  *
- *   node tools/scripts/changes.mjs            check every file (CI)
- *   node tools/scripts/changes.mjs --preview  print "## Unreleased" as the release would write it
+ * An optional `release: <major>.<minor>` holds an entry for that release: a bump to an older version (a 1.1.x patch
+ * for `release: 1.2`) leaves the file where it is, and the first bump to 1.2.0 or later takes it.
+ *
+ *   node tools/scripts/changes.mjs                    check every file, held ones too (CI)
+ *   node tools/scripts/changes.mjs --preview          print "## Unreleased" with every entry
+ *   node tools/scripts/changes.mjs --preview 1.1.7    print it as bumping to 1.1.7 would write it (held entries out)
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -39,7 +43,41 @@ export function parseFragment(name, text) {
   if (!body) problems.push(`${name}: no text after the front matter`);
   else if (!body.startsWith("- ")) problems.push(`${name}: the text is one or more list items ("- ...")`);
   if (/[–—]/.test(text)) problems.push(`${name}: no em or en dashes`);
-  return { heading, group, body, problems };
+  const release = fields.release === undefined ? undefined : fields.release.trim();
+  if (release !== undefined && !/^\d+\.\d+$/.test(release)) {
+    problems.push(`${name}: "release" is the release that takes the entry, as <major>.<minor> (such as 1.2)`);
+  }
+  return { heading, group, body, release, problems };
+}
+
+/** A version's numbers, for comparing: "1.2" is [1, 2], "1.10.3" is [1, 10, 3]. */
+const numbers = (version) => version.split(".").map(Number);
+
+/** Whether version `a` comes before `b`, number by number ("1.9.0" before "1.10.0"; a missing number counts as 0). */
+export function versionBefore(a, b) {
+  const [x, y] = [numbers(a), numbers(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
+  }
+  return false;
+}
+
+/**
+ * Whether an entry held for `release` ("1.2") stays out of `version` ("1.1.7"): its major.minor is newer. An entry
+ * with no `release` is never held, and `release: 1.2` goes out with 1.2.0 and every version after it.
+ */
+export function heldFor(release, version) {
+  if (!release) return false;
+  const [major, minor] = numbers(version);
+  return versionBefore(`${major}.${minor}`, release);
+}
+
+/** The fragments a bump to `version` writes, and the ones it leaves for a later release. */
+export function splitFragments(fragments, version) {
+  const released = [];
+  const held = [];
+  for (const fragment of fragments) (heldFor(fragment.release, version) ? held : released).push(fragment);
+  return { released, held };
 }
 
 /** Every fragment in docs/changelog/unreleased/, in name order (README.md is the folder's own notes). */
@@ -128,10 +166,22 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
-  const changelog = assembleChangelog(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"), fragments);
-  if (process.argv.includes("--preview")) {
+  const preview = process.argv.indexOf("--preview");
+  const version = preview < 0 ? undefined : process.argv[preview + 1];
+  if (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) {
+    console.error("usage: node tools/scripts/changes.mjs [--preview [<major.minor.patch>]]");
+    process.exit(1);
+  }
+  const { released, held } = version ? splitFragments(fragments, version) : { released: fragments, held: [] };
+  const changelog = assembleChangelog(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"), released);
+  if (preview >= 0) {
     const from = changelog.indexOf("## Unreleased");
     const to = changelog.indexOf("\n## ", from + 1);
     console.log(changelog.slice(from, to < 0 ? undefined : to));
-  } else console.log(`${CHANGES}/: ${fragments.length} change${fragments.length === 1 ? "" : "s"} for the next release, all well formed`);
+    if (held.length) console.error(`Held for a later release: ${held.map((f) => `${f.name} (${f.release})`).join(", ")}`);
+  } else {
+    const waiting = fragments.filter((f) => f.release);
+    const note = waiting.length ? `, ${waiting.length} of them held for a release (release: <major.minor>)` : "";
+    console.log(`${CHANGES}/: ${fragments.length} change${fragments.length === 1 ? "" : "s"}${note}, all well formed`);
+  }
 }

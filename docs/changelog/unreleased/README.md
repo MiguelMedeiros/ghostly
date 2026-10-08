@@ -1,8 +1,9 @@
 # Changelog entries
 
 One file per change for the next release, instead of a line in `CHANGELOG.md`: pull requests open at the same time
-then never edit the same lines. `tools/scripts/bump-version.mjs` puts every file in this folder
-(`docs/changelog/unreleased/`) into the changelog's `## Unreleased` at release time and deletes it.
+then never edit the same lines. `tools/scripts/bump-version.mjs` puts the files in this folder
+(`docs/changelog/unreleased/`) into the changelog's `## Unreleased` at release time and deletes them, except the ones
+held for a later release.
 
 Name it after the change (`docs/changelog/unreleased/forward-messages.md`) and write:
 
@@ -18,8 +19,20 @@ section: For users / Chat
   not exist yet is added at the end.
 - The text is one or more list items, written for the people who read release notes. Plain English, no em dashes.
 - Entries of one section go in the files' name order.
+- `release: <major>.<minor>` (optional, after `section`) holds the entry for that release, for a change that ships
+  behind a flag until then. A bump to an older version leaves the file here (`release: 1.2` stays through every
+  1.1.x patch), and the bump to 1.2.0 or later takes it. Without it, the next release takes the entry.
+
+```markdown
+---
+section: For developers / Apps
+release: 1.2
+---
+- Behind the apps flag: ...
+```
 
 To change a line that is already in `## Unreleased`, edit `CHANGELOG.md` itself.
 
 From the repository root, `node tools/scripts/changes.mjs` checks the files (CI does);
-`node tools/scripts/changes.mjs --preview` prints the section as the release will write it.
+`node tools/scripts/changes.mjs --preview` prints the section with every entry, and
+`node tools/scripts/changes.mjs --preview 1.1.7` as bumping to 1.1.7 would write it, held entries left out.

@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assembleChangelog, parseFragment, readFragments, strayFragments } from "../changes.mjs";
+import { assembleChangelog, heldFor, parseFragment, readFragments, splitFragments, strayFragments, versionBefore } from "../changes.mjs";
 
 const CHANGELOG = `# Changelog
 
@@ -105,6 +105,40 @@ Ghostly next.
     writeFileSync(join(root, "docs/changelog/unreleased/b-second.md"), "---\nsection: Fixed\n---\n- B.\n");
     writeFileSync(join(root, "docs/changelog/unreleased/a-first.md"), "---\nsection: Fixed\n---\n- A.\n");
     expect(readFragments(root).map((f: { name: string }) => f.name)).toEqual(["docs/changelog/unreleased/a-first.md", "docs/changelog/unreleased/b-second.md"]);
+  });
+
+  it("reads a release an entry is held for, as <major>.<minor>", () => {
+    const held = (release: string) => parseFragment("docs/changelog/unreleased/x.md", `---\nsection: Fixed\nrelease: ${release}\n---\n- A.\n`);
+    expect(held("1.2")).toMatchObject({ release: "1.2", problems: [] });
+    expect(held("10.12")).toMatchObject({ release: "10.12", problems: [] });
+    expect(fragment("Fixed", "- A.").release).toBeUndefined();
+    for (const wrong of ["1.2.0", "1", "next", '"1.2"', "v1.2", ""]) expect(held(wrong).problems, wrong).toEqual([expect.stringMatching(/"release"/)]);
+  });
+
+  it("compares versions number by number", () => {
+    expect(versionBefore("1.1.7", "1.2.0")).toBe(true);
+    expect(versionBefore("1.9.0", "1.10.0")).toBe(true);
+    expect(versionBefore("1.2.0", "1.2.0")).toBe(false);
+    expect(versionBefore("1.2.1", "1.2.0")).toBe(false);
+    expect(versionBefore("1.2", "1.2.0")).toBe(false);
+    expect(versionBefore("0.9.9", "1.0.0")).toBe(true);
+  });
+
+  it("holds an entry until a version of its release or later", () => {
+    expect(heldFor("1.2", "1.1.6")).toBe(true);
+    expect(heldFor("1.2", "1.1.99")).toBe(true);
+    expect(heldFor("1.2", "1.2.0")).toBe(false);
+    expect(heldFor("1.2", "1.2.3")).toBe(false);
+    expect(heldFor("1.2", "1.3.0")).toBe(false);
+    expect(heldFor("1.2", "2.0.0")).toBe(false);
+    expect(heldFor("1.10", "1.9.0")).toBe(true);
+    expect(heldFor("2.0", "1.9.9")).toBe(true);
+    expect(heldFor(undefined, "0.0.1")).toBe(false);
+
+    const now = { name: "now", release: undefined };
+    const later = { name: "later", release: "1.2" };
+    expect(splitFragments([later, now], "1.1.7")).toEqual({ released: [now], held: [later] });
+    expect(splitFragments([later, now], "1.2.0")).toEqual({ released: [later, now], held: [] });
   });
 
   it("finds entries left in the old changes/ folder", () => {

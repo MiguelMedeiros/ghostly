@@ -9,14 +9,18 @@
  * - both crates and Cargo.lock
  * - the website's release constant (download links are built from it)
  * - the download tables in docs/INSTALLATION.md
- * - CHANGELOG.md: the files in docs/changelog/unreleased/ go into "## Unreleased" (and are deleted), which becomes "## <version>"
+ * - CHANGELOG.md: the files in docs/changelog/unreleased/ go into "## Unreleased" (and are deleted), which becomes "## <version>".
+ *   A file with `release: <major.minor>` newer than the version (`release: 1.2` in a 1.1.x bump) stays for that release.
+ *
+ * It refuses a version that must not ship a feature flag that is on (RELEASE_GUARDS): Apps (APPS_ENABLED) ship from
+ * 1.2.0, so a 1.1.x bump stops while the flag is true. The flag flips only on the release/1.2.0 branch.
  *
  * A package with a version of its own (apps/website/, native/transports/hyperdht, infra/services/*, packages/sdk/examples/*) is not a workspace.
  * See docs/RELEASING.md for the rest of a release.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { CHANGES, assembleChangelog, readFragments } from "./changes.mjs";
+import { CHANGES, assembleChangelog, readFragments, splitFragments, versionBefore } from "./changes.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,8 +51,44 @@ export function versionedJson(root = ROOT) {
   ];
 }
 
+/** Flags that must stay off in any version before `from`. */
+export const RELEASE_GUARDS = [{ file: "packages/browser/src/shared/features.ts", flag: "APPS_ENABLED", from: "1.2.0" }];
+
+/** Why a bump to `next` must stop, one line per flag that is on too early (none: it may go on). */
+export function guardProblems(root, next, guards = RELEASE_GUARDS) {
+  const problems = [];
+  for (const { file, flag, from } of guards) {
+    if (!versionBefore(next, from)) continue;
+    let text;
+    try {
+      text = readFileSync(join(root, file), "utf8");
+    } catch {
+      problems.push(`${file}: missing, so ${flag} cannot be checked before ${next}`);
+      continue;
+    }
+    const value = text.match(new RegExp(`export const ${flag}\\b[^=]*=\\s*(true|false)\\s*;`))?.[1];
+    if (value === undefined) problems.push(`${file}: no "export const ${flag} = true|false;" to check before ${next}`);
+    else if (value === "true") problems.push(`${file}: ${flag} is true, and it ships from ${from} only. Set it back to false for ${next}.`);
+  }
+  return problems;
+}
+
 function bump(root, next) {
   const previous = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+
+  // Everything that can refuse the bump runs before the first file changes, so a refusal leaves no half-bumped tree.
+  const guarded = guardProblems(root, next);
+  if (guarded.length) {
+    for (const problem of guarded) console.error(`✗ ${problem}`);
+    process.exit(1);
+  }
+  const fragments = readFragments(root);
+  const broken = fragments.flatMap((f) => f.problems);
+  if (broken.length) {
+    console.error(`✗ ${CHANGES}/: ${broken.join("; ")}`);
+    process.exit(1);
+  }
+  const { released, held } = splitFragments(fragments, next);
 
   function edit(file, replace) {
     const path = join(root, file);
@@ -76,15 +116,10 @@ function bump(root, next) {
       .replace(/Ghostly_\d+\.\d+\.\d+_/g, `Ghostly_${next}_`)
       .replace(/ghostly-browser-extension-\d+\.\d+\.\d+\.zip/g, `ghostly-browser-extension-${next}.zip`),
   );
-  const fragments = readFragments(root);
-  const broken = fragments.flatMap((f) => f.problems);
-  if (broken.length) {
-    console.error(`✗ ${CHANGES}/: ${broken.join("; ")}`);
-    process.exit(1);
-  }
-  edit("CHANGELOG.md", (text) => assembleChangelog(text, fragments).replace(/^## Unreleased$/m, `## ${next}`));
-  for (const { name } of fragments) rmSync(join(root, name));
-  if (fragments.length) console.log(`✓ ${CHANGES}/: ${fragments.length} entries moved into CHANGELOG.md`);
+  edit("CHANGELOG.md", (text) => assembleChangelog(text, released).replace(/^## Unreleased$/m, `## ${next}`));
+  for (const { name } of released) rmSync(join(root, name));
+  if (released.length) console.log(`✓ ${CHANGES}/: ${released.length} entries moved into CHANGELOG.md`);
+  if (held.length) console.log(`✓ ${CHANGES}/: ${held.length} held for a later release (${held.map((f) => `${f.name}: ${f.release}`).join(", ")})`);
 
   execFileSync("npm", ["install", "--package-lock-only", "--ignore-scripts"], { cwd: root, stdio: "inherit" });
   console.log(`✓ package-lock.json\n\n${previous} → ${next}. Next: docs/RELEASING.md`);
