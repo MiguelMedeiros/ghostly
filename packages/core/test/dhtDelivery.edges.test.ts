@@ -794,9 +794,11 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.announce();
     expect(h.transport.publish, "the last envelope named this revision already").toHaveBeenCalledTimes(published);
     // A native transport started: the record's revision 8 says how to dial it, and the contact must hear of it now,
-    // not with a control envelope four minutes later.
+    // not with a control envelope four minutes later: as soon as the publication spacing allows (the start's envelope
+    // went a moment ago).
     options.capsRev = 8;
     await h.bob.announce();
+    await vi.advanceTimersByTimeAsync(4_000);
     expect(h.transport.publish).toHaveBeenCalledTimes(published + 1);
     expect(h.openPublished()[8]).toBe(8);
     await h.bob.announce();
