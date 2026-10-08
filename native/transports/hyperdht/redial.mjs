@@ -27,15 +27,18 @@ export const RTT_FACTOR = 3
 
 /**
  * Before the stream has its first RTT sample, how many times the dial's own opening (from the dial to the stream
- * open) the preface may take. The handshake that opened the stream went to the contact and back through a DHT node,
- * so it took at least one round trip of the path; on a 3 s path the first sample comes only 3 s after the stream
- * opened, past the 2 s. A dial that opened in milliseconds (loopback, a near contact) stays on the 2 s.
+ * open) the preface may take. The opening is the DHT lookup plus the handshake through a DHT node, so it took at
+ * least two round trips of the path, and the preface comes one round trip after the stream opened: once covers it
+ * (on a 3 s path the first sample comes only 3 s after the stream opened, past the 2 s). It is not more because a
+ * stalled stream never gets a sample, and its opening is mostly the lookup (1-3 s on the public DHT even for a near
+ * contact): twice a 2.5 s opening would dial again only 7.5 s after the dial, past the move's 8 s once the second
+ * dial's own opening is added. A dial that opened in milliseconds (loopback, a near contact) stays on the 2 s.
  */
-export const OPENING_FACTOR = 2
+export const OPENING_FACTOR = 1
 
 /**
  * The preface wait for a stream whose smoothed RTT is `rtt` ms and whose dial took `opening` ms to open: three round
- * trips once there is a sample, twice the opening before, between `floor` and `ceiling`.
+ * trips once there is a sample, the opening itself before, between `floor` and `ceiling`.
  */
 export function prefaceWait(rtt, opening = 0, floor = PREFACE_WAIT_MS, ceiling = PREFACE_MAX_WAIT_MS) {
   const wait = rtt > 0 ? RTT_FACTOR * rtt : OPENING_FACTOR * (opening || 0)

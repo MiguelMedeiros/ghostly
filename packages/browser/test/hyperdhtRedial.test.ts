@@ -126,14 +126,29 @@ it("on a 100 ms path, a stream that stays silent is still made again after 2 s",
   expect(dials).toHaveLength(2);
 });
 
-it("the wait is three smoothed round trips, or twice the opening before a sample, between 2 s and 8 s", () => {
+it("on a fast path whose dial took 2.5 s to open (a slow lookup), a stream that stays silent is made again 2.5 s after it opened", async () => {
+  // A stalled stream never gets an RTT sample: nothing we send is acknowledged.
+  const { dials, dialOnce } = dialerWithRtt(0);
+  void redial(dialOnce).catch(() => {});
+  await vi.advanceTimersByTimeAsync(2500);
+  dials[0].opened(true);
+  await vi.advanceTimersByTimeAsync(2499);
+  expect(dials).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(dials[0].closed).toBe(true);
+  expect(dials).toHaveLength(2);
+});
+
+it("the wait is three smoothed round trips, or the opening before a sample, between 2 s and 8 s", () => {
   expect(prefaceWait(0)).toBe(PREFACE_WAIT_MS);
   expect(prefaceWait(0, 20)).toBe(PREFACE_WAIT_MS);
   expect(prefaceWait(100)).toBe(PREFACE_WAIT_MS);
   expect(prefaceWait(1000)).toBe(3000);
   expect(prefaceWait(3000)).toBe(PREFACE_MAX_WAIT_MS);
-  expect(prefaceWait(0, 1500)).toBe(3000);
-  expect(prefaceWait(0, 6000)).toBe(PREFACE_MAX_WAIT_MS);
+  expect(prefaceWait(0, 1500)).toBe(PREFACE_WAIT_MS);
+  expect(prefaceWait(0, 2500)).toBe(2500);
+  expect(prefaceWait(0, 6000)).toBe(6000);
+  expect(prefaceWait(0, 9000)).toBe(PREFACE_MAX_WAIT_MS);
   // A sample replaces the opening: a stream that answers fast is back on the 2 s.
   expect(prefaceWait(100, 6000)).toBe(PREFACE_WAIT_MS);
 });
