@@ -56,7 +56,14 @@ const SCREENSHOT_TYPES = /\.(png|jpg|webp)$/;
  */
 export const APP_PERMISSIONS = ["chat", "internet", "name"] as const;
 export type AppPermission = typeof APP_PERMISSIONS[number];
+/**
+ * The clients a writer may name in `runtime.clients` (WISP 1200 · Manifest). A reader also accepts a client name it does
+ * not know (`APP_CLIENT_NAME`), since `runtime` is advisory and a later client (Android, say) must not make every older
+ * reader refuse the bundle.
+ */
 export const APP_CLIENTS = ["web", "desktop", "extension"] as const;
+/** A client name a reader accepts in `runtime.clients`, a later client's included. */
+export const APP_CLIENT_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 /**
  * Where an app shows (WISP 1200 · Manifest, `view`). `chat`, the default when the manifest has none: inside a 1:1 chat
  * only, beside it on a wide screen. `full`: full screen, alone or from a chat, never beside one.
@@ -82,7 +89,8 @@ export interface AppManifest {
   permissions: AppPermission[];
   /** Absent: `chat` (`appViewOf`). */
   view?: AppViewMode;
-  runtime: { host: string; clients: AppClient[] };
+  /** Advisory: a writer names only `APP_CLIENTS`; a reader may hold a later client's name. */
+  runtime: { host: string; clients: string[] };
   license: string;
   sources?: string[];
   proofs?: never[];
@@ -108,6 +116,13 @@ const RESERVED = ["price", "recovery"] as const;
  * out the bundle's bytes) hold in both.
  */
 export interface AppManifestOptions { strict?: boolean }
+/**
+ * Keys refused in every mode, wherever a reader ignores unknown keys: kept and passed on, they would name an object's
+ * prototype the moment anything spreads or assigns a manifest or a listing.
+ */
+export const APP_FORBIDDEN_KEYS: readonly string[] = ["__proto__", "constructor", "prototype"];
+/** At most this many clients in `runtime.clients`. */
+const MAX_CLIENTS = 16;
 
 export type AppBundleRefusal =
   | "too-large" | "magic" | "truncated" | "trailing-bytes" | "manifest-too-large"
@@ -187,6 +202,7 @@ export function checkAppManifest(value: unknown, options: AppManifestOptions = {
   if (!isObject(value)) return bad("manifest", "The manifest is not an object");
   if (value.ghostlyApp !== undefined && value.ghostlyApp !== 1) return { ok: false, reason: "unsupported-format", detail: "ghostlyApp is not 1" };
   for (const key of Object.keys(value)) {
+    if (APP_FORBIDDEN_KEYS.includes(key)) return { ok: false, reason: "unknown-key", detail: key };
     if ((RESERVED as readonly string[]).includes(key)) return { ok: false, reason: "reserved-key", detail: key };
     if (options.strict && !(REQUIRED as readonly string[]).includes(key) && !(OPTIONAL as readonly string[]).includes(key)) return { ok: false, reason: "unknown-key", detail: key };
   }
@@ -206,10 +222,16 @@ export function checkAppManifest(value: unknown, options: AppManifestOptions = {
     || !permissions.every((p) => (APP_PERMISSIONS as readonly unknown[]).includes(p))) return bad("permissions");
   if (m.view !== undefined && !(APP_VIEWS as readonly unknown[]).includes(m.view)) return bad("view", `view is "chat" or "full"`);
   const runtime = m.runtime;
-  if (!isObject(runtime) || (options.strict && Object.keys(runtime).length !== 2) || typeof runtime.host !== "string" || !HOST.test(runtime.host)) return bad("runtime");
+  if (!isObject(runtime)) return bad("runtime");
+  for (const key of Object.keys(runtime)) {
+    if (key === "host" || key === "clients") continue;
+    if (options.strict || APP_FORBIDDEN_KEYS.includes(key)) return { ok: false, reason: "unknown-key", detail: `runtime.${key}` };
+  }
+  if (typeof runtime.host !== "string" || !HOST.test(runtime.host)) return bad("runtime");
+  // Advisory (WISP 1200 · Manifest): a writer names only the clients it knows, a reader accepts a later client's name.
   const clients = runtime.clients;
-  if (!Array.isArray(clients) || clients.length < 1 || new Set(clients).size !== clients.length
-    || !clients.every((c) => (APP_CLIENTS as readonly unknown[]).includes(c))) return bad("runtime");
+  if (!Array.isArray(clients) || clients.length < 1 || clients.length > MAX_CLIENTS || new Set(clients).size !== clients.length
+    || !clients.every((c) => options.strict ? (APP_CLIENTS as readonly unknown[]).includes(c) : typeof c === "string" && APP_CLIENT_NAME.test(c))) return bad("runtime");
   if (!isAppLicense(m.license)) return bad("license");
   if (m.sources !== undefined && (!Array.isArray(m.sources) || m.sources.length > APP_BUNDLE_LIMITS.sources || !m.sources.every(isAppUrl))) return bad("sources");
   if (m.homepage !== undefined && !isAppUrl(m.homepage)) return bad("homepage");

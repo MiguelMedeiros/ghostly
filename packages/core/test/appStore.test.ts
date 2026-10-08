@@ -31,7 +31,7 @@ interface Vectors {
   inputs: { keys: Record<string, { label: string; key: string }>; now: number };
   valid: Valid[];
   invalid: Invalid[];
-  listings: { valid: { name: string; json: string }[]; invalid: { name: string; refusal: string; json: string }[] };
+  listings: { valid: { name: string; strict: boolean; json: string }[]; invalid: { name: string; strict: boolean; refusal: string; json: string }[] };
   storeDecisions: { name: string; held: AppStoreVersion | null; read: AppStoreVersion; decision: AppStoreDecision }[];
   appDecisions: { name: string; installed: AppVersion; candidate: AppVersion; decision: AppUpdateDecision }[];
 }
@@ -108,6 +108,11 @@ async function build(): Promise<Vectors> {
   await no("a later key in a listing that misses a required one", "missing-key", { ...base, apps: [{ ...listing, icon: "x", digest: undefined }] });
   await no("a later key with format version 2", "unsupported-format", { ...base, ghostlyStore: 2, promoted: [] });
   await no("a later key in a revocation the store copied", "bad-revocation", { ...base, revoked: [{ ...revoked, later: 1 }] });
+  // Kept by a reader that ignores them, these would name an object's prototype when spread: refused in every mode.
+  const proto = JSON.parse("{\"__proto__\":{\"polluted\":true}}") as Record<string, unknown>;
+  await no("a __proto__ key in the index", "unknown-key", { ...base, ...proto });
+  await no("a __proto__ key in a listing", "unknown-key", { ...base, apps: [{ ...listing, ...proto }] });
+  await no("a constructor key in a removal", "unknown-key", { ...base, removed: [{ ...base.removed[0]!, constructor: 1 }] });
   await no("no expires", "missing-key", { ...base, expires: undefined });
   await no("format version 2", "unsupported-format", { ...base, ghostlyStore: 2 });
   await no("another kind", "bad-field", { ...base, kind: "official" });
@@ -119,15 +124,20 @@ async function build(): Promise<Vectors> {
   await no("a revocation signed by the store", "bad-revocation", { ...base, revoked: [await signAppRevocation({ ghostlyRevoke: 1, app: appRef(appKey("store"), "chess"), upTo: 1 }, store).then((r) => ({ ...r, statement: { ...r.statement, app: REF } }))] });
   invalid.push({ name: "bytes that are not JSON", refusal: "not-json", index: "ghostly-store", sig: good.sig });
 
-  const listings = {
+  // `strict`: read as a store checks a listing.json it is about to sign (the default), or, false, as a client reads an
+  // index entry, ignoring a later key.
+  const listings: Vectors["listings"] = {
     valid: [
-      { name: "a listing.json", json: JSON.stringify(listing, null, 2) },
-      { name: "a listing with a later key, ignored by the reader", json: JSON.stringify({ ...listing, icon: "https://example.org/icon.png" }) },
+      { name: "a listing.json", strict: true, json: JSON.stringify(listing, null, 2) },
+      { name: "a listing with a later key, ignored by a reader that is not strict", strict: false, json: JSON.stringify({ ...listing, icon: "https://example.org/icon.png" }) },
     ],
     invalid: [
-      { name: "a listing with a later key that misses a required one", refusal: "missing-key", json: JSON.stringify({ ...listing, icon: "x", tagline: undefined }) },
-      { name: "a listing without urls", refusal: "missing-key", json: JSON.stringify({ ...listing, urls: undefined }) },
-      { name: "a listing with a jsDelivr branch", refusal: "bad-field", json: JSON.stringify({ ...listing, urls: ["https://cdn.jsdelivr.net/gh/o/r@main/app.ghostlyapp"] }) },
+      { name: "a listing with a later key, refused by a store's strict check", strict: true, refusal: "unknown-key", json: JSON.stringify({ ...listing, icon: "https://example.org/icon.png" }) },
+      { name: "a listing with a store's key", strict: true, refusal: "unknown-key", json: JSON.stringify({ ...listing, expires: 1 }) },
+      { name: "a listing with a later key that misses a required one", strict: false, refusal: "missing-key", json: JSON.stringify({ ...listing, icon: "x", tagline: undefined }) },
+      { name: "a listing with a __proto__ key, in any mode", strict: false, refusal: "unknown-key", json: JSON.stringify({ ...listing, __placeholder: {} }).replace("__placeholder", "__proto__") },
+      { name: "a listing without urls", strict: true, refusal: "missing-key", json: JSON.stringify({ ...listing, urls: undefined }) },
+      { name: "a listing with a jsDelivr branch", strict: true, refusal: "bad-field", json: JSON.stringify({ ...listing, urls: ["https://cdn.jsdelivr.net/gh/o/r@main/app.ghostlyapp"] }) },
     ],
   };
 
@@ -172,8 +182,10 @@ describe("app store vectors", () => {
       const read = readAppStore(utf8Encode(c.index), utf8Encode(c.sig), v.inputs.now, c.heldKey);
       expect(read.ok ? "accepted" : read.reason, c.name).toBe(c.refusal);
     }
-    for (const c of v.listings.valid) expect(readAppListing(c.json).ok, c.name).toBe(true);
-    for (const c of v.listings.invalid) { const read = readAppListing(c.json); expect(read.ok ? "accepted" : read.reason, c.name).toBe(c.refusal); }
+    for (const c of v.listings.valid) expect(readAppListing(c.json, { strict: c.strict }).ok, c.name).toBe(true);
+    for (const c of v.listings.invalid) { const read = readAppListing(c.json, { strict: c.strict }); expect(read.ok ? "accepted" : read.reason, c.name).toBe(c.refusal); }
+    // A store's check is strict unless it says otherwise.
+    for (const c of [...v.listings.valid, ...v.listings.invalid].filter((c) => c.strict)) expect(readAppListing(c.json), c.name).toEqual(readAppListing(c.json, { strict: true }));
     for (const c of v.storeDecisions) expect(appStoreDecision(c.held, c.read), c.name).toBe(c.decision);
     for (const c of v.appDecisions) expect(appUpdateDecision(c.installed, c.candidate), c.name).toBe(c.decision);
   });
@@ -204,8 +216,9 @@ describe("signing a store", () => {
       expect(reason(checkAppStoreIndex(value)), name).toBe("accepted");
     }
     const listingJson = JSON.stringify({ ...entry, icon: "x" });
-    expect(reason(readAppListing(listingJson))).toBe("accepted");
-    expect(reason(readAppListing(listingJson, { strict: true }))).toBe("unknown-key");
+    // A listing.json is read by a store, which checks it as a writer: strict unless told otherwise.
+    expect(reason(readAppListing(listingJson))).toBe("unknown-key");
+    expect(reason(readAppListing(listingJson, { strict: false }))).toBe("accepted");
     expect(reason(checkAppListing({ ...entry, expires: 1 }, { strict: true }))).toBe("unknown-key");
   });
 

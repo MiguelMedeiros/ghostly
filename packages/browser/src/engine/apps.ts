@@ -218,6 +218,17 @@ export interface AppsHost {
 /** `store`: fetched from that store's listing, so installing it pins its updates to that store. */
 interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; at: number }
 
+/**
+ * A listing's URLs this client reads, in order, a jsDelivr copy first: one this client reads names a full commit, so it
+ * holds exactly the version the store reviewed, where a raw `HEAD` may have moved on to one it has not (WISP 1200 §
+ * Stores), and a 16 MiB bundle is not downloaded only to be skipped.
+ */
+function listingUrls(urls: readonly string[]): string[] {
+  const readable = urls.filter(isAppFetchUrl);
+  const pinned = (u: string) => new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
+  return [...readable.filter(pinned), ...readable.filter((u) => !pinned(u))];
+}
+
 /** An error whose message starts with its code (`<code>: words`), as it crosses the engine's RPC. */
 function fail(code: string, words: string): never {
   throw new Error(`${code}: ${words}`);
@@ -560,6 +571,14 @@ export class Apps {
     if (!held) return;
     if (held.preloaded) await this.putStore({ key: held.key, url: held.url, addedAt: held.addedAt, preloaded: true, removed: true });
     else await wrap((await store(STORES.appStores, "readwrite")).delete(key));
+    // The person no longer takes this store's curation: an app installed from it updates from its sources and the other
+    // stores again (WISP 1200 § Updates and rollback), so its security fixes still arrive. A newer version waiting stays:
+    // a valid newer version is one under that rule too.
+    for (const app of await this.installed()) {
+      if (app.store !== key) continue;
+      const { store: _s, ...unpinned } = app;
+      await this.putApp(unpinned);
+    }
   }
 
   /** Reads one store again, or every store (the person opened the Apps page, or the update check). */
@@ -602,8 +621,8 @@ export class Apps {
       const s = await this.storeRecord(source.store);
       const listing = s && !s.removed ? s.index?.apps.find((a) => a.ref === source.ref) : undefined;
       if (!listing) fail("not-listed", "This store does not list this app");
-      urls = listing.urls.filter(isAppFetchUrl);
-      expect = { ref: listing.ref, sequence: listing.sequence, digest: listing.digest, exact: true };
+      urls = listingUrls(listing.urls);
+      expect ={ ref: listing.ref, sequence: listing.sequence, digest: listing.digest, exact: true };
       fromStore = s!.key;
     } else if ("card" in source && source.card) {
       const { ref, url, sequence, digest } = source.card;
@@ -735,6 +754,9 @@ export class Apps {
       fail("needs-files", "The update's files are gone; it is fetched again at the next check");
     }
     const stores = await this.stores();
+    // An app installed from a store takes only what that store lists now: an update it no longer lists is not installed
+    // (the next check drops it and looks at what the store lists instead).
+    if (installed.store !== undefined && this.pinnedListing(installed, stores)?.digest !== pending.digest) fail("unlisted", "The store no longer lists this update");
     const run = this.runStatus(versionOf(read.bundle.manifest, pending.digest), stores, installed.revocations);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
@@ -748,6 +770,11 @@ export class Apps {
   }
 
   // ---------- updates ----------
+
+  /** An app's listing in the store its updates come from (`InstalledApp.store`), while that store is the person's. */
+  private pinnedListing(app: InstalledApp, stores: AddedAppStore[]): AppListing | undefined {
+    return app.store === undefined ? undefined : stores.find((s) => s.key === app.store)?.index?.apps.find((a) => a.ref === app.ref);
+  }
 
   /**
    * The update check (WISP 1200 § Updates and rollback): only with an app installed; every store read again, then each
@@ -777,6 +804,14 @@ export class Apps {
       if (!first) continue;
       let app = first;
       let outcome: AppCheckOutcome = "none";
+      // A store the person removed pins nothing any more (as `removeStore` does).
+      if (app.store !== undefined && !stores.some((s) => s.key === app.store)) { const { store: _s, ...unpinned } = app; app = unpinned; }
+      // A waiting update its store no longer lists goes, so the version the store lists now is looked at instead.
+      if (app.store !== undefined && app.pending && stores.find((s) => s.key === app.store)?.index && this.pinnedListing(app, stores)?.digest !== app.pending.digest) {
+        await this.removeBundle(app.pending.bytes, app.pending.digest);
+        const { pending: _p, ...rest } = app;
+        app = rest;
+      }
       const highest = Math.max(app.sequence, app.pending?.sequence ?? 0);
       const known = new Set([app.digest, ...(app.pending ? [app.pending.digest] : [])]);
       // Stores first (they name the version), then the publisher's own sources. An app installed from a store looks only
@@ -788,7 +823,7 @@ export class Apps {
         if (pinned !== undefined && s.key !== pinned) continue;
         const listing = s.index?.apps.find((a) => a.ref === app.ref);
         if (!listing || !(listing.sequence > highest || (listing.sequence >= app.sequence && !known.has(listing.digest)))) continue;
-        for (const url of listing.urls.filter(isAppFetchUrl)) if (!candidates.has(url)) candidates.set(url, pinned !== undefined ? { digest: listing.digest } : {});
+        for (const url of listingUrls(listing.urls)) if (!candidates.has(url)) candidates.set(url, pinned !== undefined ? { digest: listing.digest } : {});
       }
       if (pinned === undefined) {
         for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
@@ -835,8 +870,10 @@ export class Apps {
       const revocations = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])]);
       const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
       for (const r of revocations) merged.set(canonicalJson(r), r);
-      // Removed meanwhile: not put back.
-      if (!(await this.app(app.ref))) continue;
+      // Removed meanwhile: not put back. Its store removed meanwhile: not pinned again.
+      const current = await this.app(app.ref);
+      if (!current) continue;
+      if (app.store !== undefined && current.store === undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
       app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
       await this.putApp(app);
       out.push({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores) });
@@ -850,15 +887,20 @@ export class Apps {
    * Fetches an installed app's bundle again when it is not on this device (a profile restored from a backup, which
    * carries the installed list but no bundle: WISP 1200 § Where installed apps live). Only the installed digest is
    * taken, checked whole: from the URL it was installed from, the listings of the person's stores that name that digest,
-   * then its `sources`. Nothing answers: it stays `needs-files`, and it never runs unchecked.
+   * then its `sources` (for an app installed from a store: only that store's listing, never its sources). Nothing
+   * answers: it stays `needs-files`, and it never runs unchecked.
    */
   async fetchFiles({ ref }: { ref: string }): Promise<AppRunStatus> {
     const app = await this.installedOrFail(ref);
     const stores = await this.stores();
     if (await this.hasBundle(app.bytes, app.digest)) return this.runCheckOf(app, stores);
+    // An app installed from a store asks only that store's listing (and the URL it came from), never its sources.
     const urls = [app.from];
-    for (const s of stores) for (const listing of s.index?.apps ?? []) if (listing.ref === app.ref && listing.digest === app.digest) urls.push(...listing.urls);
-    urls.push(...(app.manifest.sources ?? []));
+    for (const s of stores) {
+      if (app.store !== undefined && s.key !== app.store) continue;
+      for (const listing of s.index?.apps ?? []) if (listing.ref === app.ref && listing.digest === app.digest) urls.push(...listingUrls(listing.urls));
+    }
+    if (app.store === undefined) urls.push(...(app.manifest.sources ?? []));
     for (const url of new Set(urls.filter(isAppFetchUrl))) {
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch { continue; }

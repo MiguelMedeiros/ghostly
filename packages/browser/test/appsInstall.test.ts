@@ -261,15 +261,18 @@ describe("an app installed from a store updates only to the version that store l
     await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [HEAD])] }));
     expect((await store.checkUpdates())[0]!.outcome).toBe("none");
     expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest });
-    // HEAD first, then the commit the store reviewed: 2 installs, never 3.
+    // HEAD listed first, then the commit the store reviewed: the commit is read first, 2 installs, never 3, and HEAD's
+    // bundle is not even downloaded.
     net.put(pinned2, v2.bytes);
     await net.putStore(await storeFiles({ sequence: 3, apps: [listing(v2, [HEAD, pinned2])] }));
+    net.requests.length = 0;
     expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect(net.requests).not.toContain(HEAD);
     expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest, from: pinned2 });
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
   });
 
-  it("another store's listing of a newer version is not taken; a store the person removed gives no update", async () => {
+  it("another store's listing of a newer version is not taken; once the person removes the store, the sources count again", async () => {
     const { store, v1 } = await fromStore();
     const v2 = await bundle({ sequence: 2, sources: [HEAD] });
     net.put(PINNED_URL, v1.bytes);
@@ -279,11 +282,69 @@ describe("an app installed from a store updates only to the version that store l
     await store.addStore({ url: OTHER_STORE_URL });
     expect((await store.checkUpdates())[0]!.outcome).toBe("none");
     expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest });
-    // Its own store gone: no store lists it for this app any more, and its sources are still not taken.
-    net.put(HEAD, v2.bytes);
+    // Its own store removed: the person no longer takes its curation, so the app is not pinned to it any more and takes
+    // a valid newer version from its sources and the other stores, as an app added by URL (its security fixes arrive).
+    const v3 = await bundle({ sequence: 3, sources: [HEAD] });
+    net.put(HEAD, v3.bytes);
     await store.removeStore({ key: keyOf(STORE_KEY) });
-    expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    expect(await pinnedTo()).toBeUndefined();
+    // Stores first (the other store's 2), then the sources (HEAD's 3) at the next check.
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest, from: pinned2 });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ sequence: 3, digest: v3.digest, from: HEAD });
+    expect(await pinnedTo()).toBeUndefined();
+  });
+
+  it("a waiting update the store no longer lists is not installed; the version it lists now is taken instead", async () => {
+    const { store, v1 } = await fromStore();
+    const v3 = await bundle({ sequence: 3, permissions: ["chat", "name"], sources: [HEAD] });
+    const pinned3 = `https://cdn.jsdelivr.net/gh/ana/chess@${"c".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned3, v3.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v3, [pinned3])] }));
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect((await store.list())[0]!.pending).toMatchObject({ sequence: 3 });
+
+    // The store lists 2 instead (no removal entry for 3): 3 is no longer what it reviewed.
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    const pinned2 = `https://cdn.jsdelivr.net/gh/ana/chess@${"b".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned2, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 3, apps: [listing(v2, [pinned2])] }));
+    await store.refreshStores();
+    await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^unlisted/);
     expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest });
+
+    // The next check drops 3 and installs 2, which adds no permission.
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    const view = (await store.list())[0]!;
+    expect(view).toMatchObject({ sequence: 2, digest: v2.digest, from: pinned2 });
+    expect(view.pending).toBeUndefined();
+    expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+    expect(await pinnedTo()).toBe(keyOf(STORE_KEY));
+  });
+
+  it("a restored app installed from a store fetches its files only from that store's listing, never its sources", async () => {
+    const { v1 } = await fromStore();
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+    // The URL it came from is gone; its sources and another store's listing hold that very digest.
+    net.files.delete(PINNED_URL);
+    net.put(HEAD, v1.bytes);
+    const elsewhere = `https://cdn.jsdelivr.net/gh/other/chess@${"d".repeat(40)}/app.ghostlyapp`;
+    net.put(elsewhere, v1.bytes);
+    await net.putStore(await storeFiles({ by: OTHER_STORE, name: "Other store", apps: [listing(v1, [elsewhere])] }), OTHER_STORE_URL);
+    const store = apps(net);
+    await store.addStore({ url: OTHER_STORE_URL });
+    net.requests.length = 0;
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "needs-files" });
+    expect(net.requests).toEqual([PINNED_URL]);
+    // Its own store lists that digest at another URL now: the files come from there.
+    const moved = `https://cdn.jsdelivr.net/gh/ana/chess@${"e".repeat(40)}/app.ghostlyapp`;
+    net.put(moved, v1.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v1, [HEAD, moved])] }));
+    await store.refreshStores();
+    net.requests.length = 0;
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect(net.requests, "the commit-pinned copy first, so HEAD is not read").toEqual([PINNED_URL, moved]);
   });
 
   it("an update the store lists that adds a permission waits for the person, and stays pinned once accepted", async () => {

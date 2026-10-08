@@ -63,7 +63,10 @@ const chess = () => {
   return { vector, manifest: read.bundle.manifest, files: read.bundle.files };
 };
 
-/** A vector with a key from a later format: a reader takes it, the publisher CLI (a writer) never makes it. */
+/**
+ * A vector with a key or a client name from a later format: a reader takes it, the publisher CLI (a writer) never makes
+ * it. An unknown key is `unknown-key` (named, `runtime.<key>` inside runtime); an unknown client is `bad-field`.
+ */
 const laterKey = (v: { name: string }) => v.name.endsWith("ignored by the reader");
 
 describe("app publish", () => {
@@ -90,7 +93,7 @@ describe("app publish", () => {
     writeFileSync(given, bytes);
     expect(ok(await ghostly(["app", "verify", given]))).toMatchObject({ valid: true, digest: vector.read.digest });
     const refused = error(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]), "refused", 1) as { details?: { reason?: string } };
-    expect(["unknown-key", "bad-field"]).toContain(refused.details?.reason);
+    expect(refused.details?.reason).toBe(vector.name.includes("client name") ? "bad-field" : "unknown-key");
     expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
   }, 60_000);
 

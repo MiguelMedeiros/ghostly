@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { toBase64Url, toZ32 } from "./bytes";
 import { canonicalJsonBytes, readCanonicalJson, type JsonValue } from "./canonicalJson";
-import { isAppUrl } from "./appBundle";
+import { APP_FORBIDDEN_KEYS, isAppUrl } from "./appBundle";
 import {
   APP_PREFIXES, isAppHash, isAppKey, isAppRef, readAppRevocation, readAppSignature, signAppObject, verifyAppSignature,
   type AppSignature, type SignedAppRevocation,
@@ -79,15 +79,19 @@ type Check = { ok: true } | { ok: false; reason: AppStoreRefusal; detail?: strin
 const fine: Check = { ok: true };
 
 /**
- * How a check treats a key it does not know. A reader (`readAppStore`, `readAppListing`, the client) ignores it, so a
- * later format can add an optional key without a client refusing the whole signed index; the signature still covers
- * the bytes as they are, unknown keys included. A writer (`signAppStore`, the CLI) passes `strict` and refuses it, so a
- * misspelt key is caught before anything is signed. Required keys, their types and their bounds hold in both.
+ * How a check treats a key it does not know. A reader (`readAppStore`, the client) ignores it, so a later format can
+ * add an optional key without a client refusing the whole signed index; the signature still covers the bytes as they
+ * are, unknown keys included. A writer (`signAppStore`, the CLI, a store's check of a `listing.json` through
+ * `readAppListing`) passes `strict` and refuses it, so a misspelt key is caught before anything is signed. Required
+ * keys, their types and their bounds hold in both, and `APP_FORBIDDEN_KEYS` are refused in both.
  */
 export interface AppFormatOptions { strict?: boolean }
 
 function keysOf(value: Record<string, unknown>, required: readonly string[], optional: readonly string[], options: AppFormatOptions = {}): Check {
-  if (options.strict) for (const k of Object.keys(value)) if (!required.includes(k) && !optional.includes(k)) return { ok: false, reason: "unknown-key", detail: k };
+  for (const k of Object.keys(value)) {
+    // `__proto__` and its kin are refused in both modes (`APP_FORBIDDEN_KEYS`): a reader keeps what it ignores.
+    if ((options.strict || APP_FORBIDDEN_KEYS.includes(k)) && !required.includes(k) && !optional.includes(k)) return { ok: false, reason: "unknown-key", detail: k };
+  }
   for (const k of required) if (!(k in value)) return { ok: false, reason: "missing-key", detail: k };
   return fine;
 }
@@ -115,9 +119,11 @@ export function checkAppListing(value: unknown, options: AppFormatOptions = {}):
 
 /**
  * Reads a `listing.json`: JSON holding exactly one listing (written by hand in release 1.2, so not required canonical).
- * An unknown key is ignored unless `strict` (a store's own check passes it, to catch a misspelt key), as in an index.
+ * A store reads it, as a writer: strict by default, so a misspelt key is refused before the owner signs the index (the
+ * client never reads a `listing.json`, only the signed index). `{ strict: false }` reads it as a client reads an index
+ * entry, ignoring a later key.
  */
-export function readAppListing(text: string, options: AppFormatOptions = {}): { ok: true; listing: AppListing } | { ok: false; reason: AppStoreRefusal; detail?: string } {
+export function readAppListing(text: string, options: AppFormatOptions = { strict: true }): { ok: true; listing: AppListing } | { ok: false; reason: AppStoreRefusal; detail?: string } {
   let value: unknown;
   try { value = JSON.parse(text); } catch (error) { return { ok: false, reason: "not-json", detail: String(error) }; }
   const checked = checkAppListing(value, options);
