@@ -357,6 +357,8 @@
     "bitcoinNotEnough": "لا تكفي الـ sats المؤكدة",
     "bitcoinNotEnoughNext": "المتاح {{available}}، والمطلوب مع الرسوم {{needed}}.",
     "canceledUnfunded": "أُلغيت قبل تمويلها",
+    "cashuNeverReached": "لم تصل الدفعة إلى دار السك",
+    "cashuNeverReachedNext": "لم يُرسل شيء، وعادت الـ sats. يمكنك الدفع مرة أخرى.",
     "conflicted": "أنفقت معاملة أخرى هذه العملات: لن تتأكد هذه الدفعة أبدًا",
     "federationHas": "لا يوجد ما يكفي في هذا الاتحاد: {{have}} sats",
     "federationNotEnoughNow": "لم يعد في هذا الاتحاد ما يكفي",
@@ -377,7 +379,11 @@
     "takenBack": "استُرجعت: عادت الـ sats إلى محفظتك",
     "usdtBalanceChanged": "تغيّر رصيد الرموز أو الغاز. أنشئ مراجعة جديدة",
     "usdtNonceChanged": "تغيّر الـ nonce الخاص بالحساب. أنشئ مراجعة جديدة",
-    "usdtRejected": "رفض RPC الخاص بـ USDT العملية"
+    "usdtNotSubmitted": "لم تُرسل أي معاملة",
+    "usdtNotSubmittedNext": "أنشئ مراجعة جديدة.",
+    "usdtRejected": "رفض RPC الخاص بـ USDT العملية",
+    "usdtReverted": "أُلغيت المعاملة",
+    "usdtRevertedNext": "لم تُرسل أي رموز؛ وأُنفق الغاز."
   },
   "relays": {
     "atLeastOne": "أدخل عنوان مرحّل واحدًا على الأقل",

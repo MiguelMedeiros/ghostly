@@ -357,6 +357,8 @@
     "bitcoinNotEnough": "確定済みの sats が足りません",
     "bitcoinNotEnoughNext": "利用可能 {{available}}、手数料込みで {{needed}} 必要です。",
     "canceledUnfunded": "資金が入る前にキャンセルされました",
+    "cashuNeverReached": "支払いはミントに届きませんでした",
+    "cashuNeverReachedNext": "何も送られておらず、sats は戻りました。もう一度支払えます。",
     "conflicted": "別のトランザクションがこのコインを使いました。この支払いが承認されることはありません",
     "federationHas": "このフェデレーションの残高が足りません: {{have}} sats",
     "federationNotEnoughNow": "このフェデレーションの残高が足りなくなりました",
@@ -377,7 +379,11 @@
     "takenBack": "取り戻しました。sats はウォレットに戻っています",
     "usdtBalanceChanged": "トークンまたはガスの残高が変わりました。新しい確認を作成してください",
     "usdtNonceChanged": "アカウントの nonce が変わりました。新しい確認を作成してください",
-    "usdtRejected": "USDT の RPC が操作を拒否しました"
+    "usdtNotSubmitted": "トランザクションは送信されていません",
+    "usdtNotSubmittedNext": "新しい確認を作成してください。",
+    "usdtRejected": "USDT の RPC が操作を拒否しました",
+    "usdtReverted": "トランザクションはリバートされました",
+    "usdtRevertedNext": "トークンは送られていません。ガスは消費されました。"
   },
   "relays": {
     "atLeastOne": "リレーのアドレスを 1 つ以上入力してください",

@@ -215,6 +215,8 @@ const RULES: readonly Rule[] = [
   exact("USDT RPC rejected the operation", "errors.rails.usdtRejected"),
   exact("Token or gas balance changed. Create a new review", "errors.rails.usdtBalanceChanged"),
   exact("Account nonce changed. Create a new review", "errors.rails.usdtNonceChanged"),
+  exact("No signed transaction was submitted. Create a new review.", "errors.rails.usdtNotSubmitted", "errors.rails.usdtNotSubmittedNext"),
+  exact("Transaction reverted. Tokens were not sent; gas was spent.", "errors.rails.usdtReverted", "errors.rails.usdtRevertedNext"),
   { match: /^Not enough confirmed sats: (?<available>\d+) available, (?<needed>\d+) needed with the fee$/, key: "errors.rails.bitcoinNotEnough", next: "errors.rails.bitcoinNotEnoughNext", params: ({ available, needed }, t) => ({ available: sats(available, t), needed: sats(needed, t) }) },
   { match: /^The fee \((?<fee>\d+) sats\) is above your limit of (?<max>\d+)$/, key: "errors.rails.bitcoinFeeAboveLimit", params: ({ fee, max }, t) => ({ fee: sats(fee, t), max: sats(max, t) }) },
   { match: /^The node refused the transaction: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeRefusedTx", reason: "next" },
@@ -229,6 +231,8 @@ const RULES: readonly Rule[] = [
   exact("Nothing was spent", "errors.rails.nothingSpent"),
   exact("Interrupted before it reached your contact: the sats came back", "errors.rails.interruptedBack"),
   exact("Canceled before it was funded", "errors.rails.canceledUnfunded"),
+  // A Cashu payment whose swap the mint proved never happened (paymentAdapters/cashu.ts NEVER_REACHED_MINT).
+  exact("The payment never reached the mint: nothing was sent, and the sats are back in your wallet. You can pay again.", "errors.rails.cashuNeverReached", "errors.rails.cashuNeverReachedNext"),
   exact("Only whole amounts in sats are supported", "errors.pay.wholeSats"),
   exact("Unknown payment", "errors.pay.unknownPayment"),
   exact("The mint did not confirm the ecash", "errors.pay.mintDidNotConfirm"),
