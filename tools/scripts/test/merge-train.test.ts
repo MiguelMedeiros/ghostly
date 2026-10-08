@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchBody, bisect, BudgetLow, ciState, isBatch, LABEL, order, ordinal, pickBatch, queuedAt, readState, restLayer, tick, trainBases, waiting } from "../merge-train.mjs";
+import { appTrainIn, batchBody, bisect, BudgetLow, ciState, isBatch, LABEL, order, ordinal, pickBatch, queuedAt, readState, restLayer, tick, trainBases, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -10,7 +10,7 @@ const running = [{ name: "CI Success", status: "in_progress", conclusion: null, 
 function fakeRepo() {
   const pulls = new Map<number | string, Pr>();
   const events = new Map<number, { event: string; label: { name: string }; created_at: string }[]>();
-  const comments = new Map<number | string, { id: number; body: string }[]>();
+  const comments = new Map<number | string, { id: number; body: string; user?: { login: string } }[]>();
   const runs = new Map<string, object[]>();
   const tips: Record<string, string> = { dev: "dev0", "epic/x": "epic0" };
   const landed: string[] = [];
@@ -24,7 +24,7 @@ function fakeRepo() {
     checkRuns: async (sha: string) => runs.get(sha) ?? [],
     comments: async (n: number) => comments.get(n) ?? [],
     branchSha: async (base: string) => tips[base],
-    comment: async (n: number, body: string) => void comments.set(n, [...(comments.get(n) ?? []), { id: ids++, body }]),
+    comment: async (n: number, body: string) => void comments.set(n, [...(comments.get(n) ?? []), { id: ids++, body, user: { login: "train" } }]),
     editComment: async (id: number, body: string) => {
       for (const list of comments.values()) for (const c of list) if (c.id === id) c.body = body;
     },
@@ -88,7 +88,7 @@ function fakeRepo() {
   const batch = () => [...pulls.values()].find((p) => p.open && readState(p.body));
   const members = () => readState(batch()?.body)?.prs.map((m: { number: number }) => m.number) ?? [];
   let stamp = 0;
-  const run = (opts = {}) => tick({ gh, git, base: "dev", stamp: String(stamp++), ...opts });
+  const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), ...opts });
   return { gh, git, pulls, comments, runs, tips, landed, conflicts, add, settle, batch, members, run };
 }
 
@@ -352,6 +352,27 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual(["#11"]);
   });
 
+  it("trusts only its own position comments: a planted mark neither drops a pull request nor vouches for a head", async () => {
+    const repo = fakeRepo();
+    const plant = (n: number, head: string) => repo.comments.set(n, [{ id: 900 + n, body: `<!-- merge-train:position --><!-- merge-train:head ${head} -->`, user: { login: "stranger" } }]);
+    repo.add(11);
+    plant(11, "0000000"); // would read as "new commits since queued"
+    repo.add(12);
+    plant(12, "h12later"); // would pre-approve a head nobody reviewed
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.members()).toEqual([11, 12]);
+    for (const n of [11, 12]) expect(repo.comments.get(n)![0].user!.login).toBe("stranger"); // never deleted by the train
+    repo.pulls.get(12)!.sha = "h12later";
+    repo.runs.set("h12later", green);
+    const again = await repo.run();
+    expect(again.dropped).toEqual([12]); // the train's own record (h12) counts, not the planted one
+  });
+
+  it("needs its own login", async () => {
+    await expect(fakeRepo().run({ login: "" })).rejects.toThrow(/own login/);
+  });
+
   it("drops a pull request that got new commits after it was queued: queue vouches for the reviewed head", async () => {
     const repo = fakeRepo();
     repo.add(11, { ci: red }); // waits in line, so its position comment records h11
@@ -478,6 +499,21 @@ describe("GitHub over REST", () => {
     text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
   });
 
+  it("retries a request that failed to connect, and a secondary rate limit", async () => {
+    let calls = 0;
+    const answers = [reply(403, { message: "secondary rate limit" }, { "retry-after": "3" }), reply(200, { object: { sha: "abc" } })];
+    const waits: number[] = [];
+    const fetchImpl = async () => {
+      if (++calls === 1) throw new TypeError("fetch failed");
+      return answers.shift();
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async (ms: number) => void waits.push(ms) });
+    expect(await gh.branchSha("dev")).toBe("abc");
+    expect(waits).toEqual([5000, 3000]);
+    const down = restLayer("t", "o/r", { fetchImpl: async () => Promise.reject(new TypeError("fetch failed")), wait: async () => {} });
+    await expect(down.branchSha("dev")).rejects.toThrow(/fetch failed/);
+  });
+
   it("retries a 502 and a rate-limited 403 with backoff, then answers", async () => {
     const answers = [reply(502, "<html>bad gateway</html>"), reply(403, { message: "rate" }, { "x-ratelimit-remaining": "0", "retry-after": "7" }), reply(200, { object: { sha: "abc" } })];
     const waits: number[] = [];
@@ -496,5 +532,22 @@ describe("GitHub over REST", () => {
     const low = restLayer("t", "o/r", { fetchImpl: async () => reply(200, [], { "x-ratelimit-remaining": "40" }), wait: async () => {} });
     expect(await gh.comments(1)).toEqual([]);
     await expect(low.comments(1)).rejects.toBeInstanceOf(BudgetLow);
+  });
+});
+
+describe("the Mac's stop signal", () => {
+  const job = (name: string, status: string, conclusion: string | null, steps: object[] = []) => ({ name, status, conclusion, steps });
+  const checkout = (conclusion: string) => [{ name: "Check the queue app", conclusion: "success" }, { name: "Checkout the script", conclusion }];
+
+  it("is a configured app, queue empty or not, or a train job running or done", () => {
+    expect(appTrainIn([job("Bases with a train", "completed", "success", checkout("success")), job("Train into ${{ matrix.base }}", "completed", "skipped")])).toBe(true);
+    expect(appTrainIn([job("Train into dev", "in_progress", null)])).toBe(true);
+    expect(appTrainIn([job("Train into dev", "completed", "failure")])).toBe(true);
+  });
+
+  it("is not an unconfigured app, or a train job that only waits to be skipped", () => {
+    expect(appTrainIn([job("Bases with a train", "completed", "success", checkout("skipped")), job("Train into ${{ matrix.base }}", "completed", "skipped")])).toBe(false);
+    expect(appTrainIn([job("Train into ${{ matrix.base }}", "queued", null)])).toBe(false);
+    expect(appTrainIn([])).toBe(false);
   });
 });

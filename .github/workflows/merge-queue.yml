@@ -10,9 +10,10 @@ name: Merge queue
 # Success. Without those secrets every run ends green with a notice and changes nothing; a Mac can run the train
 # meanwhile (`node tools/scripts/merge-train.mjs --run --every 300`, with its own gh login).
 #
-# These runs hold the app's key, so they only ever run the default branch's copy of this file and of the script: there
-# is no pull_request trigger, and pull_request_target (a label added) checks out the base, never the pull request.
-# The train only merges pull requests' commits with git; it never runs their code.
+# These runs hold the app's key, so they always run the default branch's copy of the script (both checkouts pin it),
+# never a pull request's: there is no pull_request trigger, and pull_request_target (a label added) and pushes take
+# this file from dev or an epic, which only writers change. The train only merges pull requests' commits with git;
+# it never runs their code.
 
 on:
   schedule:
@@ -82,17 +83,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BASE: ${{ inputs.base }}
+        # The assignment on its own line, so a failing --list-bases fails this step (inside `echo` it would not).
         run: |
           if [[ -n "$BASE" ]]; then
-            echo "bases=$(jq -cn --arg b "$BASE" '[$b]')" >> "$GITHUB_OUTPUT"
+            bases=$(jq -cn --arg b "$BASE" '[$b]')
           else
-            echo "bases=$(node tools/scripts/merge-train.mjs --list-bases)" >> "$GITHUB_OUTPUT"
+            bases=$(node tools/scripts/merge-train.mjs --list-bases)
           fi
+          echo "bases=$bases" >> "$GITHUB_OUTPUT"
 
   train:
     name: Train into ${{ matrix.base }}
     needs: bases
-    if: needs.bases.outputs.configured == 'true' && needs.bases.outputs.bases != '[]'
+    if: needs.bases.outputs.configured == 'true' && needs.bases.outputs.bases != '' && needs.bases.outputs.bases != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -131,6 +134,8 @@ jobs:
       - name: Run the train
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          # The train trusts only its own position comments: the ones this app's bot wrote.
+          MERGE_TRAIN_LOGIN: ${{ steps.token.outputs.app-slug }}[bot]
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           BASE: ${{ matrix.base }}
         run: |

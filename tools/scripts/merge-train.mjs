@@ -148,8 +148,10 @@ const conflictText = (base, reason) =>
  * One run of the train for one base. `gh` reads and writes GitHub, `git` builds and pushes batches (both are fakes
  * in the tests). In a dry run every write is logged instead. Returns the log and what happened.
  */
-export async function tick({ gh, git, base, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [], now = Date.now(), log = [] }) {
+export async function tick({ gh, git, base, login, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [], now = Date.now(), log = [] }) {
   if (!BASE.test(base)) throw new Error(`Not a train base: ${JSON.stringify(base)}`);
+  // The train's own GitHub login: only its comments count as position comments (anyone can write the marks).
+  if (!login) throw new Error("The train's own login is required");
   const say = (line) => log.push(line);
   const w = dry ? dryWriter(gh, say) : gh;
   const done = { merged: [], failed: [], dropped: [], opened: [], closed: [] };
@@ -162,7 +164,7 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
     p.queuedAt = queuedAt(await gh.events(p.number), p.createdAt);
     p.priority = p.labels.includes(LABEL.priority);
     p.ci = ciState(await gh.checkRuns(p.sha));
-    p.sticky = (await gh.comments(p.number)).find((c) => (c.body ?? "").includes(POSITION));
+    p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
   }
   const byNumber = new Map(queued.map((p) => [p.number, p]));
   const line = () => order(queued.filter((p) => !gone.has(p.number)));
@@ -175,10 +177,11 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
     if (p.sticky) await w.deleteComment(p.sticky.id);
     await w.comment(p.number, text);
   };
+  // Closed first: a run that stops before the labels are off leaves a closed pull request, never an open one out of line.
   const landed = async (p, batch) => {
     done.merged.push(p.number);
-    await leave(p, null, `Merged via #${batch}.`);
     await w.closePull(p.number);
+    await leave(p, null, `Merged via #${batch}.`);
   };
   const retire = async (batch, text) => {
     await w.comment(batch.number, text);
@@ -193,7 +196,9 @@ export async function tick({ gh, git, base, dry = false, stamp = new Date().toIS
     const built = await git.build(base, prs);
     for (const { number, reason } of built.dropped) {
       say(`DROP #${number} (${reason})`);
-      if (reason === "moved") continue; // pushed to after its CI was read: it boards once that head is green
+      // Pushed to after its CI was read: not built now, and on the next run its new head no longer matches the head in
+      // its position comment, so it leaves the line until it is reviewed and queued again.
+      if (reason === "moved") continue;
       done.dropped.push(number);
       await leave(byNumber.get(number), reason === "empty" ? null : LABEL.conflict, conflictText(base, reason));
     }
@@ -326,25 +331,44 @@ function dryWriter(gh, say) {
 
 // --------------------------------------------------------------------------------------------------------------------
 
+/** Whether one merge-queue run's jobs show the workflow's own train: a train job running or done, or the app configured. */
+export const appTrainIn = (jobs) =>
+  jobs.some(
+    (j) =>
+      (j.name.startsWith("Train into") && (j.status === "in_progress" || (j.status === "completed" && j.conclusion !== "skipped"))) ||
+      (j.name === "Bases with a train" && (j.steps ?? []).some((s) => s.name === "Checkout the script" && s.conclusion === "success")),
+  );
+
 /** Thrown when the token's REST budget runs low: the run stops, and the next one goes on from what GitHub shows. */
 export class BudgetLow extends Error {}
 
 /**
- * GitHub over REST (the shared GraphQL quota stays free). A 5xx, a 429 or a rate-limited 403 is retried with backoff
- * (`Retry-After` when given); below `budget` calls left the run stops. `wait` is injectable for the tests.
+ * GitHub over REST (the shared GraphQL quota stays free). A request that fails to connect (a reset, DNS after a Mac
+ * wakes), a 5xx, a 429 or a rate-limited 403 (primary, or secondary with `Retry-After`) is retried with backoff;
+ * below `budget` calls left the run stops. A POST retried after a 5xx that GitHub did carry out can leave a second
+ * comment, or a 422 "already exists" that fails this run; the next run goes on from GitHub's state. `wait` and
+ * `fetchImpl` are injectable for the tests.
  */
 export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch } = {}) {
+  const backoff = (attempt, after) => wait(Math.min(60, Number(after) || 2 ** attempt * 5) * 1000);
   const api = async (method, path, body) => {
     for (let attempt = 0; ; attempt++) {
-      const r = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      let r;
+      try {
+        r = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
+          method,
+          headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch (e) {
+        if (attempt >= 3) throw e;
+        await backoff(attempt);
+        continue;
+      }
       const left = Number(r.headers.get("x-ratelimit-remaining") ?? Infinity);
-      const limited = r.status === 429 || (r.status === 403 && left === 0);
+      const limited = r.status === 429 || (r.status === 403 && (left === 0 || r.headers.has("retry-after")));
       if ((r.status >= 500 || limited) && attempt < 3) {
-        await wait(Math.min(60, Number(r.headers.get("retry-after")) || 2 ** attempt * 5) * 1000);
+        await backoff(attempt, r.headers.get("retry-after"));
         continue;
       }
       if (left < budget) throw new BudgetLow(`GitHub API budget low (${left} calls left); stopping this run`);
@@ -390,12 +414,15 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     /** The last pull requests merged into `base` (one page): where a run that stopped half way finds its batch. */
     mergedPulls: async (base) =>
       (await must("GET", `/pulls?state=closed&base=${encodeURIComponent(base)}&sort=updated&direction=desc&per_page=20`)).filter((p) => p.merged_at).map(pull),
-    /** Whether the workflow's train job ran lately (the queue app exists), so a Mac must not run a second train. */
-    appTrainRan: async () => {
-      const { workflow_runs: runs } = await must("GET", "/actions/workflows/merge-queue.yml/runs?per_page=3");
+    /**
+     * Whether the workflow runs the train, so a Mac must not run a second one: a train job is running or ran, or a
+     * recent run found the queue app configured (its "Checkout the script" step runs only then), queue empty or not.
+     */
+    appTrainRuns: async () => {
+      const { workflow_runs: runs } = await must("GET", "/actions/workflows/merge-queue.yml/runs?per_page=10");
       for (const run of runs) {
         const { jobs } = await must("GET", `/actions/runs/${run.id}/jobs`);
-        if (jobs.some((j) => j.name.startsWith("Train into") && j.conclusion !== "skipped")) return true;
+        if (appTrainIn(jobs)) return true;
       }
       return false;
     },
@@ -488,7 +515,9 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
         git(["push", "-q", remote, `${sha}:refs/heads/${base}`], cwd);
         return { ok: true };
       } catch (e) {
-        return { ok: false, message: String(e.stderr ?? e.message).trim().split("\n").at(-1) };
+        // git ends with `hint:` lines; the reason is the `! [rejected]` or `error:` line.
+        const lines = String(e.stderr ?? e.message).trim().split("\n");
+        return { ok: false, message: (lines.find((l) => /^\s*!|^error:|^fatal:/.test(l)) ?? lines.at(-1)).trim() };
       }
     },
     close() {
@@ -544,27 +573,43 @@ async function main() {
   if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls())));
   const local = !process.env.GITHUB_ACTIONS && !dry;
   if (local) lock(join(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim(), "merge-train.lock"));
+  // The login the train comments as: the app's bot on a runner (set by the workflow), the gh user on a Mac.
+  const login = process.env.MERGE_TRAIN_LOGIN || execFileSync("gh", ["api", "user", "-q", ".login"], { encoding: "utf8" }).trim();
 
   const every = Number(opt("--every")) || 0;
+  const print = (base, log) => {
+    const lines = log.map(scrub);
+    console.log(lines.map((l) => (l.startsWith("::") ? l : `[${new Date().toISOString()}] ${l}`)).join("\n"));
+    const summary = process.env.GITHUB_STEP_SUMMARY;
+    if (summary) appendFileSync(summary, [`### Merge train: ${base}${dry ? " (dry run)" : ""}`, "", ...lines.map((l) => `    ${l.replace(/^::\w+::/, "")}`), ""].join("\n"));
+  };
+  const failed = (base, e, log) => {
+    log.push(e instanceof BudgetLow ? `::warning::${base}: ${e.message}` : `::error::${base}: ${e.message}`);
+    if (!(e instanceof BudgetLow) && !every) process.exitCode = 1;
+  };
   for (;;) {
-    if (local && (await gh.appTrainRan())) {
-      console.log("The merge-queue workflow runs the train now (the queue app exists); this machine stops.");
-      return;
-    }
-    for (const base of opt("--base") ? [opt("--base")] : trainBases(await gh.pulls())) {
-      const git = gitLayer();
-      const log = [];
-      try {
-        await tick({ gh, git, base, dry, also, log });
-      } catch (e) {
-        log.push(e instanceof BudgetLow ? `::warning::${base}: ${e.message}` : `::error::${base}: ${scrub(e.message)}`);
-        if (!(e instanceof BudgetLow)) process.exitCode = 1;
-      } finally {
-        git.close();
+    // A round never ends the loop: a network error or a low budget is logged, and the next round tries again.
+    try {
+      if (local && (await gh.appTrainRuns())) {
+        console.log("The merge-queue workflow runs the train now (the queue app is configured); this machine stops.");
+        return;
       }
-      console.log(log.map((l) => (l.startsWith("::") ? l : `[${new Date().toISOString()}] ${l}`)).join("\n"));
-      const summary = process.env.GITHUB_STEP_SUMMARY;
-      if (summary) appendFileSync(summary, [`### Merge train: ${base}${dry ? " (dry run)" : ""}`, "", ...log.map((l) => `    ${l.replace(/^::\w+::/, "")}`), ""].join("\n"));
+      for (const base of opt("--base") ? [opt("--base")] : trainBases(await gh.pulls())) {
+        const git = gitLayer();
+        const log = [];
+        try {
+          await tick({ gh, git, base, login, dry, also, log });
+        } catch (e) {
+          failed(base, e, log);
+        } finally {
+          git.close();
+        }
+        print(base, log);
+      }
+    } catch (e) {
+      const log = [];
+      failed("train", e, log);
+      print("train", log);
     }
     if (!every) break;
     await new Promise((r) => setTimeout(r, every * 1000));
