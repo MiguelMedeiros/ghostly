@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -38,13 +38,17 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   const { t } = useI18n();
   const hint = appHint(app, t);
   const color = { muted: "text-text-muted", warning: "text-test-money-ink", danger: "text-danger" }[hint.tone];
+  const versionId = useId();
+  const hintId = useId();
   return (
     <div className="flex items-center gap-3 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-1 text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" aria-label={t("apps.page.details", { title: app.title })}>
+      {/* Named "Chess: details", which hides the text in it: its version and the line under it (Stopped, an update that asks) are its description. */}
+      <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-1 text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        aria-label={t("apps.page.details", { title: app.title })} aria-describedby={`${versionId} ${hintId}`}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          <span className="block text-sm text-text-primary truncate">{app.title} <span className="text-text-muted text-xs">{app.version}</span></span>
-          <span data-testid="installed-app-hint" className={`block text-xs truncate ${color}`}>{hint.text}</span>
+          <span className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
+          <span id={hintId} data-testid="installed-app-hint" className={`block text-xs truncate ${color}`}>{hint.text}</span>
         </span>
       </button>
       {app.run.status === "ok" && <Button data-testid="installed-app-open" onClick={onOpen}>{t("apps.page.open")}</Button>}
@@ -52,19 +56,21 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   );
 }
 
-function StoreBlock({ store, installed, onInstall, onChanged, onError }: {
+function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError }: {
   store: AppStoreSummary;
   installed: readonly InstalledAppView[];
   onInstall: (listing: AppListing) => void;
   onChanged: () => void;
+  /** Removed: its block, and the Remove that had the focus, are about to go. */
+  onRemoved: () => void;
   onError: (e: unknown) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const work = async (call: () => Promise<unknown>) => {
+  const work = async (call: () => Promise<unknown>, done?: () => void) => {
     setBusy(true);
-    try { await call(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); }
+    try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); }
   };
   const read = store.fetchedAt !== undefined || store.apps.length > 0;
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
@@ -86,7 +92,7 @@ function StoreBlock({ store, installed, onInstall, onChanged, onError }: {
         <div className="flex items-center gap-2">
           {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again. */}
           <Button data-testid="app-store-refresh" disabled={busy} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }))}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
-          <Button variant="danger" data-testid="app-store-remove" disabled={busy} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }))}>{t("apps.store.remove")}</Button>
+          <Button variant="danger" data-testid="app-store-remove" disabled={busy} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved)}>{t("apps.store.remove")}</Button>
         </div>
       </div>
       {open && (
@@ -133,6 +139,17 @@ export function Apps() {
     target.focus({ preventScroll: true });
     setJustInstalled(null);
   }, [justInstalled, installing, installed]);
+  // An app uninstalled or a store removed: the control that had the focus went with its row, so the focus goes to Add
+  // rather than being lost on the page. Only once the row is gone and its screen closed, and only if nothing has it.
+  const [gone, setGone] = useState<{ app: string } | { store: string } | null>(null);
+  useEffect(() => {
+    if (!gone || details) return;
+    if ("app" in gone ? installed?.some((a) => a.ref === gone.app) : stores?.some((s) => s.key === gone.store)) return;
+    setGone(null);
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
+  }, [gone, details, installed, stores]);
   const notice = useToast();
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
@@ -165,11 +182,11 @@ export function Apps() {
       <Section title={t("apps.page.stores")} testId="apps-stores">
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
-            : stores.map((store) => <StoreBlock key={store.key} store={store} installed={installed ?? []} onError={fail}
+            : stores.map((store) => <StoreBlock key={store.key} store={store} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
               onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} />}
-      {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} />}
+      {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} onUninstalled={() => setGone({ app: shown.ref })} />}
       {picking && <AppChatPicker app={picking.app} options={picking.options} onClose={() => setPicking(null)} />}
       {installing && (
         <AppInstallDialog source={{ store: installing.store, ref: installing.listing.ref }} title={installing.listing.title} onClose={() => setInstalling(null)}

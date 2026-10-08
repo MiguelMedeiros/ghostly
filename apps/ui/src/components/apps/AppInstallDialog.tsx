@@ -254,7 +254,13 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
  * store removed stays stopped unless the person presses "Run anyway" here (WISP 1200 § Takedowns); a revoked one has no
  * such button.
  */
-export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledAppView; onClose: () => void; onOpen: (app: InstalledAppView, options?: OpenAppOptions) => void }) {
+export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
+  app: InstalledAppView;
+  onClose: () => void;
+  onOpen: (app: InstalledAppView, options?: OpenAppOptions) => void;
+  /** Uninstalled: the row this screen opened from goes, and the focus it would go back to with it. */
+  onUninstalled?: () => void;
+}) {
   const { t } = useI18n();
   const titleId = useId();
   const [error, setError] = useState<AppErrorView | null>(null);
@@ -275,7 +281,7 @@ export function InstalledAppDialog({ app, onClose, onOpen }: { app: InstalledApp
         <div className="flex flex-wrap justify-end gap-2">
           <Button onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
           <Button data-testid="app-export" disabled={busy} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExport", { ref: app.ref })))}>{t("apps.app.export")}</Button>
-          <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} onClick={() => void act(() => engine.call("appUninstall", { ref: app.ref }), true)}>{t("apps.app.uninstall")}</Button>
+          <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); onUninstalled?.(); }, true)}>{t("apps.app.uninstall")}</Button>
         </div>
       </Shell>
     );
