@@ -13,7 +13,7 @@
   "clearAllDataDescription": "Discussions, identités et réglages de ce profil. Les portefeuilles restent.",
   "clearAllDataInfo": "Avant d'effacer, Ghostly retire ce qu'il peut : éléments gardés pour vos contacts, votre DID, vos preuves d'identité et le réveil. Les preuves publiées sur d'autres sites y restent. Les portefeuilles ne sont pas supprimés : dépensez ou sauvegardez vos sats avant si vous voulez qu'ils partent aussi.",
   "clearAllDataItems": {
-    "apps": "Apps partagées",
+    "apps": "Services partagés",
     "chats": "Discussions, messages et fichiers",
     "groups": "Groupes",
     "identities": "Preuves d'identité, votre DID et données Nostr",

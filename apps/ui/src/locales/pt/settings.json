@@ -13,7 +13,7 @@
   "clearAllDataDescription": "Conversas, identidades e ajustes deste perfil. As carteiras ficam.",
   "clearAllDataInfo": "Antes de apagar, o Ghostly retira o que puder: itens guardados para contatos, seu DID, suas provas de identidade e o despertar. Provas que você publicou em outros sites continuam lá. As carteiras não são apagadas: gaste ou faça backup dos seus sats antes, se quiser que eles saiam também.",
   "clearAllDataItems": {
-    "apps": "Apps compartilhados",
+    "apps": "Serviços compartilhados",
     "chats": "Conversas, mensagens e arquivos",
     "groups": "Grupos",
     "identities": "Provas de identidade, seu DID e dados do Nostr",

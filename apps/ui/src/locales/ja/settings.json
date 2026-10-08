@@ -13,7 +13,7 @@
   "clearAllDataDescription": "このプロフィールのチャット、ID、設定。ウォレットは残ります。",
   "clearAllDataInfo": "消去の前に、Ghostly は取り消せるものを取り消します：連絡先のために預けた項目、DID、ID証明、通知の購読。ほかのサイトに公開した証明はそこに残ります。ウォレットは削除されません。それも消したい場合は、先にsatsを使うかバックアップしてください。",
   "clearAllDataItems": {
-    "apps": "共有アプリ",
+    "apps": "共有サービス",
     "chats": "チャット、メッセージ、ファイル",
     "groups": "グループ",
     "identities": "ID証明、DID、Nostr のデータ",

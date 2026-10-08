@@ -13,7 +13,7 @@
   "clearAllDataDescription": "Chat, identità e impostazioni di questo profilo. I wallet restano.",
   "clearAllDataInfo": "Prima di cancellare, Ghostly ritira ciò che può: elementi tenuti per i contatti, il tuo DID, le tue prove di identità e il risveglio. Le prove pubblicate su altri siti restano lì. I wallet non vengono eliminati: spendi o fai il backup dei tuoi sats prima, se vuoi che spariscano anche loro.",
   "clearAllDataItems": {
-    "apps": "App condivise",
+    "apps": "Servizi condivisi",
     "chats": "Chat, messaggi e file",
     "groups": "Gruppi",
     "identities": "Prove di identità, il tuo DID e i dati Nostr",

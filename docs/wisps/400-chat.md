@@ -21,7 +21,7 @@ There is one kind of 1:1 chat and one invite format. Every chat has two layers:
 | Layer | What it is | What it is for | Always there? |
 |---|---|---|---|
 | **Layer 0, the DHT** | Signed, encrypted Pkarr records on the Mainline DHT, read through HTTP relays or natively ([01](01-ghost-core.md)) | The rendezvous: the invite, the first contact and handshake, capabilities and transport descriptors. The **floor**: short text ([403](403-dht-text.md)) and the pointer to held items ([404](404-store-and-forward.md)) when nothing better connects | Yes, for as long as both sides can reach the DHT |
-| **Layer 1, peer to peer** | An authenticated stream over WebRTC, Iroh or HyperDHT, chosen by the rank sum of [100](100-transports.md) | Everything: text up to 16 KiB, receipts, files, payments, names and pictures, calls and shared apps | Only while one of those transports connects |
+| **Layer 1, peer to peer** | An authenticated stream over WebRTC, Iroh or HyperDHT, chosen by the rank sum of [100](100-transports.md) | Everything: text up to 16 KiB, receipts, files, payments, names and pictures, calls and shared services | Only while one of those transports connects |
 
 The DHT is always the rendezvous. After the handshake the two apps upgrade to the best peer-to-peer transport they both support and talk there. If no transport connects, or the one in use drops, the chat keeps working over the DHT alone, and layer 1 is retried in the background until it comes back. A person can also choose to keep a chat on the DHT only.
 
@@ -127,7 +127,7 @@ sequenceDiagram
 | Payment requests | Yes (`payments/1`) | Held if both allow (Cashu and Lightning requests); otherwise queued | As files |
 | Paying (ecash, Lightning, Ark, Spark, on-chain) | Yes, per [200](200-payments.md) | No. Bearer tokens never enter the DHT or a hold, and a payment is not queued | Pay disabled in the payment sheet: "Payments need a live connection"; requests still go |
 | Calls, voice and video | Yes (`calls/1`, [601](601-webrtc-media.md#paired-profile)): signals on the session, media on a WebRTC connection of its own | No | Call buttons disabled: "Calls need a live connection" |
-| Hosted local services | Yes (`services/1`, [701](701-http-services.md#paired-profile)) | No | The Shared apps dialog (composer +) says "Shared services open while you are connected live" |
+| Hosted local services | Yes (`services/1`, [701](701-http-services.md#paired-profile)) | No | The Shared services dialog (composer +) says "Shared services open while you are connected live" |
 | Identity proofs shared with the contact | Yes | No; they wait for layer 1 | Unchanged |
 
 A place is text too: a `geo:` URI (RFC 5870) or a Google Maps, Apple Maps or OpenStreetMap link that carries its coordinates shows as a location card, read from the text alone. Its map is not loaded until the person asks for it, because loading map tiles tells the tile server the device's address; the card says so. Short map links that hide their coordinates stay plain links.

@@ -13,7 +13,7 @@
   "clearAllDataDescription": "Chats, identidades y ajustes de este perfil. Las billeteras se quedan.",
   "clearAllDataInfo": "Antes de borrar, Ghostly retira lo que puede: elementos guardados para contactos, tu DID, tus pruebas de identidad y el despertar. Las pruebas que publicaste en otros sitios siguen allí. Las billeteras no se borran: gasta o respalda tus sats antes si también quieres que desaparezcan.",
   "clearAllDataItems": {
-    "apps": "Apps compartidas",
+    "apps": "Servicios compartidos",
     "chats": "Chats, mensajes y archivos",
     "groups": "Grupos",
     "identities": "Pruebas de identidad, tu DID y datos de Nostr",

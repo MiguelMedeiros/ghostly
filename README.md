@@ -40,7 +40,7 @@
 - <img src="docs/assets/icons/groups.svg" width="20" align="absmiddle" alt=""> **[Groups](docs/CHAT.md#groups)**: private groups of up to 32, communities of up to 256, joined by a link.
 - <img src="docs/assets/icons/wallets.svg" width="20" align="absmiddle" alt=""> **[Wallets](docs/WALLETS.md)**: Cashu, Lightning, Ark, Spark, Fedimint, on-chain and USDT. Pay in a chat. Mainnet is experimental.
 - <img src="docs/assets/icons/identities.svg" width="20" align="absmiddle" alt=""> **[Identities](docs/IDENTITIES.md)**: prove your Nostr, Pubky, domain, PGP, SSH, Bitcoin address or DID. Your contact's app checks it.
-- <img src="docs/assets/icons/shared-apps.svg" width="20" align="absmiddle" alt=""> **[Shared apps](docs/CHAT.md#calls-and-shared-services)**: share a web app on your `localhost` with a contact, over the chat's live connection.
+- <img src="docs/assets/icons/shared-apps.svg" width="20" align="absmiddle" alt=""> **[Shared services](docs/CHAT.md#calls-and-shared-services)**: share a web app on your `localhost` with a contact, over the chat's live connection.
 - <img src="docs/assets/icons/cli.svg" width="20" align="absmiddle" alt=""> **[CLI](docs/CLI.md) and [AI agents](docs/AI-AGENTS.md)**: the app's engine without a screen, for bots, scripts and agents.
 
 ## See it

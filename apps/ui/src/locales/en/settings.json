@@ -13,7 +13,7 @@
   "clearAllDataDescription": "Chats, identities and settings of this profile. Wallets stay.",
   "clearAllDataInfo": "Before erasing, Ghostly takes back what it can: items held for contacts, your DID, your identity proofs and wake-ups. Proofs you posted on other sites stay there. Wallets are not deleted: spend or back up your sats first if you want them gone too.",
   "clearAllDataItems": {
-    "apps": "Shared apps",
+    "apps": "Shared services",
     "chats": "Chats, messages and files",
     "groups": "Groups",
     "identities": "Identity proofs, your DID and Nostr data",
