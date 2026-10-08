@@ -1,5 +1,5 @@
 import { readAppStore } from "./store-core/appStore";
-import { APP_ICON_PATH, appViewOf, readAppBundle, type AppClient, type AppPermission, type AppViewMode } from "./store-core/appBundle";
+import { APP_ICON_PATH, appViewOf, readAppBundle, type AppBundle, type AppClient, type AppPermission, type AppViewMode } from "./store-core/appBundle";
 import { appFingerprint, appRef, appRefPublisher, type SignedAppRevocation } from "./store-core/appStatements";
 
 /*
@@ -14,8 +14,11 @@ export const STORE_URL = "https://raw.githubusercontent.com/MiguelMedeiros/ghost
 export const STORE_KEY = "y379ia3t1urwudj8o4w1qwmuwp1mcxyf956b5r7pqup7stce6diy";
 /** Where the app reads stores and apps from (packages/browser/src/engine/appFetch.ts): nowhere else. */
 export const STORE_HOSTS = ["raw.githubusercontent.com", "cdn.jsdelivr.net"] as const;
-/** What the build reads, at most: the app's own bounds (appFetch.ts), and a cap on how many apps one page lists. */
-export const STORE_LIMITS = { indexBytes: 4 * 1024 * 1024, sigBytes: 1024, bundleBytes: 16 * 1024 * 1024, apps: 200 } as const;
+/**
+ * What the build reads, at most: the app's own bounds (appFetch.ts), the URLs one listing may have (core's appStore.ts),
+ * and a cap on how many apps one page lists.
+ */
+export const STORE_LIMITS = { indexBytes: 4 * 1024 * 1024, sigBytes: 1024, bundleBytes: 16 * 1024 * 1024, apps: 200, urls: 4 } as const;
 
 /** A URL the app would read an app from: https on one of the two hosts, no port, no user. */
 export function isStoreFetchUrl(value: string): boolean {
@@ -91,9 +94,41 @@ function revokedBy(revocations: SignedAppRevocation[], ref: string, digest: stri
 }
 
 /**
+ * The bundle of the very version a listing names (reference, digest, sequence), from the first of its URLs that holds
+ * it, tried in order as the app tries them: a URL that was not read, does not verify, or holds another version (the
+ * store's repository moved on while the site was built) gives way to the next. Unlike an install from a card, a newer
+ * version than the listing's is not shown: the store lists the version it reviewed, and an app from the store updates
+ * only to that.
+ */
+function listedBundle(
+  listing: { ref: string; digest: string; sequence: number; urls: string[] },
+  bundles: Record<string, Uint8Array>,
+): { ok: true; url: string; bundle: AppBundle } | { ok: false; reason: string } {
+  let reason = "not-fetched";
+  for (const url of listing.urls.slice(0, STORE_LIMITS.urls)) {
+    const bytes = isStoreFetchUrl(url) ? bundles[url] : undefined;
+    if (bytes === undefined) continue;
+    if (bytes.length > STORE_LIMITS.bundleBytes) {
+      reason = "too-large";
+      continue;
+    }
+    const read = readAppBundle(bytes);
+    if (!read.ok) {
+      reason = read.reason;
+      continue;
+    }
+    const { manifest, digest } = read.bundle;
+    if (digest !== listing.digest) reason = "digest";
+    else if (appRef(manifest.publisher, manifest.name) !== listing.ref) reason = "ref";
+    else if (manifest.sequence !== listing.sequence) reason = "sequence";
+    else return { ok: true, url, bundle: read.bundle };
+  }
+  return { ok: false, reason };
+}
+
+/**
  * Checks the index (size, canonical JSON, fields, revocations, the signature by `key`, `expires` at `now` seconds), then
- * each listing's bundle: read from the first of its URLs the build holds, verified by the bundle reader, and the very
- * version listed (reference, digest, sequence). A removed or revoked version is left out, as the app leaves it out.
+ * each listing's bundle (`listedBundle`). A removed or revoked version is left out, as the app leaves it out.
  */
 export function readStore(bytes: StoreBytes, now: number, key: string): StoreView {
   if (bytes.index.length > STORE_LIMITS.indexBytes) return { ok: false, reason: "too-large" };
@@ -117,34 +152,13 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
       skip("revoked");
       continue;
     }
-    const url = listing.urls.find((u) => isStoreFetchUrl(u) && bytes.bundles[u] !== undefined);
-    if (!url) {
-      skip("not-fetched");
+    const found = listedBundle(listing, bytes.bundles);
+    if (!found.ok) {
+      skip(found.reason);
       continue;
     }
-    const bundleBytes = bytes.bundles[url];
-    if (bundleBytes.length > STORE_LIMITS.bundleBytes) {
-      skip("too-large");
-      continue;
-    }
-    const bundle = readAppBundle(bundleBytes);
-    if (!bundle.ok) {
-      skip(bundle.reason);
-      continue;
-    }
-    const { manifest, digest, files } = bundle.bundle;
-    if (digest !== listing.digest) {
-      skip("digest");
-      continue;
-    }
-    if (appRef(manifest.publisher, manifest.name) !== listing.ref) {
-      skip("ref");
-      continue;
-    }
-    if (manifest.sequence !== listing.sequence) {
-      skip("sequence");
-      continue;
-    }
+    const { url, bundle } = found;
+    const { manifest, digest, files } = bundle;
     const icon = files.get(APP_ICON_PATH);
     apps.push({
       slug: slugOf(listing.ref),

@@ -3,14 +3,15 @@ import { deflateSync } from "node:zlib";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import {
-  appRef, buildAppBundle, canonicalJson, seedSigner, signAppRevocation, signAppStore, toZ32, utf8Encode, type AppManifestDraft, type AppStoreIndex,
-  type Signer,
+  APP_STORE_LIMITS, appRef, buildAppBundle, canonicalJson, seedSigner, signAppRevocation, signAppStore, toZ32, utf8Encode, type AppManifestDraft,
+  type AppStoreIndex, type Signer,
 } from "@ghostly/core";
 import { APP_FETCH_HOSTS, APP_FETCH_LIMITS } from "../src/engine/appFetch";
 import { DEFAULT_STORE_KEY, DEFAULT_STORE_URL } from "../src/engine/appDefaults";
 import { STORE_HOSTS, STORE_KEY, STORE_LIMITS, STORE_URL, readStore, slugOf, type StoreBytes } from "../../../apps/website/lib/storeRead";
 import { APPS_RELEASE, versionAtLeast } from "../../../apps/website/lib/appsGate";
 import * as sync from "../../../apps/website/scripts/sync-store.mjs";
+import { RELEASE_GUARDS } from "../../../tools/scripts/changes.mjs";
 // covers: apps.store
 
 /*
@@ -167,7 +168,39 @@ describe("the site reads a store as the app does", () => {
     // The build script reads with the same ones.
     expect(sync.STORE_URL).toBe(DEFAULT_STORE_URL);
     expect(sync.STORE_HOSTS).toEqual([...APP_FETCH_HOSTS]);
-    expect(sync.LIMITS).toMatchObject({ indexBytes: STORE_LIMITS.indexBytes, sigBytes: STORE_LIMITS.sigBytes, bundleBytes: STORE_LIMITS.bundleBytes, apps: STORE_LIMITS.apps });
+    expect(STORE_LIMITS.urls).toBe(APP_STORE_LIMITS.urls);
+    expect(sync.LIMITS).toMatchObject({
+      indexBytes: STORE_LIMITS.indexBytes, sigBytes: STORE_LIMITS.sigBytes, bundleBytes: STORE_LIMITS.bundleBytes, apps: STORE_LIMITS.apps, urls: STORE_LIMITS.urls,
+    });
+  });
+
+  it("opens the pages at the release the Apps flag turns on from", () => {
+    const guard = (RELEASE_GUARDS as { flag: string; from: string }[]).find((g) => g.flag === "APPS_ENABLED");
+    expect(guard?.from).toBe(APPS_RELEASE);
+  });
+
+  it("tries a listing's URLs in order, and shows only the version it lists", async () => {
+    const a = signerOf("publisher a");
+    const listed = await buildAppBundle({ ...base("tries", "Tries App"), version: "1.0.1", sequence: 2 }, [page("Tries App")], a);
+    const newer = await buildAppBundle({ ...base("tries", "Tries App"), version: "1.1.0", sequence: 3 }, [page("Tries App")], a);
+    const first = `${RAW}/tries/HEAD/app.ghostlyapp`;
+    const second = `${PINNED}/tries.ghostlyapp`;
+    const index: AppStoreIndex = {
+      ghostlyStore: 1, key: keyOf("store"), name: "Test Store", kind: "curated", sequence: 1, expires: NOW + 80 * DAY,
+      apps: [{ ref: appRef(keyOf("publisher a"), "tries"), sequence: 2, digest: listed.digest, urls: [first, second], title: "Tries App", tagline: "Tries" }],
+      removed: [], revoked: [],
+    };
+    const { indexBytes, sigBytes } = await signAppStore(index, signerOf("store"));
+    const view = (bundles: Record<string, Uint8Array>) => readStore({ index: indexBytes, sig: sigBytes, bundles }, NOW, keyOf("store"));
+    // The first URL moved on to a version the store has not listed: the second one holds the listed version.
+    const both = view({ [first]: newer.bytes, [second]: listed.bytes });
+    expect(both.ok && both.apps.map((x) => [x.version, x.url])).toEqual([["1.0.1", second]]);
+    // Only the newer version anywhere: the store did not review it, so the page does not show it.
+    const ahead = view({ [first]: newer.bytes });
+    expect(ahead.ok && [ahead.apps.length, ahead.skipped.map((x) => x.reason)]).toEqual([0, ["digest"]]);
+    // A first URL that was not read gives way too.
+    const secondOnly = view({ [second]: listed.bytes });
+    expect(secondOnly.ok && secondOnly.apps[0]?.url).toBe(second);
   });
 
   it("shows the verified versions, and leaves out removed, revoked, mismatched and foreign ones", () => {

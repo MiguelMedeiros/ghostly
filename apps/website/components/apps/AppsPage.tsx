@@ -9,8 +9,8 @@ import "@/app/apps.css";
 export const formatDate = (seconds: number) =>
   new Date(seconds * 1000).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
-/** /apps: what Apps are, then every app the store lists and the site could verify. */
-export function AppsPage({ store }: { store: StoreView }) {
+/** /apps: what Apps are, then every app the store lists and the site could verify, as the build read it at `readAt`. */
+export function AppsPage({ store, readAt }: { store: StoreView; readAt: number }) {
   return (
     <Shell>
       <section className="ap-hero">
@@ -41,7 +41,7 @@ export function AppsPage({ store }: { store: StoreView }) {
           <p className="note">{t.list.unavailable}</p>
         ) : (
           <>
-            {store.expired && <p className="note ap-stale">{t.list.stale(formatDate(store.expires))}</p>}
+            {store.expired && <p className="note ap-stale">{t.list.stale(formatDate(readAt), formatDate(store.expires))}</p>}
             {store.apps.length === 0 ? (
               <p className="note">{t.list.empty}</p>
             ) : (

@@ -4,7 +4,7 @@ import { AppsPage } from "@/components/apps/AppsPage";
 import { apps } from "@/content/apps";
 import { appsReleased } from "@/lib/appsGate";
 import { pageMetadata } from "@/lib/pageMeta";
-import { storeView } from "@/lib/store";
+import { storeReadAt, storeView } from "@/lib/store";
 
 // Rendered for each visit: the release gate follows the latest release (asked at most once an hour, lib/latestRelease.ts),
 // and the store is the one the build read and checked (lib/store.ts). Nothing here asks GitHub per visit.
@@ -17,5 +17,5 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function Page() {
   if (!(await appsReleased())) notFound();
-  return <AppsPage store={storeView()} />;
+  return <AppsPage store={storeView()} readAt={storeReadAt()} />;
 }

@@ -3,13 +3,20 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { APPS_RELEASE, versionAtLeast } from "../lib/appsGate";
+import { VERSION } from "../lib/release";
 
 /**
  * The store pages, /apps and /apps/<name>.<publisher prefix> (app/apps/), and the release gate they sit behind
  * (lib/appsGate.ts). The build under test is served twice more, once as if the released Ghostly were 1.1 and once as if
- * it were 1.2 (GHOSTLY_SITE_RELEASE): on 1.1 nothing of Apps exists, not the pages, not a link, not a line of the
- * privacy policy; on 1.2 they show the test store (e2e/fixtures/store), which the build reads when
- * GHOSTLY_STORE_FIXTURE is set (CI sets it).
+ * it were 1.2 (GHOSTLY_SITE_RELEASE, honoured only beside GHOSTLY_STORE_FIXTURE): on 1.1 nothing of Apps exists, not
+ * the pages, not a link, not a line of the privacy policy; on 1.2 they show the test store (e2e/fixtures/store), which
+ * the build reads when GHOSTLY_STORE_FIXTURE is set (CI sets it).
+ *
+ * Only the pages rendered per visit (/apps, /privacy, the sitemap) follow the release a server is started with. The
+ * prerendered ones (/, /developers, /wisps/...) keep the gate the build saw until they are revalidated: in production
+ * that is the delay between a release and their Apps link (up to about 2 hours: the hourly page revalidation plus the
+ * hourly cache of GitHub's answer, lib/latestRelease.ts). A test build reads VERSION (lib/release.ts).
  */
 
 const site = join(__dirname, "..");
@@ -18,6 +25,20 @@ const fixture = JSON.parse(readFileSync(join(site, "e2e", "fixtures", "store", "
 const PREFIX = { a: "jmbfdj6xdr6mp3op", b: "nsuz5d3mxqozm68b" };
 const CHESS = `chess.${PREFIX.a}`;
 const NOTES = `notes.${PREFIX.b}`;
+
+/** Whether the build itself had the gate open: what its prerendered pages show, whichever release a server says. */
+const BUILT_OPEN = versionAtLeast((process.env.GHOSTLY_STORE_FIXTURE && process.env.GHOSTLY_SITE_RELEASE) || VERSION, APPS_RELEASE);
+/** A prerendered page that carries the nav and the footer. */
+const PRERENDERED = "/developers";
+
+/** A prerendered page links to Apps (nav and footer) exactly when the build had the gate open. */
+async function expectBuildGate(page: Page, url: string) {
+  await page.goto(url);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  const links = await page.locator('a[href^="/apps"]').count();
+  if (BUILT_OPEN) expect(links, url).toBeGreaterThan(0);
+  else expect(links, url).toBe(0);
+}
 
 const servers: ChildProcess[] = [];
 const HIDDEN = "http://localhost:4410";
@@ -28,7 +49,8 @@ async function serve(url: string, release: string) {
   const port = new URL(url).port;
   const child = spawn(process.execPath, [join(site, "node_modules", "next", "dist", "bin", "next"), "start", "-p", port], {
     cwd: site,
-    env: { ...process.env, GHOSTLY_SITE_RELEASE: release },
+    // GHOSTLY_SITE_RELEASE counts only in a test build's server (lib/appsGate.ts).
+    env: { ...process.env, GHOSTLY_STORE_FIXTURE: process.env.GHOSTLY_STORE_FIXTURE || "1", GHOSTLY_SITE_RELEASE: release },
     stdio: "ignore",
     detached: true,
   });
@@ -100,6 +122,10 @@ test.describe("before the release that has Apps", () => {
     const xml = await (await request.get(`${HIDDEN}/sitemap.xml`)).text();
     expect(xml).toContain("<loc>https://ghostly.tools/privacy</loc>");
     expect(xml).not.toContain("/apps");
+  });
+
+  test("a prerendered page links to them only if the build had them", async ({ page }) => {
+    await expectBuildGate(page, HIDDEN + PRERENDERED);
   });
 });
 
@@ -188,6 +214,11 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect(main).toContainText("The apps pages.");
     await expect(main).toContainText("cdn.jsdelivr.net");
     await expect(main).toContainText("Last updated: October 8, 2026");
+  });
+
+  test("a prerendered page keeps the build's gate until it is revalidated", async ({ page }) => {
+    // As on the 1.1 server: the release a server starts with reaches a prerendered page only when it is revalidated.
+    await expectBuildGate(page, LIVE + PRERENDERED);
   });
 
   test("on a phone, nothing is wider than the screen", async ({ page }) => {

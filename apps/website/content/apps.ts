@@ -24,7 +24,8 @@ export const apps = {
     count: (n: number) => (n === 1 ? "1 app" : `${n} apps`),
     empty: "The store lists no apps yet.",
     unavailable: "The store could not be read when this page was built. Open Ghostly to see its apps.",
-    stale: (date: string) => `Out of date since ${date}. Ghostly still installs its apps.`,
+    stale: (readAt: string, expires: string) =>
+      `This list is the store as read on ${readAt}, and that copy lapsed on ${expires}. Ghostly reads the store itself.`,
     signed: "Signed by the store key",
   },
   app: {

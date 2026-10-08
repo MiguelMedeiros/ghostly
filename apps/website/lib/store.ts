@@ -40,6 +40,14 @@ export function storeView(): StoreView {
   return view;
 }
 
+/** When the build read the store: the pages say their list is as of then. */
+export function storeReadAt(): number {
+  const snap = snapshot as Snapshot;
+  // The test store is read at its own clock.
+  if (snap.source === "fixture" && snap.now) return snap.now;
+  return Math.floor(Date.parse(snap.readAt) / 1000);
+}
+
 export function storeApp(slug: string): StoreApp | undefined {
   const view = storeView();
   return view.ok ? view.apps.find((a) => a.slug === slug) : undefined;
