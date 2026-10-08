@@ -159,6 +159,40 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
+  it("in the Android app shows nothing of it, even in the e2e suite's build: no page, no place, no tab, no composer row, no request", async () => {
+    // The Android app is the Desktop app built for Android: a Tauri page with an Android agent.
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36");
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    fakeEngine.appRunner = "ghostly-app://localhost/";
+    fakeEngine.appRunnerServed = true;
+    try {
+      const { user } = renderApp(
+        <LockScreenProvider>
+          <Routes>
+            <Route path="/apps" element={<Apps />} />
+            <Route path="/" element={<p data-testid="home">home</p>} />
+          </Routes>
+          <AccountBar />
+          <MobileTabBar />
+          <MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />
+          <MessageInput onSend={async () => null} apps={undefined} />
+        </LockScreenProvider>,
+        { route: "/apps" },
+      );
+      act(() => fakeEngine.update({ links: [ana(true)] }));
+      await waitFor(() => expect(screen.getByTestId("home")).toBeInTheDocument());
+      expect(screen.queryByTestId("apps-page")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("account-apps")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-tab-apps")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("app-card")).not.toBeInTheDocument();
+      await user.click(screen.getByTestId("composer-more"));
+      expect(screen.queryByTestId("composer-apps")).not.toBeInTheDocument();
+      expect(appCalls()).toEqual([]);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    }
+  });
+
   it("renames the shared-apps dialog Shared services", async () => {
     renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
     act(() => fakeEngine.update({ links: [ana(true)] }));
