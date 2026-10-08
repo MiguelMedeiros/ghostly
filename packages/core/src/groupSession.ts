@@ -525,6 +525,22 @@ export class GroupSession {
     return Math.max(0, entry.high - lowest + 1 - (1 + entry.window.filter(n => n >= lowest).length));
   }
 
+  /**
+   * The other members some of whose messages below the highest seen never arrived (what a sync names in `miss`), each
+   * with a mark that changes when what is missing does: an author answers only from its own last `outlog`, so the rest
+   * is for another member to hand on.
+   */
+  lacking(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const [sender, epochs] of Object.entries(this.state.seen)) {
+      if (sender === this.myKey || !rosterHas(this.roster, sender)) continue;
+      const marks = Object.entries(epochs).filter(([, entry]) => this.gaps(entry).length)
+        .map(([e, entry]) => `${e}:${entry.high}:${entry.window.length}`);
+      if (marks.length) out.set(sender, marks.join(","));
+    }
+    return out;
+  }
+
   private serialize<T>(run: () => Promise<T>): Promise<T> {
     const operation = this.queue.then(run);
     this.queue = operation.then(() => {}, () => {});
