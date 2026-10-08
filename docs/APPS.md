@@ -82,3 +82,8 @@ ghostly app publish <that folder> --key ~/ghostly-keys/chess-publisher.key --out
 ```
 
 Then update `sequence` and `digest` in its `listing.json`, and sign the index again.
+
+The end-to-end tests run a pinned copy of Chess, `e2e/fixtures/chess` (its `chess.json` says where it came from).
+Refresh it after any change to `apps/mini/chess` with `node tools/scripts/refresh-chess-fixture.mjs`, or from the
+signed bundle with `--bundle <app.ghostlyapp, or a URL pinned to a commit>`, which checks Chess's publisher key.
+`tools/scripts/test/chessFixture.test.ts` fails while the fixture is older than `apps/mini/chess`.

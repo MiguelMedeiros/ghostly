@@ -17,16 +17,15 @@ const root = resolve(import.meta.dirname, "../../..");
 const script = join(root, "tools/scripts/store-keys.sh");
 let tmp: string;
 let cli: string;
-let chess: string;
+// Chess's pinned build (e2e/fixtures/chess, tools/scripts/refresh-chess-fixture.mjs): the script reads its index.html.
+const chess = join(root, "e2e/fixtures/chess");
 
 beforeAll(async () => {
   tmp = mkdtempSync(join(tmpdir(), "store-keys-"));
   // The CLI's build leaves its npm dependencies out, so it runs from under the repository, where they resolve.
   mkdirSync(join(root, "node_modules/.cache"), { recursive: true });
   cli = mkdtempSync(join(root, "node_modules/.cache/store-keys-cli-"));
-  chess = join(tmp, "chess");
   await build({ configFile: join(root, "packages/cli/vite.config.ts"), root: join(root, "packages/cli"), logLevel: "silent", build: { outDir: cli, emptyOutDir: true } });
-  await build({ configFile: join(root, "apps/mini/chess/vite.config.ts"), logLevel: "silent", build: { outDir: chess, emptyOutDir: true } });
 }, 180_000);
 
 afterAll(() => {
