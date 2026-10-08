@@ -48,8 +48,8 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
         aria-label={t("apps.page.details", { title: app.title })} aria-describedby={`${versionId} ${hintId}`}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          <span className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
-          <span id={hintId} data-testid="installed-app-hint" className={`block text-xs truncate ${color}`}>{hint.text}</span>
+          <span dir="auto" className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
+          <span id={hintId} dir="auto" data-testid="installed-app-hint" className={`block text-xs truncate ${color}`}>{hint.text}</span>
         </span>
       </button>
       {app.run.status === "ok" && <Button data-testid="installed-app-open" onClick={onOpen}>{t("apps.page.open")}</Button>}
@@ -82,7 +82,7 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} disabled={!read}
           className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          <span className="block text-sm text-text-primary truncate">{store.name ?? store.url}</span>
+          <span dir="auto" className="block text-sm text-text-primary truncate">{store.name ?? store.url}</span>
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             {kind && <span>{kind}</span>}
             {read && <span>{t(store.apps.length === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps.length })}</span>}
@@ -108,8 +108,8 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
               <li key={listing.ref} className="flex items-center gap-3 px-4 py-3" data-testid="app-listing" data-ref={listing.ref}>
                 <AppIcon size={32} installed={have} />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm text-text-primary truncate">{listing.title}</span>
-                  <span className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
+                  <span dir="auto" className="block text-sm text-text-primary truncate">{listing.title}</span>
+                  <span dir="auto" className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
                 </span>
                 {have ? <span className="text-xs text-text-muted">{t("apps.store.installed")}</span>
                   : !removed && <Button data-testid="app-listing-install" onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}

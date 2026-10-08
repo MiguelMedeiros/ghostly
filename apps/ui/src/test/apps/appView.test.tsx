@@ -318,6 +318,8 @@ describe("keys and focus in a mini-app", () => {
     await open(REF, null);
     const app = screen.getByTestId("mini-app");
     expect(app).toHaveAttribute("aria-modal", "true");
+    // The publisher's title, in its own direction: in a right-to-left app an English title is cut at its end.
+    expect(within(app).getByTestId("mini-app-title")).toHaveAttribute("dir", "auto");
     expect(page.inert).toBe(true);
     expect(lock.inert).toBe(false);
     expect(within(app).getByRole("button", { name: "Close" })).toHaveFocus();

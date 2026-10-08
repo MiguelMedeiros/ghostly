@@ -164,9 +164,9 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
     <div className="flex items-center gap-3">
       <AppIcon size={48} icon={icon} installed={installed} />
       <div className="min-w-0">
-        <h2 id={titleId} className="text-lg font-medium text-text-primary break-words">{title}</h2>
+        <h2 id={titleId} dir="auto" className="text-lg font-medium text-text-primary break-words">{title}</h2>
         {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
-        {tagline && <p className="text-sm text-text-secondary">{tagline}</p>}
+        {tagline && <p dir="auto" className="text-sm text-text-secondary">{tagline}</p>}
       </div>
     </div>
   );
@@ -232,7 +232,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {preview && (
         <>
           <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} />
-          {preview.manifest.description && <p className="text-sm text-text-secondary whitespace-pre-line">{preview.manifest.description}</p>}
+          {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{preview.manifest.description}</p>}
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
           <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} />
@@ -295,7 +295,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     <Shell titleId={titleId} onClose={onClose} testId="app-details">
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} />
-      {app.description && <p className="text-sm text-text-secondary whitespace-pre-line">{app.description}</p>}
+      {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
       {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation", { sequence: String(app.equivocation.sequence) })}</Line>}
       {app.pending && (

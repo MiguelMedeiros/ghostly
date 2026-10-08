@@ -525,5 +525,37 @@ describe("with the apps flag on", () => {
     await user.click(await screen.findByTestId("app-install-confirm"));
     await waitFor(() => expect(screen.getByTestId("installed-app-open")).toHaveFocus());
   });
+
+  it("gives each text a publisher or a store wrote its own direction, so in a right-to-left app an English title is cut at its end", async () => {
+    const title = "Chess Tournament Organizer for Friends!";
+    const unread = "https://raw.githubusercontent.com/g/unread/HEAD/ghostly-store.json";
+    fakeEngine.on("appList", () => [installed({ title, description: "Chess for two." })])
+      .on("appStoreList", () => [
+        { key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+          name: "Ghostly", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+          apps: [{ ref: `${KEY}/other`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Snake", tagline: "Eat, grow." }], removed: [] },
+        { key: "u", fingerprint: "qrst uvwx yz12 3456", url: unread, preloaded: true, sequence: 0, expired: false, apps: [], removed: [] },
+      ]).on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByText(title)).toHaveAttribute("dir", "auto");
+    expect(within(row).getByTestId("installed-app-hint")).toHaveAttribute("dir", "auto");
+    expect(screen.getByText(unread)).toHaveAttribute("dir", "auto");
+    expect(screen.getByText("Ghostly")).toHaveAttribute("dir", "auto");
+    await user.click(screen.getByText("Ghostly"));
+    expect(screen.getByText("Snake")).toHaveAttribute("dir", "auto");
+    expect(screen.getByText("Eat, grow.")).toHaveAttribute("dir", "auto");
+    await user.click(within(row).getByRole("button", { name: `${title}: details` }));
+    const details = screen.getByTestId("app-details");
+    expect(within(details).getByRole("heading", { name: title })).toHaveAttribute("dir", "auto");
+    expect(within(details).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
+    expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
+  });
+
+  it("gives the card's title its own direction", async () => {
+    fakeEngine.on("appList", () => []);
+    renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    expect(await screen.findByTestId("app-card-title")).toHaveAttribute("dir", "auto");
+  });
 });
 

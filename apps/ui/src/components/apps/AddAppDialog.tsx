@@ -84,13 +84,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         {store && (
           <div className="space-y-3" data-testid="apps-add-store">
             <div className="bg-surface rounded-xl px-4 py-3 space-y-1">
-              <p className="text-sm text-text-primary">{store.name}</p>
+              <p dir="auto" className="text-sm text-text-primary">{store.name}</p>
               <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
                 <span>{store.kind === "indexed" ? t("apps.store.indexed") : t("apps.store.curated")}</span>
                 <span>{t(store.apps === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps })}</span>
                 <Fingerprint value={store.fingerprint} />
               </p>
-              {store.description && <p className="text-xs text-text-secondary whitespace-pre-line">{store.description}</p>}
+              {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires) })}</p>}
             </div>
             <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>
