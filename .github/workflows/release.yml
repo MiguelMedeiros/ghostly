@@ -143,6 +143,8 @@ jobs:
           # nothing that does not verify against the public key it was built with.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The e2e suite's switch, empty here as in the web image: the build refuses it anyway (apps/web/appsTestFlag.ts).
+          VITE_APPS_TEST: ""
         with:
           # Updater bundles are made for releases only: an ordinary `tauri build`
           # needs no signing key (apps/desktop/tauri.release.conf.json).
@@ -222,6 +224,9 @@ jobs:
 
       - name: Build
         run: npm run build:extension
+        env:
+          # The e2e suite's switch, empty here as in the web image: the build refuses it anyway (apps/web/appsTestFlag.ts).
+          VITE_APPS_TEST: ""
 
       - name: Package
         run: |

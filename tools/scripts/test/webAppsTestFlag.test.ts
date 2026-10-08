@@ -1,9 +1,13 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveConfig } from "vite";
 import { expect, it } from "vitest";
-import { checkAppsTestFlag } from "../../../apps/web/appsTestFlag";
+import { appsTestGuard, checkAppsTestFlag, type AppsTestBuild } from "../../../apps/web/appsTestFlag";
 
-// covers: apps.web-sandbox
+// covers: apps.web-sandbox, apps.desktop-sandbox
+
+const ROOT = join(import.meta.dirname, "../../..");
 
 /** The e2e suite's mini-app switch (VITE_APPS_TEST) is made into a build and can never reach a deployed one. */
 it("takes 1 or nothing, and refuses an image build that carries it", () => {
@@ -23,9 +27,80 @@ it("the web image empties it before its build", () => {
 });
 
 it("the app reads it only from the build (import.meta.env), never from storage or the address", () => {
-  for (const file of ["apps/web/src/host.ts", "apps/web/src/main.tsx"]) {
-    const text = readFileSync(join(import.meta.dirname, "../../..", file), "utf8");
-    for (const line of text.split("\n").filter((l) => l.includes("VITE_APPS_TEST") && !l.trim().startsWith("//"))) expect(line, file).toContain('import.meta.env.VITE_APPS_TEST === "1"');
+  for (const file of ["apps/web/src/host.ts", "apps/web/src/main.tsx", "apps/ui/src/desktop/host.ts", "apps/ui/src/lib/apps/flag.ts"]) {
+    const text = readFileSync(join(ROOT, file), "utf8");
+    const lines = text.split("\n").filter((l) => l.includes("VITE_APPS_TEST") && !/^\s*(\/\/|\/\*\*|\*)/.test(l));
+    expect(lines.length, file).toBeGreaterThan(0);
+    for (const line of lines) expect(line, file).toMatch(/import\.meta\.env\??\.VITE_APPS_TEST === "1"/);
+  }
+});
+
+it("Desktop takes it in a debug build only, the extension never", () => {
+  // `tauri build --debug` (every e2e build of Desktop) hands its build command TAURI_ENV_DEBUG=true.
+  expect(checkAppsTestFlag({ VITE_APPS_TEST: "1", TAURI_ENV_DEBUG: "true" }, "desktop")).toBe(true);
+  // `vite build apps/ui` on its own makes no app.
+  expect(checkAppsTestFlag({ VITE_APPS_TEST: "1" }, "desktop")).toBe(true);
+  // A release build: `tauri build` without --debug.
+  for (const debug of ["false", "0", ""]) expect(() => checkAppsTestFlag({ VITE_APPS_TEST: "1", TAURI_ENV_DEBUG: debug }, "desktop")).toThrow(/Desktop release build/);
+  expect(() => checkAppsTestFlag({ VITE_APPS_TEST: "1", TAURI_ENV_DEBUG: "true", GHOSTLY_BUILD: "abc123" }, "desktop")).toThrow(/image build/);
+  expect(checkAppsTestFlag({ TAURI_ENV_DEBUG: "false" }, "desktop")).toBe(false);
+  expect(checkAppsTestFlag({ VITE_APPS_TEST: "", TAURI_ENV_DEBUG: "false" }, "desktop")).toBe(false);
+  expect(() => checkAppsTestFlag({ VITE_APPS_TEST: "1" }, "extension")).toThrow(/extension build/);
+  expect(checkAppsTestFlag({}, "extension")).toBe(false);
+  // The web app is never inside `tauri build`: Tauri's variables mean nothing to it.
+  expect(checkAppsTestFlag({ VITE_APPS_TEST: "1", TAURI_ENV_DEBUG: "false" })).toBe(true);
+});
+
+it("the guard reads the env the build compiles in, a .env file included", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ghostly-apps-test-"));
+  const flag = process.env.VITE_APPS_TEST;
+  const debug = process.env.TAURI_ENV_DEBUG;
+  delete process.env.VITE_APPS_TEST;
+  const resolve = (build: AppsTestBuild) => resolveConfig({ root: dir, envDir: dir, configFile: false, logLevel: "silent", plugins: [appsTestGuard(build)] }, "build", "production");
+  try {
+    await expect(resolve("extension")).resolves.toBeTruthy();
+    writeFileSync(join(dir, ".env.production"), "VITE_APPS_TEST=1\n");
+    await expect(resolve("extension")).rejects.toThrow(/extension build/);
+    process.env.TAURI_ENV_DEBUG = "false";
+    await expect(resolve("desktop")).rejects.toThrow(/Desktop release build/);
+    process.env.TAURI_ENV_DEBUG = "true";
+    await expect(resolve("desktop")).resolves.toBeTruthy();
+  } finally {
+    if (flag === undefined) delete process.env.VITE_APPS_TEST; else process.env.VITE_APPS_TEST = flag;
+    if (debug === undefined) delete process.env.TAURI_ENV_DEBUG; else process.env.TAURI_ENV_DEBUG = debug;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("every client's build runs the guard, as that client", () => {
+  for (const [config, build] of [["apps/web/vite.config.ts", "web"], ["apps/ui/vite.config.ts", "desktop"], ["apps/extension/vite.config.ts", "extension"]]) {
+    expect(readFileSync(join(ROOT, config), "utf8"), config).toContain(`plugins: [appsTestGuard("${build}"), `);
+  }
+});
+
+/** A workflow's steps, each from its `- name:` line to the next one. */
+const steps = (file: string) => readFileSync(join(ROOT, ".github/workflows", file), "utf8").split(/\n(?= +- name: )/);
+
+it("CI makes a Desktop e2e build with it in debug only, and an extension build never", () => {
+  let desktop = 0;
+  for (const file of readdirSync(join(ROOT, ".github/workflows")).filter((name) => /\.ya?ml$/.test(name))) {
+    for (const step of steps(file).filter((text) => text.includes('VITE_APPS_TEST: "1"'))) {
+      expect(step, file).not.toMatch(/build:extension|tauri-action/);
+      if (/tauri -- build/.test(step)) {
+        expect(step, file).toMatch(/tauri -- build --debug/);
+        desktop++;
+      }
+    }
+  }
+  expect(desktop).toBeGreaterThan(0);
+});
+
+it("the release workflow empties it for the Desktop and extension builds", () => {
+  const release = steps("release.yml");
+  for (const marker of [/uses: tauri-apps\/tauri-action@/, /run: npm run build:extension\n/]) {
+    const found = release.filter((step) => marker.test(step));
+    expect(found, String(marker)).toHaveLength(1);
+    expect(found[0], String(marker)).toMatch(/\n +VITE_APPS_TEST: ""\n/);
   }
 });
 
