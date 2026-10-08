@@ -58,7 +58,7 @@ fn client() -> Result<&'static reqwest::Client, String> {
     Ok(CLIENT.get_or_init(|| client))
 }
 
-/// `fetch`, for an address on the profile's list of shared apps only. One that is not on it (an
+/// `fetch`, for an address on the profile's list of shared services only. One that is not on it (an
 /// app shared before the list existed) is asked about once (`ask`, the native dialog); a refused
 /// or unasked one is never connected to.
 pub async fn fetch_shared<F, Fut>(

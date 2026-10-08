@@ -64,14 +64,14 @@ The e2e suite ([e2e/README.md](../e2e/README.md)) launches Chromium profiles wit
 │   WebRTC                 RTCPeerConnection + "ghostly/1"           │
 │   Iroh (wasm)            through an Iroh relay                     │
 │   HyperDHT               through a HyperDHT relay, when set        │
-│   chat session           frames, files, payments, shared apps      │
+│   chat session           frames, files, payments, shared services  │
 │ IndexedDB and file storage: chats, messages, wallets, settings     │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 - **One UI.** The extension builds `apps/ui/src/` as is. A Vite plugin shared with the web app and Desktop (`packages/browser/vite-plugin.ts`) swaps the modules that touch the platform for stand-ins in `packages/browser/src/platform`.
 - **Why an offscreen document.** Manifest V3 service workers have no `RTCPeerConnection` and are stopped when idle. The offscreen document (reason `WEB_RTC`) has WebRTC and lives as long as the browser runs the extension, which is the peer's lifetime.
-- **State.** Chats (with their keys), messages, shared apps, wallets and settings survive restarts. Files go to the origin-private file system. Presence exists only while the offscreen document runs. Chat keys are stored as Desktop stores them, unencrypted in the browser profile; wallet secrets are sealed with a device key.
+- **State.** Chats (with their keys), messages, shared services, wallets and settings survive restarts. Files go to the origin-private file system. Presence exists only while the offscreen document runs. Chat keys are stored as Desktop stores them, unencrypted in the browser profile; wallet secrets are sealed with a device key.
 - **Relays.** Pkarr relays, the Iroh relays and the HyperDHT relay are set in Settings, Network. See [TRANSPORTS.md](TRANSPORTS.md).
 
 ## Sharing a local app

@@ -401,7 +401,7 @@ describe("shared apps on a paired session (services/1)", () => {
     await vi.waitFor(() => expect(b.link.sessionOffers.peer).toEqual(["calls/1"]));
     expect(a.presenceServices()).toEqual([]);
     expect(b.link.supportsServices).toBe(false);
-    await expect(a.link.request("atlas", { method: "GET", path: "/" })).rejects.toThrow(/cannot share web apps/);
+    await expect(a.link.request("atlas", { method: "GET", path: "/" })).rejects.toThrow(/cannot share services/);
     expect(localFetch).not.toHaveBeenCalled();
   });
 

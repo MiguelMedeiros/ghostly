@@ -264,7 +264,7 @@ export function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-/** The stores "Clear all data" empties: chats and their keys, messages, files, shared apps, groups, mini-apps and their data. */
+/** The stores "Clear all data" empties: chats and their keys, messages, files, shared services, groups, mini-apps and their data. */
 export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STORES.fileState, STORES.fileChunks, STORES.services, STORES.groups, STORES.apps, STORES.appStores, STORES.appStorage] as const;
 
 /**

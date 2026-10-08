@@ -3,7 +3,7 @@
 `ghostly` ([`@ghostlytools/cli`](../packages/cli), in `packages/cli`) is the Ghostly app's own engine without a screen. A
 bot or a script gets the same chats as the web app, the extension and the Desktop: `ghostly1` invites, one chat that
 starts on the DHT and goes live, typing (with a bot's status line), replies, edits, reactions and forwards, private and community groups, files and voice notes, wallets and payments,
-identity proofs, shared web apps and voice calls. Every command prints JSON, and `ghostly listen` streams what happens
+identity proofs, shared services and voice calls. Every command prints JSON, and `ghostly listen` streams what happens
 as one JSON event per line. `ghostly help <command>` (or `<command> --help`) prints a command's usage and options.
 
 - Every command, event and socket method: [packages/cli/README.md](../packages/cli/README.md).

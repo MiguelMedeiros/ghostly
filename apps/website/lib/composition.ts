@@ -79,7 +79,7 @@ export const BLOCKS: Block[] = [
 
   // Chat, files & media
   b("chat", "talk", "Chat", ["400-chat"], "One kind of chat: messages with storage receipts and retries, over a live link or through the DHT."),
-  b("paired", "talk", "Chat sessions", ["401-paired-chat", "501-paired-files"], "The live session of every chat: pinned keys, a durable outbox, names and pictures, negotiated files, calls and shared apps."),
+  b("paired", "talk", "Chat sessions", ["401-paired-chat", "501-paired-files"], "The live session of every chat: pinned keys, a durable outbox, names and pictures, negotiated files, calls and shared services."),
   b("compat", "talk", "Compatibility chats", ["402-legacy-chat", "502-legacy-files"], "Chats with Ghostly 0.4 contacts and the older Rust CLI keep their older wire: DHT text and, on a live link, files and calls. Never created for a new chat."),
   b("onechat", "talk", "DHT fallback and upgrade", ["400-chat", "403-dht-text", "100-transports"], "A first pairing with no direct path starts on the DHT, and every chat moves to a live link by itself when one connects."),
   b("callsall", "talk", "Calls in every chat", ["600-media", "401-paired-chat"], "Voice, video and screen sharing in the chat session while it is live, not only with Ghostly 0.4 contacts."),

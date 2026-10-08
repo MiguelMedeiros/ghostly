@@ -300,6 +300,13 @@
     lock("script-src 'wasm-unsafe-eval'");
   };
 
+  // What a failed call rejects with: one of the broker's codes (MINI_APP_ERROR_CODES, packages/core/src/miniApp.ts),
+  // or "failed" for anything else, this runner's own failures included. Read without the prototypes the app may change.
+  const CODES = ["bad-key", "bad-path", "bad-request", "failed", "full", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped", "too-fast", "too-large", "unknown-type"];
+  const known = Object.create(null);
+  for (let i = 0; i < CODES.length; i++) known[CODES[i]] = true;
+  const refusal = (code) => new Error(typeof code === "string" && known[code] === true ? code : "failed");
+
   Promise.all([portReady, lockHolds]).then(([port, holds]) => {
     if (!holds) { port.close(); return stop("lock"); }
     let nextId = 1;
@@ -309,7 +316,7 @@
     const send = (type, args) => new Promise((resolve, reject) => {
       const id = nextId++;
       pending.set(id, { resolve, reject });
-      try { port.postMessage({ id, type, args }); } catch (error) { pending.delete(id); reject(new TypeError("Not a JSON value")); }
+      try { port.postMessage({ id, type, args }); } catch (error) { pending.delete(id); reject(refusal("bad-request")); }
     });
     port.onmessage = (event) => {
       const message = event.data;
@@ -319,7 +326,7 @@
         if (!waiting) return;
         pending.delete(message.id);
         if (message.ok === true) waiting.resolve(message.value);
-        else waiting.reject(new Error(typeof message.error === "string" ? message.error : "refused"));
+        else waiting.reject(refusal(message.error));
         return;
       }
       if (message.event === "start" && entry === null && typeof message.data === "string") {

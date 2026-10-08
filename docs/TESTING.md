@@ -126,19 +126,22 @@ Other workflows:
 | E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
 | E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0 | nightly, before every release, by hand |
 | Desktop on macOS (`desktop-macos.yml`) | as in CI | also nightly, and by hand with `repeat` |
-| Merge queue (`merge-queue.yml`) | updates the next armed pull request into `dev` that fell behind ([below](#the-merge-queue)) | every 10 minutes, on every push to `dev`, when a pull request's CI ends, by hand |
+| Merge queue (`merge-queue.yml`) | the merge train: lands pull requests labelled `queue` on `dev` and `epic/*` in batches ([below](#the-merge-queue)) | when a `queue` label is added, when a pull request's CI ends, on pushes to `dev` and `epic/*`, every 10 minutes, by hand |
 | Desktop media streaming (`desktop-media.yml`) | a 100 MB video plays and seeks from the stored file in WebKitGTK (Linux) and WebView2 (Windows), `e2e/desktop/video-stream.spec.ts` | pull requests that touch the file stream, the file store or the video bubble (not drafts: leaving draft runs it); nightly; by hand |
 
 ### The merge queue
 
-`dev` merges a pull request only when CI Success is green on a branch that is up to date with `dev`, and auto-merge (`gh pr merge --squash --auto`) merges it by itself once that holds. When one merges, the others fall behind. **Merge queue** (`merge-queue.yml`, [`tools/scripts/merge-queue.mjs`](../tools/scripts/merge-queue.mjs)) brings them up to date one at a time:
+`dev` merges only a branch that is up to date with it and has CI Success green. Pull requests get there through the **merge train** (`merge-queue.yml`, [`tools/scripts/merge-train.mjs`](../tools/scripts/merge-train.mjs)), one train per base (`dev` and each `epic/*`):
 
-- it looks only at pull requests that are ready (not drafts) and armed;
-- while one of them is up to date and running CI, or about to merge, it waits;
-- otherwise it updates the oldest one that is behind (`batch/` branches first). One whose CI Success is red on its commit waits for its owner's push;
-- one that conflicts with `dev` is skipped, with one comment per commit asking for a rebase.
+- A reviewed, green pull request gets the label `queue`. The line is `queue:priority` first (flake and test fixes, which unblock everyone), then the time `queue` was added. A draft, or one whose CI Success is not green on its last commit, waits and keeps its place.
+- With no batch open, the train takes up to 5 from the front of the line and builds `batch/<base>-<time>` on the base's tip, one squash commit per pull request (`<title> (#n)`). It opens that as a pull request, and CI runs once for all of them. One that conflicts leaves the line with `queue:conflict` and a comment.
+- A green batch lands with one commit per pull request: on `dev` by the rebase merge, on an epic by a fast-forward of exactly the tested commits. The originals close with "Merged via #<batch>".
+- A red batch is split in halves until the pull request that breaks CI is found. A pull request alone in a red batch gets one more try (flakes), then `queue:failed` and a comment, and the others land. While CI Success is red on the base itself, nobody is blamed.
+- Each queued pull request has one comment that says its place in line. It also records the head that was queued: `queue` vouches for that reviewed head, so a later push takes the pull request out of the line.
 
-So a finished pull request needs `gh pr ready` and `gh pr merge --squash --auto`, and nothing more unless it conflicts or its CI goes red. The workflow acts as a GitHub App (secrets `QUEUE_APP_ID`, `QUEUE_APP_PRIVATE_KEY`): an update made with the workflow's own token would start no CI. Without the secrets each run ends green with the notice "queue app not configured". Run it by hand with **dry run** to see what it would do.
+So a finished pull request needs `gh pr ready`, a review, and the label. Don't arm auto-merge. After a conflict, a failure or a new push, fix it, get it reviewed, and add `queue` again; it goes to the back of the line. An epic's umbrella pull request never boards: it merges into `dev` with a merge commit.
+
+The workflow acts as a GitHub App (secrets `QUEUE_APP_ID`, `QUEUE_APP_PRIVATE_KEY`): a batch pushed with the workflow's own token would start no CI. Without the secrets each run ends green with the notice "queue app not configured", and one maintainer machine runs the train instead: `node tools/scripts/merge-train.mjs --run --every 300` (with its gh login). It holds a lock, so only one runs per clone, and it stops by itself once the workflow runs a train or finds the queue app configured. `--dry-run` (or **dry run** when you run the workflow by hand) shows what it would do and changes nothing.
 
 The app's e2e suites do not run on pull requests: they would hold up every merge. See [e2e/README.md](../e2e/README.md#when-they-run).
 

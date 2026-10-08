@@ -45,7 +45,7 @@ One peer, three hosts: the web app, the extension and Desktop all build `apps/ui
 ## Layers
 
 ```
- services     chat · calls · files · payments · shared apps · groups
+ services     chat · calls · files · payments · shared services · groups
  session      chat session (paired-chat/1): pinned keys, capabilities, ordered frames
  layer 1      WebRTC · Iroh · HyperDHT        (a stream, when one connects)
  layer 0      Pkarr records on the Mainline DHT (rendezvous, signaling, DHT text)

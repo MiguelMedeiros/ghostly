@@ -1,9 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { build } from "vite";
 import { expect, test, type Page } from "@playwright/test";
 import { ESCAPES, PRECONNECT_PROBES, RTC_PROBES, appEntry, hitTags, startListeners, type Listeners, type ProbeTargets } from "../support/appsSandbox";
+import { chessEntryHtml } from "../support/chessFixture";
 import { RUNNER_CSP } from "../../apps/web/runnerPolicy";
 
 /**
@@ -245,22 +244,14 @@ test("the runner refuses to run outside its sandboxed frame, and its server send
 test("Chess, as it is built, runs under the runner's lock", {
   tag: ["@feature:apps.web-sandbox", "@feature:apps.chess"],
 }, async ({ page }) => {
-  const out = mkdtempSync(join(tmpdir(), "ghostly-chess-"));
-  try {
-    const root = join(import.meta.dirname, "../../apps/mini/chess");
-    await build({ configFile: join(root, "vite.config.ts"), root, logLevel: "silent", build: { outDir: out, emptyOutDir: true } });
-    const entry = readFileSync(join(out, "index.html"), "utf8");
-    await appPage(page);
-    const ref = "chesspublisherkey/chess";
-    await open(page, ref, entry, { permissions: ["chat"], chat: { linkId: "link-chess" } });
-    const board = page.frameLocator(`iframe[data-app="${ref}"]`).locator(".board");
-    await expect(board).toBeVisible();
-    await expect(board.locator("button")).toHaveCount(64);
-    // Its one script ran with the runner's nonce, and what it keeps went to its own scope in that chat.
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.calls().filter((c) => c.ref === "chesspublisherkey/chess").every((c) => !c.scope || c.scope === "link-chess"))).toBe(true);
-  } finally {
-    rmSync(out, { recursive: true, force: true });
-  }
+  await appPage(page);
+  const ref = "chesspublisherkey/chess";
+  await open(page, ref, chessEntryHtml(), { permissions: ["chat"], chat: { linkId: "link-chess" } });
+  const board = page.frameLocator(`iframe[data-app="${ref}"]`).locator(".board");
+  await expect(board).toBeVisible();
+  await expect(board.locator("button")).toHaveCount(64);
+  // Its one script ran with the runner's nonce, and what it keeps went to its own scope in that chat.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.calls().filter((c) => c.ref === "chesspublisherkey/chess").every((c) => !c.scope || c.scope === "link-chess"))).toBe(true);
 });
 
 test.describe("an app granted internet", () => {

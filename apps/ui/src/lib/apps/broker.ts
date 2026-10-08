@@ -11,7 +11,7 @@
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
-import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppJson, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
+import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
@@ -121,20 +121,20 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
   return out;
 }
 
-class Refusal extends Error {}
-const refuse = (code: string): never => { throw new Refusal(code); };
+class Refusal extends Error { declare message: MiniAppErrorCode }
+const refuse = (code: MiniAppErrorCode): never => { throw new Refusal(code); };
 
 /**
  * The engine's refusals an app is told by their code (its errors cross the RPC as "<code>: words", engine/apps.ts):
  * `full` (its storage in this scope holds 5 MiB), `no-file` (no such file in its bundle), `stopped` (a store removed
  * or its publisher revoked the version running, WISP 1200 § Takedowns), and the bounds the broker checks too. Any other failure is `failed`, without the words.
  */
-const ENGINE_REFUSALS: ReadonlySet<string> = new Set(["full", "no-file", "too-large", "bad-key", "stopped"]);
+const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "bad-key", "stopped"]);
 
-function refusalOf(error: unknown): string {
+function refusalOf(error: unknown): MiniAppErrorCode {
   if (error instanceof Refusal) return error.message;
   const code = error instanceof Error ? /^([a-z][a-z-]*): /.exec(error.message)?.[1] : undefined;
-  return code && ENGINE_REFUSALS.has(code) ? code : "failed";
+  return code && ENGINE_REFUSALS.has(code) ? code as MiniAppErrorCode : "failed";
 }
 
 function storageKey(value: unknown): string {
@@ -248,7 +248,7 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
     while (recent.length && recent[0]! <= at - 1000) recent.shift();
 
     const id = data && typeof data === "object" && Number.isSafeInteger((data as { id?: unknown }).id) && (data as { id: number }).id >= 0 ? (data as { id: number }).id : null;
-    const fail = (error: string) => { if (id !== null) post({ id, ok: false, error }); };
+    const fail = (error: MiniAppErrorCode) => { if (id !== null) post({ id, ok: false, error }); };
     if (recent.length > MINI_APP_LIMITS.requestsPerSecond) return fail("too-fast");
     let text: string;
     try { text = JSON.stringify(data) ?? ""; } catch { return fail("bad-request"); }

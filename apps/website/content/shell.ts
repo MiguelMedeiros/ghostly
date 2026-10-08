@@ -10,6 +10,7 @@ export const shell = {
     skip: "Skip to content",
     nav: {
       story: "How it works",
+      apps: "Apps",
       developers: "Developers",
       wisps: "Protocol",
       roadmap: "Roadmap",
@@ -29,6 +30,7 @@ export const shell = {
       links: {
         open: "Open in your browser",
         download: "Download",
+        apps: "Apps",
         privacy: "Privacy",
         terms: "Terms",
         overview: "Build with Ghostly",

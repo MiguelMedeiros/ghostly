@@ -1,0 +1,1 @@
+Clear all data names the hosted local services it removes "shared services", the name the apps now use for `services/1`. The text now also says what it already removed from the peer database: the installed mini-apps with their data (WISP 1200), which the confirmation lists as "Installed apps and their data" only where Apps shows. What it removes does not change.

@@ -13,6 +13,8 @@ import { InstalledAppDialog, AppInstallDialog } from "../../components/apps/AppI
 import { Apps } from "../../pages/Apps";
 import { AddAppDialog } from "../../components/apps/AddAppDialog";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { UpdateProvider } from "../../contexts/UpdateContext";
+import { Settings } from "../../pages/Settings";
 import { setAppOpener } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
@@ -51,6 +53,16 @@ const ready = { status: "ready", transport: "iroh/1" } as NonNullable<LinkView["
 /** A paired chat with Ana; `live`: connected, both apps offering apps/1. */
 const ana = (live: boolean) => linkView({ id: "link-1", peerPubKeyZ32: "peer", profile: "paired-chat/1", pairing: live ? ready : { status: "waiting" } as never,
   dataLink: live ? "open" : "idle", sessionOffers: { mine: ["apps/1"], peer: live ? ["apps/1"] : null }, capabilities: { files: true, payments: false } });
+
+/** Settings' storage section with Clear all data asked: its list of what goes. */
+async function openClearAllData(): Promise<HTMLElement> {
+  const { user } = renderApp(
+    <LockScreenProvider><UpdateProvider><Routes><Route path="/settings/:section?" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>,
+    { route: "/settings/storage" },
+  );
+  await user.click(await screen.findByTestId("clear-all-data"));
+  return screen.getByTestId("clear-all-data-list");
+}
 
 /** Every engine call about apps so far. */
 const appCalls = () => fakeEngine.calls.filter((c) => c.method.startsWith("app")).map((c) => c.method);
@@ -137,10 +149,19 @@ describe("with the apps flag off", () => {
     expect(screen.getByRole("link", { name: /raw\.githubusercontent\.com/ })).toBeInTheDocument();
     await user.click(screen.getByTestId("composer-more"));
     expect(screen.queryByTestId("composer-apps")).not.toBeInTheDocument();
-    // The Shared services dialog keeps its old name.
-    expect(screen.getByRole("heading", { name: "Apps with Ana" })).toBeInTheDocument();
+    // The Shared services dialog has that name with the flag off too.
+    expect(screen.getByRole("heading", { name: "Shared services with Ana" })).toBeInTheDocument();
     expect(appCalls()).toEqual([]);
     expect(fetches).toEqual([]);
+  });
+
+  it("Clear all data says nothing of installed apps", async () => {
+    fakeEngine.appRunner = "/app-frame.html";
+    setAppOpener(vi.fn(async () => {}));
+    const list = await openClearAllData();
+    expect(within(list).getByText("Shared services")).toBeInTheDocument();
+    expect(within(list).queryByText("Installed apps and their data")).not.toBeInTheDocument();
+    expect(list.querySelector('[data-item="appsData"]')).toBeNull();
   });
 });
 
@@ -159,12 +180,20 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
-  it("in the Android app shows nothing of it, even in the e2e suite's build: no page, no place, no tab, no composer row, no request", async () => {
+  it.each([
     // The Android app is the Desktop app built for Android: a Tauri page with an Android agent.
-    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36");
+    ["in the Android app", "Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"],
+    // Desktop on Windows: a Tauri page in WebView2.
+    ["on Desktop on Windows", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0"],
+  ])("%s shows nothing of it, even in the e2e suite's build: no page, no place, no tab, no card, no composer row, no request", async (_where, agent) => {
+    // covers: apps.desktop-sandbox
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agent);
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
-    fakeEngine.appRunner = "ghostly-app://localhost/";
-    fakeEngine.appRunnerServed = true;
+    // A runner the app does not serve itself: without the platform rule, its header would be asked.
+    fakeEngine.appRunner = "/app-frame.html";
+    fakeEngine.appRunnerServed = false;
+    const { runnerPolicy } = await import("../../lib/apps/runnerCheck");
+    vi.mocked(runnerPolicy).mockClear();
     try {
       const { user } = renderApp(
         <LockScreenProvider>
@@ -184,19 +213,29 @@ describe("with the apps flag on", () => {
       expect(screen.queryByTestId("apps-page")).not.toBeInTheDocument();
       expect(screen.queryByTestId("account-apps")).not.toBeInTheDocument();
       expect(screen.queryByTestId("mobile-tab-apps")).not.toBeInTheDocument();
+      // The card as its text, as in an older app.
       expect(screen.queryByTestId("app-card")).not.toBeInTheDocument();
+      expect(screen.getByText(/Opened Chess 1\.2\.0 in this chat/)).toBeInTheDocument();
       await user.click(screen.getByTestId("composer-more"));
       expect(screen.queryByTestId("composer-apps")).not.toBeInTheDocument();
       expect(appCalls()).toEqual([]);
+      expect(runnerPolicy).not.toHaveBeenCalled();
+      expect(fetches).toEqual([]);
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }
   });
 
-  it("renames the shared-apps dialog Shared services", async () => {
+  it("keeps the dialog's name Shared services", async () => {
     renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
     act(() => fakeEngine.update({ links: [ana(true)] }));
     expect(await screen.findByRole("heading", { name: "Shared services with Ana" })).toBeInTheDocument();
+  });
+
+  it("Clear all data lists the installed apps and their data", async () => {
+    const list = await openClearAllData();
+    expect(within(list).getByText("Shared services")).toBeInTheDocument();
+    expect(await within(list).findByText("Installed apps and their data")).toBeInTheDocument();
   });
 
   it("puts Apps beside Services under the list, and in Services' tab on a phone (five tabs)", async () => {
@@ -436,5 +475,32 @@ describe("with the apps flag on", () => {
     await user.click(screen.getByTestId("app-uninstall-confirm"));
     expect(fakeEngine.callsTo("appUninstall")).toEqual([{ ref: REF }]);
     expect(fetches).toEqual([]);
+  });
+
+  it("an installed app's row is named for its details and describes its version and line, so a stopped app says so to a screen reader", async () => {
+    const run = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
+    fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" });
+    expect(details).toHaveAccessibleDescription("1.2.0 Stopped");
+  });
+
+  it("the focus goes to Add once an uninstalled app's row or a removed store's block is gone, not lost on the page", async () => {
+    let apps = [installed()];
+    let stores = [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+      name: "Ghostly", kind: "curated" as const, sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] }];
+    fakeEngine.on("appList", () => apps).on("appStoreList", () => stores).on("appCheckUpdates", () => [])
+      .on("appUninstall", () => { apps = []; return undefined; }).on("appStoreRemove", () => { stores = []; return undefined; });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" }));
+    await user.click(screen.getByTestId("app-uninstall-open"));
+    await user.click(screen.getByTestId("app-uninstall-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
+
+    screen.getByTestId("app-store-remove").focus();
+    await user.click(screen.getByTestId("app-store-remove"));
+    await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
   });
 });

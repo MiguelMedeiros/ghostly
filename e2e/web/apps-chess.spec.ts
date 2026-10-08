@@ -5,13 +5,13 @@ import { composerRow } from "../support/composer";
 import { CHESS_REPO, CHESS_STORE_URL, ChessPublisher, openPeers, STORE_NAME, chessFrame, colourOf, installFromStore, miniApp, move } from "../support/chessApp";
 
 /*
- * Chess end to end (WISP 1200; WISP 405 § An app), on the e2e suite's build (VITE_APPS_TEST): the real Chess, built
- * from apps/mini/chess, bundled and signed by the headless CLI with keys made for the test, in a store the CLI signed,
- * served at raw.githubusercontent.com URLs by the test. Ana installs it from the store and opens it in her chat with
- * Bob; Bob installs it from her card, which asks nothing of any host before he presses "Install and open"; they play
- * Scholar's mate over `paired-app`, and Bob's game is back after he reloads. Then what a client refuses: a tampered
- * bundle, a lower sequence, a version a store removed (stopped until "Run anyway"), a version its publisher revoked
- * (stopped for good).
+ * Chess end to end (WISP 1200; WISP 405 § An app), on the e2e suite's build (VITE_APPS_TEST): the real Chess, its
+ * pinned build (e2e/fixtures/chess, refreshed by tools/scripts/refresh-chess-fixture.mjs), bundled and signed by the
+ * headless CLI with keys made for the test, in a store the CLI signed, served at raw.githubusercontent.com URLs by the
+ * test. Ana installs it from the store and opens it in her chat with Bob; Bob installs it from her card, which asks
+ * nothing of any host before he presses "Install and open"; they play Scholar's mate over `paired-app`, and Bob's game
+ * is back after he reloads. Then what a client refuses: a tampered bundle, a lower sequence, a version a store removed
+ * (stopped until "Run anyway"), a version its publisher revoked (stopped for good).
  */
 
 async function setNickname(peer: Peer, nick: string): Promise<void> {

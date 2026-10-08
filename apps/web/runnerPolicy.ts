@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { Plugin } from "vite";
-import { checkAppsTestFlag } from "./appsTestFlag";
+import { buildAppsTestEnv, checkAppsTestFlag } from "./appsTestFlag";
 
 /** Where the mini-app runner is served (public/app-frame.html; WISP 1200, "The runner and the broker"). */
 export const RUNNER_PATH = "/app-frame.html";
@@ -71,10 +71,15 @@ export function runnerHeaders(): Plugin {
     }
     next();
   };
+  // The e2e suite's build, read as the guard reads it (apps/web/appsTestFlag.ts): a .env file's switch counts too.
+  let testBuild = false;
   return {
     name: "ghostly-runner-headers",
+    configResolved(config) {
+      testBuild = checkAppsTestFlag(buildAppsTestEnv(config.env), "web");
+    },
     generateBundle() {
-      if (!checkAppsTestFlag()) return;
+      if (!testBuild) return;
       const runner = readFileSync(new URL("./public/app-frame.html", import.meta.url), "utf8");
       this.emitFile({ type: "asset", fileName: UNGUARDED_RUNNER_PATH.slice(1), source: withoutHintGuard(runner) });
     },

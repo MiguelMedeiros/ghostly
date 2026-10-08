@@ -9,7 +9,7 @@ Every 1:1 chat has two layers ([WISP 400](wisps/400-chat.md), [WISP 100](wisps/1
 | Layer | What | Carries |
 |---|---|---|
 | 0: the DHT | Signed [Pkarr](https://github.com/pubky/pkarr) records on the Mainline DHT | Rendezvous, signaling, the capability record, and short text when nothing else connects ([DHT text](wisps/403-dht-text.md), 256 bytes), with the offer of a file waiting to go |
-| 1: a stream | WebRTC, Iroh or HyperDHT | The chat session: text, files, payments, calls signaling, shared apps |
+| 1: a stream | WebRTC, Iroh or HyperDHT | The chat session: text, files, payments, calls signaling, shared services |
 
 - The DHT is always there underneath. It is never "selected" and never fails a chat.
 - A chat is `live` (a stream carries it), `on-dht` (no stream yet, retried in the background) or `dht-chosen` (either side picked **DHT only**).

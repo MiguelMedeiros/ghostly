@@ -8,7 +8,7 @@ One chat, one invite (chat family revision 0.2, decided 2026-09-25) is implement
 
 - Every new chat starts from one bech32m code, `ghostly1…`, also shared as `https://ghostly.tools/#ghostly1…` ([801](801-invitation-profiles.md), #210).
 - The DHT is the rendezvous and floor of every 1:1 chat. First contact goes over the DHT and a live link at once; the chat upgrades to WebRTC, Iroh or HyperDHT by itself and falls back to DHT text when none connects ([400](400-chat.md), #209, #229). A person can keep a chat on DHT only.
-- Calls, shared apps, files of any size and payments run on the live session ([401](401-paired-chat.md), #207, #233). Desktop on Linux calls with its own media ([601](601-webrtc-media.md#desktop-on-linux), #331).
+- Calls, shared services, files of any size and payments run on the live session ([401](401-paired-chat.md), #207, #233). Desktop on Linux calls with its own media ([601](601-webrtc-media.md#desktop-on-linux), #331).
 - Chats with Ghostly 0.4 contacts keep working as compatibility chats ([402](402-legacy-chat.md)).
 - Chats carry replies, edits, emoji reactions, forwards and a typing indicator; message text shows lists, quotes, headings and links ([400](400-chat.md), [401](401-paired-chat.md), #344, #347, #351, #354, #370, #404).
 - A contact's own app can wake a closed web app with a push that carries no content (`wake/1`, [401](401-paired-chat.md), #394). Private groups past 16 members run on hubs, members whose apps stay online ([Group Mesh](902-group-mesh.md), #402).
@@ -36,12 +36,12 @@ What `dev` runs on each client today. This table and the evidence per WISP below
 | HyperDHT | Only through a relay the person sets | Same | Native sidecar | #187, #231 |
 | Files (`files/2`, `files/3` of any size) | Yes | Yes | Yes | #233 |
 | Calls, screen share inside a call | Yes | Yes | macOS; Linux with its own media (webrtc-rs, GStreamer), no screen share yet; Windows untested | #207, #253, #331 |
-| Shared apps (host / open) | No / No | Yes / Yes | Yes / Yes | #207, #268 |
+| Shared services (host / open) | No / No | Yes / Yes | Yes / Yes | #207, #268 |
 | Profiles and backups | Yes | Yes | Yes | #171 |
 | Wallets (per network) | Yes; WebLN web only | Yes | Yes; Bitcoin Core RPC Desktop only | #276, #277, #314, #317 |
 | Identity proofs | Yes | Yes | Yes | [300](300-peer-proofs.md) |
 | Groups (mesh, community) | Yes | Yes | Yes | [900](900-group-sessions.md) |
-| Headless CLI (`ghostly`) | The app's engine on Node, for bots: `ghostly1` invites, one chat, groups, wallets (not Bark), files, identity proofs, shared apps; DHT through relays only | | | [1100](1100-headless.md), #323 to #327 |
+| Headless CLI (`ghostly`) | The app's engine on Node, for bots: `ghostly1` invites, one chat, groups, wallets (not Bark), files, identity proofs, shared services; DHT through relays only | | | [1100](1100-headless.md), #323 to #327 |
 
 
 ## Evidence per WISP (2026-09-28)
@@ -82,7 +82,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull req
 | [AT Protocol · 312](312-atproto.md) | AT Protocol identity (Bluesky) | Draft | Provider `atproto` (#248), e2e against a local PDS; its client-metadata file is live on ghostly.tools |
 | [DID · 311](311-did.md) | Decentralized identifiers (did:key, did:jwk, did:dht, did:web) | Draft | Experimental provider `did` (#249), under Advanced in the picker |
 | [400](400-chat.md) | Chat Messaging | Draft | One chat on two layers in every new chat: DHT first contact and floor, live link, self-upgrade, DHT only per chat (#209, #229); replies (#347), reactions (#354), edits (#351), lists, quotes, headings and links in the text (#370), forwards to other chats and groups (#404) |
-| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared apps (`services/1`) while live; typing, recording or a bot's status (`typing/1`, #344, #361), reactions (`react/1`, #354), edits (`edit/1`, #351), replies on texts and files (#347, #359), forwards (`fw`, #404), a goodbye on the way out (`paired-bye`, #369), a wake-up push for a closed web app (`wake/1`, #394) |
+| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared services (`services/1`) while live; typing, recording or a bot's status (`typing/1`, #344, #361), reactions (`react/1`, #354), edits (`edit/1`, #351), replies on texts and files (#347, #359), forwards (`fw`, #404), a goodbye on the way out (`paired-bye`, #369), a wake-up push for a closed web app (`wake/1`, #394) |
 | [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 apps and the Rust compatibility CLI; existing chats and v0.4 codes only; "Continue in a new chat" |
 | [403](403-dht-text.md) | DHT Text (formerly Bounded DHT Text) | Draft | First contact and floor of every chat, fallback after a drop, DHT only per chat; pinned mailboxes (#302); a reply's id, an edit, reactions and a forward's hop count ride in the envelope (#347, #351, #354, #404); one TTL and one packet size for every envelope (#399) |
 | [Store-and-forward · 404](404-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1` (#108), opt-in: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests; held replies (#347, #359), forwards (#404) and a picture's size (#420) |
@@ -91,7 +91,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull req
 | [502](502-legacy-files.md) | Compatibility File Frames | Draft; retained for compatibility | Compatibility chats only; both peers online |
 | [600](600-media.md) | Voice and Video | Draft | 1:1 calls in every chat while live; screen sharing from inside a call (#253); Linux Desktop with native media, no screen sharing yet; the microphone, camera and speaker chosen in Settings and during a call (#388, #400, #406, #419) |
 | [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); Desktop on Linux with WebRTC in Rust and GStreamer media (#331); signals carry up to eight candidates and calls use the profile's TURN relay (#375); on Linux, the chosen devices in GStreamer (#406, #419) |
-| [700](700-local-services.md) | Local Services | Draft | HTTP proxy in every chat, hosted from Desktop, the extension and the CLI; Shared apps from the composer's + (#268) |
+| [700](700-local-services.md) | Local Services | Draft | HTTP proxy in every chat, hosted from Desktop, the extension and the CLI; Shared services from the composer's + (#268) |
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | `ph` frames in the chat session (`services/1`, #207); the web app can neither host nor open one |
 | [800](800-invite-join.md) | Invite and Join | Draft | Bearer `ghostly1` invite that pins the inviter's participation key (#210); a copy cannot stop a paired chat (#302); admission protocol proposed |
 | [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Every new chat makes a `ghostly1…` code (#210); `pair1/`, `pair2d/` and v0.4 codes still read |
@@ -102,7 +102,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull req
 | [1000](1000-storage.md) | Storage Contract | Draft | Experimental: object contract, naming and adapter rules |
 | [1001](1001-local-storage.md) | Local File Storage | Draft | Experimental adapter |
 | [1002](1002-s3-storage.md) | S3-Compatible Storage | Draft | Experimental adapter; local S3 server end-to-end |
-| [Headless · 1100](1100-headless.md) | Headless Runtime and Local Control API | Draft | Experimental: the app's engine on Node for bots: a per-profile daemon, the `ghostly` CLI and its event stream; chats, groups, wallets, files, proofs and shared apps (#323 to #327); voice calls with the audio on a Unix socket (#350, #362); typing, replies, edits, reactions and forwards (#344, #347, #351, #354, #404); Pkarr over the Mainline DHT beside the relays (#392); agent turns and an allowlist on `listen` (#431); npm package not published |
+| [Headless · 1100](1100-headless.md) | Headless Runtime and Local Control API | Draft | Experimental: the app's engine on Node for bots: a per-profile daemon, the `ghostly` CLI and its event stream; chats, groups, wallets, files, proofs and shared services (#323 to #327); voice calls with the audio on a Unix socket (#350, #362); typing, replies, edits, reactions and forwards (#344, #347, #351, #354, #404); Pkarr over the Mainline DHT beside the relays (#392); agent turns and an allowlist on `listen` (#431); npm package not published |
 
 Dependencies in headers describe the candidate modular design. Conditional dependencies are stated in the body (for example, existing media requires WebRTC). A document can refer to another without making its entire capability mandatory. In particular, 100 does not require a particular transport, 300 does not require an external identity, and 900 does not require GossipSub; the group mesh (902) is the first profile of 900 and 901 an optional later one. Group chat uses 400, group file sharing uses 500, and neither implies group payments or localhost permissions.
 

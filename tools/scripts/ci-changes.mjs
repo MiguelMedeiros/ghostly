@@ -53,6 +53,13 @@ export const WEBSITE_INPUTS = [
   "apps/ui/src/components/walletCardTypes.ts",
   "apps/ui/src/components/wallet-deck.css",
   "apps/ui/src/components/wallet-cards.css",
+  // The store pages' readers: sync-store-core.mjs's FILES, which `sync-store-core.mjs --check` compares.
+  "packages/core/src/appStore.ts",
+  "packages/core/src/appBundle.ts",
+  "packages/core/src/appStatements.ts",
+  "packages/core/src/canonicalJson.ts",
+  "packages/core/src/bytes.ts",
+  "packages/core/src/image.ts",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];
@@ -76,6 +83,14 @@ export const PACKAGES_READ_FROM_SITE = [
   // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach.
   "docs/AI-AGENTS.md",
   "apps/website/content/agents.ts",
+  // packages/browser's websiteStore test: the store pages' reader, its copy of core's, the build's reader and the test store.
+  "apps/website/lib/storeRead.ts",
+  "apps/website/lib/appsGate.ts",
+  "apps/website/lib/latestRelease.ts",
+  "apps/website/lib/release.ts",
+  "apps/website/lib/store-core/",
+  "apps/website/scripts/sync-store.mjs",
+  "apps/website/e2e/fixtures/store/",
 ];
 
 export const covers = (inputs, file) => inputs.some((p) => (p.endsWith("/") ? file.startsWith(p) : file === p));
