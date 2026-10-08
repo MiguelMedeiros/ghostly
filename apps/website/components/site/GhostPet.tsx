@@ -78,8 +78,10 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
       const dt = last ? Math.min(0.1, (now - last) / 1000) : 1 / 60;
       last = now;
       const idle = now - lastMove.current;
-      const dx = mouse.current.x + 50 - current.current.x;
-      const dy = mouse.current.y + 30 - current.current.y;
+      // Its spot beside the pointer, kept on the page: past an edge it would chase a point it never reaches, and its
+      // clock would never stop.
+      const dx = Math.max(0, Math.min(bounds.current.w, mouse.current.x + 50)) - current.current.x;
+      const dy = Math.max(0, Math.min(bounds.current.h, mouse.current.y + 30)) - current.current.y;
       const cx = current.current.x + 18;
       const cy = current.current.y + 22;
       const near = Math.hypot(mouse.current.x - cx, mouse.current.y - cy) < 60;
