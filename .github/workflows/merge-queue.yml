@@ -42,10 +42,12 @@ jobs:
   bases:
     name: Bases with a train
     # A pull request's CI ending can turn a batch or a queued pull request green; CI on a push already ran this. A label
-    # matters only when it is one of the train's.
+    # matters only when it is one of the train's. A push matters when a person moved the base: the train's own pushes
+    # (a batch lands as one squash merge per pull request) come from the run that goes on by itself.
     if: >-
       (github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request') &&
-      (github.event_name != 'pull_request_target' || startsWith(github.event.label.name, 'queue'))
+      (github.event_name != 'pull_request_target' || startsWith(github.event.label.name, 'queue')) &&
+      (github.event_name != 'push' || github.event.sender.type != 'Bot')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

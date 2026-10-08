@@ -126,7 +126,7 @@ Other workflows:
 | E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
 | E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0 | nightly, before every release, by hand |
 | Desktop on macOS (`desktop-macos.yml`) | as in CI | also nightly, and by hand with `repeat` |
-| Merge queue (`merge-queue.yml`) | the merge train: lands pull requests labelled `queue` on `dev` and `epic/*` in batches ([below](#the-merge-queue)) | when a `queue` label is added, when a pull request's CI ends, on pushes to `dev` and `epic/*`, every 10 minutes, by hand |
+| Merge queue (`merge-queue.yml`) | the merge train: lands pull requests labelled `queue` on `dev` and `epic/*` in batches ([below](#the-merge-queue)) | when a `queue` label is added, when a pull request's CI ends, on a person's push to `dev` and `epic/*` (not the train's own), every 10 minutes, by hand |
 | Desktop media streaming (`desktop-media.yml`) | a 100 MB video plays and seeks from the stored file in WebKitGTK (Linux) and WebView2 (Windows), `e2e/desktop/video-stream.spec.ts` | pull requests that touch the file stream, the file store or the video bubble (not drafts: leaving draft runs it); nightly; by hand |
 
 ### The merge queue
