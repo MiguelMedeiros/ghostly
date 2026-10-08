@@ -1,5 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import { NetworkSettings } from "../../components/NetworkSettings";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
@@ -57,6 +58,21 @@ describe("Settings, Network: Iroh relays", () => {
     await user.type(field, "https://relay.example.com/");
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { irohRelays: ["https://relay.example.com/"] } });
+  });
+
+  it("says only why a plain http:// relay elsewhere than this machine is refused, not \"Something went wrong\" first", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    // As the engine refuses it (packages/browser/src/engine/node.ts).
+    engine.on("updateSettings", ({ settings }) => {
+      const problem = (settings as { irohRelays?: string[] }).irohRelays?.map(irohRelayProblem).find(Boolean);
+      if (problem) throw new Error(problem);
+    });
+    const field = screen.getByTestId("network-iroh-relays");
+    await user.clear(field);
+    await user.type(field, "http://relay.example.org/");
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error").textContent).toBe("Use an https:// relay address: http://relay.example.org/");
   });
 });
 

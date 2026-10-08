@@ -380,7 +380,8 @@
     "usdtRejected": "USDT RPC 拒绝了这个操作"
   },
   "relays": {
-    "atLeastOne": "请至少输入一个中继地址"
+    "atLeastOne": "请至少输入一个中继地址",
+    "useHttps": "请使用 https:// 中继地址：{{address}}"
   },
   "transport": {
     "adapterFailed": "无法启动。重新打开此聊天以重试。",

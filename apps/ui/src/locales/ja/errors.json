@@ -380,7 +380,8 @@
     "usdtRejected": "USDT の RPC が操作を拒否しました"
   },
   "relays": {
-    "atLeastOne": "リレーのアドレスを 1 つ以上入力してください"
+    "atLeastOne": "リレーのアドレスを 1 つ以上入力してください",
+    "useHttps": "https:// のリレーアドレスを使ってください：{{address}}"
   },
   "transport": {
     "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",
