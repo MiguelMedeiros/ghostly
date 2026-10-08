@@ -272,17 +272,17 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
       await vi.waitFor(async () => expect((await db.getMessage(linkId, sent.messageId!))?.delivery).toBe("delivered"), { timeout: 20_000 });
       expect(received.map(m => m.text)).toEqual([QUESTION]);
       expect(received[0]).not.toHaveProperty("card");
-      expect(await db.getMessage(linkId, sent.messageId!)).toMatchObject({ via: "pkarr", card: { kind: "buttons" }, buttonsRestore: "due" });
+      expect(await db.getMessage(linkId, sent.messageId!)).toMatchObject({ via: "pkarr", card: { kind: "buttons" }, cardRestore: "due" });
       // A plain text on the floor has no buttons to restore.
       const plain = await node.sendMessage({ linkId, text: "just text" });
       await vi.waitFor(async () => expect((await db.getMessage(linkId, plain.messageId!))?.delivery).toBe("delivered"), { timeout: 20_000 });
-      expect(await db.getMessage(linkId, plain.messageId!)).not.toHaveProperty("buttonsRestore");
+      expect(await db.getMessage(linkId, plain.messageId!)).not.toHaveProperty("cardRestore");
     } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
   }, 60_000);
 
   // As the floor left it: delivered as text, the buttons due.
   const floored = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "", id: `me_${WIRE("F")}`, wireId: WIRE("F"), text: QUESTION, sender: "me", timestamp: Date.now() - 60_000,
-    via: "pkarr", delivery: "delivered", card: readStatusCard(ask())!, buttonsRestore: "due", ...fields });
+    via: "pkarr", delivery: "delivered", card: readStatusCard(ask())!, cardRestore: "due", ...fields });
 
   it("once live, the buttons go again as an edit of the buttons alone, once, restarts included", async () => {
     const t = await setup({ rows: [floored()] });
@@ -290,7 +290,7 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     expect(t.contactEdits[0]).toMatchObject({ id: WIRE("F"), e: 1, m: QUESTION, sc: readStatusCard(ask()) });
     // Here: the same text, no version kept (no edit mark), confirmed by the contact, and not due any more.
     await vi.waitFor(async () => expect((await t.row(`me_${WIRE("F")}`)).edit?.pending).toBeUndefined(), { timeout: 10_000 });
-    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ text: QUESTION, buttonsRestore: "sent", edit: { seq: 1, history: [], restore: true } });
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ text: QUESTION, cardRestore: "sent", edit: { seq: 1, history: [], restore: true } });
     // Both apps closed and open again: nothing goes a second time.
     const keys = t.keys;
     await t.stop();
@@ -324,7 +324,7 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     await new Promise(resolve => setTimeout(resolve, 1_000));
     expect(t.contactEdits).toHaveLength(1);
     // Still pending: it goes again by the queue's backoff, or on the next session.
-    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ buttonsRestore: "sent", edit: { seq: 1, pending: true } });
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ cardRestore: "sent", edit: { seq: 1, pending: true } });
   }, 30_000);
 
   it("a contact whose app shows no buttons gets no edit (an older app would mark it edited): the buttons stay due", async () => {
@@ -332,13 +332,13 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     await vi.waitFor(() => expect(t.view().sessionOffers?.peer).toContain("edit/1"));
     await new Promise(resolve => setTimeout(resolve, 1_500));
     expect(t.contactEdits).toEqual([]);
-    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ buttonsRestore: "due" });
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ cardRestore: "due" });
     expect((await t.row(`me_${WIRE("F")}`)).edit).toBeUndefined();
   }, 30_000);
 
   it("a question that went live, or a plain text on the floor, gets nothing", async () => {
-    const t = await setup({ rows: [floored({ id: `me_${WIRE("L")}`, wireId: WIRE("L"), via: "datalink", buttonsRestore: undefined }),
-      floored({ id: `me_${WIRE("P")}`, wireId: WIRE("P"), text: "just text", card: undefined, buttonsRestore: undefined })] });
+    const t = await setup({ rows: [floored({ id: `me_${WIRE("L")}`, wireId: WIRE("L"), via: "datalink", cardRestore: undefined }),
+      floored({ id: `me_${WIRE("P")}`, wireId: WIRE("P"), text: "just text", card: undefined, cardRestore: undefined })] });
     await vi.waitFor(() => expect(t.view().sessionOffers?.peer).toContain(BUTTONS_CAPABILITY));
     await new Promise(resolve => setTimeout(resolve, 1_500));
     expect(t.contactEdits).toEqual([]);
@@ -382,7 +382,7 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
       t.contact.setHoldSupport(true, 1);
     }
     await vi.waitFor(() => expect(reads).toBeGreaterThan(0), { timeout: 5_000 });
-    // The bot's app restores the buttons live (`restoreButtons`): the edit comes before its message.
+    // The bot's app restores the buttons live (`restoreCards`): the edit comes before its message.
     expect(await t.contact.sendEdit({ id: WIRE("H"), e: 1, ts: Date.now(), m: QUESTION, sc: readStatusCard(ask())! })).toBeNull();
     // Kept for its message, not confirmed: the bot's app keeps it pending and says it again.
     const buffer = (t.node as unknown as { editBuffer: { held: Map<string, Map<string, unknown>> } }).editBuffer;
@@ -412,7 +412,7 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     expect(t.contactEdits[0]).toMatchObject({ id: WIRE("F"), e: 1, m: QUESTION, sc: readStatusCard(ask()) });
     // Restored once ("sent"), but not settled: an edit unconfirmed goes again (the edit queue's resends, the next session).
     await new Promise(resolve => setTimeout(resolve, 300));
-    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ buttonsRestore: "sent", edit: { seq: 1, pending: true } });
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ cardRestore: "sent", edit: { seq: 1, pending: true } });
     // The contact's app has the question now and confirms it: settled.
     t.contact.confirmEdit(WIRE("F"), 1);
     await vi.waitFor(async () => expect((await t.row(`me_${WIRE("F")}`)).edit?.pending).toBeUndefined());

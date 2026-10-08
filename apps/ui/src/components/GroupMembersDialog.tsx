@@ -16,7 +16,8 @@ import { avatarFromFile } from "../lib/avatarImage";
 import { ContactMarks } from "./identities/ContactMarks";
 import { Select } from "./ui/Select";
 import { useI18n } from "../contexts/I18nContext";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -39,7 +40,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const backdrop = useBackdropDismiss(onClose);
   const faces = useContactFaces();
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   /** The member whose Remove was pressed, asked about before anything happens. */
   const [removing, setRemoving] = useState<GroupMemberView | null>(null);
   useEffect(() => {
@@ -53,8 +54,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   }, [returnFocus]);
   const live = state?.groups.find(g => g.id === group.id) ?? group;
   const run = async (key: string, action: () => Promise<unknown>) => {
-    setBusy(key); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); } finally { setBusy(null); }
+    setBusy(key); setError(null);
+    try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); } finally { setBusy(null); }
   };
   // The name being typed, while the admin renames the group; null otherwise. The engine cleans it and says what it refuses.
   const [naming, setNaming] = useState<string | null>(null);
@@ -164,7 +165,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
         })}
       </ul>
     </div>}
-    {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    {error && <Notice problem={error} className="mt-3 text-sm" />}
     {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>

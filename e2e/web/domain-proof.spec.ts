@@ -44,7 +44,11 @@ test("a domain proven by a DNS TXT record is verified by the one contact it is s
 
   // Not published yet: nothing is saved, and the person is told why.
   await add.getByTestId("add-identity-finish").click();
-  await expect(add.getByTestId("add-identity-error")).toContainText(`No Ghostly TXT record at _ghostly.${site.domain}`);
+  // In a few words; the exact name it looked up behind the ⓘ.
+  const error = add.getByTestId("add-identity-error");
+  await expect(error).toContainText("No Ghostly TXT record in the domain's DNS");
+  await error.getByTestId("add-identity-error-info").click();
+  await expect(error.getByTestId("add-identity-error-details")).toContainText(`No Ghostly TXT record at _ghostly.${site.domain}`);
   // Published: checked, then saved.
   site.publishTxt(value);
   await add.getByTestId("add-identity-finish").click();
@@ -83,7 +87,7 @@ test("a domain proven by a DNS TXT record is verified by the one contact it is s
   back = await turnTheirs(bob);
   await back.getByTestId("chat-identity-recheck").click();
   await expect(back).toHaveAttribute("data-status", "failed");
-  await expect(back).toContainText(`No Ghostly TXT record at _ghostly.${site.domain}`);
+  await expect(back).toContainText("No Ghostly TXT record in the domain's DNS");
   // Published again: the next check confirms it again.
   site.publishTxt(value);
   await back.getByTestId("chat-identity-recheck").click();

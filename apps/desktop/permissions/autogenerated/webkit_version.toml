@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-webkit-version"
+description = "Enables the webkit_version command without any pre-configured scope."
+commands.allow = ["webkit_version"]
+
+[[permission]]
+identifier = "deny-webkit-version"
+description = "Denies the webkit_version command without any pre-configured scope."
+commands.deny = ["webkit_version"]

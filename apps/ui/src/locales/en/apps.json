@@ -54,7 +54,7 @@
     "notSigned": "Not signed correctly. Ghostly won't install it.",
     "offline": "You are offline.",
     "otherApp": "The link holds a different app.",
-    "refused": "Ghostly won't install it: {{reason}}",
+    "refused": "Ghostly won't install it",
     "removed": "A store you added removed this app.",
     "revoked": "Its publisher revoked this version.",
     "rollback": "The link holds an older version.",
@@ -109,6 +109,11 @@
     "open": "Open",
     "stores": "Stores"
   },
+  "pick": {
+    "hint": "It runs in a chat, with your contact.",
+    "none": "No chats yet. Pair with a contact first.",
+    "title": "Open {{title}} in a chat"
+  },
   "store": {
     "count": "{{count}} apps",
     "countOne": "1 app",
@@ -123,5 +128,15 @@
     "remove": "Remove",
     "stale": "Out of date since {{date}}"
   },
-  "title": "Apps"
+  "title": "Apps",
+  "view": {
+    "back": "Back to the chat",
+    "beside": "Show the chat",
+    "full": "Full width",
+    "resume": "Back to {{title}}",
+    "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
+    "stoppedRevoked": "{{title}} was stopped: its maker revoked this version",
+    "with": "{{title}} with {{name}}",
+    "withName": "with {{name}}"
+  }
 }

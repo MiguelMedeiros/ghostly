@@ -27,7 +27,7 @@ const show = (review: Review, language?: AppRenderOptions["language"]) => {
 describe("a refused send whose ecash came back", () => {
   it("says what came back and what the mint kept, with the why behind the ⓘ", async () => {
     const { user } = show(refused({ error: "Refused: Already paid by another member of the group. 98 sats came back; the mint kept 2 as its fee.", returned: { amount: 98, fee: 2 } }));
-    expect(screen.getByTestId("review-error")).toHaveTextContent(/^Refused: Already paid by another member of the group\. 98 sats came back; the mint kept 2 as its fee\.$/);
+    expect(screen.getByTestId("review-error")).toHaveTextContent(/^The payment was refused(?:Already paid by another member of the group\. 98 sats came back; the mint kept 2\.)$/);
     expect(screen.queryByTestId("review-returned-text")).not.toBeInTheDocument();
     const info = screen.getByTestId("review-returned-info");
     expect(info).toHaveAttribute("aria-expanded", "false");
@@ -38,7 +38,7 @@ describe("a refused send whose ecash came back", () => {
 
   it("says it in the app's language", () => {
     show(refused({ error: "Refused: Already paid by another member of the group. 98 sats came back; the mint kept 2 as its fee.", returned: { amount: 98, fee: 2 } }), "pt");
-    expect(screen.getByTestId("review-error")).toHaveTextContent("Recusado: Já foi pago por outro membro do grupo. 98 sats voltaram; o mint ficou com 2 de taxa.");
+    expect(screen.getByTestId("review-error")).toHaveTextContent("O pagamento foi recusado" + "Já foi pago por outro membro do grupo. 98 sats voltaram; o mint ficou com 2.");
   });
 
   it("has nothing behind an ⓘ when all of it came back, or when what came back is not known", () => {

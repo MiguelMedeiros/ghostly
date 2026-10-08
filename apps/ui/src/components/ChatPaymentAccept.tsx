@@ -7,7 +7,8 @@ import type { PeerLinkState, WalletNetwork } from "../lib/platform";
 import { CardDeck } from "./WalletDeck";
 import { SwitchLook } from "./wallet/ui";
 import type { InstanceCard } from "./walletCardData";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /** A card's test id on the Accept side: its kind and its network (`payment-accept-cashu-testnet`). */
 export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(/:/g, "-")}`;
@@ -50,7 +51,7 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
   const here = network ? cards.filter((c) => c.network === network) : cards;
   const active = here.find((c) => c.id === chosen)?.id ?? here.find((c) => on(c, saved))?.id ?? here[0]?.id ?? "";
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [done, setDone] = useState(false);
   const changed = cards.some((c) => draft[c.id] !== on(c, saved));
   const connected = peer?.dataLink === "open";
@@ -86,7 +87,7 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
   const toggle = (id: string) => {
     if (busy) return;
     setDraft((d) => ({ ...d, [id]: !d[id] }));
-    setDone(false); setError("");
+    setDone(false); setError(null);
   };
   /**
    * The draft as the engine keeps it: a way of paying is on when one of its cards is, and on the networks of the
@@ -106,13 +107,13 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
     return { methods, networks };
   };
   const save = () => {
-    setBusy(true); setError("");
+    setBusy(true); setError(null);
     void onSave(accepts()).then(() => {
       setDone(true); setBusy(false);
       // Save goes grey once saved: the keyboard goes back to the cards rather than out of the sheet.
       const at = document.activeElement;
       if (!at || at === document.body || at === saveRef.current) saveRef.current?.closest(".composer-sheet")?.querySelector<HTMLElement>('[role=switch][tabindex="0"]')?.focus({ preventScroll: true });
-    }, (e: unknown) => { setError(errorText(e, t)); setBusy(false); });
+    }, (e: unknown) => { setError(problemText(e, t)); setBusy(false); });
   };
 
   // A network with no card says so alone, unless the other network's switches wait to be saved.
@@ -126,7 +127,7 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
     </>}
     {!(bare && state === "idle") && <>
     <p className="payment-accept-status" data-testid="payment-accept-status" data-state={state} role="status">{status}</p>
-    {error && <p role="alert" className="text-danger text-xs m-0">{error}</p>}
+    {error && <Notice problem={error} className="text-xs m-0" />}
     <button ref={saveRef} type="button" data-testid="payment-accept-save" className="composer-sheet-action" disabled={!changed || busy} onClick={save}>
       {t(busy ? "payments.accept.saving" : "payments.accept.save")}
     </button>

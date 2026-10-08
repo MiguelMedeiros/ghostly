@@ -16,7 +16,7 @@
     "symbols": "Simboli"
   },
   "closeCamera": "Chiudi fotocamera",
-  "dhtTooLong": "Questo testo è di {{bytes}} byte UTF-8. La DHT ne consente al massimo {{max}}; accorcialo o usa una connessione diretta. La bozza viene conservata.",
+  "dhtTooLong": "Troppo lungo per la DHT ({{bytes}} di {{max}} byte). Accorcialo o connettiti dal vivo; la bozza resta.",
   "document": "Documento",
   "dropFiles": "Rilascia per inviare",
   "emoji": "Emoji",
@@ -70,5 +70,5 @@
   "skinTone": "Tonalità della pelle",
   "takePhoto": "Scatta una foto",
   "tooLong": "È troppo lungo da inviare ({{count}} caratteri, il limite è {{max}}).",
-  "tooLongDht": "È troppo lungo per la DHT. Una volta connessi peer to peer, fatture lunghe e token ecash ci stanno."
+  "tooLongDht": "Troppo lungo per la DHT. Ci sta quando siete connessi direttamente."
 }

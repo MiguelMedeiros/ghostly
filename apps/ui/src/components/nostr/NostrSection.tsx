@@ -7,7 +7,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { Block, Button, Notice, Row, Section, Switch, input } from "../wallet/ui";
 import { FieldGrid, InputGroup } from "../layout";
 import { NostrPublishDialog } from "./NostrPublishDialog";
-import { errorText } from "../../lib/errorText";
+import { problemLine } from "../../lib/problemText";
 
 
 /**
@@ -33,8 +33,8 @@ export function NostrSection() {
   const save = (patch: Partial<typeof settings>) => { setError(""); return engine.call("updateSettings", { settings: { nostr: patch } }); };
   const relays = draft ?? settings.relays.join("\n");
   const relaysChanged = relays.split(/\s+/).filter(Boolean).join("\n") !== settings.relays.join("\n");
-  const saveRelays = () => save({ relays: relays.split(/\s+/).filter(Boolean) }).then(() => { savedAfter.current = engine.state; }, e => setError(errorText(e, t)));
-  const toggle = (patch: Partial<typeof settings>) => void save(patch).catch(e => setError(errorText(e, t)));
+  const saveRelays = () => save({ relays: relays.split(/\s+/).filter(Boolean) }).then(() => { savedAfter.current = engine.state; }, e => setError(problemLine(e, t)));
+  const toggle = (patch: Partial<typeof settings>) => void save(patch).catch(e => setError(problemLine(e, t)));
 
   return (<>
     <Section title="Nostr" testId="nostr-section">
@@ -69,7 +69,7 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
   const [note, setNote] = useState("");
   const p = view.profile?.profile;
   const [fields, setFields] = useState({ displayName: "", name: "", about: "", picture: "", nip05: "", website: "" });
-  const load = () => { onError(""); void engine.call("nostrLoadOwn", { subject: view.subject }).catch(e => onError(errorText(e, t))); };
+  const load = () => { onError(""); void engine.call("nostrLoadOwn", { subject: view.subject }).catch(e => onError(problemLine(e, t))); };
   const startProfile = () => { setFields({ displayName: p?.name ?? "", name: p?.handle ?? p?.name ?? "", about: p?.about ?? "", picture: "", nip05: p?.nip05 ?? "", website: p?.website ?? "" }); setMode("profile"); };
   const short = `${view.npub.slice(0, 12)}…${view.npub.slice(-4)}`;
   return (

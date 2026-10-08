@@ -46,10 +46,12 @@
     "protection": {
       "confirm": "J'ai compris. Créer la sauvegarde sans phrase.",
       "label": "Protection",
-      "mainnet": "Ce profil a des portefeuilles Mainnet qui ont contenu de l'argent réel. Quiconque obtient le fichier peut le dépenser.",
+      "mainnet": "Ce profil a détenu de l'argent réel",
+      "mainnetNext": "Qui a le fichier peut le dépenser.",
       "none": "Sans phrase",
       "passphrase": "Phrase secrète",
-      "warning": "Non chiffré. Le fichier contient en clair les clés, les discussions et les secrets des portefeuilles de ce profil. Quiconque obtient le fichier obtient tout ce qu'il contient, y compris l'argent de ses portefeuilles."
+      "warning": "Non chiffré",
+      "warningNext": "Qui a le fichier obtient vos clés, discussions et argent."
     },
     "refresh": "Actualiser",
     "repeat": "Répétez",

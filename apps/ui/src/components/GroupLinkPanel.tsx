@@ -9,7 +9,8 @@ import { groupLinkUrl } from "../lib/groups";
 import { COMMUNITY_LIMITS, MAX_GROUP_MEMBERS } from "@ghostly/core";
 import { GroupAvatar } from "./GroupAvatar";
 import { useI18n } from "../contexts/I18nContext";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 function ShareIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>;
@@ -27,7 +28,7 @@ function CopyIcon() {
 export function GroupLinkPanel({ group, large = false }: { group: GroupView; large?: boolean }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [said, setSaid] = useState<"" | "copied" | "shared">("");
   const [showQr, setShowQr] = useState(large);
   const saidTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -42,19 +43,19 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     saidTimer.current = setTimeout(() => setSaid(""), 2500);
   };
   const run = async (action: () => Promise<unknown>) => {
-    setBusy(true); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); } finally { setBusy(false); }
+    setBusy(true); setError(null);
+    try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); } finally { setBusy(false); }
   };
   const copy = async () => {
-    setError("");
-    try { await copyText(url); flash("copied"); } catch { setError(t("group.link.copyFailed")); }
+    setError(null);
+    try { await copyText(url); flash("copied"); } catch { setError({ tone: "error", title: t("group.link.copyFailed") }); }
   };
   const share = async () => {
-    setError("");
+    setError(null);
     try {
       const outcome = await shareLink(url, group.name ? t("group.link.shareTitle", { name: group.name }) : t("group.link.shareTitleUnnamed"), shareButton.current);
       if (outcome !== "cancelled") flash(outcome);
-    } catch { setError(t("group.link.shareFailed")); }
+    } catch { setError({ tone: "error", title: t("group.link.shareFailed") }); }
   };
   const note = full ? t("group.link.full", { count: cap }) : community ? t("group.link.noteCommunity", { count: cap }) : t("group.link.note", { count: cap });
 
@@ -63,7 +64,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     <p className="mt-1 text-sm text-text-muted">{t("group.link.off")}</p>
     <button disabled={busy || full} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id }))} data-testid="group-link-enable"
       className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>
-    {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
+    {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 
   const field = <input readOnly value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
@@ -95,7 +96,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     <div className="flex gap-2">{shareButtonEl}{copyButton}</div>
     <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-amber-500" : "text-text-secondary"}`}>{note}</p>
     {adminControls}
-    {error && <p role="alert" className="text-center text-xs text-danger">{error}</p>}
+    {error && <Notice problem={error} className="text-center text-xs" />}
   </div>;
 
   return <div className="mt-4 rounded-xl border border-border bg-surface-alt/40 p-3" data-testid="group-link" data-state="on">
@@ -104,7 +105,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     <div className="mt-2 flex flex-wrap items-center gap-1.5">{shareButtonEl}{copyButton}{qrToggle}{adminControls}</div>
     <p data-testid="group-link-note" className={`mt-2 text-xs ${full ? "text-amber-500" : "text-text-muted"}`}>{note}</p>
     {showQr && qr}
-    {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
+    {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 }
 

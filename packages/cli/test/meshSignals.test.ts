@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ghostly, home, localRelay, ok, Running } from "./support/cli";
+import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: groups.protocol.signals, groups.link.join
 
 /**
@@ -25,10 +25,18 @@ import { ghostly, home, localRelay, ok, Running } from "./support/cli";
  */
 const RELAY_MS = 2_500;
 let relays: { url: string; server: Server }[] = [];
+let hyperdht: Awaited<ReturnType<typeof hyperdhtTestnet>> | undefined;
 const running: Running[] = [];
 const [admin, member, joiner] = [home("admin"), home("member"), home("joiner")];
-/** The two slow relays, the only ones (set once they are up). */
-const pinned = (): NodeJS.ProcessEnv => ({ GHOSTLY_PKARR_RELAYS: relays.map((relay) => relay.url).join(",") });
+/**
+ * The two slow relays, the only ones, and a HyperDHT of this test's own (set once they are up): an edge whose WebRTC
+ * came to nothing goes on native only (node.ts `edgeWithoutRtc`), and with no native transport on this machine it would
+ * stay down (as meshGroup.test.ts and mainline.test.ts did after the tests left the public networks, #1389).
+ */
+const pinned = (): NodeJS.ProcessEnv => ({
+  GHOSTLY_PKARR_RELAYS: relays.map((relay) => relay.url).join(","),
+  ...(hyperdht ? { GHOSTLY_HYPERDHT_BOOTSTRAP: hyperdht.bootstrap } : {}),
+});
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env: pinned() });
 
 async function until<T>(what: string, read: () => Promise<T>, done: (value: T) => boolean, ms = 180_000, every = 250): Promise<T> {
@@ -63,10 +71,11 @@ function steps(welcomed: number): string {
 }
 const everyPair = async (dirs: string[], group: string) => (await Promise.all(dirs.map((dir) => show(dir, group)))).every((g) => g.status === "active" && g.members.length === dirs.length && g.members.every((m) => m.online));
 
-beforeAll(async () => { relays = [await localRelay(RELAY_MS), await localRelay(RELAY_MS)]; }, 30_000);
+beforeAll(async () => { relays = [await localRelay(RELAY_MS), await localRelay(RELAY_MS)]; hyperdht = await hyperdhtTestnet(); }, 30_000);
 afterAll(async () => {
   await Promise.all(running.map((daemon) => daemon.stop()));
   for (const relay of relays) relay.server.close();
+  await hyperdht?.destroy();
 }, 60_000);
 
 describe("a private group's edges signal through members", { timeout: 300_000 }, () => {

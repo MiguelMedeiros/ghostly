@@ -46,10 +46,12 @@
     "protection": {
       "confirm": "I understand. Make it without a passphrase.",
       "label": "Protection",
-      "mainnet": "This profile has Mainnet wallets that have held real money. Whoever gets the file can spend it.",
+      "mainnet": "This profile has held real money",
+      "mainnetNext": "Whoever gets the file can spend it.",
       "none": "No passphrase",
       "passphrase": "Passphrase",
-      "warning": "Not encrypted. The file holds this profile's keys, chats and wallet secrets in the clear. Anyone who gets the file gets everything in it, including any money in its wallets."
+      "warning": "Not encrypted",
+      "warningNext": "Anyone with the file gets your keys, chats and money."
     },
     "refresh": "Refresh",
     "repeat": "Repeat",

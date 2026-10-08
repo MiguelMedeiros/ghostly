@@ -244,7 +244,7 @@ describe("GroupLinkPanel", () => {
   it("warns that nobody gets in while the group is full", () => {
     const full = Array.from({ length: 32 }, (_, i) => member({ key: String(i).padEnd(52, "y") }));
     renderApp(<GroupLinkPanel group={admin({ entryLink, members: full })} />);
-    expect(screen.getByTestId("group-link-note")).toHaveTextContent("The group is full (32 of 32): nobody gets in through the link until someone leaves.");
+    expect(screen.getByTestId("group-link-note")).toHaveTextContent("The group is full (32 of 32). Nobody joins until someone leaves.");
   });
 
   it("replaces the link, or turns it off", async () => {
@@ -333,7 +333,7 @@ describe("NewGroupDialog", () => {
     // in (the joiner waits at "A member is letting you in" for good).
     const { user, engine, onCreated } = open();
     act(() => engine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } }));
-    expect(screen.getByTestId("new-group-no-webrtc")).toHaveTextContent("this app has neither");
+    expect(screen.getByTestId("new-group-no-webrtc")).toHaveTextContent("Open the group in the web app or on another device.");
     await user.type(screen.getByTestId("new-group-name"), "Climbing");
     expect(screen.getByTestId("new-group-create")).toBeDisabled();
     await user.keyboard("{Enter}");

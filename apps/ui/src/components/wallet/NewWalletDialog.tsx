@@ -9,8 +9,9 @@ import { Button, Notice, input } from "./ui";
 import { NETWORK_NAME, WALLET_NAME, failedBecause, shortReason } from "./names";
 import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
-import { errorText, rawError } from "../../lib/errorText";
+import { rawError } from "../../lib/errorText";
 import "./new-wallet.css";
+import { problemText, type Problem } from "../../lib/problemText";
 
 type Key = Parameters<Translate>[0];
 /** What each kind of wallet is, in a line, on each network. */
@@ -46,7 +47,7 @@ const FIRST_STEP_MS = 700;
 /** How long Ready shows before the dialog closes and the new card is dealt into its deck. */
 const READY_MS = 650;
 
-type Phase = { type: WalletType; state: "busy" | "done" | "error"; step: number; text?: string; raw?: string; made?: WalletInstanceView };
+type Phase = { type: WalletType; state: "busy" | "done" | "error"; step: number; problem?: Problem; raw?: string; made?: WalletInstanceView };
 type Action = "create" | "key" | "connect" | "add-another" | "join" | "join-another" | "added" | "off";
 
 /** What clicking a kind does on this network, as its button says it. */
@@ -115,7 +116,7 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
       const made = await wallet.create({ type, network, ...extra });
       setPhase({ type, state: "done", step: 2, made });
       later(READY_MS, () => finish(made));
-    } catch (e) { setPhase({ type, state: "error", step: 1, text: errorText(e, t), raw: rawError(e) }); }
+    } catch (e) { setPhase({ type, state: "error", step: 1, problem: problemText(e, t), raw: rawError(e) }); }
   };
   const pick = (type: WalletType) => {
     const action = actionOf(type, offer(type));
@@ -211,7 +212,7 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
                 const state = mine ?? (off ? action : busy || phase?.state === "done" ? "waiting" : "on");
                 return (
                   <button key={type} type="button" data-testid={`new-wallet-type-${type}`} data-state={state} data-action={action}
-                    aria-disabled={off || undefined} aria-busy={mine === "busy" || undefined} disabled={(busy || phase?.state === "done") && !mine} title={action === "off" && o?.reason ? errorText(o.reason, t) : undefined}
+                    aria-disabled={off || undefined} aria-busy={mine === "busy" || undefined} disabled={(busy || phase?.state === "done") && !mine} title={action === "off" && o?.reason ? problemText(o.reason, t).title : undefined}
                     onClick={() => mine === "error" ? void create(type) : pick(type)} className="new-wallet-kind">
                     <Mark type={type} />
                     {/* The name and what clicking does on one line (the action wraps under the name when narrow), what it is below. */}
@@ -227,9 +228,9 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
                       </span>
                       {/* A failure says why on the card itself: on a phone the sheet scrolls, and the message under the kinds is out of sight. */}
                       {/* So does a kind the first-run setup could not make, until it is tried here. */}
-                      {(mine === "error" && phase?.text) || (!mine && action === "create" && setupFailure(type))
+                      {(mine === "error" && phase?.problem) || (!mine && action === "create" && setupFailure(type))
                         ? <span className="block text-xs text-danger mt-1" data-testid={`new-wallet-type-${type}-reason`}>{failedBecause(mine === "error" && phase?.raw ? phase.raw : setupFailure(type)!, t)}</span>
-                        : <span className="block text-xs text-text-secondary mt-1">{action === "off" && o?.reason ? shortReason(errorText(o.reason, t)) : t(ABOUT[type](network))}</span>}
+                        : <span className="block text-xs text-text-secondary mt-1">{action === "off" && o?.reason ? shortReason(problemText(o.reason, t).title) : t(ABOUT[type](network))}</span>}
                     </span>
                     {mine === "busy" && <span className="new-wallet-shimmer" aria-hidden="true" />}
                   </button>
@@ -242,7 +243,7 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
         {phase && phase.state !== "error" && <Progress phase={phase} network={network} />}
         {error && (
           <div className="space-y-2" role="alert">
-            <Notice tone="error" testId="new-wallet-error">{error.text}</Notice>
+            <Notice problem={error.problem} testId="new-wallet-error" />
             {!offer(error.type)?.needs && <Button onClick={() => void create(error.type)} data-testid="new-wallet-retry">{t("wallet.new.tryAgain")}</Button>}
           </div>
         )}

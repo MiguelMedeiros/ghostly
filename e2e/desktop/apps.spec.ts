@@ -58,7 +58,8 @@ async function clickWithText(app: DesktopApp, selector: string, text: string): P
 }
 
 test("installs Chess from a store and opens it in an app window of its own, which reaches the broker and nothing else", { tag: ["@feature:apps.desktop-sandbox"] }, async ({ app }) => {
-  const store = await testStore({ entry: PROBE });
+  // A full-screen app: the Apps page opens it alone, in a window the Ghostly window's size.
+  const store = await testStore({ entry: PROBE, view: "full" });
   const server = await storeServer(store.files);
   try {
     await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();

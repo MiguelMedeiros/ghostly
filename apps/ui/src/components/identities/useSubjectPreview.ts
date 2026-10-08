@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { IdentityProofProvider, IdentitySigner, SubjectPreview } from "@ghostly/browser/proofs/contract";
-import { errorText } from "../../lib/errorText";
+import { problemLine } from "../../lib/problemText";
 import { useT } from "../../contexts/I18nContext";
 
 
@@ -24,10 +24,10 @@ export function useSubjectPreview(provider: IdentityProofProvider | null, input:
     setState({ status: "loading" });
     const timer = setTimeout(() => {
       let subject: string;
-      try { subject = provider.subject.normalize(input); } catch (e) { setState({ status: "error", error: errorText(e, t) }); return; }
+      try { subject = provider.subject.normalize(input); } catch (e) { setState({ status: "error", error: problemLine(e, t) }); return; }
       preview(subject, { signal: controller.signal }).then(
         result => { if (!controller.signal.aborted) setState({ status: "ok", subject, preview: result }); },
-        e => { if (!controller.signal.aborted) setState({ status: "error", error: errorText(e, t) }); });
+        e => { if (!controller.signal.aborted) setState({ status: "error", error: problemLine(e, t) }); });
     }, delayMs);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [provider, input, delayMs, t]);

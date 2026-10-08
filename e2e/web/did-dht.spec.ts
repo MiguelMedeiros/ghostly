@@ -43,7 +43,7 @@ test("the profile's did:dht is published and resolved by @web5/dids, with a Nost
     await addNostrIdentity(alice);
     // The new proof's card came up: back to the Ghostly card.
     await page.getByTestId("identity-ghostly").click();
-    await expect(section.getByTestId("did-warning")).toContainText("public to everyone, for good");
+    await expect(section.getByTestId("did-warning")).toContainText("Public to everyone, for good");
     const listed = section.getByTestId("did-list");
     await expect(listed).toHaveCount(1);
     await expect(listed).toHaveAttribute("aria-checked", "false");

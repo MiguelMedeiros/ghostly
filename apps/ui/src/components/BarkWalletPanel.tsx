@@ -10,7 +10,7 @@ import { externalLinkProps } from "../lib/externalLink";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
-import { errorText } from "../lib/errorText";
+import { problemText } from "../lib/problemText";
 
 type Network = "bitcoin" | "signet" | "regtest";
 /** Second's public servers (Bitcoin, signet), or a local regtest one (e2e/support/bark-regtest). */
@@ -49,7 +49,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
  const use = (next: Network, params: { provider?: string; explorer?: string; mnemonic?: string } = {}) => wallet.barkCreate({ network: next, provider: params.provider ?? NETWORKS[next].provider, explorer: params.explorer ?? NETWORKS[next].explorer, mnemonic: params.mnemonic });
 
  return <div className="space-y-6" data-testid="bark-wallet">
-  {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="bark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Bark" })}</p><Notice>{bark?.error ? errorText(bark.error, t) : t("wallet.bark.connectingNote")}</Notice></div>
+  {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="bark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Bark" })}</p>{bark?.error ? <Notice problem={problemText(bark.error, t)} tone="muted" /> : <Notice>{t("wallet.bark.connectingNote")}</Notice>}</div>
   : <div className="space-y-4">
    <p className="text-text-primary" data-testid="bark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(bark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{bark.network !== "bitcoin" && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.bark.testCoins", { network: NETWORKS[network].label })}</span>}</p>
    {!!bark.pending && <Notice tone="warning" testId="bark-pending">{t("wallet.bark.pending", { amount: formatAmount(bark.pending, t.language), unit })}</Notice>}
@@ -75,8 +75,8 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
    {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
   </div>}
-  {error && <Notice tone="error">{error}</Notice>}
-  {bark?.error && ready && <Notice tone="warning">{errorText(bark.error, t)}</Notice>}
+  {error && <Notice problem={error} />}
+  {bark?.error && ready && <Notice tone="warning" problem={problemText(bark.error, t)} />}
 
   {(ready || stuck) && <Section title={t("wallet.panel.settings")} testId="bark-settings">
    {backupNow && real && ready && <Block><Notice tone="warning" testId="bark-backup-now">{t("wallet.bark.backupNow")}</Notice></Block>}

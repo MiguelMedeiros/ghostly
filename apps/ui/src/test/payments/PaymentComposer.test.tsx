@@ -681,7 +681,7 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   it("gives up when the contact's app does not answer", async () => {
     await ask("arkade:testnet", "3");
     tick(45_600);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Your contact's app did not answer.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your contact's app didn't answer" + "They can send you a Request instead.");
     expect(send()).toHaveTextContent("Send");
     expect(send()).toBeEnabled();
   });

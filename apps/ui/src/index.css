@@ -39,6 +39,8 @@
   /* Its words ("Test money"): that yellow on a dark page, a darker one on a light page, where the yellow reads at
      about 2:1 (html[data-theme="light"] below). A wallet card is dark in every theme and keeps the yellow. */
   --color-test-money-ink: var(--theme-test-money-ink, #e0a800);
+  /* Words that warn without alarm (a bot's quota running low): amber on a dark page, a darker amber on a light one. */
+  --color-warn-ink: var(--theme-warn-ink, #f5a524);
   --color-text-primary: var(--theme-text-primary);
   --color-text-secondary: var(--theme-text-secondary);
   --color-text-muted: var(--theme-text-muted);
@@ -345,6 +347,8 @@ html[data-theme="light"] {
   color-scheme: light;
   /* 4.6:1 or more on every light theme's pages and rows (white, the greys, the chat's beige). */
   --theme-test-money-ink: #856200;
+  /* 4.5:1 or more on the light pages and rows. */
+  --theme-warn-ink: #9a5800;
 }
 
 body {

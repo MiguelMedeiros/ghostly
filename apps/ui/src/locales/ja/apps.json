@@ -54,7 +54,7 @@
     "notSigned": "署名が正しくありません。Ghostly はインストールしません。",
     "offline": "オフラインです。",
     "otherApp": "このリンクには別のアプリがあります。",
-    "refused": "Ghostly はインストールしません：{{reason}}",
+    "refused": "Ghostly はインストールしません",
     "removed": "追加したストアがこのアプリを削除しました。",
     "revoked": "発行者がこのバージョンを取り消しました。",
     "rollback": "このリンクには古いバージョンがあります。",
@@ -109,6 +109,11 @@
     "open": "開く",
     "stores": "ストア"
   },
+  "pick": {
+    "hint": "チャットの中で、相手と一緒に使います。",
+    "none": "まだチャットがありません。先に連絡先とペアリングしてください。",
+    "title": "{{title}} をチャットで開く"
+  },
   "store": {
     "count": "{{count}} 個のアプリ",
     "countOne": "1 個のアプリ",
@@ -123,5 +128,15 @@
     "remove": "削除",
     "stale": "{{date}} から更新されていません"
   },
-  "title": "アプリ"
+  "title": "アプリ",
+  "view": {
+    "back": "チャットに戻る",
+    "beside": "チャットを表示",
+    "full": "全幅で表示",
+    "resume": "{{title}} に戻る",
+    "stoppedRemoved": "{{title}} を停止しました: {{store}} がこのバージョンを削除しました",
+    "stoppedRevoked": "{{title}} を停止しました: 作者がこのバージョンを取り消しました",
+    "with": "{{name}} との {{title}}",
+    "withName": "{{name}} と"
+  }
 }

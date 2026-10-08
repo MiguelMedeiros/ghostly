@@ -99,18 +99,21 @@ It never starts, stops, resets or seeds a stack, here or on one, and never falls
 
 **CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main` and on every push to them. A new push to a pull request cancels the run it replaces. It takes about 3.5 minutes.
 
+A **draft** pull request gets the fast tier: lint and types, the unit tests its change reaches (`test:affected`, on one runner), the site's checks when the site changed, and the Rust job when Rust changed. Its gate job is named **CI Success (draft)**, so it never counts as the required **CI Success**. Marking it ready (`gh pr ready`) starts the full run, which reports CI Success. Many sessions push drafts at once, and the free plan runs about 20 jobs at a time (5 on macOS); the full run takes about 14.
+
 | Job | What it runs | When |
 |---|---|---|
-| Changed paths | [`tools/scripts/ci-changes.mjs`](../tools/scripts/ci-changes.mjs): which path-gated jobs below this pull request needs | pull requests (pushes run everything) |
+| Changed paths | [`tools/scripts/ci-changes.mjs`](../tools/scripts/ci-changes.mjs): which jobs below this pull request needs, from its files and whether it is a draft | always (pushes run everything) |
 | Frontend lint and types | `npm run lint`, `npm run typecheck`, `node tools/scripts/changes.mjs` (the `docs/changelog/unreleased/` entries), `npm run test:map -- --summary` (the check, and the map on the run's summary page) | always |
-| Frontend tests (app) | `npm run test:app` (UI components, matrix, scripts) | always |
-| Frontend tests (packages 1/4 to 4/4) | `npm run test:packages` (core, browser, sdk, extension and the headless CLI, whose tests build it and pair two bots) in 4 shards balanced by time ([`tools/scripts/test-shards.mjs`](../tools/scripts/test-shards.mjs), `tools/scripts/test-durations.json`); the CLI's two-peer story has a shard of its own. The two jobs together are `npm test` | skipped only when every change is under `docs/`, or under `apps/website/` outside the site files the packages' tests read |
+| Frontend tests (app) | `npm run test:app` (UI components, matrix, scripts) | not in a draft |
+| Affected unit tests (draft) | `test-affected.mjs --base HEAD^1 --no-e2e --no-rust --no-lint --no-typecheck`: `vitest related` per project over the change, 4 workers | a draft only, in place of the app's tests and the packages shards |
+| Frontend tests (packages 1/4 to 4/4) | `npm run test:packages` (core, browser, sdk, extension and the headless CLI, whose tests build it and pair two bots) in 4 shards balanced by time ([`tools/scripts/test-shards.mjs`](../tools/scripts/test-shards.mjs), `tools/scripts/test-durations.json`); the CLI's two-peer story has a shard of its own. The two jobs together are `npm test` | not in a draft; skipped when every change is under `docs/`, or under `apps/website/` outside the site files the packages' tests read |
 | CLI on Linux ARM64 | the CLI packed as npm publishes it, installed into an empty folder, starts a daemon with WebRTC and calls; then the CLI's whole suite, voice calls included, on an arm64 runner | as the packages' tests |
-| Frontend builds | `npm run build`, `check:desktop-bundle`, `build:extension`, `build:web`, `test:sdk-example` | always |
-| Tauri Backend | `cargo fmt --check`, `clippy -D warnings`, `build`, `test` for `apps/desktop` (+ `native/transports`) | a draft skips it unless it changed `apps/desktop/`, `native/transports/`, `Cargo.*` or `ci.yml`; leaving draft runs it |
-| Website, Website browser checks (1/4 to 4/4) | `npm run sync:references` (the generated files are not committed), the site's deck check, lint (dashes included), `npm test` (WISP content has one source) and types; its Playwright checks in 4 shards balanced by time (`apps/website/e2e/shard.mjs`, `apps/website/e2e/durations.json`) | only when something the site reads changed (`WEBSITE_INPUTS` in `ci-changes.mjs`) |
-| Desktop media, Desktop on macOS | voice recordings in WKWebView; on a Mac, the specs of `e2e/desktop-macos/` (two apps call and share an app, notifications, links, a 100 MB video from the stored file, …) (`desktop-macos.yml`) | skipped only when every change is under `apps/website/` or `docs/` |
-| CI Success | the required check: fails if any job failed, or was skipped without the gate saying so. A pull request into `dev` merges only with it green and the branch up to date with `dev` | always |
+| Frontend builds | `npm run build`, `check:desktop-bundle`, `build:extension`, `build:web`, `test:sdk-example` | not in a draft |
+| Tauri Backend | `cargo fmt --check`, `clippy -D warnings`, `build`, `test` for `apps/desktop` (+ `native/transports`) | a draft skips it unless it changed `apps/desktop/`, `native/transports/` or `Cargo.*`; leaving draft runs it |
+| Website, Website browser checks (1/4 to 4/4) | `npm run sync:references` (the generated files are not committed), the site's deck check, lint (dashes included), `npm test` (WISP content has one source) and types; its Playwright checks in 4 shards balanced by time (`apps/website/e2e/shard.mjs`, `apps/website/e2e/durations.json`) | only when something the site reads changed (`WEBSITE_INPUTS` in `ci-changes.mjs`); the browser checks not in a draft |
+| Desktop media, Desktop on macOS | voice recordings in WKWebView; on a Mac, the specs of `e2e/desktop-macos/` (two apps call and share an app, notifications, links, a 100 MB video from the stored file, …) (`desktop-macos.yml`) | not in a draft; skipped when every change is under `apps/website/` or `docs/` |
+| CI Success | the required check: fails if any job failed, or was skipped without the gate saying so. A pull request into `dev` merges only with it green and the branch up to date with `dev` | always; named CI Success (draft) in a draft, which the ruleset does not count |
 
 The gates are tested in `tools/scripts/test/ci-changes.test.ts`. If the file lookup fails, CI Success fails: nothing is skipped by accident.
 
@@ -123,7 +126,7 @@ Other workflows:
 | E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
 | E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0 | nightly, before every release, by hand |
 | Desktop on macOS (`desktop-macos.yml`) | as in CI | also nightly, and by hand with `repeat` |
-| Desktop media streaming (`desktop-media.yml`) | a 100 MB video plays and seeks from the stored file in WebKitGTK (Linux) and WebView2 (Windows), `e2e/desktop/video-stream.spec.ts` | pull requests that touch the file stream, the file store or the video bubble; nightly; by hand |
+| Desktop media streaming (`desktop-media.yml`) | a 100 MB video plays and seeks from the stored file in WebKitGTK (Linux) and WebView2 (Windows), `e2e/desktop/video-stream.spec.ts` | pull requests that touch the file stream, the file store or the video bubble (not drafts: leaving draft runs it); nightly; by hand |
 
 The app's e2e suites do not run on pull requests: they would hold up every merge. See [e2e/README.md](../e2e/README.md#when-they-run).
 

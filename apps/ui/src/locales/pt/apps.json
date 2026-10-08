@@ -54,7 +54,7 @@
     "notSigned": "Assinatura inválida. O Ghostly não vai instalar.",
     "offline": "Você está offline.",
     "otherApp": "O link tem outro app.",
-    "refused": "O Ghostly não vai instalar: {{reason}}",
+    "refused": "O Ghostly não vai instalar",
     "removed": "Uma loja que você adicionou removeu este app.",
     "revoked": "O publicador revogou esta versão.",
     "rollback": "O link tem uma versão mais antiga.",
@@ -109,6 +109,11 @@
     "open": "Abrir",
     "stores": "Lojas"
   },
+  "pick": {
+    "hint": "Ele roda em uma conversa, com seu contato.",
+    "none": "Nenhuma conversa ainda. Conecte-se a um contato primeiro.",
+    "title": "Abrir {{title}} em uma conversa"
+  },
   "store": {
     "count": "{{count}} apps",
     "countOne": "1 app",
@@ -123,5 +128,15 @@
     "remove": "Remover",
     "stale": "Desatualizada desde {{date}}"
   },
-  "title": "Apps"
+  "title": "Apps",
+  "view": {
+    "back": "Voltar à conversa",
+    "beside": "Mostrar a conversa",
+    "full": "Largura total",
+    "resume": "Voltar para {{title}}",
+    "stoppedRemoved": "{{title}} foi parado: {{store}} removeu esta versão",
+    "stoppedRevoked": "{{title}} foi parado: o autor revogou esta versão",
+    "with": "{{title}} com {{name}}",
+    "withName": "com {{name}}"
+  }
 }

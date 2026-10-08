@@ -24,7 +24,7 @@ describe("an engine error, in the app's language", () => {
     engine.on("walletAddMint", () => { throw new Error(engineText("testMintOnMainnet")); });
     await user.type(screen.getByTestId("wallet-mint-url"), TEST_MINT);
     await user.click(screen.getByTestId("wallet-add-mint"));
-    expect(await screen.findByTestId("wallet-error")).toHaveTextContent("Este é um mint de teste, e seus sats não valem nada: adicione-o a uma carteira Cashu de Testnet");
+    expect(await screen.findByTestId("wallet-error")).toHaveTextContent("Este é um mint de teste: seus sats não valem nada" + "Adicione-o a uma carteira Cashu Testnet.");
   });
 
   it("a mint that did not answer names it, in Portuguese; a mint's own words stay as they are", async () => {

@@ -82,7 +82,7 @@ test("a new group opens on its link; Copy, Share and the header's Share link; jo
   await expect(groupChat(bob)).toBeVisible({ timeout: 30_000 });
   const waiting = bob.page.getByTestId("group-joining");
   await expect(waiting).toContainText("Waiting to be let in");
-  await expect(waiting).toContainText("happens on its own");
+  await expect(waiting).toContainText("It happens once the admin's app is open");
   await expect(bob.page.getByPlaceholder("Message…")).toHaveCount(0);
   await expect(bob.page.getByTestId("group-accept")).toHaveCount(0);
   await expect(bob.page.getByTestId("group-share")).toHaveCount(0);

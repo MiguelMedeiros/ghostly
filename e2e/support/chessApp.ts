@@ -55,12 +55,12 @@ export class ChessPublisher {
     copyFileSync(chessEntry(), join(this.dir, "app", "index.html"));
   }
 
-  /** `ghostly app publish`: Chess as `version`, at `sequence`, served at `<repo>/<path>`. */
-  publish({ version, sequence, path = "app.ghostlyapp" }: { version: string; sequence: number; path?: string }): Published {
+  /** `ghostly app publish`: Chess as `version`, at `sequence`, served at `<repo>/<path>`; `view` as its manifest says (absent: in a chat). */
+  publish({ version, sequence, path = "app.ghostlyapp", view }: { version: string; sequence: number; path?: string; view?: "chat" | "full" }): Published {
     writeFileSync(join(this.dir, "app", "ghostly-app.json"), JSON.stringify({
       name: "chess", version, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact",
       description: "Chess for two, move by move, in your chat.", entry: "index.html", permissions: ["chat"],
-      runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT",
+      runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", ...(view && { view }),
     }));
     const out = join(this.dir, "bundles", `${sequence}.ghostlyapp`);
     const made = ghostly("app", "publish", join(this.dir, "app"), "--key", join(this.dir, "publisher.key"), "--out", out, "--sequence", String(sequence));

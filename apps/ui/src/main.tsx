@@ -19,6 +19,10 @@ import { openProfile } from "./lib/profileStart";
 import { listen } from "@tauri-apps/api/event";
 import { setAppOpener } from "./lib/apps/open";
 import { desktopOpener } from "./lib/apps/desktopOpener";
+import { appWithContact } from "./lib/apps/running";
+import { loadSettings } from "./lib/settings";
+import { locales } from "./locales";
+import { translateWith } from "./locales/translate";
 import { servicesPlatform } from "./lib/platform";
 
 async function boot() {
@@ -51,7 +55,12 @@ async function boot() {
   const host = createDesktopHost(version, await nativeCallSupport());
   setBrowserHost(host);
   // Mini-apps (WISP 1200) open in windows of their own, each with its broker here (lib/apps/desktopOpener.ts).
-  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen }));
+  // Its window is named after the app and the contact ("Chess with Ana"), in the profile's language.
+  const windowTitle = (title: string, linkId: string | null) => {
+    const language = loadSettings().language;
+    return appWithContact(title, linkId, translateWith(locales[language] || locales.en, locales[language] ? language : "en"));
+  };
+  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, windowTitle }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
   // The app is exiting (apps/desktop's lib.rs `on_run_event`): contacts hear it now, in the moment it waits for this.

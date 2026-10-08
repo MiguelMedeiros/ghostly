@@ -109,10 +109,38 @@ describe("GroupConnection: the popover lists every member's edge", () => {
       { key: CAROL, state: "error", status: "Connection issue · not seen yet" },
       { key: "dave".padEnd(52, "y"), state: "none", status: "No connection yet" },
     ]);
-    // A failure says why, where it happened.
-    expect(within(screen.getAllByTestId("group-connection-member")[2]).getByText("The member's key did not match")).toBeInTheDocument();
+    // A failure says why, where it happened, in a few words: never the engine's English.
+    expect(within(screen.getAllByTestId("group-connection-member")[2]).getByTestId("group-connection-member-why")).toHaveTextContent("Couldn't connect");
+    expect(screen.queryByText("The member's key did not match")).toBeNull();
     // Honest about transports: WebRTC, and Iroh or HyperDHT with a member that has no WebRTC; no DHT-only delivery.
     expect(screen.getByTestId("group-connection-note")).toHaveTextContent("DHT-only delivery is not offered in groups yet");
+  });
+
+  it("says why a member failed in short words, never the relays' addresses or the engine's errors (a phone, 2026-10-07)", async () => {
+    const relays = "Could not publish connection details: Publish failed on every relay: Error: https://pkarr.example.test responded 500; Error: https://pkarr.other.test is left alone after failing. Retrying in 60 s.";
+    const phone = "Could not publish discovery: Publish failed on every relay: DiscoveryBudgetError: Discovery request budget reached; retry shortly; Error: https://pkarr.pubky.app is left alone after failing; asked again in 52 s";
+    const view = await open(active([me,
+      alice({ state: "error", error: relays, cause: "relays", lastSeenAt: NOW - 3_600_000 }),
+      bob({ state: "error", error: "Session receive queue full", cause: "session", lastSeenAt: NOW - 3_600_000 }),
+      member({ key: CAROL, nick: "Carol", edge: edge({ linkId: "edge-c", state: "error", error: "Could not publish discovery: Publish failed on every relay: x" }) }),
+      member({ key: "dave".padEnd(52, "y"), nick: "Dave", edge: edge({ linkId: "edge-d", state: "error", error: phone, cause: "relays" }) }),
+      member({ key: "erin".padEnd(52, "y"), nick: "Erin", edge: edge({ linkId: "edge-e", state: "error", error: "Session frame too large", cause: "other" }) })]));
+    const why = screen.getAllByTestId("group-connection-member-why");
+    expect(why.map(line => [line.dataset.cause, line.textContent, line.querySelector("[data-tone]")?.getAttribute("data-tone")])).toEqual([
+      ["relays", "Can't reach the relays" + "Trying again. Check your connection.", "error"],
+      // A session dropped is dialled again by itself: a wait, not red.
+      ["session", "Connection dropped" + "Trying again…", "wait"],
+      // An engine that does not say the cause yet: the generic words, still not its English.
+      ["other", "Couldn't connect", "error"],
+      // The relays' budget and a relay cooling down: a wait, with the soonest retry.
+      ["relays", "Waiting for the relays" + "Retrying in 52 s", "wait"],
+      // A frame that breaks the protocol is no drop to wait past.
+      ["other", "Couldn't connect", "error"],
+    ]);
+    expect(screen.getByTestId("group-connection")).not.toHaveTextContent(/https?:|pkarr|Session (?:receive|frame)|DiscoveryBudgetError/);
+    // The engine's English is there for whoever asks: behind the ⓘ, with a way to copy it.
+    await view.user.click(within(why[3]).getByTestId("group-connection-member-problem-info"));
+    expect(within(why[3]).getByTestId("group-connection-member-problem-details")).toHaveTextContent(phone);
   });
 
   it("follows the group it is handed: a member coming back turns reachable, one going away turns the header partial", async () => {
@@ -165,7 +193,7 @@ describe("GroupConnection: the popover lists every member's edge", () => {
 
   it("an app with no transport for group links says why no member is reachable, and offers no Reconnect that cannot help", async () => {
     await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } });
-    expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("this app has neither");
+    expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("Open the group in the web app or on another device.");
     expect(screen.queryByTestId("group-connection-reconnect")).not.toBeInTheDocument();
   });
 

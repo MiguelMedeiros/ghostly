@@ -7,6 +7,8 @@ name: Android
 # a debug APK signed with the Android debug key, to try the app and never to publish.
 on:
   pull_request:
+    # ready_for_review: a draft skips this (see the apk job); leaving draft builds it.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "apps/android-twa/**"
       - "apps/desktop/icons/android/**"
@@ -36,6 +38,12 @@ concurrency:
 jobs:
   apk:
     name: Build Android APK
+    # A draft gets CI's fast tier only (ci.yml, `changes`): this builds once the pull request leaves draft
+    # (ready_for_review) and on every push after. From the event, unlike ci.yml and android-native.yml, which read the
+    # API: release.yml calls this with contents: read only, and a job here asking for pull-requests: read would stop
+    # the release from starting. The cost: a push and `gh pr ready` a second apart may leave only the push's run,
+    # whose event still says draft (#742); the next push builds it.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:

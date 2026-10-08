@@ -283,10 +283,10 @@ describe("presses in the stream", () => {
     const { h, events } = await hub("restore");
     const card = { kind: "buttons" as const, id: "q", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] };
     // The question went on the DHT floor, its text alone, and the contact confirmed it.
-    const floored = row("c1", "me_1", { sender: "me", wireId: "w1", text: "Want it?", card, via: "pkarr", delivery: "delivered", buttonsRestore: "due" });
+    const floored = row("c1", "me_1", { sender: "me", wireId: "w1", text: "Want it?", card, via: "pkarr", delivery: "delivered", cardRestore: "due" });
     h.baseline(state([link("c1")]), new Map([["c1", [floored]]]));
     // Live again: the engine sends the buttons as edit 1 (the same text), then the contact confirms it.
-    const restored = { ...floored, buttonsRestore: "sent" as const, edit: { seq: 1, at: 2, history: [], pending: true as const, restore: true as const } };
+    const restored = { ...floored, cardRestore: "sent" as const, edit: { seq: 1, at: 2, history: [], pending: true as const, restore: true as const } };
     h.sink.post({ kind: "messages", linkId: "c1", messages: [restored] });
     h.sink.post({ kind: "messages", linkId: "c1", messages: [{ ...restored, edit: { seq: 1, at: 2, history: [], restore: true as const } }] });
     expect(events).toEqual([]);

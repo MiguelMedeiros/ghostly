@@ -53,6 +53,12 @@ export const STATUS_CARD_LIMITS = {
   /** An app card's title and version, in characters (WISP 405 § An app): the manifest's bounds. */
   appTitle: 40,
   appVersion: 32,
+  /** A usage card's label ("Claude") and account, in characters (WISP 405 § Usage). */
+  usageLabel: 24,
+  /** A usage window's name ("5 h", "week"), in characters. */
+  usageWindow: 16,
+  /** Windows beside a usage card's own, shown in its details. */
+  usageWindows: 3,
 } as const;
 
 /** How a button looks: `primary` is the one highlighted, `danger` warns; `neutral` when none is said. */
@@ -161,7 +167,36 @@ export interface AppCard {
   opened?: true;
 }
 
-export type StatusCard = TaskCard | RoutineCard | ButtonsCard | AppCard;
+/** Another window of a usage card ("week"): how much of it is left, and when it starts again. */
+export interface UsageWindow { window: string; left: number; resetsAt?: number }
+
+/**
+ * How much of a quota a bot has left (WISP 405 § Usage): "Claude, 62% left of the 5 h window, resets 18:00". `left` is
+ * the percent left, 0 to 100; a bot that counts can say `used` of `limit` instead, and the percent is worked out
+ * (`usageLeft`). `windows`: other windows of the same quota (a week), shown in the details. One per chat stands: the
+ * latest a sender changed. Display only, like every card.
+ */
+export interface UsageCard {
+  kind: "usage";
+  id: string;
+  /** 0 to 100: how much is left, in percent. */
+  left?: number;
+  used?: number;
+  limit?: number;
+  /** What the quota is of ("Claude"). */
+  label?: string;
+  /** Which of the bot's accounts it is, short. */
+  account?: string;
+  /** The quota's window, as people say it ("5 h", "week"). */
+  window?: string;
+  /** When the window starts again: milliseconds. */
+  resetsAt?: number;
+  /** When the bot read the numbers: milliseconds. */
+  updatedAt?: number;
+  windows?: UsageWindow[];
+}
+
+export type StatusCard = TaskCard | RoutineCard | ButtonsCard | AppCard | UsageCard;
 export type StatusCardKind = StatusCard["kind"];
 
 const ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$/;
@@ -269,6 +304,45 @@ function readRun(raw: unknown, now: number): RoutineRun | undefined {
   return { at, result, ...(summary && { summary }) };
 }
 
+/** A percent as a reader keeps it: a finite number, rounded and clamped into 0 to 100. */
+const percent = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? Math.round(Math.min(100, Math.max(0, value))) : undefined;
+
+/** A time ahead of the reader (a reset, a next run) as it keeps it: whole, positive, at most a year ahead. */
+const ahead = (value: unknown, now: number): number | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= now + STATUS_CARD_LIMITS.nextRunMs ? value : undefined;
+
+/** A usage card as a reader keeps it (WISP 405 § Usage): dropped without a percent left or a used of limit. */
+function readUsage(raw: Record<string, unknown>, id: string, now: number): UsageCard | undefined {
+  const left = percent(raw.left);
+  let used = count(raw.used), limit = count(raw.limit, 1);
+  if (used === undefined || limit === undefined || used > limit) used = limit = undefined;
+  if (left === undefined && limit === undefined) return undefined;
+  const label = cardLine(raw.label, STATUS_CARD_LIMITS.usageLabel), account = cardLine(raw.account, STATUS_CARD_LIMITS.usageLabel);
+  const window = cardLine(raw.window, STATUS_CARD_LIMITS.usageWindow);
+  const resetsAt = ahead(raw.resetsAt, now), updatedAt = time(raw.updatedAt, now + MESSAGE_CLOCK_SKEW_MS);
+  const windows: UsageWindow[] = [];
+  if (Array.isArray(raw.windows)) for (const entry of raw.windows.slice(0, STATUS_CARD_LIMITS.usageWindows)) {
+    if (!isObject(entry)) continue;
+    const name = cardLine(entry.window, STATUS_CARD_LIMITS.usageWindow), share = percent(entry.left);
+    if (!name || share === undefined) continue;
+    const at = ahead(entry.resetsAt, now);
+    windows.push({ window: name, left: share, ...(at && { resetsAt: at }) });
+  }
+  return {
+    kind: "usage", id,
+    ...(left !== undefined && { left }), ...(used !== undefined && limit !== undefined && { used, limit }),
+    ...(label && { label }), ...(account && { account }), ...(window && { window }),
+    ...(resetsAt && { resetsAt }), ...(updatedAt && { updatedAt }), ...(windows.length && { windows }),
+  };
+}
+
+/** How much of a usage card's quota is left, 0 to 100: its own percent, else worked out from used of limit. */
+export function usageLeft(card: Pick<UsageCard, "left" | "used" | "limit">): number {
+  if (card.left !== undefined) return card.left;
+  return card.used !== undefined && card.limit ? Math.round((card.limit - card.used) / card.limit * 100) : 0;
+}
+
 /** The bytes a card takes on the wire: what `STATUS_CARD_LIMITS.bytes` bounds. */
 export function statusCardBytes(card: unknown): number {
   try { return utf8Encode(JSON.stringify(card) ?? "").length; } catch { return Infinity; }
@@ -294,6 +368,7 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
       ...(version && { version }), ...(url && { url }), ...(raw.opened === true && { opened: true as const }) };
   }
   const latest = now + MESSAGE_CLOCK_SKEW_MS;
+  if (raw.kind === "usage") return readUsage(raw, id, now);
   const links = readLinks(raw.links);
   if (raw.kind === "task") {
     const title = cardLine(raw.title, STATUS_CARD_LIMITS.title), status = oneOf(TASK_STATUSES, raw.status);
@@ -375,7 +450,7 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
   if (!isObject(raw)) return { error: "A card is an object" };
   const bytes = statusCardBytes(raw);
   if (bytes > STATUS_CARD_LIMITS.bytes) return { error: `The card takes ${bytes} bytes; at most ${STATUS_CARD_LIMITS.bytes}` };
-  if (raw.kind !== "task" && raw.kind !== "routine" && raw.kind !== "buttons" && raw.kind !== "app") return { error: "kind is task, routine, buttons or app" };
+  if (raw.kind !== "task" && raw.kind !== "routine" && raw.kind !== "buttons" && raw.kind !== "app" && raw.kind !== "usage") return { error: "kind is task, routine, buttons, app or usage" };
   if (typeof raw.id !== "string" || !ID.test(raw.id)) return { error: `id is 1 to ${STATUS_CARD_LIMITS.id} of A-Z a-z 0-9 _ . : - and does not start with -` };
   const line = (field: string, value: unknown, max: number, required = false): string | null => {
     if (value === undefined && !required) return null;
@@ -393,7 +468,28 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
       errors.push(url(`links[${i}].url`, link.url), line(`links[${i}].label`, link.label, STATUS_CARD_LIMITS.linkLabel));
     }
   }
-  if (raw.kind === "app") {
+  const share = (field: string, value: unknown) => (value === undefined || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100) ? null : `${field} is a number from 0 to 100`);
+  const reset = (field: string, value: unknown) => (value === undefined || ahead(value, now) !== undefined ? null : `${field} is a time in milliseconds, within a year`);
+  if (raw.kind === "usage") {
+    if (raw.links !== undefined) errors.push("a usage card takes no links");
+    if (raw.left === undefined && raw.used === undefined) errors.push("left (a percent) or used and limit");
+    errors.push(share("left", raw.left));
+    if ((raw.used === undefined) !== (raw.limit === undefined)) errors.push("used and limit go together");
+    else if (raw.used !== undefined) {
+      errors.push(whole("used", raw.used), whole("limit", raw.limit, 1));
+      if (typeof raw.used === "number" && typeof raw.limit === "number" && raw.used > raw.limit) errors.push("used is at most limit");
+    }
+    errors.push(line("label", raw.label, STATUS_CARD_LIMITS.usageLabel), line("account", raw.account, STATUS_CARD_LIMITS.usageLabel), line("window", raw.window, STATUS_CARD_LIMITS.usageWindow), reset("resetsAt", raw.resetsAt));
+    if (raw.updatedAt !== undefined && !(typeof raw.updatedAt === "number" && Number.isSafeInteger(raw.updatedAt) && raw.updatedAt > 0 && raw.updatedAt <= now + MESSAGE_CLOCK_SKEW_MS)) errors.push("updatedAt is a time in milliseconds, not in the future");
+    if (raw.windows !== undefined) {
+      if (!Array.isArray(raw.windows) || raw.windows.length > STATUS_CARD_LIMITS.usageWindows) errors.push(`windows is a list of at most ${STATUS_CARD_LIMITS.usageWindows}`);
+      else for (const [i, entry] of raw.windows.entries()) {
+        if (!isObject(entry)) { errors.push(`windows[${i}] is an object`); continue; }
+        errors.push(line(`windows[${i}].window`, entry.window, STATUS_CARD_LIMITS.usageWindow, true));
+        errors.push(entry.left === undefined ? `windows[${i}].left is a number from 0 to 100` : share(`windows[${i}].left`, entry.left), reset(`windows[${i}].resetsAt`, entry.resetsAt));
+      }
+    }
+  } else if (raw.kind === "app") {
     if (raw.links !== undefined) errors.push("an app card takes no links");
     if (!isAppRef(raw.ref)) errors.push("ref is <publisher key in z-base32>/<name>");
     else if (raw.id !== appCardId(raw.ref)) errors.push(`id is ${appCardId(raw.ref)}, made from ref`);
@@ -517,6 +613,14 @@ export function statusCardText(card: StatusCard): string {
   if (card.kind === "app") {
     const named = `${card.title}${card.version ? ` ${card.version}` : ""}`;
     return [card.opened ? `🧩 Opened ${named} in this chat (Ghostly app)` : `🧩 ${named} (Ghostly app)`, ...(card.url ? [card.url] : [])].join("\n");
+  }
+  // One line: what an older app shows, and the chat list's line (WISP 405 § Usage).
+  if (card.kind === "usage") {
+    const left = `${usageLeft(card)}% left${card.window ? ` (${card.window})` : ""}`;
+    return [`📊 ${card.label ?? "Usage"}`, ...(card.account ? [card.account] : []), left,
+      ...(card.used !== undefined && card.limit !== undefined ? [`${card.used} of ${card.limit} used`] : []),
+      ...(card.resetsAt ? [`resets ${cardTimeUtc(card.resetsAt)}`] : []),
+      ...(card.windows ?? []).map((w) => `${w.window} ${w.left}%`)].join(" · ");
   }
   // Buttons show with the bot's own text; this is only what goes when it gave none.
   if (card.kind === "buttons") return `Reply: ${card.buttons.map(b => b.label).join(" / ")}`;

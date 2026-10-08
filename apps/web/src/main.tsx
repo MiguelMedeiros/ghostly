@@ -5,6 +5,7 @@ import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { Root } from "../../ui/src/Root";
 import { PeerLockUnavailable, becomeThePeer } from "@ghostly/browser/inPageHost";
 import { webHost } from "./host";
+import { gateSounds } from "./sounds";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { handoffProfileHost, recoverHandoffPointer } from "../../ui/src/lib/handoffProfile";
@@ -19,7 +20,7 @@ import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
-import { setAppOpener } from "../../ui/src/lib/apps/open";
+import { setAppOpener, takedownText } from "../../ui/src/lib/apps/open";
 import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
@@ -36,6 +37,8 @@ watchInstallPrompt();
 registerServiceWorker();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
 setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
+// GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
+gateSounds();
 
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
 // default profile keeps the original names, so nothing existing moves. A profile a handoff moved whose pointer was lost
@@ -91,7 +94,11 @@ if (gate.full) {
 addEventListener("pagehide", () => webHost.announceDeparture());
 // Mini-apps (WISP 1200) open in this server's runner, once the feature is on (or in the e2e suite's build).
 if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
-  setAppOpener(webOpener({ apps: () => servicesPlatform?.apps, closeLabel: () => profileTranslator()("common.close") }));
+  setAppOpener(webOpener({
+    apps: () => servicesPlatform?.apps,
+    closeLabel: () => profileTranslator()("common.close"),
+    stoppedLabel: (title, takedown) => takedownText(title, takedown, profileTranslator()),
+  }));
 }
 
 root.render(

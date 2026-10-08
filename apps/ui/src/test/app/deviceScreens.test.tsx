@@ -124,7 +124,7 @@ describe("Profile, Devices", () => {
     engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "stalled" }) satisfies HandoffView);
     engine.on("deviceHandoffPush", () => null);
     const row = await screen.findByTestId("handoff-stopped");
-    expect(row).toHaveTextContent("The move stopped: no answer from iPhone for 2 minutes. Nothing changed, and files already copied are kept.");
+    expect(row).toHaveTextContent("The move stopped" + "iPhone didn't answer. Nothing changed; copied files are kept.");
     await user.click(within(row).getByTestId("handoff-try-again"));
     expect(await screen.findByTestId("handoff-move-dialog")).toBeInTheDocument();
     await waitFor(() => expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]));
@@ -233,7 +233,7 @@ describe("the standby screen", () => {
     fakeEngine.on("deviceHandoffView", () => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "failed", bytes: 0, total: 0, failure: "stalled" }) satisfies HandoffView);
     fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
     const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("The move stopped: no answer from MacBook for 2 minutes.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("The move stopped" + "MacBook didn't answer. Nothing changed; copied files are kept.");
     const again = await screen.findByTestId("handoff-use-here");
     expect(again).toHaveTextContent("Try again");
     await user.click(again);

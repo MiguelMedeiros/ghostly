@@ -136,5 +136,21 @@
     },
     "steps": "{{done}}/{{total}} 步",
     "updated": "更新：{{ago}}"
+  },
+  "usage": {
+    "accountLabel": "账户",
+    "info": "这是机器人自己报告的剩余量，Ghostly 不会核实。",
+    "label": "{{name}}：剩余 {{left}}%",
+    "labelResets": "{{name}}：剩余 {{left}}%，{{time}} 重置",
+    "left": "剩余 {{left}}%",
+    "leftLabel": "剩余",
+    "resets": "{{time}} 重置",
+    "resetsLabel": "重置",
+    "stale": "最近未更新",
+    "staleHint": "数字已过时：机器人最近没有更新，或额度窗口已重置。",
+    "title": "用量",
+    "updatedLabel": "更新于",
+    "used": "已用 {{used}} / {{limit}}",
+    "usedLabel": "已用"
   }
 }

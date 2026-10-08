@@ -60,7 +60,10 @@ test("an SSH key proves a GitHub account, shared with one contact only, and a re
   await paste(mine.sign(statement.replace("octo-cat", "someone-else")), /not over this statement/);
   const stranger = testSshKey();
   keys.push(stranger);
-  await paste(stranger.sign(statement), /GitHub: octo-cat does not list the key that signed \(SHA256:/);
+  await paste(stranger.sign(statement), /^octo-cat doesn't list the key that signed$/);
+  // The key it found, behind the ⓘ.
+  await add.getByTestId("add-identity-error-info").click();
+  await expect(add.getByTestId("add-identity-error-details")).toContainText("GitHub: octo-cat does not list the key that signed (SHA256:");
   await paste(mine.sign(statement));
   await expect(add).toHaveCount(0);
   await expect(alice.page.getByTestId("identity-proof")).toHaveCount(1);
@@ -84,7 +87,7 @@ test("an SSH key proves a GitHub account, shared with one contact only, and a re
   published.set("octo-cat", [other.publicKey]);
   await back.getByTestId("chat-identity-recheck").click();
   await expect(back).toHaveAttribute("data-status", "failed");
-  await expect(back).toContainText("does not list the key that signed");
+  await expect(back).toContainText("doesn't list the key that signed");
   await closeIdentities(bob);
 
   // Carol was never shown it, and her app never asked GitHub about anyone.
@@ -113,7 +116,10 @@ test("a bare SSH key is proven on the device, and another key's signature is ref
   expect(statement).toMatch(/^Ghostly identity proof v1: I control ssh:SHA256:[A-Za-z0-9+/]{43} and authorize /);
   await add.getByTestId("add-identity-paste").fill(other.sign(statement));
   await add.getByTestId("add-identity-finish").click();
-  await expect(add.getByTestId("add-identity-error")).toHaveText(/made by SHA256:.* not the key you entered/);
+  // Why in the line (another key, not the one entered); its fingerprint behind the ⓘ.
+  await expect(add.getByTestId("add-identity-error")).toHaveText(/made by another key.*Not the key you entered\./);
+  await add.getByTestId("add-identity-error-info").click();
+  await expect(add.getByTestId("add-identity-error-details")).toContainText(/made by SHA256:.* not the key you entered/);
   await add.getByTestId("add-identity-paste").fill(mine.sign(statement));
   await add.getByTestId("add-identity-finish").click();
   await expect(add).toHaveCount(0);

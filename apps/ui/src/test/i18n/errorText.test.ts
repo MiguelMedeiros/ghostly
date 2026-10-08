@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
-import { ERROR_RULES, errorText, rawError } from "../../lib/errorText";
+import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -26,6 +26,11 @@ const CODES = "packages/core/src/engineErrors.ts";
 /** [message as thrown, the file that throws it, the part of the message written there as it is]. */
 const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The Ghostly peer did not start. Reopen the extension to retry.", "apps/extension/src/background.ts"],
+  ["The membership history forked. Membership changes are halted; the admin must re-form the group.", "packages/core/src/groupSession.ts", "Membership changes are halted; the admin must re-form the group."],
+  ["The membership history forked", "packages/browser/src/engine/groups.ts"],
+  ["Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
+  ["Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
+  ["Native adapter could not start. Reopen this chat to retry.", "packages/browser/src/engine/node.ts"],
   ["The Ghostly peer is unavailable. Reopen the extension to retry.", "apps/extension/src/host.ts"],
   ["Switching profiles…", "apps/extension/src/host.ts"],
   ["Ghostly needs the sign-in permission for this.", "apps/extension/src/oidc.ts"],
@@ -294,6 +299,15 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Rate limited: the faucet is busy. Try again in a minute.", `${BROWSER}/engine/paymentAdapters/testCoins.ts`],
   ["The faucet did not answer: Failed to fetch", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not answer: "],
   ["The faucet did not pay: empty", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not pay: "],
+  ["This signature was made by another key (0123ABCD), not the public key given.", `${BROWSER}/proofs/openpgp.ts`, "This signature was made by another key ("],
+  ["That signature was made by SHA256:abc, not the key you entered (SHA256:def)", `${BROWSER}/proofs/providers/ssh.ts`, ", not the key you entered ("],
+  ["No Ghostly TXT record at _ghostly.example.com (DNS changes can take a few minutes)", `${BROWSER}/proofs/domain.ts`, "No Ghostly TXT record at ${"],
+  ["https://example.com/.well-known/ghostly.json was not found", `${BROWSER}/proofs/domain.ts`, " was not found`"],
+  ["https://example.com/.well-known/ghostly/ab12.json was not found: it was deleted, or not uploaded yet", `${BROWSER}/proofs/providers/did.ts`, " was not found: it was deleted, or not uploaded yet"],
+  ["https://example.com/.well-known/ghostly.json names no Ghostly proof", `${BROWSER}/proofs/domain.ts`, " names no Ghostly proof`"],
+  ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
+  ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
+  ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -317,8 +331,8 @@ describe("errors in the app's language", () => {
   it("a reason nested in a wallet that could not be made is said in the language, also without its final period", () => {
     const pt = translators.pt;
     expect(errorText("Could not create the Mainnet Cashu wallet: Could not reach mint.example. Check the address: it should be a Cashu mint. Nothing was saved; try again.", pt))
-      .toBe("Não foi possível criar a carteira Mainnet Cashu: Não foi possível acessar mint.example. Confira o endereço: deve ser um mint Cashu. Nada foi salvo; tente de novo.");
-    expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK: o servidor Esplora em esplora.example não respondeu em 10 s");
+      .toBe("Não foi possível criar a carteira Mainnet Cashu. Sem acesso a mint.example. Confira o endereço: deve ser um mint Cashu. Nada foi salvo. Tente de novo.");
+    expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK. O servidor Esplora em esplora.example não respondeu em 10 s");
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {
@@ -328,11 +342,11 @@ describe("errors in the app's language", () => {
 
   it("a message nested in another is said in the language too, and the numbers and names stay", () => {
     const pt = translators.pt;
-    expect(errorText("No mint could create an invoice: mint.example did not answer", pt)).toBe("Nenhum mint conseguiu criar uma fatura: mint.example não respondeu");
+    expect(errorText("No mint could create an invoice: mint.example did not answer", pt)).toBe("Nenhum mint conseguiu criar uma fatura. mint.example não respondeu");
     expect(errorText("The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", pt))
-      .toBe("O pagamento Lightning não foi concluído. Os sats voltaram para a sua carteira, menos 2 sats que o mint ficou de taxa.");
+      .toBe("O pagamento Lightning não foi concluído. Os sats voltaram, menos 2 sats que ficaram com o mint.");
     expect(errorText("Refused: Already paid by another member of the group. 1200 sats came back; the mint kept 2 as its fee.", pt))
-      .toBe("Recusado: Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2 de taxa.");
+      .toBe("O pagamento foi recusado. Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2.");
     expect(errorText("Both peers need on-chain Bitcoin on a connected data link", pt)).toBe("Você e seu contato precisam de Bitcoin on-chain, com a conversa ao vivo");
     expect(errorText("This pays with real money: confirm it with Send real money first. Nothing was sent.", pt)).toContain("Enviar dinheiro real");
   });
@@ -355,8 +369,15 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(texts.filter(([, text]) => errorText(text, translators[language]) === text).map(([code]) => code)).toEqual([]);
   });
 
-  it("in English each is the engine's own text, word for word", () => {
-    for (const [, text] of texts) expect(errorText(text, english)).toBe(text);
+  // The app says them its own short way in English too (a title and a next line, lib/problemText.ts): each is known,
+  // and none leaves a value unfilled.
+  it("in English each is known, and keeps its values", () => {
+    for (const [, text] of texts) {
+      const parts = knownErrorParts(text, english);
+      expect(parts, text).not.toBeNull();
+      expect(`${parts!.title} ${parts!.next ?? ""}`).not.toContain("{{");
+    }
+    expect(errorText("Could not reach mint.example.com. Check the address: it should be a Cashu mint.", english)).toBe("Can't reach mint.example.com. Check the address: it should be a Cashu mint.");
   });
 
   it("a reviewed payment's refusals and outcomes are said in the language too", () => {

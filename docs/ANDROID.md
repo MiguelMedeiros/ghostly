@@ -13,7 +13,7 @@ What the web app already has comes along: sharing into Ghostly from other apps (
 
 ## Build it
 
-CI builds it: Actions > Android > Run workflow builds an APK from any branch and attaches it to the run as the `android` artifact (the step summary gives its size). A pull request that changes `apps/android-twa/` builds it too, and every release builds it (`release.yml`).
+CI builds it: Actions > Android > Run workflow builds an APK from any branch and attaches it to the run as the `android` artifact (the step summary gives its size). A pull request that changes `apps/android-twa/` builds it too once it is not a draft, and every release builds it (`release.yml`).
 
 Without the upload key (below), it is a debug APK signed with the Android debug key: install it to try the app (`adb install ghostly-<version>-android-debug.apk`), never publish it. With the key, it is a release APK signed with it, and releases attach that one.
 
@@ -68,7 +68,7 @@ A native Android app is being built to replace the TWA: the Desktop app (`apps/d
 
 ### Build it
 
-CI builds it: Actions > Android native (`.github/workflows/android-native.yml`), by hand or on a pull request that touches `apps/desktop/`. Each run has two debug APKs, signed with the Android debug key, to try and never to publish:
+CI builds it: Actions > Android native (`.github/workflows/android-native.yml`), by hand or on a pull request that touches `apps/desktop/` (once it is not a draft). Each run has two debug APKs, signed with the Android debug key, to try and never to publish:
 
 - `ghostly-android-debug-arm64-v8a`: phones, and an arm64 emulator on a Mac.
 - `ghostly-android-debug-x86_64`: the CI emulator.

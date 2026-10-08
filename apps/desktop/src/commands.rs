@@ -429,6 +429,32 @@ pub fn updater_can_install() -> bool {
     }
 }
 
+/// The WebKitGTK the page runs in, as `[major, minor, micro]`; none off Linux (WKWebView, WebView2). The page's sounds
+/// keep their audio output running on WebKitGTK before 2.52, which holds the page for seconds when an `AudioContext`
+/// resumes after a suspend (apps/ui/src/lib/sounds.ts `SoundsRelease`).
+#[tauri::command]
+pub fn webkit_version() -> Option<[u32; 3]> {
+    #[cfg(target_os = "linux")]
+    {
+        // The library the WebView is (wry links it): its own version, not the one the app was built against.
+        extern "C" {
+            fn webkit_get_major_version() -> u32;
+            fn webkit_get_minor_version() -> u32;
+            fn webkit_get_micro_version() -> u32;
+        }
+        // SAFETY: plain getters of constants, no arguments, callable from any thread.
+        unsafe {
+            Some([
+                webkit_get_major_version(),
+                webkit_get_minor_version(),
+                webkit_get_micro_version(),
+            ])
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+
 /// A `lightning:` or `bitcoin:` payment link, handed to whatever wallet the system has for it. Nothing
 /// else: only those two schemes, only the characters a payment URI is made of, and never a file or a
 /// web page.
@@ -630,6 +656,17 @@ mod tests {
     use base64::Engine;
     use tauri::test::{mock_builder, MockRuntime};
     use tauri::Manager;
+
+    #[test]
+    fn webkit_version_is_the_running_webkitgtk_on_linux_and_none_elsewhere() {
+        let version = webkit_version();
+        if cfg!(target_os = "linux") {
+            let [major, minor, _] = version.expect("WebKitGTK's version");
+            assert!(major >= 2 && minor > 0, "{version:?}");
+        } else {
+            assert_eq!(version, None);
+        }
+    }
 
     #[test]
     fn payment_links_are_lightning_or_bitcoin_uris_made_of_payment_characters() {

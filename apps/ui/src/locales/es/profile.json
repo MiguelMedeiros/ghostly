@@ -46,10 +46,12 @@
     "protection": {
       "confirm": "Lo entiendo. Crear la copia sin frase.",
       "label": "Protección",
-      "mainnet": "Este perfil tiene monederos en Mainnet que han tenido dinero real. Quien consiga el archivo puede gastarlo.",
+      "mainnet": "Este perfil ha tenido dinero real",
+      "mainnetNext": "Quien tenga el archivo puede gastarlo.",
       "none": "Sin frase",
       "passphrase": "Frase de contraseña",
-      "warning": "Sin cifrar. El archivo contiene las claves, los chats y los secretos de los monederos de este perfil en claro. Quien consiga el archivo consigue todo lo que hay en él, incluido el dinero de sus monederos."
+      "warning": "Sin cifrar",
+      "warningNext": "Quien tenga el archivo se lleva tus claves, chats y dinero."
     },
     "refresh": "Actualizar",
     "repeat": "Repítela",

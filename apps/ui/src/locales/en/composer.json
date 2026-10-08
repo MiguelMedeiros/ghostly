@@ -16,7 +16,7 @@
     "symbols": "Symbols"
   },
   "closeCamera": "Close camera",
-  "dhtTooLong": "This text is {{bytes}} UTF-8 bytes. DHT allows up to {{max}}; shorten it or use a live connection. Your draft is kept.",
+  "dhtTooLong": "Too long for the DHT ({{bytes}} of {{max}} bytes). Shorten it or go live; your draft is kept.",
   "document": "Document",
   "dropFiles": "Drop to send",
   "emoji": "Emoji",
@@ -70,5 +70,5 @@
   "skinTone": "Skin tone",
   "takePhoto": "Take photo",
   "tooLong": "That is too long to send ({{count}} characters, the limit is {{max}}).",
-  "tooLongDht": "That is too long for the DHT. Once you are connected peer to peer, long invoices and ecash tokens fit."
+  "tooLongDht": "Too long for the DHT. It fits once you're connected peer to peer."
 }

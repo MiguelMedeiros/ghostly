@@ -59,7 +59,7 @@ describe("a profile with no wallet yet", () => {
       return made(params.type, params.network);
     });
     await user.click(await screen.findByTestId("wallet-first-mainnet"));
-    expect(await screen.findByTestId("wallet-first-error-usdt")).toHaveTextContent("RPC unavailable. Nothing was saved; try again.");
+    expect(await screen.findByTestId("wallet-first-error-usdt")).toHaveTextContent("RPC unavailable. Nothing was saved. Try again.");
     expect(screen.queryByTestId("wallet-first-error-cashu")).not.toBeInTheDocument();
     usdtDown = false;
     await user.click(screen.getByTestId("wallet-first-retry-usdt"));
@@ -115,7 +115,7 @@ describe("a new profile's Mainnet wallets, made by themselves", () => {
     // New says why on that kind's Mainnet card too.
     await user.click(screen.getByTestId("wallet-add"));
     await user.click(screen.getByTestId("new-wallet-network-mainnet"));
-    expect(screen.getByTestId("new-wallet-type-usdt-reason")).toHaveTextContent("RPC unavailable.");
+    expect(screen.getByTestId("new-wallet-type-usdt-reason")).toHaveTextContent("RPC unavailable");
     await user.click(screen.getByTestId("new-wallet-network-testnet"));
     expect(screen.queryByTestId("new-wallet-type-usdt-reason")).not.toBeInTheDocument();
   });
@@ -230,7 +230,7 @@ describe("New, in the header", () => {
     await user.click(await screen.findByTestId("wallet-add"));
     await user.click(screen.getByTestId("new-wallet-network-testnet"));
     await user.click(screen.getByTestId("new-wallet-type-arkade"));
-    expect(await screen.findByTestId("new-wallet-error")).toHaveTextContent("It did not answer in time. Nothing was saved; try again.");
+    expect(await screen.findByTestId("new-wallet-error")).toHaveTextContent("It did not answer in time. Nothing was saved. Try again.");
     down = false;
     await user.click(screen.getByTestId("new-wallet-retry"));
     expect(engine.callsTo("walletCreate")).toHaveLength(2);
@@ -321,7 +321,7 @@ describe("a wallet connected with New", () => {
     await choose(user, within(form).getByRole("combobox", { name: "Source" }), "nwc");
     await user.type(within(form).getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
     await user.click(within(form).getByTestId("provider-save"));
-    expect(await screen.findByTestId("new-wallet-error")).toHaveTextContent("no answer from its relay. Nothing was saved");
+    expect(await screen.findByTestId("new-wallet-error")).toHaveTextContent("No answer from its relay. Nothing was saved.");
     // Still open on the form, what was typed kept: submitting again is the retry.
     await new Promise((resolve) => setTimeout(resolve, 900));
     expect(screen.getByTestId("new-wallet")).toBeInTheDocument();
@@ -392,9 +392,9 @@ describe("the picker, while a wallet is made", () => {
     expect(screen.getByTestId("new-wallet-type-usdt")).toHaveAttribute("data-state", "error");
     expect(screen.getByTestId("new-wallet-type-usdt-status")).toHaveTextContent("Try again");
     // Why, on the card itself, in a line: on a phone the message under the kinds is below the fold.
-    expect(screen.getByTestId("new-wallet-type-usdt-reason")).toHaveTextContent(/^RPC unavailable\.$/);
+    expect(screen.getByTestId("new-wallet-type-usdt-reason")).toHaveTextContent(/^RPC unavailable$/);
     expect(screen.getAllByTestId("new-wallet-error")).toHaveLength(1);
-    expect(screen.getByTestId("new-wallet-error")).toHaveTextContent("RPC unavailable. Nothing was saved; try again.");
+    expect(screen.getByTestId("new-wallet-error")).toHaveTextContent("RPC unavailable. Nothing was saved. Try again.");
     expect(screen.queryByTestId("new-wallet-progress")).not.toBeInTheDocument();
     // The others can be chosen again, and the network changed.
     expect(screen.getByTestId("new-wallet-type-arkade")).toBeEnabled();
@@ -612,11 +612,11 @@ describe("why a wallet is not there, in the app's language", () => {
     const { user, engine } = renderApp(<Wallet />, { language: "pt" });
     const reason = "Could not create the Mainnet Cashu wallet: Could not reach mint.example. Check the address: it should be a Cashu mint. Nothing was saved; try again.";
     engine.update({ wallet: walletView({ offers: offers({ "bitcoin:mainnet": { reason: "No on-chain wallet runs on Mainnet here yet" } }), setup: { running: false, failed: [{ type: "cashu", network: "mainnet", reason }] } }) });
-    expect(await screen.findByTestId("wallet-setup-error-cashu")).toHaveTextContent("Não foi possível acessar mint.example.");
+    expect(await screen.findByTestId("wallet-setup-error-cashu")).toHaveTextContent("Sem acesso a mint.example");
     expect(screen.getByTestId("wallet-setup-error-cashu")).not.toHaveTextContent("Could not");
     await user.click(screen.getByTestId("wallet-add"));
     await user.click(screen.getByTestId("new-wallet-network-mainnet"));
-    expect(screen.getByTestId("new-wallet-type-cashu-reason")).toHaveTextContent(/^Não foi possível acessar mint\.example\.$/);
+    expect(screen.getByTestId("new-wallet-type-cashu-reason")).toHaveTextContent(/^Sem acesso a mint\.example$/);
     // A kind not offered here says why in the language too, in its line and on hover.
     expect(screen.getByTestId("new-wallet-type-bitcoin")).toHaveAttribute("title", "Nenhuma carteira on-chain funciona na Mainnet aqui ainda");
     expect(screen.getByTestId("new-wallet-type-bitcoin")).toHaveTextContent("Nenhuma carteira on-chain funciona na Mainnet aqui ainda");
@@ -628,7 +628,7 @@ describe("why a wallet is not there, in the app's language", () => {
     engine.on("walletCreate", () => Promise.reject(new Error("Could not create the Testnet Ark wallet: The Bark server is not answering. Nothing was saved; try again.")));
     await user.click(await screen.findByTestId("wallet-add"));
     await user.click(screen.getByTestId("new-wallet-type-arkade"));
-    expect(await screen.findByTestId("new-wallet-type-arkade-reason")).toHaveTextContent(/^O servidor Bark não está respondendo\.$/);
-    expect(screen.getByTestId("new-wallet-error")).toHaveTextContent("Não foi possível criar a carteira Testnet Ark: O servidor Bark não está respondendo. Nada foi salvo; tente de novo.");
+    expect(await screen.findByTestId("new-wallet-type-arkade-reason")).toHaveTextContent(/^O servidor Bark não está respondendo$/);
+    expect(screen.getByTestId("new-wallet-error")).toHaveTextContent("Não foi possível criar a carteira Testnet Ark" + "O servidor Bark não está respondendo. Nada foi salvo. Tente de novo.");
   });
 });

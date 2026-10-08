@@ -73,7 +73,7 @@ The admin invites, removes and transfers its role; any member leaves. Local bloc
 
 ## Compatibility and open decisions
 
-Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Mesh groups, their links and frames are unchanged by the community profile; an app that knows only the mesh never receives a community frame and says a `group2/` link is not one it can open. Open before Proposed: multiple admins; member key updates; approval, expiry and use counts on links; group files and media as capabilities of their own (payments between members are in both profiles: [mesh](902-group-mesh.md#payments), [community](903-group-community.md#payments)); native transports on edges; a profile beyond a few hundred members; interoperability with a second implementation.
+Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Mesh groups, their links and frames are unchanged by the community profile; an app that knows only the mesh never receives a community frame and says a `group2/` link is not one it can open. Open before Proposed: multiple admins; member key updates; approval, expiry and use counts on links; group media as a capability of its own (group files are proposed in [503](503-group-files.md); payments between members are in both profiles: [mesh](902-group-mesh.md#payments), [community](903-group-community.md#payments)); native transports on edges; a profile beyond a few hundred members; interoperability with a second implementation.
 
 ## Conformance
 

@@ -11,7 +11,7 @@ import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
 import { formatAt } from "../lib/time";
-import { errorText } from "../lib/errorText";
+import { problemText } from "../lib/problemText";
 
 /** Spark transfers cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
@@ -48,11 +48,11 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
    <Button variant="primary" className="w-full" data-testid="spark-mainnet-create" disabled={busy || !apiKey.trim()} onClick={() => void run(async () => { await wallet.sparkCreate({ network: "bitcoin", apiKey }); setApiKey(""); })}>{t("wallet.spark.openMainnet")}</Button>
    <Notice>{t("wallet.spark.orTestnet")}</Notice>
   </div>
-  {error && <Notice tone="error">{error}</Notice>}
+  {error && <Notice problem={error} />}
  </div>;
 
  return <div className="space-y-6" data-testid="spark-wallet">
-  {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="spark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Spark" })}</p><Notice>{spark?.error ? errorText(spark.error, t) : t("wallet.spark.connectingNote")}</Notice></div>
+  {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="spark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Spark" })}</p>{spark?.error ? <Notice problem={problemText(spark.error, t)} tone="muted" /> : <Notice>{t("wallet.spark.connectingNote")}</Notice>}</div>
   : <div className="space-y-4">
    <p className="text-text-primary" data-testid="spark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(spark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
     {mainnet ? <span className="block text-xs text-danger mt-1" data-testid="spark-mainnet-label">{t("wallet.spark.mainnetLabel")}</span> : <span className="block text-xs text-yellow-500 mt-1">{t("wallet.spark.regtestLabel")}</span>}</p>
@@ -82,8 +82,8 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     </ul>
    </Section>}
   </div>}
-  {error && <Notice tone="error">{error}</Notice>}
-  {spark?.error && ready && <Notice tone="warning">{errorText(spark.error, t)}</Notice>}
+  {error && <Notice problem={error} />}
+  {spark?.error && ready && <Notice tone="warning" problem={problemText(spark.error, t)} />}
 
   {ready && <Section title={t("wallet.panel.settings")}>
    <Row label={t("wallet.panel.network")} hint={mainnet ? t("wallet.spark.networkHintMainnet") : t("wallet.spark.networkHintRegtest")}><span className="text-sm text-text-secondary">{mainnet ? "Mainnet" : "Regtest"}</span></Row>

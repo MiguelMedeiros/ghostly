@@ -322,7 +322,7 @@ test("a profile with many files and a large one is backed up with its progress a
   const again = page.getByTestId("profile-backups");
   await again.getByTestId("backup-open").click();
   await again.getByRole("radio", { name: "No passphrase" }).click();
-  await expect(again.getByTestId("backup-unprotected-warning")).toHaveText("Not encrypted. The file holds this profile's keys, chats and wallet secrets in the clear. Anyone who gets the file gets everything in it, including any money in its wallets.");
+  await expect(again.getByTestId("backup-unprotected-warning")).toHaveText("Not encrypted" + "Anyone with the file gets your keys, chats and money.");
   await expect(again.getByTestId("backup-unprotected-mainnet"), "no real money in this profile").toHaveCount(0);
   await expect(again.getByTestId("backup-download")).toBeDisabled();
   await again.getByTestId("backup-unprotected-confirm").check();
@@ -394,7 +394,7 @@ test("a cancelled backup saves nothing, and a damaged file restores nothing", { 
     await backups.getByTestId("restore-go").click();
     // Its first frames are whole, so it opens and is recognised as this profile's; the damage is met while restoring.
     await backups.getByTestId("restore-same-device").getByTestId("restore-copy").click();
-    await expect(backups.getByTestId("backup-error")).toHaveText("This backup is damaged: it was changed or cut short. Try another copy of the file.", { timeout: 120_000 });
+    await expect(backups.getByTestId("backup-error")).toHaveText("This backup is damaged" + "Try another copy of the file.", { timeout: 120_000 });
     await expect(page.getByTestId("profile-row")).toHaveCount(1);
     expect(Object.keys(await restoredFiles(page)), "what the restore had written is gone").toEqual([]);
     expect(await fileFolders(page), "and so is the large file it was writing to file storage").toEqual(foldersBefore);

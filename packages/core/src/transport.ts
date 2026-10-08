@@ -90,6 +90,18 @@ export function isDiscoveryBudgetError(error: unknown): error is DiscoveryBudget
     && typeof (error as { retryInMs?: unknown }).retryInMs === "number");
 }
 
+/**
+ * A publish Ghostly Desktop's Rust relay client held back, as it says it in words (`pkarr_network.rs`
+ * `publish_failure`: "Publish held back on every relay…; retry in N ms: …"), as the `DiscoveryBudgetError` it is: every
+ * relay held the packet back for its rate limit, or held it back beside relays left alone for failing, and nothing failed
+ * now. Anything else is returned as it came.
+ */
+export function heldBackError(error: unknown): unknown {
+  const text = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+  const wait = /^Publish held back [^;]*; retry in (\d+) ms/.exec(text);
+  return wait ? new DiscoveryBudgetError(Number(wait[1]), text) : error;
+}
+
 /** When to try again after the budget held a request back: when it frees one, but never sooner than `min` nor later than `max`. */
 export function budgetRetryMs(error: DiscoveryBudgetError, min: number, max: number): number {
   return Math.min(max, Math.max(min, Number.isFinite(error.retryInMs) ? error.retryInMs : max));

@@ -16,12 +16,13 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/");
 }
 
-/** The app the runner opened (full screen over the page), closed by its own bar's Close. */
+/** The app the runner opened (in the chat's panel), closed by its header's Close: the panel hides, its frame goes. */
 async function closeApp(peer: Peer): Promise<void> {
   const app = peer.page.getByTestId("mini-app");
   await expect(app).toBeVisible();
   await app.getByRole("button", { name: "Close" }).click();
-  await expect(app).toHaveCount(0);
+  await expect(app).toBeHidden();
+  await expect(app.locator("iframe")).toHaveCount(0);
 }
 
 test("install from a store, open it in a chat, and the contact installs it from the card", { tag: ["@feature:apps.page", "@feature:apps.chat.card"] }, async ({ peer }) => {
@@ -89,6 +90,65 @@ test("install from a store, open it in a chat, and the contact installs it from 
   await closeApp(bob);
   await expect(card.getByTestId("app-card-open")).toBeVisible();
   await expect(card.getByTestId("app-card-check")).toHaveText("Installed");
+});
+
+/** Ana's app card rows as her engine keeps them: how each went (`via`) and whether its card is due to go again live. */
+async function appCardRows(peer: Peer): Promise<{ via?: string; cardRestore?: string; restored: boolean }[]> {
+  return peer.page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open("ghostly");
+    request.onsuccess = () => {
+      const db = request.result;
+      const query = db.transaction("messages").objectStore("messages").getAll();
+      query.onsuccess = () => {
+        type Row = { sender: string; via?: string; cardRestore?: string; card?: { kind: string }; edit?: { restore?: boolean } };
+        resolve((query.result as Row[]).filter((m) => m.sender === "me" && m.card?.kind === "app").map((m) => ({ via: m.via, cardRestore: m.cardRestore, restored: !!m.edit?.restore })));
+        db.close();
+      };
+      query.onerror = () => reject(query.error);
+    };
+    request.onerror = () => reject(request.error);
+  }));
+}
+
+test("an app opened while the contact's app was closed shows as a card once the chat is live again, not as text", { tag: ["@feature:apps.chat.card", "@feature:chat.status-cards.wire"] }, async ({ peer }) => {
+  // The DHT floor carries the card's text alone, and an app card gets no update to carry it later: the opener's app
+  // sends the card again live, as an edit of the card alone (WISP 405 § Cards that went as text).
+  const store = await testStore();
+  const [ana, bob] = await Promise.all([peer("ana-away"), peer("bob-away")]);
+  await serveStore(ana.context, store);
+  await serveStore(bob.context, store);
+  await setNickname(ana, "Ana");
+  await setNickname(bob, "Bob");
+  await ana.page.goto("/#/apps");
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(APP_URL);
+  await ana.page.getByTestId("apps-add-check").click();
+  await ana.page.getByTestId("app-install").getByTestId("app-install-confirm").click();
+  await expect(ana.page.getByTestId("installed-app")).toContainText(store.title);
+  await ana.page.goto("/#/");
+  await pair(ana, bob);
+
+  // Bob's app closes; Ana's chat drops to the DHT, then she opens Chess in it.
+  const returnTo = bob.page.url();
+  await bob.page.goto("about:blank");
+  await expect(ana.page.getByTestId("connection-options")).not.toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
+  await (await composerRow(ana.page, "composer-apps")).click();
+  await ana.page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
+  await closeApp(ana);
+  await expect(chat(ana).getByTestId("app-card")).toContainText("You opened it here");
+  // It went on the floor, its text alone: the card is due.
+  await expect.poll(() => appCardRows(ana), { timeout: 90_000 }).toEqual([{ via: "pkarr", cardRestore: "due", restored: false }]);
+
+  // Bob is back: the card shows once the chat is live, not its text, and with no edit mark.
+  await bob.page.goto(returnTo);
+  const card = chat(bob).getByTestId("app-card");
+  await expect(card).toContainText(`${store.title} 1.2.0`, { timeout: 120_000 });
+  await expect(card).toContainText("Ana opened it here");
+  await expect(chat(bob).getByTestId("message-edited")).toHaveCount(0);
+  await expect.poll(() => appCardRows(ana), { timeout: 60_000 }).toMatchObject([{ cardRestore: "sent", restored: true }]);
+  // Still a card after a reload, and only one message.
+  await bob.page.reload();
+  await expect(chat(bob).getByTestId("app-card")).toHaveCount(1, { timeout: 60_000 });
 });
 
 test("in Safari the install screen's two ⓘ each open their own line, even when the lines sit close", { tag: ["@feature:apps.page"] }, async ({ peer }) => {

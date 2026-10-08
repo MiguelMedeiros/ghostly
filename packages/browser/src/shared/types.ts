@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -227,8 +227,17 @@ export interface GroupEdgeView {
   noSlot?: true;
   /** When this device last heard from the member on this edge, in ms (0: never). */
   lastSeenAt: number;
+  /** The engine's own words for why the last attempt failed (English, for logs and details); `cause` sums it up. */
   error?: string;
+  /**
+   * What `error` comes down to, for a short status: `relays`, its packets could not go out or be read (the Pkarr relays
+   * failed); `session`, a connection opened and dropped in a way that says nothing about the member (it is dialled
+   * again); `other`, anything else (a refused key, no common transport...).
+   */
+  cause?: GroupEdgeCause;
 }
+
+export type GroupEdgeCause = "relays" | "session" | "other";
 
 /**
  * How far a join through a group's link got, as the joiner can know it: the knock is being left,
@@ -383,6 +392,8 @@ export interface FileTransferView {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
+  /** A group file (WISP 503) waiting, `waiting`: why, in a few words ("Nobody you are connected to has this file yet"). */
+  note?: string;
 }
 
 /** Ecash held by this peer. One row per proof; `reserved` while an operation is using it. */
@@ -860,21 +871,24 @@ export interface StoredMessage {
    */
   press?: MessagePress;
   /**
-   * A question of mine with buttons whose text went on the DHT floor or into a hold, which carry text alone (WISP 406 ·
-   * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
+   * A card of mine (WISP 405 · Status Cards, WISP 406 · Message Buttons) whose text went on the DHT floor or into a hold,
+   * which carry text alone: `due` until the card goes again live, as an edit of the card alone; `sent` once it did, or
+   * once it was given up (too old).
    */
+  cardRestore?: "due" | "sent";
+  /** What `cardRestore` was named before it covered every kind of card (buttons only): read for rows kept since. */
   buttonsRestore?: "due" | "sent";
 }
 
 /**
- * A message that carries a task or a routine card, as the Tasks board reads it across every chat and group
- * (`statusCardIndex`): where it is (`linkId`: a chat's id, or `group:<id>`), its message, who sent it (`member`: a group
+ * A message that carries a task, a routine or a usage card, as the Tasks board and the chat list read it across every
+ * chat and group (`statusCardIndex`): where it is (`linkId`: a chat's id, or `group:<id>`), its message, who sent it (`member`: a group
  * member's key, absent for my own), when it was sent and when its last edit was made. Nothing else of the message.
  */
 export interface CardIndexRow {
   linkId: string;
   id: string;
-  card: TaskCard | RoutineCard;
+  card: TaskCard | RoutineCard | UsageCard;
   sender: "me" | "peer";
   member?: string;
   timestamp: number;
@@ -1197,6 +1211,16 @@ export interface Settings {
    * nothing is said, and a contact's typing is still shown.
    */
   sendTyping?: boolean;
+  /**
+   * Whether files are downloaded without asking where the rules allow it (WISP 503: a group's voice messages, and its
+   * files up to 8 MiB within 256 MiB a group). Absent means on; off, each waits for a Download.
+   */
+  autoDownloads?: boolean;
+  /**
+   * Whether this device sends the group files it keeps to members who ask (WISP 503 § Serving limits). Absent means
+   * on; off, it answers that it is busy and does not say it holds them.
+   */
+  serveFiles?: boolean;
   /**
    * Where items are held for away contacts (WISP 404): the profile's S3 storage and its random space
    * (WISP 1000/1002), as set up under Profile → Backups. Kept here for the peer, which may run outside the

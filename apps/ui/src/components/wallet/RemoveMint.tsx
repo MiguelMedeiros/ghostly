@@ -42,7 +42,7 @@ export function RemoveMintConfirm({ mint, wallet, state, onClose }: { mint: Mint
             <span>{t("wallet.cashu.removeMintConsent")}</span>
           </label>
         </> : <p className="text-xs text-text-secondary">{t("wallet.cashu.removeMintHint")}</p>}
-        {error && <Notice tone="error" testId="mint-remove-error">{error}</Notice>}
+        {error && <Notice problem={error} testId="mint-remove-error" />}
         <div className="flex flex-wrap justify-end gap-2">
           <Button data-testid="mint-remove-cancel" disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
           <Button variant="danger" data-testid="mint-remove-yes" disabled={busy || (awaiting.length > 0 && !understood)}

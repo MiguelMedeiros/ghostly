@@ -1,10 +1,12 @@
 import { useId, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
-import { errorText } from "../../lib/errorText";
 import { reloadIntoGate, takeoverErrorKey } from "../../lib/devices";
 import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton } from "./DeviceDialog";
+import { type Problem, problemText } from "../../lib/problemText";
+import { Notice } from "../ui/Notice";
+import { said } from "../../lib/notices";
 
 /**
  * A forced takeover (WISP 06 § Forced takeover): "My other device is lost or broken" on a standby that holds a copy, and
@@ -18,7 +20,7 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [info, setInfo] = useState(false);
   // "Lost or stolen?" (WISP 06 § Forced takeover): on yes, the money checklist comes first once the profile opens here.
   // A device set of its own (a `moving` device whose remover is gone): the question is not asked, the old set is left whole.
@@ -26,15 +28,15 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
   const other = device ?? t("devices.join.otherDevice");
   const ready = (!asks || !!password) && (!device || name.trim().length > 0) && lost !== null;
   const submit = async () => {
-    setBusy(true); setError("");
+    setBusy(true); setError(null);
     try {
       const outcome = await engine.call("deviceTakeover", { password, name, lost: lost === true });
       // Active now: the app starts again into the gate, where the engine raises its counters and starts.
       if (outcome.kind === "start") { await reloadIntoGate(); return; }
-      setError(t(outcome.kind === "removed" ? "devices.takeover.ownSetRemoved" : outcome.kind === "wait" ? "devices.takeover.ownSetWait" : "devices.takeover.lostRace"));
+      setError({ tone: "error", title: t(outcome.kind === "removed" ? "devices.takeover.ownSetRemoved" : outcome.kind === "wait" ? "devices.takeover.ownSetWait" : "devices.takeover.lostRace") });
     } catch (cause) {
       const key = takeoverErrorKey(cause);
-      setError(key ? t(key) : errorText(cause, t));
+      setError(key ? said(key, t) : problemText(cause, t));
     } finally { setBusy(false); }
   };
   return (
@@ -72,7 +74,7 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
           </label>
         )}
         {busy && <p role="status" data-testid="takeover-checking" className="text-text-secondary">{t("devices.takeover.checking")}</p>}
-        {error && <p role="alert" data-testid="takeover-error" className="text-danger">{error}</p>}
+        {error && <Notice problem={error} testId="takeover-error" className="" />}
         <button type="submit" data-testid="takeover-go" disabled={busy || !ready} className={primaryButton}>{t("devices.takeover.go")}</button>
       </form>
     </DeviceDialog>

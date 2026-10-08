@@ -56,7 +56,9 @@ test("an app card reaches v1.1.4 as its text with a link, apps/1 is never offere
   await expect(app).toBeVisible();
   await expect(dialog).toHaveCount(0);
   await app.getByRole("button", { name: "Close" }).click();
-  await expect(app).toHaveCount(0);
+  // The chat's panel stays in the page, hidden, with no frame in it (WISP 1200 § Per client, web).
+  await expect(app).toBeHidden();
+  await expect(app.locator("iframe")).toHaveCount(0);
   await expect(chat(nina).getByTestId("app-card")).toContainText("You opened it here");
 
   // 1.1.4 shows the card's text: what it is, and the bundle's URL as a link on its own line. No card is drawn.

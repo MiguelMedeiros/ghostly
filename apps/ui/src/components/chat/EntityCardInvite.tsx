@@ -10,7 +10,8 @@ import { ensureSession } from "../../lib/storage";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteShareText, readInvite, type JoinOutcome } from "../../lib/url";
 import { CardIcon, EntityCardFrame, cardButton, cardQuiet } from "./EntityCardFrame";
 import { LinkActions } from "./LinkQrDialog";
-import { errorText } from "../../lib/errorText";
+import { problemText, type Problem } from "../../lib/problemText";
+import { Notice } from "../ui/Notice";
 
 
 /** Who the card says handed the invite over: the contact who sent it (by name, when known), or you. */
@@ -35,7 +36,7 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
   const { t } = useI18n();
   const nav = useAppNavigation();
   const [outcome, setOutcome] = useState(() => outcomeOf(code));
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   useEffect(() => {
     const update = () => setOutcome(outcomeOf(code));
     update();
@@ -44,15 +45,15 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
   }, [code]);
 
   const join = () => {
-    setError("");
+    setError(null);
     const reading = readInvite(code);
-    if (!reading.ok) { setError(t(INVITE_REFUSAL_MESSAGE[reading.reason])); return; }
+    if (!reading.ok) { setError({ tone: "error", title: t(INVITE_REFUSAL_MESSAGE[reading.reason]) }); return; }
     const now = classifyInvite(reading.keys);
     setOutcome(now);
     if (now.kind === "own") return;
     if (now.kind === "joined") { showJoinNotice("join.alreadyIn"); nav.conversation(chatPath(now.sessionId)); return; }
     let sessionId: string;
-    try { sessionId = ensureSession(reading.keys); } catch { setError(t("join.invalid")); return; }
+    try { sessionId = ensureSession(reading.keys); } catch { setError({ tone: "error", title: t("join.invalid") }); return; }
     window.dispatchEvent(new Event("session-updated"));
     nav.conversation(chatPath(sessionId));
   };
@@ -72,7 +73,7 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
         <p className="m-0">{t("chat.entity.joinHint")}</p>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-invite-join" className={cardButton} onClick={join}>{t("chat.entity.join")}</button>{actions}</div>
       </>}
-      {error && <p role="alert" className="m-0 text-danger-ink">{error}</p>}
+      {error && <Notice problem={error} className="m-0" ink />}
     </EntityCardFrame>
   );
 }
@@ -87,15 +88,15 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
   const nav = useAppNavigation();
   const state = useEngineState();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   // An invitation not yet answered is not membership: it has no status until it is.
   const group = state?.groups.find(g => g.id === groupId && g.status);
   const join = async () => {
-    setError(""); setBusy(true);
+    setError(null); setBusy(true);
     try {
       const { groupId: id } = await engine.call("joinGroupByLink", { link });
       nav.conversation(groupPath(id));
-    } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); }
+    } catch (e) { setError(problemText(e, t)); } finally { setBusy(false); }
   };
   const actions = <LinkActions name="entity-group" title={community ? t("chat.entity.communityGroup") : t("chat.entity.groupInvite")} url={groupLinkUrl({ entryLink: link })} />;
   return (
@@ -110,7 +111,7 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
         <p className="m-0">{community ? t("chat.entity.communityHint") : t("chat.entity.groupHint")}</p>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>{actions}</div>
       </>}
-      {error && <p role="alert" className="m-0 text-danger-ink">{error}</p>}
+      {error && <Notice problem={error} className="m-0" ink />}
     </EntityCardFrame>
   );
 }

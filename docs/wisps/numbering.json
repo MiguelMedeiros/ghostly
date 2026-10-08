@@ -378,6 +378,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "none",
+    "id": "503",
+    "oldFile": "503-group-files.md",
+    "file": "503-group-files.md",
+    "kind": "Profile",
+    "displayNumber": "503",
+    "numberAssignment": "defined"
+  },
+  {
     "oldId": "15",
     "id": "600",
     "oldFile": "15-media.md",

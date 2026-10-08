@@ -139,7 +139,9 @@
     "showQr": "Mostrar código QR",
     "title": "DID público",
     "updating": "Publicando a alteração…",
-    "warning": "Tudo o que for listado aqui fica público para todos, para sempre: quem tiver o seu DID vê, e alguns resolvedores guardam cópias mesmo depois que você retira. As conversas nunca precisam disso. Deixe desligado para compartilhar cada identidade com um contato de cada vez."
+    "warning": "Público para todos, para sempre",
+    "warningInfo": "Quem tiver o seu DID vê o que for listado aqui, e alguns resolvedores guardam cópias mesmo depois que você retira.",
+    "warningNext": "As conversas não precisam disso. Deixe desligado para compartilhar com um contato por vez."
   },
   "face": {
     "hint": "Nome e foto na sua lista de conversas. Só neste dispositivo.",

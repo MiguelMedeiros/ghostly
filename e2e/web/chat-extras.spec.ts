@@ -299,7 +299,7 @@ test("a legacy chat before its data link: an overlong text is refused and the dr
   // Far over anything the box takes: refused on paste, and what was there stays.
   await box.fill("my draft");
   await box.fill("y".repeat(20_000));
-  await expect(alice.page.getByRole("alert")).toContainText("That is too long for the DHT");
+  await expect(alice.page.getByRole("alert")).toContainText("Too long for the DHT");
   await expect(box).toHaveValue("my draft");
   await alice.page.reload();
   await expect(box).toHaveValue("my draft");

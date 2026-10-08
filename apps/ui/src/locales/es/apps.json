@@ -54,7 +54,7 @@
     "notSigned": "Firma no válida. Ghostly no la instalará.",
     "offline": "Estás sin conexión.",
     "otherApp": "El enlace tiene otra app.",
-    "refused": "Ghostly no la instalará: {{reason}}",
+    "refused": "Ghostly no la instalará",
     "removed": "Una tienda que añadiste retiró esta app.",
     "revoked": "Su editor revocó esta versión.",
     "rollback": "El enlace tiene una versión más antigua.",
@@ -109,6 +109,11 @@
     "open": "Abrir",
     "stores": "Tiendas"
   },
+  "pick": {
+    "hint": "Se usa en un chat, con tu contacto.",
+    "none": "Aún no hay chats. Conéctate primero con un contacto.",
+    "title": "Abrir {{title}} en un chat"
+  },
   "store": {
     "count": "{{count}} apps",
     "countOne": "1 app",
@@ -123,5 +128,15 @@
     "remove": "Quitar",
     "stale": "Desactualizada desde el {{date}}"
   },
-  "title": "Apps"
+  "title": "Apps",
+  "view": {
+    "back": "Volver al chat",
+    "beside": "Mostrar el chat",
+    "full": "Ancho completo",
+    "resume": "Volver a {{title}}",
+    "stoppedRemoved": "{{title}} se detuvo: {{store}} retiró esta versión",
+    "stoppedRevoked": "{{title}} se detuvo: su autor revocó esta versión",
+    "with": "{{title}} con {{name}}",
+    "withName": "con {{name}}"
+  }
 }

@@ -127,7 +127,7 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
       )}
       {!onSet ? (saved || error) && <Block>
         {saved && <Notice tone="success" testId={`${kind}-source-saved`}>{saved}</Notice>}
-        {error && <Notice tone="error" testId={`${kind}-source-error`}>{error}</Notice>}
+        {error && <Notice problem={error} testId={`${kind}-source-error`} />}
       </Block> : <Block>
         {offered.length === 0 ? (
           <Notice testId={`${kind}-source-none-offered`}>{kind === "onchain"
@@ -153,7 +153,7 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
           </div>
         )}
         {saved && <Notice tone="success" testId={`${kind}-source-saved`}>{saved}</Notice>}
-        {error && <Notice tone="error" testId={`${kind}-source-error`}>{error}</Notice>}
+        {error && <Notice problem={error} testId={`${kind}-source-error`} />}
         <Notice>{view.mode === "testnet" ? t("wallet.source.modeNote.testnet") : t("wallet.source.modeNote.mainnet")}</Notice>
       </Block>}
     </Section>

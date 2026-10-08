@@ -16,7 +16,7 @@
     "symbols": "Symboles"
   },
   "closeCamera": "Fermer l'appareil photo",
-  "dhtTooLong": "Ce texte fait {{bytes}} octets UTF-8. La DHT en accepte au plus {{max}} ; raccourcissez-le ou utilisez une liaison directe. Votre brouillon est conservé.",
+  "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",
   "document": "Document",
   "dropFiles": "Déposez pour envoyer",
   "emoji": "Emoji",
@@ -70,5 +70,5 @@
   "skinTone": "Teint",
   "takePhoto": "Prendre une photo",
   "tooLong": "C'est trop long pour être envoyé ({{count}} caractères, la limite est {{max}}).",
-  "tooLongDht": "C'est trop long pour la DHT. Une fois connectés en pair à pair, les longues factures et les jetons ecash passent."
+  "tooLongDht": "Trop long pour la DHT. Ça passe une fois connectés en direct."
 }

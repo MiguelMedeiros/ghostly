@@ -8,7 +8,7 @@ import { providerOf, shortSubject, useEngineState } from "../../lib/identities";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
 import { identityStanding } from "./identityStanding";
 import { useT, type Translate } from "../../contexts/I18nContext";
-import { errorText } from "../../lib/errorText";
+import { problemLine } from "../../lib/problemText";
 
 const fetchForCard = boundedIdentityFetch({ online: () => globalThis.navigator?.onLine !== false });
 const host = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
@@ -66,7 +66,7 @@ export function IdentityEntityCard({ provider, subject, peerPubKey }: { provider
         facts = (await preview(subject, { signal: current.signal })).facts;
       }
       if (!current.signal.aborted) setLookup({ status: "ok", facts });
-    } catch (e) { if (!current.signal.aborted) setLookup({ status: "error", error: errorText(e, t) }); }
+    } catch (e) { if (!current.signal.aborted) setLookup({ status: "error", error: problemLine(e, t) }); }
   }, [provider, subject, t]);
 
   // Offline checks run once the card scrolls into view; anything that reaches a server waits for the tap.

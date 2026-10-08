@@ -46,8 +46,10 @@
     "maxGas": "Gas maximum (ETH)",
     "noSharedMint": "Aucun mint configuré en commun",
     "noWallet": {
-      "mainnet": "De l'argent réel est demandé ({{unit}}), et vous n'avez aucun portefeuille Mainnet pour payer. Créez-en un dans Portefeuilles, ou demandez plutôt de l'argent de test.",
-      "testnet": "De l'argent de test est demandé ({{unit}}), et vous n'avez aucun portefeuille Testnet pour payer. Créez-en un dans Portefeuilles, ou demandez plutôt de l'argent réel."
+      "mainnet": "Aucun portefeuille Mainnet pour payer ceci",
+      "mainnetNext": "Créez-en un dans Portefeuilles, ou demandez de l'argent de test.",
+      "testnet": "Aucun portefeuille Testnet pour payer ceci",
+      "testnetNext": "Créez-en un dans Portefeuilles, ou demandez de l'argent réel."
     },
     "off": "Ce moyen de paiement est désactivé dans cette conversation.",
     "payElsewhere": "Payer avec un autre portefeuille",
@@ -92,9 +94,12 @@
     "chooseOther": "Choisir quelqu'un d'autre",
     "continue": "Continuer",
     "error": {
-      "noAnswer": "L'app de votre contact n'a pas répondu. Elle est peut-être hors ligne ou doit être mise à jour ; votre contact peut vous envoyer une demande à la place.",
-      "noFederation": "Vous et {{name}} n'avez aucune fédération en commun, et sa demande n'a pas de facture Lightning.",
-      "noFederationInvoice": "Vous et {{name}} n'avez aucune fédération en commun : payez sa demande via Lightning, avec Vérifier le paiement dessus dans la conversation.",
+      "noAnswer": "L'app de votre contact n'a pas répondu",
+      "noAnswerNext": "Votre contact peut vous envoyer une demande.",
+      "noFederation": "Vous et {{name}} n'avez aucune fédération en commun",
+      "noFederationInvoice": "Vous et {{name}} n'avez aucune fédération en commun",
+      "noFederationInvoiceNext": "Payez sa demande via Lightning dans la conversation.",
+      "noFederationNext": "Sa demande n'a pas non plus de facture Lightning.",
       "noMint": "Ajoutez d'abord une mint Cashu",
       "prepare": "Impossible de préparer le paiement",
       "request": "Impossible de préparer la demande"
@@ -151,7 +156,8 @@
     "copied": "Copié",
     "copyError": "Copie impossible. Sélectionnez le texte et copiez-le vous-même.",
     "open": "Ouvrir le portefeuille",
-    "openError": "Impossible d'ouvrir un portefeuille : {{error}}. Copiez le texte ou scannez le code à la place.",
+    "openError": "Impossible d'ouvrir un portefeuille",
+    "openErrorNext": "Copiez le texte ou scannez le code à la place.",
     "openTitle": "Ouvrir dans un portefeuille sur cet appareil",
     "paid": "J'ai payé",
     "paidTitle": "Le portefeuille de votre contact est invité à vérifier maintenant. Il ne marque la demande comme payée qu'une fois l'argent vu.",

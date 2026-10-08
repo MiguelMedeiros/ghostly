@@ -57,6 +57,14 @@ const SCREENSHOT_TYPES = /\.(png|jpg|webp)$/;
 export const APP_PERMISSIONS = ["chat", "internet", "name"] as const;
 export type AppPermission = typeof APP_PERMISSIONS[number];
 export const APP_CLIENTS = ["web", "desktop", "extension"] as const;
+/**
+ * Where an app shows (WISP 1200 · Manifest, `view`). `chat`, the default when the manifest has none: inside a 1:1 chat
+ * only, beside it on a wide screen. `full`: full screen, alone or from a chat, never beside one.
+ */
+export const APP_VIEWS = ["chat", "full"] as const;
+export type AppViewMode = typeof APP_VIEWS[number];
+/** The view of a manifest: `chat` when it names none. */
+export const appViewOf = (manifest: { view?: AppViewMode }): AppViewMode => manifest.view ?? "chat";
 export type AppClient = typeof APP_CLIENTS[number];
 
 export interface AppFileEntry { path: string; size: number; sha256: string }
@@ -72,6 +80,8 @@ export interface AppManifest {
   description?: string;
   entry: string;
   permissions: AppPermission[];
+  /** Absent: `chat` (`appViewOf`). */
+  view?: AppViewMode;
   runtime: { host: string; clients: AppClient[] };
   license: string;
   sources?: string[];
@@ -83,7 +93,7 @@ export interface AppManifest {
 }
 
 const REQUIRED = ["ghostlyApp", "publisher", "name", "version", "sequence", "kind", "title", "tagline", "entry", "permissions", "runtime", "license", "files"] as const;
-const OPTIONAL = ["description", "sources", "proofs", "homepage", "support", "releaseNotes"] as const;
+const OPTIONAL = ["description", "view", "sources", "proofs", "homepage", "support", "releaseNotes"] as const;
 /** Reserved for phase 2 and refused in phase 1. */
 const RESERVED = ["price", "recovery"] as const;
 
@@ -179,6 +189,7 @@ export function checkAppManifest(value: unknown): AppManifestCheck {
   const permissions = m.permissions;
   if (!Array.isArray(permissions) || new Set(permissions).size !== permissions.length
     || !permissions.every((p) => (APP_PERMISSIONS as readonly unknown[]).includes(p))) return bad("permissions");
+  if (m.view !== undefined && !(APP_VIEWS as readonly unknown[]).includes(m.view)) return bad("view", `view is "chat" or "full"`);
   const runtime = m.runtime;
   if (!isObject(runtime) || Object.keys(runtime).length !== 2 || typeof runtime.host !== "string" || !HOST.test(runtime.host)) return bad("runtime");
   const clients = runtime.clients;

@@ -165,7 +165,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await user.click(screen.getByTestId("device-add-next"));
     const failed = await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
     expect(failed).toHaveAttribute("data-reason", "unreached");
-    expect(failed).toHaveTextContent("The two devices found each other but could not connect.");
+    expect(failed).toHaveTextContent("The devices couldn't connect" + "Keep both online and make a new code.");
   }, 20_000);
 });
 

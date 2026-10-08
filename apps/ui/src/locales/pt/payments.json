@@ -46,8 +46,10 @@
     "maxGas": "Gas máximo (ETH)",
     "noSharedMint": "Nenhum mint configurado em comum",
     "noWallet": {
-      "mainnet": "O pedido é de dinheiro real ({{unit}}), e você não tem carteira Mainnet para pagar. Crie uma em Carteiras, ou peça dinheiro de teste.",
-      "testnet": "O pedido é de dinheiro de teste ({{unit}}), e você não tem carteira Testnet para pagar. Crie uma em Carteiras, ou peça dinheiro real."
+      "mainnet": "Você não tem carteira Mainnet para pagar",
+      "mainnetNext": "Crie uma em Carteiras, ou peça dinheiro de teste.",
+      "testnet": "Você não tem carteira Testnet para pagar",
+      "testnetNext": "Crie uma em Carteiras, ou peça dinheiro real."
     },
     "off": "Essa forma de pagamento está desligada nesta conversa.",
     "payElsewhere": "Pagar com outra carteira",
@@ -92,9 +94,12 @@
     "chooseOther": "Escolher outra pessoa",
     "continue": "Continuar",
     "error": {
-      "noAnswer": "O app do seu contato não respondeu. Ele pode estar offline ou precisar de uma atualização; seu contato pode te enviar um pedido.",
-      "noFederation": "Você e {{name}} não têm nenhuma federação em comum, e o pedido não tem fatura Lightning.",
-      "noFederationInvoice": "Você e {{name}} não têm nenhuma federação em comum: pague o pedido pela Lightning, com Revisar pagamento nele na conversa.",
+      "noAnswer": "O app do seu contato não respondeu",
+      "noAnswerNext": "Seu contato pode te enviar um pedido.",
+      "noFederation": "Você e {{name}} não têm federação em comum",
+      "noFederationInvoice": "Você e {{name}} não têm federação em comum",
+      "noFederationInvoiceNext": "Pague o pedido pela Lightning na conversa.",
+      "noFederationNext": "E o pedido também não tem fatura Lightning.",
       "noMint": "Adicione uma mint Cashu primeiro",
       "prepare": "Não foi possível preparar o pagamento",
       "request": "Não foi possível preparar o pedido"
@@ -151,7 +156,8 @@
     "copied": "Copiado",
     "copyError": "Não foi possível copiar. Selecione o texto e copie você mesmo.",
     "open": "Abrir carteira",
-    "openError": "Não foi possível abrir uma carteira: {{error}}. Copie o texto ou escaneie o código.",
+    "openError": "Não foi possível abrir uma carteira",
+    "openErrorNext": "Copie o texto ou escaneie o código.",
     "openTitle": "Abrir em uma carteira neste dispositivo",
     "paid": "Já paguei",
     "paidTitle": "A carteira do seu contato é avisada para verificar agora. Ela só marca o pedido como pago quando vê o dinheiro.",

@@ -4,7 +4,8 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { memberName } from "../lib/groups";
 import { useI18n } from "../contexts/I18nContext";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /**
  * Leaving a group, said before it happens: it goes from this device with its history, and an admin
@@ -17,7 +18,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus }: { g
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
   const backdrop = useBackdropDismiss(onClose);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal(); cancel.current?.focus();
@@ -36,8 +37,8 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus }: { g
   const successor = !group.isAdmin ? undefined : community ? others.find(m => m.online) ?? others[0] : others.find(m => m.online && !m.viaHub);
   const blocked = others.length > 0 && (community ? !group.community?.connected : group.isAdmin && !successor);
   const leave = async () => {
-    setBusy(true); setError("");
-    try { await onConfirm(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); setBusy(false); }
+    setBusy(true); setError(null);
+    try { await onConfirm(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); setBusy(false); }
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-leave-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
@@ -45,9 +46,9 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus }: { g
     <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">
       <p>{t("group.leave.body")}</p>
       {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}</p>}
-      {blocked && <p className="text-danger">{community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")}</p>}
+      {blocked && <Notice tone="error" className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
     </div>
-    {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
+    {error && <Notice problem={error} className="mt-2 text-sm" />}
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button disabled={busy || blocked} onClick={() => void leave()} data-testid="group-leave-confirm"

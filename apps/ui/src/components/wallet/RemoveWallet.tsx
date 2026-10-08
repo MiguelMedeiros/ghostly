@@ -149,7 +149,7 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
             <Notice testId="wallet-remove-no-backup">{t("wallet.remove.noBackup")}</Notice>
           )}
           {notice && <Notice testId="wallet-remove-notice">{notice}</Notice>}
-          {backup.error && <Notice tone="error" testId="wallet-remove-backup-error">{backup.error}</Notice>}
+          {backup.error && <Notice problem={backup.error} testId="wallet-remove-backup-error" />}
         </div>
       )}
       {risks && (
@@ -158,7 +158,7 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
           <span data-testid="wallet-remove-consent">{consent}</span>
         </label>
       )}
-      {error && <Notice tone="error" testId="wallet-remove-error">{error}</Notice>}
+      {error && <Notice problem={error} testId="wallet-remove-error" />}
       <div className="flex flex-wrap justify-end gap-2">
         <Button ref={cancel} data-testid="wallet-remove-cancel" disabled={busy} onClick={close}>{t("common.cancel")}</Button>
         <Button variant="danger" data-testid="wallet-remove-confirm" disabled={busy || removal.pending > 0 || (risks && !understood)} onClick={remove}>{busy ? t("wallet.remove.removing") : t("wallet.remove.confirm", { label })}</Button>

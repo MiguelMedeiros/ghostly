@@ -3,21 +3,26 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
 import { transportName } from "./connection";
 import { englishT, type Translate } from "../locales/translate";
+import { problemText } from "./problemText";
 
 export type { TransportEntry, TransportEvent };
 
 const name = transportName;
 const native = (t?: PairedTransport) => t === "iroh/1" || t === "hyperdht/1";
 
-/** An error from the engine, short enough for a timeline line: transport ids named, the advice left for the details. */
-export function shortReason(reason: string): string {
+/**
+ * An error from the engine, short enough for a timeline line: transport ids named, the advice left for the details,
+ * and said in a few words of `tr`'s language (lib/problemText.ts), never a long English engine text.
+ */
+export function shortReason(reason: string, tr: Translate = englishT): string {
   let text = reason;
   for (const t of TRANSPORTS) text = text.split(t).join(name(t));
-  return text
+  const short = text
     .replace(/^Transport change failed:\s*/i, "")
     .replace(/\s*(Your previous connection is kept when available;\s*)?(Retry|retry) or choose another transport\.?$/, "")
     .replace(/\s*Retry when both peers are connected\.?$/, "")
     .trim().replace(/\.$/, "");
+  return problemText(short, tr, "connect").title.replace(/\.$/, "");
 }
 
 /** How long a run of changes took, as people say it. */
@@ -29,7 +34,7 @@ function span(ms: number, tr: Translate): string {
 /** "Couldn't switch to Iroh: it timed out": the head of a failed switch, with the engine's reason when there is one. */
 function couldNotSwitch(target: PairedTransport | undefined, reason: string | undefined, tr: Translate): string {
   const head = target ? tr("connection.line.failTo", { target: name(target) }) : tr("connection.line.failAny");
-  const short = reason ? shortReason(reason) : "";
+  const short = reason ? shortReason(reason, tr) : "";
   return short ? tr("connection.line.withReason", { text: head, reason: short }) : head;
 }
 
@@ -237,8 +242,8 @@ export function transportEventText(event: TransportEvent, contact: string, tr: T
       return event.cause === "contact" ? tr("connection.line.contactBackAuto", { contact }) : tr("connection.event.youBackAuto");
     case "failed": return couldNotSwitch(event.target, event.reason, tr);
     case "attempt":
-      if (event.target) return parts(tr("connection.waitingFor", { transport: name(event.target) }), !!event.reason && tr("connection.event.lastAttempt", { reason: shortReason(event.reason) }));
-      return event.reason ? tr("connection.line.withReason", { text: tr("connection.event.attemptFailed"), reason: shortReason(event.reason) }) : tr("connection.event.attemptFailed");
+      if (event.target) return parts(tr("connection.waitingFor", { transport: name(event.target) }), !!event.reason && tr("connection.event.lastAttempt", { reason: shortReason(event.reason, tr) }));
+      return event.reason ? tr("connection.line.withReason", { text: tr("connection.event.attemptFailed"), reason: shortReason(event.reason, tr) }) : tr("connection.event.attemptFailed");
     case "dht-only": return event.cause === "contact" ? tr("connection.line.contactDhtOnly", { contact }) : tr("connection.line.youDhtOnly");
     case "dht-left": return parts(tr("connection.event.dhtLeft"), event.transport ? tr("connection.event.setTo", { transport }) : tr("connection.event.automatic"));
   }
@@ -260,7 +265,7 @@ export function transportWaitText(wait: TransportWait, contact: string, format: 
     "unknown": () => tr("connection.wait.unknown", { contact, transport }),
     "starting": () => tr("connection.wait.starting", { contact, transport }),
     "connecting": () => tr("connection.wait.connecting", { transport }),
-    "unreachable": () => `${wait.error ? tr("connection.wait.failedWith", { reason: shortReason(wait.error) }) : tr("connection.wait.failed")} ${next}`,
+    "unreachable": () => `${wait.error ? tr("connection.wait.failedWith", { reason: shortReason(wait.error, tr) }) : tr("connection.wait.failed")} ${next}`,
     "waiting": () => tr("connection.wait.waiting", { contact }),
     "contact-lacks": () => tr("connection.wait.contactLacks", { contact, transport }),
     "app-lacks": () => wait.by === "contact" ? tr("connection.wait.appLacks", { transport }) : tr("connection.wait.appLacksNow", { transport }),
@@ -285,8 +290,8 @@ export function liveAttemptText(attempt: LiveAttempt | undefined, dialer: "you" 
   if (dialer === "contact") lines.push(tr("connection.attempt.contactDials", { contact }));
   if (!attempt) return { label: tr("connection.attempt.notLiveYet"), lines: [...lines, tr("connection.attempt.none", { contact })] };
   if (attempt.side === "answered") lines.push(tr("connection.attempt.answered", { contact }));
-  for (const f of attempt.failed) lines.push(tr("connection.attempt.failure", { transport: name(f.transport), reason: shortReason(f.error) }));
-  if (!attempt.failed.length && attempt.reason) lines.push(tr("connection.attempt.reason", { reason: shortReason(attempt.reason) }));
+  for (const f of attempt.failed) lines.push(tr("connection.attempt.failure", { transport: name(f.transport), reason: shortReason(f.error, tr) }));
+  if (!attempt.failed.length && attempt.reason) lines.push(tr("connection.attempt.reason", { reason: shortReason(attempt.reason, tr) }));
   if (attempt.retryAt) lines.push(tr("connection.attempt.retryAt", { time: format(attempt.retryAt) }));
   return { label: tr("connection.attempt.label", { time: format(attempt.at) }), lines };
 }

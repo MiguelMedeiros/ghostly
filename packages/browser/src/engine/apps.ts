@@ -1,10 +1,10 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, appDigest, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, appDigest, appViewOf, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
   canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocations, readAppStore,
   toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
-  type AppStoreView, type AppVersion, type JsonValue, type SignedAppRevocation,
+  type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
@@ -124,6 +124,8 @@ export interface InstalledAppView {
   sequence: number;
   digest: string;
   permissions: AppPermission[];
+  /** Where it shows: in a 1:1 chat only, or full screen (`chat` when its manifest names none). */
+  view: AppViewMode;
   /** The URL the installed version was read from: what an app card sent in a chat names (WISP 405 § An app). */
   from: string;
   /** The bundle has an `icon.png` (read with `appFile`, no request). */
@@ -190,7 +192,7 @@ export type AppCheckOutcome = "updated" | "ask" | "equivocation" | "none";
 export interface AppCheckResult { ref: string; outcome: AppCheckOutcome; run: AppRunStatus }
 
 /** What the runner gets: the checked entry and what the broker needs to answer the app. */
-export interface AppRunEntry { ref: string; digest: string; version: string; title: string; permissions: AppPermission[]; entry: string }
+export interface AppRunEntry { ref: string; digest: string; version: string; title: string; permissions: AppPermission[]; view: AppViewMode; entry: string }
 
 /** An app's storage in one scope, as the WISP's export file. */
 export interface AppDataExport { ghostlyAppData: 1; app: string; scope: string; entries: Record<string, JsonValue> }
@@ -863,7 +865,7 @@ export class Apps {
     if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
     const bundle = await this.verifiedBundle(app);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
-    return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], entry: utf8Decode(entry) };
+    return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], view: appViewOf(bundle.manifest), entry: utf8Decode(entry) };
   }
 
   /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). */
@@ -883,7 +885,7 @@ export class Apps {
     return {
       ref: app.ref, name: app.name, publisher: app.publisher, fingerprint: appFingerprint(app.publisher),
       title: manifest.title, tagline: manifest.tagline, ...(manifest.description !== undefined && { description: manifest.description }),
-      version: manifest.version, sequence: app.sequence, digest: app.digest, permissions: [...app.permissions],
+      version: manifest.version, sequence: app.sequence, digest: app.digest, permissions: [...app.permissions], view: appViewOf(manifest),
       from: app.from, icon: manifest.files.some((f) => f.path === "icon.png"),
       installedAt: app.installedAt, updatedAt: app.updatedAt,
       run: await this.runCheckOf(app, stores), listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),

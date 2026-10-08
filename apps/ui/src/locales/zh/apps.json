@@ -54,7 +54,7 @@
     "notSigned": "签名不正确。Ghostly 不会安装它。",
     "offline": "你处于离线状态。",
     "otherApp": "这个链接里是另一个应用。",
-    "refused": "Ghostly 不会安装它：{{reason}}",
+    "refused": "Ghostly 不会安装它",
     "removed": "你添加的商店已移除此应用。",
     "revoked": "发布者已撤销此版本。",
     "rollback": "这个链接里是较旧的版本。",
@@ -109,6 +109,11 @@
     "open": "打开",
     "stores": "商店"
   },
+  "pick": {
+    "hint": "它在聊天中运行，与你的联系人一起使用。",
+    "none": "还没有聊天。请先与联系人配对。",
+    "title": "在聊天中打开 {{title}}"
+  },
   "store": {
     "count": "{{count}} 个应用",
     "countOne": "1 个应用",
@@ -123,5 +128,15 @@
     "remove": "移除",
     "stale": "自 {{date}} 起已过期"
   },
-  "title": "应用"
+  "title": "应用",
+  "view": {
+    "back": "返回聊天",
+    "beside": "显示聊天",
+    "full": "全宽",
+    "resume": "返回 {{title}}",
+    "stoppedRemoved": "{{title}} 已停止：{{store}} 移除了此版本",
+    "stoppedRevoked": "{{title}} 已停止：其作者撤销了此版本",
+    "with": "与 {{name}} 的 {{title}}",
+    "withName": "与 {{name}}"
+  }
 }

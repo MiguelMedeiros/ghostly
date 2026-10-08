@@ -14,21 +14,31 @@ import { appErrorText } from "../../lib/apps/errors";
  * Opening one sends the "opened" app card (WISP 405 § An app), made from the app as installed, so the contact sees
  * "Ana opened Chess" and can install the same app; then the app opens in this chat. Nothing is advertised before.
  */
-export function ChatAppsDialog({ linkId, name, waiting, onClose }: { linkId: string; name: string; waiting?: string | null; onClose: () => void }) {
+export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, onClose }: {
+  linkId: string;
+  name: string;
+  waiting?: string | null;
+  /** Why an app opened here from the Apps page did not open. */
+  error?: string | null;
+  onClose: () => void;
+}) {
   const { t } = useI18n();
   const nav = useAppNavigation();
   const installed = useInstalledApps(true);
   const backdrop = useBackdropDismiss(onClose);
   const ref = useRef<HTMLDivElement>(null);
-  useDialogFocus(ref, onClose);
+  // Once an app opened, its panel has the focus: closing this does not take it back.
+  const opened = useRef(false);
+  useDialogFocus(ref, onClose, () => !opened.current);
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(failed);
 
   const open = async (app: InstalledAppView) => {
     setBusy(app.ref); setError(null);
     try {
       // Opened first: an app that cannot start here sends no card. Then the contact is told, with what to install.
       await openApp(app.ref, linkId);
+      opened.current = true;
       const failed = await sendAppCard(linkId, app, true);
       if (failed) throw new Error(failed);
       onClose();

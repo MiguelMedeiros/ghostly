@@ -48,6 +48,12 @@ describe("the card index", () => {
     expect(Object.keys(rows[0]).sort()).toEqual(["card", "id", "linkId", "sender", "timestamp"]);
   });
 
+  it("lists a bot's usage cards too, for the chat list's meter (WISP 405 § Usage)", async () => {
+    await db.addMessage(message("chat-a", readStatusCard({ kind: "usage", id: "usage", left: 62, label: "Claude" })!));
+    await db.addMessage(message("chat-a", card({ id: "relay" })));
+    expect((await node().statusCardIndex()).map((row) => [row.card.kind, row.card.id])).toEqual([["usage", "usage"], ["task", "relay"]]);
+  });
+
   it("follows an edit: the card of the latest version, and when it was made", async () => {
     const sent = message("chat-a", card({ status: "running", progress: 40 }));
     await db.addMessage(sent);

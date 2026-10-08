@@ -46,10 +46,12 @@
     "protection": {
       "confirm": "Entendi. Fazer o backup sem frase-senha.",
       "label": "Proteção",
-      "mainnet": "Este perfil tem carteiras na Mainnet que já guardaram dinheiro de verdade. Quem conseguir o arquivo pode gastá-lo.",
+      "mainnet": "Este perfil já guardou dinheiro real",
+      "mainnetNext": "Quem tiver o arquivo pode gastá-lo.",
       "none": "Sem frase-senha",
       "passphrase": "Frase-senha",
-      "warning": "Sem criptografia. O arquivo guarda as chaves, as conversas e os segredos das carteiras deste perfil às claras. Quem conseguir o arquivo consegue tudo o que há nele, inclusive o dinheiro das carteiras."
+      "warning": "Sem criptografia",
+      "warningNext": "Quem tiver o arquivo leva suas chaves, conversas e dinheiro."
     },
     "refresh": "Atualizar",
     "repeat": "Repita",

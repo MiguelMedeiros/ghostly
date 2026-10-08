@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
+import { appsRunning, openApp, stopTakenDown, type OpenAppOptions } from "./open";
 
 /*
  * The apps installed in this profile, as the engine lists them (`appList`, no request), shared by every screen that
@@ -14,14 +15,13 @@ let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
 
-/** Reads the list again. */
-// After any update check (the engine's scheduled one included), once a screen has read the list: a version found
-// removed or revoked shows as stopped.
-engine.onAppsChecked(() => { if (apps !== null) void refreshInstalledApps(); });
+// After any update check (the engine's scheduled one included), once a screen has read the list or an app runs: a
+// version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`).
+engine.onAppsChecked(() => { if (apps !== null || appsRunning()) void refreshInstalledApps(); });
 
 /** Reads the list again. */
 export function refreshInstalledApps(): Promise<void> {
-  loading = engine.call("appList").then((list) => { apps = list; tell(); }, () => { apps ??= []; tell(); }).finally(() => { loading = null; });
+  loading = engine.call("appList").then((list) => { apps = list; tell(); stopTakenDown(list); }, () => { apps ??= []; tell(); }).finally(() => { loading = null; });
   return loading;
 }
 
@@ -55,4 +55,14 @@ export async function sendAppCard(linkId: string, app: InstalledAppView, opened:
   const card = appCardFor(app, opened);
   const result = await engine.call("sendMessage", { linkId, text: statusCardText(card), card, timestamp: Date.now() });
   return result.error;
+}
+
+/**
+ * Opens `app` in the 1:1 chat `linkId` and tells the contact with the "opened" card: the chat's + → Apps, and the
+ * Apps page's chat picker for an app that runs in a chat. Opened first: an app that cannot start there sends no card.
+ */
+export async function openAppInChat(app: InstalledAppView, linkId: string, options?: OpenAppOptions): Promise<void> {
+  await openApp(app.ref, linkId, options);
+  const failed = await sendAppCard(linkId, app, true);
+  if (failed) throw new Error(failed);
 }

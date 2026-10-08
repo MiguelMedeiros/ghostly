@@ -7,9 +7,10 @@ import { useI18n } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { formatAmount } from "../../lib/amount";
 import { useComposition } from "../../hooks/useComposition";
-import { errorText } from "../../lib/errorText";
 import { satsIn } from "../NetworkTag";
 import { useAmountText } from "../../hooks/useAmountText";
+import { problemText, type Problem } from "../../lib/problemText";
+import { Notice } from "../ui/Notice";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -30,7 +31,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [quote, setQuote] = useState<Quote | null>(null);
   const [outcome, setOutcome] = useState<"paid" | "pending" | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   /** Real money: Pay opens the second step, and only it pays. A wallet naming no network is Mainnet's. */
   const [confirming, setConfirming] = useState(false);
   /** The amount typed the person's way ("1.000" sats in Portuguese); `amount` is what it means, or "" while unclear. */
@@ -42,8 +43,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? t("wallet.lightning.cashuMints") : source === ln?.providerId ? ln.alias ?? ln.label ?? source : source);
 
   const run = async (task: () => Promise<void>) => {
-    setError(""); setBusy(true);
-    try { await task(); } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); }
+    setError(null); setBusy(true);
+    try { await task(); } catch (e) { setError(problemText(e, t)); } finally { setBusy(false); }
   };
   const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`;
   const quiet = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer disabled:opacity-40`;
@@ -70,7 +71,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
           setInfo(resolved);
           if (resolved.minSat === resolved.maxSat) setAmount(String(resolved.minSat));
         })}>{busy ? t("wallet.lightning.lookingUp") : t("wallet.lightning.lookUp")}</button>
-        {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
+        {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
       </div>
     );
   }
@@ -96,7 +97,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
             <button type="button" className={quiet} disabled={busy} onClick={() => { setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
           </div>
         )}
-        {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
+        {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
       </div>
     );
   }
@@ -129,7 +130,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         <button type="button" className={primary} disabled={busy || !Number(amount)} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>
         <button type="button" className={quiet} disabled={busy} onClick={() => { setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</button>
       </div>
-      {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
+      {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
     </div>
   );
 }

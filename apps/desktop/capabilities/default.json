@@ -107,6 +107,7 @@
     "allow-turn-read",
     "allow-turn-warm",
     "allow-under-test",
-    "allow-updater-can-install"
+    "allow-updater-can-install",
+    "allow-webkit-version"
   ]
 }

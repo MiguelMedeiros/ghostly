@@ -110,7 +110,7 @@ This is the maintainer's flow. Outside pull requests are closed: [open an issue]
    ```bash
    npm run test:affected -- --port 50310   # unit, lint, typecheck, Rust, and the e2e tagged with the features you touched
    ```
-4. Open the pull request against `dev`. A draft early is fine: CI runs on every push. A draft skips the Rust jobs unless it changed Rust, so mark it ready when it is done, which runs everything.
+4. Open the pull request against `dev`. A draft early is fine: on every push it runs CI's fast tier (lint, types, the unit tests the change reaches; see [docs/TESTING.md](../docs/TESTING.md#what-ci-runs)). Mark it ready when it is done, which runs everything.
 5. **CI Success** is the one required check on `dev`, and the branch must be up to date with `dev` to merge. When `dev` moves, rebase and push again. Pull requests are squash-merged; with auto-merge on (`gh pr merge --squash --auto`), a green, up-to-date branch merges by itself.
 
 CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop checks on every pull request ([What CI runs](../docs/TESTING.md#what-ci-runs)). The app's e2e suites run before every release and nightly, not on pull requests, so run the specs your change touches yourself (`npm run test:affected -- --port <n>` picks them). Run the whole suites only to reproduce a CI failure.

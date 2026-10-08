@@ -12,6 +12,7 @@ import { idCardTone, shareIdCard, type ShareState } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
 import { useI18n } from "../../contexts/I18nContext";
 import "./identity-share.css";
+import { problemLine } from "../../lib/problemText";
 
 /**
  * Where a share stands now. A share that stopped later (the next entry of that identity on that side is a stop) is
@@ -66,7 +67,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
       </div>
     );
   }
-  const words = state === "failed" && entry.error ? t("identities.share.notVerifiedWhy", { error: entry.error }) : card.statusLabel;
+  const words = state === "failed" && entry.error ? t("identities.share.notVerifiedWhy", { error: problemLine(entry.error, t) }) : card.statusLabel;
   // A mouse over the card: the deck's flourish, once (it ends at rest by itself). Never for a finger, nor with reduced motion.
   const flourish = (e: PointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === "mouse" && !reducedMotion()) playSwitch({ glow: null, incoming: e.currentTarget, outgoing: null, dir: 1 });
@@ -83,7 +84,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
         <span className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.captionMine") : t("identities.share.captionTheirs", { contact })}</span>
         {time}
       </p>
-      {state === "failed" && entry.error && <p className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={entry.error}>{entry.error}</p>}
+      {state === "failed" && entry.error && <p className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={entry.error}>{problemLine(entry.error, t)}</p>}
     </div>
   );
 }

@@ -3,7 +3,8 @@ import { createIdentity } from "../src/identity";
 import { createRelayPayload, RELAY_PAYLOAD_MAX_BYTES } from "../src/pkarr";
 import { didDhtDocument, encodeDidDhtPacket, signDidDhtPacket } from "../src/didDht";
 import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl, readRelayBody } from "../src/relay";
-import { DiscoveryBudgetError, isDiscoveryBudgetError } from "../src/transport";
+import { DiscoveryBudgetError, heldBackError, isDiscoveryBudgetError } from "../src/transport";
+import { BREAKER_THRESHOLD } from "../src/relayBreaker";
 
 // covers: core.relay-client
 
@@ -313,5 +314,53 @@ describe("publishing past a slow relay", () => {
     const error = await publishing;
     expect(isDiscoveryBudgetError(error)).toBe(false);
     expect((error as Error).message).toContain("Publish failed on every relay");
+  });
+
+  it("is a wait when the relays it did not ask are left alone for failing and the others held it back (phone, 2026-10-07)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const asked: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL) => {
+      const host = new URL(String(input)).host;
+      asked.push(host);
+      return new Response(null, { status: host === "down.test" ? 500 : 204 });
+    }) as typeof fetch;
+    const relay = new RelayTransport({ relays: ["https://down.test", "https://a.test", "https://b.test"], requestsPerMinute: 1, fetch: fetchFn });
+    // down.test fails BREAKER_THRESHOLD times in a row, a minute apart (each minute frees the others' one request).
+    for (let i = 0; i < BREAKER_THRESHOLD; i++) { await relay.publish(id, []); vi.setSystemTime(Date.now() + 61_000); }
+    // Its breaker tripped at the last one; a and b spent this minute's request on the publish just before it.
+    vi.setSystemTime(Date.now() - 61_000 + 1_000);
+    asked.length = 0;
+    const error = await relay.publish(id, []).then(() => null, (e: unknown) => e);
+    // Nothing went out now: down.test is left alone, a and b wait for their budget. A wait, never "Publish failed".
+    expect(asked).toEqual([]);
+    expect(isDiscoveryBudgetError(error)).toBe(true);
+    expect((error as DiscoveryBudgetError).retryInMs).toBeGreaterThan(50_000);
+    expect((error as Error).message).not.toContain("Publish failed");
+  });
+
+  it("is still a failure when every relay is left alone for failing", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: (async () => new Response(null, { status: 500 })) as typeof fetch });
+    for (let i = 0; i < BREAKER_THRESHOLD; i++) await relay.publish(id, []).catch(() => {});
+    vi.setSystemTime(Date.now() + 1_000);
+    const error = await relay.publish(id, []).then(() => null, (e: unknown) => e);
+    expect(isDiscoveryBudgetError(error)).toBe(false);
+    expect((error as Error).message).toContain("Publish failed on every relay");
+  });
+});
+
+describe("a publish Ghostly Desktop's Rust held back (heldBackError)", () => {
+  it("reads the wait Rust says in words as a DiscoveryBudgetError; a failure stays one", () => {
+    // As Tauri rejects an invoke: the command's error string.
+    const mixed = heldBackError("Publish held back on every relay not left alone; retry in 15000 ms: a: left alone after failing; asked again in 40 s; b: rate limited");
+    expect(isDiscoveryBudgetError(mixed)).toBe(true);
+    expect((mixed as DiscoveryBudgetError).retryInMs).toBe(15_000);
+    const all = heldBackError(new Error("Publish held back on every relay; retry in 900 ms: a: rate limited"));
+    expect(isDiscoveryBudgetError(all)).toBe(true);
+    expect((all as DiscoveryBudgetError).retryInMs).toBe(900);
+    for (const failure of ["Publish error: a: left alone after failing; asked again in 40 s; b: status 503", "Publish error: nowhere to publish"]) {
+      expect(heldBackError(failure)).toBe(failure);
+      expect(isDiscoveryBudgetError(heldBackError(failure))).toBe(false);
+    }
   });
 });

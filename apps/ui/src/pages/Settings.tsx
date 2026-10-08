@@ -55,7 +55,7 @@ import { deleteAllSessions, listSessions } from "../lib/storage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
-import { errorText } from "../lib/errorText";
+import { problemLine } from "../lib/problemText";
 import { listText } from "../lib/listText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
@@ -112,7 +112,7 @@ export function Settings() {
   const changeWake = async (on: boolean) => {
     setWakeBusy(true);
     setWakeError("");
-    try { await setWake(on); } catch (e) { setWakeError(errorText(e, t)); } finally { setWakeBusy(false); }
+    try { await setWake(on); } catch (e) { setWakeError(problemLine(e, t)); } finally { setWakeBusy(false); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();

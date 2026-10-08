@@ -271,6 +271,26 @@ pub fn caught() -> Vec<String> {
     CAUGHT.lock().map(|c| c.clone()).unwrap_or_default()
 }
 
+/// Where an app shows (WISP 1200 · Manifest, `view`), which sets its window's first size. `chat`, the default:
+/// a game beside the Ghostly window, as before. `full`: the Ghostly window's own first size (`tauri.conf.json`).
+/// Any other value is refused with the request.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppView {
+    #[default]
+    Chat,
+    Full,
+}
+
+impl AppView {
+    fn size(self) -> (f64, f64) {
+        match self {
+            AppView::Chat => (560.0, 640.0),
+            AppView::Full => (900.0, 700.0),
+        }
+    }
+}
+
 struct AppWindow {
     /// The app this window runs: its reference (`<publisher>/<name>`).
     app: String,
@@ -292,6 +312,8 @@ struct AppWindow {
     pending: HashMap<u64, oneshot::Sender<Value>>,
     /// What the window was refused (navigations and new windows), for the spike's measurements.
     refused: Vec<String>,
+    /// Its first size.
+    view: AppView,
 }
 
 impl AppWindow {
@@ -307,6 +329,7 @@ impl AppWindow {
             recent: VecDeque::new(),
             pending: HashMap::new(),
             refused: Vec::new(),
+            view: AppView::Chat,
         }
     }
 }
@@ -367,6 +390,9 @@ pub struct OpenRequest {
     /// The person granted `internet` (the engine's record): the network runner.
     #[serde(default)]
     internet: bool,
+    /// The manifest's `view`: `chat` when absent.
+    #[serde(default)]
+    view: AppView,
 }
 
 /// Why apps do not open on Windows yet: WebView2 has no content rule list, and its equivalents (a request
@@ -386,6 +412,7 @@ pub fn open<R: Runtime>(app: &AppHandle<R>, request: OpenRequest) -> Result<Stri
         Guard::FULL,
         request.internet,
         true,
+        request.view,
     )
 }
 
@@ -399,9 +426,19 @@ pub fn open_guarded<R: Runtime>(
     internet: bool,
 ) -> Result<String, String> {
     let title = app_id.clone();
-    open_window(app, app_id, &title, entry, guard, internet, false)
+    open_window(
+        app,
+        app_id,
+        &title,
+        entry,
+        guard,
+        internet,
+        false,
+        AppView::Chat,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open_window<R: Runtime>(
     app: &AppHandle<R>,
     app_id: String,
@@ -410,19 +447,19 @@ fn open_window<R: Runtime>(
     guard: Guard,
     internet: bool,
     brokered: bool,
+    view: AppView,
 ) -> Result<String, String> {
     if cfg!(target_os = "windows") {
         return Err(WINDOWS_REFUSAL.into());
     }
     let label = format!("{LABEL_PREFIX}{:016x}", rand::random::<u64>());
+    let mut window = AppWindow::new(app_id, entry, guard, internet, brokered);
+    window.view = view;
     app.state::<AppSandboxState>()
         .windows
         .lock()
         .map_err(|_| "app state poisoned")?
-        .insert(
-            label.clone(),
-            AppWindow::new(app_id, entry, guard, internet, brokered),
-        );
+        .insert(label.clone(), window);
     let built = build_window(app, &label, title, guard, internet);
     if let Err(e) = built {
         forget(app, &label);
@@ -443,6 +480,11 @@ fn window_builder<'a, R: Runtime>(
         .map_err(|e| format!("URL: {e}"))?;
     let (nav_app, nav_label) = (app.clone(), label.to_string());
     let (new_app, new_label) = (app.clone(), label.to_string());
+    let (width, height) = app
+        .state::<AppSandboxState>()
+        .with(label, |window| window.view)
+        .unwrap_or_default()
+        .size();
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
         .title(format!("{title} (Ghostly)"))
@@ -467,7 +509,7 @@ fn window_builder<'a, R: Runtime>(
                 });
             tauri::webview::NewWindowResponse::Deny
         })
-        .inner_size(560.0, 640.0);
+        .inner_size(width, height);
     #[cfg(any(test, feature = "e2e-driver"))]
     if guard.proxy {
         let port = black_hole().ok_or("No proxy")?;
@@ -1724,6 +1766,7 @@ mod tests {
             title: "Chess".into(),
             entry: "<p>chess</p>".into(),
             internet: true,
+            view: AppView::Full,
         };
         let label = open(app.handle(), request).unwrap();
         assert!(is_app_label(&label), "{label}");
@@ -1731,8 +1774,8 @@ mod tests {
         assert!(is_runner(&window.url().unwrap()));
         let state = app.state::<AppSandboxState>();
         assert_eq!(
-            state.with(&label, |w| (w.app.clone(), w.internet, w.brokered)),
-            Some(("ana/chess".to_string(), true, true))
+            state.with(&label, |w| (w.app.clone(), w.internet, w.brokered, w.view)),
+            Some(("ana/chess".to_string(), true, true, AppView::Full))
         );
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);
@@ -1749,6 +1792,23 @@ mod tests {
         let plain: OpenRequest =
             serde_json::from_value(json!({"app": "a/b", "title": "B", "entry": ""})).unwrap();
         assert!(!plain.internet, "no grant, no network");
+        assert_eq!(plain.view, AppView::Chat, "no view: a chat app's window");
+        let full: OpenRequest = serde_json::from_value(
+            json!({"app": "a/b", "title": "B", "entry": "", "view": "full"}),
+        )
+        .unwrap();
+        assert_eq!(full.view, AppView::Full);
+        assert!(
+            AppView::Full.size().0 > AppView::Chat.size().0,
+            "a full app's window is the larger"
+        );
+        assert!(
+            serde_json::from_value::<OpenRequest>(
+                json!({"app": "a/b", "title": "B", "entry": "", "view": "popup"})
+            )
+            .is_err(),
+            "an unknown view is refused"
+        );
         assert!(WINDOWS_REFUSAL.contains("Windows"));
     }
 }

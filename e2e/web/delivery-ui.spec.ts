@@ -222,10 +222,15 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
     }
     if (unavailable === "none") await expect(page.getByRole("alert")).toHaveCount(0);
     else {
-      await expect(alert).toContainText(unavailable === "network" ? /Could not (read|publish) discovery/ : `Could not ${unavailable === "publication-network" ? "publish" : unavailable} discovery`);
+      // A few words on the line; which side failed, in the engine's words, behind the ⓘ (lib/problemText.ts).
+      await expect(alert).toContainText("Can't reach the relays");
+      await expect(alert).not.toContainText("discovery");
+      await page.getByTestId("connection-failure-info").click();
+      const details = page.getByTestId("connection-failure-details");
+      await expect(details).toContainText(unavailable === "network" ? /Could not (read|publish) discovery/ : `Could not ${unavailable === "publication-network" ? "publish" : unavailable} discovery`);
       await expect(page.getByTestId("discovery-help")).toContainText("retry automatically");
       if (unavailable === "publication-network") {
-        await expect(alert).not.toContainText("Could not read discovery");
+        await expect(details).not.toContainText("Could not read discovery");
         await expect(page.getByTestId("discovery-help")).toContainText("No contact yet");
       }
       await expect(page.getByRole("link", {name:"review relay settings"})).toHaveAttribute("href", "#/settings/network");

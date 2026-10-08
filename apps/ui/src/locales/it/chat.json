@@ -21,7 +21,7 @@
     "open": "Apri la nuova chat",
     "overLimit": "Impossibile pubblicare il messaggio: superato il limite della DHT.",
     "sendFailed": "Invio del messaggio non riuscito. Controlla la connessione.",
-    "tooLarge": "Messaggio troppo grande per la DHT ({{bytes}} byte, max {{max}}). Prova un messaggio più breve o condividi un link."
+    "tooLarge": "Troppo lungo per la DHT ({{bytes}} di {{max}} byte). Accorcialo o invia un link."
   },
   "connecting": "connessione",
   "createdHere": "Hai creato questa chat",
@@ -405,7 +405,7 @@
   },
   "voice": {
     "cancelled": "Messaggio vocale annullato",
-    "cantPlay": "Questo dispositivo non può riprodurre questa registrazione ({{format}}). Salvala per ascoltarla altrove.",
+    "cantPlay": "Questo dispositivo non riproduce registrazioni {{format}}. Salvala per ascoltarla altrove.",
     "couldNotPlay": "Impossibile riprodurre questa registrazione.",
     "discard": "Scarta",
     "discardAsk": "Scartare il messaggio vocale?",
@@ -415,8 +415,8 @@
     "keep": "Tieni",
     "limit": "I messaggi vocali durano al massimo {{minutes}} minuti",
     "message": "Messaggio vocale",
-    "micDenied": "Ghostly non può usare il microfono. Consentilo nelle impostazioni del sito del browser (nell'app desktop: Impostazioni di Sistema → Privacy e sicurezza → Microfono), poi riprova.",
-    "micUnavailable": "Nessun microfono disponibile. Collegane uno o chiudi l'app che lo sta usando, poi riprova.",
+    "micDenied": "Nessun accesso al microfono. Consentilo nelle impostazioni del browser o del sistema.",
+    "micUnavailable": "Nessun microfono trovato. Collegane uno, o chiudi l'app che lo usa.",
     "micUnsupported": "Questo browser non può registrare messaggi vocali.",
     "pause": "Metti in pausa il messaggio vocale",
     "pausePlayback": "Metti in pausa la riproduzione",

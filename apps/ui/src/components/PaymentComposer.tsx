@@ -23,16 +23,17 @@ import { NETWORK_NAME } from "./wallet/names";
 import "./payment-composer.css";
 import { formatAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
-import { errorText } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 interface PaymentComposerProps {
   balance: number;
   /** `network`: the card's (a Cashu wallet of that network sends). */
   /** `confirmedReal`: the person confirmed a Mainnet send as real money (the engine refuses one without it). */
-  onSend: (amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => Promise<string | null>;
+  onSend: (amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => Promise<string | Problem | null>;
   /** `rail`: the card it was made on, for a request that must carry that way of paying only (groups). `network`: the card's. */
   /** `lightningCard`: the Lightning card picked (one of several on its network), whose invoice the request carries. */
-  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: ChatRail, network?: WalletNetwork, lightningCard?: string) => Promise<string | null>;
+  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: ChatRail, network?: WalletNetwork, lightningCard?: string) => Promise<string | Problem | null>;
   onClose: () => void;
   /**
    * A payment sent or a request made: the sheet is done, and the chat's bubble shows the rest. Without it, `onClose`.
@@ -169,7 +170,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const [busy, setBusy] = useState<"send" | "request" | null>(null);
   /** A send with no review on real money: the second step is open, and only it sends. */
   const [confirmSend, setConfirmSend] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
   // The review takes the amount's place after Send, and is taller: on a short screen (a phone with its keyboard up) it
@@ -205,14 +206,14 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
 
   /** Turn the chosen card over, and back to the cards. */
   const use = (next: string) => {
-    pick(next); setError("");
+    pick(next); setError(null);
     rememberRail(chat, next);
     leaving.current = false;
     turn();
   };
   /** The card is turning back to the deck (until another is turned over). */
   const leaving = useRef(false);
-  const backToCards = () => { leaving.current = true; setError(""); turnBack(); };
+  const backToCards = () => { leaving.current = true; setError(null); turnBack(); };
   /**
    * Escape steps back: from a turned card to the deck, and only then out of the sheet. Wherever the focus is (a click
    * on the card's text leaves it on the page), so this listens on the document before anything else does; the
@@ -241,7 +242,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   useSheetRoom(containerRef);
 
   const send = async (confirmedReal = false) => {
-    setError(""); setBusy("send");
+    setError(null); setBusy("send");
     try {
       if (reviewContext && bound && (method === "arkade" || method === "bark" || method === "spark" || method === "bitcoin" || method === "usdt" || method === "fedimint")) {
         const units = method === "usdt" ? parsePaymentAmount(amount, decimals) : value;
@@ -251,15 +252,15 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       if (reviewContext && bound && here) {
         // The mint that can pay, of this card's network: test sats and real ones never mix.
         const mint = [...here.mints].sort((a, b) => b.balance - a.balance).find((m) => m.balance >= value + CASHU_FEE_CAP) ?? [...here.mints].sort((a, b) => b.balance - a.balance)[0];
-        if (!mint) throw new Error(t("payments.composer.error.noMint"));
+        if (!mint) { setError({ tone: "error", title: t("payments.composer.error.noMint") }); return; }
         setReview(await bound.preparePayment({ target: { method: "cashu", network: network === "testnet" ? "cashu-test" : "bitcoin", provider: mint.url, address: reviewContext.peer, asset: "BTC", unit: "sat", expiresAt: Date.now() + 15 * 60 * 1000 }, amount: value, feeCap: CASHU_FEE_CAP, payee: reviewContext.peer, linkId: reviewContext.linkId, memo: memo || undefined }));
       } else {
         // Ecash sent without a review: on real money, only once the second step confirms it (no network is Mainnet).
         if (network !== "testnet" && !confirmedReal) { setConfirmSend(true); return; }
         const err = await onSend(value, memo, network, confirmedReal || undefined);
-        if (err) setError(err); else onDone();
+        if (err) setError(typeof err === "string" ? { tone: "error", title: err } : err); else onDone();
       }
-    } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.prepare")); }
+    } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("payments.composer.error.prepare") }); }
     finally { setBusy(null); }
   };
   // The contact's app answers an ask with a request: review it here, as Pay on that request would.
@@ -272,28 +273,30 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         // Fedimint, but no federation in common: their request carries an invoice of their federation instead.
         clearInterval(timer);
         setAsking(null);
-        setError(t(answer.invoice ? "payments.composer.error.noFederationInvoice" : "payments.composer.error.noFederation", { name: who }));
+        setError(answer.invoice
+          ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name: who }), next: t("payments.composer.error.noFederationInvoiceNext") }
+          : { tone: "error", title: t("payments.composer.error.noFederation", { name: who }), next: t("payments.composer.error.noFederationNext") });
       } else if (answer?.target) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";
         void bound.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : answer.target.method === "bitcoin" ? ONCHAIN_FEE_CAP : CASHU_FEE_CAP, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
-          .then(setReview, (e: unknown) => setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.prepare")))
+          .then(setReview, (e: unknown) => setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("payments.composer.error.prepare") }))
           .finally(() => setAsking(null));
       } else if (Date.now() - started > 45_000) {
         clearInterval(timer);
         setAsking(null);
-        setError(t("payments.composer.error.noAnswer"));
+        setError({ tone: "error", title: t("payments.composer.error.noAnswer"), next: t("payments.composer.error.noAnswerNext") });
       }
     }, 400);
     return () => clearInterval(timer);
   }, [asking, reviewContext, bound, who, t]);
 
   const request = async () => {
-    setError(""); setBusy("request");
+    setError(null); setBusy("request");
     try {
       const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method, rail, network, ...(card?.card ? [card.card] : []));
-      if (err) setError(err); else onDone();
-    } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.request")); }
+      if (err) setError(typeof err === "string" ? { tone: "error", title: err } : err); else onDone();
+    } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("payments.composer.error.request") }); }
     finally { setBusy(null); }
   };
 
@@ -339,17 +342,17 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             </button>
           </div>}
         </>}
-        {error && <p role="alert" className="text-danger text-xs m-0">{error}</p>}
+        {error && <Notice problem={error} className="text-xs m-0" />}
       </div>
     </div>
   );
 
-  const switchMode = (next: Mode) => { setMode(next); setError(""); };
+  const switchMode = (next: Mode) => { setMode(next); setError(null); };
   /** Another network's cards: Pay starts on its usable card, as the sheet does, and the chat remembers the tab. */
   const showNetwork = (next: WalletNetwork) => {
     if (next === net) return;
     setSwap(WALLET_NETWORKS.indexOf(next) > WALLET_NETWORKS.indexOf(net) ? "next" : "prev");
-    setTab(next); setError("");
+    setTab(next); setError(null);
     rememberNetwork(chat, next);
     const among = payCards.filter((c) => c.network === next);
     picked.current = false;
@@ -420,7 +423,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             </button>
           </div>
           : <>
-            <CardDeck<string> key={net} compact tagAll kind="radios" label={t("payments.composer.payWith")} name="payment-deck" arrows={deckArrows(t)} cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
+            <CardDeck<string> key={net} compact tagAll kind="radios" label={t("payments.composer.payWith")} name="payment-deck" arrows={deckArrows(t)} cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(null); }} onChoose={use}
               testId={paymentCardTestId} blocked={(c) => unavailable(c as InstanceCard)} size={{ max: 250, share: .62 }} />
             <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
             <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked || !card} onClick={() => use(selected)}>

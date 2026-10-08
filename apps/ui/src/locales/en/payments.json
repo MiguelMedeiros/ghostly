@@ -46,8 +46,10 @@
     "maxGas": "Maximum gas (ETH)",
     "noSharedMint": "No shared configured mint",
     "noWallet": {
-      "mainnet": "Real money is asked for ({{unit}}), and you have no Mainnet wallet to pay it from. Make one under Wallets, or ask for test money instead.",
-      "testnet": "Test money is asked for ({{unit}}), and you have no Testnet wallet to pay it from. Make one under Wallets, or ask for real money instead."
+      "mainnet": "You have no Mainnet wallet to pay this",
+      "mainnetNext": "Make one in Wallets, or ask for test money.",
+      "testnet": "You have no Testnet wallet to pay this",
+      "testnetNext": "Make one in Wallets, or ask for real money."
     },
     "off": "This way of paying is off in this chat.",
     "payElsewhere": "Pay with another wallet",
@@ -92,9 +94,12 @@
     "chooseOther": "Choose someone else",
     "continue": "Continue",
     "error": {
-      "noAnswer": "Your contact's app did not answer. It may be offline or need an update; they can send you a Request instead.",
-      "noFederation": "You and {{name}} share no federation, and their request has no Lightning invoice.",
-      "noFederationInvoice": "You and {{name}} share no federation: pay their request over Lightning, with Review payment on it in the chat.",
+      "noAnswer": "Your contact's app didn't answer",
+      "noAnswerNext": "They can send you a Request instead.",
+      "noFederation": "You and {{name}} share no federation",
+      "noFederationInvoice": "You and {{name}} share no federation",
+      "noFederationInvoiceNext": "Pay their request over Lightning in the chat.",
+      "noFederationNext": "Their request has no Lightning invoice either.",
       "noMint": "Add a Cashu mint first",
       "prepare": "Could not prepare payment",
       "request": "Could not prepare request"
@@ -151,7 +156,8 @@
     "copied": "Copied",
     "copyError": "Could not copy. Select the text and copy it yourself.",
     "open": "Open wallet",
-    "openError": "Could not open a wallet: {{error}}. Copy the text or scan the code instead.",
+    "openError": "Couldn't open a wallet",
+    "openErrorNext": "Copy the text or scan the code instead.",
     "openTitle": "Open in a wallet on this device",
     "paid": "I paid",
     "paidTitle": "Your contact's wallet is asked to look now. It marks the request paid only once it sees the money.",

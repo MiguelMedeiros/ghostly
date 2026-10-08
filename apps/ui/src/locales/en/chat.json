@@ -21,7 +21,7 @@
     "open": "Open the new chat",
     "overLimit": "Message could not be published: DHT payload limit exceeded.",
     "sendFailed": "Failed to send message. Check your connection.",
-    "tooLarge": "Message too large for DHT ({{bytes}} bytes, max {{max}}). Try a shorter message or share a link instead."
+    "tooLarge": "Too long for the DHT ({{bytes}} of {{max}} bytes). Shorten it or send a link."
   },
   "connecting": "connecting",
   "createdHere": "You created this chat",
@@ -405,7 +405,7 @@
   },
   "voice": {
     "cancelled": "Voice message cancelled",
-    "cantPlay": "This device can't play this recording ({{format}}). Save it to play it elsewhere.",
+    "cantPlay": "This device can't play {{format}} recordings. Save it to play elsewhere.",
     "couldNotPlay": "Could not play this recording.",
     "discard": "Discard",
     "discardAsk": "Discard voice message?",
@@ -415,8 +415,8 @@
     "keep": "Keep",
     "limit": "Voice messages are at most {{minutes}} minutes",
     "message": "Voice message",
-    "micDenied": "Ghostly can't use the microphone. Allow it for Ghostly in your browser's site settings (on the desktop app: System Settings → Privacy & Security → Microphone), then try again.",
-    "micUnavailable": "No microphone is available. Connect one, or close the app that is using it, then try again.",
+    "micDenied": "No access to the microphone. Allow it in your browser or system settings.",
+    "micUnavailable": "No microphone found. Connect one, or close the app using it.",
     "micUnsupported": "This browser can't record voice messages.",
     "pause": "Pause voice message",
     "pausePlayback": "Pause playback",

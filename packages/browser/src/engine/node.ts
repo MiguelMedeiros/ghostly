@@ -24,6 +24,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
 import { setOwnDidSource } from '../proofs/providers/did';
 import { ProfileDid } from './did';
@@ -34,7 +35,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
+import { APPS_CAPABILITY, BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, STATUS_CARD_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
 import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
@@ -134,9 +135,10 @@ import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
 import { lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
-import { fileBytes } from "../shared/fileBytes";
+import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
+import { groupFileId, storedGroupFiles } from "./groupFiles";
 import { DEFAULT_MINTS, TEST_MINT, mintNetwork } from "../shared/mints";
 import type {
   EngineState,
@@ -257,6 +259,12 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** How many deleted ids a link remembers: enough to outlast what a peer republishes. */
 const MAX_DELETED_IDS = 500;
+/**
+ * A card that went on the DHT floor or into a hold goes again live (`restoreCards`) only for the newest this many
+ * messages of a chat, sent within this long: an old chat's cards are not worth a burst of edits.
+ */
+const CARD_RESTORE_MOST = 50;
+const CARD_RESTORE_MS = 7 * 24 * 60 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
 /** A second press of one message's buttons waits this long (WISP 406 · Message Buttons). */
@@ -1123,6 +1131,7 @@ export class GhostlyNode implements EngineImplementation {
       live.link.sendGroupFrame(frame);
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
+    linkHandled: linkId => this.links.get(linkId)?.link?.handled() ?? Promise.resolve(false),
     linkOpen: linkId => !!this.links.get(linkId)?.link?.isDataLinkOpen,
     myNick: () => this.sharedNick,
     // A copy started from older state sends above the copy it replaced, and manages no group until told to (WISP 06).
@@ -1188,6 +1197,14 @@ export class GhostlyNode implements EngineImplementation {
     // My latest edits, again, to a member whose edge opened: a private group has no catch-up for them. The group's pin too.
     edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); this.sendGroupPinFrame(groupId, peer); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
+    // Files in groups (WISP 503): kept where a chat's are, their bytes over the edges' files/3.
+    groupFiles: {
+      store: storedGroupFiles,
+      transfers: this.transfers,
+      settings: () => ({ autoDownloads: this.settings.autoDownloads !== false, serveFiles: this.settings.serveFiles !== false }),
+      sendFiles: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
+      writable: linkId => this.links.get(linkId)?.link?.filesWritable(),
+    },
   });
 
   /**
@@ -2121,7 +2138,7 @@ export class GhostlyNode implements EngineImplementation {
   async statusCardIndex(): Promise<CardIndexRow[]> {
     const rows: CardIndexRow[] = [];
     for (const m of await db.getCardMessages()) {
-      if (m.card?.kind !== "task" && m.card?.kind !== "routine") continue;
+      if (m.card?.kind !== "task" && m.card?.kind !== "routine" && m.card?.kind !== "usage") continue;
       rows.push({ linkId: m.linkId, id: m.id, card: m.card, sender: m.sender, ...(m.member && { member: m.member }), timestamp: m.timestamp, ...(m.edit && { editedAt: m.edit.at }) });
     }
     return rows;
@@ -2872,7 +2889,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.holdingFor(live) && bytes <= HOLD_LIMITS.maxTextBytes) {
       // Longer than the DHT carries, and both sides allow held items: it waits in this device's storage, sealed for them.
       await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending", ...(preview && { preview }), ...answers,
-        ...(card?.kind === "buttons" && { buttonsRestore: "due" as const }) });
+        ...(card && { cardRestore: "due" as const }) });
       // The durable row carries the outcome; the promise only says whether it could start.
       void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
       return { error: null, messageId: id };
@@ -3028,38 +3045,53 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * A question of mine with buttons went on the DHT floor or into a hold, which carry its text alone (WISP 406 · Message
-   * Buttons): its buttons are due to go again live. Once: a row that had them restored already stays so.
+   * A card of mine went on the DHT floor or into a hold, which carry its text alone (WISP 405 · Status Cards, WISP 406 ·
+   * Message Buttons): the card is due to go again live. Once: a row that had it restored already stays so.
    */
-  private async buttonsWentBare(linkId: string, message: Pick<StoredMessage, "id" | "card" | "buttonsRestore">): Promise<void> {
-    if (message.card?.kind !== "buttons" || message.buttonsRestore) return;
-    await db.patchMessage(linkId, message.id, current => current.sender === "me" && current.card?.kind === "buttons" && !current.buttonsRestore ? { buttonsRestore: "due" } : null);
+  private async cardWentBare(linkId: string, message: Pick<StoredMessage, "id" | "card" | "cardRestore" | "buttonsRestore">): Promise<void> {
+    if (!message.card || message.cardRestore || message.buttonsRestore) return;
+    await db.patchMessage(linkId, message.id, current => current.sender === "me" && current.card && !current.cardRestore && !current.buttonsRestore ? { cardRestore: "due" } : null);
+  }
+
+  /** The session capability a contact's app lists when it shows a card of this kind, so a restore edit reads as a card there. */
+  private static cardCapability(card: StatusCard): string {
+    return card.kind === "buttons" ? BUTTONS_CAPABILITY : card.kind === "app" ? APPS_CAPABILITY : STATUS_CARD_CAPABILITY;
   }
 
   /**
-   * Buttons the contact may not have (WISP 406 · Message Buttons): a question whose text went on the DHT floor or into a
-   * hold reached the contact as text alone, and a copy under the same id that comes live later is taken as the one
-   * already there. Once the chat is live with an app that shows buttons (`buttons/1`) and takes edits, each such
-   * question goes again as an edit of its buttons alone: the same text, so no version and no edit mark. Once per
-   * message (the row says so, across restarts); the edit queue carries it (a card's edit goes only live, and a later
-   * edit of the bot's replaces it, the highest number winning). An app without `buttons/1` (1.0.0 would mark it edited)
-   * gets none: the row waits for one that shows buttons. The edit is marked `restore`: the bot's own event stream says
-   * nothing of it, while its number counts, so a later edit of the bot's takes the next one.
+   * Cards the contact may not have (WISP 405 · Status Cards, WISP 406 · Message Buttons): a message whose text went on
+   * the DHT floor or into a hold reached the contact as text alone, and a copy under the same id that comes live later
+   * is taken as the one already there. An app card or a finished task gets no later update to carry its card. So once
+   * the chat is live with an app that shows the kind (`buttons/1`, `status-card/1`, `apps/1`) and takes edits, each such
+   * message goes again as an edit of its card alone: the same text, so no version and no edit mark. Once per message (the
+   * row says so, across restarts); the edit queue carries it (a card's edit goes only live, and a later edit of the
+   * author's replaces it, the highest number winning). A contact whose app does not show the kind (it would drop the card
+   * and mark the text edited) gets none: the row waits for one that does. Bounded: the newest `CARD_RESTORE_MOST` such
+   * messages of the last `CARD_RESTORE_MS`; older ones are given up. The edit is marked `restore`: the bot's own event
+   * stream says nothing of it, while its number counts, so a later edit of the bot's takes the next one.
    */
-  private async restoreButtons(linkId: string): Promise<void> {
+  private async restoreCards(linkId: string): Promise<void> {
     const live = this.links.get(linkId), link = live?.link;
-    if (!live?.stored.profile || live.stored.group || !link?.supportsEdits || !link.sessionOffers.peer?.includes(BUTTONS_CAPABILITY)) return;
-    const due = (await db.getMessages(linkId)).filter(m => m.sender === "me" && m.buttonsRestore === "due");
+    const offers = link?.sessionOffers.peer;
+    if (!live?.stored.profile || live.stored.group || !link?.supportsEdits || !offers) return;
+    const due = (await db.getMessages(linkId)).filter(m => m.sender === "me" && (m.cardRestore ?? m.buttonsRestore) === "due")
+      .sort((a, b) => b.timestamp - a.timestamp);
+    const since = Date.now() - CARD_RESTORE_MS;
     const changed: string[] = [];
-    for (const message of due) {
+    for (const [index, message] of due.entries()) {
+      const stale = index >= CARD_RESTORE_MOST || message.timestamp < since;
+      if (!stale && message.card && !offers.includes(GhostlyNode.cardCapability(message.card))) continue;
       const at = Date.now();
       const patched = await db.patchMessage(linkId, message.id, current => {
-        if (current.sender !== "me" || current.buttonsRestore !== "due") return null;
+        if (current.sender !== "me" || (current.cardRestore ?? current.buttonsRestore) !== "due") return null;
+        const done = { cardRestore: "sent" as const, buttonsRestore: undefined };
         const seq = (current.edit?.seq ?? 0) + 1;
-        // Its buttons gone since (an edit that left none), or no edit left to carry them: nothing to restore.
-        if (current.card?.kind !== "buttons" || !current.wireId || seq > STATUS_CARD_LIMITS.edits) return { buttonsRestore: "sent" };
+        // Too old, its card gone since (an edit that left none), or no edit left to carry it: nothing to restore.
+        if (stale || !current.card || !current.wireId || seq > STATUS_CARD_LIMITS.edits) return done;
+        // An update of the author's already on its way carries the card.
+        if (current.edit?.pending) return done;
         const next = withEdit(current, { seq, at, text: current.text, preview: current.preview, card: current.card, pending: true });
-        return { edit: { ...next.edit!, restore: true }, buttonsRestore: "sent" };
+        return { edit: { ...next.edit!, restore: true }, ...done };
       });
       if (patched?.edit?.pending) changed.push(message.id);
     }
@@ -3159,8 +3191,8 @@ export class GhostlyNode implements EngineImplementation {
           : reply ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply)
           : await link.sendMessage(message.text, message.timestamp, message.wireId, ...(message.preview ? [message.preview] : []));
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
-        // On the DHT floor a question goes without its buttons: they go again once live (`restoreButtons`).
-        if (!error && message.via === "pkarr") await this.buttonsWentBare(linkId, message);
+        // On the DHT floor a card goes as its text alone: it goes again once live (`restoreCards`).
+        if (!error && message.via === "pkarr") await this.cardWentBare(linkId, message);
         return error;
       }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
         const pending = this.links.get(linkId)?.stored.dhtDeliveryState?.pending;
@@ -3189,7 +3221,7 @@ export class GhostlyNode implements EngineImplementation {
           const live = this.links.get(linkId), bytes = new TextEncoder().encode(message.text).length;
           if (!live || !this.holdingFor(live) || !message.wireId || message.file || message.paymentId || bytes > HOLD_LIMITS.maxTextBytes) return false;
           await db.updateDelivery(linkId, message.id, "sending", undefined, { via: "hold", resendUntil: undefined });
-          await this.buttonsWentBare(linkId, message);
+          await this.cardWentBare(linkId, message);
           await this.messagesChanged(linkId, [message.id]);
           void this.hold.hold(linkId, { kind: "text", id: message.wireId, messageId: message.id, bytes, timestamp: message.timestamp }).catch(() => {});
           return true;
@@ -3454,7 +3486,13 @@ export class GhostlyNode implements EngineImplementation {
     return offered;
   }
 
-  fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void {
+  fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void | Promise<void> {
+    // A group's file (WISP 503): asked for (Download), or asked for again; its transfers are the group's to run.
+    if (typeof linkId === "string" && linkId.startsWith("group:")) {
+      if (action !== "accept" && action !== "request") throw new Error("A group's file is downloaded (accept) or asked for again (request)");
+      if (!fileId.startsWith(`group-${linkId.slice("group:".length)}-`)) throw new Error("No such file in this group");
+      return this.groups.downloadFile(fileId);
+    }
     const live = this.links.get(linkId);
     if (!live) throw new Error("No such chat");
     if (!["accept", "decline", "pause", "resume", "cancel", "resend", "request"].includes(action)) throw new Error("Unknown file action");
@@ -3914,6 +3952,29 @@ export class GhostlyNode implements EngineImplementation {
     if (!sent.error) this.wakeMentioned(groupId, text, named);
     return sent;
   }
+  /**
+   * Announces a file or voice message in a group (WISP 503 · Group Files): its bytes are in the files store under
+   * `file.id` (`group-<group>-out-…`), put there by the caller as a chat's file is (`sendFile`). The message carries its
+   * description and the SHA-256 of those bytes; its text is `caption`, or the line apps from before show. This device
+   * is its first holder: members fetch it from here, then from each other.
+   */
+  async sendGroupFile({ groupId, file, caption, replyTo, forwarded: hops }: { groupId: string; file: MessageFile; caption?: string; replyTo?: string; forwarded?: number }): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
+    if (typeof groupId !== "string" || !file || typeof file.id !== "string" || !file.id.startsWith(`group-${groupId}-out-`)) return { error: "Invalid file id", refused: true };
+    if (file.size > GROUP_FILE_LIMITS.maxBytes) return { error: `A group takes files of up to ${formatFileSize(GROUP_FILE_LIMITS.maxBytes)}`, refused: true };
+    const stored = await fileStore.get(file.id);
+    if (!stored?.metadata || stored.linkId !== `group:${groupId}` || stored.direction !== "out") return { error: "The file is gone", refused: true };
+    if (storedSize(stored) !== file.size) return { error: "The file is not all here", refused: true };
+    // The digest the caller wrote down when it copied the bytes in, or read back now.
+    const digest = stored.digest ?? (stored.blob ? await blobDigest(stored.blob) : await (await fileBytesOf(stored.bytes!))!.digest(file.id));
+    if (!stored.digest) await fileStore.patch(file.id, { digest });
+    const meta = readGroupFileMeta({ name: file.name, mime: file.mime, size: file.size, d: digest, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }) });
+    if (!meta) return { error: "That file cannot go to a group", refused: true };
+    if (file.voice && !meta.voice) return { error: "That recording cannot be sent as a voice message", refused: true };
+    const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);
+    if (typeof reply === "string") return { error: reply };
+    const text = typeof caption === "string" && caption.trim() ? caption : groupFileFallback(meta);
+    return this.groups.sendFile(groupId, text, meta, file.id, reply && { i: reply.id, s: reply.snippet, f: reply.member! }, readForwarded(hops));
+  }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
 
   /**
@@ -3989,7 +4050,15 @@ export class GhostlyNode implements EngineImplementation {
             if (sent.error) note(sent.error); else if (sent.messageId) result.messageIds.push(sent.messageId);
             continue;
           }
-          if (groupId) { note("Groups take no files yet"); continue; }
+          if (groupId) {
+            // A new announcement by me (WISP 503 § Forwards), my own copy its first holder.
+            const original = message.file!, file: MessageFile = { id: groupFileId(groupId, "out"), name: original.name, size: original.size, mime: original.mime,
+              ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
+            await copyForForward(original.id, { linkId: to, wireId: file.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file });
+            const sent = await this.sendGroupFile({ groupId, file, forwarded: hops });
+            if (sent.error) { await removeStored(file.id).catch(() => {}); note(sent.error); } else if (sent.messageId) result.messageIds.push(sent.messageId);
+            continue;
+          }
           if (!live!.link) { note("You are offline"); continue; }
           const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
           const file: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
@@ -5133,6 +5202,13 @@ export class GhostlyNode implements EngineImplementation {
       await db.putSettings(this.settings);
       if (settings.sendTyping === false) { for (const live of this.links.values()) live.link?.setTyping(false); this.groups.stopTyping(); }
     }
+    // Automatic downloads and serving group files (WISP 503): absent means on, as kept.
+    for (const key of ["autoDownloads", "serveFiles"] as const) {
+      if (settings[key] === undefined) continue;
+      if (settings[key] !== false) delete this.settings[key];
+      else this.settings[key] = false;
+      await db.putSettings(this.settings);
+    }
     // Load public profiles: absent means on; turned off, nothing read before is kept.
     if (settings.publicProfiles !== undefined) {
       if (settings.publicProfiles !== false) delete this.settings.publicProfiles;
@@ -6108,6 +6184,8 @@ export class GhostlyNode implements EngineImplementation {
       arkPaymentsSupport: !entry,
       usdtPaymentsSupport: !entry,
       barkPaymentsSupport: !entry,
+      // An edge carries the bytes of the group's files between its two members (WISP 503); an entry session does not.
+      largeFilesSupport: !entry,
       params: stored,
       rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId),
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
@@ -6175,6 +6253,9 @@ export class GhostlyNode implements EngineImplementation {
           onPaymentResult: (result: PaymentResult) => member() ? this.desk.onPaymentResult(linkId, result) : undefined,
           // The member says its name on every session over the edge, and an empty one when it removed it.
           onPeerNick: (nick: string | null) => this.groups.edgeNick(group, peer, nick ?? undefined),
+          // A group file's bytes (WISP 503): they belong to the group's message, never to the edge as a chat.
+          onFilesFrame: (frame: Record<string, unknown>) => member() ? this.groups.filesFrame(group, peer, linkId, frame) : undefined,
+          onFilesSession: (open: boolean) => this.groups.fileSession(group, peer, linkId, open),
         }),
         onPresence: presence => {
           if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
@@ -6439,7 +6520,7 @@ export class GhostlyNode implements EngineImplementation {
         onEditReceipt: stored.profile && !stored.group ? (id, e) => this.editsFor(linkId).received(id, e) : undefined,
         // Edits agreed on a new session: questions whose buttons went on the floor or into a hold get them now, then what waits goes.
         onEditSupport: supported => {
-          if (supported && stored.profile && !stored.group) void this.restoreButtons(linkId).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
+          if (supported && stored.profile && !stored.group) void this.restoreCards(linkId).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
         },
         onWakeSupport: supported => { if (supported && stored.profile && !stored.group) void this.shareWake(linkId); },
         onPeerWake: target => {
@@ -6959,13 +7040,15 @@ export class GhostlyNode implements EngineImplementation {
   private async completeGroupMessage(message: StoredMessage): Promise<void> {
     if (!(await db.hasMessage(message.linkId, message.id))) return this.storeMessage(message);
     const whole = await this.resolveReply(message);
+    // A file it announces (WISP 503) comes only with the whole copy, which also says what the row shows for it.
     const added: Partial<StoredMessage> = { ...(whole.mentions && { mentions: whole.mentions }), ...(whole.mentioned && { mentioned: true }),
-      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }), ...(whole.card && { card: whole.card }), ...(whole.press && { press: whole.press }) };
+      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }), ...(whole.card && { card: whole.card }), ...(whole.press && { press: whole.press }),
+      ...(whole.file && { file: whole.file, text: whole.text }) };
     if (!Object.keys(added).length) return;
     // A card belongs to its version: an edit taken meanwhile keeps its own.
     const patched = await db.patchMessage(message.linkId, message.id, stored => {
       if (stored.member !== message.member || stored.sender !== message.sender) return null;
-      const { card: _card, ...rest } = added;
+      const { card: _card, text: _text, ...rest } = added;
       return stored.edit ? rest : added;
     });
     if (!patched) return;

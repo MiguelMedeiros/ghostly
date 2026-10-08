@@ -46,7 +46,7 @@ use std::net::SocketAddrV4;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use pkarr::dht::{DhtClient, DhtConfig};
+use pkarr::dht::{DhtClient, DhtConfig, PublishError};
 use pkarr::{Client, PublicKey, ResolvePolicy, SignedPacket};
 use serde::Serialize;
 use tokio::sync::watch;
@@ -152,43 +152,145 @@ pub enum Dht {
     StandIn(Client),
 }
 
-/// The Mainline node, made on a thread of its own. Making it looks up the public bootstrap nodes' names, a blocking
-/// DNS query for each of four, before the call returns: made in `main` it held the app before its window, up to 55 s
-/// where the resolver was slow (Linux under Xvfb, 2026-10-06). Reads and writes wait for it instead.
+/// A Mainline query ends when every node it asked has answered or timed out, and one that does not answer is the rule:
+/// the testnet's and the real DHT's alike hold a node or two that never do. A put first looks up the nodes closest to its
+/// key, and the packet reaches them only once that lookup ends, so a key's first put waited out the read node's 2 s request
+/// timeout before anyone could read it. Two Linux Desktops DHT direct waited for two of those in a row (the inviter's
+/// record, then the joiner's) before they went live. Puts go through a node of their own that gives up on a node after
+/// this long: a node that answers later is left out of where the packet is stored, which the nodes that did answer make
+/// up for. Reads keep the default, so a late answer is still heard.
+const DHT_PUT_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// The Mainline nodes, each made on a thread of its own. Making one looks up the public bootstrap nodes' names, a
+/// blocking DNS query for each of four, before the call returns: made in `main` it held the app before its window, up
+/// to 55 s where the resolver was slow (Linux under Xvfb, 2026-10-06). Reads and writes wait for them instead.
+///
+/// Two nodes, because one cannot give puts 1 s and reads 2 s: mainline 8.0.1 (the newest) sets the request timeout once,
+/// on the node's socket, for every request it sends, and has no timeout per query. A lookup and a put each end only once
+/// every request has an answer or has timed out, and a put sends its packet only once its lookup has ended. A single
+/// node at 1 s would make reads on a link slower than that hear nobody. What the second node costs, measured against the
+/// public DHT (2026-10-07, one process, 1 node vs 2, two rounds each): it joins with ~700 more packets out and ~500 in
+/// (~100 KiB each way), still in 4 s; it keeps its routing table with ~25 to 40 more packets a minute each way (~4 KiB
+/// out, ~5 KiB in; pings every 5 min, a refresh every 15); 0.4 MB more memory, 35 ms more CPU a minute, a thread and a
+/// UDP port. Its puts took 3.2 s (median of 6) against the read node's 3.9 s (of 12).
 #[derive(Clone)]
 pub struct MainlineNode(
+    /// The node reads go to (and puts, when the put node finds no node in time).
     watch::Receiver<Option<Result<DhtClient, String>>>,
     Instant,
     /// The newest packet asked to be put, per key, while its put runs (`DHT_NEWER_PUT_EVERY`).
     Arc<Mutex<HashMap<PublicKey, pkarr::Timestamp>>>,
+    /// The node puts go to (`DHT_PUT_REQUEST_TIMEOUT`).
+    watch::Receiver<Option<Result<DhtClient, String>>>,
 );
 
 impl MainlineNode {
-    /// Starts making the node with `build` on a thread of its own, and returns at once.
-    fn spawn(build: impl FnOnce() -> Result<DhtClient, String> + Send + 'static) -> Self {
-        let (made, node) = watch::channel(None);
-        std::thread::Builder::new()
-            .name("ghostly dht node".into())
-            .spawn(move || {
-                let result = build();
-                if let Err(error) = &result {
-                    diagnostics::log(&format!("pkarr dht node: {error}"));
-                }
-                let _ = made.send(Some(result));
-            })
-            .expect("a thread for the DHT node");
-        MainlineNode(node, Instant::now(), Arc::default())
+    /// Starts making the read node and the put node with `build` (given each one's request timeout), each on a thread
+    /// of its own, and returns at once.
+    fn spawn(
+        build: impl Fn(Duration) -> Result<DhtClient, String> + Send + Sync + 'static,
+    ) -> Self {
+        let build = Arc::new(build);
+        let made = |timeout: Duration| {
+            let (made, node) = watch::channel(None);
+            let build = build.clone();
+            std::thread::Builder::new()
+                .name("ghostly dht node".into())
+                .spawn(move || {
+                    let result = build(timeout);
+                    if let Err(error) = &result {
+                        diagnostics::log(&format!("pkarr dht node: {error}"));
+                    }
+                    let _ = made.send(Some(result));
+                })
+                .expect("a thread for the DHT node");
+            node
+        };
+        MainlineNode(
+            made(pkarr::DEFAULT_DHT_REQUEST_TIMEOUT),
+            Instant::now(),
+            Arc::default(),
+            made(DHT_PUT_REQUEST_TIMEOUT),
+        )
     }
 
-    /// The node, once it is made.
+    /// The read node, once it is made.
     async fn get(&self) -> Result<DhtClient, String> {
-        let mut node = self.0.clone();
-        let made = node
-            .wait_for(Option::is_some)
-            .await
-            .map_err(|_| "DHT node: never made".to_string())?;
-        made.clone().expect("waited for it")
+        made(&self.0).await
     }
+
+    /// Puts `packet` through the put node, or through the read node where that one found no node to store at in time
+    /// (a link whose round trips take longer than `DHT_PUT_REQUEST_TIMEOUT`) or could not be made.
+    async fn put(&self, packet: &SignedPacket) -> Result<(), String> {
+        let retries = if self.1.elapsed() < DHT_STARTING {
+            DHT_NO_NODES_RETRIES
+        } else {
+            0
+        };
+        let (key, at) = (packet.public_key(), packet.timestamp());
+        {
+            let mut newest = self.2.lock().unwrap();
+            if newest.get(&key).is_none_or(|known| *known < at) {
+                newest.insert(key.clone(), at);
+            }
+        }
+        let is_newest = || self.2.lock().unwrap().get(&key) == Some(&at);
+        let quick = match made(&self.3).await {
+            Ok(dht) => Some(put_on(&dht, packet, &is_newest, retries).await),
+            Err(_) => None,
+        };
+        let result = match quick {
+            Some(Err(PublishError::NoClosestNodes | PublishError::Timeout)) | None => {
+                match self.get().await {
+                    // The put node has already waited out a start.
+                    Ok(dht) => put_on(&dht, packet, &is_newest, 0)
+                        .await
+                        .map_err(|e| e.to_string()),
+                    Err(e) => Err(e),
+                }
+            }
+            Some(result) => result.map_err(|e| e.to_string()),
+        };
+        let mut newest = self.2.lock().unwrap();
+        if newest.get(&key) == Some(&at) {
+            newest.remove(&key);
+        }
+        result
+    }
+}
+
+/// The node `node` carries, once it is made.
+async fn made(
+    node: &watch::Receiver<Option<Result<DhtClient, String>>>,
+) -> Result<DhtClient, String> {
+    let mut node = node.clone();
+    let made = node
+        .wait_for(Option::is_some)
+        .await
+        .map_err(|_| "DHT node: never made".to_string())?;
+    made.clone().expect("waited for it")
+}
+
+/// A put of `packet` through `dht`, as `put_newest` and `put_once_nodes_known` try it.
+async fn put_on(
+    dht: &DhtClient,
+    packet: &SignedPacket,
+    is_newest: impl Fn() -> bool,
+    retries: usize,
+) -> Result<(), PublishError> {
+    put_once_nodes_known(
+        || {
+            put_newest(
+                || dht.publish(packet),
+                &is_newest,
+                DHT_NEWER_PUT_EVERY,
+                DHT_NEWER_PUT_FOR,
+            )
+        },
+        retries,
+        DHT_NO_NODES_RETRY_AFTER,
+    )
+    .await
 }
 
 impl Dht {
@@ -197,14 +299,16 @@ impl Dht {
     pub fn mainline(bootstrap: Option<Vec<SocketAddrV4>>) -> Result<Self, String> {
         let mut config = DhtConfig::default();
         config.bootstrap = bootstrap.clone();
-        Ok(Self::mainline_with(bootstrap, move || {
+        Ok(Self::mainline_with(bootstrap, move |timeout| {
+            let mut config = config.clone();
+            config.request_timeout = timeout;
             DhtClient::build(config).map_err(|e| format!("DHT node: {e}"))
         }))
     }
 
     fn mainline_with(
         bootstrap: Option<Vec<SocketAddrV4>>,
-        build: impl FnOnce() -> Result<DhtClient, String> + Send + 'static,
+        build: impl Fn(Duration) -> Result<DhtClient, String> + Send + Sync + 'static,
     ) -> Self {
         Dht::Mainline(
             MainlineNode::spawn(build),
@@ -214,40 +318,7 @@ impl Dht {
 
     async fn publish(&self, packet: &SignedPacket) -> Result<(), String> {
         match self {
-            Dht::Mainline(node, _) => {
-                let dht = node.get().await?;
-                let retries = if node.1.elapsed() < DHT_STARTING {
-                    DHT_NO_NODES_RETRIES
-                } else {
-                    0
-                };
-                let (key, at) = (packet.public_key(), packet.timestamp());
-                {
-                    let mut newest = node.2.lock().unwrap();
-                    if newest.get(&key).is_none_or(|known| *known < at) {
-                        newest.insert(key.clone(), at);
-                    }
-                }
-                let is_newest = || node.2.lock().unwrap().get(&key) == Some(&at);
-                let result = put_once_nodes_known(
-                    || {
-                        put_newest(
-                            || dht.publish(packet),
-                            is_newest,
-                            DHT_NEWER_PUT_EVERY,
-                            DHT_NEWER_PUT_FOR,
-                        )
-                    },
-                    retries,
-                    DHT_NO_NODES_RETRY_AFTER,
-                )
-                .await;
-                let mut newest = node.2.lock().unwrap();
-                if newest.get(&key) == Some(&at) {
-                    newest.remove(&key);
-                }
-                result
-            }
+            Dht::Mainline(node, _) => node.put(packet).await,
             Dht::StandIn(client) => client
                 .publish(packet)
                 .await
@@ -294,20 +365,20 @@ async fn put_once_nodes_known<T, F, Fut>(
     mut put: F,
     retries: usize,
     after: Duration,
-) -> Result<(), String>
+) -> Result<(), PublishError>
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<T, pkarr::dht::PublishError>>,
+    Fut: std::future::Future<Output = Result<T, PublishError>>,
 {
     let mut tried_again = 0;
     loop {
         match put().await {
             Ok(_) => return Ok(()),
-            Err(pkarr::dht::PublishError::NoClosestNodes) if tried_again < retries => {
+            Err(PublishError::NoClosestNodes) if tried_again < retries => {
                 tried_again += 1;
                 tokio::time::sleep(after).await;
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e),
         }
     }
 }
@@ -461,7 +532,67 @@ enum RelayAnswer {
 }
 
 /// One write of a packet, to a relay or the DHT, and how it went.
-type Write = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>;
+type Write = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), WriteError>> + Send>>;
+
+/// Why a write did not go in, as packages/core's `RelayTransport.putEverywhere` tells them apart (#1422).
+#[derive(Debug, Clone, PartialEq)]
+enum WriteError {
+    /// Held back for the relay's rate limit (a 429 now, its rest after one, or its breaker tripped by 429s): nothing
+    /// went out, and it goes once the relay takes requests again, in about `retry`. A wait, as `DiscoveryBudgetError`.
+    Held { retry: Duration, why: String },
+    /// A relay left alone for failing (its breaker): nothing was asked of it now, and its outage was said when it began.
+    LeftAlone(String),
+    /// Asked, and it failed: no connection, a server error, a refusal; or the DHT's put failed.
+    Failed(String),
+}
+
+impl std::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WriteError::Held { why, .. } => f.write_str(why),
+            WriteError::LeftAlone(why) | WriteError::Failed(why) => f.write_str(why),
+        }
+    }
+}
+
+/// How a publish that no write took ends: an error that says a wait (`PUBLISH_HELD_BACK`, as the WebView reads it)
+/// when every relay held the packet back for its rate limit, or held it back beside relays left alone for failing,
+/// and nothing failed now; "Publish error" when any write failed (the DHT's included) or every relay was left alone.
+fn publish_failure(errors: &[(String, WriteError)]) -> String {
+    let reasons = errors
+        .iter()
+        .map(|(name, e)| format!("{name}: {e}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let waits: Vec<Duration> = errors
+        .iter()
+        .filter_map(|(_, e)| match e {
+            WriteError::Held { retry, .. } => Some(*retry),
+            _ => None,
+        })
+        .collect();
+    let failed = errors
+        .iter()
+        .any(|(_, e)| matches!(e, WriteError::Failed(_)));
+    match waits.iter().min() {
+        None if errors.is_empty() => "Publish error: nowhere to publish".into(),
+        Some(soonest) if !failed => {
+            let which = if waits.len() == errors.len() {
+                "every relay"
+            } else {
+                "every relay not left alone"
+            };
+            format!(
+                "{PUBLISH_HELD_BACK} on {which}; retry in {} ms: {reasons}",
+                soonest.as_millis().max(1)
+            )
+        }
+        _ => format!("Publish error: {reasons}"),
+    }
+}
+
+/// The start of a publish error that is a wait (`publish_failure`): packages/core's `heldBackError` reads it.
+pub const PUBLISH_HELD_BACK: &str = "Publish held back";
 
 fn short(key: &PublicKey) -> String {
     key.to_z32().chars().take(6).collect()
@@ -762,7 +893,8 @@ impl Pkarr {
                 let packet = packet.clone();
                 (
                     "dht".to_string(),
-                    Box::pin(async move { dht.publish(&packet).await }) as _,
+                    Box::pin(async move { dht.publish(&packet).await.map_err(WriteError::Failed) })
+                        as _,
                 )
             }))
             .collect();
@@ -787,9 +919,9 @@ impl Pkarr {
                         }
                         Err(e) => {
                             // Not `brief`: a relay's error carries its cause after a colon.
-                            let why: String = e.chars().take(140).collect();
+                            let why: String = e.to_string().chars().take(140).collect();
                             report.push(format!("{name}=err@{at}ms({why})"));
-                            errors.push(format!("{name}: {e}"));
+                            errors.push((name, e));
                         }
                     }
                 }
@@ -800,10 +932,8 @@ impl Pkarr {
                 ));
                 let _ = outcome_tx.send(Some(if ok {
                     Ok(())
-                } else if errors.is_empty() {
-                    Err("Publish error: nowhere to publish".into())
                 } else {
-                    Err(format!("Publish error: {}", errors.join("; ")))
+                    Err(publish_failure(&errors))
                 }));
             });
         }
@@ -1229,22 +1359,45 @@ impl Pkarr {
     /// One PUT at a relay, telling it which packet of ours it replaces (`If-Match`): a relay refuses
     /// (428) to replace a packet whose DHT put is still in flight unless told, and a link publishes in
     /// bursts (its presence, then its offer). 412 means it never got the one named: insist without.
-    async fn relay_put(&self, url: &Url, packet: &SignedPacket) -> Result<(), String> {
+    /// Held back (a wait) while the relay rests after its rate limit or its breaker was tripped by it; left alone while
+    /// its breaker was tripped by failures; failed when asked and it did not take the packet (`WriteError`).
+    async fn relay_put(&self, url: &Url, packet: &SignedPacket) -> Result<(), WriteError> {
         let key = packet.public_key();
         let now = Instant::now();
         let previous = {
             let mut state = self.inner.state.lock().unwrap();
             let every = self.inner.all_down_probe_every;
             let Some(index) = state.relays.iter().position(|relay| relay.url == *url) else {
-                return Err("no longer in Settings".into());
+                return Err(WriteError::Failed("no longer in Settings".into()));
             };
+            // Its rate limit said wait (a 429 not long ago): asked now, it says 429 again and counts against it.
+            if let Some(until) = state.relays[index]
+                .budget
+                .resting_until
+                .filter(|until| *until > now)
+            {
+                return Err(WriteError::Held {
+                    retry: until - now,
+                    why: "rate limited (429); resting".into(),
+                });
+            }
+            let breaker = &state.relays[index].budget.breaker;
+            if breaker.blocked(now) && breaker.kind == Some(Failure::Throttled) {
+                return Err(WriteError::Held {
+                    retry: breaker
+                        .open_until
+                        .map_or(Duration::ZERO, |until| until.saturating_duration_since(now))
+                        .max(Duration::from_secs(1)),
+                    why: "throttling this address; retry shortly".into(),
+                });
+            }
             if state.relays[index].budget.breaker.blocked(now) {
                 // Every relay left alone: one of them is asked anyway, now and then (`all_down_probe`).
                 if state.all_down_probe(now, every) != Some(index) {
                     let again = state.asked_again_in(index, now, every).as_secs().max(1);
-                    return Err(format!(
+                    return Err(WriteError::LeftAlone(format!(
                         "left alone after failing; asked again in {again} s"
-                    ));
+                    )));
                 }
                 state.last_all_down_probe = Some(now);
                 state.relays[index].budget.breaker.probing = true;
@@ -1278,7 +1431,7 @@ impl Pkarr {
             } else {
                 self.breaker(url, Some((Failure::Error, "no answer")));
             }
-            request_error(&e)
+            WriteError::Failed(request_error(&e))
         };
         let mut response = send(previous).await.map_err(failed)?;
         self.note_rate_limit(url, &response);
@@ -1317,10 +1470,16 @@ impl Pkarr {
         }
         match response.status().as_u16() {
             200..=299 => Ok(()),
-            429 => Err("rate limited".into()),
-            409 => Err("relay has a more recent packet".into()),
-            428 => Err("relay is still putting another packet".into()),
-            status => Err(format!("status {status}")),
+            // Its rate limit: this packet did not go in, and goes once the relay's rest is over.
+            429 => Err(WriteError::Held {
+                retry: REST,
+                why: "rate limited".into(),
+            }),
+            409 => Err(WriteError::Failed("relay has a more recent packet".into())),
+            428 => Err(WriteError::Failed(
+                "relay is still putting another packet".into(),
+            )),
+            status => Err(WriteError::Failed(format!("status {status}"))),
         }
     }
 
@@ -2085,7 +2244,7 @@ mod direct {
     #[tokio::test]
     async fn the_dht_node_is_made_off_the_thread_that_asks_for_it() {
         let started = Instant::now();
-        let dht = Dht::mainline_with(None, || {
+        let dht = Dht::mainline_with(None, |_| {
             std::thread::sleep(Duration::from_millis(800));
             Err("DHT node: a resolver that takes its time".into())
         });
@@ -2133,7 +2292,7 @@ mod direct {
         let error = put_once_nodes_known(never, DHT_NO_NODES_RETRIES, Duration::from_millis(10))
             .await
             .unwrap_err();
-        assert!(error.contains("no closest nodes"), "{error}");
+        assert_eq!(error, PublishError::NoClosestNodes);
         assert_eq!(
             attempts.load(std::sync::atomic::Ordering::SeqCst),
             DHT_NO_NODES_RETRIES + 1,
@@ -2534,6 +2693,110 @@ mod direct {
         );
     }
 
+    /// As packages/core's `putEverywhere` (#1422): relays held back for their rate limit beside relays left alone for
+    /// failing, and nothing failing now, is a wait for the soonest held one, not "Publish error"; a write that fails
+    /// now (a relay's, or the DHT's) still makes it one, and so does every relay left alone with none held.
+    #[test]
+    fn a_publish_no_write_took_is_a_wait_only_when_nothing_failed_now() {
+        let held = |ms| WriteError::Held {
+            retry: Duration::from_millis(ms),
+            why: "rate limited".into(),
+        };
+        let alone =
+            || WriteError::LeftAlone("left alone after failing; asked again in 40 s".into());
+        let failed = || WriteError::Failed("status 503".into());
+        let named = |errors: Vec<WriteError>| -> Vec<(String, WriteError)> {
+            errors
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| (format!("r{i}"), e))
+                .collect()
+        };
+        let all_held = publish_failure(&named(vec![held(9_000), held(4_000)]));
+        assert!(
+            all_held.starts_with("Publish held back on every relay; retry in 4000 ms: "),
+            "{all_held}"
+        );
+        let mixed = publish_failure(&named(vec![alone(), held(15_000), alone()]));
+        assert!(
+            mixed.starts_with(
+                "Publish held back on every relay not left alone; retry in 15000 ms: r0: left alone"
+            ),
+            "{mixed}"
+        );
+        for error in [
+            publish_failure(&named(vec![held(1_000), failed()])),
+            publish_failure(&named(vec![alone(), held(1_000), failed()])),
+            publish_failure(&named(vec![alone(), alone()])),
+        ] {
+            assert!(error.starts_with("Publish error: "), "{error}");
+        }
+        let dht_failed = publish_failure(&[
+            ("relay".into(), held(1_000)),
+            ("dht".into(), WriteError::Failed("no nodes".into())),
+        ]);
+        assert!(dht_failed.starts_with("Publish error: "), "{dht_failed}");
+        assert_eq!(publish_failure(&[]), "Publish error: nowhere to publish");
+    }
+
+    /// Miguel's phone, 2026-10-07, on Desktop's own relay client: one relay left alone after failing, the other
+    /// answering 429. The packet waits for the second relay's rest; it is not a failure the app shows in red.
+    #[tokio::test]
+    async fn a_relay_held_back_for_its_rate_limit_beside_one_left_alone_is_a_wait() {
+        let (down, limited, failing) = (
+            pkarr_relay().await,
+            pkarr_relay().await,
+            pkarr_relay().await,
+        );
+        *down.broken.lock().unwrap() = true;
+        *limited.limited.lock().unwrap() = true;
+        let pkarr = Pkarr::new(
+            None,
+            &[down.url.parse().unwrap(), limited.url.parse().unwrap()],
+        )
+        .unwrap();
+        let keypair = Keypair::random();
+        // A relay failing now beside the held one: a failure, as before.
+        let first = pkarr.publish(&packet(&keypair, "0")).await.unwrap_err();
+        assert!(first.starts_with("Publish error: "), "{first}");
+        // The rate-limited relay rests: asked no more until its rest is over, and that is a wait.
+        let limited_puts = requests(&limited, "PUT");
+        for i in 1..BREAKER_THRESHOLD {
+            let error = pkarr
+                .publish(&packet(&keypair, &i.to_string()))
+                .await
+                .unwrap_err();
+            assert!(error.starts_with("Publish error: "), "{error}");
+        }
+        assert_eq!(requests(&limited, "PUT"), limited_puts, "resting");
+        let status = pkarr.status();
+        assert_eq!(status.relays[0].state, "failing");
+        // Now one is left alone for failing and the other held back: a wait for the held one.
+        let error = pkarr.publish(&packet(&keypair, "wait")).await.unwrap_err();
+        assert!(
+            error.starts_with(&format!(
+                "{PUBLISH_HELD_BACK} on every relay not left alone; retry in "
+            )),
+            "{error}"
+        );
+        let retry: u64 = error
+            .split("retry in ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|ms| ms.parse().ok())
+            .unwrap();
+        assert!(retry > 0 && retry <= REST.as_millis() as u64, "{error}");
+
+        // The left-alone relay beside one that fails now: a failure.
+        *failing.broken.lock().unwrap() = true;
+        pkarr.configure(
+            vec![down.url.parse().unwrap(), failing.url.parse().unwrap()],
+            true,
+        );
+        let error = pkarr.publish(&packet(&keypair, "fails")).await.unwrap_err();
+        assert!(error.starts_with("Publish error: "), "{error}");
+    }
+
     /// A relay that refuses the connection is down, not slow: it trips as before.
     #[tokio::test]
     async fn a_relay_that_refuses_the_connection_is_left_alone() {
@@ -2786,6 +3049,70 @@ mod direct {
             ]),
             ["https://relay.example".parse::<Url>().unwrap()]
         );
+    }
+
+    /// A key's first put, on a DHT where a node or two never answer (as every DHT has): it reaches the nodes once the
+    /// lookup before it gave up on those, which took the read node's 2 s request timeout; the reader of the pair waited that
+    /// long for each side's record, one after the other (dht-direct on Linux, 2026-10-07). Now well under it, and the
+    /// other app reads the packet right after.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_keys_first_put_does_not_wait_out_the_read_timeout_for_a_node_that_never_answers() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let bootstrap: Vec<SocketAddrV4> = testnet
+            .bootstrap
+            .iter()
+            .map(|node| node.parse().unwrap())
+            .collect();
+        let app = || Pkarr::direct(Dht::mainline(Some(bootstrap.clone())).unwrap(), &[]).unwrap();
+        let (alice, bob) = (app(), app());
+        // The nodes have joined: a first publish (of another key) went through, and a read of a key nobody has finished.
+        alice
+            .publish(&packet(&Keypair::random(), "0"))
+            .await
+            .unwrap();
+        let nobody = Keypair::random().public_key();
+        assert!(bob.resolve(&nobody).await.is_none());
+        lookups_over(&bob).await;
+
+        for round in 0..3 {
+            let keypair = Keypair::random();
+            let hello = packet(&keypair, "hello");
+            let started = Instant::now();
+            alice.publish(&hello).await.unwrap();
+            let took = started.elapsed();
+            assert!(
+                took < pkarr::DEFAULT_DHT_REQUEST_TIMEOUT - Duration::from_millis(500),
+                "round {round}: the first put took {took:?}"
+            );
+            let found = bob.resolve(&keypair.public_key()).await;
+            assert_eq!(found.map(|p| p.timestamp()), Some(hello.timestamp()));
+        }
+    }
+
+    /// Every node too slow for the put node (round trips past `DHT_PUT_REQUEST_TIMEOUT`, or it could not be made): the
+    /// read node puts the packet.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_put_the_put_node_cannot_make_goes_through_the_read_node() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let bootstrap: Vec<SocketAddrV4> = testnet
+            .bootstrap
+            .iter()
+            .map(|node| node.parse().unwrap())
+            .collect();
+        let mut config = DhtConfig::default();
+        config.bootstrap = Some(bootstrap);
+        let dht = Dht::mainline_with(None, move |timeout| {
+            if timeout == DHT_PUT_REQUEST_TIMEOUT {
+                Err("DHT node: the put node".into())
+            } else {
+                DhtClient::build(config.clone()).map_err(|e| e.to_string())
+            }
+        });
+        let keypair = Keypair::random();
+        let hello = packet(&keypair, "hello");
+        assert_eq!(dht.publish(&hello).await, Ok(()));
+        let (found, _) = dht.resolve(&keypair.public_key(), |_| {}).await;
+        assert_eq!(found.map(|p| p.timestamp()), Some(hello.timestamp()));
     }
 
     /// The real thing in miniature: Mainline DHT nodes on this machine, two apps on it, no relay at all.

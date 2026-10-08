@@ -11,6 +11,7 @@ import { useI18n, type Translate } from "../contexts/I18nContext";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
+import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { useAppsState } from "../lib/apps/flag";
 import { refreshInstalledApps, useInstalledApps } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
@@ -121,6 +122,17 @@ export function Apps() {
   const [adding, setAdding] = useState(false);
   const [details, setDetails] = useState<string | null>(null);
   const [installing, setInstalling] = useState<{ store: string; listing: AppListing } | null>(null);
+  const [picking, setPicking] = useState<{ app: InstalledAppView; options?: OpenAppOptions } | null>(null);
+  // Installed from a listing: its Install button is gone, so the focus goes to the app's row (its Open), not the page.
+  const [justInstalled, setJustInstalled] = useState<string | null>(null);
+  useEffect(() => {
+    if (!justInstalled || installing) return;
+    const row = document.querySelector(`[data-testid=installed-app][data-ref="${CSS.escape(justInstalled)}"]`);
+    const target = row?.querySelector<HTMLElement>("[data-testid=installed-app-open]") ?? row?.querySelector<HTMLElement>("button");
+    if (!target) return;
+    target.focus({ preventScroll: true });
+    setJustInstalled(null);
+  }, [justInstalled, installing, installed]);
   const notice = useToast();
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
@@ -135,7 +147,11 @@ export function Apps() {
 
   if (state === "checking") return null;
   if (!available) return <Navigate to="/" replace />;
-  const open = (app: InstalledAppView, options?: OpenAppOptions) => void openApp(app.ref, null, options).catch(fail);
+  // An app that runs in a chat asks which one; a full-screen app opens here, alone.
+  const open = (app: InstalledAppView, options?: OpenAppOptions) => {
+    if (app.view === "full") void openApp(app.ref, null, options).catch(fail);
+    else setPicking({ app, ...(options && { options }) });
+  };
   const shown = details ? installed?.find((a) => a.ref === details) : undefined;
   return (
     <Page title={t("apps.title")} width="md" testId="apps-page" overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" />}
@@ -154,8 +170,10 @@ export function Apps() {
       </Section>
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} />}
       {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} />}
+      {picking && <AppChatPicker app={picking.app} options={picking.options} onClose={() => setPicking(null)} />}
       {installing && (
-        <AppInstallDialog source={{ store: installing.store, ref: installing.listing.ref }} title={installing.listing.title} onClose={() => setInstalling(null)} />
+        <AppInstallDialog source={{ store: installing.store, ref: installing.listing.ref }} title={installing.listing.title} onClose={() => setInstalling(null)}
+          onInstalled={(app) => setJustInstalled(app.ref)} />
       )}
     </Page>
   );

@@ -123,6 +123,63 @@ First adapters:
   A Ghostly plugin maps those to the daemon's socket, and its allowlist to the gateway's per-platform allowed users
   ([messaging gateway](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/)).
 
+## Reporting usage
+
+A bot can say how much of its quota is left, so its owner sees it on the chat's row and in its header without opening
+the chat, and knows when to switch accounts ([WISP 405 § Usage](wisps/405-status-cards.md#usage)). One card per chat:
+the first report sends it, every later one edits it in place, quietly.
+
+```sh
+ghostly usage send <chat> --label Claude --account work --left 62 --window "5 h" --resets 2026-10-07T18:00:00Z \
+  --also week=80@2026-10-10T00:00:00Z
+ghostly usage send --all --left 62 --window "5 h"        # every 1:1 chat with a contact
+```
+
+Each report is whole (a field it leaves out goes from the card). The app shows the percent, amber under 20%, red
+under 5%, and muted once the report is 6 hours old or its reset time has passed. Report when the numbers change by a
+few points or every 15 to 30 minutes, not on every request: updates are paced to one per 2.5 s, and the card takes
+5,000 updates before a new one starts.
+
+### Where a Claude Code bot gets its numbers
+
+| Source | What it gives | Reliable? |
+|---|---|---|
+| The status line's JSON ([docs](https://code.claude.com/docs/en/statusline)): `rate_limits.five_hour` and `rate_limits.seven_day`, each `used_percentage` (0 to 100) and `resets_at` (Unix seconds) | The 5-hour and weekly windows of a Pro or Max subscription | Yes: documented. Present only for Pro and Max (or behind a gateway with a spend limit), only after the session's first response, and a window is dropped once its reset passes. Read each with a fallback |
+| The Agent SDK's rate-limit event (`rate_limit_event`: status, utilization, resets at, which window) | The same, per response, for bots on the SDK | Partly: in the SDK's types, sparsely documented; older versions gave the utilization only near the limit. Check your version |
+| `anthropic-ratelimit-unified-*` response headers | The same windows | No: undocumented, and names have changed. Not exposed to hooks |
+| `/usage` and `/status` | What a person reads | Interactive only: nothing a bot can call |
+| Claude's OAuth usage endpoint | The same windows | No: undocumented, and it needs the account's OAuth token. Don't send that token anywhere |
+
+A status line script receives the JSON on stdin whenever the session updates. It can write it to a file that a
+small loop reports from, so the report is paced and the status line stays fast:
+
+```sh
+#!/bin/sh
+# statusline.sh: shows the model, and keeps the latest rate limits for the reporter.
+input=$(cat)
+echo "$input" | jq -c '.rate_limits // empty' > ~/.cache/claude-usage.json
+echo "$input" | jq -r '"[\(.model.display_name)]"'
+```
+
+```sh
+#!/bin/sh
+# usage-reporter.sh: every 15 minutes, what is left of the 5-hour window, the week beside it.
+while sleep 900; do
+  f=~/.cache/claude-usage.json
+  [ -s "$f" ] || continue
+  used=$(jq -r '.five_hour.used_percentage // empty' "$f") || continue
+  [ -n "$used" ] || continue
+  left=$(( 100 - ${used%.*} ))
+  resets=$(jq -r '.five_hour.resets_at // empty' "$f")
+  week=$(jq -r '.seven_day.used_percentage // empty' "$f")
+  ghostly usage send "$GHOSTLY_OWNER_CHAT" --label Claude --account "$CLAUDE_ACCOUNT" --left "$left" --window "5 h" \
+    ${resets:+--resets "${resets}000"} ${week:+--also "week=$(( 100 - ${week%.*} ))"}
+done
+```
+
+`--resets` takes milliseconds or a date, so the seconds get three zeros. Set `CLAUDE_ACCOUNT` to a short name
+for the account in use, so the card says which one is running low.
+
 ## The older skill
 
 The older Rust `ghostly-cli` and its skill were removed after 1.0. Agents use `ghostly` and

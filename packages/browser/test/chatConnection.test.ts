@@ -39,7 +39,9 @@ it("shows a new chat waiting without a spinner, and keeps real discovery errors 
   link.discoveryError = "Could not publish discovery: fixture unavailable";
   expect(render()).toContain("Publication unavailable");
   expect(render()).not.toContain("Connection issue");
-  expect(render()).toContain(link.discoveryError);
+  // In a few words (the relays), the engine's English only behind the ⓘ (apps/ui lib/problemText.ts).
+  expect(render()).toContain("Can&#x27;t reach the relays");
+  expect(render()).not.toContain(link.discoveryError);
   expect(render()).not.toContain('type="radio" disabled');
 });
 

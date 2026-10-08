@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { desktopHome } from "../support/desktop";
+import { longestEventLoopGap, watchEventLoop } from "../support/eventLoop";
 import { mainlineTestnet } from "../support/mainlineTestnet";
 import { LocalRelay } from "../support/relay";
 import { desktopNetwork } from "../matrix/desktop";
@@ -18,7 +19,14 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * goes live on HyperDHT from the descriptors in each other's capability record. Before #1404 Iroh homed on n0's relay
  * a few seconds in, and the record went out a third time: that hid that the second one, with the descriptors, was
  * refused by the DHT while the first was still being put (apps/desktop/src/pkarr_network.rs `put_newest`).
+ *
+ * Neither page may freeze on the way: no gap over a second in its event loop from the invite to the live chat. Each
+ * app's first sounds of the chat (the knock, the text, "connected") held the page of WebKitGTK before 2.52 for 5 to 10 s
+ * inside `AudioContext.resume()` (r11k, apps/ui/src/lib/sounds.ts `SoundsRelease`).
  */
+
+/** The longest a page may go without running a timer while the pair goes live. */
+const MAX_FREEZE_MS = 1_000;
 
 /** How many times the open conversation shows this exact text. */
 const count = (p: DesktopPerson, text: string) => p.app.execute<number>(`
@@ -63,6 +71,7 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
     };
     const a = await open("ana");
     const b = await open("bia");
+    for (const p of [a, b]) await watchEventLoop(p.app);
 
     await a.press("New chat");
     const invite = await a.copyInvite();
@@ -79,6 +88,13 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
 
     for (const p of [a, b]) {
       expect(await discovery(p), `${p.name}'s panel`).toEqual({ path: "DHT direct", relays: ["ok"] });
+    }
+    for (const p of [a, b]) {
+      const gaps = await longestEventLoopGap(p.app);
+      test.info().annotations.push({ type: "event-loop", description: `${p.name} longest gap ${gaps?.longest} ms from ${gaps?.at} (${gaps?.count} over 300 ms)` });
+      expect(gaps, `${p.name}'s page was watched throughout`).not.toBeNull();
+      // `at` is the app's clock, as ghostly.log's: the link steps just before it say what the page was doing.
+      expect(gaps!.longest, `${p.name}'s page froze at ${gaps!.at} (see ${p.name}'s ghostly.log)`).toBeLessThanOrEqual(MAX_FREEZE_MS);
     }
     // Written to, for browser contacts; never read.
     expect(relay.puts, "the apps publish to the relay too").toBeGreaterThan(0);

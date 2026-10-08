@@ -170,7 +170,7 @@ describe("a profile backup's file", () => {
 
     await user.click(screen.getByRole("radio", { name: "No passphrase" }));
     expect(screen.queryByTestId("backup-passphrase")).not.toBeInTheDocument();
-    expect(screen.getByTestId("backup-unprotected-warning")).toHaveTextContent("Not encrypted. The file holds this profile's keys, chats and wallet secrets in the clear. Anyone who gets the file gets everything in it, including any money in its wallets.");
+    expect(screen.getByTestId("backup-unprotected-warning")).toHaveTextContent("Not encrypted" + "Anyone with the file gets your keys, chats and money.");
     expect(screen.queryByTestId("backup-unprotected-mainnet"), "no real money here: not said").not.toBeInTheDocument();
     expect(screen.getByTestId("backup-download"), "not before the person says they understand").toBeDisabled();
     await user.click(screen.getByLabelText("I understand. Make it without a passphrase."));
@@ -191,7 +191,7 @@ describe("a profile backup's file", () => {
     const { user } = renderApp(<ProfileBackups canSwitch={false} />);
     await user.click(screen.getByTestId("backup-open"));
     await user.click(screen.getByRole("radio", { name: "No passphrase" }));
-    expect(screen.getByTestId("backup-unprotected-mainnet")).toHaveTextContent("This profile has Mainnet wallets that have held real money. Whoever gets the file can spend it.");
+    expect(screen.getByTestId("backup-unprotected-mainnet")).toHaveTextContent("This profile has held real money" + "Whoever gets the file can spend it.");
   });
 
   it("what a backup holds, and what it does not, is behind the ⓘ", async () => {

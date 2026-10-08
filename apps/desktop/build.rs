@@ -99,6 +99,7 @@ const COMMANDS: &[&str] = &[
     "turn_warm",
     "under_test",
     "updater_can_install",
+    "webkit_version",
 ];
 
 fn main() {

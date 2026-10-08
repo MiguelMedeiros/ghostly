@@ -46,8 +46,10 @@
     "maxGas": "Gas massimo (ETH)",
     "noSharedMint": "Nessun mint configurato in comune",
     "noWallet": {
-      "mainnet": "Si chiede denaro reale ({{unit}}), e non hai un portafoglio Mainnet con cui pagarlo. Creane uno in Portafogli, oppure chiedi denaro di prova.",
-      "testnet": "Si chiede denaro di prova ({{unit}}), e non hai un portafoglio Testnet con cui pagarlo. Creane uno in Portafogli, oppure chiedi denaro reale."
+      "mainnet": "Non hai un portafoglio Mainnet per pagarlo",
+      "mainnetNext": "Creane uno in Portafogli, o chiedi denaro di test.",
+      "testnet": "Non hai un portafoglio Testnet per pagarlo",
+      "testnetNext": "Creane uno in Portafogli, o chiedi denaro reale."
     },
     "off": "Questo metodo di pagamento è disattivato in questa chat.",
     "payElsewhere": "Paga con un altro portafoglio",
@@ -92,9 +94,12 @@
     "chooseOther": "Scegli un'altra persona",
     "continue": "Continua",
     "error": {
-      "noAnswer": "L'app del tuo contatto non ha risposto. Potrebbe essere offline o da aggiornare; il tuo contatto può inviarti una richiesta.",
-      "noFederation": "Tu e {{name}} non avete federazioni in comune, e la sua richiesta non ha una fattura Lightning.",
-      "noFederationInvoice": "Tu e {{name}} non avete federazioni in comune: paga la sua richiesta via Lightning, con Controlla pagamento nella chat.",
+      "noAnswer": "L'app del tuo contatto non ha risposto",
+      "noAnswerNext": "Il tuo contatto può inviarti una richiesta.",
+      "noFederation": "Tu e {{name}} non avete federazioni in comune",
+      "noFederationInvoice": "Tu e {{name}} non avete federazioni in comune",
+      "noFederationInvoiceNext": "Paga la sua richiesta via Lightning nella chat.",
+      "noFederationNext": "E la sua richiesta non ha una fattura Lightning.",
       "noMint": "Aggiungi prima una mint Cashu",
       "prepare": "Impossibile preparare il pagamento",
       "request": "Impossibile preparare la richiesta"
@@ -151,7 +156,8 @@
     "copied": "Copiato",
     "copyError": "Impossibile copiare. Seleziona il testo e copialo tu.",
     "open": "Apri portafoglio",
-    "openError": "Impossibile aprire un portafoglio: {{error}}. Copia il testo o scansiona il codice.",
+    "openError": "Impossibile aprire un portafoglio",
+    "openErrorNext": "Copia il testo o scansiona il codice.",
     "openTitle": "Apri in un portafoglio su questo dispositivo",
     "paid": "Ho pagato",
     "paidTitle": "Al portafoglio del tuo contatto viene chiesto di controllare ora. Segna la richiesta come pagata solo quando vede il denaro.",

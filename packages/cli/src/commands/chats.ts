@@ -1,4 +1,5 @@
-import { type Command, force, groupWait, cursor, needs, routineFields, routineOptions, runOf, taskFields, taskOptions, wait } from "./shared";
+import { CliError } from "../errors";
+import { type Command, force, groupWait, cursor, needs, routineFields, routineOptions, runOf, taskFields, taskOptions, usageFields, usageOptions, wait } from "./shared";
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -128,5 +129,15 @@ export const commands: Record<string, Command> = {
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
     params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, kind: options.kind, status: options.status, for: options.for }),
+  },
+  "usage send": {
+    method: "usage.send", usage: "usage send [<chat|group>] [--all] --left <percent> [--window \"5 h\"] [--resets <time>] [--label Claude] [--account <name>] [--also week=80@<time>]... [--used n --limit n] [--id id] [--json json|-|file] [--wait none|sent] [--timeout s]",
+    summary: "Say how much of your quota is left (a bot's usage card, one per chat, updated in place); --all for every 1:1 chat",
+    args: ["chat?"],
+    options: { ...usageOptions, ...groupWait },
+    params: ({ options }, { chat }) => {
+      if (!chat && options.all !== true) throw new CliError("usage", "Name a chat or group, or give --all: ghostly usage send <chat|--all> --left <percent>");
+      return { chat, all: options.all === true, card: usageFields(options), text: options.text, wait: options.wait, timeout: options.timeout };
+    },
   },
 };

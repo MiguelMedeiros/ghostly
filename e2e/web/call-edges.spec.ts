@@ -193,7 +193,7 @@ test("a microphone that is blocked says so, and the caller stops ringing", { tag
   await expect(bob.page.getByText("Incoming audio call...")).toBeVisible();
   await bob.page.getByTitle("Accept audio call").click();
   await expect(bob.page.getByTestId("call-media-problem")).toHaveAttribute("data-problem", "denied");
-  await expect(bob.page.getByTestId("call-media-problem")).toContainText("can't use the microphone");
+  await expect(bob.page.getByTestId("call-media-problem")).toContainText("No access to the mic or camera");
   for (const p of [alice, bob]) await noCall(p);
   for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call couldn't connect")).toBeVisible();
 

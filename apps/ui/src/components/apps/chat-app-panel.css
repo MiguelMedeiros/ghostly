@@ -1,0 +1,13 @@
+/* A mini-app in a chat (ChatAppPanel.tsx), inside the chat page (`chat-pane`, contact-panel.css): on a wide screen it
+   docks at the end, the chat column narrows and stays usable; `data-wide` gives it the chat's whole width (the column
+   is hidden meanwhile, Chat.tsx). On a phone it covers the chat, the screen's whole size. Its frame box never moves:
+   only these rules change, so the app keeps running through every one of them. */
+.chat-app-panel{position:relative;z-index:31;display:flex;flex-direction:column;flex:none;width:clamp(360px,42%,560px);height:100%;min-height:0;min-width:0;
+ background:var(--theme-chat-bg);border-inline-start:1px solid var(--theme-border);color:var(--theme-text-primary)}
+.chat-app-panel[data-wide]{flex:1;width:auto;border-inline-start:0}
+.chat-app-panel[hidden]{display:none}
+.chat-app-frame{position:relative;flex:1;min-height:0}
+.chat-app-frame>iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+@media (max-width: 767px){
+ .chat-app-panel{position:fixed;inset:0;z-index:55;width:100%;border-inline-start:0}
+}

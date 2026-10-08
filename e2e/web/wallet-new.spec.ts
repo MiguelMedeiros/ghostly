@@ -37,8 +37,9 @@ test("on a phone: a first setup whose Ethereum RPC does not answer says so in wo
   await alice.page.getByTestId("mobile-tabs").getByRole("button", { name: "Wallets" }).click();
   const first = alice.page.getByTestId("wallet-first");
   await first.getByTestId("wallet-first-testnet").click();
+  // In a few words, what failed, then why and what is safe (lib/problemText.ts).
   await expect(first.getByTestId("wallet-first-error-usdt")).toHaveText(
-    "Could not create the Testnet USDT wallet: ethereum-sepolia-rpc.publicnode.com did not answer in time. Nothing was saved; try again.", { timeout: 60_000 });
+    "Couldn't create the Testnet USDT wallet" + "ethereum-sepolia-rpc.publicnode.com did not answer in time. Nothing was saved. Try again.", { timeout: 60_000 });
 });
 
 test("on a phone: a first setup that made nothing gives way to a wallet made with New", { tag: ["@feature:wallet.instances.create", "@feature:app.mobile-layout"] }, async ({ peer }) => {
@@ -165,7 +166,7 @@ test("on a phone: a kind that could not be made says why on its own card, not on
   await expect(cashu).toHaveAttribute("data-state", "error", { timeout: 60_000 });
   // The whole message is under the eight kinds, below the bottom of the screen; the card says why in a line.
   const reason = sheet.getByTestId("new-wallet-type-cashu-reason");
-  await expect(reason).toHaveText("Could not reach testnut.cashu.space.");
+  await expect(reason).toHaveText("Can't reach testnut.cashu.space");
   const box = (await reason.boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(phone.height);
 });

@@ -260,8 +260,8 @@ const opened: GhostLink[] = [];
 
 /** One side's link, as the engine opens it for a chat never paired (node.ts `startLink` + the joiner's `expectPeer`). */
 export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean; pollIntervals?: PollIntervals; dht?: boolean; credentials?: PairingCredentials; dhtState?: DhtDeliveryState;
-  /** A group's entry session opens its links so (node.ts `startEdge`). */
-  link?: Pick<GhostLinkOptions, "oneShot" | "firstPublish">; onDataLinkState?: (state: DataLinkState) => void } = {}): Opened {
+  /** A group's entry session opens its links so (node.ts `startEdge`); a Linux Desktop's have no WebRTC (`rtcAvailable`). */
+  link?: Pick<GhostLinkOptions, "oneShot" | "firstPublish" | "rtcAvailable">; onDataLinkState?: (state: DataLinkState) => void } = {}): Opened {
   const progress: PairingProgress[] = [], pinned: string[] = [];
   const received: Opened["received"] = [], receipts: string[] = [], states: PairingState[] = [];
   const credentials: PairingCredentials = options.credentials ?? { seedB64: side.seedB64 };

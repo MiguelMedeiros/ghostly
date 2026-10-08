@@ -1,4 +1,4 @@
-import { ACTIVE_TASK_STATUSES, taskProgress, type RoutineCard, type RunResult, type StatusCard, type TaskCard, type TaskStatus } from "@ghostly/core";
+import { ACTIVE_TASK_STATUSES, taskProgress, usageLeft, type RoutineCard, type RunResult, type StatusCard, type TaskCard, type TaskStatus, type UsageCard } from "@ghostly/core";
 import type { Translate } from "../contexts/I18nContext";
 
 /*
@@ -12,7 +12,7 @@ export interface CardRow { id: string; card?: StatusCard; sender: string; member
 
 export interface CardEntry {
   messageId: string;
-  card: ShownCard;
+  card: PanelCard;
   /** Who sent it: `me`, `peer`, or a group member's key. */
   author: string;
   /** When it last changed: its last update, else when it was sent. */
@@ -31,8 +31,8 @@ export function isActiveCard(card: StatusCard): boolean {
 export function cardEntries(rows: readonly CardRow[]): CardEntry[] {
   const latest = new Map<string, CardEntry>();
   for (const row of rows) {
-    // Only tasks and routines: a message's buttons are not a status the panel follows.
-    if (!showsCard(row.card)) continue;
+    // Only tasks and routines: a message's buttons are not a status the panel follows, nor is a bot's usage.
+    if (!panelCard(row.card)) continue;
     const key = `${author(row)}\n${row.card.kind}\n${row.card.id}`;
     latest.delete(key);
     latest.set(key, { messageId: row.id, card: row.card, author: author(row), at: row.edit?.at ?? row.timestamp, active: isActiveCard(row.card) });
@@ -78,7 +78,7 @@ export function panelModel(entries: readonly CardEntry[], grouped: boolean): { a
 }
 
 /** Routines in the order the panel lists them: a failed last run first, then the next to run, the paused ones last. */
-export function sortRoutines<E extends { card: ShownCard }>(entries: readonly E[]): E[] {
+export function sortRoutines<E extends { card: PanelCard }>(entries: readonly E[]): E[] {
   const rank = (card: RoutineCard) => (card.state === "paused" ? 2 : card.lastRun?.result === "failed" ? 0 : 1);
   const next = (card: RoutineCard) => (card.state === "active" && card.nextRunAt) || Number.MAX_SAFE_INTEGER;
   return [...entries].sort((a, b) => {
@@ -161,11 +161,21 @@ export function untilIn(language: string): (at: number, now?: number) => string 
   };
 }
 
-/** A card a message shows as, instead of its text: a task or a routine. A message with buttons shows its text. */
-export type ShownCard = TaskCard | RoutineCard;
+/**
+ * A card a message shows as, instead of its text: a task, a routine or a bot's usage (WISP 405 § Usage). A message with
+ * buttons shows its text.
+ */
+export type ShownCard = TaskCard | RoutineCard | UsageCard;
 
 /** Whether a message shows as its card: a kind this app draws. Anything else shows the message's text. */
 export function showsCard(card: StatusCard | undefined): card is ShownCard {
+  return card?.kind === "task" || card?.kind === "routine" || card?.kind === "usage";
+}
+
+/** A card the Tasks panel and board follow: a task or a routine. A bot's usage is its chat's meter instead. */
+export type PanelCard = TaskCard | RoutineCard;
+
+export function panelCard(card: StatusCard | undefined): card is PanelCard {
   return card?.kind === "task" || card?.kind === "routine";
 }
 
@@ -212,13 +222,18 @@ export function taskElapsed(card: TaskCard, now: number, end?: number): TaskElap
 
 /** What a screen reader says of a card as a whole: "Task: Fix relay rotation, Running, 67%", "Routine: Nightly, Paused". */
 export function cardLabel(t: Translate, card: ShownCard): string {
+  if (card.kind === "usage") return t("cards.usage.label", { name: card.label ?? t("cards.usage.title"), left: usageLeft(card) });
   if (card.kind === "routine") return t("cards.routine.label", { name: card.name, state: t(`cards.routine.state.${card.state}`) });
   const progress = taskProgress(card);
   const status = t(`cards.task.status.${card.status}`);
   return progress === undefined ? t("cards.task.label", { title: card.title, status }) : t("cards.task.labelProgress", { title: card.title, status, progress });
 }
 
-/** A card's line where a message's text would be (a quote, the pinned bar, the chat list): its title, or ↻ and its name. */
+/**
+ * A card's line where a message's text would be (a quote, the pinned bar, the chat list): its title, ↻ and a routine's
+ * name, or a usage's label and percent left ("📊 Claude · 62%").
+ */
 export function cardLine(card: ShownCard): string {
+  if (card.kind === "usage") return `📊 ${card.label ? `${card.label} · ` : ""}${usageLeft(card)}%`;
   return card.kind === "task" ? card.title : `↻ ${card.name}`;
 }

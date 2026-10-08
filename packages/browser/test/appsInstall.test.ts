@@ -47,13 +47,24 @@ describe("install", () => {
     expect(await bundleIds()).toEqual([]);
 
     const view = await store.install({ digest: v1.digest, grant: ["chat"] });
-    expect(view).toMatchObject({ ref: v1.ref, sequence: 1, digest: v1.digest, permissions: ["chat"], run: { status: "ok" } });
+    // No view in its manifest: it runs in a chat.
+    expect(view).toMatchObject({ ref: v1.ref, sequence: 1, digest: v1.digest, permissions: ["chat"], view: "chat", run: { status: "ok" } });
     expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
     const entry = await store.entry({ ref: v1.ref });
-    expect(entry).toMatchObject({ digest: v1.digest, version: "1.0.1", permissions: ["chat"] });
+    expect(entry).toMatchObject({ digest: v1.digest, version: "1.0.1", permissions: ["chat"], view: "chat" });
     expect(entry.entry).toContain("<p>v1");
     expect(new TextDecoder().decode(await store.file({ ref: v1.ref, path: "data/openings.json" }))).toBe("[]");
     await expect(store.file({ ref: v1.ref, path: "../secret" })).rejects.toThrow(/^no-file/);
+  });
+
+  it("a full-screen app says so in its view and its run entry", async () => {
+    const full = await bundle({ view: "full", permissions: [] });
+    net.put(BUNDLE_URL, full.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    expect(await store.install({ digest: full.digest, grant: [] })).toMatchObject({ view: "full" });
+    expect(await store.entry({ ref: full.ref })).toMatchObject({ view: "full" });
+    expect(await store.list()).toMatchObject([{ ref: full.ref, view: "full" }]);
   });
 
   it("refuses an install without every permission granted, and one never previewed", async () => {
