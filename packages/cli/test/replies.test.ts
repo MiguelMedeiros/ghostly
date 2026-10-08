@@ -21,6 +21,7 @@ function fake(sendResult: { error: string | null; refused?: boolean; messageId?:
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
+    getMessage: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => sendResult),
     sendGroupMessage: vi.fn(async () => ({ error: sendResult.error })),
   };

@@ -204,7 +204,7 @@ const METHODS: Record<string, Method> = {
     const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
-    let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
+    let message = await node(ctx).getMessage(link.id, result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
     return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
   },
@@ -224,7 +224,7 @@ const METHODS: Record<string, Method> = {
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
     if (result.error) throw editRefused(await node(ctx).getMessages(link.id), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
-    let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === id);
+    let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
     return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed: !!message && !message.edit?.pending };
   },

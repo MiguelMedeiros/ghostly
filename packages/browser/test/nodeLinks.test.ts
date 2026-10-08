@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
+import { EditQueue } from "../src/engine/edits";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
 import type { GroupEdgeView, StoredLink } from "../src/shared/types";
@@ -843,6 +844,27 @@ describe("text in a chat", () => {
     linkOf(chat.id).validateText.mockReturnValueOnce("Payment tokens are not text" as never);
     expect(await node.sendMessage({ linkId: chat.id, text: "cashuA" })).toMatchObject({ error: "Payment tokens are not text", refused: true });
     expect(await db.getMessages(chat.id)).toHaveLength(1);
+  });
+
+  it("the receipt of a message I sent reads that message, not the chat's whole history", async () => {
+    const chat = row();
+    const { node, events: pages, linkOf } = await started(chat);
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    const { messageId } = await node.sendMessage({ linkId: chat.id, text: "hi", timestamp: 4 });
+    const sent = (await db.getMessage(chat.id, messageId!))!;
+    await db.patchMessage(chat.id, sent.id, () => ({ edit: { seq: 1, at: 5, pending: true } }));
+    const { events } = linkOf(chat.id).options;
+    const history = vi.spyOn(db, "getMessages");
+    const flush = vi.spyOn(EditQueue.prototype, "flush").mockResolvedValue();
+    await events.onMessageReceipt(sent.wireId!);
+    expect((await db.getMessage(chat.id, sent.id))?.delivery).toBe("delivered");
+    expect(history).not.toHaveBeenCalled();
+    // Its edit waited for this receipt: it goes now.
+    expect(flush).toHaveBeenCalledOnce();
+    // An id no message of mine has (a file's offer or an edit said on the DHT floor) is still looked for.
+    await events.onMessageReceipt("floor-id");
+    expect(history).toHaveBeenCalled();
   });
 
   // covers: chat.link-preview.wire

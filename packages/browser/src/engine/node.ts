@@ -2131,6 +2131,11 @@ export class GhostlyNode implements EngineImplementation {
     return db.getMessages(linkId);
   }
 
+  /** One message of a chat, read by its id: the whole history costs a read of every row. */
+  getMessage(linkId: string, id: string): Promise<StoredMessage | undefined> {
+    return db.getMessage(linkId, id);
+  }
+
   async messagePage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
     if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("limit: a whole number of messages, at least 1");
     if (before === undefined) return db.getMessagePage(linkId, { limit });
@@ -6530,12 +6535,16 @@ export class GhostlyNode implements EngineImplementation {
           this.emitState();
         },
         onMessageReceipt: async id => {
+          const oneToOne = !!stored.profile && !stored.group;
+          // The receipt of one of my messages (the usual case) names neither a floor file nor a floor edit: those looks
+          // read the chat's whole history, so they are left for the ids no message of mine has.
+          const mine = oneToOne ? await db.getMessage(linkId, `me_${id}`) : undefined;
           // A file's offer said on the floor: its bubble is in place on the contact's side, and the floor is free.
-          if (stored.profile && !stored.group) await this.fileSeenOnFloor(linkId, id);
+          if (oneToOne && !mine) await this.fileSeenOnFloor(linkId, id);
           await this.outboxFor(linkId).received(id);
           // An edit that went on the DHT floor under an id of its own; and a message that waited went: its edit may follow.
-          if (stored.profile && !stored.group) await this.editsFor(linkId).receivedOnDht(id).catch(() => {});
-          if (stored.profile && !stored.group) void this.editsFor(linkId).flush().catch(() => {});
+          if (oneToOne && !mine) await this.editsFor(linkId).receivedOnDht(id).catch(() => {});
+          if (oneToOne && (!mine || mine.edit?.pending)) void this.editsFor(linkId).flush().catch(() => {});
         },
         onMessageEdit: stored.profile && !stored.group ? edit => this.receiveEdit(linkId, edit) : undefined,
         onEditReceipt: stored.profile && !stored.group ? (id, e) => this.editsFor(linkId).received(id, e) : undefined,

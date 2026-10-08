@@ -22,6 +22,7 @@ function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" }), link("chat-two", { peerNick: "Bob" })], groups: [group], settings: { online: true, nick: "Bot", relays: ["r"], holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "SK" } }, avatar: "data:x" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
+    getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     sendGroupMessage: vi.fn(async () => ({ error: null })),
@@ -146,6 +147,8 @@ describe("chats", () => {
 
     stored[0] = { ...stored[0], delivery: "failed", deliveryError: "Peer is gone" };
     await expect(callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent" })).rejects.toMatchObject({ code: "engine", message: "Peer is gone" });
+    // A send and its wait read the message itself: in a long chat, the whole history costs each of them a read of every row.
+    expect((ctx.runtime.server.node as unknown as { getMessages: ReturnType<typeof vi.fn> }).getMessages).not.toHaveBeenCalled();
   });
 
   it("send's wait sees a delivery that never came as message.delivery, and one that came as the time ran out", async () => {
