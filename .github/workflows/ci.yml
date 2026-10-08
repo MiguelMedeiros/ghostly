@@ -184,6 +184,10 @@ jobs:
       - name: Test map (every feature has a test)
         run: npm run test:map -- --summary
 
+      # e2e/fixtures/chess is what apps/mini/chess builds to, byte for byte (tools/scripts/refresh-chess-fixture.mjs).
+      - name: Chess e2e fixture is up to date
+        run: if [[ -f apps/mini/chess/vite.config.ts ]]; then node tools/scripts/refresh-chess-fixture.mjs --check; fi
+
   frontend-tests:
     name: Frontend tests (app)
     needs: changes

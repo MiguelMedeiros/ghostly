@@ -14,8 +14,9 @@
 # It prints the two PUBLIC keys and their fingerprints and the next steps. It never prints a private key, never
 # pushes, and refuses to run when either key file is already there.
 #
-# Tests may set GHOSTLY_CLI (a built ghostly.mjs) and CHESS_DIST (a built Chess dist/) to skip the builds, and
-# STORE_SKIP_CHECK=1 to skip the store's own check.
+# Tests may set GHOSTLY_CLI (a built ghostly.mjs) and CHESS_DIST (a built Chess dist/) to skip the builds,
+# CHESS_MANIFEST (a ghostly-app.json, default apps/mini/chess's) to publish another manifest, and STORE_SKIP_CHECK=1
+# to skip the store's own check.
 set -euo pipefail
 umask 077
 
@@ -101,6 +102,8 @@ if [[ -n "${CHESS_DIST:-}" ]]; then chess_dist="$CHESS_DIST"; else
   chess_dist="$repo/apps/mini/chess/dist"
 fi
 [[ -f "$chess_dist/index.html" ]] || die "no $chess_dist/index.html"
+chess_manifest="${CHESS_MANIFEST:-$repo/apps/mini/chess/ghostly-app.json}"
+[[ -f "$chess_manifest" ]] || die "no $chess_manifest"
 if [[ -n "$(git -C "$repo" status --porcelain -- apps/mini/chess 2>/dev/null)" ]]; then
   echo "note: apps/mini/chess has changes that are not committed; the bundle is built from them" >&2
 fi
@@ -116,9 +119,9 @@ stage() {
     const draft = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     if (process.argv[3]) draft.sources = [process.argv[3]];
     fs.writeFileSync(process.argv[2], JSON.stringify(draft, null, 2) + "\n");
-  ' "$repo/apps/mini/chess/ghostly-app.json" "$dir/ghostly-app.json" "$sources"
+  ' "$chess_manifest" "$dir/ghostly-app.json" "$sources"
   cp "$chess_dist/index.html" "$dir/index.html"
-  [[ -f "$repo/apps/mini/chess/icon.png" ]] && cp "$repo/apps/mini/chess/icon.png" "$dir/icon.png"
+  [[ -f "$(dirname "$chess_manifest")/icon.png" ]] && cp "$(dirname "$chess_manifest")/icon.png" "$dir/icon.png"
   return 0
 }
 
@@ -148,7 +151,7 @@ node -e '
     repo: "https://github.com/MiguelMedeiros/ghostly", support: "https://github.com/MiguelMedeiros/ghostly/issues",
   };
   fs.writeFileSync(out, JSON.stringify(listing, null, 2) + "\n");
-' "$published" "$url" "$store/$folder/listing.json" "$repo/apps/mini/chess/ghostly-app.json"
+' "$published" "$url" "$store/$folder/listing.json" "$chess_manifest"
 chmod 644 "$store/$folder/listing.json" "$store/$folder/app.ghostlyapp"
 chmod 755 "$store/$folder"
 
