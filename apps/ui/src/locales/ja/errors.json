@@ -109,6 +109,8 @@
     "peerUnavailable": "Ghostly のピアを利用できません。拡張機能を開き直して再試行してください。",
     "signInCancelled": "サインインはキャンセルされました。",
     "signInPermission": "これには Ghostly へのサインインの許可が必要です。",
+    "signInTimedOut": "サインインがタイムアウトしました",
+    "signInTimedOutNext": "もう一度始めて、サインインしたら Ghostly に戻ってください。",
     "switchingProfiles": "プロフィールを切り替えています…"
   },
   "files": {
@@ -181,6 +183,14 @@
     "removed": "このグループから削除されました",
     "shareLinkInstead": "グループのリンクを共有してください。リンクを開いた人は参加できます",
     "tooLong": "メッセージが 16 KiB を超えています"
+  },
+  "host": {
+    "noApp": "この端末にはこれを開けるアプリがありません",
+    "noAppNext": "対応するアプリを入れるか、リンクをコピーして別の場所で開いてください。",
+    "openFailed": "リンクを開けませんでした",
+    "openFailedNext": "リンクをコピーしてブラウザで開いてください。",
+    "saveFailed": "その場所にファイルを保存できませんでした",
+    "saveFailedNext": "別のフォルダを選んでもう一度お試しください。"
   },
   "lightning": {
     "alreadyPaid": "この請求書は支払い済みです",

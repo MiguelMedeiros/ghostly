@@ -44,6 +44,7 @@ import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/file
 import { setWindowThemeSink } from "../lib/windowTheme";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
+import { androidApp } from "../lib/touchOnly";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -274,6 +275,20 @@ export async function desktopUnderTest(): Promise<boolean> {
   return await invoke<boolean>("under_test");
 }
 
+/**
+ * Mini-apps (WISP 1200) on this app: on Desktop they run in windows of their own on Rust's `ghostly-app` scheme, which
+ * serves the runner with its policy (apps/desktop/src/app_sandbox.rs): one address, the policy chosen by what the
+ * person granted. The engine has them in the e2e suite's build only (VITE_APPS_TEST, fixed when the build is made),
+ * reading its test store. The Android app has none yet, whatever the build: no runner, and the engine told so.
+ */
+export function desktopApps(android: boolean) {
+  if (android) return { host: {}, node: { apps: false } };
+  return {
+    host: { appRunner: "ghostly-app://localhost/", appNetRunner: "ghostly-app://localhost/", appRunnerServed: true },
+    node: import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {},
+  };
+}
+
 /** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
 export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
   const { node: callOptions, callMedia } = nativeCallOptions(calls);
@@ -295,23 +310,18 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
+  const apps = desktopApps(androidApp());
   return createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
-    // Mini-apps run in windows of their own on Rust's `ghostly-app` scheme, which serves the runner with its policy
-    // (apps/desktop/src/app_sandbox.rs; WISP 1200): one address, the policy chosen by what the person granted.
-    appRunner: "ghostly-app://localhost/",
-    appNetRunner: "ghostly-app://localhost/",
-    appRunnerServed: true,
+    ...apps.host,
     node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
       // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
       pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
       // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
       defaultWallets: defaultWalletsAllowed(desktopUnderTest),
-      // Mini-apps on in the e2e suite's build only (VITE_APPS_TEST, fixed when the build is made), reading its test store.
-      ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {}),
-      ...macPeerBudget(), ...callOptions },
+      ...apps.node, ...macPeerBudget(), ...callOptions },
     callMedia,
     onServer: serveServiceWindows,
     oidc: desktopOidc,

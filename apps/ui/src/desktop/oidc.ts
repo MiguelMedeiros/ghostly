@@ -7,7 +7,8 @@ import { DESKTOP_RELAY } from "@ghostly/browser/proofs/oidc/popup";
  * embedded WebViews. The provider returns to the web app's static callback
  * page, registered once per provider, which forwards the fragment to Rust's
  * one-shot listener on 127.0.0.1 (apps/desktop/src/oidc.rs). The state names that
- * listener's port so the page knows where to send it.
+ * listener's port so the page knows where to send it. The Android app listens on
+ * no port (Rust says 0): its `a.` state sends the answer to the app's deep link.
  */
 export const desktopOidc: OidcHost = {
   platform: "desktop",
@@ -15,7 +16,7 @@ export const desktopOidc: OidcHost = {
     const port = await invoke<number>("oidc_loopback_start");
     return {
       redirectUri: DESKTOP_RELAY,
-      statePrefix: `d.${port}.`,
+      statePrefix: port === 0 ? "a." : `d.${port}.`,
       async authorize(url, signal) {
         const state = new URL(url).searchParams.get("state") ?? "";
         const cancel = () => void invoke("oidc_loopback_cancel", { port }).catch(() => {});

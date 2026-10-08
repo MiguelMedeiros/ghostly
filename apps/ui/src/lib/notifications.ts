@@ -20,9 +20,13 @@ const extension=()=> {
 };
 const native=()=>"__TAURI_INTERNALS__" in window;
 const platform=()=>(navigator as Navigator&{userAgentData?:{platform?:string}}).userAgentData?.platform||navigator.platform||navigator.userAgent;
-/** The system settings where the Desktop app's notifications are allowed again, when the app can open them. */
-export function noticeSettings():"macos"|"windows"|undefined{
+/**
+ * The system settings where the native app's notifications are allowed again, when the app can open them: the Android
+ * app opens its own page in Android's settings (its `navigator.platform` reads as Linux, hence the agent first).
+ */
+export function noticeSettings():"macos"|"windows"|"android"|undefined{
   if(!native()) return undefined;
+  if(/Android/i.test(navigator.userAgent)) return "android";
   return /Mac/i.test(platform())?"macos":/Win/i.test(platform())?"windows":undefined;
 }
 /**
@@ -30,7 +34,7 @@ export function noticeSettings():"macos"|"windows"|undefined{
  * settings (a pane of their own on macOS and Windows), the extension's own switch (Chrome asks again for an optional
  * permission it was refused), or the browser's or device's settings for a web page.
  */
-export function noticePlace():"macos"|"windows"|"system"|"extension"|"web"{
+export function noticePlace():"macos"|"windows"|"android"|"system"|"extension"|"web"{
   if(native()) return noticeSettings()??"system";
   return extension()?"extension":"web";
 }

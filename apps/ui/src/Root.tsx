@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { NameStep } from "./components/NameStep";
+import { OpenFailureNotice } from "./components/OpenFailureNotice";
 import { App } from "./App";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
@@ -235,6 +236,7 @@ export function Root() {
               <ErrorBoundary>
               <ChatLinkIntake />
               <JoinNotice />
+              <OpenFailureNotice />
               <GroupLinkIntake />
               <HomeAnchor />
               {/* A call that rings before the first unlock: shown on the lock screen (WISP 601 § Locked). */}

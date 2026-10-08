@@ -1,6 +1,10 @@
 //! The Ghostly app: the same body for Desktop (`main.rs` calls [`run`]) and for mobile, where Tauri's
 //! generated project loads this crate as a library and enters at [`run`].
 
+// The Android host: the opener, clipboard, share sheet, notifications and save picker through Android (its Kotlin
+// plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(desktop)]
 mod app_sandbox;
 #[cfg(desktop)]
@@ -98,6 +102,7 @@ macro_rules! commands {
             app_sandbox::app_close,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
@@ -131,6 +136,8 @@ macro_rules! commands {
             commands::resolve_records,
             commands::service_respond,
             commands::set_pkarr_relays,
+            commands::system_bars,
+            commands::test_network,
             commands::turn_put,
             commands::turn_read,
             commands::turn_warm,
@@ -266,6 +273,12 @@ pub fn run() {
         .on_menu_event(|app, event| {
             app_window::on_menu_event(app, event.id().as_ref());
         });
+
+    // Android's own host, before the app's setup: what started the app (a share, a sign-in's link) comes with it.
+    #[cfg(target_os = "android")]
+    let builder = builder
+        .plugin(android::init())
+        .manage(android::Incoming::default());
 
     builder
         .plugin(tauri_plugin_process::init())

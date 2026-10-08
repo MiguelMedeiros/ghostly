@@ -5,11 +5,12 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeProjectLinks } from "../../components/HomeProjectLinks";
+import { OpenFailureNotice } from "../../components/OpenFailureNotice";
 import { UpdateBanner } from "../../components/UpdateBanner";
 import { desktopUrl, externalLinkProps } from "../../lib/externalLink";
 import { renderApp } from "../render";
 
-// covers: app.external-links, app.project-links
+// covers: app.external-links, app.project-links, app.android.refusals
 
 /*
  * A link to another site opens outside the app on every platform. A browser page opens a new tab from the link itself;
@@ -169,9 +170,50 @@ describe("links that had no way out on Desktop", () => {
     renderApp(<HomeProjectLinks />);
     expect(click(screen.getByRole("link", { name: "GitHub" }))).toBe(true);
     expect(tauri.invoke.mock.calls).toEqual([["open_project_link", { url: "https://github.com/MiguelMedeiros/ghostly" }]]);
-    expect(await screen.findByRole("status")).toBeInTheDocument();
+    // The app's notice: what happened and what to do, the reason behind the ⓘ.
+    expect(await screen.findByTestId("home-link-failed-title")).toHaveTextContent("Couldn't open the link");
+    expect(screen.getByTestId("home-link-failed-next")).toHaveTextContent("Copy the link and open it in your browser.");
+    fireEvent.click(screen.getByTestId("home-link-failed-info"));
+    expect(screen.getByTestId("home-link-failed-details")).toHaveTextContent("refused");
     tauri.invoke.mockResolvedValue(undefined);
     click(screen.getByRole("link", { name: "GitHub" }));
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("home-link-failed")).not.toBeInTheDocument());
+  });
+
+  it("Android: no app for the link reads as the app's notice in the person's language, the reason behind the ⓘ", async () => {
+    setDesktop(true);
+    tauri.invoke.mockRejectedValue("No app on this phone opens this link");
+    renderApp(<HomeProjectLinks />, { language: "pt" });
+    click(screen.getByRole("link", { name: "GitHub" }));
+    expect(await screen.findByTestId("home-link-failed-title")).toHaveTextContent("Nenhum app deste telefone consegue abrir isto");
+    expect(screen.getByTestId("home-link-failed-next")).toHaveTextContent("Instale um app para isso");
+    fireEvent.click(screen.getByTestId("home-link-failed-info"));
+    expect(screen.getByTestId("home-link-failed-details")).toHaveTextContent("No app on this phone opens this link");
+  });
+});
+
+describe("a link whose place says nothing when it cannot open", () => {
+  it("is said once for the app: title and next in the person's language, the reason behind the ⓘ", async () => {
+    setDesktop(true);
+    tauri.invoke.mockRejectedValue("No app on this phone opens this link");
+    const { container } = renderApp(<><OpenFailureNotice /><a {...externalLinkProps("https://example.com/a")}>link</a></>, { language: "fr" });
+    expect(click(container.querySelector("a")!)).toBe(true);
+    expect(await screen.findByTestId("open-failure-title")).toHaveTextContent("Aucune app de ce téléphone ne peut l'ouvrir");
+    expect(screen.getByTestId("open-failure-next")).toHaveTextContent("copiez le lien");
+    fireEvent.click(screen.getByTestId("open-failure-info"));
+    expect(screen.getByTestId("open-failure-details")).toHaveTextContent("No app on this phone opens this link");
+    fireEvent.click(screen.getByTestId("open-failure-close"));
+    expect(screen.queryByTestId("open-failure")).not.toBeInTheDocument();
+  });
+
+  it("an unknown refusal gets the generic title and next, its English behind the ⓘ", async () => {
+    setDesktop(true);
+    tauri.invoke.mockRejectedValue("Not a web link");
+    const { container } = renderApp(<><OpenFailureNotice /><a {...externalLinkProps("https://example.com/b")}>link</a></>);
+    click(container.querySelector("a")!);
+    expect(await screen.findByTestId("open-failure-title")).toHaveTextContent("Couldn't open the link");
+    expect(screen.getByTestId("open-failure-next")).toHaveTextContent("Copy the link and open it in your browser.");
+    fireEvent.click(screen.getByTestId("open-failure-info"));
+    expect(screen.getByTestId("open-failure-details")).toHaveTextContent("Not a web link");
   });
 });
