@@ -79,7 +79,7 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
             </h2>
             <p className="muted">{VIEWS[app.view]}</p>
             <p className="note">
-              {t.madeFor}: {app.clients.map((c) => CLIENTS[c]).join(", ")}. {apps.where}
+              {t.madeFor}: {app.clients.map((c) => (CLIENTS as Record<string, string>)[c] ?? c).join(", ")}. {apps.where}
             </p>
           </section>
 
