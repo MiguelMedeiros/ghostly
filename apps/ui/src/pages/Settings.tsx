@@ -380,7 +380,7 @@ export function Settings() {
   const lockOn = lockEnabled && hasPassword;
   const systemOn = settings.notifications.systemEnabled && noticePermission === "granted";
   const systemSettings = noticeSettings();
-  const deniedHint = { macos: "settings.noticesDeniedMac", windows: "settings.noticesDeniedWindows", system: "settings.noticesDeniedSystem",
+  const deniedHint = { macos: "settings.noticesDeniedMac", windows: "settings.noticesDeniedWindows", android: "settings.noticesDeniedSystem", system: "settings.noticesDeniedSystem",
     extension: "settings.noticesDeniedExtension", web: "settings.noticesDenied" } as const;
   const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
   /** One of the password fields, wired to its error: `aria-invalid`, `aria-describedby`, and the line under it. */

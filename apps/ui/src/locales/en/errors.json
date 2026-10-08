@@ -109,6 +109,8 @@
     "peerUnavailable": "The Ghostly peer is unavailable. Reopen the extension to retry.",
     "signInCancelled": "Sign-in was cancelled.",
     "signInPermission": "Ghostly needs the sign-in permission for this.",
+    "signInTimedOut": "Sign-in timed out",
+    "signInTimedOutNext": "Start again, and come back to Ghostly once you're signed in.",
     "switchingProfiles": "Switching profiles…"
   },
   "files": {
@@ -181,6 +183,14 @@
     "removed": "You were removed from this group",
     "shareLinkInstead": "Share the group's link with them: anyone who opens it joins",
     "tooLong": "Message exceeds 16 KiB"
+  },
+  "host": {
+    "noApp": "No app on this phone can open it",
+    "noAppNext": "Install an app for it, or copy the link and open it elsewhere.",
+    "openFailed": "Couldn't open the link",
+    "openFailedNext": "Copy the link and open it in your browser.",
+    "saveFailed": "Couldn't save the file there",
+    "saveFailedNext": "Try again and choose another folder."
   },
   "lightning": {
     "alreadyPaid": "This invoice is already paid",

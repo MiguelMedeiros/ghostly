@@ -6,7 +6,6 @@
     "encrypted": "エンドツーエンド暗号化",
     "onDevice": "メッセージはあなたのデバイスに残ります"
   },
-  "linkFailed": "リンクを開けませんでした。",
   "unpublishedVersion": "ローカルバージョン — 公開リリースを見る",
   "viewRelease": "このリリースを見る",
   "welcome": "Ghostlyへようこそ"

@@ -6,15 +6,20 @@ import type { OidcWindow } from './flow';
  * never reaches a server, not even Ghostly's. The page passes it to the tab
  * that asked over a same-origin BroadcastChannel (a provider's
  * Cross-Origin-Opener-Policy cuts `window.opener`), or, for the desktop app,
- * forwards it to the app's listener on 127.0.0.1.
+ * forwards it to the app's listener on 127.0.0.1, or, for the Android app, to
+ * the app itself by its deep link (`ghostly://oidc`).
  */
 
 export const OIDC_CHANNEL = 'ghostly-oidc';
 export const CALLBACK_PATH = '/oidc-callback.html';
 /** Where the desktop app's sign-in returns before reaching its loopback listener. */
 export const DESKTOP_RELAY = 'https://app.ghostly.tools/oidc-callback.html';
+/** Where the Android app's sign-in goes from the callback page: the app's own scheme (apps/desktop/src/oidc.rs). */
+export const APP_LINK = 'ghostly://oidc';
 const WAIT_MS = 10 * 60_000;
 const DESKTOP_STATE = /^d\.(\d{1,5})\.[A-Za-z0-9_-]{43}$/;
+/** The Android app's state: `a.` and the random part (the app listens on no port). */
+const APP_STATE = /^a\.[A-Za-z0-9_-]{43}$/;
 
 function stateOf(url: string): string | null {
   const u = new URL(url);
@@ -22,10 +27,11 @@ function stateOf(url: string): string | null {
 }
 
 /** What the callback page does with the address it was opened at. */
-export function routeCallback(href: string): { kind: 'desktop'; target: string } | { kind: 'tab'; url: string } | { kind: 'none' } {
+export function routeCallback(href: string): { kind: 'desktop' | 'app'; target: string } | { kind: 'tab'; url: string } | { kind: 'none' } {
   const url = new URL(href);
   const state = stateOf(href);
   if (!state) return { kind: 'none' };
+  if (APP_STATE.test(state)) return { kind: 'app', target: `${APP_LINK}${url.search}${url.hash}` };
   const desktop = DESKTOP_STATE.exec(state);
   if (desktop) {
     const port = Number(desktop[1]);

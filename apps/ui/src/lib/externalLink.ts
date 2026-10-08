@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type React from "react";
+import { reportOpenFailure } from "./openFailure";
 
 /**
  * A web link opened outside the app. A browser page opens it in a new tab through the link itself (no opener, no
@@ -12,7 +13,7 @@ export const isDesktopApp = () => typeof window !== "undefined" && "__TAURI_INTE
 export interface ExternalLinkOptions {
   /** The Rust command that opens it on Desktop: `open_project_link` takes only Ghostly's own pages. */
   command?: "open_web_link" | "open_project_link";
-  /** Desktop refused or failed to open it. */
+  /** Desktop or Android refused or failed to open it. Without one, the app-wide notice says so (lib/openFailure.ts). */
   onError?: (error: unknown) => void;
 }
 
@@ -28,7 +29,7 @@ export function externalLinkProps(href: string, { command = "open_web_link", onE
       const url = desktopUrl(href);
       if (!url) return;
       event.preventDefault();
-      void invoke(command, { url }).catch((error: unknown) => onError?.(error));
+      void invoke(command, { url }).catch((error: unknown) => (onError ?? reportOpenFailure)(error));
     },
   };
 }

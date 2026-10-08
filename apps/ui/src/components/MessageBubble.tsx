@@ -23,6 +23,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile, fileHeld } from "../lib/fileStatus";
+import { rawError, SAVE_REFUSED } from "../lib/errorText";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
@@ -442,7 +443,7 @@ const cancelIcon = (
 function DownloadItem({ file, name, sender, format = "original", onDone }: { file: ChatFile; name: string; sender: "me" | "peer"; format?: DownloadFormat; onDone: () => void }) {
   const { t } = useI18n();
   const { platform, transfer, restoring } = useTransfer(file.id);
-  const [problem, setProblem] = useState<"missing" | "left-out" | "unconverted" | null>(null);
+  const [problem, setProblem] = useState<"missing" | "left-out" | "unconverted" | "unsaved" | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -450,6 +451,7 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
   const reason = problem === "missing" ? t("chat.message.downloadMissing")
     : problem === "left-out" ? t("chat.file.notInBackup")
     : problem === "unconverted" ? t("chat.message.downloadUnconverted")
+    : problem === "unsaved" ? t("chat.message.downloadUnsaved")
     : state === "preparing" ? t("chat.message.downloadPreparing")
     : state === "restoring" ? t("common.loading")
     : state === "arriving" ? t("chat.message.downloadArriving")
@@ -467,11 +469,12 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
         const held = await fileHeld(platform, file.id, false);
         if (mounted.current) setProblem(held === "left-out" ? "left-out" : "missing");
       })
-      .catch(() => { if (mounted.current) setProblem(format === "mp3" ? "unconverted" : "missing"); })
+      // Refused where it was to be saved (Android's picker): it can be saved again, somewhere else.
+      .catch((error: unknown) => { if (mounted.current) setProblem(SAVE_REFUSED.test(rawError(error)) ? "unsaved" : format === "mp3" ? "unconverted" : "missing"); })
       .finally(() => { if (mounted.current) setBusy(false); });
   };
   return (
-    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || !!reason} hint={reason} title={reason ?? name}
+    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved")} hint={reason} title={reason ?? name}
       data={{ "data-download-state": problem ?? (busy ? "busy" : state) }} icon={downloadIcon}>
       {t(format === "mp3" ? "chat.message.downloadMp3" : "chat.message.download")}
     </MenuItem>

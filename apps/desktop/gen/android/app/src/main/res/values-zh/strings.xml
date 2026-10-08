@@ -1,0 +1,6 @@
+<resources>
+    <string name="channel_messages">消息</string>
+    <string name="webview_title">请更新 Android System WebView</string>
+    <string name="webview_text">Ghostly 运行在 Android System WebView 中，而这部手机上的版本太旧（版本 %1$s，Ghostly 需要 %2$d 或更高版本）。请在 Play 商店中更新，然后重新打开 Ghostly。</string>
+    <string name="webview_update">更新</string>
+</resources>

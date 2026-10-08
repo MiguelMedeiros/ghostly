@@ -148,6 +148,19 @@ describe("Download in a message's menu", () => {
     expect(screen.queryByTestId("message-menu")).not.toBeInTheDocument();
   });
 
+  it("says a copy refused where it was to be saved (Android's picker) in the person's language, and can be saved again", async () => {
+    const saveFile = vi.fn(async () => { throw new Error("The file could not be saved there"); });
+    Object.assign(servicesPlatform!, { saveFile });
+    const { user } = show(document_(), null);
+    await menu(user);
+    await user.click(screen.getByTestId("message-download"));
+    await waitFor(() => expect(screen.getByTestId("message-download")).toHaveAttribute("data-download-state", "unsaved"));
+    expect(screen.getByTestId("message-download")).toHaveTextContent("Not saved. Try another folder");
+    expect(screen.getByTestId("message-download")).not.toBeDisabled();
+    await user.click(screen.getByTestId("message-download"));
+    await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(2));
+  });
+
   it("says so when the bytes are gone from this device", async () => {
     vi.mocked(servicesPlatform!.getFile).mockResolvedValue(null);
     const { user } = show(voice());

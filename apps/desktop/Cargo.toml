@@ -63,6 +63,8 @@ arboard = { version = "3.6.1", default-features = false, features = ["image-data
 jni = "0.21"
 ndk-context = "0.1"
 rustls-platform-verifier = "0.6"
+# The Android host (src/android.rs) never waits on its Kotlin half from Android's main thread: gettid against getpid.
+libc = "0.2"
 
 # Calls on Linux (src/native_call), whose WebKitGTK is built without WebRTC: WebRTC in Rust, media in GStreamer.
 [target.'cfg(target_os = "linux")'.dependencies]
