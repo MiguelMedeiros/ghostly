@@ -18,18 +18,21 @@
 // The train keeps no state of its own: a batch's members and the half that waits after it live in a hidden mark in
 // the batch's body, and everything else is read again each run.
 //
-//   GH_TOKEN=<token> GITHUB_REPOSITORY=owner/repo node tools/scripts/merge-train.mjs --dry-run [--base dev] [--also 12,34]
+//   node tools/scripts/merge-train.mjs --run | --dry-run | --list-bases  [--base dev] [--every 120] [--also 12,34]
 //
-// --dry-run reads the live repo, builds batches in a temporary worktree (never pushed) and prints what it would do;
-// it changes nothing on GitHub. --also pretends the listed pull requests carry `queue` (dry runs only).
+// .github/workflows/merge-queue.yml runs it with the queue app's token (GH_TOKEN); pushes made with the workflow's own
+// GITHUB_TOKEN would start no CI. Until that app exists a Mac runs it with its gh login (`gh auth token` when GH_TOKEN
+// is unset) and its git credentials for `origin`; --every <seconds> repeats the run. Without --base it runs every base
+// that has a queued pull request or a batch open (--list-bases prints them as JSON). --dry-run reads the live repo,
+// builds batches in a temporary worktree (never pushed) and prints what it would do; it changes nothing on GitHub.
+// --also pretends the listed pull requests carry `queue` (dry runs only). GITHUB_REPOSITORY defaults to this repo.
 // tools/scripts/test/merge-train.test.ts drives the train through a fake GitHub and git.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ciState } from "./merge-queue.mjs";
 
 export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "queue:conflict", failed: "queue:failed" };
 export const MAX_BATCH = 5;
@@ -37,6 +40,23 @@ const POSITION = "<!-- merge-train:position -->";
 const STATE = /<!-- merge-train:batch (\{.*?\}) -->/g;
 /** The bases a train runs for; anything else never reaches a URL path, a refspec or a branch name. */
 const BASE = /^(dev|epic\/[A-Za-z0-9._-]+)$/;
+
+/**
+ * CI on one commit, from its check runs: "success", "failure", "pending" (CI Success has not finished, or has no run
+ * yet while other checks run) or "none" (nothing ran: CI never started). A rerun adds a run with the same name, so
+ * the newest counts; a draft's gate "CI Success (draft)" does not count.
+ */
+export function ciState(runs) {
+  const newest = (a, b) => (Date.parse(b.started_at ?? 0) || 0) - (Date.parse(a.started_at ?? 0) || 0) || (b.id ?? 0) - (a.id ?? 0);
+  const gate = runs.filter((r) => r.name === "CI Success").sort(newest)[0];
+  const running = runs.some((r) => r.status !== "completed");
+  if (!gate) return running ? "pending" : "none";
+  if (gate.status !== "completed") return "pending";
+  if (gate.conclusion === "success") return "success";
+  // A run cancelled by a newer one (a push, a rerun) says nothing about the commit until the newer one ends.
+  if (gate.conclusion === "cancelled" || gate.conclusion === "skipped") return running ? "pending" : "none";
+  return "failure";
+}
 
 export const ordinal = (n) => {
   const v = n % 100;
@@ -307,9 +327,10 @@ export function restLayer(token, repo) {
     fork: p.head.repo?.full_name !== repo,
     labels: p.labels.map((l) => l.name),
     createdAt: p.created_at,
+    base: p.base.ref,
   });
   return {
-    pulls: async (base) => (await all(`/pulls?state=open&base=${encodeURIComponent(base)}`)).map(pull),
+    pulls: async (base) => (await all(`/pulls?state=open${base ? `&base=${encodeURIComponent(base)}` : ""}`)).map(pull),
     events: (n) => all(`/issues/${n}/events`),
     checkRuns: (sha) => all(`/commits/${sha}/check-runs?filter=latest`),
     comments: (n) => all(`/issues/${n}/comments`),
@@ -396,19 +417,48 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin" } = {}) {
   };
 }
 
+/** The bases with a train to run: `dev` and `epic/*` branches that have a queued pull request or an open batch. */
+export const trainBases = (pulls) =>
+  [...new Set(pulls.filter((p) => p.labels.includes(LABEL.queue) || readState(p.body)).map((p) => p.base))]
+    .filter((b) => b === "dev" || b.startsWith("epic/"))
+    .sort();
+
 async function main() {
   const args = process.argv.slice(2);
-  const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-  const { GH_TOKEN, GITHUB_REPOSITORY: repo = "MiguelMedeiros/ghostly" } = process.env;
-  if (!args.includes("--dry-run")) throw new Error("Only --dry-run for now: it reads the repo and changes nothing.");
-  if (!GH_TOKEN) throw new Error("GH_TOKEN is required");
+  const flag = (name) => args.includes(name);
+  const opt = (name) => (flag(name) ? args[args.indexOf(name) + 1] : undefined);
+  const dry = flag("--dry-run") || process.env.DRY_RUN === "true";
+  if (!dry && !flag("--run") && !flag("--list-bases")) {
+    console.error("usage: merge-train.mjs --run | --dry-run | --list-bases  [--base <branch>] [--every <seconds>] [--also <n,n>]");
+    process.exit(2);
+  }
   const also = (opt("--also") ?? "").split(",").filter(Boolean).map(Number);
-  const git = gitLayer();
-  try {
-    const result = await tick({ gh: restLayer(GH_TOKEN, repo), git, base: opt("--base") ?? "dev", dry: true, also });
-    for (const line of result.log) console.log(line);
-  } finally {
-    git.close();
+  if (also.length && !dry) throw new Error("--also works in dry runs only");
+  const repo = process.env.GITHUB_REPOSITORY || "MiguelMedeiros/ghostly";
+  // On a runner: the queue app's token. On a Mac until the app exists: the local gh login (never printed).
+  const token = process.env.GH_TOKEN || execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+  const gh = restLayer(token, repo);
+  if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls())));
+
+  const every = Number(opt("--every")) || 0;
+  for (;;) {
+    for (const base of opt("--base") ? [opt("--base")] : trainBases(await gh.pulls())) {
+      const git = gitLayer();
+      let log = [];
+      try {
+        ({ log } = await tick({ gh, git, base, dry, also }));
+      } catch (e) {
+        log.push(`::error::${base}: ${e.message}`);
+        process.exitCode = 1;
+      } finally {
+        git.close();
+      }
+      console.log(log.map((l) => (l.startsWith("::") ? l : `[${new Date().toISOString()}] ${l}`)).join("\n"));
+      const summary = process.env.GITHUB_STEP_SUMMARY;
+      if (summary) appendFileSync(summary, [`### Merge train: ${base}${dry ? " (dry run)" : ""}`, "", ...log.map((l) => `    ${l.replace(/^::\w+::/, "")}`), ""].join("\n"));
+    }
+    if (!every) break;
+    await new Promise((r) => setTimeout(r, every * 1000));
   }
 }
 

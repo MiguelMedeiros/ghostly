@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchBody, bisect, isBatch, LABEL, order, ordinal, pickBatch, queuedAt, readState, tick, waiting } from "../merge-train.mjs";
+import { batchBody, bisect, ciState, isBatch, LABEL, order, ordinal, pickBatch, queuedAt, readState, tick, trainBases, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -322,5 +322,40 @@ describe("a run of the train", () => {
     expect(JSON.stringify([...repo.pulls.values()]) + JSON.stringify([...repo.comments.entries()])).toBe(before);
     expect(repo.landed).toEqual([]);
     expect(r.log.join("\n")).toMatch(/\(dry run\) would merge #9000/);
+  });
+});
+
+describe("CI on a commit", () => {
+  const run = (name: string, status: string, conclusion: string | null = null, started_at = "2026-10-07T10:00:00Z", id = 1) => ({ name, status, conclusion, started_at, id });
+
+  it("reads CI Success, the newest run of it", () => {
+    expect(ciState([run("CI Success", "completed", "success")])).toBe("success");
+    expect(ciState([run("CI Success", "completed", "failure")])).toBe("failure");
+    expect(ciState([run("CI Success", "in_progress")])).toBe("pending");
+    expect(ciState([run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 1), run("CI Success", "completed", "success", "2026-10-07T11:00:00Z", 2)])).toBe("success");
+  });
+
+  it("ignores the draft gate", () => {
+    expect(ciState([run("CI Success (draft)", "completed", "success")])).toBe("none");
+  });
+
+  it("is pending while CI runs before its gate exists, and none when nothing ever started", () => {
+    expect(ciState([run("Frontend lint and types", "in_progress")])).toBe("pending");
+    expect(ciState([])).toBe("none");
+    expect(ciState([run("Security", "completed", "success")])).toBe("none");
+  });
+
+  it("does not count a cancelled run as red", () => {
+    expect(ciState([run("CI Success", "completed", "cancelled"), run("Changed paths", "queued")])).toBe("pending");
+    expect(ciState([run("CI Success", "completed", "cancelled")])).toBe("none");
+  });
+});
+
+describe("the bases with a train", () => {
+  it("are dev and epic branches with a queued pull request or an open batch", () => {
+    const pr = (base: string, labels: string[] = [], body = "") => ({ base, labels, body });
+    const batch = batchBody("epic/apps-1.2", "abc", "b1", [], []);
+    expect(trainBases([pr("dev", [LABEL.queue]), pr("dev", [LABEL.queue]), pr("epic/apps-1.2", [], batch), pr("epic/x"), pr("main", [LABEL.queue]), pr("dev")])).toEqual(["dev", "epic/apps-1.2"]);
+    expect(trainBases([pr("dev", ["bug"])])).toEqual([]);
   });
 });
