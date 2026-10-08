@@ -41,7 +41,8 @@ In short:
 1. Build the app as one self-contained HTML file (scripts, styles and images inline). Chess, in
    [`apps/mini/chess`](../apps/mini/chess), is an example.
 2. Write `ghostly-app.json` beside it (the manifest without `publisher`, `sequence` and `files`) and run
-   `ghostly app publish <dir> --key <your publisher key>`. The first run makes the key: back it up, never commit it.
+   `ghostly app publish <dir> --key <your publisher key>`. The first run makes the key: keep it outside the app's folder
+   (publish refuses a key inside it, and any private key file found there), back it up, never commit it.
    Set `view` to say where it shows: `"chat"` (the default) for an app that runs inside a chat with one contact, such
    as a game; `"full"` for a full-screen app people open from the Apps page. Any other value is refused.
 3. Commit `app.ghostlyapp` to your public GitHub repository.

@@ -150,6 +150,35 @@ describe("app publish", () => {
     expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
   }, 60_000);
 
+  it("never bundles a private key: a --key inside the folder is refused before it is made, and any key file found there", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    // A key the first run would make inside the folder: refused, and not made.
+    for (const inside of [join(dir, "publisher.key"), join(dir, "keys", "publisher.pem"), join(dir, ".publisher.key")]) {
+      const refusal = error(await ghostly(["app", "publish", dir, "--key", inside]), "refused", 1) as { message: string; details?: { reason?: string } };
+      expect(refusal.details?.reason).toBe("private-key");
+      expect(refusal.message).toContain("outside the app's folder");
+      expect(existsSync(inside)).toBe(false);
+    }
+    // A key kept elsewhere, but a key file (this one, another's, any PEM private key) left in the folder.
+    const key = vectorKey(tmp(), "publisher");
+    for (const [path, text] of [
+      ["publisher.key", readFileSync(key, "utf8")],
+      ["old/store.pem", `Ghostly store key (WISP 1200). Secret.\n${readFileSync(key, "utf8")}`],
+      ["deploy/id_ed25519", `-----BEGIN OPENSSH PRIVATE KEY-----\n${"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ".repeat(2)}\n-----END OPENSSH PRIVATE KEY-----\n`],
+    ] as const) {
+      const leaky = appFolder(manifest, files);
+      mkdirSync(dirname(join(leaky, path)), { recursive: true });
+      writeFileSync(join(leaky, path), text);
+      const refusal = error(await ghostly(["app", "publish", leaky, "--key", key]), "refused", 1) as { details?: { reason?: string; detail?: string } };
+      expect(refusal.details).toEqual({ reason: "private-key", detail: path });
+      expect(existsSync(join(leaky, "app.ghostlyapp"))).toBe(false);
+    }
+    // Code that only names the block (a PEM parser) is not a key.
+    const parser = appFolder(manifest, new Map([...files, ["pem.js", new TextEncoder().encode('const head = "-----BEGIN PRIVATE KEY-----";\n')]]));
+    expect(ok(await ghostly(["app", "publish", parser, "--key", key]))).toMatchObject({ files: ["index.html", "pem.js"] });
+  }, 60_000);
+
   it("says what is wrong with the source: a usage error, fields publish writes, a manifest a client refuses", async () => {
     const { manifest, files } = chess();
     const keys = tmp();

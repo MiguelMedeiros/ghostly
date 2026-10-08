@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
@@ -207,6 +207,15 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
   return { files, skipped };
 }
 
+/**
+ * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted), or a Ghostly
+ * key file's first line. A library that only names the block's header in its code does not match.
+ */
+const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n:,-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+
+/** Whether `path` is `dir` or anything under it. */
+const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return !rel.startsWith("..") && !isAbsolute(rel); };
+
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
 
@@ -244,6 +253,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const dir = resolve(dirArg);
   if (!statSync(dir).isDirectory()) throw new CliError("bad_request", `${dir} is not a folder`);
   const keyPath = resolve(keyArg);
+  // Every file of the folder is published, and the folder is often the repository the bundle is committed to.
+  if (isInside(dir, keyPath)) {
+    throw refused(`${keyPath} is inside ${dir}, which is published: keep the publisher key outside the app's folder (and its repository)`, { reason: "private-key" });
+  }
   const out = resolve(outArg ?? join(dir, APP_BUNDLE_FILE));
   const sourcePath = join(dir, APP_SOURCE);
   const draft = readSource(sourcePath);
@@ -275,6 +288,9 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const sequence = sequenceArg ?? Math.max(previous ? previous.sequence + 1 : 1, (draft.sequence as number | undefined) ?? 1);
   const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_REVOKE_FILE)]));
   const contents = files.map((f) => ({ path: f.path, bytes: new Uint8Array(readFileSync(f.full)) }));
+  // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
+  const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
+  if (keyFile) throw refused(`${keyFile.path} in ${dir} holds a private key, and a bundle is public: move it out of the app's folder`, { reason: "private-key", detail: keyFile.path });
   const manifest = {
     ...draft,
     ghostlyApp: 1,
