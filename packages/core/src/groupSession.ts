@@ -992,9 +992,18 @@ export class GroupSession {
       !Number.isSafeInteger(f.e) || (f.e as number) < 0 || !Number.isSafeInteger(f.ts) || (f.ts as number) <= 0 || typeof f.sig !== "string" || f.sig.length !== 86 || !B64.test(f.sig)) return;
     const bye = { t: "group-bye" as const, g: this.id, k: f.k, e: f.e as number, ts: f.ts as number, sig: f.sig };
     try { if (!verify(fromBase64Url(bye.sig), byeSigned(bye), publicKeyFromZ32(bye.k))) return; } catch { return; }
+    // Signed before the member was last admitted: a leave from before it came back, which anyone who passed it on kept.
+    if (bye.e < this.admittedAt(bye.k)) return;
     // An admin whose admin work is off on this device passes the leave on, as a member does: it commits nothing.
     if (this.isAdmin && this.hooks.adminWork?.() !== false && (await this.commitUnlessTurnUnconfirmed("remove", bye.k))) return;
     this.took(bye);
+  }
+
+  /** The epoch of the commit that last admitted `key` (0 for the creator, whom no commit admits). */
+  private admittedAt(key: string): number {
+    const chain = this.state.chain;
+    for (let e = chain.length - 1; e > 0; e--) if (chain[e].k === "add" && chain[e].s === key) return e;
+    return 0;
   }
 
   /**
