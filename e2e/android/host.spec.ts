@@ -61,6 +61,8 @@ test("a message in the background posts a private system notification", { tag: [
   await pairWithWeb(app, web);
   const before = notificationsOf(adb).length;
   app.background();
+  // A person's message comes once the app is away: the page has heard it went to the background (onStop → hidden).
+  await expect.poll(() => page.evaluate(() => document.visibilityState), { timeout: 10_000, message: "the page sees the app in the background" }).toBe("hidden");
   await say(web, "private android payload");
   await expect.poll(() => notificationsOf(adb).length, { timeout: 60_000, message: "a notification of the app in dumpsys notification" }).toBeGreaterThan(before);
   // Private: the system holds "New message", never the text (app.attention.notifications).
@@ -89,36 +91,39 @@ test("text shared from another app opens the Share to… picker", { tag: ["@feat
 });
 
 /**
- * The link schemes the app declares (`dumpsys package`'s resolver table, Schemes), other than the web's. The sign-in's
- * redirect is one of them unless E2E_ANDROID_OIDC_REDIRECT names it.
+ * Sign-in on Android (A1, apps/desktop/src/oidc.rs): there is no loopback listener on a phone, so
+ * `oidc_loopback_start` answers port 0 and `oidc_loopback_wait` opens the provider in the browser and waits for the
+ * answer to come back as a deep link, `ghostly://oidc?…#…` (the web app's callback page sends it). Rust takes only the
+ * answer whose `state` is the one it is waiting for (an `a.`-prefixed one); any other is dropped and the wait goes on.
+ * E2E_ANDROID_OIDC_REDIRECT names another link prefix (an App Link later, A2).
  */
-function ownSchemes(adb: Adb): string[] {
-  const dump = adb.shell(`dumpsys package ${PKG}`);
-  const block = dump.match(/\n\s*Schemes:\n([\s\S]*?)(?=\n\s{0,4}\S[^\n]*:\n|\n\n)/)?.[1] ?? "";
-  return [...block.matchAll(/^\s+([a-z][a-z0-9+.-]*):\s*$/gm)].map((m) => m[1]).filter((scheme) => !["http", "https"].includes(scheme));
-}
+const OIDC_LINK = process.env.E2E_ANDROID_OIDC_REDIRECT || "ghostly://oidc";
 
-test("a sign-in's deep link comes back to the running app and reaches the page", { tag: ["@feature:android.host.oidc-deep-link", "@gated"] }, async ({ app }) => {
+test("a sign-in's deep link comes back to the running app and answers the sign-in that waits for it", { tag: ["@feature:android.host.oidc-deep-link", "@gated"] }, async ({ app }) => {
   const { page, adb } = app;
-  const redirect = process.env.E2E_ANDROID_OIDC_REDIRECT || (ownSchemes(adb)[0] ? `${ownSchemes(adb)[0]}://oidc-callback` : null);
-  skipUntilA1("The sign-in deep link", !redirect && "the app declares no link scheme of its own");
-  // How the page hears it: Tauri's deep-link event unless E2E_ANDROID_DEEP_LINK_EVENT names another, or its own address.
-  const event = process.env.E2E_ANDROID_DEEP_LINK_EVENT || "deep-link://new-url";
-  await page.evaluate((event) => {
-    const w = window as unknown as { __a9: string; __a9Seen: string[]; __TAURI_INTERNALS__: { transformCallback(f: (e: { payload: unknown }) => void): number; invoke(c: string, a: unknown): Promise<unknown> } };
+  let port: unknown;
+  try { port = await app.invoke("oidc_loopback_start"); } catch (error) { skipUntilA1("The sign-in deep link", pending(error) ?? false); throw error; }
+  expect(port, "on Android the sign-in waits for a deep link, not on a loopback port").toBe(0);
+  const state = `a.${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")}`;
+  await page.evaluate(([port, state]) => {
+    const w = window as unknown as { __a9: string; __a9SignIn: Promise<{ answer?: unknown; error?: string }>; __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } };
     w.__a9 = "the same page";
-    w.__a9Seen = [];
-    const handler = w.__TAURI_INTERNALS__.transformCallback((e) => w.__a9Seen.push(JSON.stringify(e.payload)));
-    void w.__TAURI_INTERNALS__.invoke("plugin:event|listen", { event, target: { kind: "Any" }, handler }).catch(() => {});
-    addEventListener("hashchange", () => w.__a9Seen.push(location.href));
-  }, event);
-  const state = `a9state${Date.now()}`;
-  const url = `${redirect}#id_token=header.payload.signature&state=${state}`;
-  // Quoted for the device's shell: `#` and `&` are its own otherwise.
-  const started = adb.run("shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", `'${url}'`);
-  expect(started, "the link resolves to the app, not a chooser").toMatch(new RegExp(`(Activity: ${PKG.replaceAll(".", "\\.")}/|delivered to currently running top-most instance)`));
-  // The running app took it: the same process and page, not a new start.
+    w.__a9SignIn = w.__TAURI_INTERNALS__.invoke("oidc_loopback_wait", { port, url: "https://example.com/authorize?client_id=a9&redirect_uri=https%3A%2F%2Fapp.ghostly.tools%2Foidc-callback.html", expectedState: state })
+      .then((answer) => ({ answer }), (error) => ({ error: String(error) }));
+  }, [port, state] as const);
+  // The browser opened on the provider's page (no network needed: the page is never read).
+  await expect.poll(() => adb.shell("dumpsys activity activities").match(/topResumedActivity=\S+ \S+ (\S+)/)?.[1] ?? "", { timeout: 15_000, message: "the provider's page in the system browser" }).not.toContain("tools.ghostly.app");
+
+  // Another sign-in's answer first: dropped, the wait goes on. Quoted for the device's shell (`#`, `&`).
+  adb.run("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${OIDC_LINK}?code=other&state=a.${"B".repeat(43)}'`);
+  await new Promise((done) => setTimeout(done, 1_500));
+  expect(await page.evaluate(() => Promise.race([(window as unknown as { __a9SignIn: Promise<unknown> }).__a9SignIn, new Promise((done) => setTimeout(() => done("waiting"), 200))]))).toBe("waiting");
+
+  // Its own answer: back to the running app (the same process and page), and the waiting sign-in gets it.
+  const started = adb.run("shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", `'${OIDC_LINK}?code=a9&state=${state}'`);
+  expect(started, "the link resolves to the app, not a chooser").toMatch(new RegExp(`(Activity: ${PKG.replaceAll(".", "\\.")}/|delivered to currently running top-most instance|brought to the front)`));
   expect(adb.pid()).toBe(app.pid);
+  const result = await page.evaluate(() => Promise.race([(window as unknown as { __a9SignIn: Promise<unknown> }).__a9SignIn, new Promise((done) => setTimeout(() => done({ error: "no answer in 15 s" }), 15_000))]));
+  expect(result).toEqual({ answer: `?code=a9&state=${state}` });
   expect(await page.evaluate(() => (window as unknown as { __a9: string }).__a9)).toBe("the same page");
-  await expect.poll(() => page.evaluate((state) => (window as unknown as { __a9Seen: string[] }).__a9Seen.some((seen) => seen.includes(state)) || location.href.includes(state), state), { timeout: 15_000, message: `the page heard ${event} or its address changed` }).toBe(true);
 });
