@@ -524,6 +524,39 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual(["#12"]); // alone, on dev's tip and green
   });
 
+  it("lets a queue added again after a push vouch for the new head: the position comment from before it is stale", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: red }); // waits in line, so its position comment records h11
+    await repo.run();
+    repo.comments.get(11)![0] = { ...repo.comments.get(11)![0], updated_at: "2026-10-08T00:00:30Z" } as never;
+    repo.pulls.get(11)!.labels = []; // queue taken off: the train no longer reads it, and its comment stays
+    expect((await repo.run()).dropped).toEqual([]);
+    repo.pulls.get(11)!.sha = "h11b"; // a fix pushed, reviewed, and queue added again
+    repo.runs.set("h11b", green);
+    repo.pushed.set("h11b", "2026-10-08T00:05:00Z");
+    repo.pulls.get(11)!.labels = [LABEL.queue];
+    const events = await repo.gh.events(11);
+    events.push({ event: "unlabeled", label: { name: LABEL.queue }, created_at: "2026-10-08T00:01:00Z" }, { event: "labeled", label: { name: LABEL.queue }, created_at: "2026-10-08T00:10:00Z" });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.comments.get(11)).toHaveLength(1); // the stale comment is rewritten, not joined by a second one
+    expect(repo.comments.get(11)![0].body).toMatch(/merge-train:head h11b /);
+  });
+
+  it("still drops a pull request pushed to after queue was added again over a stale position comment", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: red });
+    await repo.run();
+    repo.comments.get(11)![0] = { ...repo.comments.get(11)![0], updated_at: "2026-10-08T00:00:30Z" } as never;
+    (await repo.gh.events(11)).push({ event: "labeled", label: { name: LABEL.queue }, created_at: "2026-10-08T00:10:00Z" });
+    repo.pulls.get(11)!.sha = "h11c";
+    repo.runs.set("h11c", green);
+    repo.pushed.set("h11c", "2026-10-08T00:15:00Z");
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/h11c was pushed after `queue` was added/)]);
+  });
+
   it("keeps a pull request whose head is older than its queue label, as the auto-queue labels it after green CI", async () => {
     const repo = fakeRepo();
     repo.pushed.set("h11", "2026-10-07T23:40:00Z"); // pushed, CI green, then `queue` at 2026-10-08T00:00:00Z
