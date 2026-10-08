@@ -94,8 +94,20 @@ export interface AppManifest {
 
 const REQUIRED = ["ghostlyApp", "publisher", "name", "version", "sequence", "kind", "title", "tagline", "entry", "permissions", "runtime", "license", "files"] as const;
 const OPTIONAL = ["description", "view", "sources", "proofs", "homepage", "support", "releaseNotes"] as const;
-/** Reserved for phase 2 and refused in phase 1. */
+/**
+ * Reserved for phase 2 and refused in phase 1, by a reader too: an app that names a price or a recovery key asks for
+ * something this client cannot honour, so it is not one to ignore.
+ */
 const RESERVED = ["price", "recovery"] as const;
+/**
+ * How `checkAppManifest` treats a key it does not know. A reader (`readAppBundle`, the client) ignores it, at the top of
+ * the manifest and in `runtime`, so a later publisher can add an optional key without every older client refusing the
+ * app; the publisher's signature and the digest still cover the manifest's bytes as they are. A writer
+ * (`buildAppBundle`, the CLI) passes `strict` and refuses it, so a misspelt key is caught before anything is signed.
+ * Required keys, their types and bounds, `price` and `recovery`, and a file's exact `{path, size, sha256}` (which lay
+ * out the bundle's bytes) hold in both.
+ */
+export interface AppManifestOptions { strict?: boolean }
 
 export type AppBundleRefusal =
   | "too-large" | "magic" | "truncated" | "trailing-bytes" | "manifest-too-large"
@@ -167,13 +179,16 @@ export function isAppPath(value: unknown): value is string {
 
 const bad = (field: string, detail = `${field} is not valid`): AppManifestCheck => ({ ok: false, reason: "bad-field", detail });
 
-/** Checks a parsed manifest against every rule and bound of WISP 1200 that the manifest alone decides. */
-export function checkAppManifest(value: unknown): AppManifestCheck {
+/**
+ * Checks a parsed manifest against every rule and bound of WISP 1200 that the manifest alone decides. An unknown key is
+ * ignored unless `strict` (`AppManifestOptions`).
+ */
+export function checkAppManifest(value: unknown, options: AppManifestOptions = {}): AppManifestCheck {
   if (!isObject(value)) return bad("manifest", "The manifest is not an object");
   if (value.ghostlyApp !== undefined && value.ghostlyApp !== 1) return { ok: false, reason: "unsupported-format", detail: "ghostlyApp is not 1" };
   for (const key of Object.keys(value)) {
     if ((RESERVED as readonly string[]).includes(key)) return { ok: false, reason: "reserved-key", detail: key };
-    if (!(REQUIRED as readonly string[]).includes(key) && !(OPTIONAL as readonly string[]).includes(key)) return { ok: false, reason: "unknown-key", detail: key };
+    if (options.strict && !(REQUIRED as readonly string[]).includes(key) && !(OPTIONAL as readonly string[]).includes(key)) return { ok: false, reason: "unknown-key", detail: key };
   }
   for (const key of REQUIRED) if (!(key in value)) return { ok: false, reason: "missing-key", detail: key };
   const m = value;
@@ -191,7 +206,7 @@ export function checkAppManifest(value: unknown): AppManifestCheck {
     || !permissions.every((p) => (APP_PERMISSIONS as readonly unknown[]).includes(p))) return bad("permissions");
   if (m.view !== undefined && !(APP_VIEWS as readonly unknown[]).includes(m.view)) return bad("view", `view is "chat" or "full"`);
   const runtime = m.runtime;
-  if (!isObject(runtime) || Object.keys(runtime).length !== 2 || typeof runtime.host !== "string" || !HOST.test(runtime.host)) return bad("runtime");
+  if (!isObject(runtime) || (options.strict && Object.keys(runtime).length !== 2) || typeof runtime.host !== "string" || !HOST.test(runtime.host)) return bad("runtime");
   const clients = runtime.clients;
   if (!Array.isArray(clients) || clients.length < 1 || new Set(clients).size !== clients.length
     || !clients.every((c) => (APP_CLIENTS as readonly unknown[]).includes(c))) return bad("runtime");
@@ -328,7 +343,7 @@ export async function buildAppBundle(draft: AppManifestDraft, files: { path: str
     publisher: toZ32(signer.publicKey),
     files: sorted.map((f) => ({ path: f.path, size: f.bytes.length, sha256: toBase64Url(sha256(f.bytes)) })),
   } as AppManifest;
-  const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)));
+  const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)), { strict: true });
   if (!checked.ok) throw new Error(`Not a valid manifest (${checked.reason}${checked.detail ? `: ${checked.detail}` : ""})`);
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, manifest, signer);
   const bytes = assembleAppBundle(manifestBytes, canonicalJsonBytes(signature), sorted.map((f) => f.bytes));

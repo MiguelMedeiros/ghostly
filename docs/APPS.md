@@ -20,6 +20,9 @@ Apps are behind a flag on `dev` and are not in a release yet.
 - **It is curated.** Apps enter by pull request. CI checks each listing and bundle with the Ghostly CLI, a maintainer
   reviews the app, and the owner signs the next index. The review rules and takedowns are in the store's
   [README](https://github.com/MiguelMedeiros/ghostly-store#review-rules).
+- **Its apps update to what it reviewed.** An app installed from a store updates only to the version (sequence and
+  digest) that store's signed index lists. A newer version pushed to the publisher's repository waits until the store
+  lists it. An app added by URL or from a chat card still takes a newer version from its `sources`.
 - **It is one store among many.** People can remove it, add other stores by URL, or install an app from its URL or a
   chat card. The default store has no power the others lack.
 - **It makes no request by itself.** A profile with no app installed never reads it. It is read when the person opens
@@ -43,7 +46,9 @@ In short:
    as a game; `"full"` for a full-screen app people open from the Apps page. Any other value is refused.
 3. Commit `app.ghostlyapp` to your public GitHub repository.
 4. Open a pull request on ghostly-store adding `apps/<name>.<first 16 characters of your key>/listing.json`, with the
-   `ref`, `sequence` and `digest` that `ghostly app verify` prints.
+   `ref`, `sequence` and `digest` that `ghostly app verify` prints. List a jsDelivr URL pinned to the commit as well
+   as your `HEAD` URL: Ghostly installs only the listed digest, so once `HEAD` holds a newer version, the pinned copy is
+   where people still get the reviewed one.
 
 ## Keys (owner only)
 

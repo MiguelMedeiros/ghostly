@@ -78,8 +78,16 @@ const isCount = (v: unknown, min: number): v is number => typeof v === "number" 
 type Check = { ok: true } | { ok: false; reason: AppStoreRefusal; detail?: string };
 const fine: Check = { ok: true };
 
-function keysOf(value: Record<string, unknown>, required: readonly string[], optional: readonly string[]): Check {
-  for (const k of Object.keys(value)) if (!required.includes(k) && !optional.includes(k)) return { ok: false, reason: "unknown-key", detail: k };
+/**
+ * How a check treats a key it does not know. A reader (`readAppStore`, `readAppListing`, the client) ignores it, so a
+ * later format can add an optional key without a client refusing the whole signed index; the signature still covers
+ * the bytes as they are, unknown keys included. A writer (`signAppStore`, the CLI) passes `strict` and refuses it, so a
+ * misspelt key is caught before anything is signed. Required keys, their types and their bounds hold in both.
+ */
+export interface AppFormatOptions { strict?: boolean }
+
+function keysOf(value: Record<string, unknown>, required: readonly string[], optional: readonly string[], options: AppFormatOptions = {}): Check {
+  if (options.strict) for (const k of Object.keys(value)) if (!required.includes(k) && !optional.includes(k)) return { ok: false, reason: "unknown-key", detail: k };
   for (const k of required) if (!(k in value)) return { ok: false, reason: "missing-key", detail: k };
   return fine;
 }
@@ -87,10 +95,10 @@ function keysOf(value: Record<string, unknown>, required: readonly string[], opt
 const LISTING_REQUIRED = ["ref", "sequence", "digest", "urls", "title", "tagline"] as const;
 const LISTING_OPTIONAL = ["category", "developer", "submitter", "repo", "support"] as const;
 
-/** Checks one entry of `apps`, which is also the whole of a `listing.json`. */
-export function checkAppListing(value: unknown): Check {
+/** Checks one entry of `apps`, which is also the whole of a `listing.json`. An unknown key is ignored unless `strict`. */
+export function checkAppListing(value: unknown, options: AppFormatOptions = {}): Check {
   if (!isObject(value)) return { ok: false, reason: "bad-field", detail: "A listing is not an object" };
-  const keys = keysOf(value, LISTING_REQUIRED, LISTING_OPTIONAL);
+  const keys = keysOf(value, LISTING_REQUIRED, LISTING_OPTIONAL, options);
   if (!keys.ok) return keys;
   const bad = (field: string): Check => ({ ok: false, reason: "bad-field", detail: `apps: ${field}` });
   if (!isAppRef(value.ref)) return bad("ref");
@@ -105,17 +113,20 @@ export function checkAppListing(value: unknown): Check {
   return fine;
 }
 
-/** Reads a `listing.json`: JSON holding exactly one listing (written by hand in release 1.2, so not required canonical). */
-export function readAppListing(text: string): { ok: true; listing: AppListing } | { ok: false; reason: AppStoreRefusal; detail?: string } {
+/**
+ * Reads a `listing.json`: JSON holding exactly one listing (written by hand in release 1.2, so not required canonical).
+ * An unknown key is ignored unless `strict` (a store's own check passes it, to catch a misspelt key), as in an index.
+ */
+export function readAppListing(text: string, options: AppFormatOptions = {}): { ok: true; listing: AppListing } | { ok: false; reason: AppStoreRefusal; detail?: string } {
   let value: unknown;
   try { value = JSON.parse(text); } catch (error) { return { ok: false, reason: "not-json", detail: String(error) }; }
-  const checked = checkAppListing(value);
+  const checked = checkAppListing(value, options);
   return checked.ok ? { ok: true, listing: value as AppListing } : checked;
 }
 
-function checkRemoval(value: unknown): Check {
+function checkRemoval(value: unknown, options: AppFormatOptions): Check {
   if (!isObject(value)) return { ok: false, reason: "bad-field", detail: "A removal is not an object" };
-  const keys = keysOf(value, ["ref", "digest", "reason", "at"], []);
+  const keys = keysOf(value, ["ref", "digest", "reason", "at"], [], options);
   if (!keys.ok) return keys;
   if (!isAppRef(value.ref) || !isAppHash(value.digest) || !isLine(value.reason, APP_STORE_LIMITS.reason, 1) || !isCount(value.at, 0)) {
     return { ok: false, reason: "bad-field", detail: "removed: not {ref, digest, reason, at}" };
@@ -127,12 +138,14 @@ const STORE_REQUIRED = ["ghostlyStore", "key", "name", "kind", "sequence", "expi
 
 /**
  * Checks an index's fields and bounds, and every revocation it carries (one that does not verify refuses the index:
- * the store copied it, so a broken one is the store's fault). The signature and `expires` are `readAppStore`'s.
+ * the store copied it, so a broken one is the store's fault). The signature and `expires` are `readAppStore`'s. An
+ * unknown key of the index, a listing or a removal is ignored unless `strict`; a revocation is its publisher's signed
+ * statement and keeps its exact keys.
  */
-export function checkAppStoreIndex(value: unknown): Check {
+export function checkAppStoreIndex(value: unknown, options: AppFormatOptions = {}): Check {
   if (!isObject(value)) return { ok: false, reason: "bad-field", detail: "The index is not an object" };
   if (value.ghostlyStore !== undefined && value.ghostlyStore !== 1) return { ok: false, reason: "unsupported-format", detail: "ghostlyStore is not 1" };
-  const keys = keysOf(value, STORE_REQUIRED, ["description"]);
+  const keys = keysOf(value, STORE_REQUIRED, ["description"], options);
   if (!keys.ok) return keys;
   const bad = (field: string): Check => ({ ok: false, reason: "bad-field", detail: field });
   if (!isAppKey(value.key)) return bad("key");
@@ -145,14 +158,14 @@ export function checkAppStoreIndex(value: unknown): Check {
   if (!Array.isArray(apps) || apps.length > APP_STORE_LIMITS.apps) return bad("apps");
   const refs = new Set<string>();
   for (const listing of apps) {
-    const checked = checkAppListing(listing);
+    const checked = checkAppListing(listing, options);
     if (!checked.ok) return checked;
     const ref = (listing as { ref: string }).ref;
     if (refs.has(ref)) return { ok: false, reason: "duplicate-app", detail: ref };
     refs.add(ref);
   }
   if (!Array.isArray(removed) || removed.length > APP_STORE_LIMITS.removed) return bad("removed");
-  for (const entry of removed) { const checked = checkRemoval(entry); if (!checked.ok) return checked; }
+  for (const entry of removed) { const checked = checkRemoval(entry, options); if (!checked.ok) return checked; }
   if (!Array.isArray(revoked) || revoked.length > APP_STORE_LIMITS.revoked) return bad("revoked");
   for (const entry of revoked) {
     const read = readAppRevocation(entry);
@@ -172,7 +185,8 @@ export interface AppStoreReading {
 /**
  * Reads `ghostly-store.json` with its `ghostly-store.sig`, in this order: size, JSON, canonical bytes, fields and
  * revocations, the signature statement, the key the reader holds for this store (when it holds one), the signature,
- * then `expires` against `now` (seconds): more than 90 days ahead is refused, past is `expired`.
+ * then `expires` against `now` (seconds): more than 90 days ahead is refused, past is `expired`. A key it does not know
+ * is ignored (a later store's optional field) and stays in the bytes the signature covers.
  */
 export function readAppStore(indexBytes: Uint8Array, sigBytes: Uint8Array, now: number, heldKey?: string):
   { ok: true; store: AppStoreReading } | { ok: false; reason: AppStoreRefusal; detail?: string } {
@@ -191,10 +205,13 @@ export function readAppStore(indexBytes: Uint8Array, sigBytes: Uint8Array, now: 
   return { ok: true, store: { index, digest: toBase64Url(sha256(indexBytes)), expired: index.expires < now } };
 }
 
-/** Signs an index with the store key: its canonical bytes and the `ghostly-store.sig` bytes. Throws on a bad index. */
+/**
+ * Signs an index with the store key: its canonical bytes and the `ghostly-store.sig` bytes. Throws on a bad index, and
+ * on a key this format does not define: a writer is strict, so a misspelt key is never signed.
+ */
 export async function signAppStore(index: AppStoreIndex, signer: Signer): Promise<{ indexBytes: Uint8Array; sigBytes: Uint8Array; signature: AppSignature }> {
   if (index.key !== toZ32(signer.publicKey)) throw new Error("A store index is signed by its own key");
-  const checked = checkAppStoreIndex(JSON.parse(JSON.stringify(index)));
+  const checked = checkAppStoreIndex(JSON.parse(JSON.stringify(index)), { strict: true });
   if (!checked.ok) throw new Error(`Not a valid store index (${checked.reason}${checked.detail ? `: ${checked.detail}` : ""})`);
   const { bytes, signature } = await signAppObject(APP_PREFIXES.store, index, signer);
   return { indexBytes: bytes, sigBytes: canonicalJsonBytes(signature), signature };
