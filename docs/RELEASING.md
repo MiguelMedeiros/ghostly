@@ -104,7 +104,7 @@ The workflow publishes with npm trusted publishing (OIDC), so no npm token is ke
 
 1. The npm organization `ghostlytools` exists, with the publishing npm account as an owner. The package is scoped to it, so it is private unless published with `--access public` (the workflow does, and `publishConfig` in `packages/cli/package.json` says so too).
 2. Add an npm granular access token with read and write on the `@ghostlytools` scope (allowed to bypass two-factor authentication) as the repository secret `NPM_TOKEN`, and publish the release. The workflow uses it once.
-3. On npmjs.com, `@ghostlytools/cli` → Settings → Trusted Publisher → GitHub Actions: organization or user `MiguelMedeiros`, repository `ghostly`, workflow filename `npm-publish.yml`, environment `npm`. A package that trusts the workflow with no environment (`@ghostlytools/cli` until it is edited) lets any job of it publish: set `npm` there too.
+3. On npmjs.com, `@ghostlytools/cli` → Settings → Trusted Publisher → GitHub Actions: organization or user `MiguelMedeiros`, repository `ghostly`, workflow filename `npm-publish.yml`, environment `npm`. `@ghostlytools/cli` was first set up with no environment: edit its Trusted Publisher to environment `npm` before the next release.
 4. In the same settings, choose "Require two-factor authentication and disallow tokens", then delete the `NPM_TOKEN` secret and revoke the token.
 
 For `@ghostlytools/sdk` the same four steps apply, with `SDK_NPM_PUBLISH` set to `true` (Settings → Secrets and variables → Actions → Variables) before step 2 and the trusted publisher added on `@ghostlytools/sdk` in step 3. A release then publishes both packages.
