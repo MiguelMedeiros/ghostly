@@ -4,7 +4,7 @@
 
 **Subsequent implementation:** the [native transport increment](TRANSPORT-INCREMENT.md) extends this base to Iroh and HyperDHT on desktop, and Iroh and HyperDHT later reached browsers through relays (#225, #231). WebRTC-only statements below describe the initial base. Two Desktop apps now go live natively from the DHT with no WebRTC (#235, #244).
 
-> **State on `dev` (2026-09-26):** every new chat is this session, made from one `ghostly1…` invite (#210; the `pair1/` code below is still read). Files, payments, calls (`calls/1`) and shared apps (`services/1`) run on it ([PAIRED-CAPABILITIES.md](PAIRED-CAPABILITIES.md), #207).
+> **State on `dev` (2026-09-26):** every new chat is this session, made from one `ghostly1…` invite (#210; the `pair1/` code below is still read). Files, payments, calls (`calls/1`) and shared services (`services/1`) run on it ([PAIRED-CAPABILITIES.md](PAIRED-CAPABILITIES.md), #207).
 
 Status: experimental implementation, not a Final WISP or security audit. This additive profile exercises parts of candidates 02-03, 100-101, 400 and 800. It does not implement their entire proposed lifecycle or a general multi-adapter framework. Chats with Ghostly 0.4 contacts keep the compatibility profile ([402](402-legacy-chat.md)).
 

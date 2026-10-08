@@ -13,11 +13,12 @@
   "clearAllDataDescription": "此个人资料的聊天、身份和设置。钱包保留。",
   "clearAllDataInfo": "清除前，Ghostly 会尽量撤回：为联系人保存的项目、你的 DID、你的身份证明和唤醒推送。你在其他网站发布的证明仍会留在那里。钱包不会被删除：如果也想移除，请先花掉或备份你的 sats。",
   "clearAllDataItems": {
-    "apps": "共享服务",
+    "appsData": "已安装的应用及其数据",
     "chats": "聊天、消息和文件",
     "groups": "群组",
     "identities": "身份证明、你的 DID 和 Nostr 数据",
     "profile": "你的名字和头像",
+    "services": "共享服务",
     "settings": "设置、锁屏和网络",
     "storage": "S3 存储设置和关闭时唤醒"
   },
