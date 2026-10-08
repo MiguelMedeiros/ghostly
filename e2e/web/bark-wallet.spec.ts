@@ -58,8 +58,14 @@ test("a Mainnet Bark wallet refuses a chain on another network: signet servers w
   const dialog = await createMainnetBark(alice);
   // The SDK checks the chain source's genesis block first; the engine then checks the Ark server's own network
   // (that one is covered in bark.test.ts with a server that answers as signet).
-  await expect(dialog.getByTestId("new-wallet-error")).toContainText(/Network mismatch: expected Bitcoin|does not run on bitcoin/, { timeout: 90_000 });
-  await expect(dialog.getByTestId("new-wallet-error")).toContainText("Nothing was saved");
+  // A few words and what is safe in the line; the SDK's English (the reason) behind the ⓘ (lib/problemText.ts).
+  const error = dialog.getByTestId("new-wallet-error");
+  await expect(error.getByTestId("new-wallet-error-title")).toHaveText("Couldn't create the Mainnet Bark wallet", { timeout: 90_000 });
+  await expect(error.getByTestId("new-wallet-error-next")).toContainText("Nothing was saved");
+  // The engine's own check is said in the line; the SDK's goes behind the ⓘ.
+  const info = error.getByTestId("new-wallet-error-info");
+  if (await info.count()) await info.click();
+  await expect(error).toContainText(/Network mismatch: expected Bitcoin|does not run on bitcoin/);
   expect(seen.length).toBeGreaterThan(0);
   await alice.page.keyboard.press("Escape");
   await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);

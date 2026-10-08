@@ -328,6 +328,17 @@
     "wrongPassphraseNext": "Vérifiez la phrase secrète et réessayez.",
     "wrongPassword": "Mauvais mot de passe de verrouillage pour ce profil"
   },
+  "proof": {
+    "fileNoProof": "Le fichier de preuve ne contient aucune preuve Ghostly",
+    "fileNotFound": "Le fichier de preuve est introuvable",
+    "fileNotFoundNext": "Il a été supprimé, ou pas encore envoyé.",
+    "keyNotListed": "{{login}} ne liste pas la clé qui a signé",
+    "noDnsRecord": "Aucun enregistrement TXT Ghostly dans le DNS du domaine",
+    "noDnsRecordNext": "Les changements DNS peuvent prendre quelques minutes.",
+    "otherKey": "Cette signature vient d'une autre clé",
+    "otherKeyPgpNext": "Pas de la clé publique fournie.",
+    "otherKeySshNext": "Pas de la clé que vous avez saisie."
+  },
   "rails": {
     "arkPrepare": "Impossible de préparer ce paiement Ark. Vérifiez les fonds, l'adresse et le fournisseur.",
     "balanceChanged": "Le solde {{rail}} a changé. Créez une nouvelle vérification",
@@ -357,6 +368,9 @@
     "usdtBalanceChanged": "Le solde de jetons ou de gas a changé. Créez une nouvelle vérification",
     "usdtNonceChanged": "Le nonce du compte a changé. Créez une nouvelle vérification",
     "usdtRejected": "Le RPC USDT a refusé l'opération"
+  },
+  "relays": {
+    "atLeastOne": "Saisissez au moins une adresse de relais"
   },
   "transport": {
     "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",
