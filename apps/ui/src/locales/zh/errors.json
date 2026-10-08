@@ -357,6 +357,8 @@
     "bitcoinNotEnough": "已确认的 sats 不足",
     "bitcoinNotEnoughNext": "可用 {{available}}，含手续费需要 {{needed}}。",
     "canceledUnfunded": "在注资之前已取消",
+    "cashuNeverReached": "这笔付款从未到达铸币厂",
+    "cashuNeverReachedNext": "没有发送任何东西，sats 已经退回。你可以再次付款。",
     "conflicted": "另一笔交易花掉了这些币：这笔付款永远不会确认",
     "federationHas": "这个联盟里的余额不足：{{have}} sats",
     "federationNotEnoughNow": "这个联盟里的余额已经不够了",
@@ -377,7 +379,11 @@
     "takenBack": "已收回：sats 又回到了你的钱包",
     "usdtBalanceChanged": "代币或 gas 余额已变化。请重新审核",
     "usdtNonceChanged": "账户 nonce 已变化。请重新审核",
-    "usdtRejected": "USDT RPC 拒绝了这个操作"
+    "usdtNotSubmitted": "没有发送任何交易",
+    "usdtNotSubmittedNext": "请重新审核。",
+    "usdtRejected": "USDT RPC 拒绝了这个操作",
+    "usdtReverted": "交易已回滚",
+    "usdtRevertedNext": "没有发送代币；gas 已花费。"
   },
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",

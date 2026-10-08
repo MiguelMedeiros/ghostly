@@ -357,6 +357,8 @@
     "bitcoinNotEnough": "Sats confirmados insuficientes",
     "bitcoinNotEnoughNext": "{{available}} disponíveis, {{needed}} necessários com a taxa.",
     "canceledUnfunded": "Cancelado antes de ser financiado",
+    "cashuNeverReached": "O pagamento não chegou ao mint",
+    "cashuNeverReachedNext": "Nada foi enviado e os sats voltaram. Você pode pagar de novo.",
     "conflicted": "Outra transação gastou estas moedas: este pagamento nunca vai confirmar",
     "federationHas": "Saldo insuficiente nesta federação: {{have}} sats",
     "federationNotEnoughNow": "Não há mais saldo suficiente nesta federação",
@@ -377,7 +379,11 @@
     "takenBack": "Recuperado: os sats estão de volta na sua carteira",
     "usdtBalanceChanged": "O saldo de token ou de gas mudou. Faça uma nova revisão",
     "usdtNonceChanged": "O nonce da conta mudou. Faça uma nova revisão",
-    "usdtRejected": "O RPC do USDT recusou a operação"
+    "usdtNotSubmitted": "Nenhuma transação foi enviada",
+    "usdtNotSubmittedNext": "Crie uma nova revisão.",
+    "usdtRejected": "O RPC do USDT recusou a operação",
+    "usdtReverted": "A transação foi revertida",
+    "usdtRevertedNext": "Nenhum token foi enviado; o gas foi gasto."
   },
   "relays": {
     "atLeastOne": "Informe pelo menos um endereço de relay",
