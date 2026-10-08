@@ -32,7 +32,17 @@ export const PINNED_URL = `https://cdn.jsdelivr.net/gh/ana/chess@${"a".repeat(40
 
 export interface Built { bytes: Uint8Array; digest: string; ref: string; sequence: number }
 
-export async function bundle(options: { sequence?: number; version?: string; permissions?: AppPermission[]; entry?: string; sources?: string[]; by?: Signer; name?: string; view?: AppViewMode } = {}): Promise<Built> {
+/** A square PNG's signature and header chunk, padded with zeros: what the bundle reader checks of an `icon.png`. */
+export function iconPng(side = 32): Uint8Array {
+  const out = new Uint8Array(64);
+  out.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  const view = new DataView(out.buffer);
+  view.setUint32(16, side); view.setUint32(20, side);
+  out.set([8, 6, 0, 0, 0], 24);
+  return out;
+}
+
+export async function bundle(options: { sequence?: number; version?: string; permissions?: AppPermission[]; entry?: string; sources?: string[]; by?: Signer; name?: string; view?: AppViewMode; icon?: Uint8Array } = {}): Promise<Built> {
   const sequence = options.sequence ?? 1;
   const draft: AppManifestDraft = {
     name: options.name ?? "chess", version: options.version ?? `1.0.${sequence}`, sequence, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact",
@@ -40,7 +50,10 @@ export async function bundle(options: { sequence?: number; version?: string; per
     ...(options.sources && { sources: options.sources }),
     ...(options.view && { view: options.view }),
   };
-  const files = [{ path: "index.html", bytes: utf8Encode(options.entry ?? `<!doctype html><title>Chess</title><p>v${sequence}`) }, { path: "data/openings.json", bytes: utf8Encode("[]") }];
+  const files = [
+    { path: "index.html", bytes: utf8Encode(options.entry ?? `<!doctype html><title>Chess</title><p>v${sequence}`) }, { path: "data/openings.json", bytes: utf8Encode("[]") },
+    ...(options.icon ? [{ path: "icon.png", bytes: options.icon }] : []),
+  ];
   const by = options.by ?? PUBLISHER;
   const made = await buildAppBundle(draft, files, by);
   return { bytes: made.bytes, digest: made.digest, ref: `${keyOf(by)}/${draft.name}`, sequence };
