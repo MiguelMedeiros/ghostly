@@ -1,5 +1,9 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appTrainIn, batchBody, bisect, BudgetLow, ciState, isBatch, LABEL, order, ordinal, pickBatch, queuedAt, readState, restLayer, tick, trainBases, waiting } from "../merge-train.mjs";
+import { appTrainIn, batchBody, bisect, BudgetLow, ciState, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, queuedAt, readState, restLayer, rounds, tick, trainBases, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -527,6 +531,13 @@ describe("the bases with a train", () => {
     // Only bases tick accepts, so a strange epic name never turns the workflow red; a forged batch names no base.
     expect(trainBases([pr("epic/a/b", [LABEL.queue]), pr("epic/z", [], batchBody("epic/z", "a", "b", [], []), "batch/epic/z-1", true)])).toEqual([]);
   });
+
+  it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {
+    const refs = ["refs/heads/epic/x", "refs/heads/epic/apps-1.2", "refs/heads/epic/a/b"].map((ref) => ({ ref }));
+    const gh = restLayer("t", "o/r", { fetchImpl: async () => ({ status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(refs) }), wait: async () => {} });
+    expect(await localBases(gh)).toEqual(["dev", "epic/apps-1.2", "epic/x"]);
+    expect(await localBases({ epicBranches: async () => [] })).toEqual(["dev"]);
+  });
 });
 
 describe("GitHub over REST", () => {
@@ -570,6 +581,68 @@ describe("GitHub over REST", () => {
     const low = restLayer("t", "o/r", { fetchImpl: async () => reply(200, [], { "x-ratelimit-remaining": "40" }), wait: async () => {} });
     expect(await gh.comments(1)).toEqual([]);
     await expect(low.comments(1)).rejects.toBeInstanceOf(BudgetLow);
+  });
+});
+
+describe("a stalled request or git call", () => {
+  /** A fetch that never answers: it ends only when its signal aborts. */
+  const hung = (url: string, { signal }: { signal: AbortSignal }) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
+
+  it("times out a request with no answer, retried like one that failed to connect", async () => {
+    let calls = 0;
+    const gh = restLayer("t", "o/r", { timeout: 20, wait: async () => {}, fetchImpl: (url: string, init: { signal: AbortSignal }) => (calls++, hung(url, init)) });
+    await expect(gh.branchSha("dev")).rejects.toThrow(/GET \/git\/ref\/heads\/dev: no answer within 0.02 s/);
+    expect(calls).toBe(4);
+  });
+
+  it("times out a reply whose body stalls", async () => {
+    const stalled = async (url: string, { signal }: { signal: AbortSignal }) => ({ status: 200, ok: true, headers: new Headers(), text: () => hung(url, { signal }) });
+    await expect(restLayer("t", "o/r", { timeout: 20, fetchImpl: stalled }).branchSha("dev")).rejects.toThrow(/no answer within/);
+  });
+
+  it("fails every request at once after the round's deadline", async () => {
+    const ac = new AbortController();
+    ac.abort(new Error("cut"));
+    let calls = 0;
+    const gh = restLayer("t", "o/r", { signal: ac.signal, fetchImpl: async () => void calls++ });
+    await expect(gh.branchSha("dev")).rejects.toThrow(/cut/);
+    expect(calls).toBe(0);
+  });
+
+  it("kills a git fetch that hangs", async () => {
+    const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+    const git = (args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+    try {
+      git(["init", "-q", "-b", "dev", "origin"]);
+      git(["-C", "origin", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"]);
+      git(["clone", "-q", "origin", "clone"]);
+      git(["-C", "clone", "config", "remote.origin.uploadpack", "sleep 10; git-upload-pack"]); // a remote that never answers
+      const layer = gitLayer({ cwd: join(root, "clone"), timeout: 300 });
+      const started = Date.now();
+      await expect(layer.build("dev", [])).rejects.toThrow(/git fetch: no answer within 0.3 s/);
+      expect(Date.now() - started).toBeLessThan(5000); // once: a timeout is not retried like a locked ref
+      layer.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("cuts a round past its deadline, logs it, and runs the next round", async () => {
+    const signals: AbortSignal[] = [];
+    const reports: string[] = [];
+    let n = 0;
+    await rounds(
+      async (signal: AbortSignal) => {
+        signals.push(signal);
+        if (++n === 1) return new Promise(() => {}); // stalls for good
+        if (n === 2) throw new Error("network down");
+        return true; // the workflow took over: stop
+      },
+      { every: 300, deadline: 20, sleep: async () => {}, report: (e: Error) => void reports.push(e.message) },
+    );
+    expect(n).toBe(3);
+    expect(reports).toEqual([expect.stringMatching(/past its 0.02 s deadline/), "network down"]);
+    expect(signals.map((s) => s.aborted)).toEqual([true, false, false]);
   });
 });
 
