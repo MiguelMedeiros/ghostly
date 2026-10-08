@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * The Chess the end-to-end tests run: e2e/fixtures/chess/index.html, one self-contained HTML file, with
+ * The Chess the end-to-end tests run: e2e/fixtures/chess/index.html.txt, its one self-contained HTML file, with
  * e2e/fixtures/chess/chess.json saying where it came from. The e2e specs (e2e/support/chessFixture.ts) and the
  * store-keys test read this pinned copy instead of building Chess on the fly, so they keep working once Chess lives in
- * a repository of its own.
+ * a repository of its own. It is kept as .txt so code scanning does not read the code it inlines (chess.js, minified)
+ * as this repository's own.
  *
  *   node tools/scripts/refresh-chess-fixture.mjs                      build it from apps/mini/chess (today's source)
  *   node tools/scripts/refresh-chess-fixture.mjs --bundle <file|url>  take it from a signed Chess bundle
@@ -25,6 +26,8 @@ import { fileURLToPath } from "node:url";
 export const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
 export const CHESS_SOURCE = "apps/mini/chess";
 export const FIXTURE_DIR = "e2e/fixtures/chess";
+/** The fixture's copy of Chess's entry (index.html in its bundle). */
+export const FIXTURE_ENTRY = "index.html.txt";
 /** Chess's publisher key in the official store (ghostly-store apps/chess.odcgw6wjw8dynqop). */
 export const CHESS_PUBLISHER = "odcgw6wjw8dynqop84r47jbjcdqossbgrfiejd367e14hgxmjcho";
 
@@ -129,7 +132,7 @@ async function main(args) {
   const dir = join(ROOT, FIXTURE_DIR);
   const json = describe(html, meta);
   if (check) {
-    const same = existsSync(join(dir, "index.html")) && readFileSync(join(dir, "index.html")).equals(html) && readFileSync(join(dir, "chess.json"), "utf8") === json;
+    const same = existsSync(join(dir, FIXTURE_ENTRY)) && readFileSync(join(dir, FIXTURE_ENTRY)).equals(html) && readFileSync(join(dir, "chess.json"), "utf8") === json;
     if (!same) {
       console.error(`${FIXTURE_DIR} is stale: run node tools/scripts/refresh-chess-fixture.mjs${at >= 0 ? ` --bundle ${args[at + 1]}` : ""}`);
       process.exitCode = 1;
@@ -139,7 +142,7 @@ async function main(args) {
     return;
   }
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "index.html"), html);
+  writeFileSync(join(dir, FIXTURE_ENTRY), html);
   writeFileSync(join(dir, "chess.json"), json);
   console.log(`Wrote ${FIXTURE_DIR}: ${meta.name} ${meta.version}, ${html.length} bytes, sha256 ${sha256(html)}`);
 }

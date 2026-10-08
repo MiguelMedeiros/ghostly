@@ -5,18 +5,18 @@ import { join } from "node:path";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildAppBundle, seedSigner, toZ32, utf8Encode } from "@ghostly/core";
-import { CHESS_PUBLISHER, FIXTURE_DIR, ROOT, chessInputs, fromBundle, isPinnedUrl } from "../refresh-chess-fixture.mjs";
+import { CHESS_PUBLISHER, FIXTURE_DIR, FIXTURE_ENTRY, ROOT, chessInputs, fromBundle, isPinnedUrl } from "../refresh-chess-fixture.mjs";
 // covers: apps.chess
 
 /*
  * e2e/fixtures/chess, the pinned Chess the end-to-end tests run (tools/scripts/refresh-chess-fixture.mjs writes it):
- * chess.json matches index.html, the page passes the checks a bundle of Chess has to (the same as
+ * chess.json matches index.html.txt, the page passes the checks a bundle of Chess has to (the same as
  * apps/mini/chess/test/bundle.test.ts), and while apps/mini/chess is in this repository the fixture was built from
  * what is there now.
  */
 
 const dir = join(ROOT, FIXTURE_DIR);
-const page = readFileSync(join(dir, "index.html"), "utf8");
+const page = readFileSync(join(dir, FIXTURE_ENTRY), "utf8");
 const meta = JSON.parse(readFileSync(join(dir, "chess.json"), "utf8")) as {
   name: string; version: string; entry: string; bytes: number; sha256: string;
   from: { source?: string; inputs?: string; bundle?: string; ref?: string; sequence?: number; digest?: string };
@@ -24,7 +24,7 @@ const meta = JSON.parse(readFileSync(join(dir, "chess.json"), "utf8")) as {
 
 describe("the Chess fixture", () => {
   it("is the page chess.json describes", () => {
-    const bytes = readFileSync(join(dir, "index.html"));
+    const bytes = readFileSync(join(dir, FIXTURE_ENTRY));
     expect(meta).toMatchObject({ name: "chess", entry: "index.html", bytes: bytes.length });
     expect(meta.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
     expect(meta.version).toMatch(/^\d+\.\d+\.\d+/);

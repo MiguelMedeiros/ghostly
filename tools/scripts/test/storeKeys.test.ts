@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { build } from "vite";
@@ -17,14 +17,17 @@ const root = resolve(import.meta.dirname, "../../..");
 const script = join(root, "tools/scripts/store-keys.sh");
 let tmp: string;
 let cli: string;
-// Chess's pinned build (e2e/fixtures/chess, tools/scripts/refresh-chess-fixture.mjs): the script reads its index.html.
-const chess = join(root, "e2e/fixtures/chess");
+let chess: string;
 
 beforeAll(async () => {
   tmp = mkdtempSync(join(tmpdir(), "store-keys-"));
   // The CLI's build leaves its npm dependencies out, so it runs from under the repository, where they resolve.
   mkdirSync(join(root, "node_modules/.cache"), { recursive: true });
   cli = mkdtempSync(join(root, "node_modules/.cache/store-keys-cli-"));
+  // Chess's pinned build (e2e/fixtures/chess, tools/scripts/refresh-chess-fixture.mjs), as the index.html it publishes.
+  chess = join(tmp, "chess");
+  mkdirSync(chess);
+  copyFileSync(join(root, "e2e/fixtures/chess/index.html.txt"), join(chess, "index.html"));
   await build({ configFile: join(root, "packages/cli/vite.config.ts"), root: join(root, "packages/cli"), logLevel: "silent", build: { outDir: cli, emptyOutDir: true } });
 }, 180_000);
 
