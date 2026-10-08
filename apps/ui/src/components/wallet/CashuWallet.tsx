@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { decodeBolt11, parseLightningDestination, paymentUri, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
@@ -113,6 +113,16 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, problemText(e, t).title] as const; }
   })();
 
+  // The invoice and the quote take the place of the form that had the focus: the focus goes to their first line, so the
+  // keys go on from there (to Copy, to Pay) and a screen reader says what came. Not when it went somewhere else meanwhile.
+  const invoiceLine = useRef<HTMLParagraphElement>(null);
+  const quoteLine = useRef<HTMLParagraphElement>(null);
+  const showing = invoice ? "invoice" : quote ? "quote" : null;
+  useEffect(() => {
+    const line = showing === "invoice" ? invoiceLine.current : showing === "quote" ? quoteLine.current : null;
+    if (line && (!document.activeElement || document.activeElement === document.body)) line.focus();
+  }, [showing]);
+
   const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setConfirming(false); };
 
   return (
@@ -166,7 +176,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               </div>
             ) : invoice ? (
               <div className="space-y-3">
-                <p className="text-text-primary text-sm">{fillNodes(t("wallet.cashu.invoiceFor"), { amount: <b>{sats(Number(amount))}</b> })}</p>
+                <p ref={invoiceLine} tabIndex={-1} className="text-text-primary text-sm focus:outline-none">{fillNodes(t("wallet.cashu.invoiceFor"), { amount: <b>{sats(Number(amount))}</b> })}</p>
                 <Address value={invoice} uri={paymentUri({ kind: "lightning", invoice })} testId="wallet-invoice" note={testnet && viaMint ? t("wallet.cashu.testMintInvoice") : t("wallet.lightning.waiting")}
                   actions={<button type="button" className="px-3 py-1.5 min-h-9 max-md:min-h-11 rounded-lg text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer" onClick={() => setInvoice(null)}>{t("wallet.cashu.newAmount")}</button>} />
               </div>
@@ -184,7 +194,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
             {quote ? (
               <>
-                <p className="text-text-primary text-sm">{fillNodes(t("wallet.cashu.payLine"), {
+                <p ref={quoteLine} tabIndex={-1} className="text-text-primary text-sm focus:outline-none">{fillNodes(t("wallet.cashu.payLine"), {
                   amount: <b>{sats(quote.amount)}</b>,
                   fees: <span className="text-text-muted"> {t("wallet.lightning.feesUpTo", { fee: formatAmount(quote.feeReserve, t.language) })}</span>,
                 })}</p>
