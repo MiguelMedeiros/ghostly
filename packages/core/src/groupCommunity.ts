@@ -16,7 +16,7 @@ import { cardEditNumber, readStatusCard, statusCardBytes, type StatusCard } from
 import { readGroupFileMeta, type GroupFileMeta } from "./groupFiles";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
 import { RateWindow, validEditNumber } from "./pairedEdits";
-import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers } from "./catchUp";
+import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers, type CatchUpHandled } from "./catchUp";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, nextGroupMetaRevision, groupMetaTag, groupName, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
@@ -362,9 +362,10 @@ export interface CommunitySessionHooks {
   /**
    * Resolves once the member's app handled every frame sent to it so far (it answers a ping in the order frames come),
    * or `false` when it cannot tell (no session, or an app that answers no ping): a catch-up answer then waits
-   * `COMMUNITY_LIMITS.catchUpPauseMs` between slices. Absent: an answer goes all at once, as before 2026-10-07.
+   * `COMMUNITY_LIMITS.catchUpPauseMs` between slices; `"late"` when it answers pings but has not handled them yet, and
+   * the answer asks again. Absent: an answer goes all at once, as before 2026-10-07.
    */
-  handled?(to: string): Promise<boolean>;
+  handled?(to: string): Promise<CatchUpHandled>;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;

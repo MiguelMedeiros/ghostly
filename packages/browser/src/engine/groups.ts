@@ -48,9 +48,10 @@ export interface GroupsHost {
   sendOnLink(linkId: string, frame: object): void;
   /**
    * Resolves once the app on the other end of the link handled every frame sent on it so far (`GhostLink.handled`):
-   * `false` when it cannot tell. Absent: a member's catch-up answer goes all at once.
+   * `false` when it cannot tell, `"late"` when it answers pings but has not handled them yet. Absent: a member's
+   * catch-up answer goes all at once.
    */
-  linkHandled?(linkId: string): Promise<boolean>;
+  linkHandled?(linkId: string): Promise<boolean | "late">;
   /** The link is open and both sides announced groups (`version` 2: community groups too). */
   linkReady(linkId: string, version?: number): boolean;
   /** Whether the link's connection is open, whatever the other app announces on it. Absent: not known. */

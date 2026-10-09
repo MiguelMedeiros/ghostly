@@ -24,7 +24,7 @@ import { MESH_HUBS, meshRendezvous, NO_HUB_POLICY, type MeshHubPolicy } from "./
 import { readReaction, type WireReaction } from "./reactions";
 import { GROUP_PIN_FRAME, readPin, type WirePin } from "./pins";
 import { RateWindow } from "./pairedEdits";
-import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers } from "./catchUp";
+import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers, type CatchUpHandled } from "./catchUp";
 import { GROUP_FILE_LIMITS, readGroupFileMeta, type GroupFileMeta } from "./groupFiles";
 
 /**
@@ -207,9 +207,10 @@ export interface GroupSessionHooks {
   /**
    * Resolves once the member's app handled every frame sent to it so far (it answers a ping in the order frames come),
    * or `false` when it cannot tell (no session, or an app that answers no ping): a catch-up answer then waits
-   * `GROUP_LIMITS.catchUpPauseMs` between slices. Absent: an answer goes all at once, as before 2026-10-07.
+   * `GROUP_LIMITS.catchUpPauseMs` between slices; `"late"` when it answers pings but has not handled them yet, and the
+   * answer asks again. Absent: an answer goes all at once, as before 2026-10-07.
    */
-  handled?(to: string): Promise<boolean>;
+  handled?(to: string): Promise<CatchUpHandled>;
   /**
    * Whether this device may sign commits for the group (WISP 06 § Forced takeover): false after a forced takeover or a
    * restore, until the person turns on "Manage groups from this device" there. Then no commit is signed, the automatic
