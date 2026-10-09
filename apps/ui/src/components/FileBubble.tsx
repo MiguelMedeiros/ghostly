@@ -11,7 +11,7 @@ import { Highlight } from "./chat/ChatSearch";
 import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import { useT } from "../contexts/I18nContext";
 import type { ChatFile } from "../lib/types";
-import { problemLine } from "../lib/problemText";
+import { problemLine, saveProblemLine } from "../lib/problemText";
 
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
 const HELD_MS = 500;
@@ -101,7 +101,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then(async (result) => { if (result === "missing") setMissing((await fileHeld(platform, file.id, false)) === "left-out" ? "left-out" : true); })
-      .catch((error: Error) => setActionError(problemLine(error, t)));
+      .catch((error: Error) => setActionError(saveProblemLine(error, t)));
   };
 
   // A picture's box is there before it is: from the size its sender said, else from what this device found, else

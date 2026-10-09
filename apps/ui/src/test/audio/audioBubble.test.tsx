@@ -154,6 +154,16 @@ describe("an audio file in the chat", () => {
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, "live.flac"));
   });
 
+  it("a Download the system refuses (Desktop) says so behind the ⓘ in the language, not in the system's English", async () => {
+    canPlay = (type) => (type === "audio/flac" ? "" : "maybe");
+    vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("No space left on device (os error 28)"));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<AudioBubble file={song({ name: "live.flac", mime: "audio/flac" })} sender="peer" peerName="Ana" />, { language: "fr" });
+    fireEvent.click(screen.getByTestId("audio-download"));
+    fireEvent.click(await screen.findByTestId("audio-why"));
+    expect(screen.getByTestId("audio-why-text")).toHaveTextContent(/^Impossible d'enregistrer le fichier à cet endroit\. Réessayez et choisissez un autre dossier\.$/);
+  });
+
   it("refused by the player once started, it says so and offers Download", async () => {
     play.mockImplementationOnce(() => Promise.reject(new DOMException("no decoder", "NotSupportedError")));
     show(song());

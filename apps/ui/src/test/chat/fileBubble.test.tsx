@@ -262,6 +262,26 @@ describe("FileBubble: files/3", () => {
     } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
   });
 
+  // The save command (apps/desktop file_store.rs) rejects with the system's English: a folder that cannot be written
+  // to, a full disk, a place without a file name.
+  it.each([
+    ["en", "Permission denied (os error 13)", "Couldn't save the file there. Try again and choose another folder."],
+    ["pt", "No space left on device (os error 28)", "Não foi possível salvar o arquivo ali. Tente de novo e escolha outra pasta."],
+    ["ja", "The chosen place has no file name", "その場所にファイルを保存できませんでした。別のフォルダを選んでもう一度お試しください。"],
+  ] as const)("a Save the system refuses (Desktop) says so in the language, with the next step (%s)", async (language, refusal, said) => {
+    const saveFile = vi.fn(async () => { throw new Error(refusal); });
+    Object.assign(servicesPlatform!, { saveFile });
+    try {
+      fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: { "chat1-in-abc": { state: "done", transferred: 4.2 * GB, size: 4.2 * GB } } });
+      renderApp(<FileBubble file={file()} peerName="Ana" />, { language });
+      fireEvent.click(await screen.findByTestId("file-save"));
+      fireEvent.click(await screen.findByTestId("file-why"));
+      expect(screen.getByTestId("file-why-text")).toHaveTextContent(said);
+      // Still offered: another folder can be chosen.
+      expect(screen.getByTestId("file-save")).toBeEnabled();
+    } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
+  });
+
   it("a file whose bytes are gone, or were left out of a light backup, says so and offers no Save", async () => {
     const saveFile = vi.fn(async () => true);
     const fileHeld = vi.fn(async (): Promise<"here" | "gone" | "left-out"> => "left-out");
