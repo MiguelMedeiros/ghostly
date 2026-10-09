@@ -396,6 +396,9 @@
   },
   "transport": {
     "adapterFailed": "Couldn't start. Reopen this chat to retry.",
+    "allowAnotherNext": "Allow another transport, or turn Fallback on.",
+    "cannotSwitch": "Your contact's app can't switch transports",
+    "cannotSwitchNext": "Their app needs an update (an updated Ghostly).",
     "hyperdhtClosed": "HyperDHT relay closed the connection",
     "hyperdhtRefused": "HyperDHT relay refused this chat",
     "hyperdhtSilent": "HyperDHT relay not answering",
@@ -403,6 +406,10 @@
     "irohStopped": "Iroh endpoint stopped",
     "listenerGiven": "Paused for a busier chat. Open this chat to resume.",
     "listenerReleased": "Paused for another chat. Open this chat to resume.",
+    "noneConnected": "No transport could connect",
+    "noneInCommon": "No way to connect in common",
+    "peerClosed": "Your contact closed the connection",
+    "peerClosedNext": "Check that you both allow a common transport, then reconnect.",
     "slotsFull": "All native connections in use",
     "slotsFullNext": "Disconnect another chat's native connection, or wait for one to go quiet."
   },

@@ -396,6 +396,9 @@
   },
   "transport": {
     "adapterFailed": "无法启动。重新打开此聊天以重试。",
+    "allowAnotherNext": "允许另一种传输方式，或打开备用。",
+    "cannotSwitch": "对方的应用无法切换传输方式",
+    "cannotSwitchNext": "对方的应用需要更新（更新版 Ghostly）。",
     "hyperdhtClosed": "HyperDHT 中继关闭了连接",
     "hyperdhtRefused": "HyperDHT 中继拒绝了此聊天",
     "hyperdhtSilent": "HyperDHT 中继没有响应",
@@ -403,6 +406,10 @@
     "irohStopped": "Iroh 端点已停止",
     "listenerGiven": "已为更活跃的聊天暂停。打开此聊天即可恢复。",
     "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。",
+    "noneConnected": "没有传输方式能连接",
+    "noneInCommon": "没有共同的连接方式",
+    "peerClosed": "对方关闭了连接",
+    "peerClosedNext": "请确认你们双方都允许一种共同的传输方式，然后重新连接。",
     "slotsFull": "所有原生连接都在使用中",
     "slotsFullNext": "断开另一个聊天的原生连接，或等待某个连接空闲。"
   },

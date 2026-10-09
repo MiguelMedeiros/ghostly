@@ -396,6 +396,9 @@
   },
   "transport": {
     "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",
+    "allowAnotherNext": "別のトランスポートを許可するか、フォールバックをオンにしてください。",
+    "cannotSwitch": "相手のアプリはトランスポートを切り替えられません",
+    "cannotSwitchNext": "相手のアプリは更新（最新の Ghostly）が必要です。",
     "hyperdhtClosed": "HyperDHTリレーが接続を閉じました",
     "hyperdhtRefused": "HyperDHTリレーがこのチャットを拒否しました",
     "hyperdhtSilent": "HyperDHTリレーが応答しません",
@@ -403,6 +406,10 @@
     "irohStopped": "Irohエンドポイントが停止しています",
     "listenerGiven": "より活発なチャットのため一時停止中。このチャットを開くと再開します。",
     "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。",
+    "noneConnected": "接続できたトランスポートがありません",
+    "noneInCommon": "共通の接続方法がありません",
+    "peerClosed": "相手が接続を閉じました",
+    "peerClosedNext": "お互いが共通のトランスポートを許可しているか確認してから、再接続してください。",
     "slotsFull": "ネイティブ接続がすべて使用中です",
     "slotsFullNext": "別のチャットのネイティブ接続を切断するか、どれかが待機状態になるまでお待ちください。"
   },
