@@ -48,7 +48,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
       : group.name ? t("group.leave.title", { name: group.name }) : t("group.leave.titleUnnamed")}</h2>
     <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">
       {forget && <p>{t("group.leave.forgetBody")}</p>}
-      <p>{t("group.leave.body")}</p>
+      <p>{t(community ? "group.leave.bodyCommunity" : "group.leave.body")}</p>
       {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}</p>}
       {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
     </div>
