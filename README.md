@@ -74,4 +74,4 @@ Under the hood: the apps meet on the Mainline DHT, then talk over WebRTC, Iroh o
 
 ---
 
-<p align="center">Built by <a href="https://github.com/MiguelMedeiros">Miguel Medeiros</a> · <a href="LICENSE">MIT License</a></p>
+Built by [Miguel Medeiros](https://github.com/MiguelMedeiros) · [MIT License](LICENSE)
