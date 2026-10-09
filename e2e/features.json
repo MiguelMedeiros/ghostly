@@ -928,6 +928,7 @@
     "apps/ui/src/lib/handoff.ts": ["devices.handoff","devices.handoff.*"],
     "apps/ui/src/lib/handoffProfile.ts": ["devices.handoff"],
     "apps/ui/src/lib/identities.ts": ["proofs.*","nostr.*","sdk.plugin.identity","app.navigation"],
+    "apps/ui/src/lib/initial.ts": ["*"],
     "apps/ui/src/lib/installPrompt.ts": ["app.pwa.install","app.pwa.install-entry"],
     "apps/ui/src/lib/lockedRing.ts": ["calls.lock-ring-start","calls.ring-elsewhere"],
     "apps/ui/src/lib/mediaSession.ts": ["files.voice.*"],

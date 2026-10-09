@@ -42,7 +42,7 @@ profile publishes its records within seconds of starting ([Private networks](#pr
 ```bash
 ghostly profile set --name "Echo bot"        # the name contacts see
 ghostly daemon --detach                        # keep the profile online
-ghostly invite create --label alice            # {"chat":"…","invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…"}
+ghostly invite create --label alice            # {"chat":"…","invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…","published":true}
 ghostly chat wait alice --until live           # once Alice joined (in the app, or another ghostly)
 ghostly send alice "hello"                     # {"chat":"…","messageId":"me_…","delivery":"sending"}
 ghostly listen                                 # one JSON event per line, until stopped

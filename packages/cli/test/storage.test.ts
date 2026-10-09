@@ -1,7 +1,7 @@
 import { appendFileSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.storage
 
@@ -157,6 +157,86 @@ describe("persistent IndexedDB", () => {
     expect(store.journalBytes()).toBe(0);
     expect(statSync(join(dir, "snapshot.bin")).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
+  });
+
+  it("brings a large store back from its snapshot in bulk, not record by record, and keeps it usable", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const first = await db(store.factory);
+    first.close();
+    const upgraded = await new Promise<IDBDatabase>((resolve) => {
+      const request = store.factory.open("ghostly", 2);
+      request.onupgradeneeded = () => {
+        const messages = request.transaction!.objectStore("messages");
+        messages.createIndex("byLinkTime", ["linkId", "timestamp"]);
+        messages.createIndex("byCard", "card.kind");
+        request.result.createObjectStore("proofs", { keyPath: "secret" }).createIndex("byAmount", "amount", { unique: true });
+      };
+      request.onsuccess = () => resolve(request.result);
+    });
+    // Ids out of time order, as random ids are: the time index is not in the store's own order.
+    await tx(upgraded, ["messages", "proofs", "log"], (s) => {
+      for (let i = 0; i < 3000; i++) s.messages.put({ linkId: `chat-${i % 7}`, id: `m${(i * 7919) % 3000}`, timestamp: (i * 104729) % 100_000, ...(i % 500 ? {} : { card: { kind: "task" } }) });
+      for (let i = 0; i < 50; i++) s.proofs.put({ secret: `s${i}`, amount: 50 - i });
+      for (let i = 0; i < 3; i++) s.log.add({ i });
+    });
+    await store.close();
+
+    const probe = await db(new (await import("fake-indexeddb")).IDBFactory());
+    const rawStore = (probe.transaction("messages").objectStore("messages") as unknown as { _rawObjectStore: object })._rawObjectStore;
+    const storeRecord = vi.spyOn(Object.getPrototypeOf(rawStore) as { storeRecord(...args: unknown[]): unknown }, "storeRecord");
+    let again: IDBDatabase;
+    try {
+      const factory = await open(dir);
+      expect(storeRecord.mock.calls.length).toBe(0);
+      again = await new Promise<IDBDatabase>((resolve) => { const request = factory.open("ghostly", 2); request.onsuccess = () => resolve(request.result); });
+    } finally { storeRecord.mockRestore(); }
+
+    const messages = () => again.transaction("messages").objectStore("messages");
+    expect(await read(messages().count())).toBe(3000);
+    const chat3 = await read(messages().index("byLinkTime").getAll(IDBKeyRange.bound(["chat-3", -Infinity], ["chat-3", Infinity]))) as { timestamp: number }[];
+    expect(chat3.map((m) => m.timestamp)).toEqual(chat3.map((m) => m.timestamp).sort((a, b) => a - b));
+    expect(chat3).toHaveLength(Array.from({ length: 3000 }, (_, i) => i).filter((i) => i % 7 === 3).length);
+    expect(await read(messages().index("byLink").getAllKeys("chat-0"))).toHaveLength(429);
+    expect(await read(messages().index("byCard").count())).toBe(6);
+    expect(await read(again.transaction("proofs").objectStore("proofs").index("byAmount").getAllKeys())).toEqual(Array.from({ length: 50 }, (_, i) => `s${49 - i}`));
+
+    // Still a working tree: writes, deletes and a unique index's refusal after it.
+    await tx(again, ["messages", "log"], (s) => {
+      for (let i = 0; i < 500; i++) s.messages.delete([`chat-${i % 7}`, `m${(i * 7919) % 3000}`]);
+      s.messages.put({ linkId: "chat-0", id: "new", timestamp: -1 });
+      s.log.add({ i: 3 });
+    });
+    expect(await read(messages().count())).toBe(2501);
+    expect((await read(messages().index("byLinkTime").get(IDBKeyRange.bound(["chat-0", -Infinity], ["chat-0", Infinity]))) as { id: string }).id).toBe("new");
+    expect(await read(again.transaction("log").objectStore("log").getAllKeys())).toEqual([1, 2, 3, 4]);
+    await expect(tx(again, ["proofs"], (s) => { s.proofs.put({ secret: "dup", amount: 7 }); })).rejects.toThrow();
+  });
+
+  it("leaves the snapshot as it is at open when no journal follows it", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    await tx(await db(store.factory), ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    await store.close();
+    const written = statSync(join(dir, "snapshot.bin")).mtimeMs;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const again = await db(await open(dir));
+    expect(statSync(join(dir, "snapshot.bin")).mtimeMs).toBe(written);
+    expect(await read(again.transaction("messages").objectStore("messages").count())).toBe(1);
+  });
+
+  it("still restores a snapshot whose records are not in key order", async () => {
+    const dir = folder();
+    const { serialize } = await import("node:v8");
+    writeFileSync(join(dir, "snapshot.bin"), serialize({ format: 1, databases: [{ name: "ghostly", version: 1, stores: [
+      { name: "messages", keyPath: ["linkId", "id"], autoIncrement: false, keyGenerator: null, indexes: [{ name: "byLink", keyPath: "linkId", multiEntry: false, unique: false }],
+        records: [[["b", "1"], { linkId: "b", id: "1" }], [["a", "2"], { linkId: "a", id: "2" }], [["a", "1"], { linkId: "a", id: "1" }]] },
+      { name: "settings", keyPath: null, autoIncrement: false, keyGenerator: null, indexes: [], records: [] },
+      { name: "log", keyPath: null, autoIncrement: true, keyGenerator: 1, indexes: [], records: [] },
+    ] }] }));
+    const d = await db(await open(dir));
+    expect(await read(d.transaction("messages").objectStore("messages").getAllKeys())).toEqual([["a", "1"], ["a", "2"], ["b", "1"]]);
+    expect(await read(d.transaction("messages").objectStore("messages").index("byLink").getAllKeys("a"))).toEqual([["a", "1"], ["a", "2"]]);
   });
 
   it("refuses a snapshot from a newer format instead of starting empty", async () => {

@@ -36,8 +36,8 @@ wallets of their own, one per network, made with New; their networks are in
 In a chat, on-chain Bitcoin is the `bitcoin` way of paying (endpoint `btc-onchain/1`): a request carries a fresh
 address of the payee's source, a Send asks the contact's app for one, the payer's review is a transaction signed
 by its source, and the payer sends the txid as a hint. The payee's request is paid only once its own source shows
-a confirmed transaction paying that address at least the amount: through `received(address)` when the provider
-has it, else the hint checked against `history`. It is allowed only through the `paired-payments` list of an open
+a confirmed transaction paying that address at least the amount, through `received(address)`; the hint proves
+nothing (any receive of the wallet has a txid), and a provider without `received` never sees a request paid. It is allowed only through the `paired-payments` list of an open
 session, never offered in the handshake (a full offer already has the 16 capabilities older apps accept).
 
 Everything that is not specific to a provider is shared and already written: storage, sealed secrets,
@@ -251,7 +251,7 @@ payer: the payee's own source decides, the same way it does when the payer pays 
 | Rail | The payee sees it paid through | Then |
 |---|---|---|
 | Lightning (`btc-lightning-bolt11`) | its Lightning source's `invoiceStatus` (journaled `in` op), or the Cashu wallet's own mint quotes | the request is `settled` and a `pay-res ok` goes to the payer |
-| On-chain (`btc-onchain/1`) | `OnchainProvider.received(address)` (or `history` with the payer's txid hint), one confirmation | same |
+| On-chain (`btc-onchain/1`) | `OnchainProvider.received(address)` (never the payer's txid hint), one confirmation | same |
 | Ark (`btc-arkade/1`) | the indexer's virtual outputs on the request's address (`ArkadeAdapter.received`) | same |
 | Bark (`btc-bark/1`) | the Bark wallet's receives on the request's address | same |
 | Fedimint (`fedimint-ecash/1` with an invoice) | the federation's receive operation of the invoice it made for the request | same |

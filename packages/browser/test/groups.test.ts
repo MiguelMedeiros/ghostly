@@ -587,6 +587,14 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       expect(await alice.messages(solo)).toEqual([]);
     });
 
+    it("the admin cannot delete the group from this device either when nobody is online to take over: it would be left with no admin", async () => {
+      const { world, alice, bob, carol, groupId, edge } = await trio();
+      edge("alice", bob, false); edge("alice", carol, false);
+      await expect(alice.forget(groupId)).rejects.toThrow(/nobody else in the group is online/);
+      expect(alice.views()[0]).toMatchObject({ id: groupId, status: "active", isAdmin: true });
+      expect((await world.peers.get("alice")!.store.getGroups()).map(g => g.id)).toEqual([groupId]);
+    });
+
     it("a leave the admin never hears is forgotten after a week", async () => {
       const { world, alice, bob, groupId, edge } = await trio();
       edge("alice", bob, false);
@@ -599,6 +607,20 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
       expect(world.peers.get("bob")!.edges.size).toBe(0);
       void alice;
+    });
+
+    it("a member away when the admin role moved reads that the group was renamed, not that the new admin did it", async () => {
+      const { world, alice, bob, carol, groupId, key, edge } = await trio();
+      edge("carol", alice, false); edge("carol", bob, false);
+      await alice.rename(groupId, "Book club"); await world.settle();
+      await alice.makeAdmin(groupId, key(bob)); await world.settle();
+      edge("carol", alice, true); edge("carol", bob, true);
+      await world.meet();
+      expect(carol.views()[0].name).toBe("Book club");
+      const renamed = (name: string) => world.peers.get(name)!.messages.filter(m => m.event === "renamed").map(m => ({ text: m.text, member: m.member }));
+      // Bob signed again what Alice set: Carol cannot tell it from a rename of his.
+      expect(renamed("carol")).toEqual([{ text: "The group is now called “Book club”", member: undefined }]);
+      expect(renamed("bob")).toEqual([{ text: expect.stringMatching(/ renamed the group to “Book club”$/), member: key(alice) }]);
     });
 
     it("a membership line is written once: a name or a secret arriving later does not write the admin's line again", async () => {
