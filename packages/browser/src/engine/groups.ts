@@ -876,7 +876,9 @@ export class Groups {
   }
 
   async forget(groupId: string): Promise<void> {
-    if (this.isCommunity(groupId)) { await this.communities.forget(groupId); await this.files?.drop(groupId); return; }
+    // A community I am active in is left first (the request to the hubs, an admin's role handed on), or the others keep
+    // me as a member, and as their admin, for good: refused when nothing is connected to carry it, as Leave is.
+    if (this.isCommunity(groupId)) { await this.communities.leave(groupId); await this.files?.drop(groupId); return; }
     const session = this.sessions.get(groupId);
     if (session?.status === "active") { try { await this.leave(groupId); } catch { /* the admin cannot leave a group with members: forgetting it is still allowed */ } }
     this.sessions.delete(groupId);

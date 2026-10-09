@@ -274,6 +274,17 @@ describe("GroupChat: the options menu", () => {
     expect(screen.getByText("Chat list")).toBeInTheDocument();
   });
 
+  it("keeps a community whose delete was refused, and says why", async () => {
+    const { user, engine } = openGroup(active({ profile: "community" }));
+    engine.on("forgetGroup", () => { throw new Error("Nobody in the group is connected right now to take your leave. Try again in a moment."); });
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete chat" }));
+    expect(await screen.findByTestId("group-notice")).toHaveTextContent("Nobody is online to take your leave");
+    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
+    expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
+  });
+
   it("opens the members from the header", async () => {
     const { user } = openGroup(active());
     await user.click(screen.getByTestId("group-members"));
