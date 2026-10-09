@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "Cashu の手数料が上限を超えています",
     "couldNotVerify": "この支払いはまだ確認できません。2 回目の支払いは送られていません。",
     "ecashAlreadySpent": "この ecash はすでに別の場所で使われています",
+    "ecashOtherUnit": "この ecash は {{unit}} 建てです。ここで受け取れるのは sat の ecash だけです",
     "fedimintAlreadyJoined": "このフェデレーションにはすでに参加しています",
     "fedimintConnecting": "フェデレーションの接続を待ってください",
     "fedimintNotEnough": "このフェデレーションの残高が足りません",

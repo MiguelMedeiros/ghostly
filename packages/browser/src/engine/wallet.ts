@@ -821,7 +821,8 @@ export class CashuWallet {
           unit: metadata.unit,
           mint,
           memo: metadata.memo || undefined,
-          accepted: this.getKnownMints().includes(mint) || isTestMint(mint),
+          // Only sat ecash is redeemed here, whatever mint it is from.
+          accepted: metadata.unit === UNIT && (this.getKnownMints().includes(mint) || isTestMint(mint)),
         };
       }
       if (/^creq[AB]/i.test(value)) {
@@ -852,14 +853,17 @@ export class CashuWallet {
   ): Promise<{ amount: number; mint: string; fee: number }> {
     let mint: string;
     let faceValue: number;
+    let unit: string;
     try {
       const metadata = getTokenMetadata(token);
-      if (metadata.unit !== UNIT) throw new Error("unit");
+      unit = metadata.unit;
       mint = metadata.mint.replace(/\/+$/, "");
       faceValue = Number(metadata.amount);
     } catch {
       throw new Error("That is not a valid ecash token");
     }
+    // A token of another unit is still a token: said as such.
+    if (unit !== UNIT) throw engineError("ecashOtherUnit", { unit });
     // A mint is a custodian and only the user picks those. The test mint holds nothing of value.
     if (addTestMint && !this.getKnownMints().includes(mint) && isTestMint(mint)) await this.events.onTestMintNeeded(mint);
     if (!this.getKnownMints().includes(mint)) throw new Error(`Ecash from ${new URL(mint).hostname} is not accepted`);

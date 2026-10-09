@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "La comisión de Cashu supera tu límite",
     "couldNotVerify": "Aún no se pudo verificar este pago. No se envió un segundo pago.",
     "ecashAlreadySpent": "Este ecash ya se gastó en otro lugar",
+    "ecashOtherUnit": "Este ecash está en {{unit}}: aquí solo se puede canjear ecash en sat",
     "fedimintAlreadyJoined": "Ya te uniste a esta federación",
     "fedimintConnecting": "Espera a que la federación se conecte",
     "fedimintNotEnough": "No hay suficiente en esta federación",

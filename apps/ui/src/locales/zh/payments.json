@@ -274,8 +274,11 @@
       "testnet": "测试资金：你没有可用于支付的 Testnet Lightning 钱包"
     },
     "onchainBitcoin": "链上 Bitcoin",
+    "onlySat": "这里只能兑换 sat 的 ecash。",
     "openTitle": "在此设备上的 Lightning 钱包中打开",
     "openWallet": "打开钱包",
+    "otherUnitRequest": "请求 {{unit}} 的 ecash",
+    "otherUnitToken": "一个 {{unit}} 代币",
     "paid": "已付款 ✓",
     "pay": "支付",
     "payWithFee": "支付 {{amount}} + 最多 {{fee}} 手续费",

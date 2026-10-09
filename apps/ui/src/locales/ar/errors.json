@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "رسوم Cashu تتجاوز الحد الذي وضعته",
     "couldNotVerify": "تعذّر التحقق من هذه الدفعة حتى الآن. لم تُرسَل دفعة ثانية.",
     "ecashAlreadySpent": "هذا الـ ecash أُنفق من قبل في مكان آخر",
+    "ecashOtherUnit": "هذا الـ ecash بوحدة {{unit}}: لا يمكن هنا استرداد إلا ecash بوحدة sat",
     "fedimintAlreadyJoined": "لقد انضممت إلى هذا الاتحاد من قبل",
     "fedimintConnecting": "انتظر حتى يتصل الاتحاد",
     "fedimintNotEnough": "لا يوجد ما يكفي في هذا الاتحاد",

@@ -140,6 +140,19 @@ describe("MessageBubble: money in a message", () => {
     expect(engine.callsTo("walletInspectCashu")).toEqual([{ text: TOKEN }]);
   });
 
+  it("shows an ecash token of another unit as one this wallet cannot take", async () => {
+    // 500 usd is $5.00 (the unit's cents): never a bolt and a raw 500, and nothing to redeem.
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 500, unit: "usd", mint: "https://mint.example.com", accepted: false } }));
+    bubble({ text: TOKEN });
+    const card = await screen.findByTestId("cashu-token-bubble");
+    expect(card).toHaveTextContent("A usd token");
+    expect(card).toHaveTextContent("Only sat ecash can be redeemed here.");
+    expect(card).not.toHaveTextContent("⚡");
+    expect(card).not.toHaveTextContent("You have not added this mint");
+    expect(within(card).queryByTestId("money-amount")).not.toBeInTheDocument();
+    expect(within(card).queryByTestId("token-redeem")).not.toBeInTheDocument();
+  });
+
   it("leaves a payment's text to its payment bubble", () => {
     bubble({ text: INVOICE, paymentId: "pay-9" });
     expect(screen.queryByTestId("invoice-bubble")).not.toBeInTheDocument();

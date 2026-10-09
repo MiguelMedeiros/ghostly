@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "Cashu 手续费超出你的上限",
     "couldNotVerify": "暂时无法核实此付款。没有发送第二笔付款。",
     "ecashAlreadySpent": "这笔 ecash 已在别处花掉",
+    "ecashOtherUnit": "这笔 ecash 的单位是 {{unit}}：这里只能兑换 sat 的 ecash",
     "fedimintAlreadyJoined": "你已经加入了这个联盟",
     "fedimintConnecting": "请等待联盟连接",
     "fedimintNotEnough": "这个联盟里的余额不足",
