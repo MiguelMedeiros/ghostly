@@ -1,3 +1,4 @@
+import { bech32 } from "@scure/base";
 import { describe, expect, it } from "vitest";
 import { ETHEREUM_USDT, SEPOLIA_TEST_USDT } from "@ghostly/core";
 import { findMoney } from "../../lib/money";
@@ -10,6 +11,7 @@ import {
   BARK_MAINNET, BARK_TESTNET, BC1P, BC1Q, BOLT12_SPEC_MINIMAL, EVM, EVM_BAD_CASE, P2PKH, P2SH, TB1Q, TEST_P2PKH,
   arkadeAddress, bcrt1q, bolt12Offer, corrupt,
 } from "./moneyFormatFixtures";
+import { REGTEST_INVOICE } from "./fixtures";
 
 // covers: payments.money.onchain-card, payments.money.bolt12-card, payments.money.ark-card, payments.money.usdt-card, payments.money.network
 
@@ -80,8 +82,40 @@ describe("BIP 21 links", () => {
       request: { address, chain: "regtest", network: "testnet", amountSat: 20_000, label: "Luke Jr", message: "Donation for the project", uri: `bitcoin:${address}?amount=0.0002&label=Luke%20Jr&message=Donation%20for%20the%20project` },
       rest: "here: .",
     });
-    const mainnet = findMoney(`BITCOIN:${BC1Q.toUpperCase()}?amount=0.00021&lightning=${INVOICE}`);
-    expect(mainnet).toMatchObject({ type: "onchain", request: { address: BC1Q.toUpperCase(), network: "mainnet", amountSat: 21_000, lightning: { amountSat: 2100 } } });
+    const mainnet = findMoney(`BITCOIN:${BC1Q.toUpperCase()}?amount=0.000021&lightning=${INVOICE}`);
+    expect(mainnet).toMatchObject({ type: "onchain", request: { address: BC1Q.toUpperCase(), network: "mainnet", amountSat: 2100, lightning: { amountSat: 2100 } } });
+  });
+
+  it("keeps the Lightning fallback only when it is the same payment: the link's amount, a link that may be paid", () => {
+    const address = bcrt1q();
+    const fallback = (query: string) => (findMoney(`bitcoin:${address}?${query}`) as { request: { lightning?: unknown; unsupported?: string[] } }).request;
+    // The 250,000-sat invoice beside the same amount: the same payment.
+    expect(fallback(`amount=0.0025&lightning=${REGTEST_INVOICE}`).lightning).toMatchObject({ amountSat: 250_000 });
+    // Beside another amount it is another payment: left out, the link is still paid on-chain for its own amount.
+    expect(fallback(`amount=0.00001&lightning=${REGTEST_INVOICE}`)).toMatchObject({ amountSat: 1000 });
+    expect(fallback(`amount=0.00001&lightning=${REGTEST_INVOICE}`).lightning).toBeUndefined();
+    expect(fallback(`lightning=${REGTEST_INVOICE}`).lightning).toBeUndefined();
+    // An invoice for any amount is not the link's amount either.
+    const anyAmount = bech32.encode("lnbcrt", bech32.decode(REGTEST_INVOICE as `${string}1${string}`, false).words, false);
+    expect(findMoney(anyAmount)).toMatchObject({ type: "lightning", invoice: { network: "regtest", amountSat: null } });
+    expect(fallback(`amount=0.0025&lightning=${anyAmount}`).lightning).toBeUndefined();
+    expect(fallback(`lightning=${anyAmount}`).lightning).toMatchObject({ amountSat: null });
+    // A link that must not be paid is not paid over Lightning either.
+    expect(fallback(`amount=0.0025&req-somethingnew=1&lightning=${REGTEST_INVOICE}`)).toMatchObject({ unsupported: ["req-somethingnew"] });
+    expect(fallback(`amount=0.0025&req-somethingnew=1&lightning=${REGTEST_INVOICE}`).lightning).toBeUndefined();
+    expect(fallback(`amount=1e3&lightning=${REGTEST_INVOICE}`).lightning).toBeUndefined();
+  });
+
+  it("reads nothing as money in a link with no address that must not be paid", () => {
+    const ark = arkadeAddress("tark");
+    expect(findMoney(`bitcoin:?req-somethingnew=1&lightning=${REGTEST_INVOICE}`)).toBeNull();
+    expect(findMoney(`bitcoin:?lno=${BOLT12_SPEC_MINIMAL}&req-somethingnew=1`)).toBeNull();
+    expect(findMoney(`bitcoin:?ark=${ark}&req-somethingnew=1`)).toBeNull();
+    // An amount it cannot read is not turned into "any amount".
+    expect(findMoney(`bitcoin:?ark=${ark}&amount=1e3`)).toBeNull();
+    expect(previewText(`bitcoin:?ark=${ark}&amount=1e3`)).toBe(`bitcoin:?ark=${ark}&amount=1e3`);
+    // A known parameter written as required is fine.
+    expect(findMoney(`bitcoin:?ark=${ark}&req-amount=0.00005`)).toMatchObject({ type: "ark" });
   });
 
   it("keeps a link it cannot fully read from being paid: unknown req- parameters, an unreadable amount", () => {

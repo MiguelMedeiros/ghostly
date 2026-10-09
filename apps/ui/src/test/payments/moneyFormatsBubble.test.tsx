@@ -9,6 +9,7 @@ import type { NetworkWalletsView, WalletView } from "@ghostly/browser/shared/typ
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { BARK_TESTNET, BC1Q, EVM, arkadeAddress, bcrt1q, bolt12Offer, TB1Q } from "./moneyFormatFixtures";
+import { REGTEST_INVOICE } from "./fixtures";
 
 // covers: payments.money.onchain-card, payments.money.bolt12-card, payments.money.ark-card, payments.money.usdt-card, payments.money.network
 
@@ -105,6 +106,24 @@ describe("a pasted Bitcoin address or bitcoin: link", () => {
     const invoice = "lnbc21u1p42mkf2dqqpp56q3d9mfahf0974jqwy0yyfrg7zxksgxk7ufcc084yydhfx43daqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzyskhkhqar4dqgqfmarvdttr8x2nrp4txtamfupfftrnn4hmrp7s8ayen7hp2ye58jq8zu65rch9eplpxkhf3pf2nvuynhqxvkw5f7a2vgq486x8x";
     bubble(`bitcoin:${BC1Q}?amount=0.000021&lightning=${invoice}`);
     expect(within(screen.getByTestId("onchain-lightning")).getByTestId("invoice-bubble")).toBeInTheDocument();
+  });
+
+  it("does not offer a Lightning invoice for another amount than the link's as the same payment", () => {
+    wallets({ testnet: { bitcoin: regtestBitcoin } });
+    bubble(`bitcoin:${bcrt1q()}?amount=0.00001&lightning=${REGTEST_INVOICE}`);
+    expect(within(screen.getByTestId("onchain-bubble")).getByTestId("money-amount")).toHaveTextContent("1,000");
+    expect(screen.getByTestId("onchain-pay")).toBeInTheDocument();
+    expect(screen.queryByTestId("onchain-lightning")).toBeNull();
+    expect(screen.queryByTestId("invoice-bubble")).toBeNull();
+  });
+
+  it("offers no way to pay a link it must not pay, its Lightning invoice included", () => {
+    wallets({ testnet: { bitcoin: regtestBitcoin } });
+    bubble(`bitcoin:${bcrt1q()}?amount=0.0025&req-somethingnew=1&lightning=${REGTEST_INVOICE}`);
+    expect(screen.getByTestId("onchain-bubble")).toHaveTextContent("This link asks for something this app does not understand");
+    expect(screen.queryByTestId("onchain-pay")).toBeNull();
+    expect(screen.queryByTestId("onchain-lightning")).toBeNull();
+    expect(screen.queryByTestId("invoice-bubble")).toBeNull();
   });
 
   it("is not paid from my own message", () => {

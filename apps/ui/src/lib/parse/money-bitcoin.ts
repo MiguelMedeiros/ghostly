@@ -16,7 +16,10 @@ export interface OnchainRequest {
   amountSat?: number;
   label?: string;
   message?: string;
-  /** BIP 21 `lightning=`: the same payment as a BOLT 11 invoice, for a wallet that pays Lightning. */
+  /**
+   * BIP 21 `lightning=`: the same payment as a BOLT 11 invoice, for a wallet that pays Lightning. Only kept when it
+   * is the same payment: the address's network, the link's amount, and a link that may be paid at all.
+   */
   lightning?: Bolt11Invoice;
   /** A `req-` parameter this app does not understand: BIP 21 says such a link must not be paid. */
   unsupported?: string[];
@@ -122,6 +125,11 @@ export function findBip21(text: string): Bip21[] {
 /** Parameters this app reads; any other `req-` one makes the link one it must not pay (BIP 21). */
 const KNOWN = new Set(["amount", "label", "message", "lightning", "lno", "ark"]);
 
+/** The `req-` parameters of a link this app does not understand: with any, no leg of the link is paid. */
+export function unknownRequired(link: Bip21): string[] {
+  return [...link.params.keys()].filter((name) => name.startsWith("req-") && !KNOWN.has(name.slice(4)));
+}
+
 /**
  * A `bitcoin:` link to an address: its amount, label, message and Lightning fallback. Null when the address is
  * missing or its checksum is wrong (a link carrying only `lightning=`, `lno=` or `ark=` is read by those parsers).
@@ -143,8 +151,10 @@ export function onchainFromBip21(link: Bip21): OnchainRequest | null {
   if (message) request.message = message.slice(0, 140);
   const invoice = link.params.get("lightning");
   const decoded = invoice ? decodeBolt11(invoice) : null;
-  // A fallback on another network than the address is not the same payment: left out.
-  if (decoded && (decoded.network === "bitcoin") === (network === "mainnet")) request.lightning = decoded;
+  // A fallback on another network than the address, or for another amount than the link's (or for any amount when
+  // the link names one), is not the same payment: left out. So is the fallback of a link that must not be paid.
+  const samePayment = !!decoded && (decoded.network === "bitcoin") === (network === "mainnet") && (decoded.amountSat ?? undefined) === request.amountSat;
+  if (decoded && samePayment && !request.unsupported && !unknownRequired(link).length) request.lightning = decoded;
   const unknown = [...link.params.keys()].filter((name) => name.startsWith("req-") && !KNOWN.has(name.slice(4)));
   if (unknown.length) request.unsupported = [...(request.unsupported ?? []), ...unknown];
   // Rebuilt, not the contact's text: a leg left out above (`lno=`, `ark=`, a fallback on another network) or a
