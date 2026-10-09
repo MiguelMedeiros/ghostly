@@ -293,6 +293,25 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(answers("carol")).toEqual(["busy"]);
   });
 
+  it("a member refused as busy is told when the holder's slot frees, and asks it again before the round is over", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    // Alice serves one at a time; Bob and Carol serve nobody, so whoever she turns away has only her to ask.
+    limits.serveAtOnce = 1;
+    for (const p of [bob, carol]) t.files.get(p)!.settings.serveFiles = false;
+    const start = t.world.now;
+    const { messageId, meta } = await t.send(alice, id, pattern(100_000, 13));
+    await t.world.until(() => t.done(bob, id, messageId) && t.done(carol, id, messageId), 60_000, 500);
+    const refusals = t.seen.filter(s => s.from === "alice" && s.frame.t === "group-want-no" && s.frame.why === "busy");
+    const refused = refusals[0].to;
+    expect(refusals.every(s => s.to === refused)).toBe(true);
+    // Asked again once her slot freed (her next group-have to that edge), not after the 30 s round.
+    expect(t.world.now - start).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs - 10_000);
+    const told = t.seen.slice(t.seen.indexOf(refusals.at(-1)!)).some(s => s.from === "alice" && s.to === refused && s.frame.t === "group-have" && (s.frame.ids as string[]).includes(messageId));
+    expect(told).toBe(true);
+    expect(sha(t.got(refused === "bob" ? bob : carol, id, messageId).bytes!)).toBe(meta.d);
+  });
+
   it(`a file over ${GROUP_FILE_LIMITS.autoBytes / 1024 / 1024} MiB waits for a Download, then comes; a smaller one comes by itself`, async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
