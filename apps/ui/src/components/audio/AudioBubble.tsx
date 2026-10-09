@@ -15,7 +15,7 @@ import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMedi
 import { Highlight } from "../chat/ChatSearch";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
-import { problemLine } from "../../lib/problemText";
+import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 type Problem = "unsupported" | "too-large" | "missing" | "left-out" | "not-yet";
@@ -172,7 +172,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then(async (result) => { if (result === "missing") setProblem((await fileHeld(platform, file.id, false)) === "left-out" ? "left-out" : "missing"); })
-      .catch((error: Error) => setActionError(problemLine(error, t)));
+      .catch((error: Error) => setActionError(saveProblemLine(error, t)));
   };
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
