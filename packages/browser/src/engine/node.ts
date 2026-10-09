@@ -1408,7 +1408,7 @@ export class GhostlyNode implements EngineImplementation {
     const awaiting = await this.readAwaiting();
     for (const network of WALLET_NETWORKS) {
       const view = await this.wallet.view(network);
-      everything = view.history;
+      everything = everything.concat(view.history);
       // A network's own story: test ecash is not mixed into the story of real money, nor the reverse.
       const history = view.history.filter((tx) => !tx.mint || mintNetwork(tx.mint) === network);
       networks[network] = { mints: this.withWaits(view.mints, awaiting.mints), balance: view.balance, setAside: view.setAside, openSwaps: view.openSwaps, swapsAmount: view.swapsAmount, unconfirmed: view.unconfirmed, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),

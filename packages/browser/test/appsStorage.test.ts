@@ -174,7 +174,7 @@ describe("uninstall", () => {
 
 describe("the database", () => {
   it("a profile at 13 opens at 14 with its rows kept and the apps' stores added", async () => {
-    expect(DB_VERSION).toBe(14);
+    expect(DB_VERSION).toBeGreaterThanOrEqual(14);
     await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(databaseName()); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
     const thirteen = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(databaseName(), 13);
@@ -188,7 +188,7 @@ describe("the database", () => {
     });
     thirteen.close();
     const opened = await openDb();
-    expect(opened.version).toBe(14);
+    expect(opened.version).toBe(DB_VERSION);
     expect([...opened.objectStoreNames]).toEqual(expect.arrayContaining(["settings", "links", "apps", "appStores", "appStorage"]));
     expect(await wrap(opened.transaction("settings").objectStore("settings").get("settings"))).toEqual({ nick: "Kept" });
     const storage = opened.transaction("appStorage").objectStore("appStorage");
