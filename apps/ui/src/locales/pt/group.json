@@ -117,6 +117,7 @@
     "blockedCommunityNext": "Tente de novo em instantes.",
     "blockedNext": "Torne alguém admin ou espere um membro.",
     "body": "O grupo e seu histórico saem deste dispositivo. Você não lerá o que for dito depois, e para voltar alguém terá que deixar você entrar de novo.",
+    "bodyCommunity": "O grupo e seu histórico saem deste dispositivo. Você não lerá o que for dito depois, e para voltar, abra o link do grupo de novo.",
     "forgetBody": "Apagar o grupo deste dispositivo também faz você sair dele.",
     "forgetTitle": "Apagar {{name}}?",
     "forgetTitleUnnamed": "Apagar este grupo?",
