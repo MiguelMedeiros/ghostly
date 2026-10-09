@@ -153,7 +153,26 @@ describe("the turn record", () => {
     expect(turnName("a\0b")).toBe("ab");
     // A character is a whole one: a family of four (25 bytes) does not fit, and is not cut into two people.
     expect(turnName("👩‍👩‍👧‍👧 family")).toBe("");
-    expect(turnName("Ana 👩‍👩‍👧‍👧")).toBe("Ana ");
+    expect(turnName("Ana 👩‍👩‍👧‍👧")).toBe("Ana");
+  });
+
+  it("keeps no control, invisible or direction-changing character in a name, as a nickname keeps none", () => {
+    expect(turnName("\u202EenohP\n\x07")).toBe("enohP");
+    expect(turnName("Pho\u200Bne\u2066\u2069\u061C\uFEFF\u2028\u2060")).toBe("Phone");
+    expect(turnName("  \tPhone \r\n")).toBe("Phone");
+    expect(turnName("\u202E\u200B \n")).toBe("");
+    // The two joiners stay: an emoji sequence and Persian or Indic text need them.
+    expect(turnName("👩‍💻 Ana")).toBe("👩‍💻 Ana");
+    expect(turnName("می\u200Cخوام")).toBe("می\u200Cخوام");
+    // What it makes, it reads as it is: a name made here is never changed by the next reader.
+    for (const name of ["Ana 👩‍👩‍👧‍👧", "a name that ends \u202E in a cut", "\u200B Mac\u00ADBook Pro 16 "]) expect(turnName(turnName(name))).toBe(turnName(name));
+  });
+
+  it("reads a record's names cleaned, whatever its writer put in the slot, and still checks the signature over the bytes", async () => {
+    const slots = [{ key: all[0].publicKey, name: all[0].name }, { key: all[1].publicKey, name: "\u202EenohP\n\x07" }, null, null];
+    const read = readTurnPacket(keys, await signTurnPacket(keys, fields({ slots }), signerOf(all[0])));
+    expect(read.kind).toBe("valid");
+    expect(read.kind === "valid" && read.record.slots.map((slot) => slot?.name)).toEqual([all[0].name, "enohP", undefined, undefined]);
   });
 
   it("is read whatever way its writer cut the TXT value into DNS strings: the Desktop's Rust cuts at 254, this code at 255", async () => {
