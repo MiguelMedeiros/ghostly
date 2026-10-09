@@ -174,10 +174,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       val files = JSONArray()
       streams.forEachIndexed { index, uri ->
         try {
-          val name = displayName(uri)?.replace('/', '_')?.takeIf { it.isNotBlank() && it != "." && it != ".." }
-            ?: "shared-${index + 1}"
           val folder = File(root, index.toString()).apply { mkdirs() }
-          val file = File(folder, name)
+          val file = File(folder, SharedName.of(displayName(uri), index))
           resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } ?: return@forEachIndexed
           files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
         } catch (e: Exception) {
