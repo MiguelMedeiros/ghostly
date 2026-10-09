@@ -42,6 +42,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     await hub.open();
     const node = runtime.server.node;
     const now = node.getState();
+    // The histories read here are the attach's too: one that changes before the hub is attached is read again then.
+    const mark = runtime.server.historyMark;
     const histories = new Map<string, readonly StoredMessage[]>();
     for (const link of now.links) histories.set(link.id, await node.getMessages(link.id));
     for (const group of now.groups) histories.set(`group:${group.id}`, await node.groupMessages({ groupId: group.id }));
@@ -51,7 +53,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
-    runtime.server.attach(hub.sink);
+    runtime.server.attach(hub.sink, { mark, ids: histories.keys() });
   } catch (error) {
     await runtime.close().catch(() => {});
     release();
