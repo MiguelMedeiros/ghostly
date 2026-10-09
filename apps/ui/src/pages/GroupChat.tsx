@@ -135,6 +135,15 @@ function writtenEvent(event: StoredMessage["event"], text: string, t: Translate)
   return at > 0 && text.endsWith("”") ? t("group.event.renamed", { name: writtenName(text.slice(0, at), t), group: text.slice(at + marker.length, -1) }) : undefined;
 }
 
+/** A name or picture change the engine wrote crediting nobody (a new admin signed again what the last one set), said in the interface's language. */
+function namelessEvent(event: StoredMessage["event"], text: string, t: Translate): string | undefined {
+  const renamed = "The group is now called “";
+  if (event === "renamed" && text.startsWith(renamed) && text.endsWith("”")) return t("group.event.renamedNoName", { group: text.slice(renamed.length, -1) });
+  if (event === "picture" && text === "The group's picture was changed") return t("group.event.pictureChangedNoName");
+  if (event === "picture" && text === "The group's picture was removed") return t("group.event.pictureRemovedNoName");
+  return undefined;
+}
+
 /**
  * A membership line, naming its member as the roster knows them now; what was stored, when they are gone. The engine
  * stores it in English: the line is said again in the interface's language from its kind, where the stored text has
@@ -153,8 +162,9 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: writtenName(text.slice(0, -gone.length), t) });
     // A community's line about a member who has left since: no roster or former name says who it was, but the stored
-    // line does, in the shape the engine writes. Said again in the interface's language with that name.
-    const written = message.member ? writtenEvent(message.event, text, t) : undefined;
+    // line does, in the shape the engine writes. Said again in the interface's language with that name; a change that
+    // credits nobody, without one.
+    const written = message.member ? writtenEvent(message.event, text, t) : namelessEvent(message.event, text, t);
     if (written) return written;
     // My own removal or fork: the core's reason ("Member … holds a different membership history for epoch 4. …") is
     // English, and its detail is the notice's (behind its ⓘ). The line says what happened, from its kind.
