@@ -688,6 +688,24 @@ describe("Ark receipts", () => {
     expect(arkWallet.adapter.verifyReceipt, "a settled receipt is not checked again").toHaveBeenCalledOnce();
   });
 
+  it("one request keeps one pending Ark receipt: more under fresh ids are not stored, said, or checked", async () => {
+    const { desk, arkWallet, state, texts } = setup([record({ id: "r", direction: "out", target: ark("tark1mine") })]);
+    await desk.start();
+    const pay = (id: string, txid: string) => desk.onPayment("l", { id, requestId: "r", timestamp: 1, amount: { value: "100", asset: "sat" }, endpoint: [ENDPOINT.arkade, JSON.stringify({ txid })] });
+    for (const [i, c] of ["a", "b", "c", "d", "e"].entries()) await pay(`p${i}`, tx(c));
+    expect(["p0", "p1", "p2", "p3", "p4"].map((id) => state(id)?.state)).toEqual(["pending", undefined, undefined, undefined, undefined]);
+    expect(texts().filter((t) => t?.includes("on Ark"))).toHaveLength(1);
+    expect(arkWallet.adapter.verifyReceipt).toHaveBeenCalledOnce();
+    arkWallet.adapter.verifyReceipt.mockClear();
+    await desk.reconcileArkReceipts();
+    expect(arkWallet.adapter.verifyReceipt, "a pass asks about the one receipt").toHaveBeenCalledOnce();
+
+    // The address is what pays it: our server seeing the money settles the request and its receipt.
+    arkWallet.adapter.received.mockResolvedValue(tx("f"));
+    await desk.reconcileArkReceipts();
+    expect([state("r")?.state, state("p0")?.state]).toEqual(["settled", "settled"]);
+  });
+
   it("requests and receipts of another Ark server or network are left for it", async () => {
     const { desk, arkWallet, state } = setup([
       record({ id: "r1", direction: "out", target: ark("tark1a", { provider: "https://other.ark" }) }),
