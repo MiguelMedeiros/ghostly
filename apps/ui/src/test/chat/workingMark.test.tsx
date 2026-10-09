@@ -155,40 +155,43 @@ describe("the dot's place on a chat's row", () => {
     expect(screen.getByTestId("chat-row-key").nextElementSibling).toBeNull();
   });
 
-  it.each([2, 0])("compact: starts the trailing column, before the meter; the column and the count (%i unread) stay put when it comes and goes", (unread) => {
+  it.each([2, 0])("compact: right after the name, before the identities; the meter's column and the count (%i unread) stay as they are without it", (unread) => {
     const { rerender } = renderApp(<ChatRow {...props({ unread })} usage={meter} />);
-    const shape = () => {
-      const column = trailing()!.firstElementChild!;
-      const start = column.firstElementChild!;
-      return { column: column.className, start: start.className, first: widths(start.firstElementChild!), second: start.lastElementChild, children: column.childElementCount,
-        last: unread ? column.lastElementChild : null };
-    };
+    const column = () => trailing()!.firstElementChild!;
+    const shape = () => ({ column: column().className, children: column().childElementCount, first: column().firstElementChild, last: column().lastElementChild });
     const without = shape();
-    expect(without.column).toContain("min-w-[119px]");
-    expect(without.column).toContain("justify-between");
-    expect(trailing()!.firstElementChild!.firstElementChild!.firstElementChild).toBe(screen.getByTestId("chat-row-working-gap"));
+    expect(without.column).toContain("min-w-[105px]");
+    expect(without.first).toBe(screen.getByTestId("chat-row-usage"));
+    // No place is kept for the mark here: after the name it moves nothing.
+    expect(screen.queryByTestId("chat-row-working-gap")).not.toBeInTheDocument();
     rerender(<ChatRow {...props({ unread })} usage={meter} working={entry()} />);
-    const withDot = shape();
-    expect(trailing()!.firstElementChild!.firstElementChild!.firstElementChild).toBe(screen.getByTestId("chat-row-working"));
-    expect(withDot.second).toBe(screen.getByTestId("chat-row-usage"));
-    expect({ ...withDot, second: null, last: null }).toEqual({ ...without, second: null, last: null });
-    expect(withDot.children).toBe(unread ? 2 : 1);
-    if (unread) expect(withDot.last).toBe(screen.getByTestId("chat-row-unread"));
+    const dot = screen.getByTestId("chat-row-working");
+    const name = screen.getByTestId("chat-row-name");
+    expect(name.nextElementSibling).toBe(dot);
+    // The name gives way, never the dot; and the dot is on the name's line, not the last one.
+    expect(name.className).toContain("truncate");
+    expect(dot.className).toContain("shrink-0");
+    expect(trailing()).not.toContainElement(dot);
+    expect(shape()).toEqual(without);
+    expect(without.children).toBe(unread ? 2 : 1);
+    if (unread) expect(without.last).toBe(screen.getByTestId("chat-row-unread"));
   });
 
-  it("compact, no meter: the dot starts the same column, the count at its end; no column without it", () => {
-    const { rerender } = renderApp(<ChatRow {...props()} working={entry({ at: NOW - 40 * MIN })} />);
+  it("compact, no meter: the dot after the name, and the last line ends with the count alone", () => {
+    const { rerender } = renderApp(<ChatRow {...props()} working={entry({ at: NOW - 40.5 * MIN })} />);
     const dot = screen.getByTestId("chat-row-working");
     expect(dot).toHaveAttribute("data-state", "stale");
-    const column = trailing()!.firstElementChild!;
-    expect(column.className).toContain("min-w-[119px]");
-    expect(column.firstElementChild!.firstElementChild).toBe(dot);
-    expect(column.lastElementChild).toBe(screen.getByTestId("chat-row-unread"));
-    expect(screen.queryByTestId("chat-row-usage")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-row-name").nextElementSibling).toBe(dot);
+    expect(screen.getByTestId("chat-row-unread").parentElement).toBe(trailing());
+    expect(trailing()!.className).not.toContain("min-w-");
     rerender(<ChatRow {...props()} />);
     expect(screen.queryByTestId("chat-row-working")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("chat-row-working-gap")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-row-unread").parentElement).toBe(trailing());
+  });
+
+  it("comfortable: the name's line has no dot, it is on the key's", () => {
+    renderApp(<ChatRow {...props({ density: "comfortable" })} working={entry()} />);
+    expect(screen.getByTestId("chat-row-name").nextElementSibling).not.toBe(screen.getByTestId("chat-row-working"));
   });
 });
 

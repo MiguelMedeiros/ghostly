@@ -111,13 +111,11 @@ describe("the pill's place on a chat's row", () => {
     renderApp(<ChatRow {...props({ unread })} usage={entry({ left: 12 })} />);
     const pill = screen.getByTestId("chat-row-usage");
     expect(screen.queryByTestId("chat-row-key")).not.toBeInTheDocument();
-    // The column starts with the working mark's place and the meter, which never part.
-    const column = pill.parentElement!.parentElement!;
+    const column = pill.parentElement!;
     expect(trailing()).toContainElement(column);
-    expect(column.className).toContain("min-w-[119px]");
+    expect(column.className).toContain("min-w-[105px]");
     expect(column.className).toContain("justify-between");
-    expect(column.firstElementChild).toBe(pill.parentElement);
-    expect(pill.previousElementSibling).toBe(screen.getByTestId("chat-row-working-gap"));
+    expect(column.firstElementChild).toBe(pill);
     expect(column.childElementCount).toBe(unread ? 2 : 1);
     if (unread) expect(column.lastElementChild).toBe(screen.getByTestId("chat-row-unread"));
   });

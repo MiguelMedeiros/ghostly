@@ -76,7 +76,15 @@ test("a bot's running task shows as a dot on its chat's row, muted once it goes 
     expect(await left(meter("Hermes One"))).toBe(idle.meter);
     expect((await row("Hermes One").boundingBox())!.width).toBe(idle.width);
     expect(await left(meter("Hermes Three"))).toBe(idle.meter);
-    expect(await left(dot("Hermes Two"))).toBe(await left(dot("Hermes One")));
+    // Compact, the list's default: the dot is right after the name, on the name's line.
+    const afterName = async (name: string) => {
+      const title = (await row(name).getByTestId("chat-row-name").boundingBox())!, mark = (await dot(name).boundingBox())!;
+      expect(mark.x - (title.x + title.width)).toBeGreaterThanOrEqual(0);
+      expect(mark.x - (title.x + title.width)).toBeLessThan(12);
+      expect(Math.abs(mark.y + mark.height / 2 - (title.y + title.height / 2))).toBeLessThan(4);
+    };
+    await afterName("Hermes One");
+    await afterName("Hermes Two");
 
     /** Both densities in both looks, for the review; the dots share one place in each. */
     const pictures = async (state: string) => {
@@ -84,11 +92,24 @@ test("a bot's running task shows as a dot on its chat's row, muted once it goes 
         await page.goto("/#/settings");
         await page.getByTestId("chat-list-density").getByRole("button", { name: density }).click();
         await expect(row("Hermes One").getByTestId("chat-row-key")).toHaveCount(density === "Comfortable" ? 1 : 0);
-        expect(await left(dot("Hermes Two"))).toBe(await left(dot("Hermes One")));
+        // Comfortable: the dots share one place, after the key. Compact: each after its name.
+        if (density === "Comfortable") expect(await left(dot("Hermes Two"))).toBe(await left(dot("Hermes One")));
+        else await afterName("Hermes Two");
         expect(await left(meter("Hermes Three"))).toBe(await left(meter("Hermes One")));
         for (const scheme of ["light", "dark"] as const) {
           await theme(page, scheme);
           await shot(page, `${state}-${density.toLowerCase()}-${scheme}`);
+        }
+        if (density === "Compact") {
+          // A phone's width: the list alone, the dot still right after the name.
+          await page.setViewportSize({ width: 375, height: 760 });
+          await page.goto("/#/");
+          await afterName("Hermes One");
+          for (const scheme of ["light", "dark"] as const) {
+            await theme(page, scheme);
+            await shot(page, `${state}-compact-phone-${scheme}`);
+          }
+          await page.setViewportSize({ width: 1280, height: 800 });
         }
       }
     };
