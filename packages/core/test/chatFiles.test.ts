@@ -44,7 +44,8 @@ class Disk {
   discarded = false;
   /** Every target opened on it, without keeping one alive. */
   opened: WeakRef<IncomingTarget>[] = [];
-  constructor(keep: boolean) { this.bytes = keep ? [] : null; }
+  /** Each write takes this long (ms), as storage slower than the wire does: what arrives queues up behind it. */
+  constructor(keep: boolean, private writeMs = 0) { this.bytes = keep ? [] : null; }
   /** What a restart finds: the durable part, hashed again from the pattern. */
   restart(): void {
     this.length = this.durable;
@@ -56,6 +57,7 @@ class Disk {
     const target: IncomingTarget = {
       offset: this.length,
       append: async (chunk) => {
+        if (this.writeMs) await new Promise((resolve) => setTimeout(resolve, this.writeMs));
         if (this.length + chunk.length > this.failAt) throw new Error("disk full");
         this.hash.update(chunk);
         this.length += chunk.length;
@@ -94,6 +96,8 @@ function wire(options: {
   budget?: number;
   /** With `budget`: the host says when the channel has room, as GhostLink's `filesWritable` does. */
   writable?: boolean;
+  /** Storage that takes this long (ms) for each write. */
+  writeMs?: number;
 } = {}) {
   let open = true;
   const queued = { a: 0, b: 0 };
@@ -148,7 +152,7 @@ function wire(options: {
       decide: (file, again) => side.decide(file, again),
       openTarget: async (record) => {
         let disk = side.disks.get(record.id);
-        if (!disk) { disk = new Disk(!!options.keepBytes); side.disks.set(record.id, disk); }
+        if (!disk) { disk = new Disk(!!options.keepBytes, options.writeMs); side.disks.set(record.id, disk); }
         return disk.target();
       },
       openSource: async (record) => side.sources.get(record.id)!,
@@ -427,6 +431,21 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     w.b.files.cancel("in", "cancel-2");
     await until(() => state(w.a, "out", "cancel-2") === "cancelled");
     expect(w.a.records.get("out:cancel-2")?.error).toBe("Cancelled by your contact");
+  });
+
+  it("the sender cancels while the receiver still stores what arrived: nothing is stored after it is dropped", async () => {
+    // Storage slower than the wire: chunks that arrived wait their turn to be written when the cancel comes.
+    const w = wire({ writeMs: 2 });
+    w.attach();
+    send(w, file("cancel-q", 4 * 1024 * 1024));
+    await until(() => (w.b.transferred.get("in:cancel-q") ?? 0) > 100_000);
+    w.a.files.cancel("out", "cancel-q");
+    await until(() => state(w.b, "in", "cancel-q") === "cancelled");
+    const disk = w.b.disks.get("cancel-q")!;
+    expect(disk.discarded).toBe(true);
+    // Time for any write that was under way or queued to land.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(disk.length).toBe(0);
   });
 
   it("a drop mid-way resumes from the receiver's last byte, and nothing is sent twice that arrived", async () => {
