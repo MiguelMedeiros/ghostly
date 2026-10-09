@@ -53,10 +53,14 @@ export function noteAfterChange(current: ReactionNote, message: StoredMessage): 
   return snippet === current.snippet ? undefined : { ...current, snippet };
 }
 
+/** My latest reactions said again on a private group's edge that opens: below what a receiver takes in one window. */
+export const GROUP_REACTION_RESEND = 16;
+
 /**
- * My reactions in a private group to say again to an edge that opened, in case it missed them: the newest `limit`, of
- * this membership only. One made before I was removed and invited again went out under my old member key; said again
- * now it would go under the new one, and every member would show it twice.
+ * My reactions in a private group to say again to an edge that opened, in case it missed them: the newest `limit`,
+ * newest first (what the member is likeliest to have missed lands before its pace runs out), of this membership only.
+ * One made before I was removed and invited again went out under my old member key; said again now it would go under
+ * the new one, and every member would show it twice.
  */
 export function groupReactionsToResend(messages: readonly StoredMessage[], limit: number): WireReaction[] {
   let joinedAt = 0;
@@ -64,7 +68,7 @@ export function groupReactionsToResend(messages: readonly StoredMessage[], limit
   return messages.flatMap(m => {
     const r = m.reactions?.me, id = replyRef(m, true);
     return r && id && r.at >= joinedAt ? [{ id, e: r.e, n: r.n }] : [];
-  }).sort((a, b) => b.n - a.n).slice(0, limit).reverse();
+  }).sort((a, b) => b.n - a.n).slice(0, limit);
 }
 
 /** This side's highest number in a chat: the next one goes past it (and past what still waits to be confirmed). */
