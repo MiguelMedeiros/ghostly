@@ -1,6 +1,6 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
+  EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -1305,8 +1305,9 @@ export class Groups {
         const known = { ...existing?.formerNames, ...existing?.state?.nicks };
         // Declined, the removed group comes back as it was (an invitation that replaced another keeps the one it kept).
         const previous = existing?.state ? existing : existing?.previous;
+        const genesis = existing?.state ? commitHash(existing.state.chain[0]) : existing?.invitation?.genesis;
         const invitation: StoredGroup = { id: g, createdAt: Date.now(), invitation: { name: groupName(frame.name) ?? "Group", admin: frame.admin, linkId,
-          ...invitationClaims(frame), pieces: [] },
+          ...invitationClaims(frame), pieces: [], ...(genesis ? { genesis } : {}) },
           ...(Object.keys(known).length ? { formerNames: known } : {}), ...(previous ? { previous } : {}) };
         if (existing) { this.sessions.delete(g); for (const edge of this.host.edges(g).values()) await this.host.closeEdge(edge); }
         this.stored.set(g, invitation);
@@ -1373,6 +1374,16 @@ export class Groups {
         if (!group?.invitation?.seedB64 || group.invitation.linkId !== linkId) return;
         const joined = GroupSession.join({ name: group.invitation.name, admin: group.invitation.admin }, group.invitation.pieces, frame, group.invitation.seedB64);
         if ("error" in joined) { group.invitation.pieces = []; return; }
+        // Another group under the id of the one I was removed from: refused, so its history and names stay out of it, and
+        // the invitation waits unanswered again, for its real admin's to replace.
+        if (group.invitation.genesis && commitHash(joined.state.chain[0]) !== group.invitation.genesis) {
+          try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* nobody to tell */ }
+          delete group.invitation.seedB64;
+          group.invitation.pieces = [];
+          await this.store.putGroup(group);
+          this.host.emit();
+          return;
+        }
         const viaLink = !!group.invitation.entry;
         this.meet(g, group.invitation.admin);
         // An entry session is not a contact chat: once in, the edges carry everything.
