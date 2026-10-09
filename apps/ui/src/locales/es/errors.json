@@ -179,6 +179,7 @@
     "fileTooLarge": "Un grupo acepta archivos de hasta {{size}}",
     "filesPaced": "Acabas de enviar muchos archivos a este grupo",
     "filesPacedNext": "Espera un minuto y vuelve a enviarlo.",
+    "filesPacedNextMinutes": "Espera {{minutes}} minutos y vuelve a enviarlo.",
     "filesUnsupported": "Esta app no puede enviar archivos a grupos",
     "filesUnsupportedNext": "Actualiza Ghostly y vuelve a intentarlo.",
     "forked": "Los cambios del grupo están en pausa",

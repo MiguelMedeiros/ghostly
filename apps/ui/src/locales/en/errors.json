@@ -179,6 +179,7 @@
     "fileTooLarge": "A group takes files of up to {{size}}",
     "filesPaced": "You sent many files to this group just now",
     "filesPacedNext": "Wait a minute, then send it again.",
+    "filesPacedNextMinutes": "Wait {{minutes}} minutes, then send it again.",
     "filesUnsupported": "This app cannot send files to groups",
     "filesUnsupportedNext": "Update Ghostly, then try again.",
     "forked": "Group changes are paused",
