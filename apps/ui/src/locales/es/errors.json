@@ -121,6 +121,7 @@
     "noRoomNext": "{{free}} libres.",
     "notVoice": "Esa grabación no se puede enviar como mensaje de voz",
     "pasteTooLarge": "Es demasiado grande para pegarlo. Envíalo con + → Documento.",
+    "pasteUnreadable": "No se pudieron pegar esos archivos. Envíalos con + → Documento.",
     "tooLargeForContact": "Demasiado grande para la app de tu contacto",
     "tooLargeForContactNext": "Máx. {{max}} hasta que actualice Ghostly.",
     "updatedPeerFirst": "Conéctate primero a un peer actualizado",

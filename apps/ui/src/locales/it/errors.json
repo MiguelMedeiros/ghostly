@@ -121,6 +121,7 @@
     "noRoomNext": "{{free}} liberi.",
     "notVoice": "Questa registrazione non può essere inviata come messaggio vocale",
     "pasteTooLarge": "È troppo grande da incollare. Invialo con + → Documento.",
+    "pasteUnreadable": "Impossibile incollare questi file. Inviali con + → Documento.",
     "tooLargeForContact": "Troppo grande per l'app del tuo contatto",
     "tooLargeForContactNext": "Max {{max}} finché non aggiorna Ghostly.",
     "updatedPeerFirst": "Connettiti prima a un peer aggiornato",

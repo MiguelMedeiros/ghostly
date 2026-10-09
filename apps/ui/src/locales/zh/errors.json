@@ -121,6 +121,7 @@
     "noRoomNext": "剩余 {{free}}。",
     "notVoice": "该录音无法作为语音消息发送",
     "pasteTooLarge": "内容太大,无法粘贴。请用 + → 文档 发送。",
+    "pasteUnreadable": "无法粘贴这些文件。请用 + → 文档 发送。",
     "tooLargeForContact": "对联系人的应用来说太大",
     "tooLargeForContactNext": "对方更新 Ghostly 前最大 {{max}}。",
     "updatedPeerFirst": "请先连接到已更新的节点",

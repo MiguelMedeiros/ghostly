@@ -121,6 +121,7 @@
     "noRoomNext": "المتاح {{free}}.",
     "notVoice": "لا يمكن إرسال هذا التسجيل كرسالة صوتية",
     "pasteTooLarge": "هذا أكبر من أن يُلصق. أرسله عبر + ← مستند.",
+    "pasteUnreadable": "تعذّر لصق هذه الملفات. أرسلها عبر + ← مستند.",
     "tooLargeForContact": "أكبر من أن يستقبله تطبيق جهة اتصالك",
     "tooLargeForContactNext": "الحد الأقصى {{max}} حتى يحدّث Ghostly.",
     "updatedPeerFirst": "اتصل بنظير محدَّث أولًا",
