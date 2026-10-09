@@ -122,6 +122,16 @@
     "noRoomNext": "{{free}} free.",
     "notVoice": "That recording cannot be sent as a voice message",
     "pasteTooLarge": "That is too large to paste. Send it with + → Document.",
+    "refused": {
+      "damaged": "The file arrived damaged",
+      "expired": "Not accepted in time",
+      "makeRoom": "Ask them to make room, then send it again.",
+      "noRoomFree": "{{free}} free. Ask them to make room, then send it again.",
+      "other": "Your contact could not take this file",
+      "sendAgain": "Send it again.",
+      "tooMany": "Your contact has too many files waiting",
+      "tryLater": "Try again later."
+    },
     "tooLargeForContact": "Too large for your contact's app",
     "tooLargeForContactNext": "Max {{max}} until they update Ghostly.",
     "updatedPeerFirst": "Connect to an updated peer first",
