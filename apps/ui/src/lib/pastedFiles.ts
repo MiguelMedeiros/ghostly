@@ -19,7 +19,7 @@ const TYPES: Record<string, string> = {
   mp3: "audio/mpeg", m4a: "audio/mp4", ogg: "audio/ogg", opus: "audio/ogg", wav: "audio/wav", mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
 };
 
-/** The most a paste read by the platform brings into the page: larger files go through + → Document. */
+/** The most a paste read by the platform brings into the page, all its files together: more goes through + → Document. */
 export const PLATFORM_PASTE_MAX = 256 * 1024 * 1024;
 const READ_STEP = 16 * 1024 * 1024;
 
@@ -103,11 +103,13 @@ export function pasteNamesFiles(data: DataTransfer | null): boolean {
 
 /**
  * What the platform read from the clipboard, as files to send; a picture is named after the moment. Read or not
- * (too large, a read that failed), the platform is told it may let its copies go.
+ * (too large, a read that failed), the platform is told it may let its copies go. `together`: the files must fit
+ * the limit as one, not each alone (a paste: every byte read is held in the page until the sheet sends or drops it).
  */
-export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new Date()): Promise<File[]> {
+export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new Date(), together = false): Promise<File[]> {
   try {
-    if (clips.some((clip) => clip.size > PLATFORM_PASTE_MAX)) throw new Error("That is too large to paste. Send it with + → Document.");
+    const largest = together ? clips.reduce((sum, clip) => sum + clip.size, 0) : Math.max(0, ...clips.map((clip) => clip.size));
+    if (largest > PLATFORM_PASTE_MAX) throw new Error("That is too large to paste. Send it with + → Document.");
     const files: File[] = [];
     for (const clip of clips) {
       const parts: Uint8Array[] = [];
@@ -129,5 +131,5 @@ export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new D
 /** The clipboard's files as the platform reads them (the desktop app), or null where the paste event is the only way. */
 export function platformPastedFiles(): Promise<File[]> | null {
   const read = servicesPlatform?.readClipboardFiles();
-  return read ? read.then((clips) => readPlatformFiles(clips)) : null;
+  return read ? read.then((clips) => readPlatformFiles(clips, new Date(), true)) : null;
 }
