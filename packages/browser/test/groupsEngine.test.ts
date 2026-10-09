@@ -483,6 +483,27 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(claims.map((_, i) => world.peers.get("bob")!.store.groups.get(id(i))!.invitation)).toMatchObject([{ n: 1, e: 0 }, { n: 32, e: 2 }, { n: 1, e: 0 }, { n: 1, e: 0 }, { n: 12, e: 5 }]);
   });
 
+  it("an invitation waiting for an answer is not replaced by another contact's under the same id", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    const admin = view(alice).myKey!;
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    // Another contact names the same id, with a key of its own or with the admin's: the first invitation stays.
+    await bob.handleContactFrame("chat-xb", { t: "group-invite", g: groupId, name: "Ghosts", admin: createIdentity().pubKeyZ32, e: 0, n: 3 });
+    await bob.handleContactFrame("chat-xb", { t: "group-invite", g: groupId, name: "Ghosts", admin, e: 0, n: 3 });
+    expect(view(bob).invitation).toMatchObject({ linkId: "chat-ab", admin, members: 1, accepted: false });
+    // The contact that sent it may send it again (renamed since, say).
+    await bob.handleContactFrame("chat-ab", { t: "group-invite", g: groupId, name: "Ghosts 2", admin, e: 0, n: 1 });
+    expect(view(bob)).toMatchObject({ name: "Ghosts 2", invitation: { linkId: "chat-ab", admin } });
+    // Accept goes to the admin that invited, who lets Bob in.
+    await bob.accept(groupId); await world.settle();
+    expect(view(bob).status).toBe("active");
+    expect(view(alice).invited).toEqual([]);
+    expect(view(alice).members).toHaveLength(2);
+  });
+
   it("an invitation's name shows cleaned: no invisible, direction-changing or line-breaking text", async () => {
     const world = new World();
     const bob = world.add("bob");

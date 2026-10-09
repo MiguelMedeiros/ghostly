@@ -1294,6 +1294,12 @@ export class Groups {
         }
         // Already accepting one. The same admin inviting again over the same chat never got my accept: this one replaces it.
         if (existing?.invitation?.seedB64 && (existing.invitation.linkId !== linkId || existing.invitation.admin !== frame.admin)) return;
+        // A group I left, its leave not yet heard: only the admin I owe it to, over the chat that let me in, invites me
+        // again (its app invites nobody it still holds as a member). Anyone else's frame would end the leave unsaid.
+        if (existing?.left && (existing.left.admin !== frame.admin || existing.contacts?.[existing.left.admin] !== linkId)) return;
+        // An invitation waits for my answer: another contact's, under the same id, does not take its place (Accept would
+        // go to that contact). The one who sent it may send it again.
+        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId) return;
         if ([...this.stored.values()].filter(x => x.invitation).length >= 32) return;
         // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
         // Past that the inviter is told no, as it would be by a Decline, and may invite again later.
