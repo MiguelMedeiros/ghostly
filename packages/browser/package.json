@@ -15,7 +15,7 @@
   "dependencies": {
     "@arkade-os/sdk": "0.4.78",
     "@atproto/jwk-webcrypto": "^0.3.4",
-    "@atproto/oauth-client": "^0.8.8",
+    "@atproto/oauth-client": "^0.8.9",
     "@bitcoindevkit/bdk-wallet-web": "0.3.0",
     "@breeztech/breez-sdk-spark": "0.26.1",
     "@cashu/cashu-ts": "^4.11.0",
@@ -42,9 +42,9 @@
     "@types/react": "^19.3.0",
     "@types/ws": "8.18.2",
     "fake-indexeddb": "^6.2.5",
-    "hyperdht": "6.34.0",
+    "hyperdht": "6.34.1",
     "typescript": "^5.9.3",
-    "vite": "^8.3.2",
+    "vite": "^8.3.3",
     "vitest": "^5.0.3",
     "ws": "8.22.0"
   }
