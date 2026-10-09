@@ -302,6 +302,16 @@ interface LiveLink {
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
   /** The mini-apps this side has open in this chat (chat app id to version), for this run (`apps/1`, WISP 1200). */
   appsOpen?: Map<string, string>;
+  /** The public key of `stored.participationSeed`, derived once for that seed (`participationKeyOf`). */
+  participationKey?: { seed: string; key: string };
+}
+
+/** This side's participation key in a chat: derived from its seed once, not at every state built. */
+function participationKeyOf(live: LiveLink): string | undefined {
+  const seed = live.stored.participationSeed;
+  if (!seed) return undefined;
+  if (live.participationKey?.seed !== seed) live.participationKey = { seed, key: identityFromSeedB64(seed).pubKeyZ32 };
+  return live.participationKey.key;
 }
 
 /** What one peer has sent us, so it can neither fill the disk nor reuse an id. */
@@ -991,8 +1001,8 @@ export class GhostlyNode implements EngineImplementation {
       return link?.identitySupport ? { scope: () => link.identityScope(), send: frame => link.sendIdentityProof(frame) } : undefined;
     },
     keys: linkId => {
-      const stored = this.links.get(linkId)?.stored;
-      return { mine: stored?.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined, theirs: stored?.pairedPeerKey };
+      const live = this.links.get(linkId);
+      return { mine: live && participationKeyOf(live), theirs: live?.stored.pairedPeerKey };
     },
     linkIds: () => [...this.links.keys()],
     online: () => this.networkOn,
@@ -1025,9 +1035,9 @@ export class GhostlyNode implements EngineImplementation {
     emit: () => this.emitState(),
     ownSubjects: () => this.identities.views().filter(p => p.provider === "nostr").map(p => p.subject),
     contactSubjects: linkId => {
-      const stored = this.links.get(linkId)?.stored;
+      const live = this.links.get(linkId), stored = live?.stored;
       if (!stored?.profile || !stored.identities) return [];
-      const mine = stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined;
+      const mine = participationKeyOf(live!);
       const t = Math.floor(Date.now() / 1000);
       return [...new Set(stored.identities.received.filter(r => r.binding.provider === "nostr" && receivedIdentityStatus(r, stored.pairedPeerKey, mine, t) === "verified").map(r => r.verified.subject))];
     },
@@ -1074,7 +1084,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const live of this.links.values()) {
       const stored = live.stored;
       if (!stored.profile || !stored.identities || stored.group) continue;
-      const mine = stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined;
+      const mine = participationKeyOf(live);
       for (const r of stored.identities.received)
         if (receivedIdentityStatus(r, stored.pairedPeerKey, mine, t) === "verified") out.push({ provider: r.binding.provider, subject: r.verified.subject, linkId: stored.id });
     }
@@ -2274,7 +2284,7 @@ export class GhostlyNode implements EngineImplementation {
     const live=this.links.get(linkId);if(!live || !this.networkOn || live.stored.profileChoice==='ghostly')return;
     const mine=live.myPubKeyZ32;
     // Participation, not rendezvous, is the proof audience.
-    const audience=live.stored.participationSeed ? identityFromSeedB64(live.stored.participationSeed).pubKeyZ32 : mine;
+    const audience=participationKeyOf(live) ?? mine;
     for(const proof of live.stored.peerProofs?.remote ?? []) {
       if(!currentProfileProof(proof,live.stored.pairedPeerKey,audience))continue;
       const {adapter,externalKey:key}=proof.challenge;
@@ -3268,7 +3278,7 @@ export class GhostlyNode implements EngineImplementation {
     return composeDetails(message, {
       link: live && stored && {
         // A paired chat's sender key is its participation key; a compatibility chat's is its address on the DHT.
-        stored, myKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : live.myPubKeyZ32,
+        stored, myKey: participationKeyOf(live) ?? live.myPubKeyZ32,
         verified: !!stored.pairedPeerKey && (stored.peerTrust ? stored.peerTrust.verifiedKey === stored.pairedPeerKey : true),
         transportNow: live.link?.isDataLinkOpen ? live.pairing?.transport : undefined, relayedNow: !!live.link?.relayedPath, rttNowMs: live.link?.rttMs,
       },
@@ -7222,7 +7232,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       ...(stored.pin && { pin: pinView(stored.pin) }),
-      participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
+      participationKey: participationKeyOf(live),
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,
       profileChoice: EXTERNAL_IDENTITIES_ENABLED ? stored.profileChoice : undefined,
