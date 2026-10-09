@@ -293,6 +293,41 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(answers("carol")).toEqual(["busy"]);
   });
 
+  const serving = (p: Peer) => (p.groups.files as unknown as { servingNow(): { peer: string; size: number }[] }).servingNow();
+
+  it("askers that go away mid-download free the holder's places, and the next member is served", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol, dave, erin], id } = await t.mesh(["alice", "bob", "carol", "dave", "erin"]);
+    for (const p of [bob, carol, dave, erin]) t.files.get(p)!.settings.autoDownloads = false;
+    const { messageId, meta } = await t.send(alice, id, pattern(3 * 1024 * 1024, 7), { name: "big.bin" });
+    await t.world.run(2_000);
+    const fileOf = (p: Peer) => t.got(p, id, messageId).message!.file!.id;
+    for (const p of [bob, carol, dave]) await p.groups.downloadFile(fileOf(p));
+    await t.world.until(() => [bob, carol, dave].every(p => (t.files.get(p)!.transfers.get(fileOf(p))?.transferred ?? 0) > 0), 5 * 60_000);
+    // All three go (phone asleep, app closed) and do not come back.
+    for (const p of [bob, carol, dave]) p.online = false;
+    await t.world.run(2 * GROUP_FILE_LIMITS.wantWaitMs, 1_000);
+    expect(serving(alice)).toEqual([]);
+    await erin.groups.downloadFile(fileOf(erin));
+    await t.world.until(() => t.done(erin, id, messageId), 10 * 60_000, 1_000);
+    expect(sha(t.got(erin, id, messageId).bytes!)).toBe(meta.d);
+  });
+
+  it("a member removed mid-download frees the holder's place", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    const { messageId } = await t.send(alice, id, pattern(3 * 1024 * 1024, 8), { name: "big.bin" });
+    await t.world.run(2_000);
+    const fileId = t.got(carol, id, messageId).message!.file!.id;
+    await carol.groups.downloadFile(fileId);
+    await t.world.until(() => (t.files.get(carol)!.transfers.get(fileId)?.transferred ?? 0) > 0, 5 * 60_000);
+    expect(serving(alice)).toHaveLength(1);
+    await alice.groups.remove(id, t.key(carol, id));
+    await t.world.run(5_000, 1_000);
+    expect(serving(alice)).toEqual([]);
+  });
+
   it(`a file over ${GROUP_FILE_LIMITS.autoBytes / 1024 / 1024} MiB waits for a Download, then comes; a smaller one comes by itself`, async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
