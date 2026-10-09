@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { CardIndexRow, EngineState, StoredMessage } from "@ghostly/browser/shared/types";
+import type { CardIndexRow, EngineState, GroupMemberView, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { RoutineCard, TaskCard } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
-import { shownContactName, useContactFaces } from "../components/identities/contactFace";
+import { faceCandidates, faceChoice, shownContactName, useFaceChoices, type ContactFace } from "../components/identities/contactFace";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { authorName, groupPath, memberPhoto } from "../lib/groups";
-import { useEngineState } from "../lib/identities";
 import { contactTag } from "../lib/publicKeyLabel";
+import { sameValue } from "../lib/sameValue";
 import { listSessions } from "../lib/storage";
 import { boardEntries, isActiveTask, type BoardEntry, type BoardRoutine, type BoardTask } from "../lib/taskBoard";
 import type { ChatSession } from "../lib/types";
@@ -130,11 +130,46 @@ export function useCardIndex(): readonly CardIndexRow[] {
   return useSyncExternalStore(subscribe, () => rows);
 }
 
-/** The app's sessions (1:1 chats, kept by the page), read again when one changes. */
-function useSessions(): ChatSession[] {
-  const [sessions, setSessions] = useState<ChatSession[]>(() => listSessions());
+/*
+ * What the board shows of a chat or a group: its name, its members' names, a contact's picture and the identities they
+ * can be shown as right now (a proof that expires leaves at the engine's next state). The engine sends a new state a
+ * few times a second while its links poll with nothing new, and the page reads the chats again at every message: each
+ * a new copy with the same content. So these are kept while their content is the same (`sameValue`, as a chat list's
+ * row), and the board is built again only when a name or a picture on it changes.
+ */
+
+type BoardLink = Pick<LinkView, "id" | "peerPubKeyZ32" | "peerNick" | "peerAvatar"> & { faces: ContactFace[] };
+type BoardChat = Pick<GroupView, "id" | "name" | "formerNames" | "memberLinks"> & { members: Pick<GroupMemberView, "key" | "me" | "nick">[] };
+interface BoardChats { links: BoardLink[]; groups: BoardChat[] }
+type BoardSession = Pick<ChatSession, "id" | "peerPubKeyB64" | "label" | "nick">;
+
+const chatsOf = (state: EngineState | null): BoardChats => ({
+  links: (state?.links ?? []).map((l) => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, peerNick: l.peerNick, peerAvatar: l.peerAvatar, faces: faceCandidates(l.identities?.received) })),
+  groups: (state?.groups ?? []).map((g) => ({
+    id: g.id, name: g.name, formerNames: g.formerNames, memberLinks: g.memberLinks,
+    members: g.members.map((m) => ({ key: m.key, me: m.me, nick: m.nick })),
+  })),
+});
+
+let chatsFrom: EngineState | null | undefined;
+let chats: BoardChats = chatsOf(null);
+const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
+/** The chats and groups as the board shows them: the same object until something it shows changes. */
+function boardChats(): BoardChats {
+  if (engine.state === chatsFrom) return chats;
+  chatsFrom = engine.state;
+  const next = chatsOf(engine.state);
+  if (!sameValue(next, chats)) chats = next;
+  return chats;
+}
+
+const readSessions = (): BoardSession[] => listSessions().map((s) => ({ id: s.id, peerPubKeyB64: s.peerPubKeyB64, label: s.label, nick: s.nick }));
+
+/** The app's sessions (1:1 chats, kept by the page) as the board shows them, read again when one changes. */
+function useSessions(): BoardSession[] {
+  const [sessions, setSessions] = useState(readSessions);
   useEffect(() => {
-    const refresh = () => setSessions(listSessions());
+    const refresh = () => setSessions((before) => { const next = readSessions(); return sameValue(next, before) ? before : next; });
     refresh();
     window.addEventListener("session-updated", refresh);
     return () => window.removeEventListener("session-updated", refresh);
@@ -160,25 +195,26 @@ export interface TaskBoardData {
 export function useTaskBoard(): TaskBoardData {
   const { t } = useI18n();
   const index = useCardIndex();
-  const state = useEngineState();
+  const { links, groups } = useSyncExternalStore(subscribeEngine, boardChats);
   const sessions = useSessions();
-  const contactFace = useContactFaces();
+  const choices = useFaceChoices();
   return useMemo(() => {
-    const links = state?.links ?? [], groups = state?.groups ?? [];
-    const sessionOf = new Map<string, ChatSession>();
+    const groupOf = new Map(groups.map((g) => [`group:${g.id}`, g]));
+    /** A 1:1 chat's contact as its chat names and shows them, per chat. */
+    const peerOf = new Map<string, { session: BoardSession; key: string; name: string; picture?: string }>();
+    const face = (link: BoardLink) => {
+      const choice = faceChoice(link.peerPubKeyZ32);
+      return choice && choice !== "none" ? link.faces.find((f) => f.provider === choice.provider && f.subject === choice.subject) : undefined;
+    };
     for (const link of links) {
       const session = sessions.find((s) => s.peerPubKeyB64 === link.peerPubKeyZ32);
-      if (session) sessionOf.set(link.id, session);
+      if (!session) continue;
+      const shown = face(link);
+      const name = shownContactName({ nickname: session.label, face: shown, nick: session.nick ?? link.peerNick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) }).name;
+      peerOf.set(link.id, { session, key: session.peerPubKeyB64, name, picture: shown?.photo ?? link.peerAvatar });
     }
-    const groupOf = new Map(groups.map((g) => [`group:${g.id}`, g]));
-    const known = new Set([...sessionOf.keys(), ...groupOf.keys()]);
-    const contact = (linkId: string) => {
-      const session = sessionOf.get(linkId)!;
-      const link = links.find((l) => l.id === linkId);
-      const face = contactFace(session.peerPubKeyB64);
-      const name = shownContactName({ nickname: session.label, face, nick: session.nick ?? link?.peerNick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) }).name;
-      return { key: session.peerPubKeyB64, name, picture: face?.photo ?? link?.peerAvatar };
-    };
+    const known = new Set([...peerOf.keys(), ...groupOf.keys()]);
+    const faceOfKey = (peerKey: string | undefined) => { const link = peerKey ? links.find((l) => l.peerPubKeyZ32 === peerKey) : undefined; return link && face(link); };
     const who = (entry: Pick<BoardEntry, "linkId" | "author">): { botKey: string; bot: string; chat: string } => {
       const group = groupOf.get(entry.linkId);
       if (group) {
@@ -186,7 +222,7 @@ export function useTaskBoard(): TaskBoardData {
         if (entry.author === "me") return { botKey: "me", bot: t("cards.board.me"), chat };
         return { botKey: entry.author, bot: authorName(group, entry.author, t), chat };
       }
-      const peer = contact(entry.linkId);
+      const peer = peerOf.get(entry.linkId)!;
       return entry.author === "me" ? { botKey: "me", bot: t("cards.board.me"), chat: peer.name } : { botKey: peer.key, bot: peer.name, chat: peer.name };
     };
     const entries = boardEntries(index, known);
@@ -199,21 +235,21 @@ export function useTaskBoard(): TaskBoardData {
       tasks, routines,
       active: tasks.filter((task) => isActiveTask(task.card)).length,
       pathOf: (linkId) => {
-        const group = groupOf.get(linkId), session = sessionOf.get(linkId);
-        return group ? groupPath(group.id) : session ? chatPath(session.id) : undefined;
+        const group = groupOf.get(linkId), peer = peerOf.get(linkId);
+        return group ? groupPath(group.id) : peer ? chatPath(peer.session.id) : undefined;
       },
       faceOf: (entry) => {
         if (entry.author === "me") return undefined;
         const group = groupOf.get(entry.linkId);
         if (group) {
           const member = group.members.find((m) => m.key === entry.author);
-          const picture = memberPhoto(group, { key: entry.author, me: false }, links, contactFace);
+          const picture = memberPhoto(group, { key: entry.author, me: false }, links, faceOfKey);
           return { key: entry.author, name: member?.nick || group.formerNames?.[entry.author] || "", ...(picture && { picture }) };
         }
-        if (!sessionOf.has(entry.linkId)) return undefined;
-        const peer = contact(entry.linkId);
-        return { key: peer.key, name: peer.name, ...(peer.picture && { picture: peer.picture }) };
+        const peer = peerOf.get(entry.linkId);
+        return peer && { key: peer.key, name: peer.name, ...(peer.picture && { picture: peer.picture }) };
       },
     };
-  }, [index, state, sessions, contactFace, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `choices` counts the changes of how a contact is shown
+  }, [index, links, groups, sessions, choices, t]);
 }

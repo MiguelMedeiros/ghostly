@@ -180,6 +180,15 @@
     "editTooLong": "Too long to edit in this group",
     "editTooMany": "This message was edited too many times",
     "editTooOld": "This message is too old to edit: its epoch's key is gone",
+    "fileEmpty": "An empty file cannot go to a group",
+    "fileNoRoom": "Not enough space on this device for this file",
+    "fileNoRoomNext": "Free some space, then download it again.",
+    "fileTooLarge": "A group takes files of up to {{size}}",
+    "filesPaced": "You sent many files to this group just now",
+    "filesPacedNext": "Wait a minute, then send it again.",
+    "filesPacedNextMinutes": "Wait {{minutes}} minutes, then send it again.",
+    "filesUnsupported": "This app cannot send files to groups",
+    "filesUnsupportedNext": "Update Ghostly, then try again.",
     "forked": "Group changes are paused",
     "forkedAdminBranches": "Group changes are paused",
     "forkedAdminChanges": "Group changes are paused",
@@ -214,6 +223,9 @@
     "tooLong": "Message exceeds 16 KiB"
   },
   "hold": {
+    "fullBytes": "This would put more than {{max}} MB waiting for your contact",
+    "fullItems": "Your contact already has {{max}} items waiting",
+    "fullNext": "Send it again once they pick some up.",
     "needsStorage": "This message can't be held",
     "needsStorageNext": "Set up S3 storage in Profile → Backups, and ask your contact to allow held messages."
   },

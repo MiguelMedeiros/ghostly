@@ -83,6 +83,15 @@ describe("a video in the chat", () => {
     expect(screen.queryByTestId("video-player")).toBeNull();
   });
 
+  it("is named for a screen reader in the app's language, with its length or its size", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    const view = renderApp(<VideoBubble file={video()} sender="peer" peerName="Ana" />, { language: "pt" });
+    expect(screen.getByRole("group", { name: "Vídeo, 0:12" })).toBeInTheDocument();
+    view.unmount();
+    renderApp(<VideoBubble file={video({ video: undefined })} sender="peer" peerName="Ana" />, { language: "pt" });
+    expect(screen.getByRole("group", { name: "Vídeo, 35.0 MB" })).toBeInTheDocument();
+  });
+
   it("plays in place when tapped, from its bytes, with the browser's controls", async () => {
     show(video());
     fireEvent.click(screen.getByTestId("video-play"));

@@ -12,7 +12,7 @@ import { problemLine } from "../../lib/problemText";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
- * up to `FORWARD_MAX_TARGETS` of them. Groups are offered only for texts. Text that looks like a seed or a key asks
+ * up to `FORWARD_MAX_TARGETS` of them, groups for files too (WISP 503). Text that looks like a seed or a key asks
  * first, as typing it would. Sent to one chat, that chat opens; what a chat refused is said here.
  */
 export function ForwardDialog({ from, messages, onClose, onSent }: {
@@ -27,10 +27,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const nav = useAppNavigation();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), search = useRef<HTMLInputElement>(null);
-  const files = messages.some(m => !!m.file);
-  const targets = useChatTargets({ files }).filter(target => !!target.target);
-  // A file leaves the groups out: said only when there are groups it leaves out.
-  const groupsLeftOut = useChatTargets({ files: false }).some(target => target.kind === "group") && files;
+  const targets = useChatTargets().filter(target => !!target.target);
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<ChatTarget[]>([]);
   const [secret, setSecret] = useState<SecretFinding | null>(null);
@@ -97,7 +94,6 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
           ))}
         </ul>
       )}
-      {groupsLeftOut && <p className="m-0 px-2 pt-2 text-[11px] text-text-muted" data-testid="forward-files-hint">{t("chat.forward.filesHint")}</p>}
     </div>
     {problems.length > 0 && (
       <ul className="m-0 mx-4 mt-2 list-none space-y-1 p-0" role="alert" data-testid="forward-error">

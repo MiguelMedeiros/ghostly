@@ -180,6 +180,15 @@
     "editTooLong": "Longa demais para editar neste grupo",
     "editTooMany": "Esta mensagem foi editada vezes demais",
     "editTooOld": "Esta mensagem é antiga demais para editar: a chave da época dela não existe mais",
+    "fileEmpty": "Um arquivo vazio não pode ir para um grupo",
+    "fileNoRoom": "Não há espaço suficiente neste dispositivo para este arquivo",
+    "fileNoRoomNext": "Libere espaço e baixe de novo.",
+    "fileTooLarge": "Um grupo aceita arquivos de até {{size}}",
+    "filesPaced": "Você enviou muitos arquivos a este grupo agora há pouco",
+    "filesPacedNext": "Espere um minuto e envie de novo.",
+    "filesPacedNextMinutes": "Espere {{minutes}} minutos e envie de novo.",
+    "filesUnsupported": "Este app não envia arquivos para grupos",
+    "filesUnsupportedNext": "Atualize o Ghostly e tente de novo.",
     "forked": "As mudanças no grupo estão pausadas",
     "forkedAdminBranches": "As mudanças no grupo estão pausadas",
     "forkedAdminChanges": "As mudanças no grupo estão pausadas",
@@ -214,6 +223,9 @@
     "tooLong": "A mensagem passa de 16 KiB"
   },
   "hold": {
+    "fullBytes": "Isto passaria de {{max}} MB esperando por seu contato",
+    "fullItems": "Seu contato já tem {{max}} itens esperando",
+    "fullNext": "Envie de novo quando seu contato pegar alguns.",
     "needsStorage": "Não dá para guardar esta mensagem",
     "needsStorageNext": "Configure um S3 em Perfil → Backups e peça ao seu contato para permitir mensagens guardadas."
   },

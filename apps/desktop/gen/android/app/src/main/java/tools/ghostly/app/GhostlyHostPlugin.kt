@@ -37,6 +37,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
@@ -62,9 +63,19 @@ class NotifyArgs {
 }
 
 @InvokeArg
+class TagArgs {
+  lateinit var id: String
+}
+
+@InvokeArg
 class SaveArgs {
   lateinit var path: String
   lateinit var name: String
+}
+
+@InvokeArg
+class PathsArgs {
+  var paths: List<String> = emptyList()
 }
 
 @InvokeArg
@@ -98,6 +109,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
      * Starts at the clock, so a share's folder is newer than any a previous run left.
      */
     private val shareGeneration = AtomicLong(System.currentTimeMillis())
+    /** Whether this run swept what earlier runs left in the share cache: once, as an activity made again may come. */
+    private val sharesSwept = AtomicBoolean(false)
   }
 
   /** Rust (src/android.rs): `kind` is "oidc", "share", "notification" or "network". */
@@ -106,6 +119,11 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   private var pendingSave: SaveArgs? = null
 
   override fun load(webView: WebView) {
+    // Copies an earlier run left (a share never read, the app stopped): only shares this run takes are kept.
+    if (sharesSwept.compareAndSet(false, true)) {
+      val since = shareGeneration.get()
+      thread(name = "ghostly-share-clean") { SharedCopies.stale(sharedRoot(), since).forEach { it.deleteRecursively() } }
+    }
     take(activity.intent)
     watchNetwork()
   }
@@ -171,14 +189,14 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * folder per share and per file, under the name the sharing app gave), off the main thread, then handed to Rust.
    * Shares are numbered as they arrive: one that a newer share overtook stops copying and is never handed over, so a
    * big share that ends late cannot replace the one made after it. Older shares' copies go once a newer one is
-   * handed over. The page reads the copies by token, as a paste's.
+   * handed over. The page reads the copies by token, as a paste's, then says it is done with them (`shareDone`).
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
     val title = intent.getStringExtra(Intent.EXTRA_SUBJECT) ?: intent.getStringExtra(Intent.EXTRA_TITLE) ?: ""
     val streams = streamsOf(intent).take(MAX_SHARED_FILES)
     val resolver = activity.contentResolver
-    val root = File(activity.cacheDir, "shared")
+    val root = sharedRoot()
     val generation = shareGeneration.incrementAndGet()
     val latest = { shareGeneration.get() == generation }
     thread(name = "ghostly-share") {
@@ -199,10 +217,9 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share.
         }
       }
-      if (!latest()) {
-        own.deleteRecursively()
-        return@thread
-      }
+      // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
+      if (!latest() || files.length() == 0) own.deleteRecursively()
+      if (!latest()) return@thread
       val share = JSONObject().put("title", title).put("text", text).put("files", files)
       activity.runOnUiThread {
         // Checked again on the main thread, where shares arrive: a newer one may have come during the hop.
@@ -214,6 +231,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
         }
       }
     }
+  }
+
+  private fun sharedRoot() = File(activity.cacheDir, "shared")
+
+  /**
+   * The page read a share's files (Rust's `incoming_share_done`, with the paths it had them under): their share's
+   * folder goes. Only folders of shares in the share cache, whatever the paths say.
+   */
+  @Command
+  fun shareDone(invoke: Invoke) {
+    val args = invoke.parseArgs(PathsArgs::class.java)
+    val root = sharedRoot()
+    thread(name = "ghostly-share-clean") { SharedCopies.foldersOf(root, args.paths).forEach { it.deleteRecursively() } }
+    invoke.resolve()
   }
 
   /** Copies `input` whole while `going` holds; false when it stopped first. */
@@ -310,7 +341,10 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** A silent notification on the Messages channel (the page plays its own sound); a tap opens the chat. */
+  /**
+   * A silent notification on the Messages channel (the page plays its own sound); a tap opens the chat. One posted
+   * again under the same id (a chat's next message) replaces it with no new heads-up.
+   */
   @Command
   fun notify(invoke: Invoke) {
     val args = invoke.parseArgs(NotifyArgs::class.java)
@@ -337,6 +371,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       .setCategory(NotificationCompat.CATEGORY_MESSAGE)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setSilent(true)
+      .setOnlyAlertOnce(true)
       .setAutoCancel(true)
       .setContentIntent(tap)
       .build()
@@ -346,6 +381,15 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     } catch (e: SecurityException) {
       invoke.reject("Notifications are off for Ghostly")
     }
+  }
+
+  /** Takes away the notification posted as `id` (its chat was read in the app); nothing when it is gone already. */
+  @Command
+  fun cancelNotification(invoke: Invoke) {
+    val args = invoke.parseArgs(TagArgs::class.java)
+    val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    manager.cancel(args.id, 1)
+    invoke.resolve()
   }
 
   @Command

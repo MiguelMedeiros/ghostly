@@ -446,6 +446,41 @@ describe("MessageBubble: delivery", () => {
     expect(engine.callsTo("retryMessage")).toEqual([{ linkId: "link-1", messageId: "m1" }]);
   });
 
+  it.each([
+    ["64 items", "At most 64 items can wait for this contact. Wait until some are picked up.", "Your contact already has 64 items waiting. Send it again once they pick some up."],
+    ["64 MB", "Items waiting for this contact would exceed 64 MB. Wait until some are picked up.", "This would put more than 64 MB waiting for your contact. Send it again once they pick some up."],
+  ])("a held message with no room left in the contact's storage (%s) says why on its red mark, and again when a tap is refused", async (_, full, said) => {
+    const { user, engine } = bubble({ sender: "me", delivery: "failed", deliveryError: full });
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("retryMessage", () => { throw new Error(full); });
+    const red = screen.getByRole("button", { name: said });
+    await user.hover(red);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(said);
+    await user.unhover(red);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await user.click(red);
+    expect(engine.callsTo("retryMessage")).toHaveLength(1);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(said);
+    // The mark said it: not a second time under the message.
+    expect(screen.queryByTestId("message-retry-error")).not.toBeInTheDocument();
+  });
+
+  it("⋮ → Send again refused for a full storage says it under the message, where there is no mark to say it on", async () => {
+    const full = "At most 64 items can wait for this contact. Wait until some are picked up.";
+    const { user, engine } = bubble({ sender: "me", delivery: "failed", deliveryError: full });
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("retryMessage", () => { throw new Error(full); });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-retry"));
+    expect(await screen.findByTestId("message-retry-error-title")).toHaveTextContent("Your contact already has 64 items waiting");
+    expect(screen.getByTestId("message-retry-error-next")).toHaveTextContent("Send it again once they pick some up.");
+  });
+
+  it("says a full storage in the person's language", () => {
+    renderApp(<MessageBubble message={message({ sender: "me", delivery: "failed", deliveryError: "At most 64 items can wait for this contact. Wait until some are picked up." })} peerPubKey="peer" />, { language: "pt" });
+    expect(screen.getByTestId("message-delivery")).toHaveAccessibleName("Seu contato já tem 64 itens esperando. Envie de novo quando seu contato pegar alguns.");
+  });
+
   it("⋮ → Send again sends a message that was not sent; a sent one has no such row", async () => {
     const { user, engine, rerender } = bubble({ sender: "me", delivery: "failed" });
     act(() => engine.update({ links: [linkView()] }));

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
+import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
-import { canRetryFile, failedReason, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, groupFileOffered, stalledAction } from "../../lib/fileStatus";
+import { formatFileSize } from "../../lib/format";
 import type { ChatFile } from "../../lib/types";
 import {
   applyVoiceRate,
@@ -68,6 +70,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  useFocusKept(rootRef);
   const playRef = useRef<HTMLButtonElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -351,7 +354,10 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const canRetry = canRetryFile(file, transfer, platform);
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
   const reason = retryError ? { text: retryError } : failedReason(transfer, t);
-  const moving = transfer?.state === "transferring" && !transfer.stalled;
+  const hint = reason ? null : groupFileHint(file, transfer, t);
+  // A group's voice message this device did not fetch by itself (automatic downloads off): its Download (WISP 503).
+  const offered = groupFileOffered(file, transfer) && !!platform?.fileAction;
+  const moving = transfer?.state === "transferring" && !transfer.stalled && !offered;
   const run = (action: () => Promise<unknown>) => {
     setRetryError("");
     setBusy(true);
@@ -365,7 +371,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       // As wide as a comfortable waveform, never wider than the message bubble it sits in (whose own limit
       // is a share of the chat, not of the window: vw here spilled it out of a narrow Desktop window).
       // Its colours are light in both themes: message bubbles are dark in both (MessageBubble).
-      className="w-[300px] max-w-full pt-1"
+      className="w-[300px] max-w-full pt-1 rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       data-testid="voice-bubble"
       data-voice-player={file.id}
       data-voice-sender={sender}
@@ -442,17 +448,25 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
               {active ? formatVoiceDuration(position * 1000) : formatVoiceDuration(file.voice.duration)}
             </span>
             {status && <span data-testid="voice-status" className={`min-w-0 truncate ${failed ? "text-danger-ink" : ""}`}>· <bdi>{status}</bdi></span>}
-            {reason && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="voice-why" danger />}
+            {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="voice-why" danger={!!reason} />}
           </div>
         </div>
       </div>
+      {offered && (
+        <div className="mt-1.5 px-1">
+          <button type="button" data-testid="voice-download" onClick={() => run(() => platform!.fileAction!(file.id, "accept"))}
+            className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer">
+            {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
+          </button>
+        </div>
+      )}
       {problem && (
         <p className="text-[12px] text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
           {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
       )}
-      {reason && why && <WhyText id={whyId} testId="voice-why-text" english={reason.english}>{reason.text}</WhyText>}
+      {(reason || hint) && why && <WhyText id={whyId} testId="voice-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
     </div>
   );
 }

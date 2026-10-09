@@ -1,6 +1,7 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 import { useUsageByPeer } from "../hooks/useUsage";
+import { useWorkingByPeer } from "../hooks/useWorking";
 import { ChatRow, GroupRow } from "./ChatRow";
 import { formatListTime } from "../lib/chatList";
 import { foldText } from "../lib/chatSearch";
@@ -93,6 +94,8 @@ export function Sidebar() {
   const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
   // A bot's usage card (WISP 405 § Usage) per contact: the meter on its row.
   const usageByPeer = useUsageByPeer();
+  // Each contact's running tasks (WISP 405 § Showing a card): the working mark on its row.
+  const workingByPeer = useWorkingByPeer();
   const groups = engineState?.groups ?? [];
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -343,6 +346,7 @@ export function Sidebar() {
               onDelete={(e) => handleDelete(session.id, e)}
               deleteLabel={t("sidebar.deleteChat")}
               usage={usageByPeer.get(session.peerPubKeyB64)}
+              working={workingByPeer.get(session.peerPubKeyB64)}
               reorder={pinnedIds.length > 1 && pinnedIds.includes(session.id)
                 ? { props: reorder.rowProps(session.id), dragging: reorder.dragging === session.id, drop: reorder.drop?.id === session.id ? reorder.drop.edge : undefined }
                 : undefined}

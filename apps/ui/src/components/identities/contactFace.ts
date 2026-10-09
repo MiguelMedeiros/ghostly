@@ -155,10 +155,13 @@ export function useContactFace(peerKey: string | undefined): ContactFace | undef
 const version = { n: 0 };
 const subscribeVersion = (listener: () => void) => subscribeChoices(() => { version.n++; listener(); });
 
+/** For a list of contacts that reads `faceChoice` itself: a number that changes when any contact's choice does. */
+export const useFaceChoices = (): number => useSyncExternalStore(subscribeVersion, () => version.n);
+
 /** For a list of contacts: a function from a contact key to its face, redrawn when the engine or any choice changes. */
 export function useContactFaces(): (peerKey: string | undefined) => ContactFace | undefined {
   const state = useEngineState();
-  const v = useSyncExternalStore(subscribeVersion, () => version.n);
+  const v = useFaceChoices();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   return useCallback((peerKey: string | undefined) => contactFace(receivedOf(state?.links, peerKey), faceChoice(peerKey)), [state, v]);
 }

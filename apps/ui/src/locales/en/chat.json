@@ -124,6 +124,7 @@
     "askAgainDamagedHint": "Asks the group for it again. The damaged bytes are gone.",
     "askAgainHint": "Asks your contact for the rest. What arrived stays.",
     "askGroupAgainHint": "Asks the group's members for it again, those whose copy came damaged too.",
+    "askingMember": "Asking a member who has it…",
     "askingThem": "Waiting for {{name}} to accept · {{size}}",
     "askingYou": "{{size}} · waiting for your answer",
     "busyDone": "Busy, trying again soon · {{done}} done",
@@ -138,6 +139,9 @@
     "leftMinutes": "{{minutes}} min left",
     "leftUnderMinute": "less than a minute left",
     "noRoomDevice": "Not enough space: {{size}} free on this device",
+    "nobodyHas": "Nobody you are connected to has this file yet",
+    "nobodyHasHint": "It comes by itself when a member who has it is online.",
+    "notDownloaded": "{{size}} · not downloaded",
     "notInBackup": "Not in this backup",
     "notSentHint": "Not sent. Send it again.",
     "of": "{{done}} of {{size}}",
@@ -162,7 +166,6 @@
   "fileTooLarge": "That file is too large (max {{size}}).",
   "filesNeedUpdate": "Update both peers to send files",
   "forward": {
-    "filesHint": "Groups take text only",
     "forward": "Forward",
     "forwarded": "Forwarded",
     "many": "Forwarded many times",
@@ -404,6 +407,7 @@
     "cantPlay": "This device can't play this video ({{format}}). Download it to watch.",
     "exitFullScreen": "Exit full screen",
     "fullScreen": "Full screen",
+    "label": "Video, {{length}}",
     "play": "Play video",
     "save": "Save video",
     "tooLarge": "Too large to play here. Download it to watch."

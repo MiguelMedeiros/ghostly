@@ -57,6 +57,14 @@
   "defaultNicknameHint": "Used when you start a new chat",
   "deleteAllChatsConfirm": "Delete all {{count}} chats?",
   "deleteAllChatsHint": "Messages and files go. Settings and wallets stay.",
+  "groupDownloads": {
+    "always": "Always",
+    "hint": "Voice messages and small files",
+    "info": "Voice messages, and files up to {{file}}, download by themselves until what came that way from a group adds up to {{group}} on this device. Larger files wait for Download. Each device decides for itself; nothing about it is sent to the group.",
+    "off": "Off",
+    "title": "Download automatically in groups",
+    "wifi": "Wi-Fi only"
+  },
   "incorrectPassword": "Incorrect password",
   "language": "Language",
   "license": "License",
@@ -142,6 +150,7 @@
     "colour": "colour, accent, theme",
     "deleteChats": "erase, history",
     "domains": "DNS, DoH",
+    "groupDownloads": "automatic, auto-download, media, Wi-Fi, mobile data, voice messages, files, groups",
     "language": "translation, locale",
     "linkPreviews": "links, URL",
     "lock": "password, PIN, security",

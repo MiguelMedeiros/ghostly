@@ -436,6 +436,21 @@ export const fileStore = {
     const states = await Promise.all(files.map((file) => wrap<FileState | undefined>(tx.objectStore(STORES.fileState).get(file.id))));
     return files.map((file, i) => withState(file, states[i]));
   },
+  /** The id of every group a stored file is of (`linkId` `group:<id>`), read off the index: no record is loaded. */
+  async groupIds(): Promise<string[]> {
+    const index = (await store(STORES.files, "readonly")).index("byLink"), ids: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const request = index.openKeyCursor(IDBKeyRange.bound("group:", "group:\uffff"), "nextunique");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve();
+        ids.push(String(cursor.key).slice("group:".length));
+        cursor.continue();
+      };
+    });
+    return ids;
+  },
   async delete(id: string): Promise<void> {
     await transact([STORES.files, STORES.fileState], stores => {
       stores[STORES.files].delete(id);
