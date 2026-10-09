@@ -628,7 +628,13 @@ export class Groups {
     const group = this.stored.get(groupId);
     if (!group?.invitation) throw new Error("No invitation to decline");
     try { this.host.sendOnLink(group.invitation.linkId, { t: "group-decline", g: groupId }); } catch { /* they will notice when nobody accepts */ }
-    await this.forget(groupId);
+    // Removed, then invited again: the answer is to the invitation only; the removed group and its history stay.
+    const previous = group.previous;
+    if (!previous) return this.forget(groupId);
+    this.stored.set(groupId, previous);
+    if (previous.state) this.attach(previous.state);
+    await this.store.putGroup(previous);
+    this.host.emit();
   }
 
   /**
@@ -1205,9 +1211,11 @@ export class Groups {
         if ([...this.stored.values()].filter(x => x.invitation).length >= 32) return;
         // Removed and invited again: the history stays, and the names it was written under with it.
         const known = { ...existing?.formerNames, ...existing?.state?.nicks };
+        // Declined, the removed group comes back as it was (an invitation that replaced another keeps the one it kept).
+        const previous = existing?.state ? existing : existing?.previous;
         const invitation: StoredGroup = { id: g, createdAt: Date.now(), invitation: { name: groupName(frame.name) ?? "Group", admin: frame.admin, linkId,
           e: Number.isSafeInteger(frame.e) ? frame.e as number : 0, n: Number.isSafeInteger(frame.n) ? frame.n as number : 1, pieces: [] },
-          ...(Object.keys(known).length ? { formerNames: known } : {}) };
+          ...(Object.keys(known).length ? { formerNames: known } : {}), ...(previous ? { previous } : {}) };
         if (existing) { this.sessions.delete(g); for (const edge of this.host.edges(g).values()) await this.host.closeEdge(edge); }
         this.stored.set(g, invitation);
         await this.store.putGroup(invitation);

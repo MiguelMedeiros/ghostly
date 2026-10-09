@@ -183,6 +183,27 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect(back.members.find(m => m.key === aliceKey)?.nick).toBe("contact:chat-ab");
   });
 
+  it("a member removed and invited again who declines keeps the removed group and its history", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    expect((await bob.send(groupId, "mine, before")).error).toBeNull();
+    await world.settle();
+    await alice.remove(groupId, key(bob)); await world.settle();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(bob, groupId).invitation).toBeDefined();
+
+    await bob.decline(groupId); await world.settle();
+    expect(view(bob, groupId)).toMatchObject({ status: "removed", canSend: false });
+    expect(view(bob, groupId).invitation).toBeUndefined();
+    expect(world.peers.get("bob")!.store.groups.get(groupId)?.state?.status).toBe("removed");
+    expect((await bob.messages(groupId)).map(m => m.text)).toContain("mine, before");
+    // Alice's side learns the answer: Bob is not waited for any more.
+    expect((alice as unknown as { invited: Map<string, Set<string>> }).invited.get(groupId)?.size ?? 0).toBe(0);
+    // After a restart too.
+    const again = new Groups((bob as unknown as { host: GroupsHost }).host, world.peers.get("bob")!.store);
+    await again.load();
+    expect(view(again, groupId)).toMatchObject({ status: "removed" });
+  });
+
   it("a pin by a member who is removed goes with them; the others' pins stay", async () => {
     const { world, alice, others: [bob, carol], groupId, key } = await groupOf(["bob", "carol"]);
     const pinBy = (by: string) => ({ id: `${key(bob)}:1:1`, n: Date.now(), by, at: Date.now(), k: by, sig: "s" });

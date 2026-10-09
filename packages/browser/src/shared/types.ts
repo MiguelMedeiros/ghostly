@@ -154,6 +154,8 @@ export interface StoredGroup {
    * since go on naming what they wrote.
    */
   formerNames?: Record<string, string>;
+  /** Removed, then invited again: the removed group as it was, which a Decline puts back (with the history it kept). */
+  previous?: StoredGroup;
   /**
    * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
