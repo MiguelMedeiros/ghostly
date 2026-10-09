@@ -31,7 +31,10 @@ interface RawIndex {
   records: RawRecordStore; storeRecord(record: RawRecord): void;
 }
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
-interface RawRecordStore { values(): Iterable<RawRecord>; records: { _root: RawNode | undefined; _numNodes: number; _numTombstones: number } }
+interface RawRecordStore {
+  values(): Iterable<RawRecord>; clear(): unknown;
+  records: { _root: RawNode | undefined; _numNodes: number; _numTombstones: number };
+}
 interface RawStore {
   name: string; keyPath: string | string[] | null; autoIncrement: boolean; deleted: boolean;
   keyGenerator: { num: number } | null; rawIndexes: Map<string, RawIndex>; records: RawRecordStore; rawDatabase: RawDatabase;
@@ -322,8 +325,28 @@ function fill(store: RawRecordStore, sorted: RawRecord[]) {
   store.records._numTombstones = 0;
 }
 
-/** Replays whole entries; a torn last entry (the process died mid-write) was never acknowledged and is dropped. */
+/**
+ * Replays whole entries; a torn last entry (the process died mid-write) was never acknowledged and is dropped.
+ *
+ * A store's indexes are set aside while its ops replay and rebuilt once at the end: fake-indexeddb drops an
+ * overwritten or deleted record from an index by walking every record of it, so a crash after a busy chat took
+ * tens of seconds to minutes to start, one write at a time against the whole profile.
+ */
 function replay(databases: Map<string, RawDatabase>, journal: Buffer) {
+  const touched = new Map<RawStore, Map<string, RawIndex>>();
+  try { replayEntries(databases, journal, touched); } finally {
+    for (const [store, indexes] of touched) {
+      store.rawIndexes = indexes;
+      for (const index of indexes.values()) {
+        index.records.clear();
+        if (!index.initialized) continue;
+        for (const record of store.records.values()) index.storeRecord(record);
+      }
+    }
+  }
+}
+
+function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Map<string, RawIndex>>) {
   let offset = 0;
   while (offset + 4 <= journal.length) {
     const length = journal.readUInt32BE(offset);
@@ -334,6 +357,7 @@ function replay(databases: Map<string, RawDatabase>, journal: Buffer) {
     for (const op of ops) {
       const store = databases.get(op.db)?.rawObjectStores.get(op.store);
       if (!store) continue;
+      if (!touched.has(store)) { touched.set(store, store.rawIndexes); store.rawIndexes = new Map(); }
       if (op.kind === "put") store.storeRecord({ key: op.key, value: blobsFromDisk(op.value) }, false);
       else if (op.kind === "delete") store.deleteRecord(keyFromDisk(op.key));
       else store.clear();
