@@ -405,6 +405,38 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(serving(alice)).toEqual([]);
   });
 
+  it("files announced together come one after another from their author, not a busy answer and a wait each", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const sent = await Promise.all([1, 2, 3, 4, 5].map(seed => t.send(alice, id, pattern(20_000, seed), { name: `voice-${seed}.webm` })));
+    const start = t.world.now;
+    // Each is a few round trips: well within a want's wait (`wantWaitMs`), which a busy answer would cost.
+    await t.world.until(() => sent.every(s => t.done(bob, id, s.messageId)), 60_000);
+    expect(t.world.now - start).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs / 2);
+    for (const s of sent) expect(sha(t.got(bob, id, s.messageId).bytes!)).toBe(s.meta.d);
+    // Bob's app asked Alice for the next file only once the one before had come.
+    expect(t.seen.filter(s => s.from === "alice" && s.to === "bob" && s.frame.t === "group-want-no")).toEqual([]);
+    expect(t.seen.filter(s => s.from === "bob" && s.frame.t === "group-want")).toHaveLength(5);
+  });
+
+  it("the next file's ask that overtakes the word that the last one checked out is not answered busy", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const sent = await Promise.all([1, 2, 3].map(seed => t.send(alice, id, pattern(20_000, seed), { name: `voice-${seed}.webm` })));
+    // Bob's `pf-done` reaches Alice half a second late (files/3 and the group's frames are two channels): his next
+    // `group-want` comes while her transfer still waits for it.
+    const late = (from: Peer, _to: Peer, frame: Record<string, unknown>) => from === bob && frame.t === "pf-done";
+    const start = t.world.now;
+    t.hold = late;
+    while (!sent.every(s => t.done(bob, id, s.messageId)) && t.world.now - start < 60_000) {
+      await t.world.run(500);
+      t.release(id);
+      t.hold = late;
+    }
+    expect(t.world.now - start).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs / 2);
+    expect(t.seen.filter(s => s.from === "alice" && s.to === "bob" && s.frame.t === "group-want-no")).toEqual([]);
+  });
+
   it(`a file over ${GROUP_FILE_LIMITS.autoBytes / 1024 / 1024} MiB waits for a Download, then comes; a smaller one comes by itself`, async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
