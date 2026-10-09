@@ -1,3 +1,4 @@
+import { knownErrorParts } from "./errorText";
 import { formatFileSize } from "./format";
 import type { FileAction, FileHeld, FileTransferState, ServicesPlatform } from "./platform";
 import type { ChatFile } from "./types";
@@ -24,14 +25,29 @@ export function canRetryFile(file: ChatFile, transfer: FileTransferState | null,
 }
 
 /**
- * A transfer that ended without the file, in two words: declined, cancelled, or not sent / did not arrive. The
- * error's own words are the reason behind the bubble's ⓘ, never the status itself.
+ * A transfer that ended without the file, in a few words: declined, cancelled, why when the app knows its error (the
+ * contact's app refused it: no room, too many files waiting...), else not sent / did not arrive. An error's own
+ * English is the reason behind the bubble's ⓘ, never the status itself.
  */
 export function failedStatus(file: ChatFile, transfer: FileTransferState, tr: Translate = englishT): string {
   const error = transfer.error ?? "";
   if (/declin/i.test(error)) return tr("chat.file.declined");
   if (/cancel/i.test(error)) return tr("chat.file.cancelled");
+  const known = error ? knownErrorParts(error, tr) : null;
+  if (known) return known.title;
   return transfer.direction === "out" || (!transfer.direction && file.id.includes("-out-")) ? tr("chat.delivery.failed") : tr("chat.message.downloadFailed");
+}
+
+/**
+ * What a failed transfer's ⓘ says: the next step in the app's language when the app knows its error (its title is
+ * the status), else the error's own words, in English (`english`: laid out and read as such).
+ */
+export function failedReason(transfer: FileTransferState | null, tr: Translate = englishT): { text: string; english?: true } | undefined {
+  if (transfer?.state !== "failed" || !transfer.error) return undefined;
+  const known = knownErrorParts(transfer.error, tr);
+  if (!known) return { text: transfer.error, english: true };
+  if (known.next) return { text: known.next };
+  return known.detail ? { text: known.detail, english: true } : undefined;
 }
 
 /**

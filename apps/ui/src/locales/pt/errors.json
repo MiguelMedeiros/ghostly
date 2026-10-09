@@ -121,6 +121,16 @@
     "noRoomNext": "{{free}} livres.",
     "notVoice": "Essa gravação não pode ser enviada como mensagem de voz",
     "pasteTooLarge": "Isso é grande demais para colar. Envie com + → Documento.",
+    "refused": {
+      "damaged": "O arquivo chegou danificado",
+      "expired": "Não foi aceito a tempo",
+      "makeRoom": "Peça que liberem espaço e envie de novo.",
+      "noRoomFree": "{{free}} livres. Peça que liberem espaço e envie de novo.",
+      "other": "Seu contato não pôde receber este arquivo",
+      "sendAgain": "Envie de novo.",
+      "tooMany": "Seu contato tem arquivos demais esperando",
+      "tryLater": "Tente de novo mais tarde."
+    },
     "tooLargeForContact": "Grande demais para o app do contato",
     "tooLargeForContactNext": "Máx. {{max}} até ele atualizar o Ghostly.",
     "updatedPeerFirst": "Conecte-se a um peer atualizado primeiro",

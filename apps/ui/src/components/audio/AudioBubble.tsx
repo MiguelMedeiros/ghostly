@@ -5,7 +5,7 @@ import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
@@ -183,7 +183,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
   const status = (moving && !offered) || failed ? fileStatus(file, transfer, named, false, t) : null;
-  const reason = actionError || (failed ? transfer.error : undefined);
+  const reason = actionError ? { text: actionError } : failedReason(transfer, t);
   // One sent from here can be listened to while it goes, once it has been copied.
   const canPlay = playable && (ready || (sender === "me" && transfer?.stage !== "preparing" && !failed));
   const arriving = moving && !offered && !(sender === "me" && canPlay);
@@ -280,7 +280,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
-      {reason && why && <WhyText id={whyId} testId="audio-why-text">{reason}</WhyText>}
+      {reason && why && <WhyText id={whyId} testId="audio-why-text" english={reason.english}>{reason.text}</WhyText>}
       {problemText && (
         <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="audio-problem">
           {problemText}{" "}
