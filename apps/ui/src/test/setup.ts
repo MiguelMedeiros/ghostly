@@ -4,6 +4,11 @@ import { afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { resetGifSearch } from "../lib/gifSearch";
 import { resetUnseenSats } from "../hooks/useUnseenSats";
 import { fakeEngine, installFakeEngine } from "./fakeEngine";
+import { LANGUAGE_OPTIONS } from "../lib/settings";
+import { loadLocale } from "../locales";
+
+// Every language, as an app reading in it has loaded its own: a test renders in any of them at once.
+await Promise.all(LANGUAGE_OPTIONS.map(({ value }) => loadLocale(value)));
 
 // The web app's session sync (started by the sidebar) keeps localStorage and the peer in step on every state push:
 // it would call the fake engine behind the test's back for the rest of the file. A test about it can unmock it.

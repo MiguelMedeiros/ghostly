@@ -5,7 +5,7 @@ import { Sidebar } from "../../components/Sidebar";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { formatListTime, previewText } from "../../lib/chatList";
-import { locales as translations } from "../../locales";
+import { LOCALES as translations } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { isSessionPinned, saveSession } from "../../lib/storage";

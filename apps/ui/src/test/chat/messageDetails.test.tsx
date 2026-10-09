@@ -5,7 +5,7 @@ import { LONG_PRESS_MS, MessageBubble } from "../../components/MessageBubble";
 import { buildDetails, formatBytes, formatDuration, pathWords } from "../../lib/messageDetails";
 import type { ChatMessage } from "../../lib/types";
 import { servicesPlatform } from "../../lib/platform";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";

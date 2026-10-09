@@ -22,8 +22,7 @@ import { desktopOpener } from "./lib/apps/desktopOpener";
 import { nameInChat } from "./lib/apps/nameInChat";
 import { appWithContact } from "./lib/apps/running";
 import { loadSettings } from "./lib/settings";
-import { locales } from "./locales";
-import { translateWith } from "./locales/translate";
+import { loadLocale, translatorFor } from "./locales";
 import { servicesPlatform } from "./lib/platform";
 import { androidApp } from "./lib/touchOnly";
 import { followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares } from "./desktop/android";
@@ -42,6 +41,8 @@ async function boot() {
   // A profile a handoff moved whose pointer was lost is pointed at its state again before anything opens storage. Each
   // profile gets its own sessions, database and peer (they share the WebView's storage area), and its language on <html>.
   profile = await openProfile(recoverHandoffPointer);
+  // Its words too: only English is in the entry, every other language is loaded when a profile reads in it.
+  await loadLocale(loadSettings().language);
 
   const root = createRoot(document.getElementById("root")!);
   await becomeThePeer(`ghostly-peer-${profile}`, () =>
@@ -68,10 +69,7 @@ async function boot() {
   }
   // Mini-apps (WISP 1200) open in windows of their own, each with its broker here (lib/apps/desktopOpener.ts).
   // Its window is named after the app and the contact ("Chess with Ana"), in the profile's language.
-  const windowTitle = (title: string, linkId: string | null) => {
-    const language = loadSettings().language;
-    return appWithContact(title, linkId, translateWith(locales[language] || locales.en, locales[language] ? language : "en"));
-  };
+  const windowTitle = (title: string, linkId: string | null) => appWithContact(title, linkId, translatorFor(loadSettings().language));
   setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
