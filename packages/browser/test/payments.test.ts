@@ -344,7 +344,7 @@ describe("paying on Ark or USDT without a request", () => {
   it("the payer takes a request as the answer only to an ask it made: same chat, way of paying and amount", async () => {
     const { d, sent } = desk();
     await d.start();
-    const { askId } = await d.ask({ linkId: "l1", amount: 700, method: "arkade", timestamp: 1 });
+    const { askId } = await d.ask({ linkId: "l1", amount: 700, method: "arkade", timestamp: 1, network: "testnet" });
     expect(sent[0]).toMatchObject({ kind: "ask", frame: { id: askId, amount: { value: "700", asset: "sat" }, method: "arkade" } });
     const request = (id: string, value: string, ask?: string) => d.onPaymentRequest("l1", { id, timestamp: 2, amount: { value, asset: "sat" }, endpoints: [[ENDPOINT.arkade, JSON.stringify(arkTarget)]], ask });
     await request("req_forged", "700", "ask_notmine");
