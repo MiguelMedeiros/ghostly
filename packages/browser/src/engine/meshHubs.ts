@@ -108,6 +108,8 @@ interface HubLive {
   reactions: Map<string, GroupReactedFrame>;
   /** As a hub: the edges it keeps (every other member), held for it in the budget of connections while they open. */
   need: number;
+  /** Members that said on their own edge that they leave (`group-bye`): no hub of mine, whatever the beacon says, until the commit takes them out. */
+  departed: Set<string>;
 }
 
 /**
@@ -140,7 +142,7 @@ export class MeshHubs {
       const clocks = new HubClocks(() => live!.me, HUB_CLOCK_READ_GAP_MS);
       this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
-      seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0 }));
+      seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0, departed: new Set() }));
     }
     return live;
   }
@@ -193,9 +195,37 @@ export class MeshHubs {
     const live = this.live.get(groupId);
     if (!live || !this.large(session)) return [];
     const policy = session.hubPolicy, inRoster = (key: string) => rosterHas(session.roster, key);
-    const out = new Set(meshHubs(live.beacon, session.myKey, policy, inRoster, now).map(h => h.key));
-    for (const [key, at] of live.seenHubs) if (now - at <= this.timings.graceMs && key !== session.myKey && inRoster(key) && !policy.no.includes(key)) out.add(key);
+    const out = new Set(this.listed(live, session, now).map(h => h.key));
+    for (const [key, at] of live.seenHubs) if (now - at <= this.timings.graceMs && key !== session.myKey && inRoster(key) && !policy.no.includes(key) && !live.departed.has(key)) out.add(key);
     return [...out];
+  }
+
+  /** The beacon's hubs a member counts on (`meshHubs`), but those that said they leave. */
+  private listed(live: HubLive, session: GroupSession, now: number): Hub[] {
+    return meshHubs(live.beacon, session.myKey, session.hubPolicy, key => rosterHas(session.roster, key), now).filter(h => !live.departed.has(h.key));
+  }
+
+  /**
+   * A member said on its own edge that it leaves: if it was a hub, it is none from now on, rather than until the beacon
+   * forgets it and its grace runs out (the commit that takes it out may have no other way here). True when a hub went.
+   */
+  departs(groupId: string, key: string): boolean {
+    const live = this.live.get(groupId);
+    if (!live || live.departed.has(key)) return false;
+    live.departed.add(key);
+    const was = live.seenHubs.delete(key) || live.myHubs.includes(key) || live.beacon.some(h => h.key === key);
+    live.reach.delete(key);
+    live.hubsUp.delete(key);
+    live.myHubs = live.myHubs.filter(k => k !== key);
+    return was;
+  }
+
+  /** As a hub that leaves the group: out of the beacon on my way, while the session can still write it. */
+  async stepDown(groupId: string, session: GroupSession, now: number): Promise<void> {
+    const live = this.live.get(groupId);
+    if (!live?.hub) return;
+    live.hub = false; live.members.clear();
+    await this.publish(groupId, session, live, now, false).catch(() => {});
   }
 
   /** The group runs on hubs: it is large, and I am a hub or know of one. Else it is the full mesh. */
@@ -295,7 +325,7 @@ export class MeshHubs {
     const may = mayBeHub(me, policy, inRoster, this.staysOnline);
     const readEvery = live.hub || may ? this.timings.beaconEveryMs : this.timings.beaconReadMs;
     if (!live.lastRead || now - live.lastRead >= readEvery) await this.read(groupId, session, live, now);
-    const others = meshHubs(live.beacon, me, policy, inRoster, now);
+    const others = this.listed(live, session, now);
     // A hub keeps an edge with every member: on an app with a budget of connections (a Mac's WKWebView opens about 46
     // in all), only while that fits beside its other groups. Pinned or not: past the budget, a call would not connect.
     const fits = this.fits(groupId, session);
@@ -332,8 +362,10 @@ export class MeshHubs {
   }
 
   private noteHubs(live: HubLive, session: GroupSession, now: number): void {
-    for (const h of meshHubs(live.beacon, session.myKey, session.hubPolicy, key => rosterHas(session.roster, key), now)) live.seenHubs.set(h.key, now);
+    for (const h of this.listed(live, session, now)) live.seenHubs.set(h.key, now);
     for (const [key, at] of live.seenHubs) if (now - at > this.timings.graceMs || !rosterHas(session.roster, key)) live.seenHubs.delete(key);
+    // Out of the roster now: someone who leaves and is let in again later may be a hub again.
+    for (const key of live.departed) if (!rosterHas(session.roster, key)) live.departed.delete(key);
   }
 
   /** My entry in the beacon (or none, stepping down), merged with the other fresh hubs I do not drop. */
@@ -403,7 +435,7 @@ export class MeshHubs {
       live.hubWaits.set(key, since);
       if (now - since > this.timings.hubWaitMs) { live.avoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); }
     }
-    const fresh = meshHubs(live.beacon, me, session.hubPolicy, key => rosterHas(session.roster, key), now);
+    const fresh = this.listed(live, session, now);
     // Hubs only seen a moment ago are candidates too (a reading missed them), after the fresh ones.
     const candidates: Hub[] = [...fresh, ...[...hubs].filter(key => !fresh.some(h => h.key === key)).map(key => ({ key, ts: 0, load: 0 }))];
     const kept = live.myHubs.filter(key => hubs.has(key) && !live.avoided.has(key));
@@ -494,7 +526,7 @@ export class MeshHubs {
     const live = this.get(groupId, now);
     live.reach.set(from, new Set(frame.k.filter((key): key is string => typeof key === "string" && rosterHas(session.roster, key))));
     // Only hubs say whom they reach: one that does is seen as a hub, as a reading of the beacon would (not one the admin excluded).
-    if (!session.hubPolicy.no.includes(from) && from !== session.myKey) live.seenHubs.set(from, now);
+    if (!session.hubPolicy.no.includes(from) && from !== session.myKey && !live.departed.has(from)) live.seenHubs.set(from, now);
     if (!Array.isArray(frame.l) || frame.l.length > session.roster.length) return false;
     const legacy = new Set(group.legacy ?? []);
     let changed = false;
