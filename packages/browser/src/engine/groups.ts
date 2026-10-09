@@ -1890,8 +1890,8 @@ export class Groups {
   }
 
   /** `at`: when the admin signed the statement (the line's time, as a commit's is its line's). */
-  private async metaChanged(groupId: string, session: GroupSession, by: string, change: GroupMetaChange, at?: number): Promise<void> {
-    const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
+  private async metaChanged(groupId: string, session: GroupSession, by: string | undefined, change: GroupMetaChange, at?: number): Promise<void> {
+    const name = by === undefined ? undefined : by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
     const when = at === undefined ? Date.now() : receivedTimestamp(at);
     for (const line of metaLines(name, change, session.name)) await this.event(groupId, line.event, line.text, when, session.epoch, by);
     this.host.emit();
