@@ -123,6 +123,7 @@
     "askAgain": "再次请求",
     "askAgainDamagedHint": "再次向群组请求。损坏的数据已删除。",
     "askAgainHint": "向联系人请求剩余部分。已收到的会保留。",
+    "askGroupAgainHint": "再次向群成员请求此文件，包括副本已损坏的成员。",
     "askingThem": "等待 {{name}} 接受 · {{size}}",
     "askingYou": "{{size}} · 等待你的答复",
     "busyDone": "忙碌中，稍后重试 · 已完成 {{done}}",

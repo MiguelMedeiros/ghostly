@@ -123,6 +123,7 @@
     "askAgain": "Pedir de novo",
     "askAgainDamagedHint": "Pede ao grupo de novo. Os dados danificados foram apagados.",
     "askAgainHint": "Pede o restante ao seu contato. O que chegou fica.",
+    "askGroupAgainHint": "Pede de novo aos membros do grupo, também àqueles cuja cópia chegou danificada.",
     "askingThem": "Aguardando {{name}} aceitar · {{size}}",
     "askingYou": "{{size}} · aguardando sua resposta",
     "busyDone": "Ocupado, tentando de novo em breve · {{done}} concluído",

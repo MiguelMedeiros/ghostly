@@ -123,6 +123,7 @@
     "askAgain": "Ask again",
     "askAgainDamagedHint": "Asks the group for it again. The damaged bytes are gone.",
     "askAgainHint": "Asks your contact for the rest. What arrived stays.",
+    "askGroupAgainHint": "Asks the group's members for it again, those whose copy came damaged too.",
     "askingThem": "Waiting for {{name}} to accept · {{size}}",
     "askingYou": "{{size}} · waiting for your answer",
     "busyDone": "Busy, trying again soon · {{done}} done",
