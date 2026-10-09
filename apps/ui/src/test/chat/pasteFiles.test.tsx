@@ -232,6 +232,20 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     expect(huge.read).not.toHaveBeenCalled();
   });
 
+  it("files too large together are not read, though each alone would fit", async () => {
+    const part = (name: string): ClipboardFile => ({ name, size: Math.ceil(PLATFORM_PASTE_MAX / 3) + 1, mime: null, read: vi.fn(), done: vi.fn() });
+    const parts = [part("one.mkv"), part("two.mkv"), part("three.mkv")];
+    fakeEngine.readClipboardFiles = vi.fn(async () => parts);
+    composer();
+    paste(field(), {});
+    expect(await screen.findByRole("alert")).toHaveTextContent("That is too large to paste. Send it with + → Document.");
+    for (const file of parts) {
+      expect(file.read).not.toHaveBeenCalled();
+      expect(file.done).toHaveBeenCalledTimes(1);
+    }
+    expect(sheet()).toBeNull();
+  });
+
   it("copied files the platform could not read say so, never silence", async () => {
     // WebKitGTK shows a file manager's copy as types ["text/uri-list"], no files and no text.
     fakeEngine.readClipboardFiles = vi.fn(async () => []);

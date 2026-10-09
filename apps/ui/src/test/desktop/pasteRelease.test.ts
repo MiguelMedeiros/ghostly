@@ -79,6 +79,23 @@ describe("a paste the Desktop app read lets go of its bytes in Rust", () => {
     expect(called).not.toHaveBeenCalledWith("read_pasted_bytes", expect.anything());
   });
 
+  it("a paste whose files are too large together is released unread, each of them under the limit or not", async () => {
+    const third = Math.ceil(PLATFORM_PASTE_MAX / 3) + 1;
+    shelf(["a", "b", "c"].map((token) => ({ token, name: `${token}.mkv`, size: third, mime: null })), {});
+    await expect(readPlatformFiles(await read(), new Date(), true)).rejects.toThrow("That is too large to paste. Send it with + → Document.");
+    expect([...released()].sort()).toEqual(["a", "b", "c"]);
+    expect(called).not.toHaveBeenCalledWith("read_pasted_bytes", expect.anything());
+  });
+
+  it("files that fit together are read, up to the limit itself", async () => {
+    // Sizes as Rust says them; the bytes here are a few, which is all a read hands back.
+    shelf(
+      [{ token: "a", name: "a.bin", size: PLATFORM_PASTE_MAX - 2, mime: null }, { token: "b", name: "b.bin", size: 2, mime: null }],
+      { a: [], b: [1, 2] },
+    );
+    expect((await readPlatformFiles(await read(), new Date(), true)).map((file) => file.name)).toEqual(["a.bin", "b.bin"]);
+  });
+
   it("a release Rust refuses does not fail the paste", async () => {
     shelf([{ token: "picture", name: null, size: 2, mime: "image/png" }], { picture: [1, 2] });
     const answer = called.getMockImplementation()!;
