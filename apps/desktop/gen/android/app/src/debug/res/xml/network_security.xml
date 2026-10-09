@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A debug build reaches the dev server and the e2e's loopback relays over http:// and ws://. The released app's file
+     is src/main's. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
