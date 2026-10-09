@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { formatPaymentAmount, parsePaymentAmount, type Bolt11Invoice, type PaymentReview as Review, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
@@ -18,6 +18,7 @@ import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemText, type Problem } from "../lib/problemText";
+import { qrFits } from "../lib/qrFits";
 import { Notice } from "./ui/Notice";
 
 const button =
@@ -82,6 +83,8 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
 }) {
   const { t } = useI18n();
   const [showQr, setShowQr] = useState(false);
+  // More than one QR code holds: no QR button, said in words.
+  const fits = useMemo(() => qrFits(qr), [qr]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId} data-network={network ?? "unknown"}>
       <div className="flex flex-wrap items-center justify-between gap-1.5">
@@ -93,14 +96,15 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
         <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
       <p className="font-mono text-[11.5px] leading-snug m-0 mt-1.5 break-all text-text-primary/80" data-testid="money-detail">{detail}</p>
-      {showQr && (
+      {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
+      {fits && showQr && (
         <button onClick={() => setShowQr(false)} className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none" title={t("payments.invoice.hideQr")}>
           <QRCodeSVG value={qr} size={184} bgColor="#ffffff" fgColor="#0b0f1a" level="L" className="block max-w-full h-auto" />
         </button>
       )}
       <div className="flex flex-wrap gap-1.5 mt-2">
         {children}
-        <button className={quiet} onClick={() => setShowQr(!showQr)}>{showQr ? t("payments.formats.hideQr") : "QR"}</button>
+        {fits && <button className={quiet} onClick={() => setShowQr(!showQr)}>{showQr ? t("payments.formats.hideQr") : "QR"}</button>}
       </div>
     </div>
   );

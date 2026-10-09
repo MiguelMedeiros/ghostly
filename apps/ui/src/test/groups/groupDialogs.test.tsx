@@ -250,7 +250,8 @@ describe("GroupLinkPanel", () => {
   it("creates the group's link", async () => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin()} />);
     engine.on("enableGroupLink", () => ({ link: entryLink }));
-    expect(screen.getByText(/The link is off: nobody can join with it/)).toBeInTheDocument();
+    // Turning it on makes a new link: the words do not promise the old one works again.
+    expect(screen.getByTestId("group-link")).toHaveTextContent("The link is off: nobody can join with it, and the link shared before will not work again. Turning it on makes a new link to share.");
     await user.click(screen.getByRole("button", { name: "Turn on the link" }));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id }]);
   });
@@ -288,6 +289,7 @@ describe("GroupLinkPanel", () => {
   it("replaces the link, or turns it off", async () => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
     engine.on("enableGroupLink", () => ({ link: entryLink })).on("disableGroupLink", () => undefined);
+    expect(screen.getByTestId("group-link-disable")).toHaveAttribute("title", "The link stops working. Turning it on makes a new link to share again.");
     await user.click(screen.getByTestId("group-link-reset"));
     await user.click(screen.getByTestId("group-link-disable"));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id, reset: true }]);

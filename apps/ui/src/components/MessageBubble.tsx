@@ -21,9 +21,11 @@ import { CardTime, StatusCardView } from "./chat/StatusCard";
 import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
-import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
+import { downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile, fileHeld } from "../lib/fileStatus";
-import { rawError, SAVE_REFUSED } from "../lib/errorText";
+import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
@@ -444,6 +446,8 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
   const { t } = useI18n();
   const { platform, transfer, restoring } = useTransfer(file.id);
   const [problem, setProblem] = useState<"missing" | "left-out" | "unconverted" | "unsaved" | null>(null);
+  // The system's own words for a refused save, in the row's hover text.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -469,12 +473,19 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
         const held = await fileHeld(platform, file.id, false);
         if (mounted.current) setProblem(held === "left-out" ? "left-out" : "missing");
       })
-      // Refused where it was to be saved (Android's picker): it can be saved again, somewhere else.
-      .catch((error: unknown) => { if (mounted.current) setProblem(SAVE_REFUSED.test(rawError(error)) ? "unsaved" : format === "mp3" ? "unconverted" : "missing"); })
+      // Bytes gone resolve `missing`; a rejection is the save refused where it was to be (Android's picker, a folder the
+      // desktop cannot write to, a full disk): it can be saved again, somewhere else.
+      .catch((error: unknown) => {
+        if (!mounted.current) return;
+        const unconverted = error instanceof Unconverted;
+        setProblem(unconverted ? "unconverted" : "unsaved");
+        setRefusal(unconverted || SAVE_REFUSED.test(rawError(error)) ? null : rawError(error));
+      })
       .finally(() => { if (mounted.current) setBusy(false); });
   };
   return (
-    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved")} hint={reason} title={reason ?? name}
+    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved")} hint={reason}
+      title={reason && refusal ? `${reason}\n${refusal}` : reason ?? name}
       data={{ "data-download-state": problem ?? (busy ? "busy" : state) }} icon={downloadIcon}>
       {t(format === "mp3" ? "chat.message.downloadMp3" : "chat.message.download")}
     </MenuItem>
@@ -738,20 +749,36 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
   const live = waitsForLive(isMe && !fileFailed ? message : undefined, useDhtOnly(peerPubKey));
-  /** A message that was not sent, sent again: its red mark (which says a refusal again), or its ⋮. */
+  /** Why a Send again or a Cancel sending was refused (no storage to hold it, a file gone): shown while the mark it came from stays. */
+  const [refused, setRefused] = useState<{ problem: Problem; on: typeof shown } | null>(null);
+  const refuse = (on: typeof shown) => (error: unknown) => setRefused({ problem: problemText(error, t), on });
+  /**
+   * A message that was not sent, sent again: its red mark, or its ⋮. It rejects with a full storage of the contact's,
+   * which the red mark says itself (again, on a refused tap); any other refusal is said under the message.
+   */
   const retry = async () => {
-    if (fileFailed) { await platform!.retryFile!(message.file!.id).catch(() => {}); return; }
+    setRefused(null);
+    if (fileFailed) { await platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
-    if (link) await engine.call("retryMessage", { linkId: link.id, messageId: message.id });
+    if (!link) return;
+    await engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch((error: unknown) => {
+      if (holdFull(error)) throw error;
+      refuse(shown)(error);
+    });
   };
   /** What waits to be sent, dropped: it never left, so the chat's own delete (the list forgets it too), with no confirmation. */
   const cancelSending = () => {
     playCue("deleted", { chat });
+    setRefused(null);
     if (onDelete) { onDelete(); return; }
     const link = engine.linkByPeer(peerPubKey);
-    if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
+    if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
-  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: () => void retry().catch(() => {}) } : {};
+  const refusal = isMe && refused && refused.on === shown && (
+    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
+  );
+  // The ⋮ has no mark to say a full storage on: it is said under the message, as any other refusal.
+  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: () => void retry().catch(refuse(shown)) } : {};
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
@@ -914,6 +941,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               ? <AppCardView card={appCard} mine={isMe} contact={contactName || peerNick || t("common.anonymous")} linkId={linkId!} peerKey={peerPubKey} time={time} marks={marks} />
               : <StatusCardView card={card as ShownCard} time={time} marks={marks} end={message.edit?.at ?? message.timestamp} />}
           </div>
+          {refusal}
           <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
         </div>
         {!isMe && menu}
@@ -1085,6 +1113,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         )}
       </div>
       {buttonsView && <MessageButtons view={buttonsView} messageId={message.id} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)} />}
+      {refusal}
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}

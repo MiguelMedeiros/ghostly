@@ -274,14 +274,18 @@
       "testnet": "أموال تجريبية: ليست لديك محفظة Lightning على Testnet للدفع منها"
     },
     "onchainBitcoin": "Bitcoin على السلسلة",
+    "onlySat": "لا يمكن هنا استرداد إلا ecash بوحدة sat.",
     "openTitle": "افتحها في محفظة Lightning على هذا الجهاز",
     "openWallet": "فتح المحفظة",
+    "otherUnitRequest": "يطلب ecash بوحدة {{unit}}",
+    "otherUnitToken": "رمز بوحدة {{unit}}",
     "paid": "مدفوعة ✓",
     "pay": "ادفع",
     "payWithFee": "ادفع {{amount}} + رسوم حتى {{fee}}",
     "paying": "جارٍ الدفع…",
     "paysThrough": "يُدفع عبر {{domain}}",
     "pendingAtMint": "الدفعة قيد المعالجة لدى دار السك…",
+    "qrTooLong": "أطول من أن يتسع له رمز QR: انسخه بدلًا من ذلك.",
     "redeem": "استرداد",
     "redeemed": "تم الاسترداد ✓",
     "redeeming": "جارٍ الاسترداد…"
