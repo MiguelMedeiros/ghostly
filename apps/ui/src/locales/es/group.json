@@ -146,6 +146,10 @@
     "showQr": "Mostrar QR",
     "title": "Enlace del grupo"
   },
+  "makeAdmin": {
+    "body": "Dejarás de ser el admin. Solo {{name}} podrá renombrar el grupo, cambiar su foto y su enlace, invitar o eliminar miembros, y devolverte el rol.",
+    "title": "¿Hacer a {{name}} el admin?"
+  },
   "member": {
     "connected": "Conectado · {{transport}}",
     "connecting": "Conectando…",
@@ -167,10 +171,11 @@
     "admin": "admin",
     "changePicture": "Cambiar foto",
     "epoch": "época {{epoch}}",
+    "fullInvited": "El grupo está lleno ({{max}} de {{max}}), contando invitaciones aún sin respuesta ({{invited}}). No se puede invitar a nadie más hasta que alguien salga.",
     "invite": "Invitar a un contacto",
     "inviteAction": "Invitar",
     "invited": "Invitado…",
-    "makeAdmin": "Hacer admin",
+    "makeAdmin": "Ceder admin",
     "missing": "{{count}} faltan",
     "missingHint": "Mensajes de esta época que nadie pudo recuperar",
     "needsBothHint": "Los grupos necesitan ambas apps conectadas y actualizadas",

@@ -151,6 +151,19 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.seen.filter(s => s.frame.t === "pf-offer").every(s => s.from === "alice" && s.frame.gm === messageId)).toBe(true);
   });
 
+  it("the pace and not being in the group are known before the bytes are copied in, as the announcement answers them", async () => {
+    limits.announcePerMinute = 1;
+    const t = new FilesWorld();
+    const { peers: [alice], id } = await t.mesh(["alice", "bob"]);
+    expect(alice.groups.fileCheck(id)).toEqual({ error: null });
+    await t.send(alice, id, pattern(1_000));
+    const paced = "You sent many files to this group just now. Wait a minute.";
+    expect(alice.groups.fileCheck(id)).toEqual({ error: paced });
+    const fileId = groupFileId(id, "out");
+    expect(await alice.groups.sendFile(id, "again", { name: "a.bin", mime: "application/octet-stream", size: 1, d: sha(new Uint8Array(1)) }, fileId)).toEqual({ error: paced });
+    expect(alice.groups.fileCheck("no-such-group")).toEqual({ error: "You are not in this group yet" });
+  });
+
   it("a caption is the text under it; a voice message is fetched whatever its size", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
@@ -211,6 +224,49 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     await t.world.until(() => t.done(bob, id, messageId), 60_000);
     expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
     expect(damaged()).toBe(1);
+  });
+
+  it("a file that cannot come says why: its only holder busy, or its bytes damaged (with Ask again)", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    // Alice's edge is up and she answers: busy, serving turned off.
+    t.files.get(alice)!.settings.serveFiles = false;
+    const one = await t.send(alice, id, pattern(50_000, 1));
+    await t.world.until(() => t.seen.some(s => s.from === "alice" && s.to === "bob" && s.frame.t === "group-want-no"), 60_000);
+    await t.world.run(1_000);
+    expect(t.got(bob, id, one.messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "busy" });
+    expect(t.got(bob, id, one.messageId).transfer!.stalled).toBeUndefined();
+    // Her copy goes bad: what she serves fails the author's digest.
+    t.files.get(alice)!.settings.serveFiles = true;
+    t.files.get(alice)!.store.corrupt = true;
+    const two = await t.send(alice, id, pattern(50_000, 2));
+    await t.world.until(() => t.seen.some(s => s.from === "bob" && s.frame.t === "pf-refuse" && s.frame.why === "damaged"), 60_000);
+    await t.world.run(1_000);
+    // Nobody else holds it: it is fetched no more, and its person can ask again.
+    expect(t.got(bob, id, two.messageId).transfer).toMatchObject({ state: "failed", retry: true, error: expect.stringContaining("damaged") });
+    // Nobody else in reach: the line for that, not a stale cause.
+    alice.online = false;
+    await t.world.run(GROUP_FILE_LIMITS.wantWaitMs + 2_000);
+    expect(t.got(bob, id, one.messageId).transfer).toMatchObject({ stage: "waiting", wait: "nobody" });
+  });
+
+  it("a damaged copy, its other holder out of reach, waits as damaged with Ask again, then as nobody having it", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const { messageId } = await t.send(alice, id, pattern(150_000, 9));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    t.files.get(alice)!.store.corrupt = true;
+    // Bob's copy is known here, and his offer of it never comes.
+    t.hold = (from, to, frame) => from === bob && to === carol && frame.t === "pf-offer";
+    t.world.reopen(carol);
+    await t.world.until(() => t.seen.some(s => s.from === "carol" && s.to === "alice" && s.frame.t === "pf-refuse" && s.frame.why === "damaged"), 5 * 60_000);
+    await t.world.until(() => t.got(carol, id, messageId).transfer?.wait === "damaged", GROUP_FILE_LIMITS.wantWaitMs + 2_000);
+    expect(t.got(carol, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "damaged", stalled: true });
+    bob.online = false;
+    await t.world.run(2 * GROUP_FILE_LIMITS.wantWaitMs + 2_000);
+    expect(t.got(carol, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "nobody" });
   });
 
   it("a holder that stalls mid-way is left, and the next holder goes on from the bytes stored here", async () => {

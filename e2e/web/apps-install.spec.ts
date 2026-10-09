@@ -178,3 +178,24 @@ test("in Safari the install screen's two ⓘ each open their own line, even when
     await expect(screen.getByTestId(`${line}-text`)).toHaveCount(0);
   }
 });
+
+test("on a phone the install screen and the app's screen show its whole title, over two lines if need be", { tag: ["@feature:apps.page"] }, async ({ peer }) => {
+  // Titles may be 40 characters long; the heading was cut to one line at 375 px ("Chess Tournament Organizer fo…") on the
+  // one screen where a person decides to install it.
+  const title = "Chess Tournament Organizer for Friends!";
+  const store = await testStore({ title });
+  const ana = await peer("ana-phone", { mobile: true, viewport: { width: 375, height: 740 } });
+  await serveStore(ana.context, store);
+  await ana.page.goto("/#/apps");
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(APP_URL);
+  await ana.page.getByTestId("apps-add-check").click();
+  const whole = (screen: string) => ana.page.getByTestId(screen).getByRole("heading", { name: title })
+    .evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= innerWidth);
+  await expect(ana.page.getByTestId("app-install-confirm")).toBeVisible();
+  expect(await whole("app-install")).toBe(true);
+  await ana.page.getByTestId("app-install-confirm").click();
+  await ana.page.getByTestId("installed-app").getByRole("button", { name: `${title}: details` }).click();
+  await expect(ana.page.getByTestId("app-details")).toBeVisible();
+  expect(await whole("app-details")).toBe(true);
+});

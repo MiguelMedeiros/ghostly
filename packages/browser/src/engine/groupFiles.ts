@@ -186,6 +186,8 @@ interface Want {
   wire?: string;
   moved: number;
   movedAt: number;
+  /** What the last holder asked in this round answered, when it was not the file: shown while the want waits. */
+  why?: "busy" | "damaged";
 }
 
 /** One edge's files/3, both ways. */
@@ -203,8 +205,12 @@ interface Edge {
   haveAt: number;
 }
 
-/** Why a want waits, as the person reads it. */
-const NOBODY_CONNECTED = "Nobody you are connected to has this file yet";
+/** Why a want waits, as the person reads it (the app shows its own words for each `wait`). */
+const WAITING_NOTES = {
+  nobody: "Nobody you are connected to has this file yet",
+  busy: "Its holders are busy; asking again soon",
+  damaged: "It arrived damaged; ask again",
+} as const;
 /** Why a want stopped: every holder served bytes that are not the author's file. */
 const DAMAGED = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
 
@@ -321,7 +327,7 @@ export class GroupFileDesk {
     }
     const want = this.wants.get(kept.id);
     if (!want) this.wants.set(kept.id, this.newWant());
-    else if (!want.wire) want.tried.clear();
+    else if (!want.wire) { want.tried.clear(); want.why = undefined; }
     this.ask(kept);
   }
 
@@ -396,6 +402,7 @@ export class GroupFileDesk {
       }
       edge.taking.set(frame.id, kept.id);
       want.wire = frame.id;
+      want.why = undefined;
       want.movedAt = this.deps.now();
     }
     return edge.files.handle(frame);
@@ -416,7 +423,7 @@ export class GroupFileDesk {
       }
       if (want.holder) want.tried.add(want.holder);
       // Everyone asked in turn: a new round, as holders come and go.
-      else want.tried.clear();
+      else { want.tried.clear(); want.why = undefined; }
       this.ask(kept);
     }
     for (const edge of this.edgesById.values()) {
@@ -469,7 +476,10 @@ export class GroupFileDesk {
       return;
     }
     Object.assign(want, { holder: undefined, linkId: undefined, at: this.deps.now() });
-    this.show(kept, { state: "transferring", stage: "waiting", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in", note: NOBODY_CONNECTED });
+    // Why it waits: a holder busy, bytes that came damaged (its person can ask again), or nobody in reach has it.
+    const wait = want.why ?? "nobody";
+    this.show(kept, { state: "transferring", stage: "waiting", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in",
+      wait, note: WAITING_NOTES[wait], ...(wait === "damaged" && { stalled: true }) });
   }
 
   /** No holder serves the author's bytes: the want stops, and stays stopped after a restart, until Download. */
@@ -486,6 +496,7 @@ export class GroupFileDesk {
     const want = kept && this.wants.get(kept.id);
     if (!kept || !want || want.linkId !== linkId || want.wire) return;
     if (why === "gone") kept.holders = kept.holders.filter(key => key !== peer);
+    if (why === "busy") want.why = "busy";
     want.tried.add(peer);
     want.holder = want.linkId = undefined;
     this.ask(kept);
@@ -625,7 +636,12 @@ export class GroupFileDesk {
       flush: () => writer.flush(),
       // Against the author's digest, read back from storage, not the holder's word: a holder can withhold a file, never
       // serve another one.
-      verify: async () => { damaged = (await writer.digest()) !== kept.meta.d; return !damaged; },
+      verify: async () => {
+        damaged = (await writer.digest()) !== kept.meta.d;
+        const want = this.wants.get(kept.id);
+        if (damaged && want) want.why = "damaged";
+        return !damaged;
+      },
       // Only damaged bytes go. Left with a holder that stalled or stopped, what came is kept for the next holder.
       discard: () => {
         // Whole from this holder and damaged: its bytes are not the author's, and it is not asked for them again.

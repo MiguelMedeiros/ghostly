@@ -156,6 +156,10 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     // line does, in the shape the engine writes. Said again in the interface's language with that name.
     const written = message.member ? writtenEvent(message.event, text, t) : undefined;
     if (written) return written;
+    // My own removal or fork: the core's reason ("Member … holds a different membership history for epoch 4. …") is
+    // English, and its detail is the notice's (behind its ⓘ). The line says what happened, from its kind.
+    if (!message.member && message.event === "removed") return t("group.event.removed");
+    if (!message.member && message.event === "forked") return t("group.event.forked");
     const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }

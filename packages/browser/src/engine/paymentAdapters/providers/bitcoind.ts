@@ -1,5 +1,5 @@
 import { base64, hex } from "@scure/base";
-import { Transaction } from "@scure/btc-signer";
+import { Address, OutScript, Transaction } from "@scure/btc-signer";
 import type { WalletMode } from "../../../shared/mints";
 import type { OnchainBalance, OnchainInfo, OnchainPrepared, OnchainProvider, OnchainProviderDescriptor, OnchainSendRequest, OnchainTx, OnchainTxStatus } from "./onchain";
 import { NothingSpentError, networkMode, type ProviderHost, type ProviderNetwork, type ProviderSettings } from "./types";
@@ -168,11 +168,12 @@ export class BitcoindOnchain implements OnchainProvider {
   private check(tx: Transaction, request: OnchainSendRequest, funded: Outpoint[], feeRate: number, network: ProviderNetwork): OnchainPrepared {
     const same = (a: Outpoint[], b: Outpoint[]) => a.length === b.length && a.every((o, i) => o.txid === b[i].txid && o.vout === b[i].vout);
     if (!same(this.outpoints(tx), funded)) throw new Error("The node signed other coins than it funded the payment with");
+    // Scripts, not address strings: a bech32 address is the same one in upper case (the QR form of a bitcoin: link).
+    const script = (() => { try { return hex.encode(OutScript.encode(Address(BTC_NETWORKS[network]).decode(request.address))); } catch { return undefined; } })();
     let paid = 0;
     for (let i = 0; i < tx.outputsLength; i++) {
       const output = tx.getOutput(i);
-      const address = (() => { try { return tx.getOutputAddress(i, BTC_NETWORKS[network]); } catch { return undefined; } })();
-      if (address === request.address) paid += Number(output.amount ?? 0n);
+      if (script !== undefined && output.script && hex.encode(output.script) === script) paid += Number(output.amount ?? 0n);
     }
     if (paid !== request.amount) throw new Error("The node built a transaction that does not pay the address and amount asked for");
     const fee = Number(tx.fee);

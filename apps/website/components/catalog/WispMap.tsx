@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { Icon } from "@/components/site/icons";
+import { IntentLink } from "@/components/site/IntentLink";
 import { GROUPS, listedWisps, wisps, type Wisp } from "@/lib/wisps";
 import { LAYERS, type GroupId } from "@/lib/wisp-groups";
 import { DIMS } from "@/lib/composition";
@@ -88,7 +88,7 @@ export function WispMap({ t }: { t: CatalogCopy }) {
                             {legacyIds(w).map((old) => (
                               <span key={old} id={`wisp-${old}`} className="wmap-anchor" />
                             ))}
-                            <Link
+                            <IntentLink
                               href={`/wisps/${w.slug}`}
                               className="wmap-tile"
                               data-level={w.level ?? "none"}
@@ -98,7 +98,7 @@ export function WispMap({ t }: { t: CatalogCopy }) {
                               <span className="wmap-num mono">{w.number}</span>
                               <span className="wmap-name">{short(w.name)}</span>
                               <span className="sr-only">{w.level ? levels[w.level] : t.process}</span>
-                            </Link>
+                            </IntentLink>
                           </li>
                         ))}
                       </ul>

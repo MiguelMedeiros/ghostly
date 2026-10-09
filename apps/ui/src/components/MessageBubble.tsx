@@ -930,14 +930,18 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // A message with buttons and no view from the chat (a chat that takes no replies): shown, none of them answers.
   const buttonsView = message.card?.kind === "buttons" ? buttons ?? { card: message.card, open: false } : undefined;
 
+  // The float and its gap follow the text beside them (the body's `dir="auto"`), what is inside the app's: on one box,
+  // an Arabic message in the English app floated the time to its left with the gap on the far side, the time touching it.
   const timestampEl = (
-    <span dir={dir} className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
-      {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
-      {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
-      <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
-        {time}
+    <span className="msg-meta flex float-end relative top-[4px] ms-[8px] select-none">
+      <span dir={dir} className="inline-flex items-center gap-[3px]">
+        {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
+        {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+        <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
+          {time}
+        </span>
+        {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} />}
       </span>
-      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} />}
     </span>
   );
 

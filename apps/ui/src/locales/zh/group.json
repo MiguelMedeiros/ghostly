@@ -146,6 +146,10 @@
     "showQr": "显示二维码",
     "title": "群组链接"
   },
+  "makeAdmin": {
+    "body": "你将不再是管理员。之后只有 {{name}} 能重命名群组、更换头像和链接、邀请或移除成员，以及把管理员身份交还给你。",
+    "title": "让 {{name}} 成为管理员？"
+  },
   "member": {
     "connected": "已连接 · {{transport}}",
     "connecting": "正在连接…",
@@ -167,10 +171,11 @@
     "admin": "管理员",
     "changePicture": "更换头像",
     "epoch": "纪元 {{epoch}}",
+    "fullInvited": "群组已满（{{max}}/{{max}}，包括 {{invited}} 个尚未回复的邀请）。有人离开前无法再邀请任何人。",
     "invite": "邀请联系人",
     "inviteAction": "邀请",
     "invited": "已邀请…",
-    "makeAdmin": "设为管理员",
+    "makeAdmin": "转让管理员",
     "missing": "缺少 {{count}} 条",
     "missingHint": "本纪元中无人能恢复的消息",
     "needsBothHint": "群组需要双方应用都已连接且为最新版本",
