@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
+import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
@@ -62,6 +63,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const whyId = useId();
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  useFocusKept(bubbleRef);
   const videoRef = useRef<HTMLVideoElement>(null);
   useChosenSpeaker(videoRef, phase === "playing" ? src : null);
   const srcRef = useRef<string | null>(null);
@@ -266,7 +269,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     : null;
 
   return (
-    <div className="max-w-full" data-testid="video-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")} data-phase={phase} data-playable={playable ? "true" : "false"}>
+    <div ref={bubbleRef} className="max-w-full rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" data-testid="video-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")} data-phase={phase} data-playable={playable ? "true" : "false"}>
       <div
         ref={rootRef}
         tabIndex={phase === "playing" ? 0 : -1}

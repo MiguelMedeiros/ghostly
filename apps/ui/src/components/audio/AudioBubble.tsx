@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
+import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
@@ -51,6 +52,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const audioRef = useRef<HTMLAudioElement>(null);
   useChosenSpeaker(audioRef, src);
   const playRef = useRef<HTMLButtonElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useFocusKept(rootRef);
   const srcRef = useRef<string | null>(null);
   /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
   const sourceRef = useRef<StoredMedia | null>(null);
@@ -208,7 +211,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     : null;
 
   return (
-    <div className="w-[300px] max-w-full pt-1" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
+    <div ref={rootRef} className="w-[300px] max-w-full pt-1 rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       <div className="flex items-center gap-2">
         {canRetry ? (
           <RoundRetry danger busy={busy} testId="audio-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")} onClick={() => again(() => platform!.retryFile!(file.id))} />
