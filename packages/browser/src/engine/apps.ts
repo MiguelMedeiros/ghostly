@@ -1171,7 +1171,8 @@ export class Apps {
     const scopes = new Map<string, AppDataExport>();
     for (const row of rows) {
       const out = scopes.get(row.scope) ?? { ghostlyAppData: 1 as const, app: app.ref, scope: row.scope, entries: {} };
-      out.entries[row.key] = JSON.parse(row.value) as JsonValue;
+      // Defined, not assigned: a key named `__proto__` is kept, where an assignment would set the file's prototype and lose it.
+      Object.defineProperty(out.entries, row.key, { value: JSON.parse(row.value) as JsonValue, enumerable: true, writable: true, configurable: true });
       scopes.set(row.scope, out);
     }
     return [...scopes.values()];
