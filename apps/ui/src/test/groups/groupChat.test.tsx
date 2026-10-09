@@ -40,7 +40,12 @@ describe("GroupChat: what the header says", () => {
   it("names a group that has no name", () => {
     openGroup(active({ name: "", members: [members[0]] }));
     expect(screen.getByTestId("group-name")).toHaveTextContent("A group");
-    expect(screen.getByTestId("group-members")).toHaveTextContent("1 member · 0 of 0 reachable");
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+  });
+
+  it("with nobody else in it (just created, or everyone left), counts the members and no reachability", () => {
+    openGroup(active({ members: [members[0]] }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
   });
 
   it("says who invited me while it is an invitation", () => {

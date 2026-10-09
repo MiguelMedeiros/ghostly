@@ -430,7 +430,8 @@ export function GroupChat() {
     : community && group.status === "active" ? (community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
     : group.invitation ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
-    : group.status === "active" ? t("group.chat.reachable", { members: count, reachable, total: others.length })
+    // Nobody else in it (just created, or everyone left): there is no one to reach, so only the count.
+    : group.status === "active" ? (others.length === 0 ? count : t("group.chat.reachable", { members: count, reachable, total: others.length }))
     : outOfIt;
   // In a community every member can let people in, so every member hands the link out; in a private group, the admin.
   const canShare = group.status === "active" && (group.isAdmin || (group.profile === "community" && !!group.entryLink));
