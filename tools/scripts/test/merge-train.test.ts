@@ -3,12 +3,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, BudgetLow, canGoAlone, ciRun, ciState, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, queuedAt, readState, restLayer, rounds, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, BudgetLow, canGoAlone, ciRun, ciState, draftState, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, queuedAt, readState, restLayer, rounds, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const red = [{ name: "CI Success", status: "completed", conclusion: "failure", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const running = [{ name: "CI Success", status: "in_progress", conclusion: null, started_at: "2026-10-08T00:00:00Z", id: 1 }];
+const fastGreen = [{ name: "CI Success (draft)", status: "completed", conclusion: "success", id: 1 }];
+const fastRed = [{ name: "CI Success (draft)", status: "completed", conclusion: "failure", id: 1 }];
 
 /** A fake repository: pull requests, labels, label events, comments, CI per commit, and the base's tip. */
 function fakeRepo() {
@@ -16,6 +18,11 @@ function fakeRepo() {
   const events = new Map<number, { event: string; label: { name: string }; created_at: string }[]>();
   const comments = new Map<number | string, { id: number; body: string; user?: { login: string } }[]>();
   const runs = new Map<string, object[]>();
+  /** The draft gate's jobs per commit (the fast tier), and CI's runs still going on each head, which the train may cancel. */
+  const drafts = new Map<string, object[]>();
+  const going = new Map<string, number[]>();
+  const cancelled: number[] = [];
+  const cancelAccess = { denied: null as string | null };
   /** When each head was pushed (its first check suite); unset: long before anything was queued, null: no suite yet. */
   const pushed = new Map<string, string | null>();
   const tips: Record<string, string> = { dev: "dev0", "epic/x": "epic0" };
@@ -56,6 +63,14 @@ function fakeRepo() {
     mergedPulls: async (base: string) => [...pulls.values()].filter((p) => p.merged && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     events: async (n: number) => events.get(n) ?? [],
     ciJobs: async (sha: string) => runs.get(sha) ?? [],
+    draftJobs: async (sha: string) => drafts.get(sha) ?? [],
+    cancelCi: async (sha: string) => {
+      if (cancelAccess.denied) return { cancelled: [], denied: cancelAccess.denied };
+      const ids = going.get(sha) ?? [];
+      going.delete(sha);
+      cancelled.push(...ids);
+      return { cancelled: ids };
+    },
     headPushedAt: async (sha: string) => (pushed.has(sha) ? pushed.get(sha) : "2026-10-01T00:00:00Z"),
     comments: async (n: number) => comments.get(n) ?? [],
     branchSha: async (base: string) => tips[base],
@@ -195,7 +210,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, comments, runs, pushed, tips, landed, conflicts, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, comments, runs, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -215,14 +230,25 @@ describe("the line", () => {
     expect(queuedAt([], "2026-10-01T00:00:00Z")).toBe("2026-10-01T00:00:00Z");
   });
 
-  it("lets only ready, green pull requests board, five at most", () => {
+  it("lets only ready, green pull requests board, twelve at most", () => {
     const pr = (number: number, extra = {}) => ({ number, ci: "success", draft: false, fork: false, ...extra });
     expect(waiting(pr(1, { draft: true }))).toMatch(/draft/);
     expect(waiting(pr(1, { fork: true }))).toMatch(/fork/);
     expect(waiting(pr(1, { ci: "failure" }))).toMatch(/red/);
     expect(waiting(pr(1, { ci: "pending" }))).toMatch(/not passed/);
-    const line = [pr(1), pr(2, { ci: "pending" }), pr(3), pr(4), pr(5), pr(6), pr(7), pr(8)];
-    expect(pickBatch(line).map((p) => p.number)).toEqual([1, 3, 4, 5, 6]);
+    const line = [pr(1), pr(2, { ci: "pending" }), ...Array.from({ length: 13 }, (_, i) => pr(i + 3))];
+    expect(pickBatch(line).map((p) => p.number)).toEqual([1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  });
+
+  it("lets a ready pull request board on its fast tier alone, unless CI Success is red", () => {
+    const pr = (extra = {}) => ({ number: 1, ci: "pending", draft: false, fork: false, ...extra });
+    expect(waiting(pr({ fast: "success" }))).toBeNull();
+    expect(waiting(pr({ ci: "none", fast: "success" }))).toBeNull();
+    expect(waiting(pr({ fast: "failure" }))).toMatch(/CI Success \(draft\) is red/);
+    expect(waiting(pr({ fast: "none" }))).toMatch(/not passed/);
+    expect(waiting(pr({ fast: "pending" }))).toMatch(/not passed/);
+    expect(waiting(pr({ ci: "failure", fast: "success" }))).toMatch(/CI Success is red/);
+    expect(waiting(pr({ draft: true, fast: "success" }))).toMatch(/draft/);
   });
 
   it("splits a red batch in halves down to one culprit", () => {
@@ -257,34 +283,36 @@ describe("the line", () => {
 });
 
 describe("a run of the train", () => {
-  it("boards the five oldest green pull requests and tells everyone in line where they are", async () => {
+  it("boards the twelve oldest green pull requests and tells everyone in line where they are", async () => {
     const repo = fakeRepo();
-    for (const n of [11, 12, 13, 14, 15, 16, 17]) repo.add(n);
+    const twelve = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+    for (const n of [...twelve, 23, 24]) repo.add(n);
     const r = await repo.run();
-    expect(repo.members()).toEqual([11, 12, 13, 14, 15]);
+    expect(repo.members()).toEqual(twelve);
     expect(r.inFlight).toBe(repo.batch()!.number);
     expect(repo.comments.get(11)![0].body).toMatch(new RegExp(`in batch #${r.inFlight}`));
-    expect(repo.comments.get(16)![0].body).toMatch(/\*\*1st\*\*/);
-    expect(repo.comments.get(17)![0].body).toMatch(/\*\*2nd\*\*/);
+    expect(repo.comments.get(23)![0].body).toMatch(/\*\*1st\*\*/);
+    expect(repo.comments.get(24)![0].body).toMatch(/\*\*2nd\*\*/);
 
     repo.runs.set(repo.batch()!.sha, running);
     const again = await repo.run(); // CI still running: nothing moves, and the position comments are not posted again
     expect(again.inFlight).toBe(r.inFlight);
     expect(again.log.join("\n")).not.toMatch(/warning/);
-    expect(repo.members()).toEqual([11, 12, 13, 14, 15]);
-    expect(repo.comments.get(16)).toHaveLength(1);
+    expect(repo.members()).toEqual(twelve);
+    expect(repo.comments.get(23)).toHaveLength(1);
   });
 
   it("lands a green batch one pull request at a time, each merged by GitHub, closes the batch, and boards the next", async () => {
     const repo = fakeRepo();
-    for (const n of [11, 12, 13, 14, 15, 16]) repo.add(n);
+    const twelve = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+    for (const n of [...twelve, 23]) repo.add(n);
     const first = (await repo.run()).inFlight;
     repo.settle();
     const r = await repo.run();
-    expect(r.merged).toEqual([11, 12, 13, 14, 15]);
-    expect(repo.landed).toEqual(["#11", "#12", "#13", "#14", "#15"]);
-    expect(repo.merges).toEqual(["squash #11", "squash #12", "squash #13", "squash #14", "squash #15"]); // in the batch's order, never the rebase merge
-    for (const n of [11, 12, 13, 14, 15]) {
+    expect(r.merged).toEqual(twelve);
+    expect(repo.landed).toEqual(twelve.map((n) => `#${n}`));
+    expect(repo.merges).toEqual(twelve.map((n) => `squash #${n}`)); // in the batch's order, never the rebase merge
+    for (const n of twelve) {
       expect(repo.pulls.get(n)).toMatchObject({ open: false, merged: true, labels: [] }); // merged, not closed
       expect(repo.comments.get(n)).toEqual([]); // the position comment goes, and no "Merged via"
       // The title and message of the batch's own commit of it: what CI tested is what `git log` shows.
@@ -295,13 +323,13 @@ describe("a run of the train", () => {
     expect(repo.trees.get(repo.tips.dev)).toBe(repo.trees.get(repo.pulls.get(first)!.sha));
     expect(repo.pulls.get(first)).toMatchObject({ open: false });
     expect(repo.pulls.get(first)!.merged).toBeUndefined();
-    expect(repo.comments.get(first)!.map((c) => c.body)).toEqual(["Merge train: #11 #12 #13 #14 #15 landed on `dev`, each with GitHub's squash merge, so this batch closes."]);
+    expect(repo.comments.get(first)!.map((c) => c.body)).toEqual([`Merge train: ${twelve.map((n) => `#${n}`).join(" ")} landed on \`dev\`, each with GitHub's squash merge, so this batch closes.`]);
     expect(r.closed).toEqual([]);
     expect(r.log.join("\n")).not.toMatch(/::(warning|error)::/);
-    // #16 is next, alone: dev moved under it, so the train rebases its branch instead of opening a batch.
-    expect(r.inFlight).toBe(16);
+    // #23 is next, alone: dev moved under it, so the train rebases its branch instead of opening a batch.
+    expect(r.inFlight).toBe(23);
     expect(repo.batch()).toBeUndefined();
-    expect(repo.flight()).toEqual([16]);
+    expect(repo.flight()).toEqual([23]);
   });
 
   it("drops a conflicting pull request with one comment and boards the rest", async () => {
@@ -330,6 +358,89 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual(["#11", "#12", "#14"]);
     expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/failed twice in a batch with only this pull request on `dev`/);
+  });
+
+  it("boards ready pull requests on a green fast tier while their own full CI runs, and cancels those runs", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) {
+      repo.add(n, { ci: running });
+      repo.drafts.set(`h${n}`, fastGreen);
+      repo.going.set(`h${n}`, [100 + n]);
+    }
+    repo.add(14); // CI Success green already: nothing of its own to cancel
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 12, 13, 14]);
+    expect(repo.cancelled).toEqual([111, 112, 113]);
+    expect(r.log).toContain("CANCEL #11: its own CI run 111 (the batch's CI is its gate)");
+    // The batch's own CI is the gate: nothing lands until it is green.
+    expect(repo.landed).toEqual([]);
+    repo.settle();
+    await repo.run();
+    expect(repo.landed).toEqual(["#11", "#12", "#13", "#14"]);
+  });
+
+  it("does not board a pull request whose fast tier is red or missing on its head, or green only on an older commit", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14, 15]) repo.add(n, { ci: running });
+    repo.drafts.set("h11", fastRed);
+    repo.drafts.set("h13", fastGreen);
+    repo.drafts.set("h12-older", fastGreen); // #12's head is h12: a green fast tier elsewhere does not count
+    repo.drafts.set("h15", fastGreen);
+    repo.going.set("h11", [111]);
+    const r = await repo.run();
+    expect(repo.members()).toEqual([13, 15]);
+    expect(repo.cancelled).toEqual([]);
+    expect(repo.comments.get(11)![0].body).toMatch(/1st\*\*\. Waiting: CI Success \(draft\) is red/);
+    expect(repo.comments.get(12)![0].body).toMatch(/2nd\*\*\. Waiting: CI Success has not passed/);
+    expect(repo.comments.get(14)![0].body).toMatch(/3rd\*\*\. Waiting: CI Success has not passed/);
+    expect(r.dropped).toEqual([]);
+  });
+
+  it("boards without cancelling, and says so once, when the token may not cancel workflow runs", async () => {
+    const repo = fakeRepo();
+    repo.cancelAccess.denied = "HTTP 403 Resource not accessible by integration";
+    for (const n of [11, 12]) {
+      repo.add(n, { ci: running });
+      repo.drafts.set(`h${n}`, fastGreen);
+      repo.going.set(`h${n}`, [100 + n]);
+    }
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    expect(repo.cancelled).toEqual([]);
+    expect(r.log.filter((l) => l.startsWith("Not cancelling"))).toEqual([
+      `Not cancelling the boarded pull requests' own CI: this token may not cancel workflow runs (HTTP 403 Resource not accessible by integration); it needs "Actions: write".`,
+    ]);
+    expect(r.log.join("\n")).not.toMatch(/::(warning|error)::/);
+  });
+
+  it("keeps a failed cancel from stopping the train", async () => {
+    const repo = fakeRepo();
+    repo.gh.cancelCi = async () => Promise.reject(new Error("POST cancel of run 1: HTTP 500"));
+    for (const n of [11, 12]) {
+      repo.add(n, { ci: running });
+      repo.drafts.set(`h${n}`, fastGreen);
+    }
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    expect(r.log).toContain("::warning::Could not cancel #11's own CI: POST cancel of run 1: HTTP 500");
+  });
+
+  it("finds the culprit of a red batch boarded on fast tiers by the same halves", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14]) {
+      repo.add(n, { ci: running });
+      repo.drafts.set(`h${n}`, fastGreen);
+    }
+    await repo.run();
+    const seen: number[][] = [repo.flight()];
+    for (let i = 0; i < 10 && repo.flight().length; i++) {
+      repo.settle([13]);
+      await repo.run();
+      seen.push(repo.flight());
+    }
+    expect(seen).toEqual([[11, 12, 13, 14], [11, 12], [13, 14], [13], [13], [14], []]);
+    expect(repo.landed).toEqual(["#11", "#12", "#14"]);
+    expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
   });
 
   it("never lets a newer pull request overtake an older one (FIFO)", async () => {
@@ -1304,6 +1415,19 @@ describe("CI on a commit", () => {
   });
 });
 
+describe("the fast tier on a commit", () => {
+  it("reads the newest draft gate, and nothing else", () => {
+    const gate = (status: string, conclusion: string | null, id = 1) => ({ name: "CI Success (draft)", status, conclusion, id });
+    expect(draftState([gate("completed", "success")])).toBe("success");
+    expect(draftState([gate("completed", "failure")])).toBe("failure");
+    expect(draftState([gate("in_progress", null)])).toBe("pending");
+    expect(draftState([gate("completed", "cancelled")])).toBe("none");
+    expect(draftState([gate("completed", "failure", 1), gate("completed", "success", 2)])).toBe("success");
+    expect(draftState([{ name: "CI Success", status: "completed", conclusion: "success", id: 3 }])).toBe("none");
+    expect(draftState([])).toBe("none");
+  });
+});
+
 describe("the bases with a train", () => {
   it("are dev and epic branches with a queued pull request or an open batch", () => {
     const pr = (base: string, labels: string[] = [], body = "", branch = "fix", fork = false) => ({ base, labels, body, branch, fork });
@@ -1425,6 +1549,56 @@ describe("GitHub over REST", () => {
     expect(ciState(await gh.ciJobs("def"))).toBe("failure");
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/Actions: read/);
+  });
+
+  it("reads the fast tier from the newest of CI's runs on a commit that has a draft gate", async () => {
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "completed", ...extra });
+    const answers: Record<string, object> = {
+      // 52: the full run leaving draft started; 51: the draft's run; 60: another workflow.
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(51), wf(52, { status: "in_progress" }), wf(60, { path: ".github/workflows/forge.yml" })] },
+      "/actions/runs/52/jobs?filter=latest&per_page=100&page=1": { jobs: [{ id: 9, name: "CI Success", status: "queued", conclusion: null }] },
+      "/actions/runs/51/jobs?filter=latest&per_page=100&page=1": { jobs: [{ id: 5, name: "CI Success (draft)", status: "completed", conclusion: "success" }] },
+      "/actions/workflows/ci.yml/runs?head_sha=def&per_page=100": { workflow_runs: [] },
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl: async (url: string) => reply(200, answers[url.replace("https://api.github.com/repos/o/r", "")] ?? {}), wait: async () => {} });
+    expect(draftState(await gh.draftJobs("abc"))).toBe("success");
+    expect(draftState(await gh.draftJobs("def"))).toBe("none");
+    const checks = [
+      { id: 7, name: "CI Success (draft)", status: "completed", conclusion: "success", app: { slug: "github-actions" } },
+      { id: 8, name: "CI Success (draft)", status: "completed", conclusion: "success", app: { slug: "some-other-app" } },
+    ];
+    const noActions = restLayer("t", "o/r", { fetchImpl: async (url: string) => (url.includes("/actions/") ? reply(403, { message: "no" }) : reply(200, { check_runs: checks })), wait: async () => {} });
+    expect((await noActions.draftJobs("abc")).map((c: { id: number }) => c.id)).toEqual([7]);
+  });
+
+  it("cancels only CI's pull request runs still going on the commit", async () => {
+    const sent: string[] = [];
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "in_progress", ...extra });
+    const runs = [wf(1, { status: "completed" }), wf(2), wf(3, { status: "queued" }), wf(4, { event: "push" }), wf(5, { path: ".github/workflows/e2e.yml" }), wf(6, { head_sha: "def" }), wf(7)];
+    const fetchImpl = async (url: string, init: { method: string }) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(`${init.method} ${path}`);
+      if (path === "/actions/runs/7/cancel") return reply(409, { message: "Cannot cancel a workflow run that is completed." });
+      return init.method === "POST" ? reply(202, {}) : reply(200, { workflow_runs: runs });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [3, 2] });
+    expect(sent.filter((s) => s.startsWith("POST"))).toEqual(["POST /actions/runs/7/cancel", "POST /actions/runs/3/cancel", "POST /actions/runs/2/cancel"]);
+  });
+
+  it("asks nothing more once the token may not cancel runs, and never throws for it", async () => {
+    let calls = 0;
+    const wf = { id: 2, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "in_progress" };
+    const fetchImpl = async (_url: string, init: { method: string }) => {
+      calls++;
+      return init.method === "POST" ? reply(403, { message: "Resource not accessible by integration" }) : reply(200, { workflow_runs: [wf] });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [], denied: "HTTP 403 Resource not accessible by integration" });
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [], denied: "HTTP 403 Resource not accessible by integration" });
+    expect(calls).toBe(2);
+    const noRead = restLayer("t", "o/r", { fetchImpl: async () => reply(403, { message: "no" }), wait: async () => {} });
+    expect(await noRead.cancelCi("abc")).toEqual({ cancelled: [], denied: "HTTP 403 no" });
   });
 
   it("stops the run when the token's budget runs low", async () => {

@@ -1,7 +1,7 @@
 name: Merge queue
 
 # Runs the merge train (tools/scripts/merge-train.mjs): pull requests labelled `queue` land on their base (dev or an
-# epic/* branch) in batches of up to 5, in the order they were queued (`queue:priority` first). Each run moves every
+# epic/* branch) in batches of up to 12, in the order they were queued (`queue:priority` first). Each run moves every
 # base's train one step: board a batch, merge a green one, split a red one, and update each queued pull request's
 # place in line. See docs/TESTING.md#the-merge-queue.
 #
