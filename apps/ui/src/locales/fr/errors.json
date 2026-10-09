@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "Les frais Cashu dépassent votre limite",
     "couldNotVerify": "Impossible de vérifier ce paiement pour l’instant. Aucun second paiement n’a été envoyé.",
     "ecashAlreadySpent": "Cet ecash a déjà été dépensé ailleurs",
+    "ecashOtherUnit": "Cet ecash est en {{unit}} : seul l’ecash en sat peut être encaissé ici",
     "fedimintAlreadyJoined": "Vous avez déjà rejoint cette fédération",
     "fedimintConnecting": "Attendez que la fédération se connecte",
     "fedimintNotEnough": "Pas assez dans cette fédération",
