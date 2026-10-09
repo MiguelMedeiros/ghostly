@@ -95,16 +95,42 @@ const RULES: readonly Rule[] = [
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },
+  // A sent file the contact's app refused (packages/core chatFiles.ts `refusalText`): it can be sent again.
+  { match: /^Not enough space on your contact's device \((?<free>.+) free\)$/, key: "errors.files.noRoom", next: "errors.files.refused.noRoomFree" },
+  exact("Not enough space on your contact's device", "errors.files.noRoom", "errors.files.refused.makeRoom"),
+  exact("Your contact has too many files waiting. Try again later.", "errors.files.refused.tooMany", "errors.files.refused.tryLater"),
+  exact("The file arrived damaged and was deleted. Send it again.", "errors.files.refused.damaged", "errors.files.refused.sendAgain"),
+  exact("Not accepted in time", "errors.files.refused.expired", "errors.files.refused.sendAgain"),
+  exact("Your contact could not take this file", "errors.files.refused.other", "errors.files.refused.sendAgain"),
   { match: /^That file is too large for your contact's app \(max (?<max>.+)\)\. Larger files need an updated Ghostly on their side\.$/, key: "errors.files.tooLargeForContact", next: "errors.files.tooLargeForContactNext" },
   { match: /^That file is too large \(max (?<size>.+)\)\.$/, key: "chat.fileTooLarge" },
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
+  // A held message sent again with no storage to hold it, or a contact that stopped allowing it (engine/node.ts, hold.ts).
+  exact("Held messages need S3 storage (Profile → Backups) and a contact that allows them.", "errors.hold.needsStorage", "errors.hold.needsStorageNext"),
 
   // A chat's native transport (packages/browser/src/engine/node.ts): its listener lent to another chat, or not started.
   exact("Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "errors.transport.listenerGiven"),
   exact("Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "errors.transport.listenerReleased"),
   exact("Native adapter could not start. Reopen this chat to retry.", "errors.transport.adapterFailed"),
+  // A chat's dial (packages/core ghostlink.ts), the connection panel's line: no transport in common, or none that
+  // connected, or a contact whose app cannot switch. The engine's sentence stays behind the ⓘ.
+  { match: /^No transport both apps allow is available yet$/, key: "errors.transport.noneInCommon", next: "errors.transport.allowAnotherNext", detail: true },
+  { match: /^No permitted transport could connect$/, key: "errors.transport.noneConnected", next: "errors.transport.allowAnotherNext", detail: true },
+  { match: /^The peer closed this connection\. Check that both transport preferences allow a common transport, then reconnect\.$/, key: "errors.transport.peerClosed", next: "errors.transport.peerClosedNext", detail: true },
+  { match: /^Your contact needs an updated app to negotiate a transport change\.$/, key: "errors.transport.cannotSwitch", next: "errors.transport.cannotSwitchNext", detail: true },
+  exact("All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
+  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts).
+  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable"),
+  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent"),
+  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed"),
+  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused"),
+  exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
+  // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
+  // ghostlink.ts `confirmPair`).
+  { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },
+  exact("The connection closed. Compare again after reconnecting.", "errors.verify.closed", "errors.verify.closedNext"),
 
   // Cashu and Lightning in the wallet (packages/browser/src/engine/wallet.ts).
   exact("That is not a valid mint URL", "errors.cashu.badMintUrl"),
@@ -142,6 +168,7 @@ const RULES: readonly Rule[] = [
   { match: /^(?<method>Cashu|Lightning) is not allowed by both of you here$/, key: "errors.pay.notBoth" },
   exact("Your contact allowed neither Cashu nor Lightning in this chat", "errors.pay.contactAllowsNeither"),
   exact("Your contact took no Cashu or Lightning last time. Try again once the chat is live", "errors.pay.contactTookNone", "errors.pay.contactTookNoneNext"),
+  exact("Your contact is offline. Nothing was sent: pay once the chat is live.", "errors.pay.contactAway", "errors.pay.contactAwayNext"),
   exact("Cashu and Lightning are off in this chat", "errors.pay.bothOff"),
   exact("A request to the group is paid in Cashu or over Lightning", "errors.pay.groupRails"),
   exact("Unknown payment request", "errors.pay.unknownRequest"),
@@ -215,6 +242,8 @@ const RULES: readonly Rule[] = [
   exact("USDT RPC rejected the operation", "errors.rails.usdtRejected"),
   exact("Token or gas balance changed. Create a new review", "errors.rails.usdtBalanceChanged"),
   exact("Account nonce changed. Create a new review", "errors.rails.usdtNonceChanged"),
+  exact("No signed transaction was submitted. Create a new review.", "errors.rails.usdtNotSubmitted", "errors.rails.usdtNotSubmittedNext"),
+  exact("Transaction reverted. Tokens were not sent; gas was spent.", "errors.rails.usdtReverted", "errors.rails.usdtRevertedNext"),
   { match: /^Not enough confirmed sats: (?<available>\d+) available, (?<needed>\d+) needed with the fee$/, key: "errors.rails.bitcoinNotEnough", next: "errors.rails.bitcoinNotEnoughNext", params: ({ available, needed }, t) => ({ available: sats(available, t), needed: sats(needed, t) }) },
   { match: /^The fee \((?<fee>\d+) sats\) is above your limit of (?<max>\d+)$/, key: "errors.rails.bitcoinFeeAboveLimit", params: ({ fee, max }, t) => ({ fee: sats(fee, t), max: sats(max, t) }) },
   { match: /^The node refused the transaction: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeRefusedTx", reason: "next" },
@@ -229,6 +258,8 @@ const RULES: readonly Rule[] = [
   exact("Nothing was spent", "errors.rails.nothingSpent"),
   exact("Interrupted before it reached your contact: the sats came back", "errors.rails.interruptedBack"),
   exact("Canceled before it was funded", "errors.rails.canceledUnfunded"),
+  // A Cashu payment whose swap the mint proved never happened (paymentAdapters/cashu.ts NEVER_REACHED_MINT).
+  exact("The payment never reached the mint: nothing was sent, and the sats are back in your wallet. You can pay again.", "errors.rails.cashuNeverReached", "errors.rails.cashuNeverReachedNext"),
   exact("Only whole amounts in sats are supported", "errors.pay.wholeSats"),
   exact("Unknown payment", "errors.pay.unknownPayment"),
   exact("The mint did not confirm the ecash", "errors.pay.mintDidNotConfirm"),
@@ -284,6 +315,8 @@ const RULES: readonly Rule[] = [
   exact("This is not a link to a group", "errors.group.notALink"),
   exact("You are already joining this group", "errors.group.alreadyJoining"),
   exact("This group is joined with its current link", "errors.group.currentLink"),
+  // A group's link pasted or opened while Ghostly is set offline (engine/node.ts joinGroupByLink).
+  exact("Go online to join a group", "errors.group.offline", "errors.group.offlineNext"),
   exact("Only the admin can change the members of this group", "errors.group.adminMembers"),
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
@@ -412,6 +445,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   paymentTakenBack: "errors.engine.paymentTakenBack",
   parkedSigned: "errors.engine.parkedSigned",
   ecashAlreadySpent: "errors.engine.ecashAlreadySpent",
+  ecashOtherUnit: "errors.engine.ecashOtherUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",

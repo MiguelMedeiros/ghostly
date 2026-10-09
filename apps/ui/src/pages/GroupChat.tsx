@@ -156,6 +156,10 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     // line does, in the shape the engine writes. Said again in the interface's language with that name.
     const written = message.member ? writtenEvent(message.event, text, t) : undefined;
     if (written) return written;
+    // My own removal or fork: the core's reason ("Member … holds a different membership history for epoch 4. …") is
+    // English, and its detail is the notice's (behind its ⓘ). The line says what happened, from its kind.
+    if (!message.member && message.event === "removed") return t("group.event.removed");
+    if (!message.member && message.event === "forked") return t("group.event.forked");
     const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }
@@ -580,8 +584,12 @@ export function GroupChat() {
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmLeave(false); nav.home(); }} />}
-      {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
-        onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
+      {/* Deleting an active private group leaves it: said so, and refused as Leave is while nobody could become admin. */}
+      {confirmForget && group.status === "active" && group.profile !== "community" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
+        onConfirm={async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmForget(false); nav.home(); }} />
+      : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
+        // A community is left first: refused (nobody connected to take the leave), it stays, and the notice says why.
+        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); nav.home(); }); }} />}
     </div>
     </MemberColorsProvider>
     </CueChat.Provider>

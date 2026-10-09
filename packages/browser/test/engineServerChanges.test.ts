@@ -92,6 +92,36 @@ describe("what changed in a history", () => {
     expect(second.history().at(-1)).toEqual({ kind: "message-changes", linkId: "group:g", messages: [], deleted: ["x"] });
   });
 
+  it("reads no history the client read itself after the mark, and reads again one that changed since", async () => {
+    fake.stored.set("chat", [row("chat", "a")]);
+    fake.stored.set("group:g", [row("group:g", "x")]);
+    const server = new EngineServer();
+    const events = fake.nodes.at(-1)!.events;
+    events.onMessageChanges!("chat", { messages: [row("chat", "a")], deleted: [] });
+    const mark = server.historyMark;
+    fake.reads = [];
+    const page = client();
+    server.attach(page, { mark, ids: ["chat", "group:g"] });
+    await flush();
+    expect(fake.reads).toEqual([]);
+    expect(page.history()).toEqual([]);
+    // What changes from here on goes alone, with no whole read first: the client holds both histories.
+    events.onMessageChanges!("group:g", { messages: [row("group:g", "y")], deleted: [] });
+    events.onMessageChanges!("chat", { messages: [row("chat", "b")], deleted: [] });
+    await flush();
+    expect(fake.reads).toEqual([]);
+    expect(page.history().map((m) => [m.kind, m.linkId])).toEqual([["message-changes", "group:g"], ["message-changes", "chat"]]);
+
+    // A chat that changed after its history was read is read and sent whole again.
+    const before = server.historyMark;
+    events.onMessageChanges!("chat", { messages: [row("chat", "c")], deleted: [] });
+    const late = client();
+    server.attach(late, { mark: before, ids: ["chat", "group:g"] });
+    await flush();
+    expect(fake.reads).toEqual(["chat"]);
+    expect(late.history()).toEqual([{ kind: "messages", linkId: "chat", messages: fake.stored.get("chat") }]);
+  });
+
   it("sends a whole history to every client as before when the peer sends one", async () => {
     const server = new EngineServer();
     const page = client();

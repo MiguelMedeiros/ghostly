@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, appDigest, appViewOf, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, appDigest, appViewOf, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
   canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocations, readAppStore,
   toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
@@ -278,6 +278,13 @@ export class Apps {
   private readonly staged = new Map<string, Staged>();
   /** Bundles read back and checked, by digest: the one running is read once, not on every `file`. */
   private readonly verified = new Map<string, AppBundle>();
+  /** Reads of a bundle under way, by digest: icons drawn at once share one read. */
+  private readonly verifying = new Map<string, Promise<AppBundle>>();
+  /**
+   * The `icon.png` of each checked bundle, by digest (at most 256 KiB, or null for none): every icon shown on the Apps
+   * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
+   */
+  private readonly icons = new Map<string, Uint8Array | null>();
   /** Bytes used per `ref\0scope`, counted once from the rows and kept in step by the writes here. */
   private readonly usage = new Map<string, number>();
   private readonly queues = new Map<string, Promise<unknown>>();
@@ -286,6 +293,11 @@ export class Apps {
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
   private views: Promise<AppStoreView[]> | null = null;
+  /**
+   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest>`): the same
+   * index listing the same is not peeked again at every check.
+   */
+  private readonly listingMisses = new Map<string, string>();
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -372,6 +384,22 @@ export class Apps {
   }
   private async putApp(app: InstalledApp): Promise<void> {
     await wrap((await store(STORES.apps, "readwrite")).put(app));
+  }
+  /**
+   * Writes an app's record back only while that install is still there (the same `installedAt`), read and written in
+   * one transaction: an app uninstalled (or installed again) while the update check was reading is not put back.
+   */
+  private async putAppIfInstalled(app: InstalledApp, installedAt: number): Promise<boolean> {
+    const tx = (await openDb()).transaction(STORES.apps, "readwrite");
+    let put = false;
+    const read = tx.objectStore(STORES.apps).get(app.ref);
+    read.onsuccess = () => {
+      if ((read.result as InstalledApp | undefined)?.installedAt !== installedAt) return;
+      tx.objectStore(STORES.apps).put(app);
+      put = true;
+    };
+    await done(tx);
+    return put;
   }
   private async storeRecord(key: string): Promise<AddedAppStore | undefined> {
     return wrap((await store(STORES.appStores, "readonly")).get(key));
@@ -468,20 +496,35 @@ export class Apps {
 
   private async removeBundle(kind: FileBytesKind, digest: string): Promise<void> {
     this.verified.delete(digest);
+    this.icons.delete(digest);
     await (await fileBytesOf(kind))?.remove(bundleId(digest)).catch(() => {});
   }
 
+  /** A bundle's bytes removed unless the app's record (installed again meanwhile) holds that version, or waits for it. */
+  private async removeUnusedBundle(ref: string, kind: FileBytesKind, digest: string): Promise<void> {
+    const app = await this.app(ref);
+    if (app?.digest !== digest && app?.pending?.digest !== digest) await this.removeBundle(kind, digest);
+  }
+
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
-  private async verifiedBundle(app: InstalledApp): Promise<AppBundle> {
+  private verifiedBundle(app: InstalledApp): Promise<AppBundle> {
     const kept = this.verified.get(app.digest);
-    if (kept) return kept;
-    const bytes = await this.readBundleBytes(app.bytes, app.digest);
-    if (!bytes) fail("needs-files", "This app's files are not on this device yet");
-    const read = readAppBundle(bytes);
-    if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
-    if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
-    this.verified.set(app.digest, read.bundle);
-    return read.bundle;
+    if (kept) return Promise.resolve(kept);
+    const under = this.verifying.get(app.digest);
+    if (under) return under;
+    const reading = (async () => {
+      const bytes = await this.readBundleBytes(app.bytes, app.digest);
+      if (!bytes) fail("needs-files", "This app's files are not on this device yet");
+      const read = readAppBundle(bytes);
+      if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
+      if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
+      this.verified.set(app.digest, read.bundle);
+      // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
+      this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH)?.slice() ?? null);
+      return read.bundle;
+    })().finally(() => { this.verifying.delete(app.digest); });
+    this.verifying.set(app.digest, reading);
+    return reading;
   }
 
   // ---------- network ----------
@@ -493,11 +536,18 @@ export class Apps {
     return { bundle: read.bundle, bytes };
   }
 
-  private async readStoreAt(url: string, heldKey?: string) {
+  /**
+   * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
+   * signature and every revocation in it were checked when it was read, so only its expiry is taken again.
+   */
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<ReturnType<typeof readAppStore>> {
     const [indexBytes, sigBytes] = await Promise.all([
       this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
       this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
     ]);
+    if (held?.index && held.digest !== undefined && toBase64Url(sha256(indexBytes)) === held.digest) {
+      return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
+    }
     return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
   }
 
@@ -602,7 +652,7 @@ export class Apps {
     for (const s of stores) {
       let next: AddedAppStore;
       try {
-        const read = await this.readStoreAt(s.url, s.key);
+        const read = await this.readStoreAt(s.url, s.key, s);
         next = read.ok ? this.withIndex(s, read.store.index, read.store.digest) : { ...s, problem: read.reason };
       } catch (error) {
         next = { ...s, problem: error instanceof AppFetchError ? error.code : "network" };
@@ -817,6 +867,7 @@ export class Apps {
       if (!first) continue;
       let app = first;
       let outcome: AppCheckOutcome = "none";
+      let wrote: { bytes: FileBytesKind; digest: string } | undefined;
       // A store the person removed pins nothing any more (as `removeStore` does).
       if (app.store !== undefined && !stores.some((s) => s.key === app.store)) { const { store: _s, ...unpinned } = app; app = unpinned; }
       // A waiting update its store no longer lists goes, so the version the store lists now is looked at instead.
@@ -831,22 +882,41 @@ export class Apps {
       // in that store's listing and takes only the digest it lists: a newer version at the publisher's sources, or at a
       // listing URL that moved on (a repository's HEAD), waits until the store lists it.
       const pinned = app.store;
-      const candidates = new Map<string, { digest?: string }>();
+      // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept.
+      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string] }>();
+      const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
       for (const s of stores) {
         if (pinned !== undefined && s.key !== pinned) continue;
         const listing = s.index?.apps.find((a) => a.ref === app.ref);
-        if (!listing || !(listing.sequence > highest || (listing.sequence >= app.sequence && !known.has(listing.digest)))) continue;
-        for (const url of listingUrls(listing.urls)) if (!candidates.has(url)) candidates.set(url, pinned !== undefined ? { digest: listing.digest } : {});
+        if (!listing || !newer(listing)) continue;
+        const seen = `${s.digest} ${listing.digest}`;
+        for (const url of listingUrls(listing.urls)) {
+          const missed = `${s.key} ${app.ref} ${url}`;
+          if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
+          candidates.set(url, { ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
+        }
       }
       if (pinned === undefined) {
         for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
+          if (candidates.has(url)) continue;
           try {
             const peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }));
-            if (peek && peek.ref === app.ref && (peek.sequence > highest || (peek.sequence >= app.sequence && !known.has(peek.digest))) && !candidates.has(url)) candidates.set(url, {});
+            if (peek && newer(peek)) candidates.set(url, {});
           } catch { /* this source does not answer now */ }
         }
       }
       for (const [url, want] of candidates) {
+        // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
+        // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
+        // index lists the same.
+        if (want.peek) {
+          let peek: ReturnType<typeof peekAppManifest>;
+          try { peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true })); } catch { continue; }
+          if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
+            if (want.miss) this.listingMisses.set(...want.miss);
+            continue;
+          }
+        }
         let fetched: { bundle: AppBundle; bytes: Uint8Array };
         try { fetched = await this.fetchBundle(url); } catch { continue; }
         const { bundle, bytes } = fetched;
@@ -866,11 +936,16 @@ export class Apps {
         if (this.runStatus(version, this.storeViews(stores), app.revocations).status !== "ok") continue;
         if (app.pending && version.sequence < app.pending.sequence) continue;
         const kind = await this.writeBundle(version.digest, bytes);
+        wrote = { bytes: kind, digest: version.digest };
         if (plan.action === "install") {
           const old = app;
-          app = this.versionRecord(app, bundle, kind, url, app.store);
-          if (old.pending && old.pending.sequence <= version.sequence) { await this.removeBundle(old.pending.bytes, old.pending.digest); delete app.pending; }
-          await this.putApp(app);
+          const next = this.versionRecord(app, bundle, kind, url, app.store);
+          const passed = old.pending && old.pending.sequence <= version.sequence ? old.pending : undefined;
+          if (passed) delete next.pending;
+          // Uninstalled while it downloaded: not put back.
+          if (!(await this.putAppIfInstalled(next, first.installedAt))) break;
+          app = next;
+          if (passed) await this.removeBundle(passed.bytes, passed.digest);
           await this.removeBundle(old.bytes, old.digest);
           outcome = "updated";
         } else {
@@ -883,12 +958,14 @@ export class Apps {
       const revocations = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])]);
       const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
       for (const r of revocations) merged.set(canonicalJson(r), r);
-      // Removed meanwhile: not put back. Its store removed meanwhile: not pinned again.
+      // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
       const current = await this.app(app.ref);
-      if (!current) continue;
-      if (app.store !== undefined && current.store === undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
+      if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
       app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
-      await this.putApp(app);
+      if (!(await this.putAppIfInstalled(app, first.installedAt))) {
+        if (wrote) await this.removeUnusedBundle(app.ref, wrote.bytes, wrote.digest);
+        continue;
+      }
       out.push({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores) });
     }
     return out;
@@ -961,7 +1038,10 @@ export class Apps {
   /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). */
   async file({ ref, path }: { ref: string; path: string }): Promise<Uint8Array> {
     // Its icon still shows on the Apps page and in chats once it is stopped: a picture the publisher signed, nothing more.
-    const app = path === "icon.png" ? await this.installedOrFail(ref) : await this.runningOrFail(ref);
+    const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref);
+    const icon = path === APP_ICON_PATH ? this.icons.get(app.digest) : undefined;
+    if (icon) return icon.slice();
+    if (icon === null) fail("no-file", "No such file in this app");
     const bundle = await this.verifiedBundle(app);
     if (typeof path !== "string" || !bundle.files.has(path)) fail("no-file", "No such file in this app");
     return bundle.files.get(path)!.slice();

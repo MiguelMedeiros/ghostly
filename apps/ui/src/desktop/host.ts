@@ -30,7 +30,7 @@ import type { PubkyCookieSession } from "@ghostly/browser/host";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
-import { desktopAtproto } from "./atproto";
+import { desktopAtprotoHost } from "./atproto";
 import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appCommands";
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
@@ -62,18 +62,30 @@ const STATUS_EVERY_MS = 2_000;
 export function createTauriTransport(): PkarrTransport {
   let status: DiscoveryStatus | undefined;
   let askedAt = 0;
+  let later: ReturnType<typeof setTimeout> | null = null;
   const listeners = new Set<(change?: DiscoveryChange) => void>();
-  // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering.
-  const refresh = () => {
-    if (Date.now() - askedAt < STATUS_EVERY_MS) return;
+  // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering, and
+  // of the path changing (no change named: the panel shows it, links do nothing). A read before any path is known is
+  // asked about at once: a new chat's first writes (an inviter's first envelope, a joiner's claim) go before its first
+  // reads, and the pair can be live within a second of those. Any other read or write within 2 s of the last ask is asked
+  // about when the 2 s are up, as it may be the last for a while.
+  let asks = 0;
+  const refresh = (read = false) => {
+    const wait = read && !status?.path ? 0 : askedAt + STATUS_EVERY_MS - Date.now();
+    if (wait > 0) { later ??= setTimeout(() => { later = null; refresh(); }, wait); return; }
     askedAt = Date.now();
+    const ask = ++asks;
     void invoke<DiscoveryStatus>("pkarr_status").then((next) => {
+      // An answer to an older ask, come after a newer one's.
+      if (ask < asks && status) return;
       const health = (s?: DiscoveryStatus) => JSON.stringify(s?.relays.map((r) => [r.relay, r.state]) ?? []);
       const changed = health(next) !== health(status);
+      const moved = JSON.stringify(next.path) !== JSON.stringify(status?.path ?? null);
       // A relay that was failing answers again: links look and publish now rather than at their pace.
       const recovered = !!status && next.relays.some((r) => r.state === "ok" && status!.relays.some((was) => was.relay === r.relay && was.state !== "ok"));
       status = next;
       if (changed) for (const listener of listeners) listener(recovered ? "recovered" : "tripped");
+      else if (moved) for (const listener of listeners) listener();
     }).catch(() => {});
   };
   return {
@@ -91,7 +103,7 @@ export function createTauriTransport(): PkarrTransport {
         publicKeyZ32: pubKeyZ32,
         background: !!options?.background,
         urgent: !!options?.urgent,
-      }).finally(refresh);
+      }).finally(() => refresh(true));
       // Rust verified the signature while resolving.
       return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
     },
@@ -326,7 +338,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     callMedia,
     onServer: serveServiceWindows,
     oidc: desktopOidc,
-    atproto: desktopAtproto,
+    // Not in the Android app yet (no redirect the phone receives): Bluesky is not offered there.
+    atproto: desktopAtprotoHost(),
     // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
     fullscreenWindow: (on) => invoke("plugin:window|set_fullscreen", { label: "main", value: on }),

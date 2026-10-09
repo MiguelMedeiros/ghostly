@@ -103,7 +103,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["profile use <name>", "Make a profile the current one"],
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)") }],
-  ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: o("boolean", "--no-passphrase: do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
+  ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
   ["daemon status", "Whether a daemon runs the profile, its version, and its socket (for the socket API)"],
@@ -191,7 +191,10 @@ export function commandHelp(words: readonly string[]): string {
       const options = Object.entries(row.options ?? {}).filter(([, o]) => o.description);
       if (options.length) {
         lines.push("", "Options:");
-        for (const [name, o] of options) lines.push(`  --${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`.padEnd(26) + o.description);
+        const labels = options.map(([name, o]) => `  --${o.negatedOnly ? "no-" : ""}${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`);
+        // At least two spaces between an option and its text, however long the option.
+        const width = Math.max(26, ...labels.map((label) => label.length + 2));
+        options.forEach(([, o], i) => lines.push(labels[i].padEnd(width) + o.description));
       }
       // A text that starts with a dash goes after `--`, and so does everything else on the line.
       if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))

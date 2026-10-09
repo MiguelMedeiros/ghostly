@@ -24,6 +24,8 @@ import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile, fileHeld } from "../lib/fileStatus";
 import { rawError, SAVE_REFUSED } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
@@ -738,19 +740,27 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
   const live = waitsForLive(isMe && !fileFailed ? message : undefined, useDhtOnly(peerPubKey));
+  /** Why a Send again or a Cancel sending was refused (no storage to hold it, a file gone): shown while the mark it came from stays. */
+  const [refused, setRefused] = useState<{ problem: Problem; on: typeof shown } | null>(null);
+  const refuse = (on: typeof shown) => (error: unknown) => setRefused({ problem: problemText(error, t), on });
   /** A message that was not sent, sent again: its red mark, or its ⋮. */
   const retry = () => {
-    if (fileFailed) { void platform!.retryFile!(message.file!.id).catch(() => {}); return; }
+    setRefused(null);
+    if (fileFailed) { void platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
-    if (link) void engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
+    if (link) void engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
   /** What waits to be sent, dropped: it never left, so the chat's own delete (the list forgets it too), with no confirmation. */
   const cancelSending = () => {
     playCue("deleted", { chat });
+    setRefused(null);
     if (onDelete) { onDelete(); return; }
     const link = engine.linkByPeer(peerPubKey);
-    if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
+    if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
+  const refusal = isMe && refused && refused.on === shown && (
+    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
+  );
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: retry } : {};
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
@@ -914,6 +924,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               ? <AppCardView card={appCard} mine={isMe} contact={contactName || peerNick || t("common.anonymous")} linkId={linkId!} peerKey={peerPubKey} time={time} marks={marks} />
               : <StatusCardView card={card as ShownCard} time={time} marks={marks} end={message.edit?.at ?? message.timestamp} />}
           </div>
+          {refusal}
           <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
         </div>
         {!isMe && menu}
@@ -930,14 +941,18 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // A message with buttons and no view from the chat (a chat that takes no replies): shown, none of them answers.
   const buttonsView = message.card?.kind === "buttons" ? buttons ?? { card: message.card, open: false } : undefined;
 
+  // The float and its gap follow the text beside them (the body's `dir="auto"`), what is inside the app's: on one box,
+  // an Arabic message in the English app floated the time to its left with the gap on the far side, the time touching it.
   const timestampEl = (
-    <span dir={dir} className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
-      {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
-      {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
-      <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
-        {time}
+    <span className="msg-meta flex float-end relative top-[4px] ms-[8px] select-none">
+      <span dir={dir} className="inline-flex items-center gap-[3px]">
+        {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
+        {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+        <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
+          {time}
+        </span>
+        {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} />}
       </span>
-      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} />}
     </span>
   );
 
@@ -1081,6 +1096,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         )}
       </div>
       {buttonsView && <MessageButtons view={buttonsView} messageId={message.id} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)} />}
+      {refusal}
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}

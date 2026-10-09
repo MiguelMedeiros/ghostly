@@ -50,7 +50,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       <div className="flex items-start gap-3">
         <AppIcon size={40} installed={app} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-text-primary truncate" data-testid="app-card-title">{named}</p>
+          <p dir="auto" className="text-sm font-medium text-text-primary truncate" data-testid="app-card-title">{named}</p>
           <p className="text-xs text-text-secondary truncate">{who}</p>
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             <Fingerprint value={appFingerprint(appRefPublisher(card.ref))} />

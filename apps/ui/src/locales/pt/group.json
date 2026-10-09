@@ -117,6 +117,10 @@
     "blockedCommunityNext": "Tente de novo em instantes.",
     "blockedNext": "Torne alguém admin ou espere um membro.",
     "body": "O grupo e seu histórico saem deste dispositivo. Você não lerá o que for dito depois, e para voltar alguém terá que deixar você entrar de novo.",
+    "bodyCommunity": "O grupo e seu histórico saem deste dispositivo. Você não lerá o que for dito depois, e para voltar, abra o link do grupo de novo.",
+    "forgetBody": "Apagar o grupo deste dispositivo também faz você sair dele.",
+    "forgetTitle": "Apagar {{name}}?",
+    "forgetTitleUnnamed": "Apagar este grupo?",
     "successor": "Você é o admin: {{name}} vira admin quando você sair.",
     "title": "Sair de {{name}}?",
     "titleUnnamed": "Sair deste grupo?"
@@ -126,7 +130,7 @@
     "copied": "Copiado",
     "copyFailed": "A cópia não funcionou. Selecione o link e copie.",
     "disable": "Desativar",
-    "disableHint": "Ninguém pode entrar com o link até ele ser ativado de novo",
+    "disableHint": "O link para de funcionar. Ao ativar de novo, um novo link é criado para compartilhar.",
     "enable": "Ativar o link",
     "enableFailed": "Não foi possível ativar o link",
     "full": "O grupo está cheio ({{count}} de {{count}}). Ninguém entra até alguém sair.",
@@ -134,7 +138,7 @@
     "hideQr": "Ocultar QR",
     "note": "Quem abrir este link entra, sem ser seu contato nem dizer quem é. A pessoa entra enquanto seu app estiver aberto, até {{count}} membros.",
     "noteCommunity": "Quem abrir este link entra, sem ser contato de ninguém nem dizer quem é. O app de qualquer membro deixa a pessoa entrar, então funciona enquanto você está fora; até {{count}} membros. Remover alguém não impede que abra o link de novo: para isso, o admin cria um novo.",
-    "off": "O link está desativado: ninguém pode entrar com ele. Ative para deixar entrar quem o tiver, sem ser seu contato.",
+    "off": "O link está desativado: ninguém pode entrar com ele, e o link compartilhado antes não volta a funcionar. Ao ativar, um novo link é criado para compartilhar.",
     "qrTitle": "QR code do link do grupo",
     "reset": "Novo link",
     "resetHint": "Um novo link; o atual para de funcionar",
@@ -145,6 +149,10 @@
     "shared": "Compartilhado",
     "showQr": "Mostrar QR",
     "title": "Link do grupo"
+  },
+  "makeAdmin": {
+    "body": "Você deixa de ser o admin. Só {{name}} vai poder renomear o grupo, mudar a foto e o link, convidar ou remover membros, e devolver o papel.",
+    "title": "Tornar {{name}} o admin?"
   },
   "member": {
     "connected": "Conectado · {{transport}}",
@@ -167,10 +175,11 @@
     "admin": "admin",
     "changePicture": "Alterar foto",
     "epoch": "época {{epoch}}",
+    "fullInvited": "O grupo está cheio ({{max}} de {{max}}), contando convites ainda sem resposta ({{invited}}). Ninguém mais pode ser convidado até alguém sair.",
     "invite": "Convidar um contato",
     "inviteAction": "Convidar",
     "invited": "Convidado…",
-    "makeAdmin": "Tornar admin",
+    "makeAdmin": "Passar admin",
     "missing": "{{count}} faltando",
     "missingHint": "Mensagens desta época que ninguém conseguiu recuperar",
     "needsBothHint": "Grupos precisam dos dois apps conectados e atualizados",

@@ -3,7 +3,7 @@ import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
-import { canRetryFile, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { ChatFile } from "../../lib/types";
 import {
   applyVoiceRate,
@@ -350,7 +350,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const failed = transfer?.state === "failed";
   const canRetry = canRetryFile(file, transfer, platform);
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
-  const reason = retryError || (failed ? transfer.error : undefined);
+  const reason = retryError ? { text: retryError } : failedReason(transfer, t);
   const moving = transfer?.state === "transferring" && !transfer.stalled;
   const run = (action: () => Promise<unknown>) => {
     setRetryError("");
@@ -452,7 +452,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
           {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
       )}
-      {reason && why && <WhyText id={whyId} testId="voice-why-text">{reason}</WhyText>}
+      {reason && why && <WhyText id={whyId} testId="voice-why-text" english={reason.english}>{reason.text}</WhyText>}
     </div>
   );
 }

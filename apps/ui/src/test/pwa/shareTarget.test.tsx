@@ -42,6 +42,12 @@ describe("the text a share puts in the draft", () => {
     expect(takeShareFor("chat-1")?.text).toBe("hi");
     expect(takeShareFor("chat-1")).toBeNull();
   });
+
+  it("an empty share never clears the one that waits", () => {
+    receiveShare(share({ text: "newer text" }));
+    receiveShare(share());
+    expect(incomingShare()?.text).toBe("newer text");
+  });
 });
 
 describe("in the composer", () => {
