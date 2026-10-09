@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -57,6 +57,9 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   );
 }
 
+/** How many listings a store's block shows at a time: a page a phone draws in a frame or two. */
+const LISTING_PAGE = 50;
+
 function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError }: {
   store: AppStoreSummary;
   installed: readonly InstalledAppView[];
@@ -75,12 +78,26 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
     setBusy(true);
     try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); }
   };
+  // A store may list up to 4096 apps: one page of them at a time, and a search over them all.
+  const [limit, setLimit] = useState(LISTING_PAGE);
+  const [filter, setFilter] = useState("");
+  const have = useMemo(() => new Map(installed.map((a) => [a.ref, a])), [installed]);
+  const removals = useMemo(() => new Map(store.removed.map((r) => [`${r.ref} ${r.digest}`, r])), [store.removed]);
+  const matching = useMemo(() => {
+    const words = filter.trim().toLocaleLowerCase();
+    return words ? store.apps.filter((l) => `${l.title}\n${l.tagline}`.toLocaleLowerCase().includes(words)) : store.apps;
+  }, [store.apps, filter]);
   const read = store.fetchedAt !== undefined || store.apps.length > 0;
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
+  const toggle = () => {
+    setOpen(!open);
+    setLimit(LISTING_PAGE);
+    setFilter("");
+  };
   return (
     <div data-testid="app-store" data-key={store.key}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} disabled={!read}
+        <button type="button" aria-expanded={open} onClick={toggle} disabled={!read}
           className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <span dir="auto" className="block text-sm text-text-primary truncate">{store.name ?? store.url}</span>
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
@@ -98,24 +115,40 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
           <Button variant="danger" data-testid="app-store-remove" disabled={busy} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved)}>{t("apps.store.remove")}</Button>
         </div>
       </div>
+      {open && store.apps.length > LISTING_PAGE && (
+        <div className="border-t border-border px-4 py-2">
+          <input type="search" data-testid="app-store-filter" value={filter} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); }}
+            placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}
+            className="w-full rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
+        </div>
+      )}
       {open && (
         <ul className="border-t border-border divide-y divide-border bg-surface-alt/40" data-testid="app-store-listing">
           {store.apps.length === 0 && <li className="px-4 py-3 text-xs text-text-muted">{t("apps.store.empty")}</li>}
-          {store.apps.map((listing) => {
-            const have = installed.find((a) => a.ref === listing.ref);
-            const removed = store.removed.find((r) => r.ref === listing.ref && r.digest === listing.digest);
+          {store.apps.length > 0 && matching.length === 0 && <li className="px-4 py-3 text-xs text-text-muted">{t("apps.store.noMatch")}</li>}
+          {matching.slice(0, limit).map((listing) => {
+            const app = have.get(listing.ref);
+            const removed = removals.get(`${listing.ref} ${listing.digest}`);
             return (
               <li key={listing.ref} className="flex items-center gap-3 px-4 py-3" data-testid="app-listing" data-ref={listing.ref}>
-                <AppIcon size={32} installed={have} />
+                <AppIcon size={32} installed={app} />
                 <span className="min-w-0 flex-1">
                   <span dir="auto" className="block text-sm text-text-primary truncate">{listing.title}</span>
                   <span dir="auto" className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
                 </span>
-                {have ? <span className="text-xs text-text-muted">{t("apps.store.installed")}</span>
+                {app ? <span className="text-xs text-text-muted">{t("apps.store.installed")}</span>
                   : !removed && <Button data-testid="app-listing-install" onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
               </li>
             );
           })}
+          {matching.length > limit && (
+            <li>
+              <button type="button" data-testid="app-store-more" onClick={() => setLimit(limit + LISTING_PAGE)}
+                className="w-full cursor-pointer px-4 py-2.5 text-xs font-medium text-accent hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                {t("apps.store.showMore", { count: matching.length - limit })}
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </div>
