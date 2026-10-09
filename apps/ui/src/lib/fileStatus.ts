@@ -59,7 +59,11 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
   const of = tr("chat.file.of", { done, size });
   switch (transfer.stage) {
     case "preparing": return tr("chat.file.preparing", { progress: of });
-    case "waiting": return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });
+    case "waiting":
+      // A group's file says why it waits: its holders busy, or its bytes damaged; else, as a chat's, for a connection.
+      if (transfer.wait === "damaged") return tr("chat.file.damaged", { size });
+      if (transfer.wait === "busy") return transfer.transferred > 0 ? tr("chat.file.busyDone", { done }) : tr("chat.file.busySize", { size });
+      return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });
     case "asking": return incoming ? tr("chat.file.askingYou", { size }) : tr("chat.file.askingThem", { name: peerName, size });
     case "queued": return incoming ? tr("chat.file.queuedHere", { done }) : tr("chat.file.queuedThere", { name: peerName, done });
     case "paused": return `${transfer.pausedBy === "peer" ? tr("chat.file.pausedBy", { name: peerName }) : tr("chat.file.paused")} · ${of}`;
@@ -84,5 +88,5 @@ export function stalledAction(transfer: FileTransferState | null, tr: Translate 
   if (transfer?.state !== "transferring" || !transfer.stalled || !transfer.direction) return null;
   return transfer.direction === "out"
     ? { action: "resend", label: tr("chat.message.retry"), hint: tr("chat.file.resendHint") }
-    : { action: "request", label: tr("chat.file.askAgain"), hint: tr("chat.file.askAgainHint") };
+    : { action: "request", label: tr("chat.file.askAgain"), hint: tr(transfer.wait === "damaged" ? "chat.file.askAgainDamagedHint" : "chat.file.askAgainHint") };
 }
