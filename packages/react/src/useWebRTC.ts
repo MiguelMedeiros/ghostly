@@ -120,6 +120,13 @@ export function mediaProblem(error: unknown): MediaProblem | null {
  */
 export const GATHER_STALL_MS = 4000;
 export const GATHER_ATTEMPTS = 3;
+/**
+ * An offer or an answer with its host candidates waits this long at most for a server reflexive one, not the 10 s
+ * cap: a STUN server that answers does in tens of milliseconds, and one that never does (UDP to it blocked, as on many
+ * office, school and hotel networks) made every call ring about 10 s late and connect about 10 s after Answer. The
+ * chats' data link bounds its offers the same way (`OFFER_HOST_GATHER_MS`).
+ */
+export const HOST_GATHER_MS = 2000;
 
 /**
  * A call answered (or whose answer came) that has not connected by then ends, and says so: ICE normally connects in
@@ -592,14 +599,15 @@ export function useWebRTC({
   }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable, clearReconnect, reconnects]);
 
   /**
-   * Makes the call's connection with `make` (its description set) and waits for its candidates. One that finds none
+   * Makes the call's connection with `make` (its description set) and waits for its candidates (for a reflexive one
+   * at most `HOST_GATHER_MS` once the host ones are in). One that finds none
    * (`GATHER_STALL_MS`) is closed and made again, up to `GATHER_ATTEMPTS` times; then the call cannot reach anyone
    * (`CallUnreachableError`). Null when the attempt was cancelled meanwhile.
    */
   const gathered = useCallback(async (make: () => Promise<RTCPeerConnection>, cancelled: () => boolean): Promise<RTCPeerConnection | null> => {
     for (let attempt = 1; ; attempt++) {
       const pc = await make();
-      await waitForIceGathering(pc, undefined, { stallMs: GATHER_STALL_MS });
+      await waitForIceGathering(pc, undefined, { stallMs: GATHER_STALL_MS, hostBoundMs: HOST_GATHER_MS });
       if (cancelled()) return null;
       if (sdpHasCandidates(pc.localDescription?.sdp)) return pc;
       // Its events are not ours any more: the next connection takes its place in pcRef.
