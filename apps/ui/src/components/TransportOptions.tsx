@@ -13,7 +13,7 @@ export type ConnectionChoice = PairedTransport | "auto" | "dht";
  * The chat's connection choices, in its connection panel, one short line each: Automatic, each transport, and DHT
  * only, which every app can choose (it travels as the DHT envelope's mode). The one chosen is checked; the one in use
  * carries "In use · N ms", since a chat set to WebRTC can be live over Iroh while Fallback is on. A transport this
- * app or the contact's lacks is listed, off, with the reason in its tooltip. Choosing a transport moves the live
+ * app or the contact's lacks is listed, off, with the reason in its tooltip (and under its name on a phone). Choosing a transport moves the live
  * session without reconnecting, and one that cannot connect yet is waited for (WISP 100); choosing one while on DHT
  * only leaves it. The choice is kept for the next reconnect. `onChoose` is only asked for a change.
  */
@@ -47,7 +47,7 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
         return <Option key={o.transport} testId={`connection-option-${o.transport.replace("/1", "")}`} icon={<TransportIcon transport={o.transport} />}
           checked={!dht && (single ? o.available : !automatic && link.preferredTransport === o.transport)} disabled={disabled || !o.available} inUse={inUse}
           mark={inUse ? using : waiting && o.available ? t("connection.option.waiting") : undefined}
-          hint={!o.available ? o.reason : inUse ? using : waiting ? t("connection.option.chosenWaiting") : !automatic && link.preferredTransport === o.transport ? t("connection.option.chosenNotInUse") : o.relayed ? t("connection.option.throughRelay") : undefined}
+          off={!o.available ? o.reason : undefined} hint={!o.available ? o.reason : inUse ? using : waiting ? t("connection.option.chosenWaiting") : !automatic && link.preferredTransport === o.transport ? t("connection.option.chosenNotInUse") : o.relayed ? t("connection.option.throughRelay") : undefined}
           onClick={() => choose(o.transport)} label={transportName(o.transport)} />;
       })}
       <Option testId="connection-option-dht" checked={dht} disabled={disabled} onClick={() => choose("dht")} label={t("connection.dhtOnly")}
@@ -57,17 +57,21 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
   );
 }
 
-function Option({ label, hint, mark, icon, checked, inUse = false, disabled, onClick, testId }: {
-  label: string; hint?: string; mark?: string; icon: ReactNode; checked: boolean; inUse?: boolean; disabled: boolean; onClick(): void; testId: string;
+function Option({ label, hint, off, mark, icon, checked, inUse = false, disabled, onClick, testId }: {
+  label: string; hint?: string; off?: string; mark?: string; icon: ReactNode; checked: boolean; inUse?: boolean; disabled: boolean; onClick(): void; testId: string;
 }) {
   return (
     // One line: the radio is what is chosen; the mark ("In use · 42 ms") is what carries the chat now, which may be
-    // another row. The longer word on a row (why it is off, what it does) is its tooltip and accessible description.
+    // another row. The longer word on a row (why it is off, what it does) is its tooltip and accessible description;
+    // on a narrow screen, with no hover to show a tooltip, why an option is off is a second line too.
     <button type="button" role="radio" aria-checked={checked} aria-label={label} aria-description={hint} disabled={disabled} data-testid={testId} data-in-use={inUse ? "" : undefined} onClick={onClick}
       title={hint ? `${label}: ${hint}` : undefined}
       className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-start text-xs transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-default max-md:min-h-11 ${checked ? "text-text-primary" : "text-text-secondary"} ${disabled && !checked ? "opacity-60" : ""}`}>
       <span aria-hidden="true" className={`flex shrink-0 ${checked ? "text-accent" : ""}`}>{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{label}</span>
+        {off && <span aria-hidden="true" className="text-[11px] text-text-muted md:hidden">{off}</span>}
+      </span>
       {mark && <span className={`flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] ${inUse ? "text-accent" : "text-text-muted"}`}>
         {inUse && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />}{mark}
       </span>}
