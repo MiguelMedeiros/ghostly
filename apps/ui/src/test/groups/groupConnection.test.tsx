@@ -116,6 +116,13 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(screen.getByTestId("group-connection-note")).toHaveTextContent("DHT-only delivery is not offered in groups yet");
   });
 
+  it("gives a member's name its own direction, so in a right-to-left app a long English name is cut at its end", async () => {
+    const name = "Hermes Two with a much longer display name";
+    await open(active([me, alice(), member({ key: BOB, nick: name, edge: edge({ linkId: "edge-b" }) })]));
+    expect(screen.getByText(name)).toHaveAttribute("dir", "auto");
+    expect(screen.getByText("Alice")).toHaveAttribute("dir", "auto");
+  });
+
   it("says why a member failed in short words, never the relays' addresses or the engine's errors (a phone, 2026-10-07)", async () => {
     const relays = "Could not publish connection details: Publish failed on every relay: Error: https://pkarr.example.test responded 500; Error: https://pkarr.other.test is left alone after failing. Retrying in 60 s.";
     const phone = "Could not publish discovery: Publish failed on every relay: DiscoveryBudgetError: Discovery request budget reached; retry shortly; Error: https://pkarr.pubky.app is left alone after failing; asked again in 52 s";
@@ -252,7 +259,17 @@ describe("GroupConnection: a community is connected through its hubs", () => {
     const group = community([me, alice({ state: "waiting", transport: undefined, lastSeenAt: 0 }), away(BOB, "Bob")]);
     const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
     act(() => view.engine.update({ groups: [group] }));
-    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Not reachable · not seen yet", "Through a hub"]);
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Not reachable · not seen yet", "No connection yet"]);
+  });
+
+  it("the members panel says nobody is reached through a hub while my app reaches nobody", () => {
+    // Offline, or every hub's app closed: no edge at all, so no hub carries anyone's messages to me.
+    const group = community([me, away(ALICE, "Alice"), away(BOB, "Bob")]);
+    const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+    act(() => view.engine.update({ groups: [group] }));
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["No connection yet", "No connection yet"]);
+    const dots = screen.getAllByTestId("group-member").map(row => within(row).getAllByRole("img")[0].getAttribute("aria-label"));
+    expect(dots).toEqual(["reachable", "not reachable", "not reachable"]);
   });
 });
 

@@ -1,6 +1,7 @@
 import { Identicon } from "../Avatar";
 import { useMemberText } from "../../contexts/MemberColorsContext";
 import type { MessageAuthor } from "../../lib/senderRuns";
+import { initial } from "../../lib/initial";
 
 export type { MessageAuthor };
 
@@ -18,7 +19,7 @@ export function MemberFace({ face, size = 18, className = "" }: { face: MemberFa
       className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover font-semibold leading-none select-none ${className}`}>
       {face.picture
         ? <img src={face.picture} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
-        : face.name ? <span className={memberText(face.key)}>{face.name.charAt(0).toUpperCase()}</span>
+        : face.name ? <span className={memberText(face.key)}>{initial(face.name)}</span>
         : <Identicon seed={face.key} />}
     </span>
   );
@@ -42,7 +43,7 @@ export function SenderAvatar({ author, onOpen }: { author: MessageAuthor; onOpen
       className={`sender-avatar relative flex items-center justify-center overflow-hidden rounded-full bg-surface-hover p-0 text-xs font-semibold select-none ${onOpen ? "cursor-pointer" : ""}`}>
       {author.picture
         ? <img src={author.picture} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
-        : author.name ? <span className={memberText(author.key)}>{author.name.charAt(0).toUpperCase()}</span>
+        : author.name ? <span className={memberText(author.key)}>{initial(author.name)}</span>
         : <Identicon seed={author.key} />}
     </button>
   );

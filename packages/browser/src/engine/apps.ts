@@ -246,6 +246,13 @@ function notReadable(url: unknown, words: string): never {
 const versionOf = (manifest: AppManifest, digest: string): AppVersion => ({ ref: appRef(manifest.publisher, manifest.name), sequence: manifest.sequence, digest });
 const byteLength = (text: string) => utf8Encode(text).length;
 
+/** The app with these revocations merged into the ones it holds, each kept once. */
+function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]): InstalledApp {
+  const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
+  for (const r of read) merged.set(canonicalJson(r), r);
+  return merged.size ? { ...app, revocations: [...merged.values()] } : app;
+}
+
 /** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`. */
 const rowsOf = (...prefix: string[]) => IDBKeyRange.bound(prefix, [...prefix, []]);
 
@@ -293,6 +300,11 @@ export class Apps {
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
   private views: Promise<AppStoreView[]> | null = null;
+  /**
+   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest>`): the same
+   * index listing the same is not peeked again at every check.
+   */
+  private readonly listingMisses = new Map<string, string>();
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -514,7 +526,7 @@ export class Apps {
       if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
       if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
       this.verified.set(app.digest, read.bundle);
-      // A copy: the bundle's files are views of its bytes, so a view kept here would keep all of it (up to 16 MiB).
+      // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
       this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH)?.slice() ?? null);
       return read.bundle;
     })().finally(() => { this.verifying.delete(app.digest); });
@@ -531,18 +543,30 @@ export class Apps {
     return { bundle: read.bundle, bytes };
   }
 
-  private async readStoreAt(url: string, heldKey?: string) {
+  /**
+   * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
+   * signature and every revocation in it were checked when it was read, so only its expiry is taken again.
+   */
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<ReturnType<typeof readAppStore>> {
     const [indexBytes, sigBytes] = await Promise.all([
       this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
       this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
     ]);
+    if (held?.index && held.digest !== undefined && toBase64Url(sha256(indexBytes)) === held.digest) {
+      return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
+    }
     return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
   }
 
-  /** The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error. */
-  private async readRevocations(ref: string, urls: string[]): Promise<SignedAppRevocation[]> {
+  /**
+   * The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error.
+   * `read` holds the files already read, which are skipped, and gets the ones read now.
+   */
+  private async readRevocations(ref: string, urls: string[], read = new Set<string>()): Promise<SignedAppRevocation[]> {
     const out: SignedAppRevocation[] = [];
     for (const url of new Set(urls.filter(isAppFetchUrl).map((u) => besideUrl(u, "ghostly-revoke.json")))) {
+      if (read.has(url)) continue;
+      read.add(url);
       try {
         const read = readAppRevocations(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
         if (read.ok) out.push(...read.revocations.filter((r) => r.statement.app === ref));
@@ -640,7 +664,7 @@ export class Apps {
     for (const s of stores) {
       let next: AddedAppStore;
       try {
-        const read = await this.readStoreAt(s.url, s.key);
+        const read = await this.readStoreAt(s.url, s.key, s);
         next = read.ok ? this.withIndex(s, read.store.index, read.store.digest) : { ...s, problem: read.reason };
       } catch (error) {
         next = { ...s, problem: error instanceof AppFetchError ? error.code : "network" };
@@ -870,22 +894,44 @@ export class Apps {
       // in that store's listing and takes only the digest it lists: a newer version at the publisher's sources, or at a
       // listing URL that moved on (a repository's HEAD), waits until the store lists it.
       const pinned = app.store;
-      const candidates = new Map<string, { digest?: string }>();
+      // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept.
+      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string] }>();
+      const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
       for (const s of stores) {
         if (pinned !== undefined && s.key !== pinned) continue;
         const listing = s.index?.apps.find((a) => a.ref === app.ref);
-        if (!listing || !(listing.sequence > highest || (listing.sequence >= app.sequence && !known.has(listing.digest)))) continue;
-        for (const url of listingUrls(listing.urls)) if (!candidates.has(url)) candidates.set(url, pinned !== undefined ? { digest: listing.digest } : {});
+        if (!listing || !newer(listing)) continue;
+        const seen = `${s.digest} ${listing.digest}`;
+        for (const url of listingUrls(listing.urls)) {
+          const missed = `${s.key} ${app.ref} ${url}`;
+          if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
+          candidates.set(url, { ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
+        }
       }
       if (pinned === undefined) {
         for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
+          if (candidates.has(url)) continue;
           try {
             const peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }));
-            if (peek && peek.ref === app.ref && (peek.sequence > highest || (peek.sequence >= app.sequence && !known.has(peek.digest))) && !candidates.has(url)) candidates.set(url, {});
+            if (peek && newer(peek)) candidates.set(url, {});
           } catch { /* this source does not answer now */ }
         }
       }
+      // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
+      const revokeRead = new Set<string>();
+      app = withRevocations(app, await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead));
       for (const [url, want] of candidates) {
+        // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
+        // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
+        // index lists the same.
+        if (want.peek) {
+          let peek: ReturnType<typeof peekAppManifest>;
+          try { peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true })); } catch { continue; }
+          if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
+            if (want.miss) this.listingMisses.set(...want.miss);
+            continue;
+          }
+        }
         let fetched: { bundle: AppBundle; bytes: Uint8Array };
         try { fetched = await this.fetchBundle(url); } catch { continue; }
         const { bundle, bytes } = fetched;
@@ -924,13 +970,12 @@ export class Apps {
         }
         break;
       }
-      const revocations = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])]);
-      const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
-      for (const r of revocations) merged.set(canonicalJson(r), r);
+      // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
+      app = withRevocations(app, await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead));
       // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
       const current = await this.app(app.ref);
       if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
-      app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
+      app = { ...app, checkedAt: this.now() };
       if (!(await this.putAppIfInstalled(app, first.installedAt))) {
         if (wrote) await this.removeUnusedBundle(app.ref, wrote.bytes, wrote.digest);
         continue;
@@ -1140,7 +1185,8 @@ export class Apps {
     const scopes = new Map<string, AppDataExport>();
     for (const row of rows) {
       const out = scopes.get(row.scope) ?? { ghostlyAppData: 1 as const, app: app.ref, scope: row.scope, entries: {} };
-      out.entries[row.key] = JSON.parse(row.value) as JsonValue;
+      // Defined, not assigned: a key named `__proto__` is kept, where an assignment would set the file's prototype and lose it.
+      Object.defineProperty(out.entries, row.key, { value: JSON.parse(row.value) as JsonValue, enumerable: true, writable: true, configurable: true });
       scopes.set(row.scope, out);
     }
     return [...scopes.values()];

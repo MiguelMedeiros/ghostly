@@ -3,6 +3,7 @@ import { randomBytes, toBase64Url } from "../src/bytes";
 import { createIdentity } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { INVITE_TAKEN } from "../src/ghostlink";
+import { DiscoveryBudgetError } from "../src/transport";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, rtc, useFakeWorld, yieldToLoop, type Opened } from "./support/pairingWorld";
 
 // covers: chat.one-chat, chat.dht.fallback, chat.paired.reconnect, core.peer-keys
@@ -92,6 +93,26 @@ describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
     expect(texts(joiner)).toEqual(["and back", "now live"]);
     expect(texts(inviter)).toEqual(["hello over the DHT"]);
   }, 120_000);
+
+  it("an inviter whose first packet the relays' request budget holds back says until when, and goes on once it is out", async () => {
+    let heldUntil = Date.now() + 40_000;
+    class HeldPkarr extends MemoryPkarr {
+      transport() {
+        const inner = super.transport();
+        return { ...inner, publish: async (...args: Parameters<typeof inner.publish>) => {
+          if (Date.now() < heldUntil) throw new DiscoveryBudgetError(heldUntil - Date.now());
+          return inner.publish(...args);
+        } };
+      }
+    }
+    const made = invitation(), inviter = open(made.inviter, new HeldPkarr(DESKTOP_NETWORK));
+    await run(1_000);
+    expect(inviter.link.pairingProgress).toMatchObject({ stage: "publishing", relayWaitUntil: expect.any(Number) });
+    expect(inviter.link.pairingProgress!.relayWaitUntil! - heldUntil).toBeLessThanOrEqual(1_000);
+    heldUntil = 0;
+    expect(await until(() => inviter.link.pairingProgress?.stage === "waiting", 60_000)).toBeLessThan(Infinity);
+    expect(inviter.link.pairingProgress).not.toHaveProperty("relayWaitUntil");
+  });
 
   it("says on each side why it is not live: what the dialling side tried, and the offer the other side answered", async () => {
     rtc.blocked = true;

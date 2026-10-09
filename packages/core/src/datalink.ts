@@ -219,10 +219,10 @@ export class DataLink {
       if (this.state === "offering") {
         // Both sides offered at once: the lower public key keeps its offer.
         if (this.options.myPubKeyZ32 < this.options.peerPubKeyZ32) return;
-      } else if (this.state === "answering") {
-        return;
       }
-      // A fresh offer while connected means the peer lost the old connection.
+      // A fresh offer while connected means the peer lost the old connection. One that comes while an earlier one is
+      // still being answered takes its place too: the peer gave that one up (its answer was refused there, say, and
+      // it offered again at once), and a signal is fed once, so a newer offer left aside here was never answered.
       this.lastSignalTs = signal.ts;
       const wasOpen = this.state === "open";
       this.teardown();
@@ -342,7 +342,8 @@ export class DataLink {
       this.options.publishSignal(JSON.stringify(signal));
       this.setState("connecting");
     } catch {
-      this.reset();
+      // A newer offer took this one's place meanwhile (its connection was closed under it): that attempt goes on.
+      if (this.answered?.offer === offer) this.reset();
     }
   }
 
