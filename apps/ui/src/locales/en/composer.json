@@ -48,6 +48,7 @@
   "noEmoji": "No emoji found",
   "noGifs": "No GIFs found",
   "overSoft": "Over the {{bytes}} bytes the DHT carries: it is sent when you are live",
+  "pasteReading": "Reading what you pasted…",
   "payment": "Payment",
   "placeholder": "Message…",
   "previewLoading": "Loading preview of {{host}}…",

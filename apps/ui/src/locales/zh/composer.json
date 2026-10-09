@@ -48,6 +48,7 @@
   "noEmoji": "未找到表情",
   "noGifs": "未找到 GIF",
   "overSoft": "超过 DHT 可承载的 {{bytes}} 字节：直连后发送",
+  "pasteReading": "正在读取粘贴的内容…",
   "payment": "付款",
   "placeholder": "消息…",
   "previewLoading": "正在加载 {{host}} 的预览…",
