@@ -160,6 +160,25 @@ describe("reacting over the live link", () => {
     expect(t.attention.filter(e => e.type === "message")).toEqual([]);
   });
 
+  it("a reaction taken back leaves the chat list's line: the one before it is shown again, or none", async () => {
+    const t = await setup();
+    await t.agreed();
+    await t.node.sendMessage({ linkId: t.id, text: "lunch?" });
+    await t.node.sendMessage({ linkId: t.id, text: "dinner?" });
+    const [lunch, dinner] = [await t.row("lunch?"), await t.row("dinner?")];
+    t.contact.sendReaction({ id: lunch.wireId!, e: "😂", n: 10 });
+    await vi.waitFor(() => expect(t.receipts).toContain(10));
+    t.contact.sendReaction({ id: dinner.wireId!, e: "👍", n: 20 });
+    await vi.waitFor(() => expect(t.receipts).toContain(20));
+    expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "👍", snippet: "dinner?" });
+    t.contact.sendReaction({ id: dinner.wireId!, e: "", n: 30 });
+    await vi.waitFor(() => expect(t.receipts).toContain(30));
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "😂", snippet: "lunch?" }));
+    t.contact.sendReaction({ id: lunch.wireId!, e: "", n: 40 });
+    await vi.waitFor(() => expect(t.receipts).toContain(40));
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+  });
+
   it("a reaction to a message not here yet waits for it", async () => {
     const t = await setup();
     await t.agreed();
