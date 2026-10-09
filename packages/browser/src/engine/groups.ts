@@ -1016,8 +1016,8 @@ export class Groups {
    */
   async joinByLink(code: string): Promise<string> {
     if (decodeCommunityLink(code)) {
-      const g = decodeCommunityLink(code)!.g;
-      if (this.stored.has(g)) await this.forget(g);
+      // A private group's id is no community's: opening a link never forgets or leaves a group this profile has.
+      if (this.stored.has(decodeCommunityLink(code)!.g)) throw new Error("This link names a private group of yours, not a community");
       return this.communities.joinByLink(code);
     }
     const link = decodeGroupEntryLink(code);

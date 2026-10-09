@@ -1349,6 +1349,11 @@ export class GhostLink {
   private keyStopped = false;
   /** A connection whose failure to authenticate says nothing about the contact: dialled in on a pinned chat. */
   private unproven(channel: FrameChannel): boolean { return this.dialedIn.has(channel) && !!this.options.pairing?.credentials.peerKey; }
+  /**
+   * A session that started before the pin and was refused for another key: the pin came by another path meanwhile (the
+   * DHT's first contact), and whoever this session reached held only a copy of the invite. It proves nothing either.
+   */
+  private pinnedSince(channel: FrameChannel, paired: PairedSession): boolean { return this.openedUnpinned.has(channel) && !!paired.state.keyMismatch; }
   get textDelivery(): "stream" | "dht" | "unavailable" {
     if (this.isDataLinkOpen) return "stream";
     if (!this.dht || this.securityRejected || this.keyStopped) return "unavailable";
@@ -3361,6 +3366,8 @@ export class GhostLink {
    * no more than on the DHT, so it closes that connection and nothing else.
    */
   private readonly dialedIn = new WeakSet<FrameChannel>();
+  /** Connections whose session started with no key pinned nor named by the invite. */
+  private readonly openedUnpinned = new WeakSet<FrameChannel>();
 
   /**
    * `migration`: the channel is a candidate that takes over from the session open now once it authenticated. With a
@@ -3384,6 +3391,7 @@ export class GhostLink {
         }
       };
       const unproven = this.unproven(channel);
+      if (!this.options.pairing.credentials.peerKey && !this.options.pairing.credentials.expectedPeerKey) this.openedUnpinned.add(channel);
       if (!migration) {
         this.activeBinding = binding; this.channel = channel; this.channelSince = Date.now();
         // One dialled in is nobody until it authenticated: the DHT keeps its pace meanwhile (set once it is ready).
@@ -3409,16 +3417,17 @@ export class GhostLink {
         lightningPaymentsSupport: this.paymentEnabled("lightning"),
         paymentsSupport: PAYMENT_METHODS.some(m => this.paymentEnabled(m)) && !!this.options.events?.onPayment && !!this.options.events?.onPaymentRequest && !!this.options.events?.onPaymentResult,
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
-        onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
+        onState: () => { if (this.channel === channel && (!this.unproven(channel) && !this.pinnedSince(channel, paired) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
           // Another participation key than the one pinned: a device's one-time enrollment link says so (WISP 06).
           if (paired.state.keyMismatch) this.options.events?.onPeerKeyRefused?.();
-          // Dialled in and unproven, a connection that carried nothing in time, or one that brought more than this side
-          // could handle at once (`overloaded`): none says anything about the contact. The chat dials again, and its
-          // DHT layer goes on meanwhile.
-          if (this.unproven(channel) || paired.authTimedOut || paired.overloaded) {
+          // Dialled in and unproven, started before a pin made by another path, a connection that carried nothing in
+          // time, or one that brought more than this side could handle at once (`overloaded`): none says anything about
+          // the contact. The chat dials again, and its DHT layer goes on meanwhile.
+          if (this.unproven(channel) || this.pinnedSince(channel, paired) || paired.authTimedOut || paired.overloaded) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
             if (this.unproven(channel)) traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            else if (this.pinnedSince(channel, paired)) traceLink(this.myPubKeyZ32, "pinned-since-refused", { transport: binding?.transport ?? "webrtc/1" });
             else if (paired.overloaded) traceLink(this.myPubKeyZ32, "receive-overload", { transport: binding?.transport ?? "webrtc/1" });
             else traceLink(this.myPubKeyZ32, "auth-timeout", { transport: binding?.transport ?? "webrtc/1" });
             migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));
