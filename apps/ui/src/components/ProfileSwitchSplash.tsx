@@ -3,6 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { clearPendingSwitch, pendingSwitch, type PendingSwitch } from "../lib/profiles";
+import { initial } from "../lib/initial";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 
@@ -16,7 +17,7 @@ export function ProfileSwitchView({ pending, arrived, leaving, label }: { pendin
         <span className="profile-switch-badge grid place-items-center rounded-full overflow-hidden" style={{ width: 76, height: 76, boxShadow: `0 0 0 3px var(--theme-app-bg, #222e35), 0 0 0 6px ${pending.color}` }}>
           {pending.avatar
             ? <img src={pending.avatar} alt="" className="w-full h-full object-cover" />
-            : <span aria-hidden="true" className="grid place-items-center w-full h-full text-[32px] font-semibold text-[#111b21]" style={{ background: pending.color }}>{pending.name.charAt(0).toUpperCase()}</span>}
+            : <span aria-hidden="true" className="grid place-items-center w-full h-full text-[32px] font-semibold text-[#111b21]" style={{ background: pending.color }}>{initial(pending.name)}</span>}
         </span>
         <p className="text-lg font-semibold" style={{ color: "var(--theme-text-primary, #e9edef)" }}>{label}</p>
       </div>

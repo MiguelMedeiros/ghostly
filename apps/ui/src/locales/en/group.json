@@ -117,6 +117,9 @@
     "blockedCommunityNext": "Try again in a moment.",
     "blockedNext": "Make someone admin, or wait for a member.",
     "body": "The group and its history go from this device. You will not read what is said after, and to come back someone has to let you in again.",
+    "forgetBody": "Deleting the group from this device also leaves it.",
+    "forgetTitle": "Delete {{name}}?",
+    "forgetTitleUnnamed": "Delete this group?",
     "successor": "You are the admin: {{name}} becomes the admin when you leave.",
     "title": "Leave {{name}}?",
     "titleUnnamed": "Leave this group?"

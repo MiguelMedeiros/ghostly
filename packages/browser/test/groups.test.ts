@@ -587,6 +587,14 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       expect(await alice.messages(solo)).toEqual([]);
     });
 
+    it("the admin cannot delete the group from this device either when nobody is online to take over: it would be left with no admin", async () => {
+      const { world, alice, bob, carol, groupId, edge } = await trio();
+      edge("alice", bob, false); edge("alice", carol, false);
+      await expect(alice.forget(groupId)).rejects.toThrow(/nobody else in the group is online/);
+      expect(alice.views()[0]).toMatchObject({ id: groupId, status: "active", isAdmin: true });
+      expect((await world.peers.get("alice")!.store.getGroups()).map(g => g.id)).toEqual([groupId]);
+    });
+
     it("a leave the admin never hears is forgotten after a week", async () => {
       const { world, alice, bob, groupId, edge } = await trio();
       edge("alice", bob, false);
