@@ -45,7 +45,7 @@ export interface PairingProgress {
   startedAt: number;
   /** Connection attempts so far, from 1. A failed attempt is followed by the next one. */
   attempt: number;
-  /** A short technical note (an error message), when there is one. */
+  /** A short technical note (an error message, or a code), when there is one: the UI shows it behind an ⓘ, untranslated. */
   detail?: string;
   /** When `stage` is `failed` or `on-dht`: why, and whether the engine tries again on its own. */
   reason?: PairingFailureReason | PairingOnDhtReason;
@@ -113,7 +113,8 @@ export class PairingTracker {
     // on the DHT; not pinned yet, the first contact goes on (on the DHT too) and so do the attempts.
     if (reason === "timeout" || reason === "transport") {
       if (this.dhtPinned) this.set("on-dht", { reason: "transport", retryable: true, ...(detail ? { detail } : {}) });
-      else this.set(this.idle(), { detail: detail ?? (reason === "timeout" ? "The offer was not answered in time; trying again." : "No connection came up; trying again.") });
+      // Why, as its code when the attempt brought no error of its own: the UI's words say the stage, never this English.
+      else this.set(this.idle(), { detail: detail ?? reason });
       return;
     }
     this.set("failed", { reason, retryable, ...(detail ? { detail } : {}) });

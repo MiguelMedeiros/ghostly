@@ -9,12 +9,13 @@ import { dots, focus, transportName, type ConnectionKind } from "../lib/connecti
 import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
 import { clockTime, formatAt } from "../lib/time";
 import { ConnectionIcon } from "./ConnectionIcon";
+import { PairingDetail } from "./pairing/PairingDetail";
 import { PairingGlyph } from "./pairing/PairingGlyph";
 import { usePairingWords } from "./pairing/words";
 import { useI18n } from "../contexts/I18nContext";
 import { statusWords } from "../lib/contactStatus";
 import { useNow, type PairingProgressState } from "../hooks/usePairingProgress";
-import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed } from "../lib/pairingProgress";
+import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed, pairingDetail } from "../lib/pairingProgress";
 import { TransportOptions } from "./TransportOptions";
 import { ConnectionHistory } from "./TransportTimeline";
 import { DiscoveryHealth } from "./DiscoveryHealth";
@@ -225,12 +226,11 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
                 onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>{t("connection.panel.useAutomatic")}</button>}
             </div>}
             {progress && (pairingOn || pairingFailed) && <div data-testid="connection-pairing-details" className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
-              <p className="font-medium text-text-primary">{stageWords}</p>
+              <div className="font-medium text-text-primary">{stageWords}<PairingDetail detail={pairingDetail(progress)} testId="connection-pairing-detail" className="mt-0.5 font-normal text-text-secondary" /></div>
               <ol aria-label={t("pairing.steps")} className="mt-1 flex flex-wrap gap-x-2">
                 {steps.map((s, i) => <li key={s} data-step={s} aria-current={i === step - 1 ? "step" : undefined}
                   className={i === step - 1 ? "text-text-primary" : i < step - 1 ? "text-accent" : undefined}>{words.step(s)}</li>)}
               </ol>
-              {progress.detail && <p className="mt-0.5 break-words">{progress.detail}</p>}
             </div>}
             {notLive && <div data-testid="connection-not-live" data-side={link?.liveAttempt?.side ?? "none"} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <p className="font-medium text-text-primary">{notLive.label}</p>
