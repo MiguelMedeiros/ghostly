@@ -288,6 +288,22 @@ describe("the reactions store", () => {
     expect(rows[1].reactions).toBeUndefined();
   });
 
+  it("in a group, a reaction to a message not here yet waits after a lookup by id, and its message landing never reads the whole chat", async () => {
+    // A member back in a group hears the others' latest reactions as each edge opens, before the catch-up brings the
+    // messages they name: each one read the whole history to wait, and again when its message came.
+    const rows = [row({ id: "k:0:1", member: "k", text: "here already" })];
+    const { reactions, host } = memory(rows);
+    Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id) });
+    const whole = vi.spyOn(host, "messages");
+    expect(await reactions.receive("group:g", "a", { id: "k:0:2", e: "👍", n: 1 })).toBe("waiting");
+    expect(await reactions.receive("group:g", "b", { id: "k:0:2", e: "😂", n: 1 })).toBe("waiting");
+    expect(await reactions.receive("group:g", "a", { id: "k:0:1", e: "🙏", n: 2 })).toBe("applied");
+    rows.push(row({ id: "k:0:2", member: "k", text: "came late" }));
+    await reactions.stored(rows[1]);
+    expect(rows[1].reactions).toMatchObject({ a: { e: "👍", n: 1 }, b: { e: "😂", n: 1 } });
+    expect(whole).not.toHaveBeenCalled();
+  });
+
   it("has room for so many waiting per chat", async () => {
     const { reactions } = memory([]);
     for (let i = 0; i < 64; i++) expect(await reactions.receive("group:g", `m${i}`, { id: "k:0:1", e: "👍", n: 1 })).toBe("waiting");
