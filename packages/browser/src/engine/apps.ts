@@ -246,6 +246,13 @@ function notReadable(url: unknown, words: string): never {
 const versionOf = (manifest: AppManifest, digest: string): AppVersion => ({ ref: appRef(manifest.publisher, manifest.name), sequence: manifest.sequence, digest });
 const byteLength = (text: string) => utf8Encode(text).length;
 
+/** The app with these revocations merged into the ones it holds, each kept once. */
+function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]): InstalledApp {
+  const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
+  for (const r of read) merged.set(canonicalJson(r), r);
+  return merged.size ? { ...app, revocations: [...merged.values()] } : app;
+}
+
 /** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`. */
 const rowsOf = (...prefix: string[]) => IDBKeyRange.bound(prefix, [...prefix, []]);
 
@@ -551,10 +558,15 @@ export class Apps {
     return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
   }
 
-  /** The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error. */
-  private async readRevocations(ref: string, urls: string[]): Promise<SignedAppRevocation[]> {
+  /**
+   * The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error.
+   * `read` holds the files already read, which are skipped, and gets the ones read now.
+   */
+  private async readRevocations(ref: string, urls: string[], read = new Set<string>()): Promise<SignedAppRevocation[]> {
     const out: SignedAppRevocation[] = [];
     for (const url of new Set(urls.filter(isAppFetchUrl).map((u) => besideUrl(u, "ghostly-revoke.json")))) {
+      if (read.has(url)) continue;
+      read.add(url);
       try {
         const read = readAppRevocations(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
         if (read.ok) out.push(...read.revocations.filter((r) => r.statement.app === ref));
@@ -905,6 +917,9 @@ export class Apps {
           } catch { /* this source does not answer now */ }
         }
       }
+      // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
+      const revokeRead = new Set<string>();
+      app = withRevocations(app, await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead));
       for (const [url, want] of candidates) {
         // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
         // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
@@ -955,13 +970,12 @@ export class Apps {
         }
         break;
       }
-      const revocations = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])]);
-      const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
-      for (const r of revocations) merged.set(canonicalJson(r), r);
+      // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
+      app = withRevocations(app, await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead));
       // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
       const current = await this.app(app.ref);
       if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
-      app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
+      app = { ...app, checkedAt: this.now() };
       if (!(await this.putAppIfInstalled(app, first.installedAt))) {
         if (wrote) await this.removeUnusedBundle(app.ref, wrote.bytes, wrote.digest);
         continue;
