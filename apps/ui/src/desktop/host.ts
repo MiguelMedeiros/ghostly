@@ -11,6 +11,7 @@ import {
   type Identity,
   type DiscoveryChange,
   type DiscoveryStatus,
+  type CallMedia,
   type GhostRecord,
   type LocalFetch,
   type PkarrRequestOptions,
@@ -27,6 +28,7 @@ import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { getIdentifier } from "@tauri-apps/api/app";
 import type { PubkyCookieSession } from "@ghostly/browser/host";
+import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
@@ -302,11 +304,12 @@ export function desktopApps(runsApps: boolean) {
   };
 }
 
-/** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
-export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
-  const { node: callOptions, callMedia } = nativeCallOptions(calls);
-  // Native calls capture and play in Rust: the microphones, cameras and speakers to choose from are GStreamer's.
-  if (callMedia) setDeviceSource(nativeDevices);
+/**
+ * `calls`: what Rust says about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. It may still be
+ * coming: on Linux it starts GStreamer, 0.6 s on a first launch, and the page is drawn meanwhile. The engine starts
+ * once it is there, since it tells contacts whether this app takes calls.
+ */
+export function createDesktopHost(version: string, calls: NativeCallSupport | null | Promise<NativeCallSupport | null> = null) {
   // The title bar follows the app's Light / Dark choice (null: the system's). On a Mac this is the app's appearance, so
   // the page's `prefers-color-scheme` follows it too, and comes back to the system's with System.
   setWindowThemeSink((value) => void invoke("plugin:window|set_theme", { label: "main", value }).catch(() => {}));
@@ -324,18 +327,27 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
   const apps = desktopApps(appsPlatform());
-  return createInPageHost({
+  const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
+    // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
+    pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
+    // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
+    defaultWallets: defaultWalletsAllowed(desktopUnderTest),
+    ...apps.node, ...macPeerBudget() };
+  let callMedia: CallMedia | undefined;
+  const heard = (said: NativeCallSupport | null) => {
+    const options = nativeCallOptions(said);
+    Object.assign(node, options.node);
+    callMedia = options.callMedia;
+    // Native calls capture and play in Rust: the microphones, cameras and speakers to choose from are GStreamer's.
+    if (callMedia) setDeviceSource(nativeDevices);
+  };
+  const callsKnown = calls instanceof Promise ? calls.then(heard) : heard(calls);
+  const host = createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
     ...apps.host,
-    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
-      // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
-      pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
-      // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
-      defaultWallets: defaultWalletsAllowed(desktopUnderTest),
-      ...apps.node, ...macPeerBudget(), ...callOptions },
-    callMedia,
+    node,
     onServer: serveServiceWindows,
     oidc: desktopOidc,
     // Not in the Android app yet (no redirect the phone receives): Bluesky is not offered there.
@@ -368,5 +380,10 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
       await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId });
     },
+  });
+  const connect = host.connect;
+  return Object.defineProperties(host, {
+    connect: { value: async (...args: Parameters<typeof connect>) => { await callsKnown; return connect(...args); } },
+    callMedia: { get: () => callMedia },
   });
 }
