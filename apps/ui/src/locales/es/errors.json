@@ -125,10 +125,18 @@
   "files": {
     "cannotDecodeRecording": "Este dispositivo no puede decodificar la grabación",
     "cannotRetry": "No se puede reintentar este archivo",
+    "clipboardUnavailable": "No se puede leer el portapapeles",
+    "clipboardUnavailableNext": "Adjúntalo con +.",
     "gone": "Este archivo ya no está aquí",
     "noRoom": "No hay espacio en el dispositivo de tu contacto",
     "noRoomNext": "{{free}} libres.",
     "notVoice": "Esa grabación no se puede enviar como mensaje de voz",
+    "pasteDamaged": "No se puede leer la imagen copiada",
+    "pasteDamagedNext": "Cópiala de nuevo o adjúntala con +.",
+    "pasteFileUnreadable": "No se puede leer el archivo pegado",
+    "pasteFileUnreadableNext": "Adjúntalo con +.",
+    "pasteGone": "Ese pegado ya no está",
+    "pasteGoneNext": "Pégalo de nuevo.",
     "pasteTooLarge": "Es demasiado grande para pegarlo. Envíalo con + → Documento.",
     "pasteUnreadable": "No se pudieron pegar esos archivos. Envíalos con + → Documento.",
     "refused": {

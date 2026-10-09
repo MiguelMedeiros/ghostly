@@ -125,10 +125,18 @@
   "files": {
     "cannotDecodeRecording": "この端末では録音をデコードできません",
     "cannotRetry": "このファイルは再試行できません",
+    "clipboardUnavailable": "クリップボードを読み取れません",
+    "clipboardUnavailableNext": "+ から添付してください。",
     "gone": "このファイルはもうここにありません",
     "noRoom": "相手のデバイスに空きがありません",
     "noRoomNext": "空き {{free}}。",
     "notVoice": "その録音はボイスメッセージとして送れません",
+    "pasteDamaged": "コピーした画像を読み取れません",
+    "pasteDamagedNext": "もう一度コピーするか、+ から添付してください。",
+    "pasteFileUnreadable": "貼り付けたファイルを読み取れません",
+    "pasteFileUnreadableNext": "+ から添付してください。",
+    "pasteGone": "その貼り付けはもう使えません",
+    "pasteGoneNext": "もう一度貼り付けてください。",
     "pasteTooLarge": "貼り付けるには大きすぎます。+ → 書類 から送ってください。",
     "pasteUnreadable": "これらのファイルを貼り付けられませんでした。+ → 書類 から送ってください。",
     "refused": {

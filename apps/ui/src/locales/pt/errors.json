@@ -125,10 +125,18 @@
   "files": {
     "cannotDecodeRecording": "Este aparelho não consegue decodificar a gravação",
     "cannotRetry": "Não é possível tentar enviar este arquivo de novo",
+    "clipboardUnavailable": "Não foi possível ler a área de transferência",
+    "clipboardUnavailableNext": "Anexe com +.",
     "gone": "Este arquivo não está mais aqui",
     "noRoom": "Sem espaço no dispositivo do contato",
     "noRoomNext": "{{free}} livres.",
     "notVoice": "Essa gravação não pode ser enviada como mensagem de voz",
+    "pasteDamaged": "Não foi possível ler a imagem copiada",
+    "pasteDamagedNext": "Copie de novo ou anexe com +.",
+    "pasteFileUnreadable": "Não foi possível ler o arquivo colado",
+    "pasteFileUnreadableNext": "Anexe com +.",
+    "pasteGone": "Essa colagem expirou",
+    "pasteGoneNext": "Cole de novo.",
     "pasteTooLarge": "Isso é grande demais para colar. Envie com + → Documento.",
     "pasteUnreadable": "Não foi possível colar esses arquivos. Envie-os com + → Documento.",
     "refused": {
