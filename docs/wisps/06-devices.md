@@ -197,6 +197,7 @@ It is shown as a QR code and as a link to copy or share, and read through the ex
 Two rules make the digits enough, without a commitment round:
 
 - **One session per invite.** A admits the first joiner that authenticates and voids the invite. A second joiner gets nothing, and A says so.
+  Every device that reads the code writes the joiner's one packet on the link, and A reads only the last one written. So that A hears of each of them: a joiner with WebRTC always makes an offer, whichever one-time key sorts first, signed with its device signing key as every signal of the session is; while it has no session it puts its packet out again every 5 seconds; and A goes on reading that packet for as long as the enrollment runs, a session open or not. A validly signed signal there by a key other than the one A admitted, or than the first one A saw, is a second device: A counts it (`refused` on its waiting and digits views) and tells the person, whichever of the two holds the session. A joiner without WebRTC signs no signal: it is counted when a session with it is refused for its key.
 - **B shows digits only after it verified A's proof** against the invite's key.
 
 So an attacker who photographed the code and joined first holds A's only session; the person's own device shows an error and no digits, and nothing is confirmed. An attacker cannot sit between the two either: B knows A's key from the code. If step 5 or 6 does not finish, B holds nothing usable (it is not in the record) and shows "Not finished" with **Remove**; A adds no device.
