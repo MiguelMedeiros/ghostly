@@ -154,6 +154,16 @@ describe("an audio file in the chat", () => {
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, "live.flac"));
   });
 
+  it("a Download the system refuses (Desktop) says so behind the ⓘ in the language, not in the system's English", async () => {
+    canPlay = (type) => (type === "audio/flac" ? "" : "maybe");
+    vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("No space left on device (os error 28)"));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<AudioBubble file={song({ name: "live.flac", mime: "audio/flac" })} sender="peer" peerName="Ana" />, { language: "fr" });
+    fireEvent.click(screen.getByTestId("audio-download"));
+    fireEvent.click(await screen.findByTestId("audio-why"));
+    expect(screen.getByTestId("audio-why-text")).toHaveTextContent(/^Impossible d'enregistrer le fichier à cet endroit\. Réessayez et choisissez un autre dossier\.$/);
+  });
+
   it("refused by the player once started, it says so and offers Download", async () => {
     play.mockImplementationOnce(() => Promise.reject(new DOMException("no decoder", "NotSupportedError")));
     show(song());
@@ -179,6 +189,20 @@ describe("an audio file in the chat", () => {
     expect(audio.getAttribute("src")).toBe("ghostly-file://localhost/song-1");
     expect(screen.queryByTestId("audio-problem")).toBeNull();
     fireEvent.ended(audio);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("gone while its stream is being opened (the chat closed), it lets go of the stream once it comes", async () => {
+    getFile.mockResolvedValue(null);
+    const release = vi.fn();
+    let answer: (source: { url: string; release: () => void }) => void = () => {};
+    vi.spyOn(servicesPlatform!, "streamFile").mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const view = show(song());
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    view.unmount();
+    answer({ url: "ghostly-file://localhost/song-late", release });
+    await flush();
     expect(release).toHaveBeenCalledTimes(1);
   });
 

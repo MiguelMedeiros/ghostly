@@ -12,13 +12,18 @@ import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
 import { groupFileText, type GroupFileDesk, type GroupFileMembership } from "./groupFiles";
 
-/** The line a change of a group's picture leaves in its history (both profiles). */
-export const pictureText = (name: string, set: boolean) => `${name} ${set ? "changed" : "removed"} the group's picture`;
+/** The line a change of a group's picture leaves in its history (both profiles); without a name, nobody is credited. */
+export const pictureText = (name: string | undefined, set: boolean) =>
+  name === undefined ? `The group's picture was ${set ? "changed" : "removed"}` : `${name} ${set ? "changed" : "removed"} the group's picture`;
 /** The line a new name leaves (both profiles): `group` is the name the group has now. */
-export const renameText = (name: string, group: string) => `${name} renamed the group to “${group}”`;
+export const renameText = (name: string | undefined, group: string) =>
+  name === undefined ? `The group is now called “${group}”` : `${name} renamed the group to “${group}”`;
 
-/** The lines a statement that changed the group's name or picture leaves in its history, in that order. */
-export function metaLines(name: string, change: GroupMetaChange, group: string): { event: GroupEvent; text: string }[] {
+/**
+ * The lines a statement that changed the group's name or picture leaves in its history, in that order. No `name` when
+ * the core cannot say who made the change (a new admin signed again what the last one set).
+ */
+export function metaLines(name: string | undefined, change: GroupMetaChange, group: string): { event: GroupEvent; text: string }[] {
   return [
     ...("name" in change ? [{ event: "renamed" as const, text: renameText(name, group) }] : []),
     ...("picture" in change ? [{ event: "picture" as const, text: pictureText(name, !!change.picture) }] : []),
@@ -460,11 +465,19 @@ export class Communities {
     this.host.emit();
   }
 
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard, file?: GroupFileMeta): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
+  /** Whether a message of mine could go to the group now: the refusal `send` would answer for not being in it, or null. */
+  sendCheck(groupId: string): { error: string | null; refused?: boolean } {
     const live = this.live.get(groupId);
     if (!live) return { error: "You are not in this group yet", refused: true };
     // Not a member (removed, the history forked, an admission that lost): refused, not something to try again.
     if (!live.session.isMember) return { error: live.session.state.statusReason ?? "You are not in this group", refused: true };
+    return { error: null };
+  }
+
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard, file?: GroupFileMeta): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
+    const check = this.sendCheck(groupId);
+    if (check.error) return check;
+    const live = this.live.get(groupId)!;
     // Dated by the engine's clock, as the commits it signs and the session's own decisions are: a frame said again once
     // its author has caught up (`CommunitySession.reseal`) goes to the members let in before it, judged by the commits'
     // times against the frame's. Dated by the wall clock, a frame read as written before admissions it came after
@@ -1626,7 +1639,7 @@ export class Communities {
       pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
       metaChanged: (by, change, at) => {
-        const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
+        const name = by === undefined ? undefined : by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
         // When the admin signed it, as a membership line keeps its commit's time (`membershipChanged`).
         const when = receivedTimestamp(at, this.now());
         void (async () => {

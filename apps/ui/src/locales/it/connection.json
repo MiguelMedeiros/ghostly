@@ -119,6 +119,7 @@
   "option": {
     "automatic": "Automatico",
     "automaticHint": "Scelgono le app, prima WebRTC",
+    "automaticHintNative": "Scelgono le app, prima {{transport}}: questa app non ha WebRTC",
     "chosenNotInUse": "Scelto · non in uso",
     "chosenWaiting": "Scelto · in attesa",
     "contactLacks": "L'app del tuo contatto non supporta {{transport}}",
@@ -198,6 +199,7 @@
     "afterDrop": "Automatico: la chat è tornata tramite {{transport}} dopo che il trasporto precedente è caduto.",
     "afterDropShort": "automatico, dopo un'interruzione",
     "automatic": "Automatico: entrambe le app mettono {{transport}} al primo posto.",
+    "automaticNoWebrtc": "Automatico: le app usano {{transport}}, che hanno entrambe; una delle due non ha WebRTC.",
     "automaticWebrtc": "Automatico: entrambe le app mettono WebRTC al primo posto, e un primo abbinamento usa sempre WebRTC.",
     "contactChose": "{{contact}} ha scelto {{transport}} per questa chat.",
     "fallback": "Hai scelto {{preferred}} per questa chat; ora non è disponibile, quindi la chat usa {{transport}}.",

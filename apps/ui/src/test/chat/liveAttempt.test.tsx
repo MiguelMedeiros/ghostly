@@ -19,9 +19,9 @@ describe("why a chat is not live (WISP 100)", () => {
     ] }, "you")).toEqual({ label: "Last attempt at 17:02", lines: [
       "WebRTC: The offer was not answered.", "Iroh: The contact has no Iroh relay.", "Trying again at about 17:02.",
     ] });
-    // Nothing to try yet: why, instead of a list.
+    // Nothing to try yet: why, instead of a list, in the app's words.
     expect(text({ at: 1, side: "dialled", failed: [], reason: "No transport both apps allow is available yet" }, "you")?.lines)
-      .toEqual(["No transport both apps allow is available yet."]);
+      .toEqual(["No way to connect in common."]);
   });
 
   it("says on the answering side that the contact dials, and what of it reached this app", () => {
