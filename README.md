@@ -25,7 +25,7 @@
 <p align="center">
   <a href="https://github.com/MiguelMedeiros/ghostly/releases/latest"><img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?label=release" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/MiguelMedeiros/ghostly" alt="License: MIT"></a>
-  <a href="https://github.com/MiguelMedeiros/ghostly/actions/workflows/ci.yml?query=branch%3Adev"><img src="https://img.shields.io/github/actions/workflow/status/MiguelMedeiros/ghostly/ci.yml?branch=dev&label=CI%20(dev)" alt="CI status on dev"></a>
+  <a href="https://github.com/MiguelMedeiros/ghostly/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/MiguelMedeiros/ghostly/ci.yml?branch=main&label=CI" alt="CI status of the released code (main)"></a>
 </p>
 
 <p align="center">
