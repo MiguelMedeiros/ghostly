@@ -296,7 +296,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
       if (!platform || !peerKey) return null;
-      const tooLarge = platform.fileTooLarge ? platform.fileTooLarge(peerKey, source.size)
+      // The platform says it in English, as sendFile throws it: the same words in the app's language.
+      const refused = platform.fileTooLarge?.(peerKey, source.size);
+      const tooLarge = platform.fileTooLarge ? refused && problemLine(refused, t)
         : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes) }) : null;
       if (tooLarge) return tooLarge;
       // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
