@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, BudgetLow, canGoAlone, ciState, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, queuedAt, readState, restLayer, rounds, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, BudgetLow, canGoAlone, ciRun, ciState, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, queuedAt, readState, restLayer, rounds, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -55,7 +55,7 @@ function fakeRepo() {
     pulls: async (base: string) => [...pulls.values()].filter((p) => p.open && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     mergedPulls: async (base: string) => [...pulls.values()].filter((p) => p.merged && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     events: async (n: number) => events.get(n) ?? [],
-    checkRuns: async (sha: string) => runs.get(sha) ?? [],
+    ciJobs: async (sha: string) => runs.get(sha) ?? [],
     headPushedAt: async (sha: string) => (pushed.has(sha) ? pushed.get(sha) : "2026-10-01T00:00:00Z"),
     comments: async (n: number) => comments.get(n) ?? [],
     branchSha: async (base: string) => tips[base],
@@ -1289,6 +1289,19 @@ describe("CI on a commit", () => {
     expect(ciState([run("CI Success", "completed", "cancelled"), run("Changed paths", "queued")])).toBe("pending");
     expect(ciState([run("CI Success", "completed", "cancelled")])).toBe("none");
   });
+
+  it("takes the newest gate by id, never by a start time the caller set", () => {
+    const forged = run("CI Success", "completed", "success", "2099-01-01T00:00:00Z", 5);
+    expect(ciState([run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 4), forged])).toBe("success");
+    expect(ciState([forged, run("CI Success", "completed", "failure", "2026-10-07T12:00:00Z", 6)])).toBe("failure");
+  });
+
+  it("is CI's own run: the newest run of this repository's ci.yml on exactly that commit", () => {
+    const wf = (id: number, path = ".github/workflows/ci.yml", repo = "o/r", head_sha = "abc") => ({ id, path, head_sha, repository: { full_name: repo } });
+    expect(ciRun([wf(1), wf(3), wf(2)], "o/r", "abc")?.id).toBe(3);
+    expect(ciRun([wf(1), wf(9, ".github/workflows/forge.yml"), wf(8, ".github/workflows/ci.yml", "evil/r"), wf(7, ".github/workflows/ci.yml", "o/r", "def")], "o/r", "abc")?.id).toBe(1);
+    expect(ciRun([wf(9, ".github/workflows/forge.yml")], "o/r", "abc")).toBeNull();
+  });
 });
 
 describe("the bases with a train", () => {
@@ -1375,6 +1388,43 @@ describe("GitHub over REST", () => {
       { method: "GET", url: "/commits/old1", body: undefined },
       { method: "PUT", url: "/pulls/9000/merge", body: { merge_method: "rebase", sha: "b1" } },
     ]);
+  });
+
+  it("reads CI from the jobs of ci.yml's own run, never from check runs a workflow can post", async () => {
+    const sent: string[] = [];
+    const ciYml = { id: 41, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } };
+    const forge = { id: 42, path: ".github/workflows/forge.yml", head_sha: "abc", repository: { full_name: "o/r" } };
+    const gate = (id: number, conclusion: string, started_at: string) => ({ id, name: "CI Success", status: "completed", conclusion, started_at });
+    const answers: Record<string, object> = {
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [ciYml, forge] },
+      "/actions/runs/41/jobs?filter=latest&per_page=100&page=1": { total_count: 1, jobs: [gate(7, "failure", "2026-10-09T00:30:00Z")] },
+      "/actions/workflows/ci.yml/runs?head_sha=def&per_page=100": { workflow_runs: [] },
+      "/commits/abc/check-runs?filter=latest&per_page=100&page=1": { check_runs: [gate(9, "success", "2099-01-01T00:00:00Z")] },
+    };
+    const fetchImpl = async (url: string) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(path);
+      return reply(200, answers[path] ?? {});
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(ciState(await gh.ciJobs("abc"))).toBe("failure");
+    expect(await gh.ciJobs("def")).toEqual([]);
+    expect(sent.some((p) => p.includes("check-runs"))).toBe(false);
+  });
+
+  it("falls back to GitHub Actions' check runs, with one warning, when the token may not read Actions", async () => {
+    const warnings: string[] = [];
+    const checks = [
+      { id: 7, name: "CI Success", status: "completed", conclusion: "failure", app: { slug: "github-actions" } },
+      { id: 9, name: "CI Success", status: "completed", conclusion: "success", app: { slug: "some-other-app" } },
+    ];
+    const fetchImpl = async (url: string) =>
+      url.includes("/actions/") ? reply(403, { message: "Resource not accessible by integration" }) : reply(200, { total_count: 2, check_runs: checks });
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {}, warn: (m: string) => void warnings.push(m) });
+    expect(ciState(await gh.ciJobs("abc"))).toBe("failure");
+    expect(ciState(await gh.ciJobs("def"))).toBe("failure");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/Actions: read/);
   });
 
   it("stops the run when the token's budget runs low", async () => {
