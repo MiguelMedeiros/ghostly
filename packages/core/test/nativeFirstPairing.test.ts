@@ -86,6 +86,33 @@ describe("a first pairing with no WebRTC on either side", () => {
 });
 
 /**
+ * A slow DHT (a busy public one, or a testnet with dead nodes: puts 5-12 s, reads 2.5-7.5 s): for 20 s neither Desktop
+ * has read the other's capability record, so a dial has nothing to try ("No transport both apps allow is available
+ * yet"). Each such dial used to count as a failed one: the pairing turned `on-dht` with a transport reason at 12-15 s,
+ * and the next dial waited 160 s.
+ */
+const SLOW_DHT: NetworkModel = { publishMs: 5_000, visibleAfterMs: 5_000, readMs: 2_500 };
+
+describe("a first pairing with no WebRTC, before either side read the other's record", () => {
+  it("counts no dial that had nothing to try: no on-dht for a transport, no wait grown", async () => {
+    const pkarr = new MemoryPkarr(SLOW_DHT), native = new NativeWorld(), made = invitationWhere("inviter");
+    const inviter = desktop(native, "ana", open(made.inviter, pkarr, { dht: true, link: { rtcAvailable: false } }));
+    await run(8_000);
+    const joiner = desktop(native, "bia", open(made.joiner, pkarr, { dht: true, link: { rtcAvailable: false } }));
+    await run(20_000);
+    for (const desk of [inviter, joiner]) {
+      const role = desk.side.link.pairingProgress?.role;
+      expect(desk.dials, `${role}: nothing was dialled`).toEqual([]);
+      expect(desk.side.progress.filter(p => p.reason === "transport"), `${role}: no transport failed`).toEqual([]);
+      const attempt = desk.side.link.liveAttempt;
+      expect(attempt?.reason, `${role}: says why nothing was tried`).toMatch(/No transport both apps allow/);
+      // At most the first wait of the background pace (20 s), not 160 s.
+      expect(attempt!.retryAt! - Date.now(), `${role}: the next dial is not pushed back`).toBeLessThanOrEqual(20_000);
+    }
+  }, 60_000);
+});
+
+/**
  * The local Mainline testnet of dht-direct.spec.ts once DHT puts stopped waiting for silent nodes (#1421): a key's
  * first put lands in ~1.15 s, and the joiner's first read of the inviter returns after `DHT_ANSWER_WAIT` (1.5 s).
  */

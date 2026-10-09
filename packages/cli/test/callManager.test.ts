@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -168,6 +168,24 @@ describe("the audio socket", () => {
     chmodSync(join(path, ".."), 0o755);
     await expect(AudioSocket.open(path, 48000, { onAudio: () => {} })).rejects.toThrow(/not a folder of this user's alone/);
     rmSync(join(path, ".."), { recursive: true, force: true });
+  });
+
+  it("a daemon's manager removes the sockets a crashed one left, in either folder; a one-shot's leaves them", async () => {
+    const engine: CallEngine = { getState: () => ({ links: [] }) as unknown as EngineState, setCallSignal: () => {} };
+    for (const profileDir of [tmp(), join(tmp(), "x".repeat(120))]) {
+      const left = audioSocketPath(profileDir, "0123456789ab");
+      // The daemon that made it died during the call: its socket's file stays.
+      mkdirSync(join(left, ".."), { recursive: true, mode: 0o700 });
+      writeFileSync(left, "");
+      writeFileSync(join(left, "..", "notes.txt"), "kept");
+      expect(existsSync(left)).toBe(true);
+      new CallManager({ engine, emit: () => {}, profileDir, answers: false });
+      expect(existsSync(left)).toBe(true);
+      new CallManager({ engine, emit: () => {}, profileDir, answers: true });
+      expect(existsSync(left)).toBe(false);
+      expect(existsSync(join(left, "..", "notes.txt"))).toBe(true);
+      rmSync(join(left, ".."), { recursive: true, force: true });
+    }
   });
 });
 

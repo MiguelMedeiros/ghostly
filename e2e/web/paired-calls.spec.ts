@@ -341,3 +341,35 @@ test("a second call while on one: End and answer ends the first on both sides an
   await expect(chat(carol).getByText("Audio call ended")).toBeVisible();
   await expect.poll(microphones).toBe(0);
 });
+
+test("in Arabic a voice call's state line keeps a space between its words and the clock", { tag: ["@feature:calls.paired", "@feature:calls.audio", "@feature:app.i18n"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("paired-call-alice"), peer("paired-call-bob")]);
+  await pair(alice, bob);
+  await alice.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+  });
+  await alice.page.reload();
+  await expect(alice.page.locator("html")).toHaveAttribute("dir", "rtl");
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-audio")).toBeEnabled({ timeout: 90_000 });
+
+  await alice.page.getByTestId("call-audio").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  const line = alice.page.getByTestId("call-status");
+  await expect(line).toHaveAttribute("data-state", "connected");
+  await expect(line.locator("span")).toHaveCount(2);
+
+  // Right to left the clock comes after the words, on their left: a margin on the clock's left side left the two
+  // touching ("00:01" stuck to the words). The room between them is the same as left to right.
+  const gap = () => line.evaluate((el) => {
+    const [words, time] = [...el.querySelectorAll("span")].map((span) => span.getBoundingClientRect());
+    return Math.round(words.left - time.right);
+  });
+  expect(await gap()).toBe(8);
+  await alice.page.getByTestId("call-minimize").click();
+  await expect(alice.page.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+  expect(await gap()).toBe(8);
+
+  await alice.page.getByTestId("call-hang-up").click();
+  await expect(bob.page.getByTitle("End call")).toHaveCount(0);
+});

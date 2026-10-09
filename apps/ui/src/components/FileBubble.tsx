@@ -3,7 +3,7 @@ import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } fr
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { canRetryFile, fileHeld, fileStatus, stalledAction } from "../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, stalledAction } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
@@ -11,7 +11,7 @@ import { Highlight } from "./chat/ChatSearch";
 import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import { useT } from "../contexts/I18nContext";
 import type { ChatFile } from "../lib/types";
-import { problemLine } from "../lib/problemText";
+import { problemLine, saveProblemLine } from "../lib/problemText";
 
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
 const HELD_MS = 500;
@@ -101,7 +101,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then(async (result) => { if (result === "missing") setMissing((await fileHeld(platform, file.id, false)) === "left-out" ? "left-out" : true); })
-      .catch((error: Error) => setActionError(problemLine(error, t)));
+      .catch((error: Error) => setActionError(saveProblemLine(error, t)));
   };
 
   // A picture's box is there before it is: from the size its sender said, else from what this device found, else
@@ -134,7 +134,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
-  const reason = actionError || (failed ? transfer.error : undefined);
+  const reason = actionError ? { text: actionError } : failedReason(transfer, t);
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
@@ -235,7 +235,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
-      {reason && why && <WhyText id={whyId} testId="file-why-text">{reason}</WhyText>}
+      {reason && why && <WhyText id={whyId} testId="file-why-text" english={reason.english}>{reason.text}</WhyText>}
       {moving && transfer.stage !== "asking" && (
         <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
           <div

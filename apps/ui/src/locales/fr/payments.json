@@ -274,14 +274,18 @@
       "testnet": "Argent de test : vous n'avez aucun portefeuille Lightning Testnet pour la payer"
     },
     "onchainBitcoin": "Bitcoin on-chain",
+    "onlySat": "Seul l'ecash en sat peut être encaissé ici.",
     "openTitle": "Ouvrir dans un portefeuille Lightning sur cet appareil",
     "openWallet": "Ouvrir le portefeuille",
+    "otherUnitRequest": "Demande de l'ecash en {{unit}}",
+    "otherUnitToken": "Un jeton en {{unit}}",
     "paid": "Payée ✓",
     "pay": "Payer",
     "payWithFee": "Payer {{amount}} + frais jusqu'à {{fee}}",
     "paying": "Paiement…",
     "paysThrough": "Paiement via {{domain}}",
     "pendingAtMint": "Paiement en attente au mint…",
+    "qrTooLong": "Trop long pour un QR code : copiez-le plutôt.",
     "redeem": "Encaisser",
     "redeemed": "Encaissé ✓",
     "redeeming": "Encaissement…"
