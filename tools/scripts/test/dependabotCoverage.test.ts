@@ -46,9 +46,23 @@ function nodeImages(dir = root, folder = ""): string[] {
  */
 const longTerm = (major: number) => major >= 27 || major % 2 === 0;
 
+/** The block of one npm folder, as written. */
+const npmBlock = (text: string, directory: string) => text.split(/^ {2}- package-ecosystem: /m).find((block) => block.startsWith("npm\n") && block.includes(`\n    directory: ${directory}\n`)) ?? "";
+
 describe("Dependabot's configuration", () => {
   const text = readFileSync(join(root, ".github/dependabot.yml"), "utf8");
   const config = watched(text);
+
+  // hyperdht has four copies behind three lockfiles and a patch named by version (tools/patches): a group that moved
+  // the root's alone left the sidecar and the relay behind and the patch misnamed. Its update is a pull request of
+  // its own at the root, and no version update at all in the two other folders.
+  it("offers hyperdht alone at the root, never in the weekly group, and nowhere else", () => {
+    const group = npmBlock(text, "/").match(/^ {6}npm:\n((?: {8}.*\n)+)/m)?.[1] ?? "";
+    expect(group).toMatch(/^ {8}patterns: \["\*"\]$/m);
+    expect(group).toMatch(/^ {8}exclude-patterns: \[hyperdht\]$/m);
+    for (const directory of ["/native/transports/hyperdht", "/infra/services/hyperdht-relay"])
+      expect(npmBlock(text, directory)).toMatch(/^ {6}- dependency-name: hyperdht\n {8}update-types: \["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"\]$/m);
+  });
 
   it("reads both forms a block names its folders in", () => {
     const sample = [

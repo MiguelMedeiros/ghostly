@@ -22,6 +22,9 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+        # hyperdht arrives alone, never in the weekly group: its four copies (this lockfile's two, the sidecar's
+        # and the relay's below) and tools/patches/hyperdht+<version>.patch move in one pull request, by hand.
+        exclude-patterns: [hyperdht]
         update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /apps/website
