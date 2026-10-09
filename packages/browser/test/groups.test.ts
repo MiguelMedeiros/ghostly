@@ -609,6 +609,20 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       void alice;
     });
 
+    it("a member away when the admin role moved reads that the group was renamed, not that the new admin did it", async () => {
+      const { world, alice, bob, carol, groupId, key, edge } = await trio();
+      edge("carol", alice, false); edge("carol", bob, false);
+      await alice.rename(groupId, "Book club"); await world.settle();
+      await alice.makeAdmin(groupId, key(bob)); await world.settle();
+      edge("carol", alice, true); edge("carol", bob, true);
+      await world.meet();
+      expect(carol.views()[0].name).toBe("Book club");
+      const renamed = (name: string) => world.peers.get(name)!.messages.filter(m => m.event === "renamed").map(m => ({ text: m.text, member: m.member }));
+      // Bob signed again what Alice set: Carol cannot tell it from a rename of his.
+      expect(renamed("carol")).toEqual([{ text: "The group is now called “Book club”", member: undefined }]);
+      expect(renamed("bob")).toEqual([{ text: expect.stringMatching(/ renamed the group to “Book club”$/), member: key(alice) }]);
+    });
+
     it("a membership line is written once: a name or a secret arriving later does not write the admin's line again", async () => {
       const { world, alice, bob, carol, groupId, key } = await trio();
       await alice.makeAdmin(groupId, key(bob)); await world.settle();

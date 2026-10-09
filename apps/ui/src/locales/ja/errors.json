@@ -130,6 +130,7 @@
     "noRoomNext": "空き {{free}}。",
     "notVoice": "その録音はボイスメッセージとして送れません",
     "pasteTooLarge": "貼り付けるには大きすぎます。+ → 書類 から送ってください。",
+    "pasteUnreadable": "これらのファイルを貼り付けられませんでした。+ → 書類 から送ってください。",
     "refused": {
       "damaged": "ファイルが破損した状態で届きました",
       "expired": "時間内に承認されませんでした",
@@ -172,6 +173,15 @@
     "editTooLong": "このグループで編集するには長すぎます",
     "editTooMany": "このメッセージは編集回数の上限に達しました",
     "editTooOld": "このメッセージは古すぎて編集できません。そのエポックの鍵がもうありません",
+    "fileEmpty": "空のファイルはグループに送れません",
+    "fileNoRoom": "このデバイスにはこのファイルを保存する空き容量がありません",
+    "fileNoRoomNext": "空き容量を作ってから、もう一度ダウンロードしてください。",
+    "fileTooLarge": "グループに送れるファイルは {{size}} までです",
+    "filesPaced": "このグループに短時間で多くのファイルを送りました",
+    "filesPacedNext": "1分待ってから、もう一度送ってください。",
+    "filesPacedNextMinutes": "{{minutes}}分待ってから、もう一度送ってください。",
+    "filesUnsupported": "このアプリはグループにファイルを送れません",
+    "filesUnsupportedNext": "Ghostly を更新してから、もう一度お試しください。",
     "forked": "グループの変更は一時停止中です",
     "forkedAdminBranches": "グループの変更は一時停止中です",
     "forkedAdminChanges": "グループの変更は一時停止中です",
@@ -206,6 +216,9 @@
     "tooLong": "メッセージが 16 KiB を超えています"
   },
   "hold": {
+    "fullBytes": "相手を待っている分が {{max}} MB を超えてしまいます",
+    "fullItems": "相手を待っている項目がすでに {{max}} 件あります",
+    "fullNext": "相手がいくつか受け取ったら、もう一度送ってください。",
     "needsStorage": "このメッセージは保留できません",
     "needsStorageNext": "プロフィール → バックアップで S3 ストレージを設定し、相手にも保留メッセージを許可してもらってください。"
   },

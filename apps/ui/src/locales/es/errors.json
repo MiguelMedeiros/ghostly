@@ -130,6 +130,7 @@
     "noRoomNext": "{{free}} libres.",
     "notVoice": "Esa grabación no se puede enviar como mensaje de voz",
     "pasteTooLarge": "Es demasiado grande para pegarlo. Envíalo con + → Documento.",
+    "pasteUnreadable": "No se pudieron pegar esos archivos. Envíalos con + → Documento.",
     "refused": {
       "damaged": "El archivo llegó dañado",
       "expired": "No se aceptó a tiempo",
@@ -172,6 +173,15 @@
     "editTooLong": "Demasiado largo para editar en este grupo",
     "editTooMany": "Este mensaje se editó demasiadas veces",
     "editTooOld": "Este mensaje es demasiado antiguo para editarlo: la clave de su época ya no existe",
+    "fileEmpty": "Un archivo vacío no puede enviarse a un grupo",
+    "fileNoRoom": "No hay espacio suficiente en este dispositivo para este archivo",
+    "fileNoRoomNext": "Libera espacio y vuelve a descargarlo.",
+    "fileTooLarge": "Un grupo acepta archivos de hasta {{size}}",
+    "filesPaced": "Acabas de enviar muchos archivos a este grupo",
+    "filesPacedNext": "Espera un minuto y vuelve a enviarlo.",
+    "filesPacedNextMinutes": "Espera {{minutes}} minutos y vuelve a enviarlo.",
+    "filesUnsupported": "Esta app no puede enviar archivos a grupos",
+    "filesUnsupportedNext": "Actualiza Ghostly y vuelve a intentarlo.",
     "forked": "Los cambios del grupo están en pausa",
     "forkedAdminBranches": "Los cambios del grupo están en pausa",
     "forkedAdminChanges": "Los cambios del grupo están en pausa",
@@ -206,6 +216,9 @@
     "tooLong": "El mensaje supera los 16 KiB"
   },
   "hold": {
+    "fullBytes": "Esto superaría los {{max}} MB esperando a tu contacto",
+    "fullItems": "Tu contacto ya tiene {{max}} elementos esperando",
+    "fullNext": "Envíalo de nuevo cuando tu contacto recoja algunos.",
     "needsStorage": "Este mensaje no se puede retener",
     "needsStorageNext": "Configura S3 en Perfil → Copias de seguridad y pide a tu contacto que permita retener mensajes."
   },

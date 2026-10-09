@@ -19,7 +19,7 @@ import { RateWindow, validEditNumber } from "./pairedEdits";
 import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers } from "./catchUp";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, nextGroupMetaRevision, groupMetaTag, groupName, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
-  type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
+  type GroupMeta, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
 } from "./groupMeta";
 
 /**
@@ -337,8 +337,11 @@ export interface CommunitySessionHooks {
   /** A payload another member sealed to me (see `sendPair`). Payloads to others are carried, never opened. */
   pair?(message: CommunityIncomingPair): Promise<void> | void;
   changed(): void;
-  /** The group's name or picture changed (set, replaced or removed), by `by`, in a statement signed at `at`. */
-  metaChanged?(by: string, change: GroupMetaChange, at: number): void;
+  /**
+   * The group's name or picture changed (set, replaced or removed), by `by`, in a statement signed at `at`. `by` is
+   * undefined when the signer may only have signed again what an admin before them set (`metaAuthor`).
+   */
+  metaChanged?(by: string | undefined, change: GroupMetaChange, at: number): void;
   /** A frame that waited here (a commit ahead of its parent) and is now placed: a hub passes it on. */
   relay?(frame: CommunityFrame): void;
   /** The engine's clock, for how often a member is asked for what I lack (defaults to Date.now). */
@@ -1679,9 +1682,26 @@ export class CommunitySession {
     // What the group looked like when I got in is no change: the first statement I take, signed under a commit before
     // mine, makes no line, nor does a new admin's signing again the name the welcome gave me.
     const change = !before && !rosterHas(this.rosterAt(s.h) ?? [], this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(s.by, change, opened.meta.ts);
+    if (change) this.hooks.metaChanged?.(this.metaAuthor(before, s, at), change, opened.meta.ts);
     this.hooks.changed();
     return true;
+  }
+
+  /**
+   * Who made the change a statement brings me (`at`: its commit's place on my main branch): its signer, when they were
+   * the admin all along since the statement I held (or, with none, since I got in). A new admin signs again what the
+   * last one set (`metaFollowsChain`): to a member that missed that, it is no change of theirs it can tell apart.
+   */
+  private metaAuthor(before: GroupMeta | undefined, s: GroupMetaStatement, at: number): string | undefined {
+    const from = before ? this.mainIndex.get(before.h) : undefined;
+    let roster = before && from !== undefined ? this.rosterAt(before.h) ?? null : null, counted = from !== undefined;
+    for (let i = from ?? 0; i <= at; i++) {
+      if (i !== from) roster = communityRoster(roster, this.state.chain[i]);
+      if (!roster) return undefined;
+      counted ||= rosterHas(roster, this.myKey);
+      if (counted && rosterAdmin(roster) !== s.by) return undefined;
+    }
+    return s.by;
   }
 
   /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */

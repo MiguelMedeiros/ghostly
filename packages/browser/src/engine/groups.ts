@@ -795,6 +795,13 @@ export class Groups {
     this.host.historyGone?.(groupId);
     for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
     this.host.emit();
+    // A hub's members hear its leave on their edges and stop counting on it at once, and its entry leaves the beacon:
+    // as the only hub, nobody else would tell them, and they would wait for the beacon to forget it.
+    // Said before the session leaves: that closes the edges to members.
+    if (this.hubs.isHub(groupId)) {
+      await this.hubs.stepDown(groupId, session, this.now());
+      if (bye) for (const [key, edge] of this.host.edges(groupId)) if (!hubs.includes(key) && this.host.linkReady(edge)) { try { this.host.sendOnLink(edge, bye); } catch { /* closing */ } }
+    }
     await session.leave();
     if (bye) for (const key of hubs) { const edge = this.host.edges(groupId).get(key); if (edge && this.host.linkReady(edge)) { try { this.host.sendOnLink(edge, bye); } catch { /* when it opens again */ } } }
     // The admin may be off; its contact chat, if that is how I got here, hears it too.
@@ -1447,6 +1454,8 @@ export class Groups {
       return;
     }
     if (!session) return;
+    // A member leaving says so on its own edge: as a hub, it is none from now on (the next tick opens direct edges).
+    if (t === "group-bye" && session.status === "active" && (frame as { k?: unknown }).k === peerKey && this.hubs.departs(groupId, peerKey)) this.host.emit();
     if (t === GROUP_REACTION_FRAME || t === GROUP_REACTED_FRAME) { await this.reaction(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (t === GROUP_TYPING_FRAME) { this.typings.heard(session, peerKey, frame); return; }
     if (t === GROUP_PIN_FRAME) {
@@ -1890,8 +1899,8 @@ export class Groups {
   }
 
   /** `at`: when the admin signed the statement (the line's time, as a commit's is its line's). */
-  private async metaChanged(groupId: string, session: GroupSession, by: string, change: GroupMetaChange, at?: number): Promise<void> {
-    const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
+  private async metaChanged(groupId: string, session: GroupSession, by: string | undefined, change: GroupMetaChange, at?: number): Promise<void> {
+    const name = by === undefined ? undefined : by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
     const when = at === undefined ? Date.now() : receivedTimestamp(at);
     for (const line of metaLines(name, change, session.name)) await this.event(groupId, line.event, line.text, when, session.epoch, by);
     this.host.emit();

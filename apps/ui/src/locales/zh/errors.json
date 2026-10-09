@@ -130,6 +130,7 @@
     "noRoomNext": "剩余 {{free}}。",
     "notVoice": "该录音无法作为语音消息发送",
     "pasteTooLarge": "内容太大,无法粘贴。请用 + → 文档 发送。",
+    "pasteUnreadable": "无法粘贴这些文件。请用 + → 文档 发送。",
     "refused": {
       "damaged": "文件到达时已损坏",
       "expired": "未及时接受",
@@ -172,6 +173,15 @@
     "editTooLong": "内容太长，无法在此群组中编辑",
     "editTooMany": "这条消息已编辑太多次",
     "editTooOld": "这条消息太旧，无法编辑：其纪元的密钥已不存在",
+    "fileEmpty": "空文件无法发送到群组",
+    "fileNoRoom": "此设备没有足够空间存放这个文件",
+    "fileNoRoomNext": "请释放一些空间后再下载。",
+    "fileTooLarge": "群组接受的文件最大为 {{size}}",
+    "filesPaced": "你刚刚向这个群组发送了很多文件",
+    "filesPacedNext": "请等一分钟后再发送。",
+    "filesPacedNextMinutes": "请等 {{minutes}} 分钟后再发送。",
+    "filesUnsupported": "此应用无法向群组发送文件",
+    "filesUnsupportedNext": "请更新 Ghostly 后重试。",
     "forked": "群组变更已暂停",
     "forkedAdminBranches": "群组变更已暂停",
     "forkedAdminChanges": "群组变更已暂停",
@@ -206,6 +216,9 @@
     "tooLong": "消息超过 16 KiB"
   },
   "hold": {
+    "fullBytes": "等待联系人取走的内容将超过 {{max}} MB",
+    "fullItems": "已有 {{max}} 项在等待联系人取走",
+    "fullNext": "对方取走一些后,请重新发送。",
     "needsStorage": "无法暂存这条消息",
     "needsStorageNext": "请在个人资料 → 备份中设置 S3 存储，并请对方允许暂存消息。"
   },

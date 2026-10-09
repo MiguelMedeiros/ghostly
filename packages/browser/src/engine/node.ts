@@ -194,7 +194,7 @@ import { settleAhead } from "./arrival";
 import { Groups, meshEdgeIntervals, otherEndSeen } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
-import { Reactions, groupReactionsToResend, latestReaction, noteAfterChange } from "./reactions";
+import { Reactions,groupReactionsToResend, latestReaction, noteAfterChange } from "./reactions";
 import { mayPinIn, myPin, pinView, pinnedRow } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
@@ -1129,6 +1129,12 @@ export class GhostlyNode implements EngineImplementation {
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
     changed: async (chat, id, note) => {
       if (note) this.reactionNotes.set(chat, note);
+      else if (this.reactionNotes.get(chat)?.message === id) {
+        // The reaction the chat list shows was taken back: the one before it is shown again, or none.
+        const before = latestReaction(await db.getMessages(chat));
+        if (before) this.reactionNotes.set(chat, before);
+        else this.reactionNotes.delete(chat);
+      }
       await this.messagesChanged(chat, [id]);
       this.emitState();
     },
@@ -4247,15 +4253,16 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async resendGroupReactions(groupId: string, linkId: string): Promise<void> {
     if (this.outsideEdge(linkId)) return;
+    // Newest first: what the member is likeliest to have missed lands before anything else of mine in its window.
     const mine = groupReactionsToResend(await this.edgeOpenHistory(`group:${groupId}`), REACTION_LIMITS.pending);
     const link = this.links.get(linkId)?.link;
     const say = (batch: WireReaction[]) => {
       for (const reaction of batch) { try { link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }
     };
-    say(mine.slice(-REACTION_LIMITS.send));
+    say(mine.slice(0, REACTION_LIMITS.send));
     // A second past the window, so the first ones have left it on the member's side whatever the edge's delay.
-    for (let end = mine.length - REACTION_LIMITS.send, turn = 1; end > 0; end -= REACTION_LIMITS.send, turn++) {
-      const batch = mine.slice(Math.max(0, end - REACTION_LIMITS.send), end);
+    for (let start = REACTION_LIMITS.send, turn = 1; start < mine.length; start += REACTION_LIMITS.send, turn++) {
+      const batch = mine.slice(start, start + REACTION_LIMITS.send);
       setTimeout(() => { if (link && this.links.get(linkId)?.link === link) say(batch); }, turn * (REACTION_LIMITS.windowMs + 1_000));
     }
   }

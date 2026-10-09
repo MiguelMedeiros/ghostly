@@ -27,6 +27,8 @@ import { callEventText } from "../lib/callLines";
 import type { Translate } from "../locales/translate";
 import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
+import type { WorkingEntry } from "../lib/working";
+import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -35,7 +37,9 @@ import { UsagePill } from "./chat/UsageMeter";
  * What the chat is set to (muted, pinned) is a quiet mark just before the time, in the time's own tone; on a pointer
  * device the row's actions (mute, pin, delete) take the marks' and the time's place while it is hovered.
  * A bot's usage meter keeps one place on every row, whatever else the row shows: right after the key when the key has
- * its line, else at the start of a trailing column of one width (USAGE_COLUMN).
+ * its line, else at the start of a trailing column of one width (USAGE_COLUMN). The mark that says the bot is working
+ * goes just before the meter when the key has its line, in a place of one width that a row with a meter keeps when it
+ * has no mark; else right after the name, where it is beside what it is about and moves nothing but the name's end.
  */
 
 const AVATAR = { compact: 46, comfortable: 52 } as const;
@@ -214,6 +218,12 @@ export interface ChatRowProps {
    * Comfortable: right after the key. Compact: at the start of the last line's trailing column (USAGE_COLUMN).
    */
   usage?: UsageEntry;
+  /**
+   * The contact's running tasks (WISP 405 § Showing a card): a dot in the accent while one was updated lately, a muted
+   * ring once they have gone quiet. Comfortable: just before the meter's place, which a row with a meter keeps without
+   * it. Compact: right after the name.
+   */
+  working?: WorkingEntry;
 }
 
 /** A join notice as the chat's line says it (MessageBubble): mine, or the contact by the name the list shows. */
@@ -266,6 +276,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
   const meter = p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />;
+  const working = p.working && <WorkingDot entry={p.working} testId="chat-row-working" />;
   const unread = p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />;
   return (
     <div data-testid="chat-row" data-chat={p.chatId} data-muted={muted || undefined} data-dragging={p.reorder?.dragging || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} {...p.reorder?.props}
@@ -303,17 +314,20 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
       <RowText
         name={<bdi>{p.label}</bdi>}
         previewId={previewId}
-        marks={<ContactMarks peerKey={p.peerPubKey} />}
+        // Compact: the working mark right after the name, before the identities.
+        marks={<>{p.density === "compact" && working}<ContactMarks peerKey={p.peerPubKey} /></>}
         nameClass={!p.named ? "text-text-muted italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
         time={p.time}
         timeClass={p.unread > 0 && !muted ? "text-accent font-medium" : "text-text-muted"}
         sub={<>
           {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. A bot's meter
-              follows it: the short key is as wide on every row, so the meter starts at the same place on each. The line
-              keeps the key's height (the meter, 2px taller, is centred over it), and so the row keeps its own. */}
+              follows it, after the working mark's place (kept empty on a row with a meter and no running task): the
+              short key is as wide on every row, so both start at the same place on each. The line keeps the key's
+              height (the meter, 2px taller, is centred over it), and so the row keeps its own. */}
           {p.density === "comfortable"
             ? <span className="flex h-4 items-center gap-1.5 whitespace-nowrap">
                 <span data-testid="chat-row-key" className="shrink-0 text-[11px] leading-4 text-text-muted font-mono">{p.keyLabel}</span>
+                {working || (meter && <WorkingGap />)}
                 {meter}
               </span>
             : <span className="sr-only"> · {p.keyLabel}</span>}

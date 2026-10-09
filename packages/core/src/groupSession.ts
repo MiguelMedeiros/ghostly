@@ -12,7 +12,7 @@ import {
 } from "./groupCommits";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupName, groupMetaChange, groupMetaNewer, groupMetaPicture, nextGroupMetaRevision, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
-  type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
+  type GroupMeta, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } from "./replies";
@@ -194,8 +194,11 @@ export interface GroupSessionHooks {
   edit?(edit: GroupIncomingEdit): Promise<void> | void;
   /** Roster, epoch or status changed. */
   changed(): void;
-  /** The group's name or picture changed (set, replaced or removed), by `by`, in a statement signed at `at`. */
-  metaChanged?(by: string, change: GroupMetaChange, at: number): void;
+  /**
+   * The group's name or picture changed (set, replaced or removed), by `by`, in a statement signed at `at`. `by` is
+   * undefined when the signer may only have signed again what an admin before them set (`metaAuthor`).
+   */
+  metaChanged?(by: string | undefined, change: GroupMetaChange, at: number): void;
   /** The clock the limits read (the engine's, or a simulation's); the wall clock when absent. */
   clock?(): number;
   /**
@@ -1495,9 +1498,20 @@ export class GroupSession {
     // A change of hubs alone is no line in the history, nor what the group looked like when I got in: the first
     // statement I take, signed under a commit before mine, is no change made while I was a member.
     const change = !before && !rosterHas(commit.m, this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(s.by, change, opened.meta.ts);
+    if (change) this.hooks.metaChanged?.(this.metaAuthor(before, s), change, opened.meta.ts);
     this.hooks.changed();
     this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });
+  }
+
+  /**
+   * Who made the change a statement brings me: its signer, when they were the admin all along since the statement I
+   * held (or, with none, since I got in). A new admin signs again what the last one set (`metaFollowsChain`): to a
+   * member that missed that, it is no change of theirs it can tell apart, so nobody is named.
+   */
+  private metaAuthor(before: GroupMeta | undefined, s: GroupMetaStatement): string | undefined {
+    const chain = this.state.chain, from = before ? before.e : chain.findIndex(c => rosterHas(c.m, this.myKey));
+    for (let e = Math.max(0, from); e <= s.e; e++) if (rosterAdmin(chain[e].m) !== s.by) return undefined;
+    return s.by;
   }
 
   /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */

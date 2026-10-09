@@ -22,7 +22,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareText, takeShareFor } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
 import { useComposition } from "../hooks/useComposition";
@@ -450,7 +450,12 @@ export function MessageInput({
     if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
     const reading = platformPastedFiles();
     if (!reading) return false;
-    reading.then((found) => { if (found.length) offerRef.current(found); }, (error: unknown) => showToast(problemLine(error, t)));
+    // Copied files the platform could not read either are said, not dropped in silence; an empty clipboard stays quiet.
+    const named = pasteNamesFiles(data);
+    reading.then((found) => {
+      if (found.length) offerRef.current(found);
+      else if (named) showToast(t("errors.files.pasteUnreadable"));
+    }, (error: unknown) => showToast(problemLine(error, t)));
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
