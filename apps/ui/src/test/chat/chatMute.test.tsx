@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { AttentionFeedback } from "../../components/AttentionFeedback";
+import { MuteMenu } from "../../components/ChatMute";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import {
@@ -405,5 +406,15 @@ describe("a muted chat in the list", () => {
     expect(within(group).getByTestId("chat-row-muted")).toBeInTheDocument();
     expect(within(group).getByTestId("chat-row-mute")).toHaveAccessibleName("Notifications muted");
     expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+  });
+
+  it("formats no end time while a row's mute menu is closed", () => {
+    // Every chat and group row mounts its bell's menu closed; a long list redraws them all at start and while idle.
+    const long = vi.spyOn(Date.prototype, "toLocaleString");
+    const short = vi.spyOn(Date.prototype, "toLocaleTimeString");
+    const anchor = { current: null };
+    renderApp(<>{["a", "b", groupChat("g")].map(c => <MuteMenu key={c} chat={c} open={false} onClose={() => {}} anchorRef={anchor} portal mentions={c.startsWith("group:")} />)}</>);
+    expect(screen.queryByTestId("mute-menu")).not.toBeInTheDocument();
+    expect(long.mock.calls.length + short.mock.calls.length).toBe(0);
   });
 });
