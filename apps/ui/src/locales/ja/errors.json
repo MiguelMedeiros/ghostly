@@ -396,8 +396,15 @@
   },
   "transport": {
     "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",
+    "hyperdhtClosed": "HyperDHTリレーが接続を閉じました",
+    "hyperdhtRefused": "HyperDHTリレーがこのチャットを拒否しました",
+    "hyperdhtSilent": "HyperDHTリレーが応答しません",
+    "hyperdhtUnreachable": "HyperDHTリレーに接続できません",
+    "irohStopped": "Irohエンドポイントが停止しています",
     "listenerGiven": "より活発なチャットのため一時停止中。このチャットを開くと再開します。",
-    "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。"
+    "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。",
+    "slotsFull": "ネイティブ接続がすべて使用中です",
+    "slotsFullNext": "別のチャットのネイティブ接続を切断するか、どれかが待機状態になるまでお待ちください。"
   },
   "wallet": {
     "alreadyHave": "{{network}} の {{kind}} ウォレットはすでにあります",

@@ -396,8 +396,15 @@
   },
   "transport": {
     "adapterFailed": "Avvio non riuscito. Riapri questa chat per riprovare.",
+    "hyperdhtClosed": "Il relay HyperDHT ha chiuso la connessione",
+    "hyperdhtRefused": "Il relay HyperDHT ha rifiutato questa chat",
+    "hyperdhtSilent": "Il relay HyperDHT non risponde",
+    "hyperdhtUnreachable": "Relay HyperDHT irraggiungibile",
+    "irohStopped": "Endpoint Iroh fermato",
     "listenerGiven": "In pausa per una chat più attiva. Apri questa chat per riprendere.",
-    "listenerReleased": "In pausa per un'altra chat. Apri questa chat per riprendere."
+    "listenerReleased": "In pausa per un'altra chat. Apri questa chat per riprendere.",
+    "slotsFull": "Tutte le connessioni native sono in uso",
+    "slotsFullNext": "Disconnetti la connessione nativa di un'altra chat, o attendi che una resti inattiva."
   },
   "wallet": {
     "alreadyHave": "Hai già un portafoglio {{kind}} {{network}}",

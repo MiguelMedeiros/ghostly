@@ -396,8 +396,15 @@
   },
   "transport": {
     "adapterFailed": "无法启动。重新打开此聊天以重试。",
+    "hyperdhtClosed": "HyperDHT 中继关闭了连接",
+    "hyperdhtRefused": "HyperDHT 中继拒绝了此聊天",
+    "hyperdhtSilent": "HyperDHT 中继没有响应",
+    "hyperdhtUnreachable": "无法连接 HyperDHT 中继",
+    "irohStopped": "Iroh 端点已停止",
     "listenerGiven": "已为更活跃的聊天暂停。打开此聊天即可恢复。",
-    "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。"
+    "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。",
+    "slotsFull": "所有原生连接都在使用中",
+    "slotsFullNext": "断开另一个聊天的原生连接，或等待某个连接空闲。"
   },
   "wallet": {
     "alreadyHave": "你已经有一个 {{network}} {{kind}} 钱包",

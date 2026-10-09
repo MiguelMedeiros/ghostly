@@ -396,8 +396,15 @@
   },
   "transport": {
     "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",
+    "hyperdhtClosed": "Le relais HyperDHT a fermé la connexion",
+    "hyperdhtRefused": "Le relais HyperDHT a refusé cette discussion",
+    "hyperdhtSilent": "Le relais HyperDHT ne répond pas",
+    "hyperdhtUnreachable": "Relais HyperDHT injoignable",
+    "irohStopped": "Point d'accès Iroh arrêté",
     "listenerGiven": "En pause pour une discussion plus active. Ouvrez celle-ci pour reprendre.",
-    "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre."
+    "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre.",
+    "slotsFull": "Toutes les connexions natives sont utilisées",
+    "slotsFullNext": "Déconnectez la connexion native d'une autre discussion, ou attendez qu'une devienne inactive."
   },
   "wallet": {
     "alreadyHave": "Vous avez déjà un portefeuille {{kind}} {{network}}",

@@ -396,8 +396,15 @@
   },
   "transport": {
     "adapterFailed": "Não iniciou. Reabra esta conversa para tentar de novo.",
+    "hyperdhtClosed": "O relay HyperDHT fechou a conexão",
+    "hyperdhtRefused": "O relay HyperDHT recusou esta conversa",
+    "hyperdhtSilent": "O relay HyperDHT não respondeu",
+    "hyperdhtUnreachable": "Relay HyperDHT inacessível",
+    "irohStopped": "Endpoint Iroh parado",
     "listenerGiven": "Pausado para uma conversa mais ativa. Abra esta conversa para retomar.",
-    "listenerReleased": "Pausado para outra conversa. Abra esta conversa para retomar."
+    "listenerReleased": "Pausado para outra conversa. Abra esta conversa para retomar.",
+    "slotsFull": "Todas as conexões nativas em uso",
+    "slotsFullNext": "Desconecte a conexão nativa de outra conversa, ou espere uma ficar ociosa."
   },
   "wallet": {
     "alreadyHave": "Você já tem uma carteira {{kind}} {{network}}",

@@ -105,6 +105,13 @@ const RULES: readonly Rule[] = [
   exact("Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "errors.transport.listenerGiven"),
   exact("Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "errors.transport.listenerReleased"),
   exact("Native adapter could not start. Reopen this chat to retry.", "errors.transport.adapterFailed"),
+  exact("All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
+  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts).
+  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable"),
+  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent"),
+  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed"),
+  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused"),
+  exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
 
   // Cashu and Lightning in the wallet (packages/browser/src/engine/wallet.ts).
   exact("That is not a valid mint URL", "errors.cashu.badMintUrl"),
