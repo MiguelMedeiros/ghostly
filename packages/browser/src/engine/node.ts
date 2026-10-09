@@ -1117,6 +1117,12 @@ export class GhostlyNode implements EngineImplementation {
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
     changed: async (chat, id, note) => {
       if (note) this.reactionNotes.set(chat, note);
+      else if (this.reactionNotes.get(chat)?.message === id) {
+        // The reaction the chat list shows was taken back: the one before it is shown again, or none.
+        const before = latestReaction(await db.getMessages(chat));
+        if (before) this.reactionNotes.set(chat, before);
+        else this.reactionNotes.delete(chat);
+      }
       await this.messagesChanged(chat, [id]);
       this.emitState();
     },
