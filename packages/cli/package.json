@@ -58,7 +58,7 @@
     "ethers": "6.17.0",
     "eventsource": "^5.1.2",
     "fake-indexeddb": "6.2.5",
-    "hyperdht": "6.34.1",
+    "hyperdht": "6.34.0",
     "keet-identity-key": "3.2.0",
     "mpg123-decoder": "1.0.3",
     "node-datachannel": "^0.33.4",
