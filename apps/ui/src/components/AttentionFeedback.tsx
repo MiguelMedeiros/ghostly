@@ -50,7 +50,7 @@ export function AttentionFeedback(){
       // together is one sound too, the most important (apps/ui/src/lib/soundGate.ts).
       if(outcome.sound && event.type!=="reaction" && (event.type!=="message" || event.mention || firstOfBurst(chat ?? event.linkId ?? ""))) playSound(eventSound({...event,type:event.type},notifications));
       // So is a chat's system notification (another chat's still shows); a mention shows inside a burst.
-      if(outcome.notice && (event.type!=="message" || event.mention || firstNoticeOfBurst(chat ?? event.linkId ?? ""))) await showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat);
+      if(outcome.notice && (event.type!=="message" || event.mention || firstNoticeOfBurst(chat ?? event.linkId ?? ""))) await showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat,true);
     };
     if(navigator.locks) void navigator.locks.request("ghostly-feedback",run);
     else void run();

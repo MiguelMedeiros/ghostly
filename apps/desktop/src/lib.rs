@@ -186,6 +186,7 @@ macro_rules! commands {
             native_call::native_microphone_meter,
             native_call::native_microphone_meter_close,
             native_call::native_speaker_test,
+            notifications::native_clear_notification,
             notifications::native_notification_permission,
             notifications::native_private_notification,
             notifications::open_notification_settings,

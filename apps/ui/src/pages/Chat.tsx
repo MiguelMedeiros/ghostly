@@ -104,6 +104,7 @@ import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
 import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
+import { clearChatNotification } from "../lib/notifications";
 import { showChatOnScreen } from "../lib/appBadge";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
 
@@ -524,7 +525,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown).
   const pageShown = usePageShown();
   useEffect(() => {
-    if (visible && pageShown) markSessionAsRead(sessionId);
+    if (!visible || !pageShown) return;
+    markSessionAsRead(sessionId);
+    clearChatNotification(sessionId);
   }, [visible, pageShown, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
   useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
