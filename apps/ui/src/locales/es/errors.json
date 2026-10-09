@@ -215,6 +215,9 @@
     "tooLong": "El mensaje supera los 16 KiB"
   },
   "hold": {
+    "fullBytes": "Esto superaría los {{max}} MB esperando a tu contacto",
+    "fullItems": "Tu contacto ya tiene {{max}} elementos esperando",
+    "fullNext": "Envíalo de nuevo cuando tu contacto recoja algunos.",
     "needsStorage": "Este mensaje no se puede retener",
     "needsStorageNext": "Configura S3 en Perfil → Copias de seguridad y pide a tu contacto que permita retener mensajes."
   },

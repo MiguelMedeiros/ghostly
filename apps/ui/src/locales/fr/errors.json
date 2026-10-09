@@ -215,6 +215,9 @@
     "tooLong": "Le message dépasse 16 Kio"
   },
   "hold": {
+    "fullBytes": "Cela dépasserait {{max}} Mo en attente pour votre contact",
+    "fullItems": "Votre contact a déjà {{max}} éléments en attente",
+    "fullNext": "Renvoyez-le quand votre contact en aura récupéré quelques-uns.",
     "needsStorage": "Ce message ne peut pas être gardé",
     "needsStorageNext": "Configurez un stockage S3 dans Profil → Sauvegardes, et demandez à votre contact d'autoriser les messages gardés."
   },
