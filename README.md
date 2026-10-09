@@ -41,6 +41,8 @@ https://github.com/user-attachments/assets/7f9e11de-4c65-44e9-9763-885664de0d64
 - <img src="docs/assets/icons/shared-apps.svg" width="20" align="absmiddle" alt=""> **[Shared services](docs/CHAT.md#calls-and-shared-services)**: share a web app on your `localhost` with a contact, over the chat's live connection.
 - <img src="docs/assets/icons/cli.svg" width="20" align="absmiddle" alt=""> **[CLI](docs/CLI.md) and [AI agents](docs/AI-AGENTS.md)**: the app's engine without a screen, for bots, scripts and agents.
 
+## The app
+
 <p align="center">
   <img src="docs/assets/readme/hero.webp" alt="Ghostly on a computer and a phone: a chat with Casper, with a voice message, a photo sent straight from his app and a reply" width="720">
 </p>
