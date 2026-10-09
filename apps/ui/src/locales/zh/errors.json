@@ -180,6 +180,8 @@
     "notIn": "你不在此群组中",
     "notYet": "你还未加入此群组",
     "nothingToSend": "没有可发送的内容",
+    "offline": "你已离线",
+    "offlineNext": "请在“服务”中上线，然后重试。",
     "removed": "你已被移出此群组",
     "shareLinkInstead": "把群组链接分享给对方：打开链接即可加入",
     "tooLong": "消息超过 16 KiB"
