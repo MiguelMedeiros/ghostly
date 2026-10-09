@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
+import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, groupFileOffered, stalledAction } from "../../lib/fileStatus";
@@ -69,6 +70,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  useFocusKept(rootRef);
   const playRef = useRef<HTMLButtonElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -369,7 +371,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       // As wide as a comfortable waveform, never wider than the message bubble it sits in (whose own limit
       // is a share of the chat, not of the window: vw here spilled it out of a narrow Desktop window).
       // Its colours are light in both themes: message bubbles are dark in both (MessageBubble).
-      className="w-[300px] max-w-full pt-1"
+      className="w-[300px] max-w-full pt-1 rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       data-testid="voice-bubble"
       data-voice-player={file.id}
       data-voice-sender={sender}

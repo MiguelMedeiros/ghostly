@@ -195,6 +195,35 @@ describe("a group's file bubbles", () => {
     expect(engine.callsTo("fileAction").map(c => [c.fileId, c.action])).toEqual([[VOICE.id, "accept"], [CLIP.id, "accept"]]);
   });
 
+  it("Download pressed from the keyboard keeps the focus in the bubble once the file is asked for", async () => {
+    const { user, engine } = openGroup({ [REPORT.id]: offered(REPORT), [VOICE.id]: offered(VOICE), [CLIP.id]: offered(CLIP) });
+    await vi.waitFor(() => within(row(`${ALICE}:1:1`)).getByTestId("file-bubble"));
+    const asked = (file: MessageFile): FileTransferView => ({ state: "transferring", stage: "queued", transferred: 0, size: file.size, direction: "in" });
+    const transfers = { [REPORT.id]: offered(REPORT), [VOICE.id]: offered(VOICE), [CLIP.id]: offered(CLIP) };
+    for (const [message, bubbleId, buttonId, file] of [[`${ALICE}:1:1`, "file-bubble", "file-accept", REPORT], [`${BOB}:1:1`, "voice-bubble", "voice-download", VOICE], [`${ALICE}:1:2`, "video-bubble", "video-accept", CLIP]] as const) {
+      const bubble = within(row(message)).getByTestId(bubbleId);
+      within(bubble).getByTestId(buttonId).focus();
+      await user.keyboard("{Enter}");
+      transfers[file.id] = asked(file);
+      act(() => engine.update({ transfers: { ...transfers } }));
+      expect(within(bubble).queryByTestId(buttonId)).toBeNull();
+      // Not on the page itself: the next Tab goes on from this message.
+      expect(document.activeElement).not.toBe(document.body);
+      expect(bubble.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it("a Download that leaves while the focus is elsewhere takes no focus", async () => {
+    const { engine } = openGroup({ [REPORT.id]: offered(REPORT) });
+    const bubble = await vi.waitFor(() => within(row(`${ALICE}:1:1`)).getByTestId("file-bubble"));
+    within(bubble).getByTestId("file-accept").focus();
+    const composer = document.querySelector("textarea")!;
+    composer.focus();
+    act(() => engine.update({ transfers: { [REPORT.id]: { state: "transferring", stage: "queued", transferred: 0, size: REPORT.size, direction: "in" } } }));
+    expect(within(bubble).queryByTestId("file-accept")).toBeNull();
+    expect(document.activeElement).toBe(composer);
+  });
+
   it("my own file: here from the start, no Download, no Send again", async () => {
     openGroup({ [MINE.id]: { state: "done", transferred: MINE.size, size: MINE.size, direction: "out" } });
     const bubble = await vi.waitFor(() => within(row(`${ME}:1:0`)).getByTestId("file-bubble"));

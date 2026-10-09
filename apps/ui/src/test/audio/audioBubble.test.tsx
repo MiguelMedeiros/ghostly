@@ -307,6 +307,16 @@ describe("an audio file not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
   });
 
+  it("Download pressed from the keyboard keeps the focus in the bubble once the offer is answered", async () => {
+    const file = song({ size: 40 * MB });
+    const { user } = show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
+    screen.getByTestId("audio-accept").focus();
+    await user.keyboard("{Enter}");
+    act(() => fakeEngine.update({ transfers: { [file.id]: { state: "transferring", direction: "in", transferred: 0, size: file.size } } }));
+    expect(screen.queryByTestId("audio-accept")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("audio-bubble"));
+  });
+
   it("an offer larger than the room here cannot be accepted", () => {
     const file = song({ size: 40 * MB });
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 10 * MB });

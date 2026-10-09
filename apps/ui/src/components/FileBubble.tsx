@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
@@ -46,6 +47,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   /** The picture open large (a tap on it). */
   const [viewing, setViewing] = useState(false);
   const opener = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useFocusKept(rootRef);
   /** When a finger (or a pen) went down on the picture: held as long as a long press, its tap opens nothing. */
   const pressedAt = useRef<number | null>(null);
   useEffect(() => {
@@ -147,7 +150,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   };
 
   return (
-    <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
+    <div ref={rootRef} className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)] rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       {box && (
         <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
