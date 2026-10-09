@@ -580,7 +580,10 @@ export function GroupChat() {
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmLeave(false); nav.home(); }} />}
-      {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
+      {/* Deleting an active private group leaves it: said so, and refused as Leave is while nobody could become admin. */}
+      {confirmForget && group.status === "active" && group.profile !== "community" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
+        onConfirm={async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmForget(false); nav.home(); }} />
+      : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
     </div>
     </MemberColorsProvider>

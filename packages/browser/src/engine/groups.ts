@@ -878,7 +878,9 @@ export class Groups {
   async forget(groupId: string): Promise<void> {
     if (this.isCommunity(groupId)) { await this.communities.forget(groupId); await this.files?.drop(groupId); return; }
     const session = this.sessions.get(groupId);
-    if (session?.status === "active") { try { await this.leave(groupId); } catch { /* the admin cannot leave a group with members: forgetting it is still allowed */ } }
+    // Deleting an active group leaves it. An admin with members who cannot hand the role on is refused, as Leave is:
+    // gone with the role, the group would have no admin for good. Anyone else's failed goodbye does not keep it here.
+    if (session?.status === "active") { try { await this.leave(groupId); } catch (e) { if (session.isAdmin && session.others.length) throw e; } }
     this.sessions.delete(groupId);
     this.stored.delete(groupId);
     this.invited.delete(groupId);
