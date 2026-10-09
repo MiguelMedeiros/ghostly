@@ -172,6 +172,15 @@ describe("capability record: keys, seal and signature", () => {
     expect(bKeys.open(packetOf(aKeys, automatic))).not.toHaveProperty("choice");
   });
 
+  it("cleans the contact's name as a nickname from any other source", () => {
+    const { aKeys, bKeys } = pair();
+    const named = (name: string) => bKeys.open(packetOf(aKeys, aKeys.seal(content({ name }), 1).records)).name;
+    expect(named("Bank\u202eknab\u0085\u200b\nX\u0007")).toBe("BankknabX");
+    expect(named("  Ada\u2066 Lovelace\u2069 "), "trimmed").toBe("Ada Lovelace");
+    expect(named("\u{1f468}\u200d\u{1f469}"), "an emoji's zero-width joiner stays").toBe("\u{1f468}\u200d\u{1f469}");
+    expect(named("\u202e\u200b\n"), "nothing visible left: no name shared").toBe("");
+  });
+
   it("refuses out-of-bounds fields and the DHT listed as a transport", () => {
     const { aKeys, bKeys } = pair();
     const bad: Partial<CapsContent>[] = [
