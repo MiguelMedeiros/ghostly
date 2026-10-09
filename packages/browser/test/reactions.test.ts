@@ -272,7 +272,7 @@ describe("the reactions store", () => {
     expect(rows[0].reactions?.me?.e).toBe("🙏");
   });
 
-  it("a reaction waits a minute for its message, the newest per person, and then is dropped", async () => {
+  it("a reaction waits five minutes for its message, the newest per person, and then is dropped", async () => {
     const rows: StoredMessage[] = [];
     const { reactions, tick } = memory(rows);
     expect(await reactions.receive("group:g", "p", { id: "k:0:1", e: "👍", n: 2 })).toBe("waiting");
@@ -282,16 +282,43 @@ describe("the reactions store", () => {
     await reactions.stored(rows[0]);
     expect(rows[0].reactions?.p).toMatchObject({ e: "😮", n: 3 });
     expect(await reactions.receive("group:g", "p", { id: "k:0:2", e: "👍", n: 4 })).toBe("waiting");
-    tick(61_000);
+    tick(REACTION_LIMITS.bufferMs + 1_000);
     rows.push(row({ id: "k:0:2", member: "k" }));
     await reactions.stored(rows[1]);
     expect(rows[1].reactions).toBeUndefined();
   });
 
-  it("has room for so many waiting per chat", async () => {
-    const { reactions } = memory([]);
-    for (let i = 0; i < 64; i++) expect(await reactions.receive("group:g", `m${i}`, { id: "k:0:1", e: "👍", n: 1 })).toBe("waiting");
-    expect(await reactions.receive("group:g", "one-more", { id: "k:0:1", e: "👍", n: 1 })).toBe("dropped");
+  it("has room for so many waiting per sender in a chat", async () => {
+    const { reactions, tick } = memory([]);
+    for (let i = 0; i < REACTION_LIMITS.buffer; i++) {
+      if (i && i % REACTION_LIMITS.receive === 0) tick(REACTION_LIMITS.windowMs);
+      expect(await reactions.receive("group:g", "m", { id: `k:0:${i}`, e: "👍", n: 1 })).toBe("waiting");
+    }
+    expect(await reactions.receive("group:g", "m", { id: "k:0:one-more", e: "👍", n: 1 })).toBe("dropped");
+    // Another member's room is its own.
+    expect(await reactions.receive("group:g", "other", { id: "k:0:1", e: "👍", n: 1 })).toBe("waiting");
+  });
+
+  it("keeps what every member says again to a member back in a busy group until the catch-up brings the messages", async () => {
+    // Seven members each say their latest 32 again as their edges open (20 a window, as a sender says them), naming
+    // messages the catch-up brings over a minute later: before, 64 waited for the whole chat, a minute, and 64 of 224 showed.
+    const rows: StoredMessage[] = [];
+    const { reactions, tick } = memory(rows);
+    const members = Array.from({ length: 7 }, (_, i) => `member${i}`);
+    const outcomes: string[] = [];
+    for (const [first, last] of [[0, REACTION_LIMITS.send], [REACTION_LIMITS.send, 32]]) {
+      for (const [m, by] of members.entries()) {
+        for (let i = first; i < last; i++) outcomes.push(await reactions.receive("group:g", by, { id: `k:0:${m * 32 + i}`, e: "👍", n: i + 1 }));
+      }
+      tick(REACTION_LIMITS.windowMs);
+    }
+    expect(outcomes.filter(o => o !== "waiting")).toEqual([]);
+    tick(70_000);
+    for (let i = 0; i < 7 * 32; i++) {
+      rows.push(row({ id: `k:0:${i}`, member: "k" }));
+      await reactions.stored(rows[i]);
+    }
+    expect(rows.filter(r => r.reactions).length).toBe(7 * 32);
   });
 
   it("numbers mine past what waits to be confirmed, even when the clock goes back", async () => {
