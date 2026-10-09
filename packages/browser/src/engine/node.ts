@@ -2931,16 +2931,28 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * A received reply, or one sent before its original was here, against this chat's own history: the original found
    * here gives the line and the author (and it is then checked); one not found keeps what the wire said, unchecked.
+   * The original is read alone where its id says its row (a group's message id, a chat's `peer_`/`me_` text): a reply
+   * costs what a plain message does, however long the chat. A group's row goes by its own id only, so a miss there is
+   * not here; a chat's other rows (a file's, a payment's) are looked for in the whole chat.
    */
   private async resolveReply(message: StoredMessage): Promise<StoredMessage> {
     const reply = message.replyTo;
     if (!reply || reply.messageId) return message;
-    const history = await db.getMessages(message.linkId);
-    const original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
+    const group = message.linkId.startsWith("group:");
+    let original: StoredMessage | undefined, history: StoredMessage[] | undefined;
+    for (const rowId of group ? [reply.id] : [`peer_${reply.id}`, `me_${reply.id}`]) {
+      const row = rowId === message.id ? undefined : await db.getMessage(message.linkId, rowId);
+      if (row && replyRef(row, group) === reply.id) { original = row; break; }
+    }
+    if (!original && !group) {
+      history = await db.getMessages(message.linkId);
+      original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
+    }
     if (!original) return message;
     const resolved: StoredMessage = { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }), ...(reply.button && { button: reply.button }) } };
-    // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person.
-    const press = buttonPress(resolved, original, history);
+    // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person. The history
+    // only says whether this person already answered, so it is read when there is a press to check.
+    const press = buttonPress(resolved, original, []) && buttonPress(resolved, original, history ?? await db.getMessages(message.linkId));
     return press ? { ...resolved, press } : resolved;
   }
 
