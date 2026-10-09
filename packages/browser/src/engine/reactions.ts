@@ -146,16 +146,15 @@ export class Reactions {
       const now = this.now(), all = (this.waiting.get(message.linkId) ?? []).filter(w => w.until > now);
       const mine = all.filter(w => w.reaction.id === id).sort((a, b) => a.reaction.n - b.reaction.n);
       this.waiting.set(message.linkId, all.filter(w => w.reaction.id !== id));
-      for (const { by, reaction } of mine) {
-        const target = reactionTarget(await this.host.messages(message.linkId), id, isGroup(message.linkId));
-        if (target && reactionIsNewer(target.reactions?.[by], reaction.n)) await this.write(message.linkId, target, by, reaction);
-      }
+      // The message just kept is their row: written to directly (the patch keeps only a newer one), the chat not read.
+      for (const { by, reaction } of mine) await this.write(message.linkId, message, by, reaction);
     });
   }
 
   /**
    * The row a received reaction names. Most often the row of that id (a group's), or of `peer_` or `me_` and that id (a
-   * chat's): those are read alone. Any other (a file's, a payment's, one not here yet) is looked for in the whole chat.
+   * chat's): those are read alone. Any other (a file's, a payment's, one not here yet) is looked for in the whole chat;
+   * in a group there is no other, since a row that takes a reaction goes by its own id there.
    */
   private async find(chat: string, id: string): Promise<StoredMessage | undefined> {
     const group = isGroup(chat);
@@ -164,6 +163,7 @@ export class Reactions {
         const row = await this.host.message(chat, rowId);
         if (row && replyRef(row, group) === id) return row;
       }
+      if (group) return undefined;
     }
     return reactionTarget(await this.host.messages(chat), id, group);
   }
