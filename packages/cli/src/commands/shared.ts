@@ -73,6 +73,8 @@ export const buttonOptions: Record<string, OptionSpec> = {
 };
 /** The group's entry link lets anyone join: printed only when asked for. */
 export const showSecret: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print the group's entry link (anyone who has it can join)" } };
+/** A pending chat's invite code lets whoever reads it take the chat: printed only when asked for. */
+export const showInvite: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print a pending chat's invite code (whoever has it can take the chat)" } };
 export const secret = (options: Parsed["options"]) => (options["show-secret"] === true ? { showSecret: true } : {});
 
 /**

@@ -33,6 +33,20 @@ function checkTextSize(text: string): void {
 
 // ---------- settings ----------
 
+/**
+ * The engine's state as `engine getState` prints it without `--show-secret`: the settings' credentials, a group's
+ * entry link (anyone who reads it can join) and a pending chat's invite code (whoever reads it can take the chat)
+ * are `<hidden>`.
+ */
+export function hideStateSecrets<T extends { settings: Settings; groups?: { entryLink?: string }[]; links?: { inviteCode?: string }[] }>(state: T) {
+  return {
+    ...state,
+    settings: redactSettings(state.settings),
+    ...(state.groups ? { groups: state.groups.map((g) => (g.entryLink ? { ...g, entryLink: "<hidden>" } : g)) } : {}),
+    ...(state.links ? { links: state.links.map((l) => (l.inviteCode ? { ...l, inviteCode: "<hidden>" } : l)) } : {}),
+  };
+}
+
 /** Settings as a bot may read them: storage credentials and other secrets masked unless asked for. */
 export function redactSettings(settings: Settings, showSecret = false): Record<string, unknown> {
   if (showSecret) return settings as unknown as Record<string, unknown>;
@@ -184,12 +198,13 @@ const METHODS: Record<string, Method> = {
     return { chat: linkId };
   },
 
-  async "chat.list"(ctx) {
-    return { chats: state(ctx).links.map(chatJson).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
+  async "chat.list"(ctx, params) {
+    const showSecret = bool(params, "showSecret");
+    return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
     const link = chatOf(ctx, params);
-    return { ...chatDetailsJson(link), heldUntil: holdOf(ctx, link.id) };
+    return { ...chatDetailsJson(link, bool(params, "showSecret")), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);

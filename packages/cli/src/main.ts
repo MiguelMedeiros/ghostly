@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { callApi, redactSettings, SETTABLE } from "./api";
+import { callApi, hideStateSecrets, SETTABLE } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
@@ -545,9 +545,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
   let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal }));
   if (method === "getState" && !showSecret && result && typeof result === "object") {
-    const state = result as { settings: Parameters<typeof redactSettings>[0]; groups?: { entryLink?: string }[] };
-    // A group's entry link lets anyone join: hidden like the settings' secrets.
-    result = { ...state, settings: redactSettings(state.settings), ...(state.groups ? { groups: state.groups.map((g) => (g.entryLink ? { ...g, entryLink: "<hidden>" } : g)) } : {}) };
+    result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
   }
   print(result);
 }
