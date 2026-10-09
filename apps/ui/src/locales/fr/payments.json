@@ -285,6 +285,7 @@
     "paying": "Paiement…",
     "paysThrough": "Paiement via {{domain}}",
     "pendingAtMint": "Paiement en attente au mint…",
+    "qrTooLong": "Trop long pour un QR code : copiez-le plutôt.",
     "redeem": "Encaisser",
     "redeemed": "Encaissé ✓",
     "redeeming": "Encaissement…"

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
@@ -15,6 +15,7 @@ import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
 import { OpenInWallet } from "./OpenInWallet";
 import { rawError } from "../lib/errorText";
+import { qrFits } from "../lib/qrFits";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 
@@ -68,6 +69,8 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
 }) {
   const { t } = useI18n();
   const [showQr, setShowQr] = useState(true);
+  // A token of many proofs, or a long invoice, holds more than one QR code: said in words, the card and its actions stay.
+  const fits = useMemo(() => qrFits(qr), [qr]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId}>
       <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{label}{tag}</p>
@@ -87,7 +90,8 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
       {lines.filter(Boolean).map((line) => (
         <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
-      {showQr && (
+      {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
+      {fits && showQr && (
         <button
           onClick={() => setShowQr(false)}
           className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none"
@@ -98,7 +102,7 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
       )}
       <div className="flex flex-wrap gap-1.5 mt-2">
         {children}
-        {!showQr && (
+        {fits && !showQr && (
           <button className={quiet} onClick={() => setShowQr(true)}>QR</button>
         )}
       </div>

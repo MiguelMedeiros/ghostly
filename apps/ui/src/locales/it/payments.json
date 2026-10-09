@@ -285,6 +285,7 @@
     "paying": "Pagamento…",
     "paysThrough": "Si paga tramite {{domain}}",
     "pendingAtMint": "Pagamento in sospeso presso il mint…",
+    "qrTooLong": "Troppo lungo per un codice QR: copialo invece.",
     "redeem": "Riscatta",
     "redeemed": "Riscattato ✓",
     "redeeming": "Riscatto…"
