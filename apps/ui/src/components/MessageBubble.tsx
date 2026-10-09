@@ -21,7 +21,7 @@ import { CardTime, StatusCardView } from "./chat/StatusCard";
 import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
-import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
+import { downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile, fileHeld } from "../lib/fileStatus";
 import { rawError, SAVE_REFUSED } from "../lib/errorText";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
@@ -444,6 +444,8 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
   const { t } = useI18n();
   const { platform, transfer, restoring } = useTransfer(file.id);
   const [problem, setProblem] = useState<"missing" | "left-out" | "unconverted" | "unsaved" | null>(null);
+  // The system's own words for a refused save, in the row's hover text.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -469,12 +471,19 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
         const held = await fileHeld(platform, file.id, false);
         if (mounted.current) setProblem(held === "left-out" ? "left-out" : "missing");
       })
-      // Refused where it was to be saved (Android's picker): it can be saved again, somewhere else.
-      .catch((error: unknown) => { if (mounted.current) setProblem(SAVE_REFUSED.test(rawError(error)) ? "unsaved" : format === "mp3" ? "unconverted" : "missing"); })
+      // Bytes gone resolve `missing`; a rejection is the save refused where it was to be (Android's picker, a folder the
+      // desktop cannot write to, a full disk): it can be saved again, somewhere else.
+      .catch((error: unknown) => {
+        if (!mounted.current) return;
+        const unconverted = error instanceof Unconverted;
+        setProblem(unconverted ? "unconverted" : "unsaved");
+        setRefusal(unconverted || SAVE_REFUSED.test(rawError(error)) ? null : rawError(error));
+      })
       .finally(() => { if (mounted.current) setBusy(false); });
   };
   return (
-    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved")} hint={reason} title={reason ?? name}
+    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved")} hint={reason}
+      title={reason && refusal ? `${reason}\n${refusal}` : reason ?? name}
       data={{ "data-download-state": problem ?? (busy ? "busy" : state) }} icon={downloadIcon}>
       {t(format === "mp3" ? "chat.message.downloadMp3" : "chat.message.download")}
     </MenuItem>
