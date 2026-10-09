@@ -514,7 +514,8 @@ export class Apps {
       if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
       if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
       this.verified.set(app.digest, read.bundle);
-      this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH) ?? null);
+      // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
+      this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH)?.slice() ?? null);
       return read.bundle;
     })().finally(() => { this.verifying.delete(app.digest); });
     this.verifying.set(app.digest, reading);
