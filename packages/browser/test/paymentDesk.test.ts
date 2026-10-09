@@ -106,11 +106,28 @@ describe("paying a contact's request, never twice", () => {
     const { desk, wallet } = setup([
       record({ id: "r1", mints: [MINT] }),
       record({ id: "p0", kind: "payment", direction: "out", requestId: "r1", state: "reclaimed" }),
-      record({ id: "p1", kind: "payment", direction: "out", requestId: "r1", state: "failed", token: "cashuBold" }),
+      record({ id: "p1", kind: "payment", direction: "out", requestId: "r1", state: "failed" }),
     ]);
     await desk.start();
     await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
     expect(wallet.createToken).toHaveBeenCalledWith(100, [MINT], undefined, expect.any(Function), "mainnet");
+  });
+
+  it("refused ecash not taken back yet still counts: the request is not paid again until it is back", async () => {
+    const { desk, wallet, state } = setup([record({ id: "r1", mints: [MINT] })]);
+    await desk.start();
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
+    const paid = desk.records().find((p) => p.kind === "payment" && p.requestId === "r1")!;
+    wallet.receiveToken.mockRejectedValueOnce(new Error("fetch failed"));
+    await desk.onPaymentResult("l", { id: paid.id, ok: false, error: "No thanks" });
+    expect(state(paid.id)).toMatchObject({ state: "failed", token: "cashuBtoken" });
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("You already paid this request");
+    expect(wallet.createToken).toHaveBeenCalledOnce();
+    // Taken back: the ecash is ours again, and the request can be paid.
+    await desk.reclaim(paid.id);
+    expect(state(paid.id)?.state).toBe("reclaimed");
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
+    expect(wallet.createToken).toHaveBeenCalledTimes(2);
   });
 
   it("goes to Lightning only when no ecash was made and the request has an invoice", async () => {

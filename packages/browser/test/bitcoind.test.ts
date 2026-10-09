@@ -216,6 +216,18 @@ describe("Bitcoin Core source", () => {
     expect(history[1]).toMatchObject({ amount: 50_000, confirmations: 1 });
     expect(await provider.history(1)).toHaveLength(1);
   });
+
+  it("lists what one address received: not the wallet's receives on its other addresses, nor what it sent", async () => {
+    const node = new MockBitcoind(); node.fund(50_000);
+    const provider = await connect(node);
+    const address = await provider.receiveAddress();
+    expect(await provider.received(address), "an older receive elsewhere in the wallet").toEqual([]);
+    const prepared = await provider.prepareSend({ address: fakeAddress(), amount: 10_000, feeCap: 1_000 });
+    await provider.broadcast(prepared);
+    const paid = node.fund(2_000, address);
+    expect(await provider.received(address)).toEqual([{ txid: paid, amount: 2_000, confirmations: 1 }]);
+    expect(await provider.received(fakeAddress())).toEqual([]);
+  });
 });
 
 describe("Bitcoin Core through the payment coordinator", () => {

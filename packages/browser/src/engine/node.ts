@@ -4946,7 +4946,8 @@ export class GhostlyNode implements EngineImplementation {
       if(params.requestId){
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
         if(params.target.method!=="cashu" ? JSON.stringify(request.target)!==JSON.stringify(params.target) : !!request.target || params.target.address!==request.id || !request.mints?.includes(params.target.provider))throw new Error("Selected method or mint does not match the authenticated request");
-        if(request.lightningPending || Object.values(this.desk.views()).some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && !["failed","reclaimed"].includes(p.state)))throw engineError("requestPaymentInFlight");
+        // A failed payment still holding its token was not taken back yet: the contact may still redeem it.
+        if(request.lightningPending || this.desk.records().some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && p.state!=="reclaimed" && (p.state!=="failed" || !!p.token)))throw engineError("requestPaymentInFlight");
         const asked=paymentNetwork(request);
         if(asked!==paying)throw new Error(crossNetwork(paying, asked));
       } else if(params.target.method!=="cashu" || !payee || params.target.address!==payee)throw new Error("Destination does not match the authenticated peer");
