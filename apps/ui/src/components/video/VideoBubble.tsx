@@ -3,7 +3,7 @@ import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
@@ -234,6 +234,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   };
 
   const moving = transfer?.state === "transferring";
+  const group = isGroupFile(file);
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const noRoom = offered && typeof transfer.room === "number" && transfer.room < file.size;
@@ -245,6 +246,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const status = moving || failed ? fileStatus(file, transfer, named, false, t) : null;
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
   const reason = actionError ? { text: actionError } : failedReason(transfer, t);
+  const hint = reason ? null : groupFileHint(file, transfer, t);
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
@@ -331,7 +333,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     <DownloadIcon size={18} />
                     {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
                   </button>
-                  <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>
+                  {/* A group's video (WISP 503) is downloaded or not: nothing to decline. */}
+                  {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
                 </>
               ) : showRing ? (
                 <ProgressRing percent={percent} paused={transfer?.stage === "paused" || transfer?.stage === "waiting" || !!transfer?.stalled} />
@@ -374,7 +377,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room) })}
         </p>
       )}
-      {(status || canRetry || stuck) && !offered && (
+      {(status || canRetry || stuck) && (!offered || reason) && (
         <div className="flex items-center gap-2 mt-1 px-1">
           {canRetry ? (
             <RoundRetry danger busy={busy} testId="video-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")}
@@ -386,19 +389,19 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           {status && (
             <p className={`flex items-center gap-1 min-w-0 text-[11px] m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
               <span className="min-w-0 truncate" data-testid="video-status">{status}</span>
-              {reason && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger />}
+              {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger={!!reason} />}
             </p>
           )}
         </div>
       )}
-      {controls && !offered && (
+      {controls && !offered && !group && (
         <div className="flex gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={linkButton} data-testid="video-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="video-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
           <button type="button" className={linkButton} data-testid="video-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
-      {reason && why && <WhyText id={whyId} testId="video-why-text" english={reason.english}>{reason.text}</WhyText>}
+      {(reason || hint) && why && <WhyText id={whyId} testId="video-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {problemText && (
         <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
           {problemText}{" "}

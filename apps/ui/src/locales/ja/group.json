@@ -14,7 +14,6 @@
     "memberCount": "メンバー {{count}} 人",
     "memberOne": "メンバー 1 人",
     "membersButton": "メンバー",
-    "noFiles": "グループではまだファイルを送れません",
     "nobodyElse": "グループにはまだ他に誰もいません",
     "reachable": "{{members}} · {{total}} 人中 {{reachable}} 人に到達可能",
     "removedCommunity": "削除されました。もう一度参加するには、グループのリンクを開いてください。",

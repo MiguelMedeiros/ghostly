@@ -15,6 +15,7 @@ import { NetworkSettings } from "../components/NetworkSettings";
 import { ForkRows } from "../components/devices/Forks";
 import { DomainProofSettings } from "../components/DomainProofSettings";
 import { MediaSettings } from "../components/MediaSettings";
+import { GroupDownloadsRow } from "../components/settings/GroupDownloads";
 import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
 import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
@@ -682,6 +683,7 @@ export function Settings() {
           </Row>
         )}
         <ForkRows forks={devices?.forks} />
+        <GroupDownloadsRow />
         <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
           {confirmDeleteChats ? <>
             <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
