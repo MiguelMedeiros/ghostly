@@ -269,6 +269,31 @@ describe("ChatConnection: what the panel does", () => {
     expect(screen.getByTestId("connection-options")).toHaveFocus();
   });
 
+  // At 375 px the panel is a fixed overlay over the messages: a Tab past its end went on to the buttons under it.
+  it("closes when Tab takes the focus out of it, leaving the focus where it went", async () => {
+    const view = renderApp(<><ChatConnection peerKey="peer" /><button type="button">Next in the header</button></>);
+    act(() => view.engine.update({ links: [linkView({ availableTransports: all, pairing: ready() })] }));
+    const menu = screen.getByTestId("connection-menu") as HTMLDetailsElement;
+    await view.user.click(screen.getByTestId("connection-options"));
+    await view.user.click(screen.getByTestId("connection-details-summary"));
+    // A click on the panel's text moves the focus nowhere in particular: the panel stays.
+    await view.user.click(screen.getByTestId("connection-state"));
+    expect(menu.open).toBe(true);
+    screen.getByTestId("connection-key-contact").focus();
+    await view.user.tab();
+    expect(screen.getByRole("button", { name: "Next in the header" })).toHaveFocus();
+    expect(menu.open).toBe(false);
+  });
+
+  it("stays open while Tab goes round its own controls", async () => {
+    const { user } = banner({ pairing: ready() });
+    const menu = screen.getByTestId("connection-menu") as HTMLDetailsElement;
+    await user.click(screen.getByTestId("connection-options"));
+    await user.tab();
+    expect(screen.getByTestId("connection-menu")).toContainElement(document.activeElement as HTMLElement);
+    expect(menu.open).toBe(true);
+  });
+
   it("offers the five choices, one chosen: Automatic, WebRTC, Iroh, HyperDHT and DHT only", () => {
     banner({ pairing: ready(), transportAutomatic: true, transportRttMs: 12 });
     expect(screen.getAllByRole("radio").map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked"), r.textContent])).toEqual([
