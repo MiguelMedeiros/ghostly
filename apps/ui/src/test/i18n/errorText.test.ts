@@ -32,6 +32,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Native adapter could not start. Reopen this chat to retry.", "packages/browser/src/engine/node.ts"],
+  ["At most 64 items can wait for this contact. Wait until some are picked up.", `${BROWSER}/engine/hold.ts`, " items can wait for this contact. Wait until some are picked up."],
+  ["Items waiting for this contact would exceed 64 MB. Wait until some are picked up.", `${BROWSER}/engine/hold.ts`, "Items waiting for this contact would exceed ${"],
   ["The Ghostly peer is unavailable. Reopen the extension to retry.", "apps/extension/src/host.ts"],
   ["Switching profiles…", "apps/extension/src/host.ts"],
   ["Ghostly needs the sign-in permission for this.", "apps/extension/src/oidc.ts"],

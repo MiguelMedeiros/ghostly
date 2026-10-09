@@ -184,6 +184,11 @@
     "shareLinkInstead": "Condividi con questa persona il link del gruppo: chi lo apre entra",
     "tooLong": "Il messaggio supera i 16 KiB"
   },
+  "hold": {
+    "fullBytes": "Si supererebbero i {{max}} MB in attesa per il tuo contatto",
+    "fullItems": "Il tuo contatto ha già {{max}} elementi in attesa",
+    "fullNext": "Invialo di nuovo quando il tuo contatto ne avrà ritirati alcuni."
+  },
   "host": {
     "noApp": "Nessuna app di questo telefono può aprirlo",
     "noAppNext": "Installa un'app adatta, oppure copia il link e aprilo altrove.",

@@ -184,6 +184,11 @@
     "shareLinkInstead": "把群组链接分享给对方：打开链接即可加入",
     "tooLong": "消息超过 16 KiB"
   },
+  "hold": {
+    "fullBytes": "等待联系人取走的内容将超过 {{max}} MB",
+    "fullItems": "已有 {{max}} 项在等待联系人取走",
+    "fullNext": "对方取走一些后,请重新发送。"
+  },
   "host": {
     "noApp": "这台手机上没有能打开它的应用",
     "noAppNext": "请安装相应的应用，或复制链接到别处打开。",
