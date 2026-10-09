@@ -264,6 +264,22 @@ describe("the header's line", () => {
     expect(line).toHaveAttribute("aria-expanded", "true");
   });
 
+  it.each(["{Escape}", "close"])("closed (%s), the panel gives the focus back to what opened it: the line, or the Tasks button", async (how) => {
+    const { user } = renderApp(<Header found={entry()} />);
+    const shut = async () => {
+      await waitFor(() => expect(screen.getByTestId("chat-tasks-panel")).toHaveFocus());
+      if (how === "close") await user.click(screen.getByTestId("chat-tasks-close"));
+      else await user.keyboard(how);
+      await waitFor(() => expect(screen.queryByTestId("chat-tasks-panel")).not.toBeInTheDocument());
+    };
+    for (const opener of ["chat-working", "chat-tasks", "chat-working"]) {
+      act(() => screen.getByTestId(opener).focus());
+      await user.keyboard("{Enter}");
+      await shut();
+      expect(screen.getByTestId(opener)).toHaveFocus();
+    }
+  });
+
   it("is plain words, no button, while the chat shows no card to list (its card is further back than what is loaded)", () => {
     renderApp(<Header found={entry()} cards={false} />);
     expect(screen.getByTestId("chat-working").tagName).toBe("SPAN");
