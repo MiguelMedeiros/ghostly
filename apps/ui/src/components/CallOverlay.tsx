@@ -248,7 +248,7 @@ export function CallOverlay({
             <span className="text-accent">{t("calls.audio")}</span>
           )}
           {statusText && (
-            <span className={callState === "connected" ? "ml-2" : ""}>
+            <span className={callState === "connected" ? "ms-2" : ""}>
               {statusText}
             </span>
           )}
