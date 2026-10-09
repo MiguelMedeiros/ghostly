@@ -1,4 +1,5 @@
-import {useId,useState} from 'react';
+import {useEffect,useId,useRef,useState} from 'react';
+import { focusInPlace } from "../lib/focus";
 import {walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform} from '../lib/platform';
 import {useI18n} from '../contexts/I18nContext';
@@ -33,8 +34,13 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
  const button='rounded-lg px-3 py-2 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40';
  const status=token&&review.state==='settled'?'confirmed':review.state;
  const blocks=review.evm?.confirmations??2;
+ // It takes the place of the button that opened it (Review payment, Send, an open payment), and Approve's row takes
+ // other buttons after it: the focus would fall to the page. Its title takes it then, in place, so the keys go on from
+ // here and a screen reader says what it is. Not when the focus is somewhere else.
+ const title=useRef<HTMLHeadingElement>(null);
+ useEffect(()=>{if(!document.activeElement||document.activeElement===document.body)focusInPlace(title.current);},[review.state]);
  return <section aria-label={t('payments.review.label')} className="rounded-xl border border-border p-3 space-y-3" data-testid="payment-review" data-network={network}>
-  <h3 className="text-text-primary text-sm font-semibold flex items-center gap-2 flex-wrap">{review.state==='pending'?t('payments.review.title.pending'):t('payments.review.title.status')}<NetworkTag network={network} testId="review-network"/></h3>
+  <h3 ref={title} tabIndex={-1} className="text-text-primary text-sm font-semibold flex items-center gap-2 flex-wrap focus:outline-none">{review.state==='pending'?t('payments.review.title.pending'):t('payments.review.title.status')}<NetworkTag network={network} testId="review-network"/></h3>
   <p className="text-xl font-semibold text-text-primary">{shown} <span className="text-xs font-normal">{unit}</span></p>
   <p className="text-xs text-text-secondary" data-testid="review-rail">{railLine(t,review.method,review.network)}</p>
   <p className="text-xs text-text-secondary" data-testid="review-money">{real?t('payments.review.money.mainnet'):t('payments.review.money.testnet')}</p>

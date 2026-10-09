@@ -1075,6 +1075,36 @@ describe("private groups through the engine", () => {
     }
     const edgeOf = (id: string) => links.filter((l) => l.options.params.id === id).at(-1)!;
 
+    it("an edge whose listener failed to start (Iroh's relay out of reach) starts it again on a later tick, and at once when the network is back", async () => {
+      const { node, iroh } = await nativeEngine();
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      await vi.waitFor(() => expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBe("Iroh relay unreachable"));
+      // The next tick before the wait is over: nothing yet.
+      node["retryGroupNative"]();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(iroh).toHaveBeenCalledOnce();
+      // One retry period later, the tick starts it again, and the edge has it.
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 16_000);
+      onTestFinished(() => { clock.mockRestore(); });
+      node["retryGroupNative"]();
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledTimes(2);
+      expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBeUndefined();
+      // Failed again (the network went down once more): the network coming back starts it at the next tick.
+      edgeOf(edgeId).availableTransports = ["webrtc/1"];
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      node["groupNativeFailed"].clear();
+      void node["ensureNativeEndpoints"](edgeId);
+      await vi.waitFor(() => expect(node["groupNativeFailed"].has(edgeId)).toBe(true));
+      node.wake({ network: true });
+      node["retryGroupNative"]();
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(2));
+    });
+
     it("an app with WebRTC takes an endpoint on an edge only once the member's packet says it has none, and again after a restart", async () => {
       vi.stubGlobal("RTCPeerConnection", class {});
       onTestFinished(() => { vi.unstubAllGlobals(); });

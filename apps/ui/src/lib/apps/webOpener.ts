@@ -93,6 +93,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     const title = document.createElement("span");
     title.className = "flex-1 truncate font-medium";
     title.setAttribute("data-testid", "mini-app-title");
+    title.dir = "auto";
     title.textContent = entry.title;
     const close = document.createElement("button");
     close.type = "button";

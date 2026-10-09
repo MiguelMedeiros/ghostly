@@ -4,15 +4,16 @@ import { useEffect } from "react";
 
 /**
  * Idle loops rest while they are off screen, page-wide: the ghosts' hem morph
- * (SMIL, which CSS cannot pause), their bob and blink, the network twinkles and
- * the rising particles. One observer watches every outermost ghost, every
- * stage and every particle field; what is not on screen gets `data-offscreen`
- * (CSS pauses its animations) and, for an svg, its SMIL timeline paused. New
+ * (SMIL, which CSS cannot pause), their bob and blink, the network twinkles,
+ * the rising particles and the footer's sleeping ghost. One observer watches
+ * every outermost ghost, every stage, every particle field and the sleeper;
+ * what is not on screen gets `data-offscreen` (CSS pauses its animations) and,
+ * for an svg, its SMIL timeline paused. New
  * elements (the deck mounts late, the boo comes and goes) are picked up by a
  * mutation observer. Nothing here changes what is drawn; it only stops the
  * clock on things nobody can see.
  */
-const LOOPS = "svg.ghost:not(svg svg), svg.stage, .particles";
+const LOOPS = "svg.ghost:not(svg svg), svg.stage, .particles, .footer-sleeper";
 
 export function IdleLoops() {
   useEffect(() => {

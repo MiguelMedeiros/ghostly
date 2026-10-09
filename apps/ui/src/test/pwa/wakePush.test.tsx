@@ -25,6 +25,17 @@ function fakePlatform(overrides: Partial<PushPlatform> = {}): Fake {
 beforeEach(() => setPushPlatform(null));
 afterEach(() => setPushPlatform(null));
 
+/** The page as hidden (in the background, or being closed) until `show()`, which is how a page comes back. */
+function hiddenPage(): { show(): void; restore(): void } {
+  let state: DocumentVisibilityState = "hidden";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+  return {
+    show() { state = "visible"; document.dispatchEvent(new Event("visibilitychange")); },
+    restore() { delete (document as unknown as Record<string, unknown>).visibilityState; },
+  };
+}
+const moment = () => new Promise((resolve) => setTimeout(resolve, 20));
+
 describe("where it can be turned on", () => {
   it("only where the host registered a way that works: the installed web app", () => {
     expect(pushPlatform()).toBeNull();
@@ -118,6 +129,49 @@ describe("the push worker's table", () => {
     vi.unstubAllGlobals();
   });
 
+  it("a hidden page that reads notifications as refused (one being closed does, whatever the person chose) turns nothing off: the new subscription is made when it shows", async () => {
+    const old = generateVapidKeys();
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    const page = hiddenPage();
+    vi.stubGlobal("Notification", { permission: "denied" });
+    fakeEngine.on("setWakeSubscription", () => undefined);
+    fakeEngine.setState(engineState({ settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: old }, wakeRotate: true } }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await moment();
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([]);
+    expect(platform.subscribe).not.toHaveBeenCalled();
+    expect(platform.unsubscribe).not.toHaveBeenCalled();
+
+    // It was the page going away, not the person: shown again, it reads what was chosen and makes the new subscription.
+    vi.stubGlobal("Notification", { permission: "granted" });
+    page.show();
+    await waitFor(() => expect(fakeEngine.callsTo("setWakeSubscription")).toHaveLength(1));
+    const subscription = fakeEngine.callsTo("setWakeSubscription")[0]!.subscription!;
+    expect(subscription.vapid.publicKey).not.toBe(old.publicKey);
+    expect(platform.unsubscribe).not.toHaveBeenCalled();
+    page.restore();
+    vi.unstubAllGlobals();
+  });
+
+  it("a hidden page whose notifications were really taken away turns wake-ups off once it shows", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    const page = hiddenPage();
+    vi.stubGlobal("Notification", { permission: "denied" });
+    fakeEngine.on("setWakeSubscription", () => undefined);
+    fakeEngine.setState(engineState({ settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() }, wakeRotate: true } }));
+    const rotated = rotateWake();
+    await moment();
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([]);
+    page.show();
+    await rotated;
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([{ subscription: null }]);
+    expect(platform.unsubscribe).toHaveBeenCalledWith("");
+    page.restore();
+    vi.unstubAllGlobals();
+  });
+
   it("a private group: a token per member, all opening the group; its mute tells the engine; a community has none", async () => {
     const platform = fakePlatform();
     setPushPlatform(platform);
@@ -153,6 +207,26 @@ describe("the push worker's table", () => {
     renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
     await waitFor(() => expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([{ subscription: { ...keys, vapid } }]));
     expect(platform.subscribe).toHaveBeenCalledWith("", vapid);
+    vi.unstubAllGlobals();
+  });
+
+  it("a dropped subscription on a hidden page that reads notifications as refused is left as it is, and made again when the page shows", async () => {
+    const vapid = generateVapidKeys();
+    const platform = fakePlatform({ current: vi.fn(async () => null) });
+    setPushPlatform(platform);
+    const page = hiddenPage();
+    vi.stubGlobal("Notification", { permission: "denied" });
+    fakeEngine.on("setWakeSubscription", () => undefined);
+    fakeEngine.setState(engineState({ settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, endpoint: "https://fcm.googleapis.com/old", vapid } } }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(platform.current).toHaveBeenCalled());
+    await moment();
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([]);
+
+    vi.stubGlobal("Notification", { permission: "granted" });
+    page.show();
+    await waitFor(() => expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([{ subscription: { ...keys, vapid } }]));
+    page.restore();
     vi.unstubAllGlobals();
   });
 });
@@ -215,6 +289,23 @@ describe("a profile on several devices (WISP 06 § Push and the phone)", () => {
     expect(subscription.endpoint).toBe(fresh.endpoint);
     expect(subscription.vapid.publicKey).not.toBe(old.publicKey);
     expect(platform.subscribe).toHaveBeenCalledWith("", subscription.vapid);
+    vi.unstubAllGlobals();
+  });
+
+  it("a standby's hidden page that reads notifications as refused keeps its subscription until it shows", async () => {
+    const platform = fakePlatform({ current: vi.fn(async () => null), syncText: vi.fn(async () => {}) });
+    setPushPlatform(platform);
+    const page = hiddenPage();
+    vi.stubGlobal("Notification", { permission: "denied" });
+    fakeEngine.on("devicePushState", () => ({ endpoint: keys.endpoint, vapidPublic: generateVapidKeys().publicKey }));
+    fakeEngine.on("devicePushSet", () => undefined);
+    renderHook(() => useStandbyPush({ title: "Ghostly", body: "New message" }, true));
+    await waitFor(() => expect(platform.current).toHaveBeenCalled());
+    await moment();
+    expect(fakeEngine.callsTo("devicePushSet")).toEqual([]);
+    page.show();
+    await waitFor(() => expect(fakeEngine.callsTo("devicePushSet")).toEqual([{ subscription: null }]));
+    page.restore();
     vi.unstubAllGlobals();
   });
 

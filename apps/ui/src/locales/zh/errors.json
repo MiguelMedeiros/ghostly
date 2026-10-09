@@ -180,6 +180,8 @@
     "notIn": "你不在此群组中",
     "notYet": "你还未加入此群组",
     "nothingToSend": "没有可发送的内容",
+    "offline": "你已离线",
+    "offlineNext": "请在“服务”中上线，然后重试。",
     "removed": "你已被移出此群组",
     "shareLinkInstead": "把群组链接分享给对方：打开链接即可加入",
     "tooLong": "消息超过 16 KiB"
@@ -250,6 +252,8 @@
     "confirmRealFirst": "请先确认真钱付款",
     "confirmRealFirstNext": "使用“{{button}}”。没有发送任何款项。",
     "contactAllowsNeither": "你的联系人在此聊天中既未允许 Cashu 也未允许 Lightning",
+    "contactAway": "你的联系人不在线",
+    "contactAwayNext": "没有发送任何内容。等聊天连上后再付款。",
     "contactClosed": "你的联系人关闭了它",
     "contactHasNone": "你的联系人没有 {{network}} {{method}} 钱包",
     "contactRefuses": "你的联系人在此聊天中不接受 {{method}}",
@@ -357,6 +361,8 @@
     "bitcoinNotEnough": "已确认的 sats 不足",
     "bitcoinNotEnoughNext": "可用 {{available}}，含手续费需要 {{needed}}。",
     "canceledUnfunded": "在注资之前已取消",
+    "cashuNeverReached": "这笔付款从未到达铸币厂",
+    "cashuNeverReachedNext": "没有发送任何东西，sats 已经退回。你可以再次付款。",
     "conflicted": "另一笔交易花掉了这些币：这笔付款永远不会确认",
     "federationHas": "这个联盟里的余额不足：{{have}} sats",
     "federationNotEnoughNow": "这个联盟里的余额已经不够了",
@@ -377,7 +383,11 @@
     "takenBack": "已收回：sats 又回到了你的钱包",
     "usdtBalanceChanged": "代币或 gas 余额已变化。请重新审核",
     "usdtNonceChanged": "账户 nonce 已变化。请重新审核",
-    "usdtRejected": "USDT RPC 拒绝了这个操作"
+    "usdtNotSubmitted": "没有发送任何交易",
+    "usdtNotSubmittedNext": "请重新审核。",
+    "usdtRejected": "USDT RPC 拒绝了这个操作",
+    "usdtReverted": "交易已回滚",
+    "usdtRevertedNext": "没有发送代币；gas 已花费。"
   },
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",
@@ -389,12 +399,19 @@
     "allowAnotherNext": "允许另一种传输方式，或打开备用。",
     "cannotSwitch": "对方的应用无法切换传输方式",
     "cannotSwitchNext": "对方的应用需要更新（更新版 Ghostly）。",
+    "hyperdhtClosed": "HyperDHT 中继关闭了连接",
+    "hyperdhtRefused": "HyperDHT 中继拒绝了此聊天",
+    "hyperdhtSilent": "HyperDHT 中继没有响应",
+    "hyperdhtUnreachable": "无法连接 HyperDHT 中继",
+    "irohStopped": "Iroh 端点已停止",
     "listenerGiven": "已为更活跃的聊天暂停。打开此聊天即可恢复。",
     "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。",
     "noneConnected": "没有传输方式能连接",
     "noneInCommon": "没有共同的连接方式",
     "peerClosed": "对方关闭了连接",
-    "peerClosedNext": "请确认你们双方都允许一种共同的传输方式，然后重新连接。"
+    "peerClosedNext": "请确认你们双方都允许一种共同的传输方式，然后重新连接。",
+    "slotsFull": "所有原生连接都在使用中",
+    "slotsFullNext": "断开另一个聊天的原生连接，或等待某个连接空闲。"
   },
   "wallet": {
     "alreadyHave": "你已经有一个 {{network}} {{kind}} 钱包",

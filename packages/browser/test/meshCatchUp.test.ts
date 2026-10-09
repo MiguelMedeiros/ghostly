@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
-import { MESH_GOSSIP_MS } from "../src/engine/groups";
+import { MESH_GAP_AGAIN_MS, MESH_GOSSIP_MS } from "../src/engine/groups";
 // covers: groups.catch-up, groups.link.join
 
 /**
@@ -64,6 +64,62 @@ describe("a private group catches up a member from whoever is there", { timeout:
     expect(new Set(world.texts(frank, id)).size).toBe(world.texts(frank, id).length);
     // Three members hold all ten; one is asked for Bob's and Carol's, so ten frames, not thirty.
     expect(toFrank.length).toBe(10);
+  });
+
+  it("a member back gets an author's messages past the author's own log from another member, though the author is there", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, bob, , dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    // Forty each: the authors keep their last 32 (`GROUP_LIMITS.outlog`), Carol holds all eighty.
+    for (let i = 0; i < 40; i++) { await alice.groups.send(id, `alice ${i}`); await bob.groups.send(id, `bob ${i}`); }
+    await world.run(2_000);
+    world.reopen(dave);
+    await world.until(() => world.texts(dave, id).filter(t => /^(alice|bob) /.test(t)).length === 80, 5 * 60_000, 1000,
+      () => `dave has ${world.texts(dave, id).filter(t => /^(alice|bob) /.test(t)).length} of 80`);
+    expect(new Set(world.texts(dave, id)).size).toBe(world.texts(dave, id).length);
+  });
+
+  it("a member back after 200 messages of one author gets them in about a minute, not 32 a gossip turn", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , , dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    // Bob and Carol hold all 200 (256 kept); a sync names 32 of the missing at a time (`GROUP_LIMITS.miss`).
+    for (let i = 0; i < 200; i++) await alice.groups.send(id, `alice ${i}`);
+    await world.run(2_000);
+    const syncs: { to: string; at: number }[] = [];
+    const has = () => world.texts(dave, id).filter(t => t.startsWith("alice ")).length;
+    world.drop = (from, to, frame) => { if (from === dave && frame.t === "group-sync") syncs.push({ to: to.name, at: world.now }); return false; };
+    // Alice's edge comes up first: her own answer (her last 32) shows Dave what is below them, then Bob and Carol are there.
+    world.cut = (a, b) => (a === dave || b === dave) && a !== alice && b !== alice;
+    const back = world.now;
+    world.reopen(dave);
+    await world.until(() => has() === 32, 60_000);
+    world.cut = null;
+    await world.until(() => has() === 200, 10 * 60_000, 1000, () => `dave has ${has()} of 200`);
+    const took = world.now - back;
+    // Seven asks of 32, ten seconds apart (`MESH_GAP_AGAIN_MS`); one a gossip turn took 2 to 8 minutes.
+    expect(took).toBeLessThanOrEqual(8 * MESH_GAP_AGAIN_MS);
+    // Each member answers 8 syncs of one member a minute (`GROUP_LIMITS.syncAnswers`): none of these went unanswered.
+    for (const { to, at } of syncs) expect(syncs.filter(s => s.to === to && s.at > at - 60_000 && s.at <= at).length).toBeLessThanOrEqual(8);
+  });
+
+  it("a member asks each other member once for messages nobody holds, not every gossip turn", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , , dave] = peers;
+    const aliceKey = world.view(alice, id)!.myKey!;
+    const asks: string[] = [];
+    // Alice's messages 0 to 9 reach nobody: Dave holds 10 and 11, so it names ten it never got.
+    world.drop = (from, to, frame) => {
+      if (from === dave && frame.t === "group-sync" && Array.isArray(frame.ask) && frame.ask.includes(aliceKey)) asks.push(to.name);
+      return from === alice && frame.t === "group-msg" && (frame.n as number) < 10;
+    };
+    for (let i = 0; i < 12; i++) await alice.groups.send(id, `alice ${i}`);
+    await world.run(MESH_GOSSIP_MS * 6);
+    expect(world.texts(dave, id).filter(t => t.startsWith("alice "))).toHaveLength(2);
+    // Bob and Carol, once each; Alice is not asked for her own.
+    expect(asks.sort()).toEqual(["bob", "carol"]);
   });
 
   it("a member back after a while is announced once, and the others look fast for it", async () => {

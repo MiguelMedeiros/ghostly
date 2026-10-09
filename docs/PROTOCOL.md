@@ -375,6 +375,7 @@ A second profile, `group-community/1`, is for a group whose link (`group2/<group
 ```
 → { "t": "group-invite", "g", "name", "admin", "e", "n" }               contact chat: an admin invites
 ← { "t": "group-accept", "g", "key" }   |   { "t": "group-decline", "g" }
+→ { "t": "group-full", "g", "n", "max", "why"? }                        entry session: no room yet (in place of group-invite)
 → { "t": "group-chain", "g", "commits": [ … ] } *                       long chains, 24 commits at a time
 → { "t": "group-welcome", "g", "name", "commits": [ … ], "secrets": [ { "e", "s": { "e", "n", "c" } } ] }
 ↔ { "t": "group-commit", "g", "commit": { "v": 1, "g", "e", "p", "k", "m", "by", "s"?, "ts", "c", "sig" }, "secret"? }
