@@ -2133,6 +2133,8 @@ dependencies = [
  "webrtc",
  "webview2-com",
  "windows-core 0.62.2",
+ "wl-clipboard-rs",
+ "x11rb",
 ]
 
 [[package]]

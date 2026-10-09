@@ -80,6 +80,10 @@ bytes = "1"
 webkit2gtk = "2"
 # One app per profile (src/single_instance.rs): a second launch brings the running window forward.
 tauri-plugin-single-instance = "2"
+# Which targets the clipboard offers (src/copied_files.rs), which arboard does not say: the two crates arboard reads
+# the clipboard with, at the versions it uses.
+x11rb = "0.13"
+wl-clipboard-rs = "0.9"
 
 # The window follows WebView2 in and out of full screen (src/fullscreen.rs): the versions Tauri's wry uses.
 [target.'cfg(windows)'.dependencies]

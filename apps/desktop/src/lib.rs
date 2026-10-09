@@ -12,6 +12,10 @@ mod app_window;
 mod bitcoind_rpc;
 mod clipboard;
 mod commands;
+// The e2e build pastes from a stand-in, never from the clipboard.
+#[cfg(target_os = "linux")]
+#[cfg_attr(feature = "e2e-driver", allow(dead_code))]
+mod copied_files;
 mod crypto;
 mod device_state;
 mod diagnostics;
