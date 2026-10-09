@@ -458,7 +458,8 @@ export class Groups {
     }
   }
 
-  async load(): Promise<void> {
+  /** `asItIs`: a copy that must stay as it was stored (limited mode, WISP 06), so nothing left over is cleared from it. */
+  async load(asItIs = false): Promise<void> {
     const all = await this.store.getGroups();
     await this.communities.load(all.filter(g => g.community || g.joining));
     for (const group of all.filter(g => !g.community && !g.joining)) {
@@ -478,6 +479,7 @@ export class Groups {
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
     await this.files?.load(all.map(g => g.id));
+    if (!asItIs) await this.files?.sweep(all.map(g => g.id));
     // An admission in flight did not survive the restart: its joiner knocks again. A joiner keeps its side.
     for (const group of this.stored.values()) for (const [, linkId] of this.host.entries(group.id)) {
       if (!group.invitation?.entry || group.invitation.linkId !== linkId) await this.host.closeEdge(linkId);

@@ -49,6 +49,8 @@ export const groupFileText = (text: string, meta: GroupFileMeta): string => text
 export interface GroupFileStore {
   /** The records of a group's files (`linkId` `group:<id>`). */
   list(groupId: string): Promise<StoredFile[]>;
+  /** Every group a stored file is of, whether or not this device still has the group. */
+  groups(): Promise<string[]>;
   get(id: string): Promise<StoredFile | undefined>;
   put(file: StoredFile): Promise<void>;
   patch(id: string, fields: Pick<StoredFile, "transfer" | "group">): Promise<void>;
@@ -80,6 +82,7 @@ export interface GroupFileWriter {
 /** The profile's files store and file storage, as a 1:1 chat's files use them. */
 export const storedGroupFiles: GroupFileStore = {
   list: groupId => fileStore.listForLink(`group:${groupId}`),
+  groups: () => fileStore.groupIds(),
   get: id => fileStore.get(id),
   put: file => fileStore.put(file),
   patch: (id, fields) => fileStore.patch(id, fields),
@@ -260,6 +263,19 @@ export class GroupFileDesk {
     }
     for (const [id] of this.wants) this.ask(this.kept.get(id)!);
     this.deps.changed();
+  }
+
+  /**
+   * At start, once every group was read: the files of a group this device no longer has (`groupIds` are the groups it
+   * has, a tombstone or a join under way among them) go, with their bytes. A group left before Leave took its files
+   * left them behind, where nothing lists them.
+   */
+  async sweep(groupIds: string[]): Promise<void> {
+    const here = new Set(groupIds);
+    for (const groupId of await this.deps.store.groups().catch(() => [])) {
+      if (here.has(groupId)) continue;
+      for (const file of await this.deps.store.list(groupId).catch(() => [])) await this.deps.store.remove(file.id).catch(() => {});
+    }
   }
 
   /**

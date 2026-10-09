@@ -1566,7 +1566,7 @@ export class GhostlyNode implements EngineImplementation {
     this.transfersRestored = true;
     for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
     // Groups know their edges from the links above, and may add or drop some before anything dials.
-    await this.groups.load();
+    await this.groups.load(this.limitedMode);
     for (const group of this.groups.views()) {
       const note = latestReaction(await db.getMessages(`group:${group.id}`));
       if (note) this.reactionNotes.set(`group:${group.id}`, note);
