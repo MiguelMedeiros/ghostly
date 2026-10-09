@@ -30,7 +30,7 @@ import type { PubkyCookieSession } from "@ghostly/browser/host";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
-import { desktopAtproto } from "./atproto";
+import { desktopAtprotoHost } from "./atproto";
 import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appCommands";
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
@@ -338,7 +338,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     callMedia,
     onServer: serveServiceWindows,
     oidc: desktopOidc,
-    atproto: desktopAtproto,
+    // Not in the Android app yet (no redirect the phone receives): Bluesky is not offered there.
+    atproto: desktopAtprotoHost(),
     // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
     fullscreenWindow: (on) => invoke("plugin:window|set_fullscreen", { label: "main", value: on }),
