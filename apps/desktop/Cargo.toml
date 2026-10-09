@@ -60,7 +60,7 @@ arboard = { version = "3.6.1", default-features = false, features = ["image-data
 # own verifier, which needs the JVM and the app's context before the first request (src/lib.rs `android_tls`). Its
 # Kotlin half comes from the crate's Maven folder (gen/android/app/build.gradle.kts).
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
+jni = "0.22"
 ndk-context = "0.1"
 rustls-platform-verifier = "0.6"
 # The Android host (src/android.rs) never waits on its Kotlin half from Android's main thread: gettid against getpid.
