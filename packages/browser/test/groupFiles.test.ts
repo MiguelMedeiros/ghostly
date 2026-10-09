@@ -293,6 +293,27 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(answers("carol")).toEqual(["busy"]);
   });
 
+  it(`a member's app sends at most ${GROUP_FILE_LIMITS.announceTaken} files in ${GROUP_FILE_LIMITS.announceWindowMs / 60_000} minutes, so every one it sends reaches the others as a file`, async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    t.files.get(bob)!.settings.autoDownloads = false;
+    const store = t.files.get(alice)!.store, sent: string[] = [], refused: string[] = [];
+    // 7.5 a minute, within the minute's pace: the window of 10 minutes is what stops the 31st.
+    for (let i = 0; i < GROUP_FILE_LIMITS.announceTaken + 2; i++) {
+      const bytes = pattern(1_000 + i, i), fileId = groupFileId(id, "out");
+      const meta: GroupFileMeta = { name: `n${i}.txt`, mime: "text/plain", size: bytes.length, d: sha(bytes) };
+      store.bytes.set(fileId, bytes);
+      await store.put({ id: fileId, linkId: `group:${id}`, direction: "out", digest: meta.d, createdAt: t.world.now, metadata: { name: meta.name, size: meta.size, mime: meta.mime, timestamp: t.world.now } });
+      const r = await alice.groups.sendFile(id, groupFileFallback(meta), meta, fileId);
+      if (r.error) refused.push(r.error); else sent.push(r.messageId!);
+      await t.world.run(8_000);
+    }
+    expect(sent).toHaveLength(GROUP_FILE_LIMITS.announceTaken);
+    expect(refused[0]).toMatch(/^You sent many files to this group just now\. Wait \d+ minutes\.$/);
+    await t.world.run(5_000);
+    expect(sent.filter(m => !t.got(bob, id, m).message?.file)).toEqual([]);
+  });
+
   it(`a file over ${GROUP_FILE_LIMITS.autoBytes / 1024 / 1024} MiB waits for a Download, then comes; a smaller one comes by itself`, async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);

@@ -211,6 +211,7 @@ export class GroupFileDesk {
   private readonly own = new Map<string, string>();
   /** Announcements sent per group, and taken per member of a group (WISP 503 § Rules for both, Pace). */
   private readonly sentPace = new Map<string, RateWindow>();
+  private readonly sentTaken = new Map<string, RateWindow>();
   private readonly takenPace = new Map<string, RateWindow>();
   /** `<group>\n<message id>` a `group-have` named before its message came → its holders, newest first. */
   private readonly ahead = new Map<string, string[]>();
@@ -242,10 +243,15 @@ export class GroupFileDesk {
     this.deps.changed();
   }
 
-  /** An error when this group took as many announcements of mine as it takes in a minute; null when one may go now. */
+  /**
+   * An error when this group took as many announcements of mine as it takes in a minute, or as its members take from
+   * one member in `announceWindowMs` (past that they would get the text, not the file); null when one may go now.
+   */
   mayAnnounce(groupId: string): string | null {
-    const pace = this.pace(this.sentPace, groupId, GROUP_FILE_LIMITS.announcePerMinute, 60_000);
-    return pace.wait() ? "You sent many files to this group just now. Wait a minute." : null;
+    const wait = Math.max(...this.sentPaces(groupId).map(pace => pace.wait()));
+    if (!wait) return null;
+    const minutes = Math.ceil(wait / 60_000);
+    return `You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : "a minute"}.`;
   }
 
   /** My file, stored under `fileId` with the author's digest, is about to be announced in the group: its message takes it. */
@@ -266,7 +272,7 @@ export class GroupFileDesk {
     const ownId = m.sender === me ? this.own.get(`${groupId}\n${m.file.d}`) : undefined;
     if (ownId) {
       this.own.delete(`${groupId}\n${m.file.d}`);
-      this.pace(this.sentPace, groupId, GROUP_FILE_LIMITS.announcePerMinute, 60_000).take();
+      for (const pace of this.sentPaces(groupId)) pace.take();
       const kept: Kept = { id: ownId, groupId, message: m.id, author: me, meta: m.file, mine: true, auto: false, asked: false, held: true, holders: [] };
       this.add(kept);
       const transfer = { state: "done" as const, transferred: m.file.size, size: m.file.size };
@@ -683,6 +689,12 @@ export class GroupFileDesk {
     let window = windows.get(key);
     if (!window) windows.set(key, (window = new RateWindow(limit, ms, () => this.deps.now())));
     return window;
+  }
+
+  /** My announcements in a group, in a minute and in the window the members count them over. */
+  private sentPaces(groupId: string): RateWindow[] {
+    return [this.pace(this.sentPace, groupId, GROUP_FILE_LIMITS.announcePerMinute, 60_000),
+      this.pace(this.sentTaken, groupId, GROUP_FILE_LIMITS.announceTaken, GROUP_FILE_LIMITS.announceWindowMs)];
   }
 
   private show(kept: Kept, view: FileTransferView): void {
