@@ -184,6 +184,10 @@
     "shareLinkInstead": "把群组链接分享给对方：打开链接即可加入",
     "tooLong": "消息超过 16 KiB"
   },
+  "hold": {
+    "needsStorage": "无法暂存这条消息",
+    "needsStorageNext": "请在个人资料 → 备份中设置 S3 存储，并请对方允许暂存消息。"
+  },
   "host": {
     "noApp": "这台手机上没有能打开它的应用",
     "noAppNext": "请安装相应的应用，或复制链接到别处打开。",

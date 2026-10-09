@@ -184,6 +184,10 @@
     "shareLinkInstead": "Compartilhe o link do grupo com a pessoa: quem abrir o link entra",
     "tooLong": "A mensagem passa de 16 KiB"
   },
+  "hold": {
+    "needsStorage": "Não dá para guardar esta mensagem",
+    "needsStorageNext": "Configure um S3 em Perfil → Backups e peça ao seu contato para permitir mensagens guardadas."
+  },
   "host": {
     "noApp": "Nenhum app deste telefone consegue abrir isto",
     "noAppNext": "Instale um app para isso, ou copie o link e abra em outro lugar.",

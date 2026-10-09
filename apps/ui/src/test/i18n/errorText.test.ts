@@ -62,6 +62,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
+  ["Held messages need S3 storage (Profile → Backups) and a contact that allows them.", `${BROWSER}/engine/node.ts`],
   ["Not enough space on your contact's device for this file (2.0 MB free).", `${BROWSER}/platform/services.ts`, "Not enough space on your contact's device for this file ("],
   ["That file is too large for your contact's app (max 64 MB). Larger files need an updated Ghostly on their side.", `${BROWSER}/platform/services.ts`, ". Larger files need an updated Ghostly on their side."],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
