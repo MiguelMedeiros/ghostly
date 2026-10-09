@@ -76,10 +76,10 @@ describe("the Forward to… picker", () => {
   function Where() {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
-  const open = (messages: ChatMessage[], from = "link-bo") => renderApp(<Routes>
+  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt") => renderApp(<Routes>
     <Route path="/here" element={<ForwardDialog from={from} messages={messages} onClose={() => {}} />} />
     <Route path="*" element={<Where />} />
-  </Routes>, { route: "/here" });
+  </Routes>, { route: "/here", language });
   const names = () => screen.getAllByTestId("forward-target").map(row => row.querySelector("bdi")?.textContent);
 
   it("lists chats and the groups this device can write in, most recent first, and finds them by name", async () => {
@@ -123,6 +123,15 @@ describe("the Forward to… picker", () => {
     expect(fakeEngine.callsTo("forwardMessages")[0]).toMatchObject({ to: ["link-ana", "group:g1", "link-bo", "link-1", "link-2"] });
     expect(screen.getByTestId("forward-error")).toHaveTextContent("Friends: You are not in this group");
     expect(screen.queryByTestId("where")).toBeNull();
+  });
+
+  it("says what a chat refused in the app's language, not the engine's English", async () => {
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: "You are offline" })) }));
+    const { user } = open([message({ text: "", file: PICTURE })], "link-bo", "pt");
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent(/^Ana: Você está offline/);
+    expect(screen.getByTestId("forward-error")).not.toHaveTextContent("You are offline");
   });
 
   it("asks before forwarding text that looks like a seed, as typing it would", async () => {
