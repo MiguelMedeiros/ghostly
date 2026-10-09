@@ -351,4 +351,19 @@ describe("a Mac's budget of connections", () => {
     mac.heldElsewhere = 0;
     await world.until(() => edgesOf(b, mac).length === 11, 5 * 60_000, 1000);
   }, 300_000);
+
+  it("a Mac hub taken out of the group holds no room for it once its edges closed", async () => {
+    const b = await build(20, { hubs: [2, 5], budgets: { 2: onMac(0) } });
+    const { world, id, peers } = b;
+    const mac = peers[2];
+    await world.until(() => isHub(b, mac) && onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    const hubs = (mac.groups as unknown as { hubs: { isHub(g: string): boolean; room(g: string): number | undefined } }).hubs;
+    await b.admin.groups.remove(id, keyOf(b, mac));
+    await world.until(() => view(b, mac).status === "removed", 60_000, 1000);
+    await world.run(60_000);
+    expect(edgesOf(b, mac)).toHaveLength(0);
+    expect(hubs.isHub(id)).toBe(false);
+    // Another group has the whole budget again, not 40 less the 19 edges this one no longer keeps.
+    expect(hubs.room("another-group")).toBe(40);
+  }, 300_000);
 });
