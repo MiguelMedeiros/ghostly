@@ -646,6 +646,21 @@ export class Groups {
   }
 
   /**
+   * Whether a file of mine could be announced in the group now, asked before its bytes are copied in: the error
+   * `sendFile` would answer for the pace or for not being in the group, or null. `sendFile` checks again.
+   */
+  fileCheck(groupId: string): { error: string | null; refused?: boolean } {
+    if (!this.files) return { error: "This app takes no group files", refused: true };
+    const paced = this.files.mayAnnounce(groupId);
+    if (paced) return { error: paced };
+    if (this.isCommunity(groupId)) return this.communities.sendCheck(groupId);
+    const session = this.sessions.get(groupId);
+    if (!session) return { error: "You are not in this group yet" };
+    if (session.status !== "active") return { error: session.state.statusReason ?? "You are no longer in this group" };
+    return { error: null };
+  }
+
+  /**
    * Announces a file or voice message of mine (WISP 503): `text` is its caption, or the line older apps show
    * (`groupFileFallback`), `file` its description with the digest of the bytes kept under `fileId`, which this device
    * then holds and serves. `messageId` is the announcement's.
