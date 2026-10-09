@@ -52,6 +52,13 @@ describe("durable paired message delivery", () => {
     await restarted.received(p.wireId); await restarted.stop();
     expect((await p.row()).delivery).toBe("delivered");
   });
+  it("stops without reading the chat's history when nothing awaits a receipt", async () => {
+    const p = await setup(async () => null);
+    const read = vi.fn(p.store.read);
+    const box = new Outbox({ ...p.store, read }, async () => null, 100, undefined, { resender: { ready: () => false } });
+    await box.stop();
+    expect(read).not.toHaveBeenCalled();
+  });
   it("recovers an interrupted send as queued and never resurrects a deleted row", async () => {
     const p = await setup(async () => "Connection closed", { ready: () => false });
     await p.box.recover(); expect((await p.row()).delivery).toBe("queued");
