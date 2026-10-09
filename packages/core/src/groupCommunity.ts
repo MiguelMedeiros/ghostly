@@ -178,8 +178,11 @@ function parseCommit(raw: unknown): CommunityCommit | null {
   return out;
 }
 
-/** The roster a commit of this kind makes of the previous one; null when it is not allowed. */
-export function communityRoster(previous: Roster | null, c: Pick<CommunityCommit, "k" | "by" | "s" | "x" | "n" | "ls" | "g">): Roster | null {
+/**
+ * The roster a commit of this kind makes of the previous one; null when it is not allowed. `trusted`: the commit was
+ * verified when it was accepted (a replay of the stored main branch), so a leave's statement is not checked again.
+ */
+export function communityRoster(previous: Roster | null, c: Pick<CommunityCommit, "k" | "by" | "s" | "x" | "n" | "ls" | "g">, trusted = false): Roster | null {
   if (c.k === "create") return previous === null && !c.s && !!c.x && !!c.n ? [[c.by, "admin"]] : null;
   if (!previous || !rosterHas(previous, c.by)) return null;
   const admin = rosterAdmin(previous);
@@ -189,7 +192,7 @@ export function communityRoster(previous: Roster | null, c: Pick<CommunityCommit
       return sortRoster([...previous, [c.s, "member"]]);
     case "leave":
       if (!c.s || c.s === c.by || c.s === admin || !rosterHas(previous, c.s) || !c.ls) return null;
-      if (!verify(fromBase64Url(c.ls), leaveStatement(c.g, c.s), publicKeyFromZ32(c.s))) return null;
+      if (!trusted && !verify(fromBase64Url(c.ls), leaveStatement(c.g, c.s), publicKeyFromZ32(c.s))) return null;
       return previous.filter(([k]) => k !== c.s);
     case "remove":
       if (c.by !== admin || !c.s || c.s === c.by || !rosterHas(previous, c.s)) return null;
@@ -440,6 +443,8 @@ export class CommunitySession {
   private known = new Map<string, CommunityCommit>();
   /** Commit hash → roster after it, for the window of the main branch and the side commits. */
   private rosters = new Map<string, Roster>();
+  /** Commit hash → roster after it, for a few main-branch commits older than the window that `couldRead` was asked about. */
+  private pastRosters = new Map<string, Roster>();
   private mainIndex = new Map<string, number>();
   private pendingCommits = new Map<string, { from: string; commit: unknown }>();
   private pendingSecrets = new Map<string, SealedSecret>();
@@ -448,6 +453,8 @@ export class CommunitySession {
   private asked = new Map<string, number>();
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
+  /** The entry seed sealed to each member, for the seed it seals (`entryFrame`): every sync answer carries it. In memory only. */
+  private sealedEntries = new Map<string, { seedB64: string; frame: CommunityEntryFrame }>();
   /** Catch-up answers still going out, a slice at a time (`receiveSync`). */
   private readonly answers: CatchUpAnswers<CommunityFrame>;
   private queue = Promise.resolve();
@@ -569,8 +576,24 @@ export class CommunitySession {
    */
   couldRead(key: string, messageId: string): boolean {
     const [, e, h] = messageId.split(":");
-    const found = h === undefined ? undefined : this.commitByShort(Number(e), h);
-    return !!found && rosterHas(this.rosterAt(found.hash) ?? [], key) && rosterHas(this.roster, key);
+    if (h === undefined || !rosterHas(this.roster, key)) return false;
+    const found = this.commitByShort(Number(e), h);
+    if (found) return rosterHas(this.rosterAt(found.hash) ?? [], key);
+    // A commit of the main branch older than the window: its secret is gone, not the rule (its roster is replayed).
+    const i = this.state.chain.length - 1 - (this.epoch - Number(e));
+    const commit = Number.isSafeInteger(i) && i >= 0 ? this.state.chain[i] : undefined;
+    const hash = commit && communityCommitHash(commit);
+    return !!hash && hash.startsWith(h) && rosterHas(this.pastRoster(i, hash), key);
+  }
+  /** The roster after an old commit of the main branch, replayed and kept apart from the window's (a few, the latest asked). */
+  private pastRoster(i: number, hash: string): Roster {
+    const known = this.pastRosters.get(hash);
+    if (known) return known;
+    let roster: Roster | null = null;
+    for (let j = 0; j <= i && (j === 0 || roster); j++) roster = communityRoster(roster, this.state.chain[j]);
+    this.pastRosters.set(hash, roster ?? []);
+    for (const old of this.pastRosters.keys()) { if (this.pastRosters.size <= 8) break; this.pastRosters.delete(old); }
+    return roster ?? [];
   }
   /** Someone the chain took out (removed or left) and who is not back in. */
   wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
@@ -609,13 +632,16 @@ export class CommunitySession {
 
   // -- the tree of commits -------------------------------------------------------------------------
 
-  /** Replays the main branch (rosters kept for its window) and places the side commits. */
+  /**
+   * Replays the main branch (rosters kept for its window) and places the side commits. The main branch was verified
+   * commit by commit when it was accepted: its signatures are not checked again.
+   */
   private rebuild(): void {
     this.known.clear(); this.rosters.clear(); this.mainIndex.clear();
     let roster: Roster | null = null;
     const keepFrom = Math.max(0, this.state.chain.length - 1 - COMMUNITY_LIMITS.window);
     this.state.chain.forEach((commit, i) => {
-      roster = communityRoster(roster, commit);
+      roster = communityRoster(roster, commit, true);
       if (!roster) throw new Error("Stored membership chain does not replay");
       const h = communityCommitHash(commit);
       this.known.set(h, commit); this.mainIndex.set(h, i);
@@ -642,7 +668,7 @@ export class CommunitySession {
     const i = this.mainIndex.get(h);
     if (i === undefined) return undefined;
     let roster: Roster | null = null;
-    for (let j = 0; j <= i; j++) roster = communityRoster(roster, this.state.chain[j]);
+    for (let j = 0; j <= i; j++) roster = communityRoster(roster, this.state.chain[j], true);
     if (roster) this.rosters.set(h, roster);
     return roster ?? undefined;
   }
@@ -1502,13 +1528,16 @@ export class CommunitySession {
     // to the members they were written for (a hub passes them on). Anyone else's it could not read stays here.
     const unheard = new Set(this.state.unheard ?? []);
     for (const stored of this.state.store) {
-      if (stored.s === from || this.wasRemoved(stored.s)) continue;
+      if (stored.s === from) continue;
+      // What they have first: the checks below hash commits for every stored frame, and a member up to date has them
+      // all; a hub answered each 30 s sync in ~4 ms (2026-10-08).
+      const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
+      if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
+      if (this.wasRemoved(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;
       const reads = rosterHas(this.rosterAt(found.hash) ?? [], from), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
       if (!reads && !(mine && rosterHas(this.roster, from))) continue;
-      const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
-      if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
       if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer);
       answer.push(stored);
       // Handed to a member it was written for: heard.
@@ -1538,11 +1567,15 @@ export class CommunitySession {
     }
   }
 
-  /** The current entry seed sealed to a member, when I hold it. */
+  /** The current entry seed sealed to a member, when I hold it: sealed once per seed, not on every sync answer. */
   private entryFrame(to: string): CommunityEntryFrame | null {
     const { key, seedB64 } = this.state.entry;
     if (!key || !seedB64) return null;
-    return { t: "group-entry", v: 2, g: this.id, to, x: key, s: sealSecret(to, fromBase64Url(seedB64), entryAad(this.id, to)) };
+    const sealed = this.sealedEntries.get(to);
+    if (sealed?.seedB64 === seedB64 && sealed.frame.x === key) return { ...sealed.frame };
+    const frame: CommunityEntryFrame = { t: "group-entry", v: 2, g: this.id, to, x: key, s: sealSecret(to, fromBase64Url(seedB64), entryAad(this.id, to)) };
+    this.sealedEntries.set(to, { seedB64, frame });
+    return { ...frame };
   }
 
   /** A newer entry seed, from a member who holds it (see `replaceLink`): only the one the chain names. */

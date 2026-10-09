@@ -54,6 +54,17 @@ describe("problemText: an error in a few words, its English behind the ⓘ", () 
     expect(problemText(new Error(timedOut), pt, "connect")).toEqual({ tone: "wait", title: pt("errors.problem.connectFailed"), next: pt("errors.problem.retrying"), detail: timedOut });
   });
 
+  it("says a dial that found no transport in common in the language, with what to do, its English behind the ⓘ", () => {
+    const none = "No transport both apps allow is available yet";
+    expect(problemText(none, english, "connect")).toEqual({ tone: "error", title: "No way to connect in common", next: "Allow another transport, or turn Fallback on.", detail: none });
+    for (const raw of [none, "No permitted transport could connect", "The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect.", "Your contact needs an updated app to negotiate a transport change."]) {
+      const said = problemText(raw, pt, "connect");
+      expect(said.title, raw).not.toBe(raw);
+      expect(said.next, raw).toBeDefined();
+      expect(said.detail, raw).toBe(raw);
+    }
+  });
+
   it("says a known error in the language, whole, with no English beside it", () => {
     expect(problemText("Lost the Ghostly peer", english)).toEqual({ tone: "error", title: "Lost the Ghostly peer" });
     expect(problemText(new Error("Lost the Ghostly peer"), pt)).toEqual({ tone: "error", title: pt("errors.app.lostPeer") });

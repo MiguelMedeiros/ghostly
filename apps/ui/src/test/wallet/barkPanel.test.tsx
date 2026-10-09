@@ -22,7 +22,7 @@ describe("the Bark panel", () => {
     expect(screen.getByTestId("bark-terms")).toHaveAttribute("href", "https://second.tech/terms");
     const essentials = screen.getByTestId("bark-essentials");
     expect(within(essentials).getByTestId("bark-expiry")).toHaveTextContent("Coins last about 28 days on this server. Ghostly renews them close to expiry while it is open, so open it before then. The next one expires in about 2 days.");
-    expect(within(essentials).getByTestId("bark-expiry")).toHaveClass("text-yellow-500");
+    expect(within(essentials).getByTestId("bark-expiry")).toHaveClass("text-warn-ink");
     expect(within(essentials).getByTestId("bark-exit")).toHaveTextContent("If the server disappears, coins can still be taken back on-chain before they expire (a unilateral exit, paying on-chain fees), but Ghostly has no button for that yet, so keep amounts small.");
     // Another server, while empty, stays on Bitcoin.
     engine.on("barkCreate", () => undefined);
@@ -46,7 +46,7 @@ describe("the Bark panel", () => {
     const state = onNetwork("mainnet", { bark: barkReady({ ...MAINNET, expiry: { lifetime: 4032 } }) });
     renderApp(<BarkWalletPanel wallet={{} as never} state={state} />);
     expect(screen.getByTestId("bark-expiry")).toHaveTextContent(/^Coins last about 28 days on this server\. Ghostly renews them close to expiry while it is open, so open it before then\.$/);
-    expect(screen.getByTestId("bark-expiry")).not.toHaveClass("text-yellow-500");
+    expect(screen.getByTestId("bark-expiry")).not.toHaveClass("text-warn-ink");
   });
 
   it("on Testnet: the test networks only, no terms, and the exit line without the real-money advice", () => {
