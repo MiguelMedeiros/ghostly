@@ -6252,6 +6252,9 @@ export class GhostlyNode implements EngineImplementation {
       // How the member's app said to dial it, where one side has no WebRTC (`_tr`, `onPacketTransports`).
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports, peerFallback: stored.peerFallback, automatic: true },
       packetTransports: !this.options.webrtcGroupLinks,
+      // It ran a native endpoint on this link in some run (its seed is kept), so it said a `_tr` there: it says what it
+      // runs now, WebRTC alone too, and the member's app stops dialling what an earlier run said.
+      packetTransportsSaid: !!stored.transportSeeds && Object.keys(stored.transportSeeds).length > 0,
       // An offer from before that session began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: !entry && stored.edgeLive ? stored.edgeLiveSince : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
@@ -6302,6 +6305,17 @@ export class GhostlyNode implements EngineImplementation {
           live.stored = { ...live.stored, ...patch };
           void db.patchLink(linkId, patch).catch(() => {});
           if (this.keepsGroupNative(live.stored)) void this.ensureNativeEndpoints(linkId);
+          // It has WebRTC (again): this link waits for no native slot any more.
+          else this.groupNativeWaiting.delete(linkId);
+        },
+        // The member's app publishes no `_tr` (any more): what an earlier packet said is not kept for the next start,
+        // or an app that said it had no WebRTC once (its attempt failed, `edgeWithoutRtc` there) would stay so here.
+        onPacketTransportsGone: () => {
+          const patch = { peerTransports: undefined, peerDescriptors: undefined, peerFallback: undefined };
+          live.stored = { ...live.stored, ...patch };
+          void db.patchLink(linkId, patch).catch(() => {});
+          if (!this.keepsGroupNative(live.stored)) this.groupNativeWaiting.delete(linkId);
+          this.emitState();
         },
         ...(entry ? {} : {
           onPaymentRequest: (request: PaymentRequest) => member() ? this.desk.onPaymentRequest(linkId, request) : undefined,

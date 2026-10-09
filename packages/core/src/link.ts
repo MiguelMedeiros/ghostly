@@ -82,6 +82,13 @@ export const EXPECT_PEER_MS = 30_000;
 export const WATCH_PEER_MS = 2 * 60_000;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
+/**
+ * A group link's peer whose packet advertises and carries no `_tr` on every read for this long publishes none: what it
+ * said before is forgotten (WISP 902 § Transports). Not at the first such packet: an app with no WebRTC (a Linux
+ * Desktop) publishes its `_tr` only once a native endpoint is up, seconds after its first packet of a run, and what it
+ * said in the run before still holds meanwhile. On this side's clock, from the first read that found it so.
+ */
+export const TRANSPORTS_GONE_MS = 2 * 60_000;
 const PUBLISH_RETRY_MS = 4_000;
 /**
  * A packet the relays' request budget held back goes again when the budget frees a request, and at least this often
@@ -139,6 +146,8 @@ export interface LinkSessionEvents {
   onPeerClock?(packetAt: number, readBefore: number, readAt: number): void;
   /** The peer's packet carries a new `_tr` value (a group link's transports, `parsePacketTransports`). */
   onPeerTransports?(value: string): void;
+  /** The peer's packet has said no `_tr` for `TRANSPORTS_GONE_MS`: the peer publishes none (any more). Once per such stretch. */
+  onPeerTransportsGone?(): void;
   onStatus?(status: LinkStatus): void;
   /** A poll started, or finished with the next one due in `nextInMs`. */
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -198,6 +207,9 @@ export class LinkSession {
   /** A group link's `_tr` value this side publishes (`setTransports`), and the last the peer's packet carried. */
   private transports: string | null = null;
   private lastTransportsIn: string | null = null;
+  /** When a read first found the peer's packet advertising with no `_tr` (0: the last packet that said carried one). */
+  private transportsAbsentSince = 0;
+  private transportsGone = false;
 
   private running = false;
   /** Stopped without a last packet (`stop(false)`): nothing more goes out. */
@@ -676,9 +688,21 @@ export class LinkSession {
           services: online ? batch.services : null,
         };
         // Before presence: a dial that presence starts ranks with them.
-        if (batch.transports !== null && batch.transports !== this.lastTransportsIn) {
-          this.lastTransportsIn = batch.transports;
-          this.events.onPeerTransports?.(batch.transports);
+        if (batch.transports !== null) {
+          this.transportsAbsentSince = 0; this.transportsGone = false;
+          if (batch.transports !== this.lastTransportsIn) {
+            this.lastTransportsIn = batch.transports;
+            this.events.onPeerTransports?.(batch.transports);
+          }
+        } else if (batch.services !== null && !this.transportsGone) {
+          // It advertises, and `_tr` is left out for size only after `_svc` is (`buildLinkRecords`): it set none.
+          this.transportsAbsentSince ||= Date.now();
+          if (Date.now() - this.transportsAbsentSince >= TRANSPORTS_GONE_MS) {
+            this.transportsGone = true;
+            // The value it said before, said again later, is news again.
+            this.lastTransportsIn = null;
+            this.events.onPeerTransportsGone?.();
+          }
         }
         this.events.onPresence?.(this.presence);
         if (read && readBefore && batch.packetTimestamp !== wasSeen) this.events.onPeerClock?.(batch.packetTimestamp, readBefore, Date.now());
