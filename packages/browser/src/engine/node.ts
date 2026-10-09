@@ -1246,6 +1246,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private readonly groupEdits = new GroupEdits({
     messages: chat => db.getMessages(chat),
+    history: chat => this.edgeOpenHistory(chat),
     message: (chat, id) => db.getMessage(chat, id),
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
     changed: (chat, id) => this.messagesChanged(chat, [id]),
@@ -4223,6 +4224,22 @@ export class GhostlyNode implements EngineImplementation {
     return { error: null };
   }
 
+  /** A group's history read in flight for edges that opened, by chat: its callers of the moment share it. */
+  private readonly edgeOpenReads = new Map<string, Promise<StoredMessage[]>>();
+
+  /**
+   * A group's whole history, for what an edge that opens hears again (my latest edits and reactions): the edges that
+   * open together, a member back in a group of 8 opening 7, read it once, not twice each. Ended, the next one reads anew.
+   */
+  private edgeOpenHistory(chat: string): Promise<StoredMessage[]> {
+    let read = this.edgeOpenReads.get(chat);
+    if (!read) {
+      read = db.getMessages(chat).finally(() => this.edgeOpenReads.delete(chat));
+      this.edgeOpenReads.set(chat, read);
+    }
+    return read;
+  }
+
   /**
    * An edge of a private group opened: the member hears my latest reactions again, in case it missed them. The newest
    * `REACTION_LIMITS.send` go now and the rest a window later, while the edge is the same: the member takes 30 a window
@@ -4230,7 +4247,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async resendGroupReactions(groupId: string, linkId: string): Promise<void> {
     if (this.outsideEdge(linkId)) return;
-    const mine = groupReactionsToResend(await db.getMessages(`group:${groupId}`), REACTION_LIMITS.pending);
+    const mine = groupReactionsToResend(await this.edgeOpenHistory(`group:${groupId}`), REACTION_LIMITS.pending);
     const link = this.links.get(linkId)?.link;
     const say = (batch: WireReaction[]) => {
       for (const reaction of batch) { try { link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }

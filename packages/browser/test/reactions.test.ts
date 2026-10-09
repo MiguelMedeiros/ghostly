@@ -354,6 +354,28 @@ describe("a private group's edge that opens", () => {
     expect(sent.map(frame => [frame.id, frame.e])).toEqual([["admin:5:0", "🎉"]]);
   });
 
+  it("edges that open together read the group's history once for my reactions and edits said again", async () => {
+    // A member back in a group of 8 opens 7 edges at once: each read the whole history twice, 14 reads (4 s at 10k rows).
+    const g = `burst-${crypto.randomUUID()}`, chat = `group:${g}`;
+    await db.addMessage({ linkId: chat, id: "admin:1:0", member: "admin", text: "hello group", sender: "peer", timestamp: 1_500, via: "datalink", reactions: { me: { e: "👍", n: 2_000, at: 2_000 } } });
+    cleanup.push(async () => { for (const m of await db.getMessages(chat)) await db.deleteMessage(chat, m.id); });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as { links: Map<string, unknown>; groups: { signReaction(): object }; resendGroupReactions(groupId: string, linkId: string): Promise<void>; groupEdits: { resend(groupId: string, to: string): Promise<void> } };
+    const sent = new Map<string, unknown[]>();
+    for (let e = 0; e < 7; e++) inner.links.set(`edge-${e}`, { link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.set(`edge-${e}`, [...sent.get(`edge-${e}`) ?? [], frame.id]); } } });
+    vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
+    const reads = vi.spyOn(db, "getMessages");
+    cleanup.push(() => { reads.mockRestore(); });
+    await Promise.all(Array.from({ length: 7 }, (_, e) => [inner.resendGroupReactions(g, `edge-${e}`), inner.groupEdits.resend(g, `member-${e}`)]).flat());
+    expect(reads.mock.calls.filter(([id]) => id === chat)).toHaveLength(1);
+    // Each edge still hears my reaction.
+    expect([...sent.values()]).toEqual(Array(7).fill(["admin:1:0"]));
+    // The next burst reads again: what changed meanwhile is said.
+    await inner.resendGroupReactions(g, "edge-0");
+    expect(reads.mock.calls.filter(([id]) => id === chat)).toHaveLength(2);
+  });
+
   it("hears my latest 32 again within what a member takes a window: the newest 20 now, the rest a window later", async () => {
     // 32 at once went past the 30 a member takes from me in 10 s, and the last two were dropped (Bug hunter, 2026-10-09).
     const g = `paced-${crypto.randomUUID()}`, chat = `group:${g}`;
