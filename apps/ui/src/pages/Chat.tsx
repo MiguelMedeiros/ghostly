@@ -945,13 +945,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           const answering = replyingRef.current;
           const error = await sendMessage(text, answering ? { ...extra, replyTo: answering.id } : extra);
           if (!error && answering) replied(answering);
-          return error;
+          // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
+          return error && problemLine(error, t);
         }}
         reply={replyBar}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }

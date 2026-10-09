@@ -36,6 +36,14 @@
     "unreachable": "Can't reach {{host}}",
     "unreachableNext": "Check the address: it should be a Cashu mint."
   },
+  "chat": {
+    "editTooMany": "This message can't be edited again",
+    "editTooManyNext": "A message takes {{max}} edits at most.",
+    "replyGone": "That message can't be replied to",
+    "replyGoneNext": "Cancel the reply and send it again.",
+    "tooLong": "Message too long",
+    "tooLongNext": "Shorten it or send it as a file."
+  },
   "connectionFailed": "Connection failed",
   "engine": {
     "alreadySubmitted": "This payment was already submitted or could not be saved",
