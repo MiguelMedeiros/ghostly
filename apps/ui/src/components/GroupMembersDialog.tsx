@@ -19,6 +19,7 @@ import { Select } from "./ui/Select";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { initial } from "../lib/initial";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -187,7 +188,7 @@ function MemberAvatar({ src, name }: { src?: string; name: string }) {
       className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover text-xs">
       {src
         ? <img src={src} alt="" draggable={false} className="h-full w-full object-cover" />
-        : <span aria-hidden="true" data-initial={name.charAt(0).toUpperCase()} className="text-text-muted before:content-[attr(data-initial)]" />}
+        : <span aria-hidden="true" data-initial={initial(name)} className="text-text-muted before:content-[attr(data-initial)]" />}
     </AvatarOpener>
   );
 }

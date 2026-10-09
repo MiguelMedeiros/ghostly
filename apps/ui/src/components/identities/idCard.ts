@@ -7,6 +7,7 @@ import { providerIcon } from "./ProviderIcons";
 import { categoryLabel, date, daysLeft, expiringSoon, providerLabel, providerOf, receivedStatus, shortSubject } from "../../lib/identities";
 import { english } from "../../lib/english";
 import { ago, badgeState } from "./contactBadges";
+import { initial } from "../../lib/initial";
 
 /**
  * What an identity's ID card says (IdCardFace.tsx), worked out once so the card, its panel and the tests agree.
@@ -236,7 +237,7 @@ export function ghostlyCard(t: Translate, profile: GhostlyProfile, place: { chat
     bound: GHOSTLY,
     name,
     photo,
-    monogram: !photo && nick ? nick.charAt(0).toUpperCase() : undefined,
+    monogram: !photo && nick ? initial(nick) : undefined,
     category: place.chat ? t("identities.ghostly.keyInChat") : t("identities.ghostly.yourOwnKeys"),
     attested: false,
     status: "default",
@@ -268,7 +269,7 @@ export function contactGhostlyCard(t: Translate, link: Pick<LinkView, "peerNick"
     bound: GHOSTLY,
     name: nick || fallback,
     photo,
-    monogram: !photo && nick ? nick.charAt(0).toUpperCase() : undefined,
+    monogram: !photo && nick ? initial(nick) : undefined,
     category: t("identities.ghostly.theirKeyInChat"),
     attested: false,
     status: "default",
