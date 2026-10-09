@@ -248,6 +248,23 @@ describe("hubs in a private group past 16 members", () => {
     for (let i = 0; i < 600 && (await leaver.store.getGroups()).some(g => g.id === id); i++) await world.run(500, 500);
     expect((await leaver.store.getGroups()).some(g => g.id === id)).toBe(false);
   }, 300_000);
+
+  it("a member leaves through its hubs while the admin's app is closed: the admin removes it once back", async () => {
+    const b = await build(20, { hubs: [2, 5] });
+    const { world, id, admin, peers } = b;
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const leaver = peers[13], leaverKey = keyOf(b, leaver);
+    admin.online = false;
+    await leaver.groups.leave(id);
+    await world.run(30_000);
+    world.reopen(admin);
+    // A hub kept the leave it passed on and hands it to the admin when their edge opens again.
+    await world.until(() => !view(b, admin).members.some(m => m.key === leaverKey), 5 * 60_000, 500);
+    await world.until(() => !view(b, peers[9]).members.some(m => m.key === leaverKey), 60_000, 500);
+    for (let i = 0; i < 600 && (await leaver.store.getGroups()).some(g => g.id === id); i++) await world.run(500, 500);
+    expect((await leaver.store.getGroups()).some(g => g.id === id)).toBe(false);
+  }, 300_000);
 });
 
 /**
