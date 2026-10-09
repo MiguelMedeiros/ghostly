@@ -101,6 +101,33 @@ describe("persistent IndexedDB", () => {
     expect(await read(second.transaction("messages").objectStore("messages").getAllKeys())).toEqual([["c", "9"]]);
   });
 
+  it("replays a long journal after a crash in about the time of a normal start, indexes right", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    (await db(store.factory)).close();
+    await store.close();
+    // What a daemon killed mid-chat leaves: every message written, then each one written again (a status, a receipt).
+    const { serialize } = await import("node:v8");
+    const n = 2000;
+    const entry = (ops: unknown[]) => { const body = serialize(ops); const header = Buffer.alloc(4); header.writeUInt32BE(body.length); return Buffer.concat([header, body]); };
+    const put = (linkId: string, id: number) => ({ db: "ghostly", store: "messages", kind: "put", key: [linkId, String(id)], value: { linkId, id: String(id), text: "x".repeat(200) } });
+    const journal: Buffer[] = [];
+    for (let i = 0; i < n; i++) journal.push(entry([put("a", i)]));
+    for (let i = 0; i < n; i++) journal.push(entry([put("a", i)]));
+    journal.push(entry([{ db: "ghostly", store: "messages", kind: "delete", key: ["a", "0"] }, put("b", 1)]));
+    writeFileSync(join(dir, "journal.bin"), Buffer.concat(journal));
+
+    const started = performance.now();
+    const factory = await open(dir);
+    const took = performance.now() - started;
+    const second = await db(factory);
+    const messages = second.transaction("messages").objectStore("messages");
+    expect(await read(messages.count())).toBe(n);
+    expect(await read(messages.index("byLink").count("a"))).toBe(n - 1);
+    expect(await read(messages.index("byLink").getAllKeys("b"))).toEqual([["b", "1"]]);
+    expect(took).toBeLessThan(1500);
+  });
+
   it("ignores a torn last journal entry (the process died mid-write)", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
