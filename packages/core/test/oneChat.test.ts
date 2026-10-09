@@ -246,10 +246,11 @@ describe("one chat: first contact on two paths, one key", () => {
       await run(10_000);
       // The joiner the invite was sent to comes later, with the inviter's key from the invite (as a ghostly1 join does).
       const second = open(made.joiner, pkarr, { dht: true, credentials: { seedB64: made.joiner.seedB64, expectedPeerKey: createIdentityKey(made.inviter.seedB64) } });
-      // It reads the inviter's envelope sealed to the first joiner once the inviter publishes one (its control
-      // envelope, every 4 minutes): about 4 to 5 minutes, instead of "on the DHT, retrying" and "sent" forever.
+      // The inviter's envelope in the invite mailbox is sealed to the first joiner from the moment it pinned it: the
+      // second reads that on its first look, not its first unsealed envelope (which it would pin, and "send" to).
       const took = await until(() => !!second.dhtView?.inviteTaken, 8 * 60_000);
-      expect(took, "the second joiner learns the invite was taken").toBeLessThan(6 * 60_000);
+      expect(took, "the second joiner learns the invite was taken within the first contact").toBeLessThan(30_000);
+      expect(second.credentials.peerKey, "it never took the inviter's envelope as its own").toBeUndefined();
       expect(second.link.pairingProgress).toMatchObject({ stage: "failed", reason: "taken", retryable: false, detail: INVITE_TAKEN });
       expect(second.link.validateText("hello?", Date.now(), "AAAAAAAAAAAAAAAAAAAAAA"), "nothing is sent that nobody reads").toBe(INVITE_TAKEN);
       await run(60_000);

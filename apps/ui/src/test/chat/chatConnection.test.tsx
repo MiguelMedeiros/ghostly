@@ -171,6 +171,18 @@ describe("ChatConnection: what the header says", () => {
     expect(screen.getByRole("radio", { name: "HyperDHT" })).toBeDisabled();
   });
 
+  it("says a transport's listener error in the app's language, with its next step", () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />, { language: "pt" });
+    act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1"], pairing: ready(), transportErrors: {
+      "hyperdht/1": "Could not reach the HyperDHT relay",
+      "iroh/1": "All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.",
+    } })] }));
+    const [hyperdht, iroh] = screen.getAllByTestId("connection-transport-error");
+    expect(within(hyperdht!).getByTestId("connection-transport-error-title")).toHaveTextContent("HyperDHT: Relay HyperDHT inacessível");
+    expect(within(iroh!).getByTestId("connection-transport-error-title")).toHaveTextContent("Iroh: Todas as conexões nativas em uso");
+    expect(within(iroh!).getByTestId("connection-transport-error-next")).toHaveTextContent("Desconecte a conexão nativa de outra conversa, ou espere uma ficar ociosa.");
+  });
+
   it.each<[string, Partial<LinkView>, string]>([
     ["WebRTC", { pairing: ready() }, "webrtc/1"],
     ["Iroh", { pairing: ready({ transport: "iroh/1" }) }, "iroh/1"],
@@ -405,10 +417,31 @@ describe("ChatConnection: what the panel does", () => {
 
   it("keeps the code on screen when the confirmation fails", async () => {
     const { user, engine } = banner({ peerParticipationKey: "saved", pairing: ready({ code: "4821 0937", peerKey: "peer" }) });
-    engine.on("confirmPair", () => { throw new Error("The code changed"); });
+    engine.on("confirmPair", () => { throw new Error("No authenticated peer to verify"); });
     await user.click(screen.getByRole("button", { name: "Verify this contact" }));
     await user.click(screen.getByRole("button", { name: "The codes match" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The code changed");
+    expect(await screen.findByTestId("pair-verify-error")).toHaveTextContent("No authenticated peer to verify");
+    expect(screen.getByTestId("pair-code")).toBeInTheDocument();
+  });
+
+  // The connection changed or closed between showing the code and the click: a code to compare again, said in the
+  // app's language beside the code. It is no connection issue: the chat's icon stays as it was.
+  it.each([
+    ["The connection changed. Compare the current code again.", "O código mudou", "Compare o novo código."],
+    ["Compare the current code again.", "O código mudou", "Compare o novo código."],
+    ["The connection closed. Compare again after reconnecting.", "A conexão foi fechada", "Compare de novo depois de reconectar."],
+  ])("says a refused comparison beside the code, never as a connection issue: %s", async (raw, title, next) => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />, { language: "pt" });
+    act(() => engine.update({ links: [linkView({ availableTransports: all, peerParticipationKey: "saved", pairing: ready({ code: "4821 0937", peerKey: "peer" }) })] }));
+    const before = header();
+    engine.on("confirmPair", () => { throw new Error(raw); });
+    await user.click(screen.getByTestId("pair-verify"));
+    await user.click(screen.getByTestId("pair-verify-confirm"));
+    expect(await screen.findByTestId("pair-verify-error-title")).toHaveTextContent(title);
+    expect(screen.getByTestId("pair-verify-error-next")).toHaveTextContent(next);
+    expect(screen.getByTestId("pair-verify-error")).not.toHaveAttribute("data-tone", "error");
+    expect(screen.queryByTestId("connection-failure")).not.toBeInTheDocument();
+    expect(header()).toEqual(before);
     expect(screen.getByTestId("pair-code")).toBeInTheDocument();
   });
 

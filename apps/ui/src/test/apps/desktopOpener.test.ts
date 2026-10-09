@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, forIpc, toBase64 } from "../../lib/apps/desktopOpener";
+import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, forIpc } from "../../lib/apps/desktopOpener";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 import { nameToldIn } from "../../lib/apps/nameInChat";
 import { stopTakenDown } from "../../lib/apps/open";
@@ -177,8 +177,19 @@ describe("opening an app on Desktop", () => {
     request("app-1", { id: 2, type: "file", args: ["board.svg"] });
     expect(await answer("app-1", 2)).toEqual({ id: 2, ok: true, bytes: "AAEC+v8=" });
     expect(forIpc({ id: 1, ok: true, value: "x" })).toEqual({ id: 1, ok: true, value: "x" });
-    const big = new Uint8Array(0x8000 * 2 + 3).map((_, i) => i % 256);
-    expect(atob(toBase64(big)).length).toBe(big.length);
+  });
+
+  it("encodes a file with core's encoder, not btoa, on the Ghostly window's thread (about 100 ms a MiB)", () => {
+    const btoa = vi.spyOn(globalThis, "btoa");
+    try {
+      for (const length of [0, 1, 2, 3, 0x8000 * 2 + 3, 1024 * 1024 + 1]) {
+        const bytes = new Uint8Array(length).map((_, i) => (i * 131) & 255);
+        expect(forIpc({ id: 2, ok: true, value: bytes.buffer })).toEqual({ id: 2, ok: true, bytes: Buffer.from(bytes).toString("base64") });
+      }
+      expect(btoa.mock.calls.length).toBe(0);
+    } finally {
+      btoa.mockRestore();
+    }
   });
 
   it("sends the contact's frames to that window as events", async () => {

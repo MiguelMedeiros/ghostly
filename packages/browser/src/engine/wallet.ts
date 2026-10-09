@@ -18,7 +18,7 @@ import {
   type SerializedSwapPreview,
   type SwapPreview,
 } from "@cashu/cashu-ts";
-import { STORES, openDb, store, transact, wrap } from "../shared/idb";
+import { STORES, newestWalletTx, openDb, store, transact, wrap } from "../shared/idb";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "./paymentAdapters/cashu";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
@@ -253,7 +253,10 @@ export class CashuWallet {
   /** How long `stop` waits for a swap in a per-mint lock. */
   static STOP_WAIT_MS = 30_000;
 
-  /** The Cashu wallet of one network: its mints and their balance. History is every network's, newest first. */
+  /**
+   * The Cashu wallet of one network: its mints, their balance, and the network's newest movements (every network's when
+   * none is named) with the fees they paid. Only those movements are read, however long the history is.
+   */
   async view(network?: WalletNetwork): Promise<WalletView> {
     const proofs = await this.allProofs();
     const mints: MintView[] = this.getMints(network).map((url) => ({
@@ -262,8 +265,7 @@ export class CashuWallet {
       balance: total(proofs.filter((p) => p.mint === url && !p.reserved)),
       info: this.infos.get(url) ?? null,
     }));
-    const all = await wrap<WalletTx[]>((await store(STORES.walletTx, "readonly")).getAll());
-    all.sort((a, b) => b.timestamp - a.timestamp);
+    const history = await newestWalletTx<WalletTx>((mint) => !network || mintNetwork(mint) === network, HISTORY_SHOWN);
     const here = new Set(mints.map((m) => m.url));
     const swaps = (await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll())).filter((s) => here.has(s.mint) && !s.released && !s.finished);
     // What a swap is about: the proofs it spends, or what a redeem would bring.
@@ -278,8 +280,8 @@ export class CashuWallet {
       openSwaps: swaps.length,
       swapsAmount: total(swaps.map((s) => ({ amount: about(s) }))),
       unconfirmed: total(swaps.filter((s) => s.stuck).map((s) => ({ amount: about(s) }))),
-      history: all.slice(0, HISTORY_SHOWN),
-      feesPaid: all.reduce((sum, tx) => sum + tx.fee, 0),
+      history,
+      feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
     };
   }
 
@@ -821,7 +823,8 @@ export class CashuWallet {
           unit: metadata.unit,
           mint,
           memo: metadata.memo || undefined,
-          accepted: this.getKnownMints().includes(mint) || isTestMint(mint),
+          // Only sat ecash is redeemed here, whatever mint it is from.
+          accepted: metadata.unit === UNIT && (this.getKnownMints().includes(mint) || isTestMint(mint)),
         };
       }
       if (/^creq[AB]/i.test(value)) {
@@ -852,14 +855,17 @@ export class CashuWallet {
   ): Promise<{ amount: number; mint: string; fee: number }> {
     let mint: string;
     let faceValue: number;
+    let unit: string;
     try {
       const metadata = getTokenMetadata(token);
-      if (metadata.unit !== UNIT) throw new Error("unit");
+      unit = metadata.unit;
       mint = metadata.mint.replace(/\/+$/, "");
       faceValue = Number(metadata.amount);
     } catch {
       throw new Error("That is not a valid ecash token");
     }
+    // A token of another unit is still a token: said as such.
+    if (unit !== UNIT) throw engineError("ecashOtherUnit", { unit });
     // A mint is a custodian and only the user picks those. The test mint holds nothing of value.
     if (addTestMint && !this.getKnownMints().includes(mint) && isTestMint(mint)) await this.events.onTestMintNeeded(mint);
     if (!this.getKnownMints().includes(mint)) throw new Error(`Ecash from ${new URL(mint).hostname} is not accepted`);

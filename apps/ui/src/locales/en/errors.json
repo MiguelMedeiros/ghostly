@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "Cashu fee exceeds your limit",
     "couldNotVerify": "Could not verify this payment yet. No second payment was sent.",
     "ecashAlreadySpent": "This ecash was already spent somewhere else",
+    "ecashOtherUnit": "This ecash is in {{unit}}: only sat ecash can be redeemed here",
     "fedimintAlreadyJoined": "You already joined this federation",
     "fedimintConnecting": "Wait for the federation to connect",
     "fedimintNotEnough": "Not enough in this federation",
@@ -180,9 +181,15 @@
     "notIn": "You are not in this group",
     "notYet": "You are not in this group yet",
     "nothingToSend": "Nothing to send",
+    "offline": "You are offline",
+    "offlineNext": "Go online in Services, then try again.",
     "removed": "You were removed from this group",
     "shareLinkInstead": "Share the group's link with them: anyone who opens it joins",
     "tooLong": "Message exceeds 16 KiB"
+  },
+  "hold": {
+    "needsStorage": "This message can't be held",
+    "needsStorageNext": "Set up S3 storage in Profile → Backups, and ask your contact to allow held messages."
   },
   "host": {
     "noApp": "No app on this phone can open it",
@@ -250,6 +257,8 @@
     "confirmRealFirst": "Confirm the real money first",
     "confirmRealFirstNext": "Use {{button}}. Nothing was sent.",
     "contactAllowsNeither": "Your contact allowed neither Cashu nor Lightning in this chat",
+    "contactAway": "Your contact is offline",
+    "contactAwayNext": "Nothing was sent. Pay once the chat is live.",
     "contactClosed": "your contact closed it",
     "contactHasNone": "Your contact has no {{network}} {{method}} wallet",
     "contactRefuses": "Your contact does not accept {{method}} in this chat",
@@ -392,8 +401,28 @@
   },
   "transport": {
     "adapterFailed": "Couldn't start. Reopen this chat to retry.",
+    "allowAnotherNext": "Allow another transport, or turn Fallback on.",
+    "cannotSwitch": "Your contact's app can't switch transports",
+    "cannotSwitchNext": "Their app needs an update (an updated Ghostly).",
+    "hyperdhtClosed": "HyperDHT relay closed the connection",
+    "hyperdhtRefused": "HyperDHT relay refused this chat",
+    "hyperdhtSilent": "HyperDHT relay not answering",
+    "hyperdhtUnreachable": "HyperDHT relay unreachable",
+    "irohStopped": "Iroh endpoint stopped",
     "listenerGiven": "Paused for a busier chat. Open this chat to resume.",
-    "listenerReleased": "Paused for another chat. Open this chat to resume."
+    "listenerReleased": "Paused for another chat. Open this chat to resume.",
+    "noneConnected": "No transport could connect",
+    "noneInCommon": "No way to connect in common",
+    "peerClosed": "Your contact closed the connection",
+    "peerClosedNext": "Check that you both allow a common transport, then reconnect.",
+    "slotsFull": "All native connections in use",
+    "slotsFullNext": "Disconnect another chat's native connection, or wait for one to go quiet."
+  },
+  "verify": {
+    "closed": "The connection closed",
+    "closedNext": "Compare again after reconnecting.",
+    "codeChanged": "The code changed",
+    "codeChangedNext": "Compare the new code."
   },
   "wallet": {
     "alreadyHave": "You already have a {{network}} {{kind}} wallet",

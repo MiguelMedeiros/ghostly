@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createIdentity, encodeCommunityLink, encodeGroupEntryLink } from "@ghostly/core";
+import { MAX_GROUP_NAME_LENGTH, createIdentity, encodeCommunityLink, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { GroupLinkPanel } from "../../components/GroupLinkPanel";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
@@ -209,6 +209,17 @@ describe("GroupMembersDialog", () => {
     const most = Array.from({ length: 31 }, (_, i) => member({ key: String(i).padEnd(52, "y"), me: i === 0 }));
     members_(groupView({ status: "active", isAdmin: true, members: most, invited: ["link-pending"] }), [paired({ id: "link-carol" }), paired({ id: "link-pending" })]);
     expect(screen.getByTestId("group-invite")).toBeDisabled();
+    expect(screen.getByTestId("group-invite-full")).toHaveTextContent("The group is full (32 of 32), counting invitations not answered yet (1). Nobody else can be invited until someone leaves.");
+  });
+
+  it("says a group of 32 members is full, and nothing while there is room", () => {
+    const all = Array.from({ length: 32 }, (_, i) => member({ key: String(i).padEnd(52, "y"), me: i === 0 }));
+    const { unmount } = members_(groupView({ status: "active", isAdmin: true, members: all }), [paired({ id: "link-carol" })]);
+    expect(screen.getByTestId("group-invite-full")).toHaveTextContent("The group is full (32 of 32). Nobody joins until someone leaves.");
+    unmount();
+    members_(groupView({ status: "active", isAdmin: true, members: all.slice(0, 30), invited: ["link-pending"] }), [paired({ id: "link-carol" })]);
+    expect(screen.queryByTestId("group-invite-full")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-invite")).toBeEnabled();
   });
 
   it("says when there is nobody left to invite", () => {
@@ -239,7 +250,8 @@ describe("GroupLinkPanel", () => {
   it("creates the group's link", async () => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin()} />);
     engine.on("enableGroupLink", () => ({ link: entryLink }));
-    expect(screen.getByText(/The link is off: nobody can join with it/)).toBeInTheDocument();
+    // Turning it on makes a new link: the words do not promise the old one works again.
+    expect(screen.getByTestId("group-link")).toHaveTextContent("The link is off: nobody can join with it, and the link shared before will not work again. Turning it on makes a new link to share.");
     await user.click(screen.getByRole("button", { name: "Turn on the link" }));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id }]);
   });
@@ -277,6 +289,7 @@ describe("GroupLinkPanel", () => {
   it("replaces the link, or turns it off", async () => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
     engine.on("enableGroupLink", () => ({ link: entryLink })).on("disableGroupLink", () => undefined);
+    expect(screen.getByTestId("group-link-disable")).toHaveAttribute("title", "The link stops working. Turning it on makes a new link to share again.");
     await user.click(screen.getByTestId("group-link-reset"));
     await user.click(screen.getByTestId("group-link-disable"));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id, reset: true }]);
@@ -323,6 +336,13 @@ describe("NewGroupDialog", () => {
     // A community is what a new group is unless the person picks Private.
     expect(engine.callsTo("createGroup")).toEqual([{ name: "Climbing", profile: "community" }]);
     expect(onCreated).toHaveBeenCalledWith("new-group");
+  });
+
+  it("takes a name as long as Rename does, and no longer", async () => {
+    const { user, engine } = open();
+    engine.on("createGroup", () => ({ groupId: "long" }));
+    await user.type(screen.getByTestId("new-group-name"), `${"x".repeat(MAX_GROUP_NAME_LENGTH)}yz{Enter}`);
+    expect(engine.callsTo("createGroup")).toEqual([{ name: "x".repeat(MAX_GROUP_NAME_LENGTH), profile: "community" }]);
   });
 
   it("makes a private group (up to 32, contacts or a link) when that kind is picked", async () => {

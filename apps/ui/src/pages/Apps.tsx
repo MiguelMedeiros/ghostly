@@ -7,6 +7,7 @@ import { Block, Page, PageAction, Section } from "../components/layout";
 import { Button, Notice } from "../components/wallet/ui";
 import { Toast } from "../components/ui/Toast";
 import { useToast } from "../hooks/useToast";
+import { useFocusBack } from "../hooks/useFocusBack";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
@@ -47,8 +48,8 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
         aria-label={t("apps.page.details", { title: app.title })} aria-describedby={`${versionId} ${hintId}`}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          <span className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
-          <span id={hintId} data-testid="installed-app-hint" className={`block text-xs truncate ${color}`}>{hint.text}</span>
+          <span dir="auto" className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
+          <span id={hintId} dir="auto" data-testid="installed-app-hint" className={`block text-xs truncate ${color}`}>{hint.text}</span>
         </span>
       </button>
       {app.run.status === "ok" && <Button data-testid="installed-app-open" onClick={onOpen}>{t("apps.page.open")}</Button>}
@@ -68,7 +69,9 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const focusBack = useFocusBack(busy);
   const work = async (call: () => Promise<unknown>, done?: () => void) => {
+    focusBack();
     setBusy(true);
     try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); }
   };
@@ -79,7 +82,7 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} disabled={!read}
           className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          <span className="block text-sm text-text-primary truncate">{store.name ?? store.url}</span>
+          <span dir="auto" className="block text-sm text-text-primary truncate">{store.name ?? store.url}</span>
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             {kind && <span>{kind}</span>}
             {read && <span>{t(store.apps.length === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps.length })}</span>}
@@ -105,8 +108,8 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
               <li key={listing.ref} className="flex items-center gap-3 px-4 py-3" data-testid="app-listing" data-ref={listing.ref}>
                 <AppIcon size={32} installed={have} />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm text-text-primary truncate">{listing.title}</span>
-                  <span className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
+                  <span dir="auto" className="block text-sm text-text-primary truncate">{listing.title}</span>
+                  <span dir="auto" className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
                 </span>
                 {have ? <span className="text-xs text-text-muted">{t("apps.store.installed")}</span>
                   : !removed && <Button data-testid="app-listing-install" onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
@@ -129,7 +132,7 @@ export function Apps() {
   const [details, setDetails] = useState<string | null>(null);
   const [installing, setInstalling] = useState<{ store: string; listing: AppListing } | null>(null);
   const [picking, setPicking] = useState<{ app: InstalledAppView; options?: OpenAppOptions } | null>(null);
-  // Installed from a listing: its Install button is gone, so the focus goes to the app's row (its Open), not the page.
+  // Installed from a listing or a pasted link: what had the focus is gone, so it goes to the app's row (its Open), not the page.
   const [justInstalled, setJustInstalled] = useState<string | null>(null);
   useEffect(() => {
     if (!justInstalled || installing) return;
@@ -185,7 +188,7 @@ export function Apps() {
             : stores.map((store) => <StoreBlock key={store.key} store={store} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
               onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
-      {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} />}
+      {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} onInstalled={(app) => setJustInstalled(app.ref)} />}
       {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} onUninstalled={() => setGone({ app: shown.ref })} />}
       {picking && <AppChatPicker app={picking.app} options={picking.options} onClose={() => setPicking(null)} />}
       {installing && (

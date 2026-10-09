@@ -274,8 +274,11 @@
       "testnet": "أموال تجريبية: ليست لديك محفظة Lightning على Testnet للدفع منها"
     },
     "onchainBitcoin": "Bitcoin على السلسلة",
+    "onlySat": "لا يمكن هنا استرداد إلا ecash بوحدة sat.",
     "openTitle": "افتحها في محفظة Lightning على هذا الجهاز",
     "openWallet": "فتح المحفظة",
+    "otherUnitRequest": "يطلب ecash بوحدة {{unit}}",
+    "otherUnitToken": "رمز بوحدة {{unit}}",
     "paid": "مدفوعة ✓",
     "pay": "ادفع",
     "payWithFee": "ادفع {{amount}} + رسوم حتى {{fee}}",

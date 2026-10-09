@@ -59,7 +59,11 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
   const of = tr("chat.file.of", { done, size });
   switch (transfer.stage) {
     case "preparing": return tr("chat.file.preparing", { progress: of });
-    case "waiting": return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });
+    case "waiting":
+      // A group's file says why it waits: its holders busy, or its bytes damaged; else, as a chat's, for a connection.
+      if (transfer.wait === "damaged") return tr("chat.file.damaged", { size });
+      if (transfer.wait === "busy") return transfer.transferred > 0 ? tr("chat.file.busyDone", { done }) : tr("chat.file.busySize", { size });
+      return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });
     case "asking": return incoming ? tr("chat.file.askingYou", { size }) : tr("chat.file.askingThem", { name: peerName, size });
     case "queued": return incoming ? tr("chat.file.queuedHere", { done }) : tr("chat.file.queuedThere", { name: peerName, done });
     case "paused": return `${transfer.pausedBy === "peer" ? tr("chat.file.pausedBy", { name: peerName }) : tr("chat.file.paused")} · ${of}`;
@@ -78,11 +82,13 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
 
 /**
  * What a stuck files/3 transfer offers its person: "Send again" (sending) or "Ask again" (receiving), with a one-line
- * hint. Either goes on from what the receiver holds; null when it is moving, or waits for a person.
+ * hint. Either goes on from what the receiver holds; null when it is moving, or waits for a person. A group's file
+ * that stopped arriving (every copy came damaged, `retry`) offers "Ask again" too: its members are asked once more.
  */
 export function stalledAction(transfer: FileTransferState | null, tr: Translate = englishT): { action: Extract<FileAction, "resend" | "request">; label: string; hint: string } | null {
+  if (transfer?.state === "failed" && transfer.direction === "in" && transfer.retry) return { action: "request", label: tr("chat.file.askAgain"), hint: tr("chat.file.askGroupAgainHint") };
   if (transfer?.state !== "transferring" || !transfer.stalled || !transfer.direction) return null;
   return transfer.direction === "out"
     ? { action: "resend", label: tr("chat.message.retry"), hint: tr("chat.file.resendHint") }
-    : { action: "request", label: tr("chat.file.askAgain"), hint: tr("chat.file.askAgainHint") };
+    : { action: "request", label: tr("chat.file.askAgain"), hint: tr(transfer.wait === "damaged" ? "chat.file.askAgainDamagedHint" : "chat.file.askAgainHint") };
 }

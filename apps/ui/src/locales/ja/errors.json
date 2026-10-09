@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "Cashu の手数料が上限を超えています",
     "couldNotVerify": "この支払いはまだ確認できません。2 回目の支払いは送られていません。",
     "ecashAlreadySpent": "この ecash はすでに別の場所で使われています",
+    "ecashOtherUnit": "この ecash は {{unit}} 建てです。ここで受け取れるのは sat の ecash だけです",
     "fedimintAlreadyJoined": "このフェデレーションにはすでに参加しています",
     "fedimintConnecting": "フェデレーションの接続を待ってください",
     "fedimintNotEnough": "このフェデレーションの残高が足りません",
@@ -180,9 +181,15 @@
     "notIn": "このグループに参加していません",
     "notYet": "まだこのグループに参加していません",
     "nothingToSend": "送信する内容がありません",
+    "offline": "オフラインです",
+    "offlineNext": "「サービス」でオンラインにしてから、もう一度お試しください。",
     "removed": "このグループから削除されました",
     "shareLinkInstead": "グループのリンクを共有してください。リンクを開いた人は参加できます",
     "tooLong": "メッセージが 16 KiB を超えています"
+  },
+  "hold": {
+    "needsStorage": "このメッセージは保留できません",
+    "needsStorageNext": "プロフィール → バックアップで S3 ストレージを設定し、相手にも保留メッセージを許可してもらってください。"
   },
   "host": {
     "noApp": "この端末にはこれを開けるアプリがありません",
@@ -250,6 +257,8 @@
     "confirmRealFirst": "先に実際のお金の確認が必要です",
     "confirmRealFirstNext": "「{{button}}」を使ってください。何も送られていません。",
     "contactAllowsNeither": "相手はこのチャットで Cashu も Lightning も許可していません",
+    "contactAway": "相手はオフラインです",
+    "contactAwayNext": "何も送信されていません。チャットがライブになってから支払ってください。",
     "contactClosed": "相手が閉じました",
     "contactHasNone": "相手には {{network}} の {{method}} ウォレットがありません",
     "contactRefuses": "相手はこのチャットで {{method}} を受け付けていません",
@@ -392,8 +401,28 @@
   },
   "transport": {
     "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",
+    "allowAnotherNext": "別のトランスポートを許可するか、フォールバックをオンにしてください。",
+    "cannotSwitch": "相手のアプリはトランスポートを切り替えられません",
+    "cannotSwitchNext": "相手のアプリは更新（最新の Ghostly）が必要です。",
+    "hyperdhtClosed": "HyperDHTリレーが接続を閉じました",
+    "hyperdhtRefused": "HyperDHTリレーがこのチャットを拒否しました",
+    "hyperdhtSilent": "HyperDHTリレーが応答しません",
+    "hyperdhtUnreachable": "HyperDHTリレーに接続できません",
+    "irohStopped": "Irohエンドポイントが停止しています",
     "listenerGiven": "より活発なチャットのため一時停止中。このチャットを開くと再開します。",
-    "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。"
+    "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。",
+    "noneConnected": "接続できたトランスポートがありません",
+    "noneInCommon": "共通の接続方法がありません",
+    "peerClosed": "相手が接続を閉じました",
+    "peerClosedNext": "お互いが共通のトランスポートを許可しているか確認してから、再接続してください。",
+    "slotsFull": "ネイティブ接続がすべて使用中です",
+    "slotsFullNext": "別のチャットのネイティブ接続を切断するか、どれかが待機状態になるまでお待ちください。"
+  },
+  "verify": {
+    "closed": "接続が閉じました",
+    "closedNext": "再接続してから、もう一度照合してください。",
+    "codeChanged": "コードが変わりました",
+    "codeChangedNext": "新しいコードを照合してください。"
   },
   "wallet": {
     "alreadyHave": "{{network}} の {{kind}} ウォレットはすでにあります",
