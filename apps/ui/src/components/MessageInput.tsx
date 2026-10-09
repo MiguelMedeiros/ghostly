@@ -589,38 +589,45 @@ export function MessageInput({
   const remaining = maxBytes ? maxBytes - bytes : maxLength - text.length;
   const overSoft = !!softBytes && bytes > softBytes;
 
+  // With the sheet open the composer is behind its veil, outside the dialog: what it has to say is said on the sheet.
+  const sheetOpen = !!attached && !locked;
+  const toastBox = toast && (
+    <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="text-danger shrink-0 mt-0.5"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      <span className="text-[13px] text-text-primary leading-snug flex-1">
+        {toast}
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          setToast(null);
+          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        }}
+        aria-label={t("common.close")}
+        className="text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none shrink-0"
+      >
+        &times;
+      </button>
+    </div>
+  );
+
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
-      {toast && (
+      {toastBox && !sheetOpen && (
         <div role="alert" className="absolute bottom-full left-4 right-4 mb-2 z-50 animate-fade-in">
-          <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="text-danger shrink-0 mt-0.5"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            <span className="text-[13px] text-text-primary leading-snug flex-1">
-              {toast}
-            </span>
-            <button
-              onClick={() => {
-                setToast(null);
-                if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-              }}
-              aria-label={t("common.close")}
-              className="text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none shrink-0"
-            >
-              &times;
-            </button>
-          </div>
+          {toastBox}
         </div>
       )}
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
@@ -759,9 +766,8 @@ export function MessageInput({
             else void handleSubmit(true);
           }} />
       )}
-      {attached && !locked && (
-        <AttachmentSheet files={attached}
-          onAdd={(more) => setAttached((was) => [...(was ?? []), ...more])}
+      {sheetOpen && (
+        <AttachmentSheet files={attached} alert={toastBox} onPaste={takePaste}
           onRemove={(index) => setAttached((was) => was && was.length > 1 ? was.filter((_, i) => i !== index) : null)}
           onCancel={() => setAttached(null)}
           onSend={(caption) => void sendAttached(caption)} />
