@@ -39,6 +39,46 @@ updates:
       website:
         patterns: ["*"]
         update-types: [minor, patch]
+  # The Desktop's HyperDHT sidecar and the relay for browsers: lockfiles of their own, both shipped.
+  # hyperdht itself moves with the root's: tools/patches/hyperdht+<version>.patch is by version, and
+  # every copy runs the same one. Listing the update types keeps its security updates coming.
+  - package-ecosystem: npm
+    directory: /native/transports/hyperdht
+    schedule: { interval: weekly, day: monday }
+    target-branch: dev
+    ignore:
+      - dependency-name: hyperdht
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+    groups:
+      hyperdht-sidecar:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /infra/services/hyperdht-relay
+    schedule: { interval: weekly, day: monday }
+    target-branch: dev
+    ignore:
+      - dependency-name: hyperdht
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+    groups:
+      hyperdht-relay:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  # Test infrastructure (the e2e suite's AT Protocol network, never shipped): one pull request a
+  # week for the whole folder, transitive packages included (that is where its advisories are),
+  # and its security updates as one too.
+  - package-ecosystem: npm
+    directory: /e2e/infra/atproto
+    schedule: { interval: weekly, day: monday }
+    target-branch: dev
+    allow:
+      - dependency-type: all
+    groups:
+      e2e-atproto:
+        patterns: ["*"]
+      e2e-atproto-security:
+        applies-to: security-updates
+        patterns: ["*"]
   - package-ecosystem: cargo
     directory: /
     schedule: { interval: weekly, day: monday }
@@ -53,6 +93,14 @@ updates:
       cargo:
         patterns: ["*"]
         update-types: [minor, patch]
+  # Iroh for browsers, a crate outside the workspace. Security updates only: packages/iroh-web/pkg is
+  # built from this lockfile and committed (tools/scripts/build-iroh-web.mjs), so any change to it
+  # needs a rebuild by hand, and iroh moves with the Desktop's.
+  - package-ecosystem: cargo
+    directory: /native/transports/iroh-web
+    schedule: { interval: weekly, day: monday }
+    target-branch: dev
+    open-pull-requests-limit: 0
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }
@@ -61,6 +109,6 @@ updates:
       actions:
         patterns: ["*"]
   - package-ecosystem: docker
-    directories: [/web, /website]
+    directories: [/apps/web, /apps/website, /e2e/infra/atproto, /infra/services/hyperdht-relay]
     schedule: { interval: weekly, day: monday }
     target-branch: dev
