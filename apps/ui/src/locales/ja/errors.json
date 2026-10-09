@@ -36,6 +36,14 @@
     "unreachable": "{{host}} に接続できません",
     "unreachableNext": "アドレスを確認してください。Cashu ミントである必要があります。"
   },
+  "chat": {
+    "editTooMany": "このメッセージはこれ以上編集できません",
+    "editTooManyNext": "1つのメッセージの編集は{{max}}回までです。",
+    "replyGone": "そのメッセージには返信できません",
+    "replyGoneNext": "返信を取り消して、もう一度送信してください。",
+    "tooLong": "メッセージが長すぎます",
+    "tooLongNext": "短くするか、ファイルとして送信してください。"
+  },
   "connectionFailed": "接続に失敗しました",
   "engine": {
     "alreadySubmitted": "この支払いはすでに送信されたか、保存できませんでした",

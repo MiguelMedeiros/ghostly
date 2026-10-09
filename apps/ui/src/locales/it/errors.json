@@ -36,6 +36,14 @@
     "unreachable": "{{host}} non raggiungibile",
     "unreachableNext": "Controlla l'indirizzo: deve essere un mint Cashu."
   },
+  "chat": {
+    "editTooMany": "Questo messaggio non si può più modificare",
+    "editTooManyNext": "Un messaggio accetta al massimo {{max}} modifiche.",
+    "replyGone": "Non puoi rispondere a quel messaggio",
+    "replyGoneNext": "Annulla la risposta e invialo di nuovo.",
+    "tooLong": "Messaggio troppo lungo",
+    "tooLongNext": "Accorcialo o invialo come file."
+  },
   "connectionFailed": "Connessione fallita",
   "engine": {
     "alreadySubmitted": "Questo pagamento è già stato inviato o non è stato possibile salvarlo",

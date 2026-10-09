@@ -36,6 +36,14 @@
     "unreachable": "تعذر الوصول إلى {{host}}",
     "unreachableNext": "تحقق من العنوان: يجب أن يكون دار سك Cashu."
   },
+  "chat": {
+    "editTooMany": "لا يمكن تعديل هذه الرسالة مرة أخرى",
+    "editTooManyNext": "تقبل الرسالة {{max}} تعديلًا كحد أقصى.",
+    "replyGone": "لا يمكن الرد على تلك الرسالة",
+    "replyGoneNext": "ألغِ الرد وأرسلها مرة أخرى.",
+    "tooLong": "الرسالة طويلة جدًا",
+    "tooLongNext": "اختصرها أو أرسلها كملف."
+  },
   "connectionFailed": "فشل الاتصال",
   "engine": {
     "alreadySubmitted": "أُرسلت هذه الدفعة بالفعل أو تعذّر حفظها",
