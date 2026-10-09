@@ -117,6 +117,9 @@
     "blockedCommunityNext": "Réessayez dans un instant.",
     "blockedNext": "Nommez un admin ou attendez un membre.",
     "body": "Le groupe et son historique quittent cet appareil. Vous ne lirez pas ce qui sera dit ensuite, et pour revenir quelqu'un devra vous faire entrer à nouveau.",
+    "forgetBody": "Supprimer le groupe de cet appareil vous en fait aussi sortir.",
+    "forgetTitle": "Supprimer {{name}} ?",
+    "forgetTitleUnnamed": "Supprimer ce groupe ?",
     "successor": "Vous êtes l'admin : {{name}} devient l'admin quand vous partez.",
     "title": "Quitter {{name}} ?",
     "titleUnnamed": "Quitter ce groupe ?"
