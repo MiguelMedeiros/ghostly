@@ -180,6 +180,8 @@
     "notIn": "このグループに参加していません",
     "notYet": "まだこのグループに参加していません",
     "nothingToSend": "送信する内容がありません",
+    "offline": "オフラインです",
+    "offlineNext": "「サービス」でオンラインにしてから、もう一度お試しください。",
     "removed": "このグループから削除されました",
     "shareLinkInstead": "グループのリンクを共有してください。リンクを開いた人は参加できます",
     "tooLong": "メッセージが 16 KiB を超えています"
@@ -254,6 +256,8 @@
     "confirmRealFirst": "先に実際のお金の確認が必要です",
     "confirmRealFirstNext": "「{{button}}」を使ってください。何も送られていません。",
     "contactAllowsNeither": "相手はこのチャットで Cashu も Lightning も許可していません",
+    "contactAway": "相手はオフラインです",
+    "contactAwayNext": "何も送信されていません。チャットがライブになってから支払ってください。",
     "contactClosed": "相手が閉じました",
     "contactHasNone": "相手には {{network}} の {{method}} ウォレットがありません",
     "contactRefuses": "相手はこのチャットで {{method}} を受け付けていません",
@@ -361,6 +365,8 @@
     "bitcoinNotEnough": "確定済みの sats が足りません",
     "bitcoinNotEnoughNext": "利用可能 {{available}}、手数料込みで {{needed}} 必要です。",
     "canceledUnfunded": "資金が入る前にキャンセルされました",
+    "cashuNeverReached": "支払いはミントに届きませんでした",
+    "cashuNeverReachedNext": "何も送られておらず、sats は戻りました。もう一度支払えます。",
     "conflicted": "別のトランザクションがこのコインを使いました。この支払いが承認されることはありません",
     "federationHas": "このフェデレーションの残高が足りません: {{have}} sats",
     "federationNotEnoughNow": "このフェデレーションの残高が足りなくなりました",
@@ -381,7 +387,11 @@
     "takenBack": "取り戻しました。sats はウォレットに戻っています",
     "usdtBalanceChanged": "トークンまたはガスの残高が変わりました。新しい確認を作成してください",
     "usdtNonceChanged": "アカウントの nonce が変わりました。新しい確認を作成してください",
-    "usdtRejected": "USDT の RPC が操作を拒否しました"
+    "usdtNotSubmitted": "トランザクションは送信されていません",
+    "usdtNotSubmittedNext": "新しい確認を作成してください。",
+    "usdtRejected": "USDT の RPC が操作を拒否しました",
+    "usdtReverted": "トランザクションはリバートされました",
+    "usdtRevertedNext": "トークンは送られていません。ガスは消費されました。"
   },
   "relays": {
     "atLeastOne": "リレーのアドレスを 1 つ以上入力してください",
@@ -390,8 +400,15 @@
   },
   "transport": {
     "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",
+    "hyperdhtClosed": "HyperDHTリレーが接続を閉じました",
+    "hyperdhtRefused": "HyperDHTリレーがこのチャットを拒否しました",
+    "hyperdhtSilent": "HyperDHTリレーが応答しません",
+    "hyperdhtUnreachable": "HyperDHTリレーに接続できません",
+    "irohStopped": "Irohエンドポイントが停止しています",
     "listenerGiven": "より活発なチャットのため一時停止中。このチャットを開くと再開します。",
-    "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。"
+    "listenerReleased": "別のチャットのため一時停止中。このチャットを開くと再開します。",
+    "slotsFull": "ネイティブ接続がすべて使用中です",
+    "slotsFullNext": "別のチャットのネイティブ接続を切断するか、どれかが待機状態になるまでお待ちください。"
   },
   "wallet": {
     "alreadyHave": "{{network}} の {{kind}} ウォレットはすでにあります",

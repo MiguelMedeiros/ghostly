@@ -274,6 +274,17 @@ describe("GroupChat: the options menu", () => {
     expect(screen.getByText("Chat list")).toBeInTheDocument();
   });
 
+  it("keeps a community whose delete was refused, and says why", async () => {
+    const { user, engine } = openGroup(active({ profile: "community" }));
+    engine.on("forgetGroup", () => { throw new Error("Nobody in the group is connected right now to take your leave. Try again in a moment."); });
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete chat" }));
+    expect(await screen.findByTestId("group-notice")).toHaveTextContent("Nobody is online to take your leave");
+    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
+    expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
+  });
+
   it("opens the members from the header", async () => {
     const { user } = openGroup(active());
     await user.click(screen.getByTestId("group-members"));
@@ -360,6 +371,22 @@ describe("GroupChat: leaving", () => {
     const dialog = await leaveFromMenu(user);
     expect(dialog).toHaveTextContent("Nobody is online to become admin" + "Make someone admin, or wait for a member.");
     expect(within(dialog).queryByTestId("group-leave-successor")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
+  });
+
+  it("says in red that a private group's admin must act first", async () => {
+    const { user } = openGroup(adminOf([member({ key: BOB, nick: "Bob" })]));
+    expect(within(await leaveFromMenu(user)).getByTestId("leave-blocked")).toHaveAttribute("data-tone", "error");
+  });
+
+  it("says a community's wait for a hub in the wait tone, not in red", async () => {
+    // Nobody at a hub: the button comes back by itself once one is reached, nothing for the person to do meanwhile.
+    const { user } = openGroup(active({ profile: "community", isAdmin: true, community: { hub: false, hubs: 1, connected: 0 },
+      members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: BOB, nick: "Bob" })] }));
+    const dialog = await leaveFromMenu(user);
+    expect(dialog).toHaveTextContent("Nobody is online to take your leave" + "Try again in a moment.");
+    expect(within(dialog).getByTestId("leave-blocked")).toHaveAttribute("data-tone", "wait");
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
   });
 
@@ -465,6 +492,19 @@ describe("GroupChat: history and sending", () => {
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
       "Carol entrou", "Carol agora é o admin", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
+    ]));
+  });
+
+  it("says a fork or a removal with the core's own reason in the app's language", () => {
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "forked", text: "Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group." }),
+      stored({ id: "e2", event: "forked", text: "The admin signed two different changes after epoch 5. Membership changes are halted; the admin must re-form the group.", timestamp: 1_700_000_000_001 }),
+      stored({ id: "e3", event: "removed", text: "Removed by a reason this app does not know", timestamp: 1_700_000_000_002 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active()] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
+      "O histórico de membros se bifurcou", "O histórico de membros se bifurcou", "Você foi removido deste grupo",
     ]));
   });
 

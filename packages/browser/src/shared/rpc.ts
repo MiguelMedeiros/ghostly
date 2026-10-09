@@ -196,6 +196,11 @@ export interface EngineApi {
    */
   sendGroupFile(params: { groupId: string; file: MessageFile; caption?: string; replyTo?: string; forwarded?: number }): { error: string | null; messageId?: string; refused?: boolean };
   /**
+   * Whether `sendGroupFile` would take a file of mine for the group now (its pace of files, being in it), asked before
+   * the bytes are copied into the `files` store: the error it would answer, or null.
+   */
+  groupFileCheck(params: { groupId: string }): { error: string | null; refused?: boolean };
+  /**
    * Forwards messages of a chat (or `group:<id>`) to up to 5 chats and groups (WISP 400 § Forwards): new messages of
    * mine with a hop count, files from the bytes here. Each target says which messages it got and its first problem.
    */

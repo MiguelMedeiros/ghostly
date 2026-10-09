@@ -180,6 +180,8 @@
     "notIn": "No estás en este grupo",
     "notYet": "Todavía no estás en este grupo",
     "nothingToSend": "Nada que enviar",
+    "offline": "Estás sin conexión",
+    "offlineNext": "Conéctate en Servicios y vuelve a intentarlo.",
     "removed": "Te eliminaron de este grupo",
     "shareLinkInstead": "Comparte con esa persona el enlace del grupo: quien lo abre entra",
     "tooLong": "El mensaje supera los 16 KiB"
@@ -254,6 +256,8 @@
     "confirmRealFirst": "Confirma primero el dinero real",
     "confirmRealFirstNext": "Usa {{button}}. No se envió nada.",
     "contactAllowsNeither": "Tu contacto no permitió ni Cashu ni Lightning en este chat",
+    "contactAway": "Tu contacto está desconectado",
+    "contactAwayNext": "No se envió nada. Paga cuando el chat esté en vivo.",
     "contactClosed": "tu contacto lo cerró",
     "contactHasNone": "Tu contacto no tiene billetera {{method}} {{network}}",
     "contactRefuses": "Tu contacto no acepta {{method}} en este chat",
@@ -361,6 +365,8 @@
     "bitcoinNotEnough": "No hay suficientes sats confirmados",
     "bitcoinNotEnoughNext": "{{available}} disponibles, {{needed}} necesarios con la comisión.",
     "canceledUnfunded": "Se canceló antes de financiarse",
+    "cashuNeverReached": "El pago nunca llegó al mint",
+    "cashuNeverReachedNext": "No se envió nada y los sats volvieron. Puedes pagar de nuevo.",
     "conflicted": "Otra transacción gastó estas monedas: este pago nunca se confirmará",
     "federationHas": "No hay suficiente en esta federación: {{have}} sats",
     "federationNotEnoughNow": "Ya no hay suficiente en esta federación",
@@ -381,7 +387,11 @@
     "takenBack": "Recuperado: los sats vuelven a estar en tu billetera",
     "usdtBalanceChanged": "El saldo de tokens o de gas cambió. Crea una nueva revisión",
     "usdtNonceChanged": "El nonce de la cuenta cambió. Crea una nueva revisión",
-    "usdtRejected": "El RPC de USDT rechazó la operación"
+    "usdtNotSubmitted": "No se envió ninguna transacción",
+    "usdtNotSubmittedNext": "Crea una nueva revisión.",
+    "usdtRejected": "El RPC de USDT rechazó la operación",
+    "usdtReverted": "La transacción fue revertida",
+    "usdtRevertedNext": "No se enviaron tokens; el gas se gastó."
   },
   "relays": {
     "atLeastOne": "Escribe al menos una dirección de relay",
@@ -390,8 +400,15 @@
   },
   "transport": {
     "adapterFailed": "No se inició. Vuelve a abrir este chat para reintentar.",
+    "hyperdhtClosed": "El relay HyperDHT cerró la conexión",
+    "hyperdhtRefused": "El relay HyperDHT rechazó este chat",
+    "hyperdhtSilent": "El relay HyperDHT no responde",
+    "hyperdhtUnreachable": "Relay HyperDHT inaccesible",
+    "irohStopped": "Endpoint de Iroh detenido",
     "listenerGiven": "En pausa por un chat más activo. Abre este chat para reanudar.",
-    "listenerReleased": "En pausa por otro chat. Abre este chat para reanudar."
+    "listenerReleased": "En pausa por otro chat. Abre este chat para reanudar.",
+    "slotsFull": "Todas las conexiones nativas en uso",
+    "slotsFullNext": "Desconecta la conexión nativa de otro chat, o espera a que una quede inactiva."
   },
   "wallet": {
     "alreadyHave": "Ya tienes una billetera {{kind}} {{network}}",

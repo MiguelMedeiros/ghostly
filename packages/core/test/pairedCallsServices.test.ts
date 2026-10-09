@@ -417,3 +417,20 @@ describe("shared apps on a paired session (services/1)", () => {
     expect(localFetch).not.toHaveBeenCalled();
   });
 });
+
+describe("paying a contact that said goodbye", () => {
+  it("is refused at once while the contact's app is gone", async () => {
+    const { a, b } = pair();
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsPayments).toBe(true));
+    expect(a.link.contactAway).toBe(false);
+    // b's app stops: it says goodbye on the live session.
+    b.link.depart();
+    await vi.waitFor(() => expect(a.link.isDataLinkOpen).toBe(false));
+    expect(a.link.contactAway).toBe(true);
+    // Before, this dialled and waited out connect()'s 90 s for an app that had said it was going.
+    const started = Date.now();
+    await expect(a.link.requirePaymentSupport()).rejects.toThrow("Your contact is offline. Nothing was sent");
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+});

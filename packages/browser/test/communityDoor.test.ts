@@ -84,6 +84,28 @@ describe("a community's door", { timeout: 120_000 }, () => {
     expect(crowd.slice(0, 2).map(p => world.view(p, id)?.invitation)).toEqual([undefined, undefined]);
   });
 
+  it("a joiner who got in takes its knock out, so the next one is not told someone is waiting", async () => {
+    const world = new CommunityWorld();
+    const alice = world.add("alice");
+    const { id, link, entry } = await community(world, alice);
+    await world.run(5_000);
+    const bob = world.add("bob");
+    await bob.groups.joinByLink(link);
+    await landed();
+    const bobKnock = guestKey(bob);
+    await world.until(() => world.member(bob, id), 2 * 60_000);
+    await world.run(1_000);
+    // Its knock was refreshed a moment ago: left there, it read as a person still knocking for 40 s.
+    expect(knocksIn(world, entry, 0)).not.toContain(bobKnock);
+    alice.online = false;
+    const carol = world.add("carol");
+    await carol.groups.joinByLink(link);
+    await landed();
+    expect(world.view(carol, id)?.invitation?.waiting).toBeUndefined();
+    await world.run(COMMUNITY_TIMINGS.knockMs + 1_000);
+    expect(world.view(carol, id)?.invitation?.waiting).toBeUndefined();
+  });
+
   it("a lone door reads the bell every few seconds and the other records now and then, within its share of the relays' budget", async () => {
     const world = new CommunityWorld(undefined, RELAY_NETWORK);
     const alice = world.add("alice");
