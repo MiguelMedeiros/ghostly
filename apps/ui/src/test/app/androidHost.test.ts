@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RTC_CONFIG } from "@ghostly/core";
 import { cssColorHex, followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares, withoutPublicStun } from "../../desktop/android";
-import { incomingShare, resetIncomingShare } from "../../lib/incomingShare";
+import { incomingShare, resetIncomingShare, shareFiles } from "../../lib/incomingShare";
+import { PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
 import { androidApp, touchOnly } from "../../lib/touchOnly";
 
 // covers: app.android.share-target, app.android.test-network
 
 /*
  * The Android app's page side (apps/ui/src/desktop/android.ts): the system bars take the page's background and
- * follow the theme; a share from another app reaches the Share to… picker with its files read whole; and the app is
+ * follow the theme; a share from another app reaches the Share to… picker, its files read only once a chat takes them; and the app is
  * touch only whatever the pointer query says.
  */
 
@@ -89,15 +90,48 @@ describe("a share from another app", () => {
     expect([share.title, share.text, share.url]).toEqual(["A note", "Look https://example.com", ""]);
     // The file too large to paste is left out, and never read.
     expect(share.files.map((file) => [file.name, file.type, file.size])).toEqual([["note.txt", "text/plain", bytes.length]]);
-    expect(new TextDecoder().decode(await share.files[0]!.arrayBuffer())).toBe("hello from another app");
-    expect(reads.every((read) => (read as { token: string }).token === "paste-1")).toBe(true);
     expect(location.hash).toBe("#/shared");
+    // Read when a chat's composer takes the share, not before the picker.
+    expect(reads).toEqual([]);
+    const [file] = await shareFiles(share);
+    expect(new TextDecoder().decode(await file!.arrayBuffer())).toBe("hello from another app");
+    expect(reads.every((read) => (read as { token: string }).token === "paste-1")).toBe(true);
     expect(listen).toHaveBeenCalledWith("incoming-share", expect.any(Function));
 
     // Rust says another arrived while the app runs: it is taken then.
     shares.push({ title: "", text: "second", files: [] });
     arrived();
     await vi.waitFor(() => expect(incomingShare()?.text).toBe("second"));
+  });
+
+  it("shows the picker from names and sizes, and reads only what a paste brings in all once a chat takes it", async () => {
+    const MiB = 1024 * 1024;
+    const files = [
+      ...Array.from({ length: 31 }, (_, i) => ({ token: `paste-${i + 1}`, name: `IMG_${i + 1}.jpg`, size: 60 * MiB, mime: "image/jpeg" })),
+      { token: "paste-32", name: "note.txt", size: 3, mime: "text/plain" },
+    ];
+    const shares = [{ title: "", text: "", files }];
+    const reads: string[] = [];
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      if (command === "read_pasted_bytes") {
+        reads.push(args!.token as string);
+        return args!.offset ? new ArrayBuffer(0) : new Uint8Array([1, 2, 3]).buffer;
+      }
+      throw new Error(command);
+    });
+    takeIncomingShares(invoke as never, async () => undefined);
+    await vi.waitFor(() => expect(location.hash).toBe("#/shared"));
+
+    const share = incomingShare()!;
+    expect(reads).toEqual([]);
+    // Four photos fill what a paste brings in (240 of 256 MiB); the rest are left out, the small note still fits.
+    expect(share.files.map((file) => file.name)).toEqual(["IMG_1.jpg", "IMG_2.jpg", "IMG_3.jpg", "IMG_4.jpg", "note.txt"]);
+    expect(share.files.reduce((sum, file) => sum + file.size, 0)).toBeLessThanOrEqual(PLATFORM_PASTE_MAX);
+
+    const read = await shareFiles(share);
+    expect(read.map((file) => [file.name, file.type])).toEqual(share.files.map((file) => [file.name, file.type]));
+    expect([...new Set(reads)]).toEqual(["paste-1", "paste-2", "paste-3", "paste-4", "paste-32"]);
   });
 
   it("is nothing when none waits", async () => {

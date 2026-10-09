@@ -102,16 +102,29 @@ export function followSystemBars(invoke: Invoke, root: HTMLElement = document.do
 }
 
 /**
+ * The files of a share the page takes: each in turn while all of them stay within what a paste brings in
+ * (`PLATFORM_PASTE_MAX`); one that would go past it is left out. Kotlin copies a share by the same rule
+ * (GhostlyHostPlugin.kt `shared`): keep the two alike.
+ */
+function withinPasteTotal<T extends { size: number }>(files: T[]): T[] {
+  let left = PLATFORM_PASTE_MAX;
+  return files.filter((file) => {
+    if (file.size > left) return false;
+    left -= file.size;
+    return true;
+  });
+}
+
+/**
  * "Share to Ghostly" from another app: taken when the app starts (a share can be what started it) and whenever Rust
- * says one arrived. Its files are read whole into the page, as a paste's; one too large to paste is left out. The page
- * then shows the Share to… picker, as the web app's share target does.
+ * says one arrived. The page shows the Share to… picker, as the web app's share target does, from the files' names
+ * and sizes; their bytes are read into the page, as a paste's, only when the chat picked takes them.
  */
 export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
   const take = async () => {
     const shared = await invoke<Shared | null>("incoming_share_take");
     if (!shared) return;
-    const clips: ClipboardFile[] = shared.files
-      .filter((file) => file.size <= PLATFORM_PASTE_MAX)
+    const clips: ClipboardFile[] = withinPasteTotal(shared.files)
       .map(({ token, ...file }) => ({
         ...file,
         read: async (offset: number, length: number) => {
@@ -120,8 +133,8 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
           return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
         },
       }));
-    const files = await readPlatformFiles(clips);
-    receiveShare({ title: shared.title, text: shared.text, url: "", files });
+    const files = clips.map((clip) => ({ name: clip.name ?? "", size: clip.size, type: clip.mime ?? "" }));
+    receiveShare({ title: shared.title, text: shared.text, url: "", files, read: () => readPlatformFiles(clips) });
     if (location.hash !== "#/shared") location.hash = "#/shared";
   };
   void listen("incoming-share", () => void take().catch(() => {})).catch(() => {});
