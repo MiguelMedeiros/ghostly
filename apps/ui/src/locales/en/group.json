@@ -117,6 +117,7 @@
     "blockedCommunityNext": "Try again in a moment.",
     "blockedNext": "Make someone admin, or wait for a member.",
     "body": "The group and its history go from this device. You will not read what is said after, and to come back someone has to let you in again.",
+    "bodyCommunity": "The group and its history go from this device. You will not read what is said after, and to come back, open the group's link again.",
     "successor": "You are the admin: {{name}} becomes the admin when you leave.",
     "title": "Leave {{name}}?",
     "titleUnnamed": "Leave this group?"

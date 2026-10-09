@@ -44,7 +44,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus }: { g
     data-testid="group-leave-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <h2 id={`${id}-title`} className="text-base font-semibold">{group.name ? t("group.leave.title", { name: group.name }) : t("group.leave.titleUnnamed")}</h2>
     <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">
-      <p>{t("group.leave.body")}</p>
+      <p>{t(community ? "group.leave.bodyCommunity" : "group.leave.body")}</p>
       {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}</p>}
       {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
     </div>

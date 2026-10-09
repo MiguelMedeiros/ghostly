@@ -117,6 +117,7 @@
     "blockedCommunityNext": "Inténtalo en un momento.",
     "blockedNext": "Nombra a alguien admin o espera a un miembro.",
     "body": "El grupo y su historial se van de este dispositivo. No leerás lo que se diga después, y para volver alguien tendrá que dejarte entrar de nuevo.",
+    "bodyCommunity": "El grupo y su historial se van de este dispositivo. No leerás lo que se diga después, y para volver, abre de nuevo el enlace del grupo.",
     "successor": "Eres el admin: {{name}} pasa a ser el admin cuando salgas.",
     "title": "¿Salir de {{name}}?",
     "titleUnnamed": "¿Salir de este grupo?"

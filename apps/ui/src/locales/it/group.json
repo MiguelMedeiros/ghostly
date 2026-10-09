@@ -117,6 +117,7 @@
     "blockedCommunityNext": "Riprova tra un momento.",
     "blockedNext": "Nomina un admin o aspetta un membro.",
     "body": "Il gruppo e la sua cronologia spariscono da questo dispositivo. Non leggerai ciò che verrà detto dopo, e per tornare qualcuno dovrà farti entrare di nuovo.",
+    "bodyCommunity": "Il gruppo e la sua cronologia spariscono da questo dispositivo. Non leggerai ciò che verrà detto dopo, e per tornare, apri di nuovo il link del gruppo.",
     "successor": "Sei l'admin: {{name}} diventa admin quando esci.",
     "title": "Uscire da {{name}}?",
     "titleUnnamed": "Uscire da questo gruppo?"

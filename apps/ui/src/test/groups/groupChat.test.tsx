@@ -299,6 +299,15 @@ describe("GroupChat: leaving", () => {
     expect(engine.callsTo("leaveGroup")).toEqual([]);
   });
 
+  // A private group takes someone to let the person back in; a community's link lets them in by itself.
+  it.each([
+    ["mesh", "to come back someone has to let you in again."],
+    ["community", "to come back, open the group's link again."],
+  ] as const)("says how to come back to a %s group", async (profile, line) => {
+    const { user } = openGroup(active({ profile }));
+    expect(await leaveFromMenu(user)).toHaveTextContent(line);
+  });
+
   it("leaves, and goes back to the chat list: the group is gone from it", async () => {
     const { user, engine } = openGroup(active());
     engine.on("leaveGroup", () => undefined);
