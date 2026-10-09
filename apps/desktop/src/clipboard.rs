@@ -149,6 +149,8 @@ impl PasteSource {
 pub const MAX_PASTED_FILES: usize = 32;
 /// The largest picture a paste turns into a PNG (100 megapixels, a 400 MB bitmap).
 pub const MAX_PASTED_PIXELS: usize = 100_000_000;
+/// How hard a pasted picture's PNG is packed (deflate, 1 to 9): see [`encode_png`].
+const PASTED_PNG_LEVEL: u8 = 2;
 /// The most bytes one read hands the page.
 const MAX_READ: u64 = 16 * 1024 * 1024;
 /// What the shelf keeps: the latest pastes, a bounded amount of picture bytes.
@@ -246,6 +248,9 @@ pub fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, S
     let mut encoder = png::Encoder::new(&mut out, width as u32, height as u32);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
+    // The sheet waits for this. The crate's own level (6) took 1 to 6 s for a 4K picture; level 2 takes a fifth to
+    // a tenth of that for 10 to 20% more bytes. Its fastest packer made a screenshot six times larger to send.
+    encoder.set_deflate_compression(png::DeflateCompression::Level(PASTED_PNG_LEVEL));
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
     writer.write_image_data(rgba).map_err(|e| e.to_string())?;
     writer.finish().map_err(|e| e.to_string())?;
@@ -723,6 +728,78 @@ mod tests {
         assert_eq!(
             encode_png(MAX_PASTED_PIXELS, 2, &[]),
             Err("That picture is too large to paste".into())
+        );
+    }
+
+    /// A photo-like picture: two gradients with a little noise on them, the kind that packs slowest.
+    fn photo(width: usize, height: usize) -> Vec<u8> {
+        let mut seed = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut rgba = Vec::with_capacity(width * height * 4);
+        for y in 0..height {
+            for x in 0..width {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let noise = (seed >> 16) as i32 % 9 - 4;
+                let base = ((x * 255 / width) as i32 + (y * 255 / height) as i32) / 2;
+                let channel = |v: i32| (v + noise).clamp(0, 255) as u8;
+                rgba.extend([
+                    channel(base),
+                    channel(255 - base),
+                    channel((x ^ y) as i32 % 64 + 96),
+                    255,
+                ]);
+            }
+        }
+        rgba
+    }
+
+    /// The same picture as the png crate writes it when nothing is chosen: the yardstick.
+    fn png_by_default(width: usize, height: usize, rgba: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(rgba).unwrap();
+        writer.finish().unwrap();
+        out
+    }
+
+    /// How hard a PNG's pixels were packed, as its zlib header says (RFC 1950, FLEVEL): 0 fastest, 1 fast,
+    /// 2 default, 3 hardest.
+    fn packing(png_bytes: &[u8]) -> u8 {
+        let mut at = 8;
+        loop {
+            let length = u32::from_be_bytes(png_bytes[at..at + 4].try_into().unwrap()) as usize;
+            if &png_bytes[at + 4..at + 8] == b"IDAT" {
+                return png_bytes[at + 9] >> 6;
+            }
+            at += length + 12;
+        }
+    }
+
+    /// The sheet opens only once the picture is a PNG, so a paste waits for it. The png crate's own choice (zlib's
+    /// default level) took 1 to 6 s for a 4K picture; the fast level takes a fifth to a tenth of that, for a few
+    /// more bytes to send.
+    #[test]
+    fn a_pasted_picture_is_packed_fast_and_about_as_small_as_the_png_default() {
+        let (width, height) = (800, 450);
+        let rgba = photo(width, height);
+        let by_default = png_by_default(width, height, &rgba);
+        let pasted = encode_png(width, height, &rgba).unwrap();
+        assert_eq!(packing(&by_default), 2, "the png crate's own choice");
+        assert_eq!(packing(&pasted), 1, "a pasted picture is packed fast");
+        assert_eq!(
+            decode(&pasted),
+            (width as u32, height as u32, rgba),
+            "the same pixels"
+        );
+        assert!(
+            pasted.len() * 10 <= by_default.len() * 13,
+            "a pasted picture is {} bytes, the png default {}",
+            pasted.len(),
+            by_default.len()
         );
     }
 
