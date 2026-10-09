@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { PairedTransport } from "@ghostly/core";
+import { automaticTransport, type PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportIcon } from "./TransportIcon";
 import { transportName } from "../lib/connection";
@@ -22,12 +22,15 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
 }) {
   const { t } = useI18n();
   const options = transportOptions(link, t);
-  const local = options.filter(o => ownTransports(link).includes(o.transport));
+  const own = ownTransports(link), local = options.filter(o => own.includes(o.transport));
   // One transport in this app (web, the extension): nothing to choose between, only to know why.
   const single = local.length <= 1;
   const dht = link.deliveryMode === "dht";
   const current = liveTransport(link), automatic = link.transportAutomatic ?? link.preferredTransport === undefined;
   const peerDht = link.dhtDelivery?.peerMode === "dht";
+  // An app with no WebRTC (Linux Desktop) puts its first native transport first.
+  const automaticHint = own.includes("webrtc/1") ? t("connection.option.automaticHint")
+    : t("connection.option.automaticHintNative", { transport: transportName(automaticTransport(own)) });
   function choose(choice: ConnectionChoice) {
     // A single transport here: choosing it means leaving DHT only, back to the app's rule.
     if (single && choice !== "dht") choice = "auto";
@@ -39,7 +42,7 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
     <div role="radiogroup" aria-label={t("connection.option.group")} data-testid="transport-options">
       {!single && <Option testId="connection-option-auto" checked={automatic && !dht} disabled={disabled} onClick={() => choose("auto")}
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></svg>}
-        hint={t("connection.option.automaticHint")} label={t("connection.option.automatic")} />}
+        hint={automaticHint} label={t("connection.option.automatic")} />}
       {/* Every transport, what this app lacks too: off, and why. */}
       {options.map(o => {
         const inUse = current === o.transport && o.available, waiting = link.transportWait?.transport === o.transport && !dht;
