@@ -80,14 +80,26 @@ export const REQUEST_TIMEOUT = 30_000;
 export const GIT_TIMEOUT = 5 * 60_000;
 export const ROUND_DEADLINE = 15 * 60_000;
 
+/** The workflow whose "CI Success" job is CI's gate. */
+export const CI_WORKFLOW = ".github/workflows/ci.yml";
+
 /**
- * CI on one commit, from its check runs: "success", "failure", "pending" (CI Success has not finished, or has no run
- * yet while other checks run) or "none" (nothing ran: CI never started). A rerun adds a run with the same name, so
- * the newest counts; a draft's gate "CI Success (draft)" does not count.
+ * CI's run for one commit: the newest run (by id) of this repository's ci.yml on exactly that commit, or null. Anyone
+ * who can push a branch can post a check run named "CI Success" for any commit (and give it any start time), and a
+ * workflow on another branch can be named anything, so only the workflow's file and repository count.
+ */
+export function ciRun(runs, repo, sha) {
+  const ours = runs.filter((r) => r.path?.split("@")[0] === CI_WORKFLOW && r.repository?.full_name === repo && r.head_sha === sha);
+  return ours.sort((a, b) => b.id - a.id)[0] ?? null;
+}
+
+/**
+ * CI on one commit, from the jobs of its CI run: "success", "failure", "pending" (CI Success has not finished, or has
+ * no job yet while other jobs run) or "none" (nothing ran: CI never started). A rerun adds a job with the same name, so
+ * the newest (by id, never by a time the caller sets) counts; a draft's gate "CI Success (draft)" does not count.
  */
 export function ciState(runs) {
-  const newest = (a, b) => (Date.parse(b.started_at ?? 0) || 0) - (Date.parse(a.started_at ?? 0) || 0) || (b.id ?? 0) - (a.id ?? 0);
-  const gate = runs.filter((r) => r.name === "CI Success").sort(newest)[0];
+  const gate = runs.filter((r) => r.name === "CI Success").sort((a, b) => (b.id ?? 0) - (a.id ?? 0))[0];
   const running = runs.some((r) => r.status !== "completed");
   if (!gate) return running ? "pending" : "none";
   if (gate.status !== "completed") return "pending";
@@ -239,7 +251,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const events = await gh.events(p.number);
     p.queuedAt = queuedAt(events, p.createdAt);
     p.priority = p.labels.includes(LABEL.priority);
-    p.ci = ciState(await gh.checkRuns(p.sha));
+    p.ci = ciState(await gh.ciJobs(p.sha));
     p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
     // Written before the latest `queue` (taken off and added again): it speaks for an earlier head, and the label
     // added since vouches for the one it was added on. It is rewritten (or deleted) like any position comment.
@@ -364,9 +376,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const state = readState(batch.body);
     const members = state.prs.map((s) => (gone.has(s.number) ? undefined : byNumber.get(s.number)));
     const next = state.next.map((n) => byNumber.get(n)).filter((p) => p && !gone.has(p.number) && !waiting(p));
-    const ci = ciState(await gh.checkRuns(batch.sha));
+    const ci = ciState(await gh.ciJobs(batch.sha));
     const tip = await gh.branchSha(base);
-    const baseCi = ci === "failure" ? ciState(await gh.checkRuns(state.baseSha)) : null;
+    const baseCi = ci === "failure" ? ciState(await gh.ciJobs(state.baseSha)) : null;
     const stay = { number: batch.number, members };
     const names = (list) => list.map((s) => `#${s.number}`).join(" ");
     say(`BATCH #${batch.number} [${names(state.prs)}] CI ${ci}`);
@@ -613,7 +625,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried });
     if (p.ci === "failure") {
-      const baseCi = ciState(await gh.checkRuns(mark.baseSha));
+      const baseCi = ciState(await gh.ciJobs(mark.baseSha));
       if (baseCi === "failure" || baseCi === "pending") {
         say(`HOLD #${p.number}: CI Success on \`${base}\` itself is ${baseCi === "failure" ? "red" : "still running"}; nobody is blamed until it is green.`);
         return stay;
@@ -705,9 +717,10 @@ export class BudgetLow extends Error {}
  * below `budget` calls left the run stops. An attempt with no answer within `timeout` counts as one that failed to
  * connect; once `signal` aborts (the round's deadline), every request fails at once. A POST retried after a 5xx that
  * GitHub did carry out can leave a second comment, or a 422 "already exists" that fails this run; the next run goes on
- * from GitHub's state. `wait`, `fetchImpl` and `timeout` are injectable for the tests.
+ * from GitHub's state. `wait`, `fetchImpl`, `timeout` and `warn` are injectable for the tests.
  */
-export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch, timeout = REQUEST_TIMEOUT, signal } = {}) {
+export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch, timeout = REQUEST_TIMEOUT, signal, warn = (m) => console.log(`::warning::${m}`) } = {}) {
+  let warnedChecks = false;
   const backoff = (attempt, after) => wait(Math.min(60, Number(after) || 2 ** attempt * 5) * 1000);
   const api = async (method, path, body) => {
     const named = (e) => (e?.name === "TimeoutError" ? new Error(`${method} ${path}: no answer within ${timeout / 1000} s`) : e);
@@ -754,7 +767,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     const out = [];
     for (let page = 1; page <= 10; page++) {
       const data = await must("GET", `${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
-      const list = Array.isArray(data) ? data : data.check_runs;
+      const list = Array.isArray(data) ? data : (data.jobs ?? data.check_runs);
       out.push(...list);
       if (list.length < 100) break;
     }
@@ -792,7 +805,22 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     /** Every `epic/*` branch: the bases a Mac serves besides `dev`. */
     epicBranches: async () => (await must("GET", "/git/matching-refs/heads/epic/")).map((r) => r.ref.replace("refs/heads/", "")),
     events: (n) => all(`/issues/${n}/events`),
-    checkRuns: (sha) => all(`/commits/${sha}/check-runs?filter=latest`),
+    /**
+     * The jobs of CI's own run on a commit (its latest attempt; see `ciRun`), or none when CI has no run there. A token
+     * that may not read Actions (a queue app without "Actions: read") gets the commit's check runs from GitHub Actions
+     * instead, with a warning once: any workflow of the repository can post one named "CI Success" there.
+     */
+    ciJobs: async (sha) => {
+      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+      if (r.status === 403) {
+        if (!warnedChecks) warn(`This token may not read Actions (${r.data?.message ?? "HTTP 403"}), so CI is read from check runs, which any workflow of the repository can post. Give the queue app "Actions: read".`);
+        warnedChecks = true;
+        return (await all(`/commits/${sha}/check-runs?filter=latest`)).filter((c) => c.app?.slug === "github-actions");
+      }
+      if (!r.ok) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
+      const run = ciRun(r.data.workflow_runs, repo, sha);
+      return run ? all(`/actions/runs/${run.id}/jobs?filter=latest`) : [];
+    },
     /** When a commit was pushed: its earliest check suite (GitHub makes them on the push), or null before any. */
     headPushedAt: async (sha) => (await must("GET", `/commits/${sha}/check-suites?per_page=100`)).check_suites.map((s) => s.created_at).sort()[0] ?? null,
     comments: (n) => all(`/issues/${n}/comments`),
