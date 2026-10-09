@@ -468,6 +468,23 @@ describe("GroupChat: history and sending", () => {
     ]));
   });
 
+  for (const profile of ["mesh", "community"] as const) it(`after being removed (${profile}), my own lines still read as mine, in the app's language`, async () => {
+    // Bug hunt 1008-1246: once removed the roster no longer has me, so "You are now the admin" read "Membro meyyyyyy agora é o admin".
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "admin", member: ME, text: "You are now the admin" }),
+      stored({ id: "e2", event: "renamed", member: ME, text: "You renamed the group to “Ghost Club”", timestamp: 1_700_000_000_001 }),
+      stored({ id: "e3", event: "picture", member: ME, text: "You changed the group's picture", timestamp: 1_700_000_000_002 }),
+      stored({ id: "e4", event: "picture", member: ME, text: "You removed the group's picture", timestamp: 1_700_000_000_003 }),
+      stored({ id: "e5", event: "removed", text: "You were removed from this group", timestamp: 1_700_000_000_004 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active({ profile, status: "removed", myKey: ME, members: members.filter(m => !m.me) })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    const lines = await screen.findAllByTestId("group-event");
+    expect(lines.map(l => l.textContent)).toEqual([
+      "Agora você é o admin", "Você renomeou o grupo para “Ghost Club”", "Você alterou a foto do grupo", "Você removeu a foto do grupo", "Você foi removido deste grupo",
+    ]);
+  });
+
   it("sends what is typed to the group", async () => {
     const { user, engine } = openGroup(active());
     engine.on("sendGroupMessage", () => ({ error: null }));
