@@ -4,6 +4,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
 import { encrypt, tryDecrypt } from "./crypto";
+import { isPublicAddress } from "./domainProofs";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
@@ -149,9 +150,9 @@ export class HoldKeys {
   /**
    * Opens a bundle the contact sealed for me. Everything is checked before anything is returned: the
    * authenticated encryption, the header's shape, that it names this link, this contact and me, the
-   * signature, the body digest and the limits of its kind.
+   * signature, the body digest and the limits of its kind. `loopback`: see `isHoldUrl`.
    */
-  open(bytes: Uint8Array, expect: { maxBytes?: number; mailbox?: string; now?: number } = {}): { header: HoldHeader; body: Uint8Array } {
+  open(bytes: Uint8Array, expect: { maxBytes?: number; mailbox?: string; now?: number; loopback?: boolean } = {}): { header: HoldHeader; body: Uint8Array } {
     const now = expect.now ?? Date.now();
     if (bytes.length > (expect.maxBytes ?? HOLD_LIMITS.maxBundleBytes)) throw new HoldRefusedError("size", "The held item is larger than allowed");
     if (bytes.length < MAGIC.length + 1 + NONCE + 16 + 4 || !MAGIC.every((b, i) => bytes[i] === b)) throw new HoldRefusedError("format", "Not a held item");
@@ -186,7 +187,7 @@ export class HoldKeys {
     // lifetime from now, give or take what the sender's clock is ahead.
     if ((expires as number) <= (ts as number) || (expires as number) > now + HOLD_LIMITS.ttlMs + HOLD_LIMITS.clockSkewMs) throw new HoldRefusedError("limits", "The held item's lifetime is out of bounds");
     const header: HoldHeader = { v: 1, from, to, author, recipient, mailbox, seq: seq as number, id, ts: ts as number, kind: kind as HoldKind, meta, digest, expires: expires as number };
-    checkKind(header, body);
+    checkKind(header, body, expect.loopback);
     return { header, body };
   }
 
@@ -202,9 +203,10 @@ export class HoldKeys {
 
   /**
    * The contact's pointer out of its packet, or null when the packet is not one of its pointers. Its `issued` is the
-   * contact's clock and refuses nothing: an older pointer cannot take a newer one's place because of `rev`.
+   * contact's clock and refuses nothing: an older pointer cannot take a newer one's place because of `rev`. The
+   * manifest's address is held to what an item's is (`isHoldUrl`): it is fetched as soon as the pointer is read.
    */
-  readPointer(packet: SignedPacket): HoldPointer | null {
+  readPointer(packet: SignedPacket, loopback = false): HoldPointer | null {
     if (packet.pubKeyZ32 !== this.peerAddress || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return null;
     const records = packet.records.filter(r => r.label === "_hold");
     if (records.length !== 1) return null;
@@ -216,7 +218,7 @@ export class HoldKeys {
     const [body, signature] = parsed as [unknown[], string];
     const [v, rev, issued, expires, manifestUrl, top, ack, count, bytes, refused = []] = body;
     if (v !== VERSION || ![rev, issued, expires, top, ack, count, bytes].every(n => Number.isSafeInteger(n) && (n as number) >= 0) ||
-      (manifestUrl !== null && (typeof manifestUrl !== "string" || manifestUrl.length > 2048)) ||
+      (manifestUrl !== null && !isHoldUrl(manifestUrl, loopback)) ||
       !Array.isArray(refused) || refused.length > 32 || !refused.every(n => Number.isSafeInteger(n) && (n as number) > 0)) return null;
     try {
       if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-hold-pointer", this.to, this.from, body])), publicKeyFromZ32(this.peer))) return null;
@@ -225,17 +227,25 @@ export class HoldKeys {
   }
 }
 
-/** A URL a bundle or manifest may be fetched from: HTTPS, or HTTP to this machine while testing. */
-export function isHoldUrl(value: unknown): value is string {
+/**
+ * A URL a bundle or manifest may be fetched from. The contact chose it and this device fetches it on its own, so it
+ * is HTTPS, without a user or password, at a name or a public IPv4 address: never this machine or its network.
+ * `loopback` adds plain HTTP to this machine, for a test against a local server; no shipped app passes it.
+ */
+export function isHoldUrl(value: unknown, loopback = false): value is string {
   if (typeof value !== "string" || value.length > 2048) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname));
-  } catch { return false; }
+  let url: URL;
+  try { url = new URL(value); } catch { return false; }
+  if (url.username || url.password) return false;
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (loopback && url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(host)) return true;
+  if (url.protocol !== "https:" || !host || host.startsWith("[") || host === "localhost" || host.endsWith(".localhost")) return false;
+  // A URL's IPv4 host is always written as four decimal numbers, whatever form it was given in.
+  return !/^\d+\.\d+\.\d+\.\d+$/.test(host) || isPublicAddress(Uint8Array.from(host.split("."), Number));
 }
 
 /** The limits of each kind, on the way in. */
-function checkKind(header: HoldHeader, body: Uint8Array): void {
+function checkKind(header: HoldHeader, body: Uint8Array, loopback = false): void {
   const bad = (message: string) => new HoldRefusedError("limits", message);
   switch (header.kind) {
     case "text":
@@ -252,14 +262,14 @@ function checkKind(header: HoldHeader, body: Uint8Array): void {
     }
     case "manifest": {
       if (body.length !== 0) throw bad("A manifest carries no body");
-      readManifest(header.meta);
+      readManifest(header.meta, loopback);
       return;
     }
   }
 }
 
 /** The entries of a manifest, checked: strictly increasing sequences, bounded sizes, fetchable URLs. */
-export function readManifest(meta: unknown): HoldManifestEntry[] {
+export function readManifest(meta: unknown, loopback = false): HoldManifestEntry[] {
   const bad = (message: string) => new HoldRefusedError("limits", message);
   const entries = (meta as { entries?: unknown } | null)?.entries;
   if (!Array.isArray(entries) || entries.length > HOLD_LIMITS.maxMailboxBundles) throw bad("The manifest lists too many items");
@@ -269,7 +279,7 @@ export function readManifest(meta: unknown): HoldManifestEntry[] {
     if (!Array.isArray(entry) || entry.length !== 6) throw bad("The manifest is malformed");
     const [seq, id, kind, bytes, url, expires] = entry;
     if (!Number.isSafeInteger(seq) || seq <= last || typeof id !== "string" || !WIRE_ID.test(id) || typeof kind !== "string" || !KINDS.includes(kind) || kind === "manifest" ||
-      !Number.isSafeInteger(bytes) || bytes < 0 || bytes > HOLD_LIMITS.maxBundleBytes || !isHoldUrl(url) || !Number.isSafeInteger(expires)) throw bad("The manifest is malformed");
+      !Number.isSafeInteger(bytes) || bytes < 0 || bytes > HOLD_LIMITS.maxBundleBytes || !isHoldUrl(url, loopback) || !Number.isSafeInteger(expires)) throw bad("The manifest is malformed");
     last = seq; total += bytes;
     if (total > HOLD_LIMITS.maxMailboxBytes) throw bad("The manifest lists more than a mailbox may hold");
     out.push([seq, id, kind as HoldManifestEntry[2], bytes, url, expires]);

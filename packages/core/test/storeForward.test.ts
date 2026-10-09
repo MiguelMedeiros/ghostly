@@ -68,7 +68,8 @@ describe("held bundles", () => {
     expect(() => readManifest({ entries: [entry(1, HOLD_LIMITS.maxBundleBytes + 1)] })).toThrow(/malformed/);
     expect(() => readManifest({ entries: [entry(1, 10, "ftp://x/y")] })).toThrow(/malformed/);
     expect(() => readManifest({ entries: [entry(1, 10, "http://evil.example/o")] })).toThrow(/malformed/);
-    expect(readManifest({ entries: [entry(1, 10, "http://127.0.0.1:46010/b/o")] })).toHaveLength(1);
+    expect(() => readManifest({ entries: [entry(1, 10, "http://127.0.0.1:46010/b/o")] })).toThrow(/malformed/);
+    expect(readManifest({ entries: [entry(1, 10, "http://127.0.0.1:46010/b/o")] }, true)).toHaveLength(1);
     expect(() => readManifest({ entries: Array.from({ length: HOLD_LIMITS.maxMailboxBundles + 1 }, (_, i) => entry(i + 1)) })).toThrow(/too many/);
     expect(() => readManifest({ entries: Array.from({ length: 9 }, (_, i) => entry(i + 1, HOLD_LIMITS.maxBundleBytes)) })).toThrow(/more than a mailbox/);
     const { alice, bob } = pairKeys();
