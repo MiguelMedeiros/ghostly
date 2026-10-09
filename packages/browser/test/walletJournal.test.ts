@@ -114,7 +114,7 @@ describe("checking a mint before it is added", () => {
 });
 
 describe("the balance and history shown", () => {
-  it("counts neither reserved proofs nor the other network's mints, and shows the latest 100 records with every fee", async () => {
+  it("counts neither reserved proofs nor the other network's mints, and shows the latest 100 records with their fees", async () => {
     seed("proofs", [stored(64, "a"), stored(32, "held", MINT, true), stored(500, "test", TEST_MINT)]);
     seed("walletTx", Array.from({ length: 120 }, (_, i) => ({ id: `tx${i}`, timestamp: i, mint: MINT, kind: "ecash-in", amount: 1, fee: 1 })));
     const events = { onChange: vi.fn(), onTestMintNeeded: vi.fn(async (_mint: string) => {}), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() };
@@ -125,7 +125,7 @@ describe("the balance and history shown", () => {
     expect(view.mints.map((m) => m.url)).toEqual([MINT]);
     expect(view.history).toHaveLength(100);
     expect(view.history[0].timestamp).toBe(119);
-    expect(view.feesPaid).toBe(120);
+    expect(view.feesPaid).toBe(100);
     // Kept, and counted in its own network's wallet, but never spent by a send of the other network.
     expect(await wallet.view("testnet")).toMatchObject({ balance: 500, mints: [expect.objectContaining({ url: TEST_MINT })] });
     expect(await wallet.balanceAt(TEST_MINT)).toBe(500);
