@@ -121,6 +121,29 @@ it("the payee settles a request from its own wallet: a confirmed receive on the 
   expect(received).toHaveBeenCalledWith(a, 1_000, expect.any(Set));
 });
 
+it("one transaction is one received payment: the same receipt under new payment ids adds no record and no chat line", async () => {
+  const createdAt = Date.now(), a = target();
+  seed("payments", [{ id: "r1", linkId: "l", kind: "request", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt, target: a }]);
+  const chain = { txid: "f".repeat(64), confirmations: 0 };
+  const { desk, received, host, sent } = setup({ received: async () => ({ ...chain }) });
+  await desk.start();
+  const pay = (id: string, txid = chain.txid) => desk.onPayment("l", { id, requestId: "r1", timestamp: createdAt + Number(id.slice(1)), amount: { value: "1000", asset: "sat" }, endpoint: [ENDPOINT.bitcoin, JSON.stringify({ txid })] });
+  const incoming = () => rows<StoredPayment>("payments").filter((p) => p.kind === "payment" && p.direction === "in").map((p) => [p.id, p.state]);
+  await pay("p1");
+  await pay("p2"); await pay("p3", "e".repeat(64));
+  expect(incoming(), "while it waits for a confirmation").toEqual([["p1", "pending"]]);
+  expect(sent, "an unpaid request is not answered").toEqual([]);
+  chain.confirmations = 1;
+  await desk.reconcileBitcoinReceipts();
+  expect(desk.payment("r1")?.state).toBe("settled");
+  const asked = received.mock.calls.length;
+  for (const id of ["p4", "p5", "p6", "p7", "p8"]) await pay(id);
+  expect(incoming(), "once it is paid").toEqual([["p1", "settled"]]);
+  expect(host.storeMessage).toHaveBeenCalledTimes(1);
+  expect(received, "the wallet is not asked again").toHaveBeenCalledTimes(asked);
+  expect(sent.map((s) => s.frame), "the contact is told again that it is paid").toEqual(Array(6).fill({ id: "r1", ok: true }));
+});
+
 it("a contact's txid is no proof: with a Bitcoin Core source, a request settles only on a receive on its own address", async () => {
   const { BitcoinService } = await import("../src/engine/paymentAdapters/providers/bitcoinService");
   const { BitcoindOnchain, bitcoindRpc } = await import("../src/engine/paymentAdapters/providers/bitcoind");

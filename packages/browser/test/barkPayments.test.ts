@@ -98,6 +98,21 @@ it("a receipt alone settles nothing: the request is paid when this wallet shows 
   expect(received).toHaveBeenCalledWith("tark1psrvA", 1_000, createdAt, expect.any(Set));
 });
 
+it("one receive is one received payment: a receipt under a new payment id adds no record, before or after it is paid", async () => {
+  const createdAt = Date.now();
+  seed("payments", [{ id: "r1", linkId: "l", kind: "request", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt, target: target("tark1psrvA") }]);
+  const payee = { arrived: undefined as string | undefined };
+  const { desk } = setup({ received: async () => payee.arrived });
+  await desk.start();
+  const pay = (id: string) => desk.onPayment("l", { id, requestId: "r1", timestamp: createdAt, amount: { value: "1000", asset: "sat" }, endpoint: [ENDPOINT.bark, JSON.stringify({ txid: "a".repeat(64) })] });
+  await pay("p1"); await pay("p2");
+  payee.arrived = "f".repeat(64);
+  await desk.reconcileBarkReceipts();
+  await pay("p3");
+  expect(desk.payment("p1")?.state).toBe("settled");
+  expect([desk.payment("p2"), desk.payment("p3")]).toEqual([undefined, undefined]);
+});
+
 it("a request paid while the receipt was lost still settles, from the wallet alone", async () => {
   seed("payments", [{ id: "r1", linkId: "l", kind: "request", direction: "out", amount: 50, unit: "sat", state: "pending", createdAt: Date.now(), target: target("tark1psrvC") }]);
   const { desk } = setup({ received: async () => "c".repeat(64) });
