@@ -23,6 +23,7 @@ export interface UsdtRequest {
   token?: string;
   /** In the token's base units (USDT: 6 decimals), from a `transfer` link. */
   amount?: bigint;
+  /** When it came in an `ethereum:` link: that link rebuilt from what was read here (no `value`, no second amount). */
   uri?: string;
 }
 
@@ -82,10 +83,12 @@ export function findUsdtAddress(text: string): { request: UsdtRequest; rest: str
       if (!mentioned && (chainId === undefined || KNOWN_USDT[chainId] !== token)) continue;
       const raw = params.get("uint256");
       const amount = raw === null ? null : eip681Number(trimUriEnd(raw));
-      request = { recipient, ...chainOf(chainId), token, ...(amount && amount > 0n ? { amount } : {}), uri };
+      const kept = amount && amount > 0n ? amount : undefined;
+      const rebuilt = `ethereum:${token}${chainId === undefined ? "" : `@${chainId}`}/transfer?address=${recipient}${kept ? `&uint256=${kept}` : ""}`;
+      request = { recipient, ...chainOf(chainId), token, ...(kept ? { amount: kept } : {}), uri: rebuilt };
     } else if (!fn && mentioned && isEvmAddress(target)) {
       // A plain `ethereum:` link to an address, with USDT named: its `value` is ether, not USDT, so no amount.
-      request = { recipient: target, ...chainOf(chainId), uri };
+      request = { recipient: target, ...chainOf(chainId), uri: `ethereum:${target}${chainId === undefined ? "" : `@${chainId}`}` };
     }
     if (request) return { request, rest: cut(text, match.index!, uri.length) };
   }

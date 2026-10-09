@@ -77,7 +77,7 @@ describe("BIP 21 links", () => {
     // A mainnet invoice is not the same payment as a regtest address: left out.
     expect(findMoney(`here: ${uri}.`)).toEqual({
       type: "onchain",
-      request: { address, chain: "regtest", network: "testnet", amountSat: 20_000, label: "Luke Jr", message: "Donation for the project", uri },
+      request: { address, chain: "regtest", network: "testnet", amountSat: 20_000, label: "Luke Jr", message: "Donation for the project", uri: `bitcoin:${address}?amount=0.0002&label=Luke%20Jr&message=Donation%20for%20the%20project` },
       rest: "here: .",
     });
     const mainnet = findMoney(`BITCOIN:${BC1Q.toUpperCase()}?amount=0.00021&lightning=${INVOICE}`);
@@ -97,6 +97,20 @@ describe("BIP 21 links", () => {
     expect(findMoney(`bitcoin:?lno=${BOLT12_SPEC_MINIMAL}`)).toMatchObject({ type: "bolt12", rest: "" });
     const ark = arkadeAddress("tark");
     expect(findMoney(`pay bitcoin:?ark=${ark}&amount=0.00005`)).toMatchObject({ type: "ark", request: { address: ark, kind: "arkade", network: "testnet", amountSat: 5000 }, rest: "pay" });
+  });
+
+  it("hands a wallet the link it read, not the text: no dropped leg, no second amount", () => {
+    const uriOf = (text: string) => (findMoney(text) as { request: { uri?: string } }).request.uri;
+    // A test address with a mainnet invoice: the card is test money, so what it hands out carries no lnbc.
+    expect(uriOf(`pay me here bitcoin:${TB1Q}?amount=0.00001&lightning=${INVOICE}`)).toBe(`bitcoin:${TB1Q}?amount=0.00001`);
+    expect(uriOf(`bitcoin:${BC1Q}?amount=0.00021&lightning=${INVOICE.toUpperCase()}`)).toBe(`bitcoin:${BC1Q}?amount=0.00021&lightning=${INVOICE}`);
+    // Legs the on-chain card does not show, and a repeated amount read one way here and maybe another elsewhere.
+    expect(uriOf(`bitcoin:${TB1Q}?lno=${BOLT12_SPEC_MINIMAL}&ark=${arkadeAddress("ark")}&AMOUNT=0.00001&amount=1`)).toBe(`bitcoin:${TB1Q}?amount=0.00001`);
+    // What keeps this app from paying keeps a wallet from paying too.
+    expect(uriOf(`bitcoin:${BC1Q}?req-somethingnew=1&somethingelse=2`)).toBe(`bitcoin:${BC1Q}?req-somethingnew=1`);
+    expect(uriOf(`bitcoin:${BC1Q}?amount=1e3`)).toBe(`bitcoin:${BC1Q}?amount=1e3`);
+    const ark = arkadeAddress("tark");
+    expect(uriOf(`bitcoin:?ark=${ark}&amount=0.00005&amount=1&lightning=${INVOICE}`)).toBe(`bitcoin:?ark=${ark}&amount=0.00005`);
   });
 
   it("is not fooled by a link with a bad address", () => {
@@ -176,8 +190,13 @@ describe("USDT addresses", () => {
 
   it("reads a transfer link: the token, the chain (network), the recipient and the amount", () => {
     const uri = `ethereum:${ETHEREUM_USDT}@1/transfer?address=${EVM}&uint256=2.5e6`;
-    expect(findMoney(`pay me ${uri}`)).toEqual({ type: "usdt", request: { recipient: EVM, chainId: 1, network: "mainnet", token: ETHEREUM_USDT.toLowerCase(), amount: 2_500_000n, uri }, rest: "pay me" });
+    const handedOut = `ethereum:${ETHEREUM_USDT.toLowerCase()}@1/transfer?address=${EVM}&uint256=2500000`;
+    expect(findMoney(`pay me ${uri}`)).toEqual({ type: "usdt", request: { recipient: EVM, chainId: 1, network: "mainnet", token: ETHEREUM_USDT.toLowerCase(), amount: 2_500_000n, uri: handedOut }, rest: "pay me" });
     expect(findUsdtAddress(`ethereum:${SEPOLIA_TEST_USDT}@11155111/transfer?address=${EVM}`)?.request).toMatchObject({ network: "testnet", chainId: 11155111 });
+    // What a wallet gets is what the card read: the first amount only, no ether `value` beside the transfer.
+    expect(findUsdtAddress(`usdt ethereum:${SEPOLIA_TEST_USDT}@11155111/transfer?address=${EVM}&uint256=1&uint256=9e6&value=1e18`)?.request.uri)
+      .toBe(`ethereum:${SEPOLIA_TEST_USDT.toLowerCase()}@11155111/transfer?address=${EVM}&uint256=1`);
+    expect(findUsdtAddress(`usdt ethereum:${EVM}@11155111?value=1e18`)?.request.uri).toBe(`ethereum:${EVM}@11155111`);
   });
 
   it("is conservative: a bare 0x address needs USDT named, and then says no network", () => {

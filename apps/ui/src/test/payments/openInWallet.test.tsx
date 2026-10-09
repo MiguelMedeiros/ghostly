@@ -39,6 +39,14 @@ describe("Open in wallet on a payment in a message", () => {
     expect(open).toHaveBeenCalledWith(uri);
   });
 
+  it("a test-money link hands out no real-money leg: the QR and Open in wallet carry what the card shows", async () => {
+    const mainnetInvoice = "lnbc21u1p42mkf2dqqpp56q3d9mfahf0974jqwy0yyfrg7zxksgxk7ufcc084yydhfx43daqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzyskhkhqar4dqgqfmarvdttr8x2nrp4txtamfupfftrnn4hmrp7s8ayen7hp2ye58jq8zu65rch9eplpxkhf3pf2nvuynhqxvkw5f7a2vgq486x8x";
+    bubble(`pay me here bitcoin:${TB1Q}?amount=0.00001&lightning=${mainnetInvoice}`);
+    expect(await screen.findByTestId("onchain-open-wallet")).toHaveAttribute("href", `bitcoin:${TB1Q}?amount=0.00001`);
+    expect(screen.queryByTestId("onchain-lightning")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("lnbc");
+  });
+
   it("on a web page the browser follows the link itself", async () => {
     bubble(BIP21);
     const link = await screen.findByTestId("onchain-open-wallet");

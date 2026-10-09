@@ -20,7 +20,10 @@ export interface OnchainRequest {
   lightning?: Bolt11Invoice;
   /** A `req-` parameter this app does not understand: BIP 21 says such a link must not be paid. */
   unsupported?: string[];
-  /** The whole `bitcoin:` link, when the address came in one. */
+  /**
+   * When the address came in a `bitcoin:` link: that link rebuilt from what was read above, never the text as
+   * written, so a wallet that scans or opens it gets what the card shows (no dropped leg, no second amount).
+   */
   uri?: string;
 }
 
@@ -60,6 +63,25 @@ export function btcToSats(value: string): number | null {
   if (!match) return null;
   const sats = Number(match[1] || "0") * 100_000_000 + Number((match[2] ?? "").padEnd(8, "0"));
   return sats > 0 && sats <= 21_000_000 * 100_000_000 ? sats : null;
+}
+
+/** Whole sats as a BIP 21 `amount`: decimal bitcoin, no trailing zeros. */
+export function satsToBtc(sats: number): string {
+  const fraction = String(sats % 100_000_000).padStart(8, "0").replace(/0+$/, "");
+  return String(Math.floor(sats / 100_000_000)) + (fraction ? `.${fraction}` : "");
+}
+
+/** A `bitcoin:` link from read fields only: what a card hands to a wallet (QR, Open in wallet). */
+export function bip21Uri(address: string, fields: { amountSat?: number; label?: string; message?: string; lightning?: string; ark?: string; unsupported?: [string, string][] }): string {
+  const params: string[] = [];
+  if (fields.ark) params.push(`ark=${fields.ark}`);
+  if (fields.amountSat !== undefined) params.push(`amount=${satsToBtc(fields.amountSat)}`);
+  // What made the card refuse to pay (an unreadable amount, an unknown `req-`) goes along, so a wallet refuses too.
+  for (const [name, value] of fields.unsupported ?? []) params.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
+  if (fields.label) params.push(`label=${encodeURIComponent(fields.label)}`);
+  if (fields.message) params.push(`message=${encodeURIComponent(fields.message)}`);
+  if (fields.lightning) params.push(`lightning=${fields.lightning}`);
+  return `bitcoin:${address}${params.length ? `?${params.join("&")}` : ""}`;
 }
 
 /** What a `bitcoin:` link carries, before this app picks what to show. */
@@ -108,7 +130,7 @@ export function onchainFromBip21(link: Bip21): OnchainRequest | null {
   const chain = link.address ? addressChain(link.address) : null;
   if (!chain) return null;
   const network: WalletNetwork = chain === "bitcoin" ? "mainnet" : "testnet";
-  const request: OnchainRequest = { address: link.address, chain, network, uri: link.uri };
+  const request: OnchainRequest = { address: link.address, chain, network };
   const amount = link.params.get("amount");
   if (amount !== undefined) {
     const sats = btcToSats(amount);
@@ -125,5 +147,9 @@ export function onchainFromBip21(link: Bip21): OnchainRequest | null {
   if (decoded && (decoded.network === "bitcoin") === (network === "mainnet")) request.lightning = decoded;
   const unknown = [...link.params.keys()].filter((name) => name.startsWith("req-") && !KNOWN.has(name.slice(4)));
   if (unknown.length) request.unsupported = [...(request.unsupported ?? []), ...unknown];
+  // Rebuilt, not the contact's text: a leg left out above (`lno=`, `ark=`, a fallback on another network) or a
+  // repeated parameter must not reach a wallet that reads the link its own way.
+  const unsupported = (request.unsupported ?? []).map((name): [string, string] => [name, link.params.get(name) ?? ""]);
+  request.uri = bip21Uri(link.address, { amountSat: request.amountSat, label: request.label, message: request.message, lightning: request.lightning?.invoice, unsupported });
   return request;
 }

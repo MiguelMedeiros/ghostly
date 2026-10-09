@@ -1,6 +1,6 @@
 import { bech32m } from "@scure/base";
 import type { WalletNetwork } from "@ghostly/core";
-import { btcToSats, findBip21 } from "./money-bitcoin";
+import { bip21Uri, btcToSats, findBip21 } from "./money-bitcoin";
 import { cut, insideUrl } from "./money-text";
 
 /**
@@ -13,7 +13,7 @@ export interface ArkRequest {
   kind: "arkade" | "bark";
   network: WalletNetwork;
   amountSat?: number;
-  /** The whole `bitcoin:?ark=` link, when it came in one. */
+  /** When it came in a `bitcoin:?ark=` link: that link rebuilt from the address and amount (no other leg). */
   uri?: string;
 }
 
@@ -78,7 +78,8 @@ export function findArkAddress(text: string): { request: ArkRequest; rest: strin
     if (!address || !decoded || link.address) continue;
     const amount = link.params.get("amount");
     const sats = amount === undefined ? undefined : btcToSats(amount) ?? undefined;
-    return { request: { address: address.toLowerCase(), ...decoded, ...(sats ? { amountSat: sats } : {}), uri: link.uri }, rest: cut(text, link.index, link.uri.length) };
+    const uri = bip21Uri("", { ark: address.toLowerCase(), amountSat: sats });
+    return { request: { address: address.toLowerCase(), ...decoded, ...(sats ? { amountSat: sats } : {}), uri }, rest: cut(text, link.index, link.uri.length) };
   }
   for (const match of text.matchAll(ARK_WORD)) {
     const decoded = insideUrl(text, match.index!) ? null : decodeArkAddress(match[0]);
