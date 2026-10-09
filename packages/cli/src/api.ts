@@ -47,7 +47,7 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 }
 
 /** Settings a command may change; the rest are the app's to manage. */
-const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
+export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
   relays: "strings", irohRelays: "strings", hyperdhtRelay: "string", readRelays: "boolean",
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
 };
