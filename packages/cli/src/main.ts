@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { callApi, redactSettings, SETTABLE } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
-import { COMMANDS, idSlot, positionals, TEXT_COMMANDS } from "./commands";
+import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -237,6 +237,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     case "list": {
+      noMoreThan(0, parsed.positionals, "profile list");
       const current = currentProfile(g.home);
       print({ profiles: listProfiles(g.home).map((name) => ({ name, current: name === current, running: lockOwner(profilePaths(g.home, name)) !== null })), home: g.home });
       return;
@@ -244,14 +245,17 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     case "use": {
       const [name] = parsed.positionals;
       if (!name) throw new CliError("usage", "ghostly profile use <name>");
+      noMoreThan(1, parsed.positionals, "profile use <name>");
       selectProfile(g.home, name);
       print({ current: name });
       return;
     }
     case "show":
+      noMoreThan(0, parsed.positionals, "profile show");
       print(await withSession(g, (s) => s.call("profile.get")));
       return;
     case "set": {
+      noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile]");
       const params: Record<string, unknown> = {};
       if (parsed.options.name !== undefined) params.name = parsed.options.name;
       if (parsed.options["share-profile"] !== undefined) params.shareProfile = parsed.options["share-profile"];
@@ -260,6 +264,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     case "backup": {
+      noMoreThan(0, parsed.positionals, "profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]");
       const out = parsed.options.out;
       if (typeof out !== "string") throw new CliError("usage", "ghostly profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light] (or GHOSTLY_BACKUP_PASSPHRASE)");
       // Encrypted unless --no-passphrase says otherwise, and never a guess: a passphrase and --no-passphrase together are refused.
@@ -275,6 +280,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     case "restore": {
       const [file, name] = parsed.positionals;
       if (!file || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
       const protection = await backupFileProtection(file);
       const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"]));
@@ -335,6 +341,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
+  if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub}` : "daemon [--detach]");
   if (sub === "status") {
     const client = await connectDaemon(g.paths.socket);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
@@ -487,7 +494,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, list: { type: "boolean", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (parsed.options.list) { print({ methods: [...ENGINE_METHODS, ...ENGINE_READS].sort() }); return; }
+  if (parsed.options.list) { noMoreThan(0, parsed.positionals, "engine --list"); print({ methods: [...ENGINE_METHODS, ...ENGINE_READS].sort() }); return; }
   const [method, raw] = parsed.positionals;
   if (!method || parsed.positionals.length > 2) throw new CliError("usage", "ghostly engine <method> [json-params | -]");
   if (!ENGINE_METHODS.includes(method) && !ENGINE_READS.includes(method)) throw new CliError("not_found", `The engine has no call ${method} (ghostly engine --list)`);
@@ -513,7 +520,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
   const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (sub === "get") { print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }))); return; }
+  if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }))); return; }
   if (sub === "set") {
     const [key, value] = parsed.positionals;
     if (!key || value === undefined || parsed.positionals.length > 2) throw new CliError("usage", "ghostly settings set <key> <json-value>");
