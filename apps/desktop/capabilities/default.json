@@ -40,6 +40,7 @@
     "allow-generate-enc-key",
     "allow-get-profile",
     "allow-get-public-key",
+    "allow-incoming-share-done",
     "allow-incoming-share-take",
     "allow-keep-awake",
     "allow-link-preview-fetch",
