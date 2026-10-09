@@ -163,6 +163,35 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     expect((await again.groups.messages(id)).some(m => m.text === "before restart")).toBe(true);
   });
 
+  it("deleting it from the device leaves it first: out of every roster, and an admin hands the role on", async () => {
+    // Bug hunt groups-flows: forgetting only dropped it here, and the others kept the device as a member (and as their admin) for good.
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");
+    const { id, link } = await community(world, admin);
+    await joinAll(world, id, link, [bob, carol]);
+    await world.run(20_000);
+    const carolKey = world.view(carol, id)!.myKey!;
+    await carol.groups.forget(id);
+    expect(carol.groups.views()).toEqual([]);
+    await world.until(() => [admin, bob].every(p => !world.view(p, id)?.members.some(m => m.key === carolKey)), 2 * 60_000);
+    await admin.groups.forget(id);
+    expect(admin.groups.views()).toEqual([]);
+    await world.until(() => world.view(bob, id)?.members.length === 1, 2 * 60_000);
+    expect(world.view(bob, id)!.isAdmin).toBe(true);
+  });
+
+  it("deleting it from the device with nobody connected to take the leave is refused, and it stays", async () => {
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), bob = world.add("bob");
+    const { id, link } = await community(world, admin);
+    await joinAll(world, id, link, [bob]);
+    await world.run(20_000);
+    bob.online = false;
+    await world.until(() => world.view(admin, id)?.community?.connected === 0, 2 * 60_000);
+    await expect(admin.groups.forget(id)).rejects.toThrow(/Nobody in the group is connected/);
+    expect(world.view(admin, id)).toMatchObject({ status: "active", isAdmin: true });
+  });
+
   it("a member whose fresh secret was lost on the way asks for it and gets it", async () => {
     const world = new CommunityWorld();
     const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");
