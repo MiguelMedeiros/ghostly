@@ -178,6 +178,16 @@ describe("a video in the chat", () => {
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, "clip.webm"));
   });
 
+  it("a Download the system refuses (Desktop) says so in the language, not in the system's English", async () => {
+    canPlay = (type) => (type === "video/webm" ? "" : "maybe");
+    vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("Permission denied (os error 13)"));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<VideoBubble file={video({ name: "clip.webm", mime: "video/webm" })} sender="peer" peerName="Ana" />, { language: "pt" });
+    fireEvent.click(screen.getByTestId("video-download"));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    expect(screen.getAllByRole("alert")[1]).toHaveTextContent(/^Não foi possível salvar o arquivo ali\. Tente de novo e escolha outra pasta\.$/);
+  });
+
   it("a type never served as itself (Matroska) is not handed to the player", () => {
     show(video({ name: "film.mkv", mime: "video/x-matroska" }));
     expect(screen.getByTestId("video-bubble")).toHaveAttribute("data-playable", "false");

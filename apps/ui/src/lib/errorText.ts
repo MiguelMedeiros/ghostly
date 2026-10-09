@@ -54,6 +54,12 @@ const readParts = (parts: string, t: Translate) => parts.split(", ").map((part) 
 
 /** A copy the app could not save where the person chose (Android's document picker, apps/desktop android.rs). */
 export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable file path)$/;
+/**
+ * The same on Desktop (apps/desktop file_store.rs): the system's own English ("Permission denied (os error 13)", "No
+ * space left on device (os error 28)"), or a place without a file name. Not a rule of its own: an io error is a save's
+ * only where a save threw it (problemText.ts saveProblemLine).
+ */
+export const DESKTOP_SAVE_REFUSED = /^(?:.+ \(os error \d+\)|The chosen place has no file name)$/;
 
 const NETWORK = "(?<network>Mainnet|Testnet)";
 const HOST = "(?<host>[^\\s:/]+(?::\\d+)?)";

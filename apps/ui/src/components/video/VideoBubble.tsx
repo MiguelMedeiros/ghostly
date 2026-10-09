@@ -12,7 +12,7 @@ import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/video
 import { localPoster, posterUrl } from "../../lib/videoPoster";
 import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { useT } from "../../contexts/I18nContext";
-import { problemLine } from "../../lib/problemText";
+import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "missing" | "left-out" | "not-yet";
@@ -217,7 +217,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then(async (result) => { if (result === "missing") setProblem((await fileHeld(platform, file.id, false)) === "left-out" ? "left-out" : "missing"); })
-      .catch((error: Error) => setActionError(problemLine(error, t)));
+      .catch((error: Error) => setActionError(saveProblemLine(error, t)));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
