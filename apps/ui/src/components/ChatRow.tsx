@@ -33,12 +33,20 @@ import { UsagePill } from "./chat/UsageMeter";
  * key out of the row — it is in the row's tooltip and the chat's header; `comfortable` gives it its own line.
  * What the chat is set to (muted, pinned) is a quiet mark just before the time, in the time's own tone; on a pointer
  * device the row's actions (mute, pin, delete) take the marks' and the time's place while it is hovered.
+ * A bot's usage meter keeps one place on every row, whatever else the row shows: right after the key when the key has
+ * its line, else at the start of a trailing column of one width (USAGE_COLUMN).
  */
 
 const AVATAR = { compact: 46, comfortable: 52 } as const;
 /** How long a group invitation's row says why its answer did not go. */
 export const REFUSAL_SHOWN_MS = 8000;
 const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" } as const;
+/**
+ * Compact has no key line, so a bot's meter stays on the last line, where nothing but the row's end is fixed: it starts
+ * a column as wide as the widest meter ("100%") with the widest unread count ("99+") after it, the count at the row's
+ * end as on any row. The meter so starts at the same place with or without a count, whatever the count says.
+ */
+const USAGE_COLUMN = "flex min-w-[105px] items-center justify-between gap-1.5";
 
 /** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
 export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["delivery"]; live?: DhtOnlyBy }) {
@@ -200,7 +208,10 @@ export interface ChatRowProps {
    * listens to, whether it is the one in the hand, and the line on its edge when the dragged row would land there.
    */
   reorder?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
-  /** A bot's usage card (WISP 405 § Usage): how much of its quota is left, a small meter beside the unread count. */
+  /**
+   * A bot's usage card (WISP 405 § Usage): how much of its quota is left, a small meter in the same place on every row.
+   * Comfortable: right after the key. Compact: at the start of the last line's trailing column (USAGE_COLUMN).
+   */
   usage?: UsageEntry;
 }
 
@@ -235,6 +246,8 @@ export function ChatRow(p: ChatRowProps) {
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
+  const meter = p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />;
+  const unread = p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />;
   return (
     <div data-testid="chat-row" data-chat={p.chatId} data-muted={muted || undefined} data-dragging={p.reorder?.dragging || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} {...p.reorder?.props}
       // A row that can be dragged: a held finger moves it, so it selects no text and asks for no callout. In the hand it is
@@ -276,9 +289,14 @@ export function ChatRow(p: ChatRowProps) {
         time={p.time}
         timeClass={p.unread > 0 && !muted ? "text-accent font-medium" : "text-text-muted"}
         sub={<>
-          {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. */}
+          {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. A bot's meter
+              follows it: the short key is as wide on every row, so the meter starts at the same place on each. The line
+              keeps the key's height (the meter, 2px taller, is centred over it), and so the row keeps its own. */}
           {p.density === "comfortable"
-            ? <span data-testid="chat-row-key" className="block text-[11px] leading-4 text-text-muted font-mono whitespace-nowrap">{p.keyLabel}</span>
+            ? <span className="flex h-4 items-center gap-1.5 whitespace-nowrap">
+                <span data-testid="chat-row-key" className="shrink-0 text-[11px] leading-4 text-text-muted font-mono">{p.keyLabel}</span>
+                {meter}
+              </span>
             : <span className="sr-only"> · {p.keyLabel}</span>}
         </>}
         // The contact writing now takes the last message's place, in the accent, until it stops or the message comes.
@@ -299,10 +317,7 @@ export function ChatRow(p: ChatRowProps) {
           {muted && <MutedMark label={t("mute.bell")} />}
           {p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
         </>}
-        trailing={(p.usage || p.unread > 0) && <>
-          {p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />}
-          {p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />}
-        </>}
+        trailing={meter && p.density === "compact" ? <span className={USAGE_COLUMN}>{meter}{unread}</span> : unread}
         timeCover={
           // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place. A row in
           // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.
