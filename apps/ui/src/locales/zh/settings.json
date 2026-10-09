@@ -57,6 +57,14 @@
   "defaultNicknameHint": "开始新聊天时使用",
   "deleteAllChatsConfirm": "删除全部 {{count}} 个聊天?",
   "deleteAllChatsHint": "消息和文件会被删除。设置和钱包保留。",
+  "groupDownloads": {
+    "always": "始终",
+    "hint": "语音消息和小文件",
+    "info": "语音消息和不超过 {{file}} 的文件会自动下载，直到此设备上从某个群组自动下载的内容达到 {{group}}。更大的文件等待你点按“下载”。每台设备自行决定，不会向群组发送任何信息。",
+    "off": "关闭",
+    "title": "在群组中自动下载",
+    "wifi": "仅 Wi-Fi"
+  },
   "incorrectPassword": "密码错误",
   "language": "语言",
   "license": "许可证",
@@ -142,6 +150,7 @@
     "colour": "颜色、强调色、主题",
     "deleteChats": "删除、历史记录",
     "domains": "DNS、DoH",
+    "groupDownloads": "自动, 自动下载, 媒体, Wi-Fi, 移动数据, 语音消息, 文件, 群组",
     "language": "翻译、区域",
     "linkPreviews": "链接、URL",
     "lock": "密码、PIN、安全",

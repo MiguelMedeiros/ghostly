@@ -74,4 +74,15 @@ describe("help", () => {
     expect((await ghostly(["version"])).json).toHaveProperty("version");
     expect((await ghostly(["--pretty", "--version"])).json).toHaveProperty("version");
   });
+
+  it("shows an option only in the form the command takes, its text apart from it however long it is", async () => {
+    const backup = (await ghostly(["help", "profile", "backup"])).stdout;
+    // The command refuses a passphrase on the line: only --no-passphrase works.
+    expect(backup).toMatch(/^ {2}--no-passphrase\s+Do not encrypt/m);
+    expect(backup).not.toMatch(/^ {2}--passphrase\s/m);
+    for (const words of [["profile", "backup"], ["profile", "restore"]]) {
+      const { stdout } = await ghostly(["help", ...words]);
+      expect(stdout, words.join(" ")).toMatch(/--passphrase-file <value> {2,}The passphrase/);
+    }
+  });
 });

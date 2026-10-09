@@ -5,6 +5,8 @@ export interface OptionSpec {
   type: OptionType; short?: string; description: string;
   /** A number option that may stand alone (then `true`): it takes the next word only when that is a number. */
   optionalValue?: boolean;
+  /** A boolean the command takes only as `--no-<name>`: help shows it so. */
+  negatedOnly?: boolean;
 }
 export interface Parsed { positionals: string[]; options: Record<string, string | number | boolean | string[] | undefined> }
 

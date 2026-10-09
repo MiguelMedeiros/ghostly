@@ -119,6 +119,7 @@
   "option": {
     "automatic": "تلقائي",
     "automaticHint": "يختار التطبيقان، WebRTC أولًا",
+    "automaticHintNative": "يختار التطبيقان، {{transport}} أولًا: هذا التطبيق لا يدعم WebRTC",
     "chosenNotInUse": "مختار · غير مستخدم",
     "chosenWaiting": "مختار · في انتظاره",
     "contactLacks": "تطبيق جهة اتصالك لا يدعم {{transport}}",
@@ -198,6 +199,7 @@
     "afterDrop": "تلقائي: عادت المحادثة عبر {{transport}} بعد انقطاع وسيلة النقل السابقة.",
     "afterDropShort": "تلقائي، بعد انقطاع",
     "automatic": "تلقائي: يضع التطبيقان {{transport}} أولًا.",
+    "automaticNoWebrtc": "تلقائي: يستخدم التطبيقان {{transport}} المتوفر لدى كليهما؛ أحدهما لا يدعم WebRTC.",
     "automaticWebrtc": "تلقائي: يضع التطبيقان WebRTC أولًا، والاقتران الأول يستخدم WebRTC دائمًا.",
     "contactChose": "اختار {{contact}} {{transport}} لهذه المحادثة.",
     "fallback": "اخترت {{preferred}} لهذه المحادثة؛ وهو غير متاح الآن، لذا تستخدم المحادثة {{transport}}.",

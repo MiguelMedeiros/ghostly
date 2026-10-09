@@ -123,6 +123,36 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
   return out;
 }
 
+/**
+ * At least how many bytes `value` takes as JSON, counted only until it passes `budget`: a string by its length (UTF-8
+ * and escapes only add), anything else by its fewest. Binary data (an ArrayBuffer or a view on one) and a value too
+ * deep are NOT_JSON. It looks at no more than `budget` members, so a request far over 64 KiB is refused
+ * without JSON.stringify writing it whole: a 16 MiB Uint8Array took that 1.6 s on the page's thread.
+ */
+function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_JSON {
+  let bytes = 0;
+  const walk = (item: unknown, depth: number): boolean => {
+    // MAX_DEPTH within the args, one level below the request.
+    if (depth > MAX_DEPTH + 1 || item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return false;
+    if (typeof item === "string") bytes += item.length + 2;
+    else if (Array.isArray(item)) {
+      bytes += item.length + 1;
+      for (let i = 0; i < item.length && bytes <= budget; i++) if (!walk(item[i], depth + 1)) return false;
+    } else if (item !== null && typeof item === "object") {
+      bytes += 2;
+      for (const key in item) {
+        if (bytes > budget) break;
+        const member = (item as Record<string, unknown>)[key];
+        if (!Object.prototype.hasOwnProperty.call(item, key) || member === undefined) continue;
+        bytes += key.length + 2;
+        if (!walk(member, depth + 1)) return false;
+      }
+    } else bytes += 1;
+    return true;
+  };
+  return walk(value, 0) ? bytes : NOT_JSON;
+}
+
 class Refusal extends Error { declare message: MiniAppErrorCode }
 const refuse = (code: MiniAppErrorCode): never => { throw new Refusal(code); };
 
@@ -252,6 +282,10 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
     const id = data && typeof data === "object" && Number.isSafeInteger((data as { id?: unknown }).id) && (data as { id: number }).id >= 0 ? (data as { id: number }).id : null;
     const fail = (error: MiniAppErrorCode) => { if (id !== null) post({ id, ok: false, error }); };
     if (recent.length > MINI_APP_LIMITS.requestsPerSecond) return fail("too-fast");
+    // A bounded count first: what passes it is small enough to write as JSON and measure exactly.
+    const least = jsonBytesAtLeast(data, MINI_APP_LIMITS.requestBytes);
+    if (least === NOT_JSON) return fail("bad-request");
+    if (least > MINI_APP_LIMITS.requestBytes) return fail("too-large");
     let text: string;
     try { text = JSON.stringify(data) ?? ""; } catch { return fail("bad-request"); }
     if (utf8Bytes(text) > MINI_APP_LIMITS.requestBytes) return fail("too-large");
