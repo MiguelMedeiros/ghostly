@@ -45,12 +45,6 @@ https://github.com/user-attachments/assets/7f9e11de-4c65-44e9-9763-885664de0d64
 - <img src="docs/assets/icons/shared-apps.svg" width="20" align="absmiddle" alt=""> **[Shared services](docs/CHAT.md#calls-and-shared-services)**: share a web app on your `localhost` with a contact, over the chat's live connection.
 - <img src="docs/assets/icons/cli.svg" width="20" align="absmiddle" alt=""> **[CLI](docs/CLI.md) and [AI agents](docs/AI-AGENTS.md)**: the app's engine without a screen, for bots, scripts and agents.
 
-## See it
-
-https://github.com/user-attachments/assets/38824bb2-0e73-4066-93e2-0850ccd15c2e
-
-<sub>A short narrated intro (it plays on github.com). The site has more: <a href="https://ghostly.tools">ghostly.tools</a>.</sub>
-
 ## Get it
 
 - **Web:** open [app.ghostly.tools](https://app.ghostly.tools) in any modern browser. Install it as an app on a computer, Android or iPhone.
