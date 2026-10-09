@@ -307,11 +307,14 @@ function TasksPanel({ entries, nameOf, faceOf, anchorRef, onClose, onJump }: {
  * beside it, so a bot is known at a glance. The panel is then one section per sender (a bot each, in a
  * group like "Sala de Máquinas"), those with the most tasks going first, each saying how many it has going.
  */
-export function TasksButton({ rows, nameOf, faceOf }: {
+export function TasksButton({ rows, nameOf, faceOf, open: openGiven, onOpenChange }: {
   rows: readonly CardRow[]; nameOf?: (author: string) => string; faceOf?: (author: string) => MemberFaceOf | undefined;
+  /** The panel's state kept by the header, when something else there opens it too (the working line); else its own. */
+  open?: boolean; onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [openOwn, setOpenOwn] = useState(false);
+  const open = openGiven ?? openOwn, setOpen = onOpenChange ?? setOpenOwn;
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const entries = useMemo(() => cardEntries(rows), [rows]);

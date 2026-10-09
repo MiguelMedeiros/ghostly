@@ -23,3 +23,9 @@ export function useWorkingByPeer(): ReadonlyMap<string, WorkingEntry> {
     return byPeer;
   }, [index, state?.links]);
 }
+
+/** One contact's running tasks, or none. */
+export function useWorkingOf(peerKey: string | undefined): WorkingEntry | undefined {
+  const byPeer = useWorkingByPeer();
+  return peerKey ? byPeer.get(peerKey) : undefined;
+}

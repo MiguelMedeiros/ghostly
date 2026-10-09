@@ -94,9 +94,11 @@ import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
 import { UsageButton } from "../components/chat/UsageMeter";
 import { useUsageOf } from "../hooks/useUsage";
+import { WorkingLine } from "../components/chat/WorkingMark";
+import { useWorkingOf } from "../hooks/useWorking";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
-import { routineStacks } from "../lib/statusCards";
+import { panelCard, routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
@@ -559,6 +561,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const locked = useIsLocked();
   // A bot's usage card (WISP 405 § Usage): the meter in the header.
   const usage = useUsageOf(params?.peerPubKeyB64);
+  // Whether the bot is working (WISP 405 § Showing a card): a line in the header that opens the Tasks panel.
+  const working = useWorkingOf(params?.peerPubKeyB64);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  useEffect(() => setTasksOpen(false), [sessionId]);
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -726,6 +732,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={truncatedPeerKey} />
               {/* A bot's usage (WISP 405 § Usage): what is left of its quota and when it resets; a tap says more. */}
               {usage && <UsageButton entry={usage} />}
+              {/* What the bot is working on, from its running tasks; it opens the Tasks panel while the chat shows a card. */}
+              {working && <WorkingLine entry={working} open={tasksOpen} onToggle={messages.some((m) => panelCard(m.card)) ? setTasksOpen : undefined} />}
             </div>
           </div>
         </div>
@@ -737,7 +745,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <CallButtons blocked={webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
             onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
-          <TasksButton rows={messages} />
+          <TasksButton rows={messages} open={tasksOpen} onOpenChange={setTasksOpen} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button
