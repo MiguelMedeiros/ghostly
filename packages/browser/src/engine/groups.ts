@@ -1215,7 +1215,11 @@ export class Groups {
           this.host.emit();
           return;
         }
-        if (existing?.state && existing.state.status === "active") return;
+        if (existing?.state && existing.state.status === "active") {
+          // Already in (through the link, say): its admin stops showing us as invited. Only the admin we know hears it.
+          if (this.sessions.get(g)?.admin === frame.admin) this.host.sendOnLink(linkId, { t: "group-decline", g });
+          return;
+        }
         if (existing?.invitation?.seedB64) return; // already accepting one
         if ([...this.stored.values()].filter(x => x.invitation).length >= 32) return;
         // Removed and invited again: the history stays, and the names it was written under with it.

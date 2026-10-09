@@ -59,7 +59,7 @@ inviter → contact:  { "t": "group-chain", "g", "commits": [ … ] } *   (24 co
 inviter → contact:  { "t": "group-welcome", "g", "name", "commits": [ … ], "secrets": [ { "e", "s": <sealed> } ] }
 ```
 
-The invitee generates its member key on accepting. The admin commits `add`, tells the existing members over their edges, and sends the welcome over the contact chat. The joiner verifies the chain, unseals and confirms the secret, then opens edges to every other member. Being in the roster is the only admission; the contact chat is only the authenticated path that carried it.
+A contact already active in the group (it came in through the link, say) answers an invitation that names the group's admin with `group-decline`, so the inviter stops counting it as invited. The invitee generates its member key on accepting. The admin commits `add`, tells the existing members over their edges, and sends the welcome over the contact chat. The joiner verifies the chain, unseals and confirms the secret, then opens edges to every other member. Being in the roster is the only admission; the contact chat is only the authenticated path that carried it.
 
 ### Entry link (`group-entry/1`)
 
