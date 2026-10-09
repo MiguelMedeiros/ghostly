@@ -224,11 +224,32 @@
     "tooLong": "Message exceeds 16 KiB"
   },
   "hold": {
+    "ackFailed": "Picked up, but your contact couldn't be told",
+    "addressExpired": "Your contact left items for you, but their address expired",
+    "addressExpiredNext": "They're handed over when your contact is next online.",
+    "contactRefused": "Your contact's app refused this item",
+    "contactRefusedNext": "It couldn't be verified as yours, or was too large for it. Retry to hold it again.",
+    "expired": "Held for its whole lifetime without being picked up",
+    "fileGone": "The file is gone",
     "fullBytes": "This would put more than {{max}} MB waiting for your contact",
     "fullItems": "Your contact already has {{max}} items waiting",
     "fullNext": "Send it again once they pick some up.",
+    "messageGone": "The message is gone",
+    "needPinned": "Held messages need S3 storage and a pinned contact",
+    "needStorageNext": "Set up S3 storage in Profile → Backups.",
     "needsStorage": "This message can't be held",
-    "needsStorageNext": "Set up S3 storage in Profile → Backups, and ask your contact to allow held messages."
+    "needsStorageNext": "Set up S3 storage in Profile → Backups, and ask your contact to allow held messages.",
+    "pickUpFailed": "Couldn't pick up what your contact left for you",
+    "pointerFailed": "Stored, but your contact couldn't be told where",
+    "readFailed": "Couldn't check what your contact left for you",
+    "refusedItem": "Refused an item your contact left for you",
+    "refusedOffer": "Refused what your contact's storage offered",
+    "requestGone": "The payment request is gone",
+    "retryNext": "Retry to hold it again.",
+    "retryingNext": "Ghostly tries again by itself.",
+    "storeFailed": "Couldn't store the item in your storage",
+    "storeFailedNext": "Check your S3 storage in Profile → Backups, then retry.",
+    "tooLarge": "An item held for an away contact is at most {{mb}} MB"
   },
   "host": {
     "noApp": "No app on this phone can open it",

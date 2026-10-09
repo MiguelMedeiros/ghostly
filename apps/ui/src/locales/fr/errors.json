@@ -224,11 +224,32 @@
     "tooLong": "Le message dépasse 16 Kio"
   },
   "hold": {
+    "ackFailed": "Récupéré, mais impossible de prévenir votre contact",
+    "addressExpired": "Votre contact vous a laissé des éléments, mais son adresse a expiré",
+    "addressExpiredNext": "Ils vous parviennent quand votre contact revient en ligne.",
+    "contactRefused": "L'app de votre contact a refusé cet élément",
+    "contactRefusedNext": "Il n'a pas pu être vérifié comme venant de vous, ou était trop gros pour elle. Réessayez pour le garder à nouveau.",
+    "expired": "Gardé pendant toute sa durée sans être récupéré",
+    "fileGone": "Le fichier n'existe plus",
     "fullBytes": "Cela dépasserait {{max}} Mo en attente pour votre contact",
     "fullItems": "Votre contact a déjà {{max}} éléments en attente",
     "fullNext": "Renvoyez-le quand votre contact en aura récupéré quelques-uns.",
+    "messageGone": "Le message n'existe plus",
+    "needPinned": "Les messages gardés demandent un stockage S3 et un contact épinglé",
+    "needStorageNext": "Configurez un stockage S3 dans Profil → Sauvegardes.",
     "needsStorage": "Ce message ne peut pas être gardé",
-    "needsStorageNext": "Configurez un stockage S3 dans Profil → Sauvegardes, et demandez à votre contact d'autoriser les messages gardés."
+    "needsStorageNext": "Configurez un stockage S3 dans Profil → Sauvegardes, et demandez à votre contact d'autoriser les messages gardés.",
+    "pickUpFailed": "Impossible de récupérer ce que votre contact vous a laissé",
+    "pointerFailed": "Enregistré, mais impossible d'indiquer à votre contact où le trouver",
+    "readFailed": "Impossible de voir ce que votre contact vous a laissé",
+    "refusedItem": "Refusé un élément que votre contact vous a laissé",
+    "refusedOffer": "Refusé ce que le stockage de votre contact proposait",
+    "requestGone": "La demande de paiement n'existe plus",
+    "retryNext": "Réessayez pour le garder à nouveau.",
+    "retryingNext": "Ghostly réessaie tout seul.",
+    "storeFailed": "Impossible d'enregistrer l'élément dans votre stockage",
+    "storeFailedNext": "Vérifiez votre stockage S3 dans Profil → Sauvegardes, puis réessayez.",
+    "tooLarge": "Un élément gardé pour un contact absent fait au plus {{mb}} Mo"
   },
   "host": {
     "noApp": "Aucune app de ce téléphone ne peut l'ouvrir",

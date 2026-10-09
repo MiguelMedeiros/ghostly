@@ -224,11 +224,32 @@
     "tooLong": "A mensagem passa de 16 KiB"
   },
   "hold": {
+    "ackFailed": "Buscado, mas não foi possível avisar seu contato",
+    "addressExpired": "Seu contato deixou itens para você, mas o endereço deles expirou",
+    "addressExpiredNext": "Eles chegam quando seu contato voltar a ficar online.",
+    "contactRefused": "O app do seu contato recusou este item",
+    "contactRefusedNext": "Não deu para confirmar que era seu, ou era grande demais para ele. Tente de novo para guardá-lo outra vez.",
+    "expired": "Ficou guardado o prazo todo sem ser buscado",
+    "fileGone": "O arquivo não existe mais",
     "fullBytes": "Isto passaria de {{max}} MB esperando por seu contato",
     "fullItems": "Seu contato já tem {{max}} itens esperando",
     "fullNext": "Envie de novo quando seu contato pegar alguns.",
+    "messageGone": "A mensagem não existe mais",
+    "needPinned": "Mensagens guardadas precisam de um S3 e de um contato fixado",
+    "needStorageNext": "Configure um S3 em Perfil → Backups.",
     "needsStorage": "Não dá para guardar esta mensagem",
-    "needsStorageNext": "Configure um S3 em Perfil → Backups e peça ao seu contato para permitir mensagens guardadas."
+    "needsStorageNext": "Configure um S3 em Perfil → Backups e peça ao seu contato para permitir mensagens guardadas.",
+    "pickUpFailed": "Não foi possível buscar o que seu contato deixou para você",
+    "pointerFailed": "Guardado, mas não foi possível avisar seu contato onde",
+    "readFailed": "Não foi possível ver o que seu contato deixou para você",
+    "refusedItem": "Recusado um item que seu contato deixou para você",
+    "refusedOffer": "Recusado o que o armazenamento do seu contato ofereceu",
+    "requestGone": "O pedido de pagamento não existe mais",
+    "retryNext": "Tente de novo para guardá-lo outra vez.",
+    "retryingNext": "O Ghostly tenta de novo sozinho.",
+    "storeFailed": "Não foi possível guardar o item no seu armazenamento",
+    "storeFailedNext": "Confira seu S3 em Perfil → Backups e tente de novo.",
+    "tooLarge": "Um item guardado para um contato ausente tem no máximo {{mb}} MB"
   },
   "host": {
     "noApp": "Nenhum app deste telefone consegue abrir isto",

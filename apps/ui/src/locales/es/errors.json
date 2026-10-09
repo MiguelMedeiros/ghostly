@@ -224,11 +224,32 @@
     "tooLong": "El mensaje supera los 16 KiB"
   },
   "hold": {
+    "ackFailed": "Recogido, pero no se pudo avisar a tu contacto",
+    "addressExpired": "Tu contacto te dejó elementos, pero su dirección caducó",
+    "addressExpiredNext": "Te llegan cuando tu contacto vuelva a estar en línea.",
+    "contactRefused": "La app de tu contacto rechazó este elemento",
+    "contactRefusedNext": "No se pudo verificar que era tuyo, o era demasiado grande para ella. Vuelve a intentarlo para retenerlo de nuevo.",
+    "expired": "Estuvo retenido todo su plazo sin que lo recogieran",
+    "fileGone": "El archivo ya no existe",
     "fullBytes": "Esto superaría los {{max}} MB esperando a tu contacto",
     "fullItems": "Tu contacto ya tiene {{max}} elementos esperando",
     "fullNext": "Envíalo de nuevo cuando tu contacto recoja algunos.",
+    "messageGone": "El mensaje ya no existe",
+    "needPinned": "Los mensajes retenidos necesitan S3 y un contacto fijado",
+    "needStorageNext": "Configura S3 en Perfil → Copias de seguridad.",
     "needsStorage": "Este mensaje no se puede retener",
-    "needsStorageNext": "Configura S3 en Perfil → Copias de seguridad y pide a tu contacto que permita retener mensajes."
+    "needsStorageNext": "Configura S3 en Perfil → Copias de seguridad y pide a tu contacto que permita retener mensajes.",
+    "pickUpFailed": "No se pudo recoger lo que tu contacto te dejó",
+    "pointerFailed": "Guardado, pero no se pudo avisar a tu contacto de dónde está",
+    "readFailed": "No se pudo ver lo que tu contacto te dejó",
+    "refusedItem": "Se rechazó un elemento que tu contacto te dejó",
+    "refusedOffer": "Se rechazó lo que ofrecía el almacenamiento de tu contacto",
+    "requestGone": "La solicitud de pago ya no existe",
+    "retryNext": "Vuelve a intentarlo para retenerlo de nuevo.",
+    "retryingNext": "Ghostly lo vuelve a intentar solo.",
+    "storeFailed": "No se pudo guardar el elemento en tu almacenamiento",
+    "storeFailedNext": "Revisa tu S3 en Perfil → Copias de seguridad y vuelve a intentarlo.",
+    "tooLarge": "Un elemento retenido para un contacto ausente ocupa como máximo {{mb}} MB"
   },
   "host": {
     "noApp": "Ninguna app de este teléfono puede abrirlo",
