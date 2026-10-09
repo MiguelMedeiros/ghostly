@@ -95,6 +95,13 @@ const RULES: readonly Rule[] = [
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },
+  // A sent file the contact's app refused (packages/core chatFiles.ts `refusalText`): it can be sent again.
+  { match: /^Not enough space on your contact's device \((?<free>.+) free\)$/, key: "errors.files.noRoom", next: "errors.files.refused.noRoomFree" },
+  exact("Not enough space on your contact's device", "errors.files.noRoom", "errors.files.refused.makeRoom"),
+  exact("Your contact has too many files waiting. Try again later.", "errors.files.refused.tooMany", "errors.files.refused.tryLater"),
+  exact("The file arrived damaged and was deleted. Send it again.", "errors.files.refused.damaged", "errors.files.refused.sendAgain"),
+  exact("Not accepted in time", "errors.files.refused.expired", "errors.files.refused.sendAgain"),
+  exact("Your contact could not take this file", "errors.files.refused.other", "errors.files.refused.sendAgain"),
   { match: /^That file is too large for your contact's app \(max (?<max>.+)\)\. Larger files need an updated Ghostly on their side\.$/, key: "errors.files.tooLargeForContact", next: "errors.files.tooLargeForContactNext" },
   { match: /^That file is too large \(max (?<size>.+)\)\.$/, key: "chat.fileTooLarge" },
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
