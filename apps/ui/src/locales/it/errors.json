@@ -386,8 +386,15 @@
   },
   "transport": {
     "adapterFailed": "Avvio non riuscito. Riapri questa chat per riprovare.",
+    "allowAnotherNext": "Consenti un altro trasporto o attiva il Ripiego.",
+    "cannotSwitch": "L'app del tuo contatto non può cambiare trasporto",
+    "cannotSwitchNext": "La sua app va aggiornata (un Ghostly aggiornato).",
     "listenerGiven": "In pausa per una chat più attiva. Apri questa chat per riprendere.",
-    "listenerReleased": "In pausa per un'altra chat. Apri questa chat per riprendere."
+    "listenerReleased": "In pausa per un'altra chat. Apri questa chat per riprendere.",
+    "noneConnected": "Nessun trasporto è riuscito a connettersi",
+    "noneInCommon": "Nessun modo di connettersi in comune",
+    "peerClosed": "Il tuo contatto ha chiuso la connessione",
+    "peerClosedNext": "Verifica che entrambi consentiate un trasporto in comune, poi riconnetti."
   },
   "wallet": {
     "alreadyHave": "Hai già un portafoglio {{kind}} {{network}}",

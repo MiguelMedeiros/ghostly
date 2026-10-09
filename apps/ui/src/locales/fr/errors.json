@@ -386,8 +386,15 @@
   },
   "transport": {
     "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",
+    "allowAnotherNext": "Autorisez un autre transport ou activez le Secours.",
+    "cannotSwitch": "L'app de votre contact ne peut pas changer de transport",
+    "cannotSwitchNext": "Son app doit être mise à jour (un Ghostly à jour).",
     "listenerGiven": "En pause pour une discussion plus active. Ouvrez celle-ci pour reprendre.",
-    "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre."
+    "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre.",
+    "noneConnected": "Aucun transport n'a pu se connecter",
+    "noneInCommon": "Aucun moyen de connexion en commun",
+    "peerClosed": "Votre contact a fermé la connexion",
+    "peerClosedNext": "Vérifiez que vous autorisez tous deux un transport commun, puis reconnectez-vous."
   },
   "wallet": {
     "alreadyHave": "Vous avez déjà un portefeuille {{kind}} {{network}}",

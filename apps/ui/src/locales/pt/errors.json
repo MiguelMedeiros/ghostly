@@ -386,8 +386,15 @@
   },
   "transport": {
     "adapterFailed": "Não iniciou. Reabra esta conversa para tentar de novo.",
+    "allowAnotherNext": "Permita outro transporte ou ligue a Alternativa.",
+    "cannotSwitch": "O app do seu contato não troca de transporte",
+    "cannotSwitchNext": "O app dele precisa de uma atualização (um Ghostly atualizado).",
     "listenerGiven": "Pausado para uma conversa mais ativa. Abra esta conversa para retomar.",
-    "listenerReleased": "Pausado para outra conversa. Abra esta conversa para retomar."
+    "listenerReleased": "Pausado para outra conversa. Abra esta conversa para retomar.",
+    "noneConnected": "Nenhum transporte conseguiu conectar",
+    "noneInCommon": "Nenhuma forma de conexão em comum",
+    "peerClosed": "Seu contato fechou a conexão",
+    "peerClosedNext": "Confira se vocês dois permitem um transporte em comum e reconecte."
   },
   "wallet": {
     "alreadyHave": "Você já tem uma carteira {{kind}} {{network}}",

@@ -386,8 +386,15 @@
   },
   "transport": {
     "adapterFailed": "无法启动。重新打开此聊天以重试。",
+    "allowAnotherNext": "允许另一种传输方式，或打开备用。",
+    "cannotSwitch": "对方的应用无法切换传输方式",
+    "cannotSwitchNext": "对方的应用需要更新（更新版 Ghostly）。",
     "listenerGiven": "已为更活跃的聊天暂停。打开此聊天即可恢复。",
-    "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。"
+    "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。",
+    "noneConnected": "没有传输方式能连接",
+    "noneInCommon": "没有共同的连接方式",
+    "peerClosed": "对方关闭了连接",
+    "peerClosedNext": "请确认你们双方都允许一种共同的传输方式，然后重新连接。"
   },
   "wallet": {
     "alreadyHave": "你已经有一个 {{network}} {{kind}} 钱包",
