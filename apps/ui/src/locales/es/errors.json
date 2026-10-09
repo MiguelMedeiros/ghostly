@@ -187,6 +187,10 @@
     "shareLinkInstead": "Comparte con esa persona el enlace del grupo: quien lo abre entra",
     "tooLong": "El mensaje supera los 16 KiB"
   },
+  "hold": {
+    "needsStorage": "Este mensaje no se puede retener",
+    "needsStorageNext": "Configura S3 en Perfil → Copias de seguridad y pide a tu contacto que permita retener mensajes."
+  },
   "host": {
     "noApp": "Ninguna app de este teléfono puede abrirlo",
     "noAppNext": "Instala una app para ello, o copia el enlace y ábrelo en otro sitio.",
