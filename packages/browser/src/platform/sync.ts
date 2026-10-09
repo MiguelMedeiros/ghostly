@@ -44,6 +44,18 @@ export function notifySessionsChanged(): void {
 }
 
 /**
+ * Histories made whole again after a reload (the engine posts every chat's at attach) store nothing new: the chat list
+ * has nothing to show, but an open chat has older messages to read. One `session-updated` for all of them, not one each.
+ */
+let wholeAgain: ReturnType<typeof setTimeout> | undefined;
+function notifyWholeAgain(): void {
+  wholeAgain ??= setTimeout(() => {
+    wholeAgain = undefined;
+    notifySessionsChanged();
+  }, 50);
+}
+
+/**
  * The sessions as this module last read them. Each engine update, `session-updated` and the 5 s tick reads them all:
  * a long chat's session is parsed again only when what is stored for it changed. One changed in place here is saved,
  * then forgotten (read again), so a write that failed does not linger as if it had been made.
@@ -125,7 +137,8 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   setEngineMessages(session.id, engineIds(messages));
   // Read without its older messages (this page just loaded): the ones the engine keeps come back below, all of them.
   const partial = !!session.older;
-  const at = new Map(session.messages.map((m, i) => [m.id, i]));
+  const before = partial ? storedSession(session.id) : null;
+  const at =new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
   let dirty = false, moved = false;
   for (const message of messages) {
@@ -188,8 +201,10 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   if (mirrorIdentityShare(session, link)) changed = true;
   if (mirrorReaction(session, link)) changed = true;
   if (dirty || added.length || changed) forget(session.id);
-  mirrored.set(linkId, { messages, sessionId: session.id, stored: storedSession(session.id) });
-  if (changed) notifySessionsChanged();
+  const after = storedSession(session.id);
+  mirrored.set(linkId, { messages, sessionId: session.id, stored: after });
+  if (changed && partial && after === before) notifyWholeAgain();
+  else if (changed) notifySessionsChanged();
 }
 
 /**

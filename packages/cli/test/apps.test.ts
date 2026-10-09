@@ -179,6 +179,15 @@ describe("app publish", () => {
     expect(ok(await ghostly(["app", "publish", parser, "--key", key]))).toMatchObject({ files: ["index.html", "pem.js"] });
   }, 60_000);
 
+  it("lists a folder's files in the manifest's order when a file and a folder share a prefix", async () => {
+    const { manifest, files } = chess();
+    const text = (s: string) => new TextEncoder().encode(s);
+    const dir = appFolder(manifest, new Map([...files, ["lib/x.js", text("1")], ["lib-extra.js", text("2")], ["img/a.txt", text("3")], ["img.txt", text("4")]]));
+    const made = ok(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]));
+    expect(made.files).toEqual(["img.txt", "img/a.txt", "index.html", "lib-extra.js", "lib/x.js"]);
+    expect(ok(await ghostly(["app", "verify", join(dir, "app.ghostlyapp")]))).toMatchObject({ valid: true });
+  }, 60_000);
+
   it("says what is wrong with the source: a usage error, fields publish writes, a manifest a client refuses", async () => {
     const { manifest, files } = chess();
     const keys = tmp();

@@ -106,11 +106,28 @@ describe("paying a contact's request, never twice", () => {
     const { desk, wallet } = setup([
       record({ id: "r1", mints: [MINT] }),
       record({ id: "p0", kind: "payment", direction: "out", requestId: "r1", state: "reclaimed" }),
-      record({ id: "p1", kind: "payment", direction: "out", requestId: "r1", state: "failed", token: "cashuBold" }),
+      record({ id: "p1", kind: "payment", direction: "out", requestId: "r1", state: "failed" }),
     ]);
     await desk.start();
     await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
     expect(wallet.createToken).toHaveBeenCalledWith(100, [MINT], undefined, expect.any(Function), "mainnet");
+  });
+
+  it("refused ecash not taken back yet still counts: the request is not paid again until it is back", async () => {
+    const { desk, wallet, state } = setup([record({ id: "r1", mints: [MINT] })]);
+    await desk.start();
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
+    const paid = desk.records().find((p) => p.kind === "payment" && p.requestId === "r1")!;
+    wallet.receiveToken.mockRejectedValueOnce(new Error("fetch failed"));
+    await desk.onPaymentResult("l", { id: paid.id, ok: false, error: "No thanks" });
+    expect(state(paid.id)).toMatchObject({ state: "failed", token: "cashuBtoken" });
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("You already paid this request");
+    expect(wallet.createToken).toHaveBeenCalledOnce();
+    // Taken back: the ecash is ours again, and the request can be paid.
+    await desk.reclaim(paid.id);
+    expect(state(paid.id)?.state).toBe("reclaimed");
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
+    expect(wallet.createToken).toHaveBeenCalledTimes(2);
   });
 
   it("goes to Lightning only when no ecash was made and the request has an invoice", async () => {
@@ -669,6 +686,24 @@ describe("Ark receipts", () => {
     expect(sent).toEqual([{ kind: "res", frame: { id: "r", ok: true } }]);
     await pay("p6", JSON.stringify({ txid: tx("a") }));
     expect(arkWallet.adapter.verifyReceipt, "a settled receipt is not checked again").toHaveBeenCalledOnce();
+  });
+
+  it("one request keeps one pending Ark receipt: more under fresh ids are not stored, said, or checked", async () => {
+    const { desk, arkWallet, state, texts } = setup([record({ id: "r", direction: "out", target: ark("tark1mine") })]);
+    await desk.start();
+    const pay = (id: string, txid: string) => desk.onPayment("l", { id, requestId: "r", timestamp: 1, amount: { value: "100", asset: "sat" }, endpoint: [ENDPOINT.arkade, JSON.stringify({ txid })] });
+    for (const [i, c] of ["a", "b", "c", "d", "e"].entries()) await pay(`p${i}`, tx(c));
+    expect(["p0", "p1", "p2", "p3", "p4"].map((id) => state(id)?.state)).toEqual(["pending", undefined, undefined, undefined, undefined]);
+    expect(texts().filter((t) => t?.includes("on Ark"))).toHaveLength(1);
+    expect(arkWallet.adapter.verifyReceipt).toHaveBeenCalledOnce();
+    arkWallet.adapter.verifyReceipt.mockClear();
+    await desk.reconcileArkReceipts();
+    expect(arkWallet.adapter.verifyReceipt, "a pass asks about the one receipt").toHaveBeenCalledOnce();
+
+    // The address is what pays it: our server seeing the money settles the request and its receipt.
+    arkWallet.adapter.received.mockResolvedValue(tx("f"));
+    await desk.reconcileArkReceipts();
+    expect([state("r")?.state, state("p0")?.state]).toEqual(["settled", "settled"]);
   });
 
   it("requests and receipts of another Ark server or network are left for it", async () => {

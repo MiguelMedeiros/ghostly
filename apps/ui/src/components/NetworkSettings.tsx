@@ -49,13 +49,14 @@ export function NetworkSettings() {
   const saved = savedAs === current;
   // A TURN server restored from a backup comes without its credential (backups leave it out): calls skip it until then.
   const credentialGone = !!network.turn?.urls && !network.turn.credential && !turn.credential;
+  const direct = network.readRelays !== undefined;
 
   const save = async () => {
     setError("");
     setSavedAs(null);
     const server = turn.urls.trim() ? { ...turn, urls: turn.urls.trim() } : null;
     // Checked here as well as in the engine, so the person sees why before anything changes.
-    const relay = hyperdhtRelay.trim();
+    const relay = direct ? "" : hyperdhtRelay.trim();
     const push = pushRelay.trim();
     const problem = (server ? iceServerProblem(server) : null) ?? (relay ? hyperdhtRelayProblem(relay) : null) ?? (push ? pushRelayProblem(push) : null);
     if (problem) { setError(errorText(problem, t)); return; }
@@ -64,12 +65,11 @@ export function NetworkSettings() {
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
       // Either spelling of a default (with or without the trailing dot of a full domain name) is that default.
       const defaults = network.iroh && JSON.stringify(irohRelays.map(url => irohRelayUrl(url))) === JSON.stringify(network.iroh.defaultRelays.map(url => irohRelayUrl(url)));
-      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), hyperdhtRelay: relay, pushRelay: push });
+      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), ...(direct ? {} : { hyperdhtRelay: relay }), pushRelay: push });
     } catch (e) { setError(problemLine(e, t)); return; }
     setSavedAs(current);
   };
 
-  const direct = network.readRelays !== undefined;
   // On at once, like the other switches of Settings; the relay list as saved goes with it, not unsaved edits.
   const readRelays = async (on: boolean) => {
     setError("");
@@ -102,10 +102,11 @@ export function NetworkSettings() {
           className={`${field} font-mono text-sm resize-y`} />
       </Field>}
 
-      <Field label={t("network.hyperdht")} htmlFor="network-hyperdht-relay" hint={t("network.hyperdhtHint")} info={t("network.hyperdhtInfo")}>
+      {/* The Desktop (the DHT reached directly) runs HyperDHT itself and ignores the relay: not offered, and left as saved. */}
+      {!direct && <Field label={t("network.hyperdht")} htmlFor="network-hyperdht-relay" hint={t("network.hyperdhtHint")} info={t("network.hyperdhtInfo")}>
         <input id="network-hyperdht-relay" value={hyperdhtRelay} onChange={(e) => setHyperdhtRelay(e.target.value)} placeholder="wss://relay.example.org"
           spellCheck={false} data-testid="network-hyperdht-relay" className={`${field} font-mono text-sm`} />
-      </Field>
+      </Field>}
 
       <Field label={t("network.pushRelay")} htmlFor="network-push-relay" hint={t("network.pushRelayHint")} info={t("network.pushRelayInfo")}>
         <input id="network-push-relay" value={pushRelay} onChange={(e) => setPushRelay(e.target.value)} placeholder="https://push-relay.example.org"

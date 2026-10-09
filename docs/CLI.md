@@ -43,11 +43,16 @@ Windows x64 have the same prebuilt modules but no CI run.
 ```bash
 ghostly profile set --name "Echo bot"     # the name contacts see
 ghostly daemon --detach                   # keep the profile online
-ghostly invite create --label alice       # {"chat","invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…"}
+ghostly invite create --label alice       # {"chat","invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…","published":true}
 ghostly chat wait alice --until live      # once Alice opened the link in the app
 ghostly send alice "hello"
 ghostly listen                            # one JSON event per line
 ```
+
+A pairing costs the inviter 12 to 18 requests on each relay, and a profile keeps to 30 per relay a minute (relays limit
+by IP), so about 3 invites a minute go out at once. Past that, `invite create` still answers at once with
+`"published":false` and `retryInMs`: the invite goes out by itself when the relays' minute frees a request, and the
+link works from then on. A one-shot (no daemon) waits up to 20 s for it before it leaves.
 
 To join someone else's invite: `ghostly invite join <ghostly1… or link> --label bob`. The invite is the app's own, so
 the other side can be the web app, the extension, the Desktop or another `ghostly`.

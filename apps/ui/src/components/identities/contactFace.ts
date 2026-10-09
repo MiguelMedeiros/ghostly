@@ -62,6 +62,8 @@ export function forgetFaceChoice(peerKey: string): void {
   try { localStorage.removeItem(faceKey(peerKey)); } catch { /* storage unavailable */ }
 }
 
+const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
+
 const subscribeChoices = (listener: () => void) => {
   window.addEventListener(FACE_EVENT, listener);
   window.addEventListener("storage", listener);
@@ -168,14 +170,17 @@ export function useContactFaces(): (peerKey: string | undefined) => ContactFace 
  * nobody chose a profile for.
  */
 export function useChosenProfile(peerKey: string | undefined): void {
-  const state = useEngineState();
   const choice = useFaceChoice(peerKey);
-  const r = choice && choice !== "none" ? receivedOf(state?.links, peerKey)?.find(x => x.provider === choice.provider && x.subject === choice.subject) : undefined;
-  const good = !!r && isGood(badgeState(r) ?? "expired") && hasPublicProfile(r.provider);
-  const provider = r?.provider, subject = r?.subject;
+  // Only the identity to ask for is read from the state: an engine state that changes nothing here draws nothing (a chat list's row).
+  const chosen = () => {
+    const r = choice && choice !== "none" ? receivedOf(engine.state?.links, peerKey)?.find(x => x.provider === choice.provider && x.subject === choice.subject) : undefined;
+    return r && isGood(badgeState(r) ?? "expired") && hasPublicProfile(r.provider) ? r : undefined;
+  };
+  const provider = useSyncExternalStore(subscribeEngine, () => chosen()?.provider);
+  const subject = useSyncExternalStore(subscribeEngine, () => chosen()?.subject);
   useEffect(() => {
-    if (good && provider && subject) void engine.call("loadPublicProfile", { provider, subject }).catch(() => {});
-  }, [good, provider, subject]);
+    if (provider && subject) void engine.call("loadPublicProfile", { provider, subject }).catch(() => {});
+  }, [provider, subject]);
 }
 
 /**
