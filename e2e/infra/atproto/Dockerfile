@@ -1,6 +1,6 @@
 # A local AT Protocol network for the e2e suite (server.mjs): a PLC directory in memory and a reference PDS.
 # Debian, not Alpine: the PDS's SQLite (better-sqlite3) and sharp ship glibc prebuilds.
-FROM node:25-bookworm-slim
+FROM node:22-bookworm-slim
 WORKDIR /atproto
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
