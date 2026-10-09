@@ -5,7 +5,7 @@ import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, CALL_
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { findChat } from "../apiKit";
 import { CliError } from "../errors";
-import { AudioSocket, audioSocketPath } from "./audioSocket";
+import { AudioSocket, audioSocketPath, clearAudioSockets } from "./audioSocket";
 import { CallMedia, loadCallStack, type CallStack, type MediaOptions } from "./media";
 import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
 
@@ -106,6 +106,8 @@ export class CallManager {
   constructor(private readonly host: CallHost) {
     this.configPath = join(host.profileDir, "calls.json");
     this.auto = readAuto(this.configPath);
+    // A daemon starts with no call: a socket left in its folder is one a daemon that crashed during a call never closed.
+    if (host.answers !== false) clearAudioSockets(host.profileDir);
   }
 
   private get now(): number { return (this.host.now ?? Date.now)(); }
