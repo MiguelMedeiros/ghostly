@@ -440,6 +440,8 @@ export class CommunitySession {
   private known = new Map<string, CommunityCommit>();
   /** Commit hash → roster after it, for the window of the main branch and the side commits. */
   private rosters = new Map<string, Roster>();
+  /** Commit hash → roster after it, for a few main-branch commits older than the window that `couldRead` was asked about. */
+  private pastRosters = new Map<string, Roster>();
   private mainIndex = new Map<string, number>();
   private pendingCommits = new Map<string, { from: string; commit: unknown }>();
   private pendingSecrets = new Map<string, SealedSecret>();
@@ -571,8 +573,24 @@ export class CommunitySession {
    */
   couldRead(key: string, messageId: string): boolean {
     const [, e, h] = messageId.split(":");
-    const found = h === undefined ? undefined : this.commitByShort(Number(e), h);
-    return !!found && rosterHas(this.rosterAt(found.hash) ?? [], key) && rosterHas(this.roster, key);
+    if (h === undefined || !rosterHas(this.roster, key)) return false;
+    const found = this.commitByShort(Number(e), h);
+    if (found) return rosterHas(this.rosterAt(found.hash) ?? [], key);
+    // A commit of the main branch older than the window: its secret is gone, not the rule (its roster is replayed).
+    const i = this.state.chain.length - 1 - (this.epoch - Number(e));
+    const commit = Number.isSafeInteger(i) && i >= 0 ? this.state.chain[i] : undefined;
+    const hash = commit && communityCommitHash(commit);
+    return !!hash && hash.startsWith(h) && rosterHas(this.pastRoster(i, hash), key);
+  }
+  /** The roster after an old commit of the main branch, replayed and kept apart from the window's (a few, the latest asked). */
+  private pastRoster(i: number, hash: string): Roster {
+    const known = this.pastRosters.get(hash);
+    if (known) return known;
+    let roster: Roster | null = null;
+    for (let j = 0; j <= i && (j === 0 || roster); j++) roster = communityRoster(roster, this.state.chain[j]);
+    this.pastRosters.set(hash, roster ?? []);
+    for (const old of this.pastRosters.keys()) { if (this.pastRosters.size <= 8) break; this.pastRosters.delete(old); }
+    return roster ?? [];
   }
   /** Someone the chain took out (removed or left) and who is not back in. */
   wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
