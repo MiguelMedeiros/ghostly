@@ -130,6 +130,7 @@
     "noRoomNext": "{{free}} free.",
     "notVoice": "That recording cannot be sent as a voice message",
     "pasteTooLarge": "That is too large to paste. Send it with + → Document.",
+    "pasteUnreadable": "Could not paste those files. Send them with + → Document.",
     "refused": {
       "damaged": "The file arrived damaged",
       "expired": "Not accepted in time",

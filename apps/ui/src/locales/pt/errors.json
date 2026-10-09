@@ -130,6 +130,7 @@
     "noRoomNext": "{{free}} livres.",
     "notVoice": "Essa gravação não pode ser enviada como mensagem de voz",
     "pasteTooLarge": "Isso é grande demais para colar. Envie com + → Documento.",
+    "pasteUnreadable": "Não foi possível colar esses arquivos. Envie-os com + → Documento.",
     "refused": {
       "damaged": "O arquivo chegou danificado",
       "expired": "Não foi aceito a tempo",
