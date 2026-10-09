@@ -2,6 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatConnection } from "../../components/ChatConnection";
+import { connectionSummary } from "../../lib/transportEvents";
 import { linkView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -305,6 +306,17 @@ describe("ChatConnection: what the panel does", () => {
     }
     await user.click(screen.getByRole("radio", { name: "WebRTC" }));
     expect(engine.callsTo("setChatTransport")).toEqual([]);
+  });
+
+  it("in an app with no WebRTC (Linux Desktop), Automatic and the summary say what Automatic does there", () => {
+    const link = { pairing: ready({ transport: "hyperdht/1" }), availableTransports: ["iroh/1", "hyperdht/1"] as LinkView["availableTransports"], peerTransports: all, transportAutomatic: true };
+    banner(link);
+    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("title", "Automatic: The apps choose, Iroh first: this app has no WebRTC");
+    // The contact's app ranks WebRTC first: "both apps rank HyperDHT first" would be untrue.
+    expect(connectionSummary(linkView(link), Date.now())?.why).toBe("Automatic: the apps use HyperDHT, which both have; one of them has no WebRTC.");
+    expect(connectionSummary(linkView({ ...link, availableTransports: all, peerTransports: ["iroh/1", "hyperdht/1"] }), Date.now())?.why)
+      .toBe("Automatic: the apps use HyperDHT, which both have; one of them has no WebRTC.");
+    expect(connectionSummary(linkView({ ...link, availableTransports: all }), Date.now())?.why).toBe("Automatic: both apps rank HyperDHT first.");
   });
 
   it("goes back to Automatic", async () => {
