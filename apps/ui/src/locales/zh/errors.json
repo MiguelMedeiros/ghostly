@@ -224,11 +224,32 @@
     "tooLong": "消息超过 16 KiB"
   },
   "hold": {
+    "ackFailed": "已领取，但无法告知联系人",
+    "addressExpired": "联系人为你留下了项目，但其地址已过期",
+    "addressExpiredNext": "联系人下次上线时会送达。",
+    "contactRefused": "联系人的应用拒绝了此项目",
+    "contactRefusedNext": "无法验证它来自你，或对它来说太大。重试即可再次暂存。",
+    "expired": "已暂存满期限，但无人领取",
+    "fileGone": "文件已不存在",
     "fullBytes": "等待联系人取走的内容将超过 {{max}} MB",
     "fullItems": "已有 {{max}} 项在等待联系人取走",
     "fullNext": "对方取走一些后,请重新发送。",
+    "messageGone": "消息已不存在",
+    "needPinned": "暂存消息需要 S3 存储，以及已固定的联系人",
+    "needStorageNext": "请在个人资料 → 备份中设置 S3 存储。",
     "needsStorage": "无法暂存这条消息",
-    "needsStorageNext": "请在个人资料 → 备份中设置 S3 存储，并请对方允许暂存消息。"
+    "needsStorageNext": "请在个人资料 → 备份中设置 S3 存储，并请对方允许暂存消息。",
+    "pickUpFailed": "无法领取联系人为你留下的内容",
+    "pointerFailed": "已存储，但无法告诉联系人在哪里领取",
+    "readFailed": "无法查看联系人为你留下的内容",
+    "refusedItem": "已拒绝联系人留下的一个项目",
+    "refusedOffer": "已拒绝联系人存储提供的内容",
+    "requestGone": "付款请求已不存在",
+    "retryNext": "重试即可再次暂存。",
+    "retryingNext": "Ghostly 会自动重试。",
+    "storeFailed": "无法将项目存入你的存储",
+    "storeFailedNext": "请在个人资料 → 备份中检查 S3 存储，然后重试。",
+    "tooLarge": "为不在线的联系人暂存的项目最大 {{mb}} MB"
   },
   "host": {
     "noApp": "这台手机上没有能打开它的应用",
