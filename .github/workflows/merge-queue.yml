@@ -112,11 +112,27 @@ jobs:
     # Nothing here uses the workflow's own token: the checkout and the train act as the queue app.
     permissions: {}
     steps:
-      # The train reads CI from the jobs of ci.yml's own run, which needs "Actions: read": a check run named "CI Success"
-      # can be posted by any workflow of the repository. Until the app has that permission, GitHub refuses this token,
-      # and the next step's token reads CI from check runs (the train warns in its log).
+      # The train reads CI from the jobs of ci.yml's own run ("Actions: read": a check run named "CI Success" can be
+      # posted by any workflow of the repository) and cancels a boarded pull request's own CI run, which frees runners
+      # for the batch ("Actions: write"). GitHub refuses a token that asks for more than the app has, so it falls back:
+      # Actions write -> Actions read (no cancelling; the train says so once) -> no Actions (CI from check runs; the
+      # train warns in its log).
       - name: App token
         id: token
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.QUEUE_APP_ID }}
+          private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-checks: read
+          permission-actions: write
+
+      - name: App token (Actions read)
+        id: token-read
+        if: steps.token.outcome == 'failure'
         continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -130,7 +146,7 @@ jobs:
 
       - name: App token (no Actions read)
         id: token-checks
-        if: steps.token.outcome == 'failure'
+        if: steps.token.outcome == 'failure' && steps.token-read.outcome != 'success'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
@@ -146,15 +162,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
-          token: ${{ steps.token.outputs.token || steps.token-checks.outputs.token }}
+          token: ${{ steps.token.outputs.token || steps.token-read.outputs.token || steps.token-checks.outputs.token }}
           fetch-depth: 0
           filter: blob:none
 
       - name: Run the train
         env:
-          GH_TOKEN: ${{ steps.token.outputs.token || steps.token-checks.outputs.token }}
+          GH_TOKEN: ${{ steps.token.outputs.token || steps.token-read.outputs.token || steps.token-checks.outputs.token }}
           # The train trusts only its own position comments: the ones this app's bot wrote.
-          MERGE_TRAIN_LOGIN: ${{ steps.token.outputs.app-slug || steps.token-checks.outputs.app-slug }}[bot]
+          MERGE_TRAIN_LOGIN: ${{ steps.token.outputs.app-slug || steps.token-read.outputs.app-slug || steps.token-checks.outputs.app-slug }}[bot]
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           BASE: ${{ matrix.base }}
         run: |
