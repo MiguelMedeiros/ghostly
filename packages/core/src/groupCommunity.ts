@@ -448,6 +448,8 @@ export class CommunitySession {
   private asked = new Map<string, number>();
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
+  /** The entry seed sealed to each member, for the seed it seals (`entryFrame`): every sync answer carries it. In memory only. */
+  private sealedEntries = new Map<string, { seedB64: string; frame: CommunityEntryFrame }>();
   /** Catch-up answers still going out, a slice at a time (`receiveSync`). */
   private readonly answers: CatchUpAnswers<CommunityFrame>;
   private queue = Promise.resolve();
@@ -1502,13 +1504,16 @@ export class CommunitySession {
     // to the members they were written for (a hub passes them on). Anyone else's it could not read stays here.
     const unheard = new Set(this.state.unheard ?? []);
     for (const stored of this.state.store) {
-      if (stored.s === from || this.wasRemoved(stored.s)) continue;
+      if (stored.s === from) continue;
+      // What they have first: the checks below hash commits for every stored frame, and a member up to date has them
+      // all; a hub answered each 30 s sync in ~4 ms (2026-10-08).
+      const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
+      if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
+      if (this.wasRemoved(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;
       const reads = rosterHas(this.rosterAt(found.hash) ?? [], from), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
       if (!reads && !(mine && rosterHas(this.roster, from))) continue;
-      const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
-      if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
       if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer);
       answer.push(stored);
       // Handed to a member it was written for: heard.
@@ -1538,11 +1543,15 @@ export class CommunitySession {
     }
   }
 
-  /** The current entry seed sealed to a member, when I hold it. */
+  /** The current entry seed sealed to a member, when I hold it: sealed once per seed, not on every sync answer. */
   private entryFrame(to: string): CommunityEntryFrame | null {
     const { key, seedB64 } = this.state.entry;
     if (!key || !seedB64) return null;
-    return { t: "group-entry", v: 2, g: this.id, to, x: key, s: sealSecret(to, fromBase64Url(seedB64), entryAad(this.id, to)) };
+    const sealed = this.sealedEntries.get(to);
+    if (sealed?.seedB64 === seedB64 && sealed.frame.x === key) return { ...sealed.frame };
+    const frame: CommunityEntryFrame = { t: "group-entry", v: 2, g: this.id, to, x: key, s: sealSecret(to, fromBase64Url(seedB64), entryAad(this.id, to)) };
+    this.sealedEntries.set(to, { seedB64, frame });
+    return { ...frame };
   }
 
   /** A newer entry seed, from a member who holds it (see `replaceLink`): only the one the chain names. */
