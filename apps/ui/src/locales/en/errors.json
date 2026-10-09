@@ -187,6 +187,10 @@
     "shareLinkInstead": "Share the group's link with them: anyone who opens it joins",
     "tooLong": "Message exceeds 16 KiB"
   },
+  "hold": {
+    "needsStorage": "This message can't be held",
+    "needsStorageNext": "Set up S3 storage in Profile → Backups, and ask your contact to allow held messages."
+  },
   "host": {
     "noApp": "No app on this phone can open it",
     "noAppNext": "Install an app for it, or copy the link and open it elsewhere.",

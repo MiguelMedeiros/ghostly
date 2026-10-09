@@ -100,6 +100,8 @@ const RULES: readonly Rule[] = [
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
+  // A held message sent again with no storage to hold it, or a contact that stopped allowing it (engine/node.ts, hold.ts).
+  exact("Held messages need S3 storage (Profile → Backups) and a contact that allows them.", "errors.hold.needsStorage", "errors.hold.needsStorageNext"),
 
   // A chat's native transport (packages/browser/src/engine/node.ts): its listener lent to another chat, or not started.
   exact("Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "errors.transport.listenerGiven"),

@@ -187,6 +187,10 @@
     "shareLinkInstead": "Partagez le lien du groupe avec cette personne : quiconque l'ouvre rejoint le groupe",
     "tooLong": "Le message dépasse 16 Kio"
   },
+  "hold": {
+    "needsStorage": "Ce message ne peut pas être gardé",
+    "needsStorageNext": "Configurez un stockage S3 dans Profil → Sauvegardes, et demandez à votre contact d'autoriser les messages gardés."
+  },
   "host": {
     "noApp": "Aucune app de ce téléphone ne peut l'ouvrir",
     "noAppNext": "Installez une app pour cela, ou copiez le lien et ouvrez-le ailleurs.",
