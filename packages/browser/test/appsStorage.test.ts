@@ -162,6 +162,27 @@ describe("uninstall", () => {
     expect((await storageRows() as { scope: string }[]).map((r) => r.scope)).toEqual(["chat-2"]);
   });
 
+  it("a deleted chat's messages and app rows go by range, one delete per app, not one per row", async () => {
+    const refs = ["ana/chess", "ana/go", "bo/notes"];
+    const tx = (await openDb()).transaction([STORES.messages, STORES.appStorage], "readwrite");
+    for (const linkId of ["chat-1", "chat-2"]) {
+      for (let i = 0; i < 300; i++) tx.objectStore(STORES.messages).put({ linkId, id: `m${i}`, timestamp: i });
+      for (const ref of refs) for (let i = 0; i < 100; i++) tx.objectStore(STORES.appStorage).put({ ref, scope: linkId, key: `k${i}`, value: "1", size: 1 });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    const deletes = vi.spyOn(IDBObjectStore.prototype, "delete");
+    try {
+      await db.deleteLink("chat-1");
+      const on = (name: string) => deletes.mock.contexts.filter((store) => (store as IDBObjectStore).name === name).length;
+      expect(on(STORES.messages)).toBe(1);
+      expect(on(STORES.appStorage)).toBe(refs.length);
+    } finally { deletes.mockRestore(); }
+    expect((await db.getMessages("chat-1"))).toEqual([]);
+    expect((await db.getMessages("chat-2"))).toHaveLength(300);
+    expect(new Set((await storageRows() as { scope: string }[]).map((r) => r.scope))).toEqual(new Set(["chat-2"]));
+    expect(await storageRows()).toHaveLength(300);
+  });
+
   it("Clear all data empties the apps' stores", async () => {
     const { store, app } = await installed();
     await store.storageSet({ ref: app.ref, scope: "chat-1", key: "k", value: 1 });
