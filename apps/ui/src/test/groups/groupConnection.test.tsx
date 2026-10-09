@@ -116,6 +116,13 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(screen.getByTestId("group-connection-note")).toHaveTextContent("DHT-only delivery is not offered in groups yet");
   });
 
+  it("gives a member's name its own direction, so in a right-to-left app a long English name is cut at its end", async () => {
+    const name = "Hermes Two with a much longer display name";
+    await open(active([me, alice(), member({ key: BOB, nick: name, edge: edge({ linkId: "edge-b" }) })]));
+    expect(screen.getByText(name)).toHaveAttribute("dir", "auto");
+    expect(screen.getByText("Alice")).toHaveAttribute("dir", "auto");
+  });
+
   it("says why a member failed in short words, never the relays' addresses or the engine's errors (a phone, 2026-10-07)", async () => {
     const relays = "Could not publish connection details: Publish failed on every relay: Error: https://pkarr.example.test responded 500; Error: https://pkarr.other.test is left alone after failing. Retrying in 60 s.";
     const phone = "Could not publish discovery: Publish failed on every relay: DiscoveryBudgetError: Discovery request budget reached; retry shortly; Error: https://pkarr.pubky.app is left alone after failing; asked again in 52 s";

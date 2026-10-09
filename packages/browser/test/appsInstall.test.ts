@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { canonicalJsonBytes } from "@ghostly/core";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { canonicalJsonBytes, toBase64Url, utf8Encode } from "@ghostly/core";
 import { fileBytes } from "../src/shared/fileBytes";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, keyOf,
@@ -298,6 +299,25 @@ describe("an app installed from a store updates only to the version that store l
     expect(net.requests).not.toContain(HEAD);
     expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest, from: pinned2 });
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+  });
+
+  it("a listing that names a version its URL does not hold costs one peek per index, never the whole bundle", async () => {
+    const { store, v1 } = await fromStore();
+    const lie = { ...listing(v1, [PINNED_URL]), sequence: 99, digest: toBase64Url(sha256(utf8Encode("no bundle has this"))) };
+    await net.putStore(await storeFiles({ sequence: 2, apps: [lie] }));
+    net.fetch.mockClear();
+    const reads = () => net.fetch.mock.calls.filter(([url]) => String(url) === PINNED_URL).map(([, init]) => ((init?.headers ?? {}) as Record<string, string>).range ? "peek" : "whole");
+    for (let visit = 0; visit < 3; visit++) expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    expect(reads(), "peeked once, never read whole").toEqual(["peek"]);
+    // The store's next index: peeked again once; then the version it lists at a URL that holds it installs.
+    await net.putStore(await storeFiles({ sequence: 3, apps: [lie] }));
+    for (let visit = 0; visit < 2; visit++) await store.checkUpdates();
+    expect(reads()).toEqual(["peek", "peek"]);
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 4, apps: [listing(v2, [PINNED_URL])] }));
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest });
   });
 
   it("another store's listing of a newer version is not taken; once the person removes the store, the sources count again", async () => {

@@ -138,6 +138,11 @@ export interface StoredGroup {
     /** Joining through the group's link: its entry key, the admin's side of `linkId` (an entry session, not a contact chat). */
     entry?: string;
   };
+  /**
+   * On the admin's side: contact chats invited and not answered yet, and when. Kept so that an accept after my app
+   * started again still lets them in.
+   */
+  invited?: Record<string, number>;
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
@@ -154,6 +159,8 @@ export interface StoredGroup {
    * since go on naming what they wrote.
    */
   formerNames?: Record<string, string>;
+  /** Removed, then invited again: the removed group as it was, which a Decline puts back (with the history it kept). */
+  previous?: StoredGroup;
   /**
    * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
@@ -241,9 +248,11 @@ export type GroupEdgeCause = "relays" | "session" | "other";
 
 /**
  * How far a join through a group's link got, as the joiner can know it: the knock is being left,
- * it is there for the admin's app to read, that app opened the entry session, it let me in.
+ * it is there for the admin's app to read, that app opened the entry session, it let me in. Or a member's app
+ * answered that there is no room yet (`group-full`, WISP 902 § A full group): `full`, or `blocked` while the group
+ * waits for every member's app to take more than eight; the joiner goes on knocking.
  */
-export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted";
+export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked";
 
 export interface GroupView {
   id: string;
@@ -264,8 +273,11 @@ export interface GroupView {
   adminOff?: true;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
-  /** `waiting`: joining a community through its link, how many others were knocking with me when I last knocked. */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number };
+  /**
+   * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
+   * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
+   */
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -392,7 +404,12 @@ export interface FileTransferView {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
-  /** A group file (WISP 503) waiting, `waiting`: why, in a few words ("Nobody you are connected to has this file yet"). */
+  /**
+   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
+   * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
+   */
+  wait?: "nobody" | "busy" | "damaged";
+  /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
 

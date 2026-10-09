@@ -252,13 +252,33 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   // ---- Clipboard ----
 
-  /** The clipboard's text; none when it holds something else. Android 10 and up gives it to the app in front only. */
+  /**
+   * The clipboard's text; none when it holds something else. Android 10 and up gives it to the app in front only.
+   * A copied URI (a file, a provider's stream) is read as `coerceToText` would, but off the main thread and never
+   * past the paste's limit: a big file or a slow provider froze the app while `coerceToText` read all of it.
+   */
   @Command
   fun clipboardRead(invoke: Invoke) {
     val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val clip = clipboard.primaryClip
-    val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(activity)?.toString() else null
-    invoke.resolve(JSObject().put("text", text ?: ""))
+    val item = if (clip != null && clip.itemCount > 0) clip.getItemAt(0) else null
+    val uri = item?.uri
+    if (item?.text != null || uri == null) {
+      val text = item?.text ?: item?.intent?.toUri(Intent.URI_INTENT_SCHEME)
+      invoke.resolve(JSObject().put("text", text?.toString() ?: ""))
+      return
+    }
+    thread(name = "ghostly-clipboard") {
+      val text = try {
+        activity.contentResolver.openTypedAssetFileDescriptor(uri, "text/*", null)?.createInputStream()?.use {
+          ClipText.upTo(it) ?: return@thread invoke.reject("The clipboard holds too much text")
+        }
+      } catch (e: Exception) {
+        null
+      }
+      // Not text (or gone): the URI itself, as coerceToText gives.
+      invoke.resolve(JSObject().put("text", text ?: uri.toString()))
+    }
   }
 
   // ---- Notifications ----

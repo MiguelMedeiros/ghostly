@@ -12,7 +12,8 @@ import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
  * - every committed read-write transaction appends its puts, deletes and clears to `journal.bin` and is fsynced
  *   before the transaction's `complete` event reaches the engine (a Cashu proof saved is a proof on disk);
  * - a schema change (an upgrade, a deleted database) writes a whole new `snapshot.bin` instead;
- * - at start the snapshot is loaded, the journal replayed, and both folded into a fresh snapshot.
+ * - at start the snapshot is loaded, the journal replayed, and both folded into a fresh snapshot (with no journal, the
+ *   snapshot stays as it is).
  *
  * Only one process may hold a profile's store: the caller takes the profile lock first (see `profiles.ts`).
  * fake-indexeddb is pinned: this reaches into its raw classes, and `storage.test.ts` checks them.
@@ -24,11 +25,16 @@ type Op =
   | { db: string; store: string; kind: "delete"; key: Key }
   | { db: string; store: string; kind: "clear" };
 
+interface RawRecord { key: Key; value: unknown }
 interface RawIndex {
   name: string; keyPath: string | string[]; multiEntry: boolean; unique: boolean; initialized: boolean; deleted: boolean;
-  records: RawRecordStore; storeRecord(record: { key: Key; value: unknown }): void;
+  records: RawRecordStore; storeRecord(record: RawRecord): void;
 }
-interface RawRecordStore { values(): Iterable<{ key: Key; value: unknown }>; clear(): unknown }
+interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
+interface RawRecordStore {
+  values(): Iterable<RawRecord>; clear(): unknown;
+  records: { _root: RawNode | undefined; _numNodes: number; _numTombstones: number };
+}
 interface RawStore {
   name: string; keyPath: string | string[] | null; autoIncrement: boolean; deleted: boolean;
   keyGenerator: { num: number } | null; rawIndexes: Map<string, RawIndex>; records: RawRecordStore; rawDatabase: RawDatabase;
@@ -89,11 +95,12 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   const snapshotPath = join(dir, SNAPSHOT);
   const journalPath = join(dir, JOURNAL);
 
-  // Load what the disk holds before any connection opens.
-  if (existsSync(snapshotPath)) restore(classes, raw._databases, deserialize(readFileSync(snapshotPath)) as Snapshot);
-  if (existsSync(journalPath)) replay(raw._databases, readFileSync(journalPath));
+  // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
+  const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
+  if (snapshotFound) restore(classes, raw._databases, deserialize(readFileSync(snapshotPath)) as Snapshot, (a, b) => factory.cmp(a, b));
+  if (journalFound) replay(raw._databases, readFileSync(journalPath));
   restoring = false;
-  await writeSnapshot();
+  if (journalFound || !snapshotFound) await writeSnapshot();
 
   // Record what each read-write transaction does, keyed by its rollback log (one array per transaction).
   const storeProto = classes.ObjectStore.prototype as RawStore;
@@ -239,7 +246,12 @@ async function probeClasses(factory: IDBFactory): Promise<RawClasses> {
   return classes;
 }
 
-function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot) {
+/**
+ * The snapshot's records come in key order (as `writeSnapshot` walks them), so each store's tree and each index's are
+ * built whole from sorted arrays: storing record by record compared every key down the tree, a 70,000-message profile
+ * took seconds. A snapshot not in order (never written so) is stored record by record.
+ */
+function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot, cmp: (a: Key, b: Key) => number) {
   if (snapshot?.format !== 1) throw new Error("This profile was last used by a newer version of ghostly (its store has a format this version does not read). Update ghostly to open it.");
   for (const saved of snapshot.databases) {
     const db = new classes.Database(saved.name, saved.version);
@@ -252,10 +264,65 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
         store.rawIndexes.set(i.name, index);
       }
       db.rawObjectStores.set(s.name, store);
-      for (const [key, value] of s.records) store.storeRecord({ key, value: blobsFromDisk(value) }, false);
+      const records = s.records.map(([key, value]): RawRecord => ({ key, value: blobsFromDisk(value) }));
+      if (records.some((record, at) => at > 0 && cmp(records[at - 1].key, record.key) >= 0)) {
+        for (const record of records) store.storeRecord(record, false);
+        continue;
+      }
+      fill(store.records, records);
+      for (const index of store.rawIndexes.values()) fill(index.records, indexEntries(index, records, cmp));
     }
     databases.set(saved.name, db);
   }
+}
+
+/**
+ * An index's entries for records in key order, sorted by the index's key: the index derives them itself (key path,
+ * multi-entry, invalid keys skipped) into a list instead of its tree. A stable sort keeps equal index keys in the
+ * records' key order, the tree's own tie-break.
+ */
+function indexEntries(index: RawIndex, records: RawRecord[], cmp: (a: Key, b: Key) => number): RawRecord[] {
+  const entries: RawRecord[] = [];
+  const tree = index.records;
+  index.records = { get: () => undefined, put: (entry: RawRecord) => { entries.push(entry); } } as unknown as RawRecordStore;
+  try {
+    for (const record of records) if (!absent(index.keyPath, record.value)) index.storeRecord(record);
+  } finally { index.records = tree; }
+  return entries.sort((a, b) => cmp(a.key, b.key));
+}
+
+/**
+ * Whether a key path surely finds nothing in a value: a plain object along it lacks the step (most messages have no
+ * `card` for the card index). The index would throw and catch a DataError for each of those; anything else it judges.
+ */
+function absent(keyPath: string | string[], value: unknown): boolean {
+  if (typeof keyPath !== "string" || keyPath === "") return false;
+  let object = value;
+  for (const step of keyPath.split(".")) {
+    if (object === null || typeof object !== "object" || Array.isArray(object) || object instanceof Blob) return false;
+    if (!Object.hasOwn(object, step)) return true;
+    object = (object as Record<string, unknown>)[step];
+  }
+  return false;
+}
+
+/**
+ * fake-indexeddb's red-black tree, built balanced from sorted records: every level full but the last, whose nodes
+ * are red, so each path holds the same number of black nodes and later inserts rebalance as usual.
+ */
+function fill(store: RawRecordStore, sorted: RawRecord[]) {
+  const deepest = sorted.length ? Math.floor(Math.log2(sorted.length)) : 0;
+  const build = (low: number, high: number, parent: RawNode | undefined, depth: number): RawNode | undefined => {
+    if (low > high) return undefined;
+    const middle = (low + high) >>> 1;
+    const node: RawNode = { record: sorted[middle], left: undefined, right: undefined, parent, deleted: false, red: depth > 0 && depth === deepest };
+    node.left = build(low, middle - 1, node, depth + 1);
+    node.right = build(middle + 1, high, node, depth + 1);
+    return node;
+  };
+  store.records._root = build(0, sorted.length - 1, undefined, 0);
+  store.records._numNodes = sorted.length;
+  store.records._numTombstones = 0;
 }
 
 /**

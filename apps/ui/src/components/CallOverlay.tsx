@@ -6,6 +6,7 @@ import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
 import { Menu, MenuItem } from "./Menu";
+import { initial } from "../lib/initial";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -234,7 +235,7 @@ export function CallOverlay({
         <div className="call-peer flex flex-col items-center gap-4">
           <div className="call-avatar w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
             <span className="text-text-muted text-3xl">
-              {peerName.charAt(0).toUpperCase()}
+              {initial(peerName)}
             </span>
           </div>
           <p className="call-name text-text-primary text-lg font-medium">{peerName}</p>
@@ -248,7 +249,7 @@ export function CallOverlay({
             <span className="text-accent">{t("calls.audio")}</span>
           )}
           {statusText && (
-            <span className={callState === "connected" ? "ml-2" : ""}>
+            <span className={callState === "connected" ? "ms-2" : ""}>
               {statusText}
             </span>
           )}

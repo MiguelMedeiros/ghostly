@@ -15,7 +15,14 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- Nothing of the app's goes into Android's backup or phone-to-phone transfer: received files, the device state
+         and the profile's database would bring the same profile up on a new phone. A profile moves with Ghostly's
+         own encrypted backup or the device handoff. Android 12 and up read dataExtractionRules (and ignore
+         allowBackup for a device transfer), older ones fullBackupContent. -->
     <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.ghostly"

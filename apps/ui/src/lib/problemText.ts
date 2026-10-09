@@ -1,5 +1,5 @@
 import type { Translate } from "../contexts/I18nContext";
-import { knownErrorParts, rawError, readable } from "./errorText";
+import { DESKTOP_SAVE_REFUSED, knownErrorParts, rawError, readable } from "./errorText";
 import { english } from "./english";
 
 /*
@@ -93,4 +93,12 @@ export function problemLine(cause: unknown, t: Translate = english, fallback: Pr
   if (!next) return title;
   if (/[.!?…。！？]$/.test(title)) return `${title} ${next}`;
   return t.language === "ja" || t.language === "zh" ? `${title}。${next}` : `${title}. ${next}`;
+}
+
+/**
+ * A save of a file that failed, as a line: one the system refused on Desktop is said as Android's (errorText.ts
+ * SAVE_REFUSED), with its next step, never as the system's English in every language.
+ */
+export function saveProblemLine(cause: unknown, t: Translate = english): string {
+  return problemLine(DESKTOP_SAVE_REFUSED.test(rawError(cause)) ? "The file could not be saved there" : cause, t);
 }

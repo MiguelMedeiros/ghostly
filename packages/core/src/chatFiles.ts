@@ -210,6 +210,8 @@ interface Incoming {
   gapAt?: number;
   writing: Promise<void>;
   verifying?: boolean;
+  /** What was stored is being removed: nothing more is written. */
+  dropped?: boolean;
 }
 
 interface Entry {
@@ -448,9 +450,14 @@ export class ChatFiles {
   /**
    * Removes what this side stored of an incoming file that ends here. Through its target, opened now if need be: after
    * a restart a transfer has none until bytes arrive again, and one cancelled before that kept its part on the disk.
+   * After the write under way, and with the ones queued behind it stopped: a write landing after the removal would
+   * store a part of the file again.
    */
   private discardStored(entry: Entry): Promise<void> {
-    return entry.in ? this.target(entry).then((t) => t.discard()).catch(() => {}) : Promise.resolve();
+    const incoming = entry.in;
+    if (!incoming) return Promise.resolve();
+    incoming.dropped = true;
+    return incoming.writing.then(() => this.target(entry)).then((t) => t.discard()).catch(() => {});
   }
 
   private target(entry: Entry): Promise<IncomingTarget> {
@@ -609,7 +616,7 @@ export class ChatFiles {
     incoming.written += bytes.length;
     const target = incoming.target;
     incoming.writing = incoming.writing.then(async () => {
-      if (transferEnded(record)) return;
+      if (transferEnded(record) || incoming.dropped) return;
       await (await target).append(bytes);
       incoming.stored = offset + bytes.length;
       const drained = incoming.stored === incoming.written;
@@ -782,7 +789,13 @@ export class ChatFiles {
     record.error = error;
     record.pausedBy = record.waitingFor = undefined;
     if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; }
-    if (entry.in) clearTimeout(entry.in.timer);
+    if (entry.in) {
+      const incoming = entry.in;
+      clearTimeout(incoming.timer);
+      // Its writer goes once the writes under way are done (a host's holds a 256 KiB buffer): every file received kept
+      // one until the app quit. One taken again opens a new target.
+      void incoming.writing.finally(() => { if (transferEnded(record)) incoming.target = undefined; });
+    }
     this.changed(entry);
   }
 

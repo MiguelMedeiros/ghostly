@@ -66,7 +66,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
       return;
     }
     setBusy(false);
-    const failed = outcome.filter(o => o.error).map(o => ({ name: chosen.find(c => c.target === o.to)?.name ?? "", error: o.error! }));
+    const failed = outcome.filter(o => o.error).map(o => ({ name: chosen.find(c => c.target === o.to)?.name ?? "", error: problemLine(o.error, t) }));
     if (failed.length) { setProblems(failed); return; }
     onSent?.();
     onClose();

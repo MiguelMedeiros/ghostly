@@ -8,6 +8,7 @@ import { Button, Notice } from "../wallet/ui";
 import { NostrPublishDialog } from "./NostrPublishDialog";
 import { externalLinkProps } from "../../lib/externalLink";
 import { problemLine } from "../../lib/problemText";
+import { initial } from "../../lib/initial";
 
 
 /**
@@ -47,7 +48,7 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
       <div className="space-y-1.5">
         {profile ? (
           <div className="flex items-start gap-3">
-            {profile.avatar ? <img src={profile.avatar} alt="" data-testid="nostr-profile-avatar" className="w-12 h-12 rounded-full object-cover shrink-0" /> : <div className="w-12 h-12 rounded-full bg-surface-alt shrink-0 grid place-items-center text-text-muted" aria-hidden="true">{(profile.name ?? "?").slice(0, 1).toUpperCase()}</div>}
+            {profile.avatar ? <img src={profile.avatar} alt="" data-testid="nostr-profile-avatar" className="w-12 h-12 rounded-full object-cover shrink-0" /> : <div className="w-12 h-12 rounded-full bg-surface-alt shrink-0 grid place-items-center text-text-muted" aria-hidden="true">{initial(profile.name ?? "?")}</div>}
             <div className="min-w-0 flex-1 space-y-0.5">
               <p className="text-sm text-text-primary break-words" data-testid="nostr-profile-name">{profile.name ?? t("identities.nostr.noName")}{profile.handle && <span className="text-xs text-text-muted"> · @{profile.handle}</span>}</p>
               {profile.nip05 && <p data-testid="nostr-profile-nip05" className="break-all">{profile.nip05} <span className="text-[11px]">{t("identities.nostr.nip05Unchecked")}</span></p>}
