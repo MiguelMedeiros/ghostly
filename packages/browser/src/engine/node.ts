@@ -4197,11 +4197,24 @@ export class GhostlyNode implements EngineImplementation {
     return { error: null };
   }
 
-  /** An edge of a private group opened: the member hears my latest reactions again, in case it missed them. */
+  /**
+   * An edge of a private group opened: the member hears my latest reactions again, in case it missed them. The newest
+   * `REACTION_LIMITS.send` go now and the rest a window later, while the edge is the same: the member takes 30 a window
+   * from me, and 32 at once lost two of them.
+   */
   private async resendGroupReactions(groupId: string, linkId: string): Promise<void> {
     if (this.outsideEdge(linkId)) return;
     const mine = groupReactionsToResend(await db.getMessages(`group:${groupId}`), REACTION_LIMITS.pending);
-    for (const reaction of mine) { try { this.links.get(linkId)?.link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }
+    const link = this.links.get(linkId)?.link;
+    const say = (batch: WireReaction[]) => {
+      for (const reaction of batch) { try { link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }
+    };
+    say(mine.slice(-REACTION_LIMITS.send));
+    // A second past the window, so the first ones have left it on the member's side whatever the edge's delay.
+    for (let end = mine.length - REACTION_LIMITS.send, turn = 1; end > 0; end -= REACTION_LIMITS.send, turn++) {
+      const batch = mine.slice(Math.max(0, end - REACTION_LIMITS.send), end);
+      setTimeout(() => { if (link && this.links.get(linkId)?.link === link) say(batch); }, turn * (REACTION_LIMITS.windowMs + 1_000));
+    }
   }
 
   /**

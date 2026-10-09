@@ -326,4 +326,32 @@ describe("a private group's edge that opens", () => {
     await inner.resendGroupReactions(g, "edge");
     expect(sent.map(frame => [frame.id, frame.e])).toEqual([["admin:5:0", "🎉"]]);
   });
+
+  it("hears my latest 32 again within what a member takes a window: the newest 20 now, the rest a window later", async () => {
+    // 32 at once went past the 30 a member takes from me in 10 s, and the last two were dropped (Bug hunter, 2026-10-09).
+    const g = `paced-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const row = (fields: Partial<StoredMessage>): StoredMessage => ({ linkId: chat, id: "x", text: "", sender: "peer", timestamp: 1, via: "datalink", ...fields });
+    await db.addMessage(row({ id: "event:1:joined:1000", event: "joined", text: "You joined.", timestamp: 1_000 }));
+    for (let i = 0; i < 40; i++) await db.addMessage(row({ id: `admin:1:${i}`, member: "admin", text: `line ${i}`, timestamp: 2_000 + i, reactions: { me: { e: "👍", n: 3_000 + i, at: 3_000 + i } } }));
+    cleanup.push(async () => { for (const m of await db.getMessages(chat)) await db.deleteMessage(chat, m.id); });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as { links: Map<string, unknown>; groups: { signReaction(): object }; resendGroupReactions(groupId: string, linkId: string): Promise<void> };
+    const sent: Record<string, unknown>[] = [], again: Record<string, unknown>[] = [];
+    inner.links.set("edge", { link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.push(frame); } } });
+    inner.links.set("closes", { link: { sendGroupFrame: (frame: Record<string, unknown>) => { again.push(frame); } } });
+    vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    cleanup.push(async () => { vi.useRealTimers(); });
+    await inner.resendGroupReactions(g, "edge");
+    await inner.resendGroupReactions(g, "closes");
+    expect(sent.map(frame => frame.id)).toEqual(Array.from({ length: REACTION_LIMITS.send }, (_, i) => `admin:1:${40 - REACTION_LIMITS.send + i}`));
+    // That edge closed and opened again: the next one says them all from the start.
+    inner.links.set("closes", { link: { sendGroupFrame: vi.fn() } });
+    await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+    expect(sent).toHaveLength(REACTION_LIMITS.send);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(new Set(sent.map(frame => frame.id))).toEqual(new Set(Array.from({ length: 32 }, (_, i) => `admin:1:${8 + i}`)));
+    expect(again).toHaveLength(REACTION_LIMITS.send);
+  });
 });
