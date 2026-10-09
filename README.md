@@ -25,12 +25,10 @@
 <p align="center">
   <a href="https://github.com/MiguelMedeiros/ghostly/releases/latest"><img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?label=release" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/MiguelMedeiros/ghostly" alt="License: MIT"></a>
-  <a href="https://github.com/MiguelMedeiros/ghostly/actions/workflows/ci.yml?query=branch%3Adev"><img src="https://img.shields.io/github/actions/workflow/status/MiguelMedeiros/ghostly/ci.yml?branch=dev&label=CI%20(dev)" alt="CI status on dev"></a>
+  <a href="https://github.com/MiguelMedeiros/ghostly/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/MiguelMedeiros/ghostly/ci.yml?branch=main&label=CI" alt="CI status of the released code (main)"></a>
 </p>
 
-<p align="center">
-  <img src="docs/assets/readme/hero.webp" alt="Ghostly on a computer and a phone: a chat with Casper, with a voice message, a photo sent straight from his app and a reply" width="720">
-</p>
+https://github.com/user-attachments/assets/7f9e11de-4c65-44e9-9763-885664de0d64
 
 ## Features
 
@@ -43,11 +41,11 @@
 - <img src="docs/assets/icons/shared-apps.svg" width="20" align="absmiddle" alt=""> **[Shared services](docs/CHAT.md#calls-and-shared-services)**: share a web app on your `localhost` with a contact, over the chat's live connection.
 - <img src="docs/assets/icons/cli.svg" width="20" align="absmiddle" alt=""> **[CLI](docs/CLI.md) and [AI agents](docs/AI-AGENTS.md)**: the app's engine without a screen, for bots, scripts and agents.
 
-## See it
+## The app
 
-https://github.com/user-attachments/assets/38824bb2-0e73-4066-93e2-0850ccd15c2e
-
-<sub>A short narrated intro (it plays on github.com). The site has more: <a href="https://ghostly.tools">ghostly.tools</a>.</sub>
+<p align="center">
+  <img src="docs/assets/readme/hero.webp" alt="Ghostly on a computer and a phone: a chat with Casper, with a voice message, a photo sent straight from his app and a reply" width="720">
+</p>
 
 ## Get it
 
@@ -76,4 +74,4 @@ Under the hood: the apps meet on the Mainline DHT, then talk over WebRTC, Iroh o
 
 ---
 
-<p align="center">Built by <a href="https://github.com/MiguelMedeiros">Miguel Medeiros</a> · <a href="LICENSE">MIT License</a></p>
+Built by [Miguel Medeiros](https://github.com/MiguelMedeiros) · [MIT License](LICENSE)

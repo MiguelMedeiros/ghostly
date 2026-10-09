@@ -92,6 +92,11 @@ export function positionals(command: { usage: string; args?: string[] }, values:
     if (values[i] === undefined) throw new CliError("usage", `Missing <${name}>: ghostly ${command.usage}`);
     out[name] = values[i];
   }
-  if (values.length > names.length) throw new CliError("usage", `Too many arguments: ghostly ${command.usage}`);
+  noMoreThan(names.length, values, command.usage);
   return out;
+}
+
+/** Words past a usage's arguments are refused, never dropped: `profile use my bot` would select `my`. */
+export function noMoreThan(count: number, values: readonly string[], usage: string): void {
+  if (values.length > count) throw new CliError("usage", `Too many arguments: ghostly ${usage}`);
 }

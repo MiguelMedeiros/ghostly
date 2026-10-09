@@ -152,5 +152,10 @@
     "updatedLabel": "更新",
     "used": "{{limit}} 中 {{used}} 使用",
     "usedLabel": "使用済み"
+  },
+  "working": {
+    "label": "作業中",
+    "quiet": "作業中？ · 最終更新 {{ago}}",
+    "stale": "{{duration}}間更新なし"
   }
 }

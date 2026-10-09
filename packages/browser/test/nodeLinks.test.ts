@@ -1075,6 +1075,36 @@ describe("private groups through the engine", () => {
     }
     const edgeOf = (id: string) => links.filter((l) => l.options.params.id === id).at(-1)!;
 
+    it("an edge whose listener failed to start (Iroh's relay out of reach) starts it again on a later tick, and at once when the network is back", async () => {
+      const { node, iroh } = await nativeEngine();
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      await vi.waitFor(() => expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBe("Iroh relay unreachable"));
+      // The next tick before the wait is over: nothing yet.
+      node["retryGroupNative"]();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(iroh).toHaveBeenCalledOnce();
+      // One retry period later, the tick starts it again, and the edge has it.
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 16_000);
+      onTestFinished(() => { clock.mockRestore(); });
+      node["retryGroupNative"]();
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledTimes(2);
+      expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBeUndefined();
+      // Failed again (the network went down once more): the network coming back starts it at the next tick.
+      edgeOf(edgeId).availableTransports = ["webrtc/1"];
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      node["groupNativeFailed"].clear();
+      void node["ensureNativeEndpoints"](edgeId);
+      await vi.waitFor(() => expect(node["groupNativeFailed"].has(edgeId)).toBe(true));
+      node.wake({ network: true });
+      node["retryGroupNative"]();
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(2));
+    });
+
     it("an app with WebRTC takes an endpoint on an edge only once the member's packet says it has none, and again after a restart", async () => {
       vi.stubGlobal("RTCPeerConnection", class {});
       onTestFinished(() => { vi.unstubAllGlobals(); });
@@ -1146,6 +1176,96 @@ describe("private groups through the engine", () => {
       await node["nativeQueue"];
       expect(edgeOf(blocked)).toBe(again);
       expect(iroh).toHaveBeenCalledOnce();
+    });
+
+    it("an edge that ran a native endpoint says its transports on from then, and one that never did says none", async () => {
+      // An edge whose WebRTC failed once said `_tr = ["iroh/1"]` for that run. Back with WebRTC it ran no endpoint and
+      // published no `_tr` at all, so the member's app kept dialling the Iroh endpoint of the run before, for good.
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const blocked = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      const fine = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      expect(edgeOf(blocked).options.packetTransportsSaid).toBe(false);
+      const first = edgeOf(blocked);
+      first.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(blocked)).not.toBe(first));
+      await vi.waitFor(() => expect(edgeOf(blocked).registerEndpoint).toHaveBeenCalledOnce());
+      // The member's app answers in kind: it has WebRTC, and runs Iroh for this edge now.
+      edgeOf(blocked).options.events.onPacketTransports(["webrtc/1", "iroh/1"], { "iroh/1": { id: "cd".repeat(32), relay: null, addresses: [], relayed: true } });
+      await vi.waitFor(async () => expect((await saved(blocked))?.peerTransports).toEqual(["webrtc/1", "iroh/1"]));
+      await node.shutdown();
+      nodes.splice(nodes.indexOf(node), 1);
+      // The next run: WebRTC again, no endpoint (the member's app has WebRTC), and the edge says so.
+      const again = await nativeEngine();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(again.iroh).not.toHaveBeenCalled();
+      expect(edgeOf(blocked).options.rtcAvailable).toBe(true);
+      expect(edgeOf(blocked).options.packetTransportsSaid).toBe(true);
+      // The edge that never left WebRTC says nothing, as before.
+      expect(edgeOf(fine).options.packetTransportsSaid).toBe(false);
+    });
+
+    it("what a member's packet said is forgotten once its packet says none any more, for the next start too", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const member = createIdentity().pubKeyZ32;
+      const edgeId = await node["openEdge"](state as never, member);
+      // The member's WebRTC failed once: its edge said it had none, and this app keeps that.
+      const descriptors = { "iroh/1": { id: "cd".repeat(32), relay: null, addresses: [], relayed: true } };
+      edgeOf(edgeId).options.events.onPacketTransports(["iroh/1"], descriptors);
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledOnce());
+      await vi.waitFor(async () => expect((await saved(edgeId))?.peerTransports).toEqual(["iroh/1"]));
+      // Its app is back with WebRTC, and from before it said so itself: its packet carries no `_tr` (two minutes of it).
+      edgeOf(edgeId).options.events.onPacketTransportsGone();
+      await vi.waitFor(async () => expect(await saved(edgeId)).toMatchObject({ id: edgeId, transportSeeds: { "iroh/1": expect.any(String) } }));
+      await vi.waitFor(async () => {
+        const kept = await saved(edgeId);
+        expect(kept?.peerTransports).toBeUndefined();
+        expect(kept?.peerDescriptors).toBeUndefined();
+        expect(kept?.peerFallback).toBeUndefined();
+      });
+      await db.patchLink(edgeId, { edgeLive: true, edgeLiveSince: Date.now() });
+      await node.shutdown();
+      nodes.splice(nodes.indexOf(node), 1);
+      // Started again: an edge between two apps with WebRTC, which takes no listener and resumes on WebRTC.
+      const again = await nativeEngine();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(again.iroh).not.toHaveBeenCalled();
+      expect(iroh).toHaveBeenCalledOnce();
+      expect(edgeOf(edgeId).options.native).toMatchObject({ peerTransports: undefined, peerDescriptors: undefined });
+      expect(edgeOf(edgeId).options.resume).toBe("webrtc/1");
+      // It ran an endpoint here, so it says what it runs now: the member's app kept its `["webrtc/1", "iroh/1"]`.
+      expect(edgeOf(edgeId).options.packetTransportsSaid).toBe(true);
+    });
+
+    it("a link waiting for a native slot waits for none once its member's packet says it has WebRTC, or says no transports any more", async () => {
+      // Five saved contacts and three group links hold the eight listeners: the next two group links wait.
+      const chats = Array.from({ length: 5 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const members = Array.from({ length: 5 }, () => createIdentity().pubKeyZ32);
+      const edgeIds: string[] = [];
+      for (const member of members) edgeIds.push(await node["openEdge"](state as never, member));
+      // Each member's app said it has no WebRTC.
+      for (const id of edgeIds) edgeOf(id).options.events.onPacketTransports(["iroh/1"], {});
+      const waiting = () => members.filter((member) => (node["edgeView"](groupId, member) as GroupEdgeView | undefined)?.noSlot);
+      await vi.waitFor(() => expect(waiting()).toHaveLength(2));
+      const [one, two] = waiting().map((member) => edgeIds[members.indexOf(member)]);
+      edgeOf(one).options.events.onPacketTransports(["webrtc/1"], {});
+      await vi.waitFor(() => expect(waiting()).toHaveLength(1));
+      edgeOf(two).options.events.onPacketTransportsGone();
+      await vi.waitFor(() => expect(waiting()).toHaveLength(0));
     });
 
     it("an app with no WebRTC offers to be no private group's hub, and gives its groups four connections in all", async () => {

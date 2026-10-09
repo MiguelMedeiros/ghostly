@@ -1,5 +1,6 @@
 import {
   DEFAULT_RELAYS,
+  GROUP_FILE_LIMITS,
   LIMITS,
   formatFileSize,
   parseLocalTarget,
@@ -16,7 +17,7 @@ import type { ServicesPlatform, WalletPlatform } from "../../../../apps/ui/src/l
 import type { WalletNetwork } from "@ghostly/core";
 import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
-import { storedBlob } from "../shared/storedFiles";
+import { removeStored, storedBlob } from "../shared/storedFiles";
 import type { FileTransferState } from "../../../../apps/ui/src/lib/platform";
 import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
@@ -385,6 +386,49 @@ export const servicesPlatform: ServicesPlatform | null = {
     });
     return { timestamp, file };
   },
+  async sendGroupFile(groupId, source, options) {
+    if (source.size > GROUP_FILE_LIMITS.maxBytes) throw new Error(`A group takes files of up to ${formatFileSize(GROUP_FILE_LIMITS.maxBytes)}`);
+    if (!source.size) throw new Error("An empty file cannot go to a group");
+    // A file the group would refuse anyway (its files of the minute are taken, or this profile is not in it) is refused
+    // before any of it is read or kept: up to 100 MiB would be copied in and hashed, then deleted. The announcement
+    // checks again.
+    const check = await engine.call("groupFileCheck", { groupId });
+    if (check.error) throw new Error(check.error);
+    const mime = sanitizeMime(source.type);
+    const image = options?.voice || options?.video ? undefined : await readImageMeta(source, mime);
+    const file = {
+      // The group's own key space, as the engine names a file it announces (`groupFileId` in engine/groupFiles.ts).
+      id: `group-${groupId}-out-${toBase64Url(randomBytes(12))}`,
+      name: sanitizeFileName(source.name),
+      size: source.size,
+      mime,
+      ...(options?.voice && { voice: parseVoiceMeta(options.voice, mime) }),
+      ...(!options?.voice && options?.video && { video: parseVideoMeta(options.video, mime) }),
+      ...(image && { image }),
+    };
+    if (options?.voice && !file.voice) throw new Error("That recording cannot be sent as a voice message");
+    // Its bytes and their digest first, as a chat's file: the announcement carries the digest, and members fetch the
+    // bytes from here. A large file is copied a step at a time; nothing shows in the group until it is announced.
+    const timestamp = Date.now();
+    const metadata = { name: file.name, size: file.size, mime, timestamp, voice: file.voice, video: file.video, image: file.image };
+    const record = { id: file.id, linkId: `group:${groupId}`, createdAt: timestamp, direction: "out" as const, metadata, transfer: { state: "transferring" as const, transferred: 0, size: file.size } };
+    if (source.size <= SMALL_FILE_BYTES) {
+      keepJustSent(file.id, new Blob([source], { type: mime }));
+      await fileStore.put({ ...record, blob: source, digest: await blobDigest(source) });
+    } else {
+      const bytes = await fileBytes();
+      await fileStore.put({ ...record, bytes: bytes.kind, digest: await bytes.stage(file.id, source) });
+    }
+    const result = await engine.call("sendGroupFile", { groupId, file, ...(options?.replyTo && { replyTo: options.replyTo }) })
+      .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error), messageId: undefined }));
+    if (result.error) {
+      // Not announced: nothing is in the group, so the copy goes too, and the composer says why.
+      justSent.delete(file.id);
+      await removeStored(file.id).catch(() => {});
+      throw new Error(result.error);
+    }
+    return { file, ...(result.messageId && { messageId: result.messageId }) };
+  },
   async retryFile(fileId) {
     const stored = await fileStore.get(fileId);
     if (!stored?.metadata || stored.direction !== "out") throw new Error("This file cannot be retried");
@@ -403,6 +447,8 @@ export const servicesPlatform: ServicesPlatform | null = {
   async fileAction(fileId, action) {
     // A file's local id starts with its chat's.
     const linkId = engine.state?.links.find((link) => fileId.startsWith(`${link.id}-in-`) || fileId.startsWith(`${link.id}-out-`))?.id
+      // A group's file, `group-<group>-in-…`: the group's `group:<id>` (WISP 503).
+      ?? (() => { const group = engine.state?.groups.find((g) => fileId.startsWith(`group-${g.id}-`)); return group && `group:${group.id}`; })()
       ?? (await fileStore.get(fileId).catch(() => undefined))?.linkId;
     if (!linkId) throw new Error("This file is no longer here");
     await engine.call("fileAction", { linkId, fileId, action });

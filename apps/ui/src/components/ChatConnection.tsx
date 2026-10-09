@@ -3,7 +3,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useCopyKey } from "../hooks/useCopyKey";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState, useSyncExternalStore, type FocusEvent } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
@@ -65,6 +65,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const [menuOpen, setMenuOpen] = useState(false);
   const nav = useAppNavigation();
   const [error, setError] = useState("");
+  // A refused "The codes match" (the connection changed or closed after the code was shown): said beside the code,
+  // never as the chat's connection failure.
+  const [verifyError, setVerifyError] = useState("");
   const [busy, setBusy] = useState(false), [comparing, setComparing] = useState(false);
   const root = useRef<HTMLDetailsElement>(null), trigger = useRef<HTMLElement>(null);
   // Offline either way: Ghostly's own switch, or a device with no network. The banner says the second; what the relays
@@ -160,22 +163,28 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const iconKind: ConnectionKind = liveOn && !failure ? "connected" : kind;
   const holding = !ready && link?.textDelivery === "hold";
   const summary = liveOn ? connectionSummary(link, Date.now(), undefined, t) : undefined;
-  // The state line's round trip, once live and not moving.
+  // The state line's round trip, once live and not moving: isolated, so its number stays by its unit, not by a Latin transport name.
   const rtt = liveOn && !failure && !pair?.transitionTarget ? link?.transportRttMs : undefined;
   const keyOfMine = myKey || link?.myPubKeyZ32;
   const [tip, setTip] = useState(false);
   const close = () => { if (root.current?.open) { root.current.open = false; trigger.current?.focus(); } };
   useOutsideDismiss(root, menuOpen, close);
-  async function run(action: () => Promise<unknown>) {
-    setBusy(true); setError("");
+  // Focus gone to a control outside (a Tab past its end): it closes and leaves the focus there. On a phone the panel
+  // covers the messages, and the control would be under it. A click on its text moves the focus nowhere: it stays.
+  const focusLeft = (e: FocusEvent<HTMLElement>) => {
+    if (!root.current?.open || !(e.relatedTarget instanceof Node) || root.current.contains(e.relatedTarget)) return;
+    root.current.open = false; setMenuOpen(false);
+  };
+  async function run(action: () => Promise<unknown>, fail = setError) {
+    setBusy(true); fail("");
     // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
-    try { await action(); } catch (e) { setError(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }
+    try { await action(); } catch (e) { fail(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }
     finally { setBusy(false); }
   }
   // The header shows only the icon: the label is in its tooltip, its accessible name and the panel.
   // `toggle` is queued, and React can take a while to handle it: the click and Escape act at once instead.
   return <div className="relative shrink-0">
-  <details ref={root} onToggle={e => setMenuOpen(e.currentTarget.open)} onKeyDown={e => {
+  <details ref={root} onToggle={e => setMenuOpen(e.currentTarget.open)} onBlur={focusLeft} onKeyDown={e => {
     if (e.key !== "Escape") return;
     if (root.current?.open) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
   }} className="relative" data-testid={`${testIdPrefix}connection-menu`}>
@@ -190,7 +199,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     <div role="dialog" aria-label={t("connection.panel.title")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
       <div className="flex items-center gap-2 px-1 font-medium text-text-primary" data-testid="connection-state">
         {glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />}
-        <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · {t("connection.ms", { ms: rtt })}</span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
+        <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · <bdi data-testid="connection-rtt">{t("connection.ms", { ms: rtt })}</bdi></span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
       </div>
       {progress && (pairingOn || pairingFailed || onDhtWhy) && <div data-testid="connection-pairing" data-stage={stage} className="mt-1 space-y-0.5 px-1">
         {step > 0 && <p data-testid="connection-pairing-step">{t("pairing.stepOf", { n: step, total: steps.length })}{progress.attempt > 1 && ` · ${t("pairing.attempt", { n: progress.attempt })}`}</p>}
@@ -251,7 +260,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             <DiscoveryHealth status={state?.transport?.discovery} />
             {!dht && Object.entries(link?.transportErrors ?? {}).map(([transport, reason]) => {
               const said = problemText(reason, t, "connect");
-              return <Notice key={transport} testId="connection-transport-error" className="" title={t("connection.line.withReason", { text: name(transport as PairedTransport), reason: said.title })} details={said.detail} />;
+              return <Notice key={transport} testId="connection-transport-error" className="" title={t("connection.line.withReason", { text: name(transport as PairedTransport), reason: said.title })} next={said.next} details={said.detail} />;
             })}
             {(pinned || pair?.keyMismatch) && <div data-testid="pair-trust">
               {pair?.keyMismatch ? <p role="alert" className="text-danger">{t("connection.panel.keyMismatch")}</p> : <>
@@ -260,13 +269,14 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
                     <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/>{link?.peerVerified && <path d="m8 12 3 3 5-6"/>}</svg>
                     {link?.peerVerified ? t("connection.panel.verified") : t("connection.panel.notVerified")}
                   </span>
-                  {!link?.peerVerified && canCompare && !comparing && <button data-testid="pair-verify" aria-label={t("connection.panel.verifyContact")} className={`min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`} onClick={()=>setComparing(true)}>{t("connection.panel.verify")}</button>}
+                  {!link?.peerVerified && canCompare && !comparing && <button data-testid="pair-verify" aria-label={t("connection.panel.verifyContact")} className={`min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`} onClick={()=>{setVerifyError("");setComparing(true);}}>{t("connection.panel.verify")}</button>}
                 </div>
                 {comparing && canCompare && !link?.peerVerified && <div className="rounded-lg bg-surface-hover p-3">
                   <code data-testid="pair-code" className="block select-all break-words text-sm tracking-widest text-text-primary">{pair?.code}</code>
                   <p className="mt-1">{t("connection.panel.compare")}</p>
                   <button data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent px-3 text-panel-header ${focus}`}
-                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);})}>{t("connection.panel.codesMatch")}</button>
+                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</button>
+                  {verifyError && <Notice problem={problemText(verifyError, t)} tone="warning" testId="pair-verify-error" className="mt-1.5" />}
                 </div>}
               </>}
             </div>}

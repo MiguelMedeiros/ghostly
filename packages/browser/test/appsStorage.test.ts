@@ -116,6 +116,20 @@ describe("storage", () => {
       { ghostlyAppData: 1, app: app.ref, scope: "chat-1", entries: { a: [1, 2] } },
     ]);
   });
+
+  it("exports a key named __proto__ like any other", async () => {
+    const { store, app } = await installed();
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "__proto__", value: { board: "rnbqkbnr", turn: 7 } });
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "score", value: 3 });
+    const [file] = await store.exportData({ ref: app.ref });
+    expect(Object.keys(file.entries).sort()).toEqual(["__proto__", "score"]);
+    expect(Object.getPrototypeOf(file.entries)).toBe(Object.prototype);
+    // The file the uninstall dialog saves is this, as JSON.
+    expect(JSON.parse(JSON.stringify(file))).toEqual({
+      ghostlyAppData: 1, app: app.ref, scope: "chat-1",
+      entries: JSON.parse('{"__proto__":{"board":"rnbqkbnr","turn":7},"score":3}'),
+    });
+  });
 });
 
 describe("uninstall", () => {
@@ -162,6 +176,27 @@ describe("uninstall", () => {
     expect((await storageRows() as { scope: string }[]).map((r) => r.scope)).toEqual(["chat-2"]);
   });
 
+  it("a deleted chat's messages and app rows go by range, one delete per app, not one per row", async () => {
+    const refs = ["ana/chess", "ana/go", "bo/notes"];
+    const tx = (await openDb()).transaction([STORES.messages, STORES.appStorage], "readwrite");
+    for (const linkId of ["chat-1", "chat-2"]) {
+      for (let i = 0; i < 300; i++) tx.objectStore(STORES.messages).put({ linkId, id: `m${i}`, timestamp: i });
+      for (const ref of refs) for (let i = 0; i < 100; i++) tx.objectStore(STORES.appStorage).put({ ref, scope: linkId, key: `k${i}`, value: "1", size: 1 });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    const deletes = vi.spyOn(IDBObjectStore.prototype, "delete");
+    try {
+      await db.deleteLink("chat-1");
+      const on = (name: string) => deletes.mock.contexts.filter((store) => (store as IDBObjectStore).name === name).length;
+      expect(on(STORES.messages)).toBe(1);
+      expect(on(STORES.appStorage)).toBe(refs.length);
+    } finally { deletes.mockRestore(); }
+    expect((await db.getMessages("chat-1"))).toEqual([]);
+    expect((await db.getMessages("chat-2"))).toHaveLength(300);
+    expect(new Set((await storageRows() as { scope: string }[]).map((r) => r.scope))).toEqual(new Set(["chat-2"]));
+    expect(await storageRows()).toHaveLength(300);
+  });
+
   it("Clear all data empties the apps' stores", async () => {
     const { store, app } = await installed();
     await store.storageSet({ ref: app.ref, scope: "chat-1", key: "k", value: 1 });
@@ -174,7 +209,7 @@ describe("uninstall", () => {
 
 describe("the database", () => {
   it("a profile at 13 opens at 14 with its rows kept and the apps' stores added", async () => {
-    expect(DB_VERSION).toBe(14);
+    expect(DB_VERSION).toBeGreaterThanOrEqual(14);
     await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(databaseName()); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
     const thirteen = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(databaseName(), 13);
@@ -188,7 +223,7 @@ describe("the database", () => {
     });
     thirteen.close();
     const opened = await openDb();
-    expect(opened.version).toBe(14);
+    expect(opened.version).toBe(DB_VERSION);
     expect([...opened.objectStoreNames]).toEqual(expect.arrayContaining(["settings", "links", "apps", "appStores", "appStorage"]));
     expect(await wrap(opened.transaction("settings").objectStore("settings").get("settings"))).toEqual({ nick: "Kept" });
     const storage = opened.transaction("appStorage").objectStore("appStorage");

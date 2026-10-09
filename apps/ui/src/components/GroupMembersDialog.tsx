@@ -9,6 +9,7 @@ import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto } from "..
 import { agoIn } from "../lib/relativeTime";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 import { RemoveMemberDialog } from "./RemoveMemberDialog";
+import { MakeAdminDialog } from "./MakeAdminDialog";
 import { GroupAvatar } from "./GroupAvatar";
 import { AvatarOpener } from "./AvatarViewer";
 import { useContactFaces } from "./identities/contactFace";
@@ -18,6 +19,7 @@ import { Select } from "./ui/Select";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { initial } from "../lib/initial";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -43,6 +45,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const [error, setError] = useState<Problem | null>(null);
   /** The member whose Remove was pressed, asked about before anything happens. */
   const [removing, setRemoving] = useState<GroupMemberView | null>(null);
+  /** The member whose Hand over admin was pressed: the one admin role leaves me for them, so it is asked first too. */
+  const [promoting, setPromoting] = useState<GroupMemberView | null>(null);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal();
@@ -66,7 +70,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   };
   // Contacts: paired chats, minus members and pending invitations. Those without groups are shown, and say why.
   const contacts = (state?.links ?? []).filter(l => l.profile && !live.memberLinks[l.id]);
-  const invited = new Set(live.invited);
+  const invited = new Set(live.invited), full = live.members.length + live.invited.length >= MAX_GROUP_MEMBERS;
   // A member who is also a contact: the identities they shared in that chat. Community members are not contacts.
   const contactOf = (key: string) => {
     const linkId = Object.keys(live.memberLinks).find(id => live.memberLinks[id] === key);
@@ -75,9 +79,10 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const contactKey = (key: string) => contactOf(key)?.peerPubKeyZ32;
   // In a community my app holds an edge only with a hub or two (as a hub, with its members): everyone else is reached
   // through the hubs, which is not "not reachable". That holds for a hub my edge to is not up (yet, or any more) while
-  // another edge is: what it says still comes through the hub I am linked to. With no edge up, each edge says its own state.
+  // another edge is: what it says still comes through the hub I am linked to. With no edge up, no hub carries anyone to me:
+  // each edge says its own state, and a member without one has no connection.
   const linked = live.members.some(m => m.edge?.state === "open");
-  const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && (!m.edge || (linked && m.edge.state !== "open"));
+  const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && linked && m.edge?.state !== "open";
   const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
   // The member whose name or picture was tapped in the chat: their row, in sight and marked.
   const list = useRef<HTMLUListElement>(null);
@@ -142,7 +147,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           {live.profile === "mesh" && live.members.length > MESH_HUBS.threshold && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy !== null}
             value={m.hubRole ?? "auto"} options={hubRoles}
             onChange={role => void run(m.key, () => engine.call("setGroupHub", { groupId: live.id, key: m.key, role: role === "auto" ? null : role }))} />}
-          <button disabled={busy !== null} onClick={() => void run(m.key, () => engine.call("makeGroupAdmin", { groupId: live.id, key: m.key }))} data-testid="group-make-admin"
+          <button disabled={busy !== null} onClick={() => setPromoting(m)} data-testid="group-make-admin"
             className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">{t("group.members.makeAdmin")}</button>
           <button disabled={busy !== null} onClick={() => setRemoving(m)} data-testid="group-remove-member"
             className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
@@ -151,10 +156,13 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     </ul>
     {live.isAdmin && live.status === "active" && live.profile !== "community" && <div className="mt-4">
       <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.members.invite")}</h3>
+      {/* Unanswered invitations hold a seat (they last until the app restarts), so a full group says how many of its 32 are only invited. */}
+      {full && <p data-testid="group-invite-full" className="mt-1 text-sm text-text-muted">{live.invited.length > 0
+        ? t("group.members.fullInvited", { max: MAX_GROUP_MEMBERS, invited: live.invited.length }) : t("group.link.full", { count: MAX_GROUP_MEMBERS })}</p>}
       {contacts.length === 0 && <p className="mt-1 text-sm text-text-muted">{t("group.members.noContacts")}</p>}
       <ul className="mt-1 max-h-40 space-y-1 overflow-y-auto" data-testid="group-invite-list">
         {contacts.map(link => {
-          const pending = invited.has(link.id), can = !!link.groups && !pending && live.members.length + live.invited.length < MAX_GROUP_MEMBERS;
+          const pending = invited.has(link.id), can = !!link.groups && !pending && !full;
           return <li key={link.id} data-testid="group-invite-contact" data-link={link.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
             <span className="min-w-0 flex-1 truncate text-sm">{contactName(link)}</span>
             {pending ? <span className="text-xs text-text-muted">{t("group.members.invited")}</span>
@@ -168,6 +176,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     {error && <Notice problem={error} className="mt-3 text-sm" />}
     {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
+    {promoting && <MakeAdminDialog name={memberName(promoting, t)} onClose={() => setPromoting(null)}
+      onConfirm={() => { const key = promoting.key; setPromoting(null); void run(key, () => engine.call("makeGroupAdmin", { groupId: live.id, key })); }} />}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);
 }
@@ -179,7 +189,7 @@ function MemberAvatar({ src, name }: { src?: string; name: string }) {
       className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover text-xs">
       {src
         ? <img src={src} alt="" draggable={false} className="h-full w-full object-cover" />
-        : <span aria-hidden="true" data-initial={name.charAt(0).toUpperCase()} className="text-text-muted before:content-[attr(data-initial)]" />}
+        : <span aria-hidden="true" data-initial={initial(name)} className="text-text-muted before:content-[attr(data-initial)]" />}
     </AvatarOpener>
   );
 }
