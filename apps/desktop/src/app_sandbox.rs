@@ -517,6 +517,8 @@ fn window_builder<'a, R: Runtime>(
                 });
             tauri::webview::NewWindowResponse::Deny
         })
+        // Never a file saved by the window itself.
+        .on_download(|_, event| crate::viewer::may_download(&event))
         .inner_size(width, height);
     #[cfg(any(test, feature = "e2e-driver"))]
     if guard.proxy {
@@ -1876,5 +1878,27 @@ mod tests {
             "an unknown view is refused"
         );
         assert!(WINDOWS_REFUSAL.contains("Windows"));
+    }
+}
+
+/// The real window on WebKitGTK, with every layer off (the runner's CSP alone stops a download there): what
+/// an app's page can leave on disk.
+#[cfg(all(test, target_os = "linux"))]
+mod download_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs a display and a process of its own (test_support::saved_by_a_window)"]
+    fn a_download_the_page_starts_saves_no_file() {
+        // covers: apps.desktop-sandbox
+        let saved = crate::test_support::saved_by_a_window(
+            SCHEME,
+            |app| app.manage(AppSandboxState::default()),
+            |app| {
+                let guard = Guard::parse("control").unwrap();
+                open_guarded(app, "chess".into(), String::new(), guard, false).unwrap();
+            },
+        );
+        assert_eq!(saved, Vec::<String>::new());
     }
 }
