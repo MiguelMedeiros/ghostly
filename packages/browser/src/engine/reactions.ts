@@ -54,9 +54,10 @@ export function noteAfterChange(current: ReactionNote, message: StoredMessage): 
 }
 
 /**
- * My reactions in a private group to say again to an edge that opened, in case it missed them: the newest `limit`, of
- * this membership only. One made before I was removed and invited again went out under my old member key; said again
- * now it would go under the new one, and every member would show it twice.
+ * My reactions in a private group to say again to an edge that opened, in case it missed them: the newest `limit`,
+ * newest first (what the member is likeliest to have missed lands before its pace runs out), of this membership only.
+ * One made before I was removed and invited again went out under my old member key; said again now it would go under
+ * the new one, and every member would show it twice.
  */
 export function groupReactionsToResend(messages: readonly StoredMessage[], limit: number): WireReaction[] {
   let joinedAt = 0;
@@ -64,7 +65,7 @@ export function groupReactionsToResend(messages: readonly StoredMessage[], limit
   return messages.flatMap(m => {
     const r = m.reactions?.me, id = replyRef(m, true);
     return r && id && r.at >= joinedAt ? [{ id, e: r.e, n: r.n }] : [];
-  }).sort((a, b) => b.n - a.n).slice(0, limit).reverse();
+  }).sort((a, b) => b.n - a.n).slice(0, limit);
 }
 
 /** This side's highest number in a chat: the next one goes past it (and past what still waits to be confirmed). */
@@ -145,16 +146,15 @@ export class Reactions {
       const now = this.now(), all = (this.waiting.get(message.linkId) ?? []).filter(w => w.until > now);
       const mine = all.filter(w => w.reaction.id === id).sort((a, b) => a.reaction.n - b.reaction.n);
       this.waiting.set(message.linkId, all.filter(w => w.reaction.id !== id));
-      for (const { by, reaction } of mine) {
-        const target = reactionTarget(await this.host.messages(message.linkId), id, isGroup(message.linkId));
-        if (target && reactionIsNewer(target.reactions?.[by], reaction.n)) await this.write(message.linkId, target, by, reaction);
-      }
+      // The message just kept is their row: written to directly (the patch keeps only a newer one), the chat not read.
+      for (const { by, reaction } of mine) await this.write(message.linkId, message, by, reaction);
     });
   }
 
   /**
    * The row a received reaction names. Most often the row of that id (a group's), or of `peer_` or `me_` and that id (a
-   * chat's): those are read alone. Any other (a file's, a payment's, one not here yet) is looked for in the whole chat.
+   * chat's): those are read alone. Any other (a file's, a payment's, one not here yet) is looked for in the whole chat;
+   * in a group there is no other, since a row that takes a reaction goes by its own id there.
    */
   private async find(chat: string, id: string): Promise<StoredMessage | undefined> {
     const group = isGroup(chat);
@@ -163,6 +163,7 @@ export class Reactions {
         const row = await this.host.message(chat, rowId);
         if (row && replyRef(row, group) === id) return row;
       }
+      if (group) return undefined;
     }
     return reactionTarget(await this.host.messages(chat), id, group);
   }

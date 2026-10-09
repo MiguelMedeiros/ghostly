@@ -57,6 +57,14 @@
   "defaultNicknameHint": "Usado ao iniciar uma nova conversa",
   "deleteAllChatsConfirm": "Excluir todas as {{count}} conversas?",
   "deleteAllChatsHint": "Mensagens e arquivos são apagados. Ajustes e carteiras ficam.",
+  "groupDownloads": {
+    "always": "Sempre",
+    "hint": "Mensagens de voz e arquivos pequenos",
+    "info": "Mensagens de voz, e arquivos de até {{file}}, são baixados sozinhos até que o que chegou assim de um grupo some {{group}} neste dispositivo. Arquivos maiores esperam por Baixar. Cada dispositivo decide por si; nada disso é enviado ao grupo.",
+    "off": "Desligado",
+    "title": "Baixar automaticamente nos grupos",
+    "wifi": "Só no Wi-Fi"
+  },
   "incorrectPassword": "Senha incorreta",
   "language": "Idioma",
   "license": "Licença",
@@ -142,6 +150,7 @@
     "colour": "cor, destaque, tema",
     "deleteChats": "apagar, histórico",
     "domains": "DNS, DoH",
+    "groupDownloads": "automático, download automático, mídia, Wi-Fi, dados móveis, mensagens de voz, arquivos, grupos",
     "language": "tradução, localidade",
     "linkPreviews": "links, URL",
     "lock": "senha, PIN, segurança",

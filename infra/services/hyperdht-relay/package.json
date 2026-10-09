@@ -9,6 +9,6 @@
   "dependencies": {
     "@hyperswarm/dht-relay": "0.4.3",
     "hyperdht": "6.34.0",
-    "ws": "8.21.3"
+    "ws": "8.22.0"
   }
 }

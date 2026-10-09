@@ -75,6 +75,36 @@ describe("FileBubble: files/3", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
   });
 
+  it("Accept pressed from the keyboard keeps the focus in the bubble once the offer is answered", async () => {
+    const { user } = show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 12 * GB });
+    const bubble = screen.getByTestId("file-bubble");
+    screen.getByTestId("file-accept").focus();
+    await user.keyboard("{Enter}");
+    // Chromium says the focus left the button as it takes it out, to nothing.
+    const accept = screen.getByTestId("file-accept");
+    act(() => {
+      fakeEngine.update({ transfers: { "chat1-in-abc": { state: "transferring", direction: "in", transferred: 0, size: 4.2 * GB } } });
+      fireEvent.focusOut(accept);
+    });
+    expect(screen.queryByTestId("file-accept")).toBeNull();
+    expect(document.activeElement).toBe(bubble);
+    // Tab goes on to what the bubble offers now, and the bubble is no stop of its own once the focus left it.
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByTestId("file-pause"));
+    expect(bubble).not.toHaveAttribute("tabindex");
+  });
+
+  it("an offer whose buttons the focus left before it was answered moves no focus", async () => {
+    show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 12 * GB });
+    screen.getByTestId("file-decline").focus();
+    screen.getByTestId("file-decline").blur();
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    act(() => fakeEngine.update({ transfers: { "chat1-in-abc": { state: "transferring", direction: "in", transferred: 0, size: 4.2 * GB } } }));
+    expect(screen.queryByTestId("file-accept")).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+    expect(screen.getByTestId("file-bubble")).not.toHaveAttribute("tabindex");
+  });
+
   it("a contact with no name: \"your contact\" mid-sentence, \"Your contact\" to start one", () => {
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: { "chat1-out-p": { state: "transferring", stage: "paused", pausedBy: "peer", direction: "out", transferred: GB, size: 4.2 * GB } } });
     const sent = renderApp(<FileBubble file={file({ id: "chat1-out-p" })} />);

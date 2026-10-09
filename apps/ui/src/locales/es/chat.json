@@ -124,6 +124,7 @@
     "askAgainDamagedHint": "Lo pide de nuevo al grupo. Los datos dañados se borraron.",
     "askAgainHint": "Pide el resto a tu contacto. Lo que llegó se queda.",
     "askGroupAgainHint": "Lo pide de nuevo a los miembros del grupo, también a aquellos cuya copia llegó dañada.",
+    "askingMember": "Pidiéndolo a un miembro que lo tiene…",
     "askingThem": "Esperando a que {{name}} acepte · {{size}}",
     "askingYou": "{{size}} · esperando tu respuesta",
     "busyDone": "Ocupado, se reintenta pronto · {{done}} hecho",
@@ -138,6 +139,9 @@
     "leftMinutes": "quedan {{minutes}} min",
     "leftUnderMinute": "menos de un minuto restante",
     "noRoomDevice": "No hay espacio suficiente: {{size}} libres en este dispositivo",
+    "nobodyHas": "Nadie con quien estás conectado tiene este archivo todavía",
+    "nobodyHasHint": "Llega solo cuando un miembro que lo tiene esté en línea.",
+    "notDownloaded": "{{size}} · sin descargar",
     "notInBackup": "No está en esta copia",
     "notSentHint": "No enviado. Envíalo de nuevo.",
     "of": "{{done}} de {{size}}",
@@ -162,7 +166,6 @@
   "fileTooLarge": "Ese archivo es demasiado grande (máx. {{size}}).",
   "filesNeedUpdate": "Actualiza ambos lados para enviar archivos",
   "forward": {
-    "filesHint": "Los grupos solo aceptan texto",
     "forward": "Reenviar",
     "forwarded": "Reenviado",
     "many": "Reenviado muchas veces",
@@ -404,6 +407,7 @@
     "cantPlay": "Este dispositivo no puede reproducir este vídeo ({{format}}). Descárgalo para verlo.",
     "exitFullScreen": "Salir de pantalla completa",
     "fullScreen": "Pantalla completa",
+    "label": "Vídeo, {{length}}",
     "play": "Reproducir vídeo",
     "save": "Guardar vídeo",
     "tooLarge": "Demasiado grande para reproducirlo aquí. Descárgalo para verlo."

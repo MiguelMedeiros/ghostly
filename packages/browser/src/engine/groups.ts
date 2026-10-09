@@ -458,7 +458,8 @@ export class Groups {
     }
   }
 
-  async load(): Promise<void> {
+  /** `asItIs`: a copy that must stay as it was stored (limited mode, WISP 06), so nothing left over is cleared from it. */
+  async load(asItIs = false): Promise<void> {
     const all = await this.store.getGroups();
     await this.communities.load(all.filter(g => g.community || g.joining));
     for (const group of all.filter(g => !g.community && !g.joining)) {
@@ -478,6 +479,7 @@ export class Groups {
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
     await this.files?.load(all.map(g => g.id));
+    if (!asItIs) await this.files?.sweep(all.map(g => g.id));
     // An admission in flight did not survive the restart: its joiner knocks again. A joiner keeps its side.
     for (const group of this.stored.values()) for (const [, linkId] of this.host.entries(group.id)) {
       if (!group.invitation?.entry || group.invitation.linkId !== linkId) await this.host.closeEdge(linkId);
@@ -756,8 +758,8 @@ export class Groups {
   }
 
   /**
-   * Leaves, and the group is gone from this device at once: its row, its history and every edge
-   * but the one to the admin, which stays until the admin's commit removing me comes back (or a
+   * Leaves, and the group is gone from this device at once: its row, its history, its files and every
+   * edge but the one to the admin, which stays until the admin's commit removing me comes back (or a
    * week passes), so a leave said while the admin was away still reaches it. An admin with other
    * members hands the role to one who is online first; alone, the group simply goes.
    */
@@ -792,9 +794,18 @@ export class Groups {
     this.lastMentionAt.delete(groupId);
     await this.store.deleteGroup(groupId);
     await this.store.putGroup(group);
+    // The files go with the history, not when the admin has heard: its app may be away for the week the tombstone stays.
+    await this.files?.drop(groupId);
     this.host.historyGone?.(groupId);
     for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
     this.host.emit();
+    // A hub's members hear its leave on their edges and stop counting on it at once, and its entry leaves the beacon:
+    // as the only hub, nobody else would tell them, and they would wait for the beacon to forget it.
+    // Said before the session leaves: that closes the edges to members.
+    if (this.hubs.isHub(groupId)) {
+      await this.hubs.stepDown(groupId, session, this.now());
+      if (bye) for (const [key, edge] of this.host.edges(groupId)) if (!hubs.includes(key) && this.host.linkReady(edge)) { try { this.host.sendOnLink(edge, bye); } catch { /* closing */ } }
+    }
     await session.leave();
     if (bye) for (const key of hubs) { const edge = this.host.edges(groupId).get(key); if (edge && this.host.linkReady(edge)) { try { this.host.sendOnLink(edge, bye); } catch { /* when it opens again */ } } }
     // The admin may be off; its contact chat, if that is how I got here, hears it too.
@@ -936,7 +947,7 @@ export class Groups {
   async forget(groupId: string): Promise<void> {
     // A community I am active in is left first (the request to the hubs, an admin's role handed on), or the others keep
     // me as a member, and as their admin, for good: refused when nothing is connected to carry it, as Leave is.
-    if (this.isCommunity(groupId)) { await this.communities.leave(groupId); await this.files?.drop(groupId); return; }
+    if (this.isCommunity(groupId)) return this.communities.leave(groupId);
     const session = this.sessions.get(groupId);
     // Deleting an active group leaves it. An admin with members who cannot hand the role on is refused, as Leave is:
     // gone with the role, the group would have no admin for good. Anyone else's failed goodbye does not keep it here.
@@ -1447,6 +1458,8 @@ export class Groups {
       return;
     }
     if (!session) return;
+    // A member leaving says so on its own edge: as a hub, it is none from now on (the next tick opens direct edges).
+    if (t === "group-bye" && session.status === "active" && (frame as { k?: unknown }).k === peerKey && this.hubs.departs(groupId, peerKey)) this.host.emit();
     if (t === GROUP_REACTION_FRAME || t === GROUP_REACTED_FRAME) { await this.reaction(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (t === GROUP_TYPING_FRAME) { this.typings.heard(session, peerKey, frame); return; }
     if (t === GROUP_PIN_FRAME) {

@@ -57,6 +57,14 @@
   "defaultNicknameHint": "新しいチャットを始めるときに使われます",
   "deleteAllChatsConfirm": "{{count}}件のチャットをすべて削除しますか?",
   "deleteAllChatsHint": "メッセージとファイルは削除されます。設定とウォレットは残ります。",
+  "groupDownloads": {
+    "always": "常に",
+    "hint": "ボイスメッセージと小さなファイル",
+    "info": "ボイスメッセージと {{file}} までのファイルは、グループから自動で届いた分がこのデバイスで {{group}} になるまで自動でダウンロードされます。それより大きいファイルは「ダウンロード」を待ちます。デバイスごとに決まり、グループには何も送られません。",
+    "off": "オフ",
+    "title": "グループで自動ダウンロード",
+    "wifi": "Wi-Fi のみ"
+  },
   "incorrectPassword": "パスワードが正しくありません",
   "language": "言語",
   "license": "ライセンス",
@@ -142,6 +150,7 @@
     "colour": "色、アクセント、テーマ",
     "deleteChats": "消去、履歴",
     "domains": "DNS、DoH",
+    "groupDownloads": "自動, 自動ダウンロード, メディア, Wi-Fi, モバイルデータ, ボイスメッセージ, ファイル, グループ",
     "language": "翻訳、ロケール",
     "linkPreviews": "リンク、URL",
     "lock": "パスワード、PIN、セキュリティ",

@@ -74,6 +74,22 @@ describe("an audio file in the chat", () => {
     }
   });
 
+  it("names the person who sent it to the system's media controls in the app's language", async () => {
+    const session = { metadata: null as unknown, playbackState: "none", setActionHandler: vi.fn(), setPositionState: vi.fn() };
+    Object.defineProperty(navigator, "mediaSession", { configurable: true, value: session });
+    vi.stubGlobal("MediaMetadata", class { constructor(public init: object) {} });
+    try {
+      fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+      renderApp(<AudioBubble file={song()} sender="me" peerName="Ana" />, { language: "pt" });
+      fireEvent.click(screen.getByTestId("audio-play"));
+      await flush();
+      expect(session.metadata).toMatchObject({ init: { title: "Ghost Town.mp3", artist: "Você" } });
+    } finally {
+      Reflect.deleteProperty(navigator, "mediaSession");
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("is routed to the audio bubble by its type; a voice message keeps its own; MIDI stays a file", () => {
     const message = (file: ChatFile): ChatMessage => ({ id: `peer_${file.id}`, text: `📎 ${file.name}`, sender: "peer", timestamp: 1_700_000_000_000, file });
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
@@ -289,6 +305,16 @@ describe("an audio file not here yet", () => {
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([{ linkId: "chat1", fileId: file.id, action: "accept" }]));
     fireEvent.click(screen.getByTestId("audio-decline"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
+  });
+
+  it("Download pressed from the keyboard keeps the focus in the bubble once the offer is answered", async () => {
+    const file = song({ size: 40 * MB });
+    const { user } = show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
+    screen.getByTestId("audio-accept").focus();
+    await user.keyboard("{Enter}");
+    act(() => fakeEngine.update({ transfers: { [file.id]: { state: "transferring", direction: "in", transferred: 0, size: file.size } } }));
+    expect(screen.queryByTestId("audio-accept")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("audio-bubble"));
   });
 
   it("an offer larger than the room here cannot be accepted", () => {

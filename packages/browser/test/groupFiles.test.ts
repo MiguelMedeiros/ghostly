@@ -24,6 +24,7 @@ class MemoryFiles implements GroupFileStore {
   /** Its copies went bad: what it serves is not what it stored. */
   corrupt = false;
   async list(groupId: string) { return [...this.records.values()].filter(r => r.linkId === `group:${groupId}`).map(r => ({ ...r })); }
+  async groups() { return [...new Set([...this.records.values()].filter(r => r.linkId.startsWith("group:")).map(r => r.linkId.slice("group:".length)))]; }
   async get(id: string) { const record = this.records.get(id); return record && { ...record }; }
   async put(file: StoredFile) { this.records.set(file.id, { ...file }); }
   async patch(id: string, fields: Pick<StoredFile, "transfer" | "group">) { const record = this.records.get(id); if (record) this.records.set(id, { ...record, ...fields }); }
@@ -370,6 +371,46 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(answers("carol")).toEqual(["busy"]);
   });
 
+  it(`a member's app sends at most ${GROUP_FILE_LIMITS.announceTaken} files in ${GROUP_FILE_LIMITS.announceWindowMs / 60_000} minutes, so every one it sends reaches the others as a file`, async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    t.files.get(bob)!.settings.autoDownloads = false;
+    const store = t.files.get(alice)!.store, sent: string[] = [], refused: string[] = [];
+    // 7.5 a minute, within the minute's pace: the window of 10 minutes is what stops the 31st.
+    for (let i = 0; i < GROUP_FILE_LIMITS.announceTaken + 2; i++) {
+      const bytes = pattern(1_000 + i, i), fileId = groupFileId(id, "out");
+      const meta: GroupFileMeta = { name: `n${i}.txt`, mime: "text/plain", size: bytes.length, d: sha(bytes) };
+      store.bytes.set(fileId, bytes);
+      await store.put({ id: fileId, linkId: `group:${id}`, direction: "out", digest: meta.d, createdAt: t.world.now, metadata: { name: meta.name, size: meta.size, mime: meta.mime, timestamp: t.world.now } });
+      const r = await alice.groups.sendFile(id, groupFileFallback(meta), meta, fileId);
+      if (r.error) refused.push(r.error); else sent.push(r.messageId!);
+      await t.world.run(8_000);
+    }
+    expect(sent).toHaveLength(GROUP_FILE_LIMITS.announceTaken);
+    expect(refused[0]).toMatch(/^You sent many files to this group just now\. Wait \d+ minutes\.$/);
+    await t.world.run(5_000);
+    expect(sent.filter(m => !t.got(bob, id, m).message?.file)).toEqual([]);
+  });
+
+  it("a member refused as busy is told when the holder's slot frees, and asks it again before the round is over", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    // Alice serves one at a time; Bob and Carol serve nobody, so whoever she turns away has only her to ask.
+    limits.serveAtOnce = 1;
+    for (const p of [bob, carol]) t.files.get(p)!.settings.serveFiles = false;
+    const start = t.world.now;
+    const { messageId, meta } = await t.send(alice, id, pattern(100_000, 13));
+    await t.world.until(() => t.done(bob, id, messageId) && t.done(carol, id, messageId), 60_000, 500);
+    const refusals = t.seen.filter(s => s.from === "alice" && s.frame.t === "group-want-no" && s.frame.why === "busy");
+    const refused = refusals[0].to;
+    expect(refusals.every(s => s.to === refused)).toBe(true);
+    // Asked again once her slot freed (her next group-have to that edge), not after the 30 s round.
+    expect(t.world.now - start).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs - 10_000);
+    const told = t.seen.slice(t.seen.indexOf(refusals.at(-1)!)).some(s => s.from === "alice" && s.to === refused && s.frame.t === "group-have" && (s.frame.ids as string[]).includes(messageId));
+    expect(told).toBe(true);
+    expect(sha(t.got(refused === "bob" ? bob : carol, id, messageId).bytes!)).toBe(meta.d);
+  });
+
   const serving = (p: Peer) => (p.groups.files as unknown as { servingNow(): { peer: string; size: number }[] }).servingNow();
 
   it("askers that go away mid-download free the holder's places, and the next member is served", async () => {
@@ -405,6 +446,38 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(serving(alice)).toEqual([]);
   });
 
+  it("files announced together come one after another from their author, not a busy answer and a wait each", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const sent = await Promise.all([1, 2, 3, 4, 5].map(seed => t.send(alice, id, pattern(20_000, seed), { name: `voice-${seed}.webm` })));
+    const start = t.world.now;
+    // Each is a few round trips: well within a want's wait (`wantWaitMs`), which a busy answer would cost.
+    await t.world.until(() => sent.every(s => t.done(bob, id, s.messageId)), 60_000);
+    expect(t.world.now - start).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs / 2);
+    for (const s of sent) expect(sha(t.got(bob, id, s.messageId).bytes!)).toBe(s.meta.d);
+    // Bob's app asked Alice for the next file only once the one before had come.
+    expect(t.seen.filter(s => s.from === "alice" && s.to === "bob" && s.frame.t === "group-want-no")).toEqual([]);
+    expect(t.seen.filter(s => s.from === "bob" && s.frame.t === "group-want")).toHaveLength(5);
+  });
+
+  it("the next file's ask that overtakes the word that the last one checked out is not answered busy", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const sent = await Promise.all([1, 2, 3].map(seed => t.send(alice, id, pattern(20_000, seed), { name: `voice-${seed}.webm` })));
+    // Bob's `pf-done` reaches Alice half a second late (files/3 and the group's frames are two channels): his next
+    // `group-want` comes while her transfer still waits for it.
+    const late = (from: Peer, _to: Peer, frame: Record<string, unknown>) => from === bob && frame.t === "pf-done";
+    const start = t.world.now;
+    t.hold = late;
+    while (!sent.every(s => t.done(bob, id, s.messageId)) && t.world.now - start < 60_000) {
+      await t.world.run(500);
+      t.release(id);
+      t.hold = late;
+    }
+    expect(t.world.now - start).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs / 2);
+    expect(t.seen.filter(s => s.from === "alice" && s.to === "bob" && s.frame.t === "group-want-no")).toEqual([]);
+  });
+
   it(`a file over ${GROUP_FILE_LIMITS.autoBytes / 1024 / 1024} MiB waits for a Download, then comes; a smaller one comes by itself`, async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
@@ -419,6 +492,76 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(bob, id, big.messageId).bytes!)).toBe(big.meta.d);
     // Asked for, it does not count toward what the group fetches by itself.
     expect(t.files.get(bob)!.store.records.get(t.got(bob, id, big.messageId).message!.file!.id)!.group).toMatchObject({ asked: true });
+  });
+
+  it("a member who leaves keeps none of the group's files: they go with its history, not when the admin has heard", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    const theirs = await t.send(alice, id, pattern(40_000, 2), { name: "plans.bin" });
+    const mine = await t.send(bob, id, pattern(30_000, 3), { name: "reply.bin" });
+    await t.world.until(() => [alice, bob, carol].every(p => t.done(p, id, theirs.messageId) && t.done(p, id, mine.messageId)), 5 * 60_000);
+    const { store, transfers } = t.files.get(bob)!;
+    expect(store.bytes.size).toBe(2);
+    // The admin is away: its commit taking bob out does not come back, and the leave waits for it for a week.
+    alice.online = false;
+    await t.world.run(5_000);
+    await bob.groups.leave(id);
+    await t.world.run(60_000);
+    expect(bob.messages.filter(m => m.linkId === `group:${id}`)).toEqual([]);
+    expect([...store.records.keys()]).toEqual([]);
+    expect([...store.bytes.keys()]).toEqual([]);
+    expect([...transfers.keys()]).toEqual([]);
+  });
+});
+
+describe("the files of a group this device no longer has", { timeout: 120_000 }, () => {
+  /** A file of `groupId` as an earlier run kept it: its record and its bytes. */
+  const leftOver = async (store: MemoryFiles, groupId: string) => {
+    const id = groupFileId(groupId, "in"), bytes = pattern(4_000, 9);
+    store.bytes.set(id, bytes);
+    await store.put({ id, linkId: `group:${groupId}`, direction: "in", digest: sha(bytes), createdAt: 1,
+      metadata: { name: "old.bin", size: bytes.length, mime: "application/octet-stream", timestamp: 1 },
+      transfer: { state: "done", transferred: bytes.length, size: bytes.length }, group: { message: "m1", author: "someone" } });
+    return id;
+  };
+
+  it("go at start with their bytes, and the files of the groups it has stay", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const { messageId, meta } = await t.send(alice, id, pattern(50_000, 4));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    const store = t.files.get(bob)!.store, here = t.got(bob, id, messageId).message!.file!.id;
+    // A community left on a version whose Leave kept its files: no group stored here names them.
+    const gone = await leftOver(store, "gone-community");
+    await t.world.restart(bob);
+    expect(store.records.has(gone)).toBe(false);
+    expect(store.bytes.has(gone)).toBe(false);
+    expect(sha(store.bytes.get(here)!)).toBe(meta.d);
+    expect(t.got(bob, id, messageId).transfer).toMatchObject({ state: "done" });
+  });
+
+  it("stay for a group it was removed from, whose history is kept", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const { messageId, meta } = await t.send(alice, id, pattern(50_000, 5));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    await alice.groups.remove(id, t.key(bob, id));
+    await t.world.until(() => t.world.view(bob, id)?.status === "removed", 60_000);
+    await t.world.restart(bob);
+    expect(t.world.view(bob, id)?.status).toBe("removed");
+    const { message, bytes, transfer } = t.got(bob, id, messageId);
+    expect(t.files.get(bob)!.store.records.has(message!.file!.id)).toBe(true);
+    expect(sha(bytes!)).toBe(meta.d);
+    expect(transfer).toMatchObject({ state: "done" });
+  });
+
+  it("stay on a copy that must stay as it is (limited mode)", async () => {
+    const t = new FilesWorld();
+    const { peers: [, bob] } = await t.mesh(["alice", "bob"]);
+    const store = t.files.get(bob)!.store, gone = await leftOver(store, "gone-community");
+    await bob.groups.load(true);
+    expect(store.records.has(gone)).toBe(true);
+    expect(store.bytes.has(gone)).toBe(true);
   });
 });
 
@@ -444,5 +587,31 @@ describe("a file in a community", { timeout: 120_000 }, () => {
       expect(from.length).toBeGreaterThan(0);
       expect(from.every(name => hubs.some(h => h.name === name))).toBe(true);
     }
+  });
+
+  it("a member who leaves keeps none of the community's files, and none is left after the app starts again", async () => {
+    const t = new FilesWorld();
+    const admin = t.add("admin");
+    const id = await admin.groups.create("Open door");
+    const link = await admin.groups.enableLink(id);
+    const others = Array.from({ length: 3 }, (_, i) => t.add(`p${i}`));
+    for (const p of others) await p.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await t.world.until(() => others.every(p => t.world.member(p, id)), 10 * 60_000);
+    await t.world.run(30_000);
+    const [author, reader] = others;
+    const theirs = await t.send(author, id, pattern(40_000, 5), { name: "minutes.bin" });
+    const mine = await t.send(reader, id, pattern(30_000, 6), { name: "answer.bin" });
+    await t.world.until(() => t.done(reader, id, theirs.messageId) && t.done(reader, id, mine.messageId), 5 * 60_000);
+    const { store, transfers } = t.files.get(reader)!;
+    expect(store.bytes.size).toBe(2);
+    await reader.groups.leave(id);
+    await t.world.run(60_000);
+    expect(t.world.view(reader, id)).toBeUndefined();
+    expect(reader.messages.filter(m => m.linkId === `group:${id}`)).toEqual([]);
+    expect([...store.records.keys()]).toEqual([]);
+    expect([...store.bytes.keys()]).toEqual([]);
+    expect([...transfers.keys()]).toEqual([]);
+    await t.world.restart(reader);
+    expect([...store.records.keys()]).toEqual([]);
   });
 });

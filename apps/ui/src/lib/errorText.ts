@@ -61,6 +61,11 @@ export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable fi
  */
 export const DESKTOP_SAVE_REFUSED = /^(?:.+ \(os error \d+\)|The chosen place has no file name)$/;
 
+/** No room left in the storage that holds items for an away contact (WISP 404, engine/hold.ts): it sends once some are picked up. */
+const HOLD_FULL_ITEMS = /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/;
+const HOLD_FULL_BYTES = /^Items waiting for this contact would exceed (?<max>\d+) MB\. Wait until some are picked up\.$/;
+export const holdFull = (cause: unknown) => [HOLD_FULL_ITEMS, HOLD_FULL_BYTES].some((full) => full.test(rawError(cause)));
+
 const NETWORK = "(?<network>Mainnet|Testnet)";
 const HOST = "(?<host>[^\\s:/]+(?::\\d+)?)";
 
@@ -113,6 +118,8 @@ const RULES: readonly Rule[] = [
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
+  { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
+  { match: HOLD_FULL_BYTES, key: "errors.hold.fullBytes", next: "errors.hold.fullNext" },
   // A held message sent again with no storage to hold it, or a contact that stopped allowing it (engine/node.ts, hold.ts).
   exact("Held messages need S3 storage (Profile → Backups) and a contact that allows them.", "errors.hold.needsStorage", "errors.hold.needsStorageNext"),
 
@@ -344,14 +351,20 @@ const RULES: readonly Rule[] = [
   exact("Share the group's link with them: anyone who opens it joins", "errors.group.shareLinkInstead"),
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
+  // Files in groups (packages/browser/src/engine/groupFiles.ts, node.ts `sendGroupFile`, platform/services.ts).
+  // The wait is a minute (a minute's pace) or the minutes left of the longer window (`mayAnnounce`).
+  { match: /^You sent many files to this group just now\. Wait a minute\.$/, key: "errors.group.filesPaced", next: "errors.group.filesPacedNext" },
+  { match: /^You sent many files to this group just now\. Wait (?<minutes>\d+) minutes\.$/, key: "errors.group.filesPaced", next: "errors.group.filesPacedNextMinutes" },
+  exact("Not enough space on this device for this file", "errors.group.fileNoRoom", "errors.group.fileNoRoomNext"),
+  exact("An empty file cannot go to a group", "errors.group.fileEmpty"),
+  exact("This app takes no group files", "errors.group.filesUnsupported", "errors.group.filesUnsupportedNext"),
+  { match: /^A group takes files of up to (?<size>[\d.]+ [KMGT]?B)$/, key: "errors.group.fileTooLarge" },
 
   // Held items for an away contact (packages/browser/src/engine/hold.ts, WISP 404): a message's line, and the chat's hold
   // line and dialog. What the storage or the network answered goes behind the ⓘ: it is English, and often a status code.
-  exact("Held messages need S3 storage (Profile → Backups) and a contact that allows them.", "errors.hold.needStorage", "errors.hold.needStorageNext"),
+  // No storage, a contact that stopped allowing it and no room left are above, with the files' (`HOLD_FULL_ITEMS`).
   exact("Held messages need S3 storage (Profile → Backups) and a pinned contact.", "errors.hold.needPinned", "errors.hold.needStorageNext"),
-  { match: /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/, key: "errors.hold.tooMany", next: "errors.hold.waitPickUp" },
   { match: /^An item held for an away contact is at most (?<mb>\d+) MB\.$/, key: "errors.hold.tooLarge" },
-  { match: /^Items waiting for this contact would exceed (?<mb>\d+) MB\. Wait until some are picked up\.$/, key: "errors.hold.tooMuch", next: "errors.hold.waitPickUp" },
   exact("The message is gone", "errors.hold.messageGone"),
   exact("The file is gone", "errors.hold.fileGone"),
   exact("The payment request is gone", "errors.hold.requestGone"),

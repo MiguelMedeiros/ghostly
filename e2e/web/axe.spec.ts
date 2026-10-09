@@ -36,11 +36,18 @@ async function look(page: Page, language: string, scheme: "light" | "dark"): Pro
  * itself (its title) is in the top document, still checked.
  */
 async function findings(page: Page, { frames = true }: { frames?: boolean } = {}): Promise<string[]> {
-  // Past the colour transitions and the fade-ins, so contrast is read on the colours as they end. Not past the loops:
-  // those that end by themselves take half a minute or more (a "connecting" dot, a spinner), and none is text.
+  // Past the colour transitions and the fade-ins, so contrast is read on the colours as they end: until a frame has
+  // none running, since one may start while another ends. Not past the loops: those that end by themselves take half
+  // a minute or more (a "connecting" dot, a spinner), and none is text. Never more than a second on one look nor ten
+  // in all: an animation whose end is never told would hold the test until its timeout.
   await page.evaluate(async () => {
-    await new Promise(requestAnimationFrame);
-    await Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations === 1).map((a) => a.finished.catch(() => {})));
+    const until = performance.now() + 10_000;
+    while (performance.now() < until) {
+      await new Promise(requestAnimationFrame);
+      const running = document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations === 1 && a.playState === "running");
+      if (!running.length) return;
+      await Promise.race([Promise.all(running.map((a) => a.finished.catch(() => {}))), new Promise((done) => setTimeout(done, 1000))]);
+    }
   });
   const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
   return violations.filter((v) => v.impact === "serious" || v.impact === "critical")
@@ -161,6 +168,9 @@ for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
     await page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
     const app = page.getByTestId("mini-app");
     await expect(app.locator("iframe")).toBeVisible();
+    // The card comes a moment after the panel, fading in, and + → Apps closes once it is sent: axe reads the chat at rest.
+    await expect(chat(ana).getByTestId("app-card").getByTestId("app-card-open")).toBeVisible();
+    await expect(page.getByTestId("chat-apps")).toHaveCount(0);
     await check("app panel", page, { frames: false });
     await app.getByTestId("mini-app-close").click();
     await expect(app).toBeHidden();

@@ -91,10 +91,15 @@ describe("the Forward to… picker", () => {
     expect(screen.getByTestId("forward-none")).toHaveTextContent("No chat by that name");
   });
 
-  it("offers no group for a file: groups take text only", () => {
-    open([message({ text: "", file: PICTURE })]);
-    expect(names()).toEqual(["Ana", "Bo"]);
-    expect(screen.getByTestId("forward-files-hint")).toHaveTextContent("Groups take text only");
+  it("offers the groups for a file too (WISP 503), and forwards it there", async () => {
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: ["x"], error: null })) }));
+    const { user } = open([message({ text: "", file: PICTURE })]);
+    expect(names()).toEqual(["Ana", "Friends", "Bo"]);
+    expect(screen.queryByTestId("forward-files-hint")).toBeNull();
+    await user.click(screen.getAllByTestId("forward-target")[1]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([{ linkId: "link-bo", messageIds: ["m1"], to: ["group:g1"] }]);
+    expect(await screen.findByTestId("where")).toHaveTextContent("/group/g1");
   });
 
   it("sends to the chosen ones and, for one, opens it", async () => {

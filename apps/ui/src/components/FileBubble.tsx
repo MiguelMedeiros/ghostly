@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, stalledAction } from "../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
@@ -46,6 +47,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   /** The picture open large (a tap on it). */
   const [viewing, setViewing] = useState(false);
   const opener = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useFocusKept(rootRef);
   /** When a finger (or a pen) went down on the picture: held as long as a long press, its tap opens nothing. */
   const pressedAt = useRef<number | null>(null);
   useEffect(() => {
@@ -126,6 +129,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const drawn = !!blobUrl && loaded?.url === blobUrl && loaded.ok;
   const status = restoring ? t("chat.file.restoring", { size: formatFileSize(file.size) }) : fileStatus(file, transfer, named, missing, t);
   const moving = transfer?.state === "transferring";
+  // A group's file (WISP 503) is downloaded or not: no Decline, no pause or cancel.
+  const group = isGroupFile(file);
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
@@ -133,8 +138,10 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
-  // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
+  // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble; so is what a
+  // group's file waits for.
   const reason = actionError ? { text: actionError } : failedReason(transfer, t);
+  const hint = reason ? null : groupFileHint(file, transfer, t);
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
@@ -143,7 +150,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   };
 
   return (
-    <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
+    <div ref={rootRef} className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)] rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       {box && (
         <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
@@ -189,7 +196,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </p>
           <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
             <span className="min-w-0 truncate" data-testid="file-status">{status}</span>
-            {reason && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger />}
+            {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
         </div>
         {(blobUrl || saveOnly) && (
@@ -211,7 +218,13 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </a>
         )}
       </div>
-      {offered && (
+      {offered && group && (
+        <div className="px-2 pb-1.5" data-testid="file-offer">
+          <button type="button" className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer"
+            data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size) })}</button>
+        </div>
+      )}
+      {offered && !group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
           <p className="text-[12px] m-0 mb-1">
             {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size) })}
@@ -228,14 +241,14 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </div>
         </div>
       )}
-      {(controls && !offered) && (
+      {(controls && !offered && !group) && (
         <div className="flex gap-1.5 px-2 pb-1">
           {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
           <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
-      {reason && why && <WhyText id={whyId} testId="file-why-text" english={reason.english}>{reason.text}</WhyText>}
+      {(reason || hint) && why && <WhyText id={whyId} testId="file-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {moving && transfer.stage !== "asking" && (
         <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
           <div

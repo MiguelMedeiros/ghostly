@@ -14,7 +14,6 @@
     "memberCount": "{{count}} miembros",
     "memberOne": "1 miembro",
     "membersButton": "Miembros",
-    "noFiles": "Los archivos aún no forman parte de los grupos",
     "nobodyElse": "Aún no hay nadie más en el grupo",
     "reachable": "{{members}} · {{reachable}} de {{total}} accesibles",
     "removedCommunity": "Te eliminaron. Abre el enlace del grupo para volver a unirte.",
