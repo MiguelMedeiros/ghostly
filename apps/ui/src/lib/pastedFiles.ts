@@ -101,6 +101,9 @@ export function pasteNamesFiles(data: DataTransfer | null): boolean {
   return !!data && [...(data.types ?? [])].some((type) => type === "Files" || type === "text/uri-list");
 }
 
+/** The type of something the platform read: the one it gave, or the one its name's extension says ("" when neither does). */
+const clipType = (clip: ClipboardFile) => clip.mime ?? TYPES[clip.name?.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+
 /**
  * What the platform read from the clipboard, as files to send; a picture is named after the moment. Read or not
  * (too large, a read that failed), the platform is told it may let its copies go. `together`: the files must fit
@@ -119,7 +122,7 @@ export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new D
         parts.push(bytes);
         offset += bytes.length;
       }
-      const type = clip.mime ?? TYPES[clip.name?.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+      const type = clipType(clip);
       files.push(new File(parts as BlobPart[], clip.name ?? pastedImageName(type || "image/png", at), { type, lastModified: at.getTime() }));
     }
     return files;
@@ -132,4 +135,21 @@ export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new D
 export function platformPastedFiles(): Promise<File[]> | null {
   const read = servicesPlatform?.readClipboardFiles();
   return read ? read.then((clips) => readPlatformFiles(clips, new Date(), true)) : null;
+}
+
+/**
+ * The clipboard's first picture as the platform reads it, for a place that takes one picture (Join's QR screenshot);
+ * null where the paste event is the only way. Resolves to null when the clipboard holds no picture, and to "tooLarge"
+ * for one over `max` bytes, which is not read. Whatever else was copied with it is not read either.
+ */
+export function platformPastedImage(max: number): Promise<File | "tooLarge" | null> | null {
+  const read = servicesPlatform?.readClipboardFiles();
+  if (!read) return null;
+  return read.then(async (clips) => {
+    const image = clips.find((clip) => clipType(clip).startsWith("image/"));
+    for (const clip of clips) if (clip !== image) clip.done?.();
+    if (!image) return null;
+    if (image.size > max) { image.done?.(); return "tooLarge"; }
+    return (await readPlatformFiles([image]))[0] ?? null;
+  });
 }
