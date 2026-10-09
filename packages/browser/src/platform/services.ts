@@ -389,6 +389,11 @@ export const servicesPlatform: ServicesPlatform | null = {
   async sendGroupFile(groupId, source, options) {
     if (source.size > GROUP_FILE_LIMITS.maxBytes) throw new Error(`A group takes files of up to ${formatFileSize(GROUP_FILE_LIMITS.maxBytes)}`);
     if (!source.size) throw new Error("An empty file cannot go to a group");
+    // A file the group would refuse anyway (its files of the minute are taken, or this profile is not in it) is refused
+    // before any of it is read or kept: up to 100 MiB would be copied in and hashed, then deleted. The announcement
+    // checks again.
+    const check = await engine.call("groupFileCheck", { groupId });
+    if (check.error) throw new Error(check.error);
     const mime = sanitizeMime(source.type);
     const image = options?.voice || options?.video ? undefined : await readImageMeta(source, mime);
     const file = {
