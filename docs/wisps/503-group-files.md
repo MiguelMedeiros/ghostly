@@ -96,7 +96,7 @@ The frames of [501 § files/3](501-paired-files.md#frames) are unchanged on a fi
 
 ### Serving limits
 
-A holder serves at most **3 transfers at once**, all groups together, and at most one per asking member; more are `busy`. It serves at most **1 GiB a day** of group files to others (its person can raise it, or turn serving off: then it answers `busy` and is no holder in its `group-have`). The author always serves its own files, within the same limits, so an announcement never depends on someone else being generous.
+A holder serves at most **3 transfers at once**, all groups together, and at most one per asking member; more are `busy`. A transfer whose every byte the member confirmed (only its `pf-done` to come) is not that member's one: its next want may overtake that `pf-done`. A member asks a holder for one file at a time: while one is asked of it or coming from it, the next waits its turn, and is asked as soon as that one ends. It serves at most **1 GiB a day** of group files to others (its person can raise it, or turn serving off: then it answers `busy` and is no holder in its `group-have`). The author always serves its own files, within the same limits, so an announcement never depends on someone else being generous.
 
 ## What apps from before see
 
