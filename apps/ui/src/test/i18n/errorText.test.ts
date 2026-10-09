@@ -199,7 +199,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Share the group's link with them: anyone who opens it joins", `${BROWSER}/engine/groups.ts`],
   ["At most 4 members can be pinned as hubs", `${CORE}/groupSession.ts`, " members can be pinned as hubs"],
   ["A community group chooses its hubs by itself", `${BROWSER}/engine/groups.ts`],
-  ["You sent many files to this group just now. Wait a minute.", `${BROWSER}/engine/groupFiles.ts`],
+  ["You sent many files to this group just now. Wait a minute.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
+  ["You sent many files to this group just now. Wait 7 minutes.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
   ["Not enough space on this device for this file", `${BROWSER}/engine/groupFiles.ts`],
   ["An empty file cannot go to a group", `${BROWSER}/platform/services.ts`],
   ["This app takes no group files", `${BROWSER}/engine/groups.ts`],
@@ -401,6 +402,7 @@ describe("errors in the app's language", () => {
       .toBe("O pagamento Lightning não foi concluído. Os sats voltaram, menos 2 sats que ficaram com o mint.");
     expect(errorText("Refused: Already paid by another member of the group. 1200 sats came back; the mint kept 2 as its fee.", pt))
       .toBe("O pagamento foi recusado. Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2.");
+    expect(errorText("You sent many files to this group just now. Wait 7 minutes.", pt)).toBe("Você enviou muitos arquivos a este grupo agora há pouco. Espere 7 minutos e envie de novo.");
     expect(errorText("Both peers need on-chain Bitcoin on a connected data link", pt)).toBe("Você e seu contato precisam de Bitcoin on-chain, com a conversa ao vivo");
     expect(errorText("This pays with real money: confirm it with Send real money first. Nothing was sent.", pt)).toContain("Enviar dinheiro real");
   });
