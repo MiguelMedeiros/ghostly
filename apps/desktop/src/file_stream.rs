@@ -392,22 +392,46 @@ pub fn trace(request: &Request<Vec<u8>>, response: &Response<Vec<u8>>) {
 /// a new one for each seek.
 pub mod loopback {
     use super::*;
-    use std::io::{BufRead, BufReader, Write};
-    use std::net::{TcpListener, TcpStream};
+    use std::collections::VecDeque;
+    use std::io::Write;
+    use std::net::{Shutdown, TcpListener, TcpStream};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
-    /// Connections served at once. The engine opens one per seek, a few at a time; past this a new one is closed at
-    /// once, so connections left idle (any program on the machine can open them) cannot take a thread each without end.
+    /// Connections served at once. The engine opens one per seek, a few at a time; past this the oldest one that has
+    /// not sent its request yet gives its place to the new one, and with none of those the new one is closed at once.
+    /// So connections left idle or kept slow (any program on the machine can open them) can neither take a thread each
+    /// without end nor keep the Ghostly window's own requests out.
     pub const MAX_CONNECTIONS: usize = 32;
 
+    /// How long a connection has, from the moment it is taken, to send its whole request head, however it sends it.
+    pub const HEAD_TIME: Duration = Duration::from_secs(5);
+
+    /// The connections that have not sent their whole request head yet, oldest first.
+    type Waiting = Arc<Mutex<VecDeque<(u64, TcpStream)>>>;
+
     /// A connection's place among the `MAX_CONNECTIONS`, given back when its thread ends (or never starts).
-    struct Slot(Arc<AtomicUsize>);
+    struct Slot {
+        open: Arc<AtomicUsize>,
+        waiting: Waiting,
+        id: u64,
+    }
+
+    impl Slot {
+        /// The request head came (or never will): the connection is no longer one that gives its place.
+        fn asked(&self) {
+            self.waiting
+                .lock()
+                .unwrap()
+                .retain(|(id, _)| *id != self.id);
+        }
+    }
 
     impl Drop for Slot {
         fn drop(&mut self) {
-            self.0.fetch_sub(1, Ordering::SeqCst);
+            self.asked();
+            self.open.fetch_sub(1, Ordering::SeqCst);
         }
     }
 
@@ -416,22 +440,36 @@ pub mod loopback {
         let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let open = Arc::new(AtomicUsize::new(0));
+        let waiting = Waiting::default();
         std::thread::Builder::new()
             .name("ghostly-file".into())
             .spawn(move || {
-                for stream in listener.incoming().flatten() {
-                    if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-                        open.fetch_sub(1, Ordering::SeqCst);
-                        drop(stream);
+                for (id, stream) in (0u64..).zip(listener.incoming().flatten()) {
+                    let taken = Instant::now();
+                    let Ok(handle) = stream.try_clone() else {
                         continue;
+                    };
+                    if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                        // Full. Its thread ends as soon as the connection is shut, so there is one more only for
+                        // that moment.
+                        let oldest = waiting.lock().unwrap().pop_front();
+                        let Some((_, oldest)) = oldest else {
+                            open.fetch_sub(1, Ordering::SeqCst);
+                            continue;
+                        };
+                        let _ = oldest.shutdown(Shutdown::Both);
                     }
-                    let slot = Slot(open.clone());
+                    waiting.lock().unwrap().push_back((id, handle));
+                    let slot = Slot {
+                        open: open.clone(),
+                        waiting: waiting.clone(),
+                        id,
+                    };
                     let (store, grants) = (store.clone(), grants.clone());
                     let _ = std::thread::Builder::new()
                         .name("ghostly-file-conn".into())
                         .spawn(move || {
-                            let _slot = slot;
-                            let _ = serve(stream, &store, &grants, port);
+                            let _ = serve(stream, &store, &grants, port, taken + HEAD_TIME, &slot);
                         });
                 }
             })
@@ -442,33 +480,56 @@ pub mod loopback {
     /// A request's method, target and headers (names in lower case).
     type Head = (String, String, Vec<(String, String)>);
 
-    /// The request line and headers, at most 16 KiB of them.
-    fn read_head(stream: &TcpStream) -> std::io::Result<Option<Head>> {
-        let mut reader = BufReader::new(stream.take(16 * 1024));
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        let mut parts = line.split_whitespace();
+    /// The request line and headers, at most 16 KiB of them, all of it by `until`: a time limit on each read alone
+    /// would be started again by every byte.
+    fn read_head(mut stream: &TcpStream, until: Instant) -> std::io::Result<Option<Head>> {
+        const MAX: usize = 16 * 1024;
+        let mut raw = Vec::new();
+        let mut piece = [0u8; 1024];
+        // Where the line now arriving starts, and where the head ends: after its first empty line.
+        let (mut line, mut end) = (0, None);
+        while end.is_none() {
+            if raw.len() >= MAX {
+                return Ok(None);
+            }
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+            stream.set_read_timeout(Some(left))?;
+            let room = piece.len().min(MAX - raw.len());
+            let read = stream.read(&mut piece[..room])?;
+            if read == 0 {
+                return Ok(None);
+            }
+            let seen = raw.len();
+            raw.extend_from_slice(&piece[..read]);
+            for at in seen..raw.len() {
+                if raw[at] != b'\n' {
+                    continue;
+                }
+                if raw[line..at].iter().all(|&byte| byte == b'\r') {
+                    end = Some(at);
+                    break;
+                }
+                line = at + 1;
+            }
+        }
+        let Ok(text) = std::str::from_utf8(&raw[..end.unwrap_or(0)]) else {
+            return Ok(None);
+        };
+        let mut lines = text.split('\n').map(|line| line.trim_end_matches('\r'));
+        let mut parts = lines.next().unwrap_or("").split_whitespace();
         let (Some(method), Some(target), Some(_version)) =
             (parts.next(), parts.next(), parts.next())
         else {
             return Ok(None);
         };
-        let (method, target) = (method.to_string(), target.to_string());
-        let mut headers = Vec::new();
-        loop {
-            let mut line = String::new();
-            if reader.read_line(&mut line)? == 0 {
-                return Ok(None);
-            }
-            let line = line.trim_end_matches(['\r', '\n']);
-            if line.is_empty() {
-                break;
-            }
-            if let Some((name, value)) = line.split_once(':') {
-                headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
-            }
-        }
-        Ok(Some((method, target, headers)))
+        let headers = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_string()))
+            .collect();
+        Ok(Some((method.to_string(), target.to_string(), headers)))
     }
 
     fn serve(
@@ -476,10 +537,13 @@ pub mod loopback {
         store: &FileStore,
         grants: &StreamGrants,
         port: u16,
+        head_until: Instant,
+        slot: &Slot,
     ) -> std::io::Result<()> {
-        stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         stream.set_write_timeout(Some(Duration::from_secs(60)))?;
-        let Some((method, target, headers)) = read_head(&stream)? else {
+        let head = read_head(&stream, head_until);
+        slot.asked();
+        let Some((method, target, headers)) = head? else {
             return Ok(());
         };
         let header_of = |name: &str| {
@@ -1091,48 +1155,135 @@ mod tests {
         fs_cleanup(dir);
     }
 
+    /// Whether the server has closed this connection, waiting up to `within` for it.
+    fn closed_within(stream: &std::net::TcpStream, within: std::time::Duration) -> bool {
+        let mut stream = stream;
+        stream.set_read_timeout(Some(within)).unwrap();
+        match stream.read(&mut [0u8; 1]) {
+            Ok(read) => read == 0,
+            Err(error) => !matches!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ),
+        }
+    }
+
     #[test]
-    fn over_loopback_http_idle_connections_past_the_limit_are_closed_at_once() {
+    fn over_loopback_http_a_full_server_takes_a_request_in_place_of_its_oldest_silent_connection() {
+        use std::time::Duration;
         let (files, dir) = store();
         let grants = StreamGrants::default();
         files.append("p", "f", 0, b"bytes").unwrap();
         let token = grants.open(&files, "p", "f", "video/mp4").unwrap();
         let port = grants.loopback_port(&files).unwrap();
-        let idle: Vec<_> = (0..loopback::MAX_CONNECTIONS)
+        let host = format!("Host: 127.0.0.1:{port}");
+        let silent: Vec<_> = (0..loopback::MAX_CONNECTIONS)
             .map(|_| std::net::TcpStream::connect(("127.0.0.1", port)).unwrap())
             .collect();
-        // One more: taken and closed at once, with the others still waiting.
+        // Every place is taken by a connection that asks for nothing, and the window's request is still answered:
+        // it takes the place of the oldest of them, and the others stay.
+        let (status, _, body) =
+            over_http(port, &format!("GET /{token} HTTP/1.1\r\n{host}\r\n\r\n"));
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert_eq!(body, b"bytes");
+        assert!(closed_within(&silent[0], Duration::from_secs(2)));
+        for other in &silent[1..] {
+            assert!(!closed_within(other, Duration::from_millis(20)));
+        }
+        fs_cleanup(dir);
+    }
+
+    #[test]
+    fn over_loopback_http_a_request_head_has_a_few_seconds_in_all_however_slowly_it_comes() {
+        use std::time::{Duration, Instant};
+        let (files, dir) = store();
+        let grants = StreamGrants::default();
+        let port = grants.loopback_port(&files).unwrap();
+        // One byte of a request line every 200 ms: each byte comes well inside any time limit on a single read.
+        let slow = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let started = Instant::now();
+        let mut dripping = slow.try_clone().unwrap();
+        let drip = std::thread::spawn(move || {
+            while std::io::Write::write_all(&mut dripping, b"G").is_ok()
+                && started.elapsed() < Duration::from_secs(30)
+            {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        });
+        assert!(
+            closed_within(&slow, loopback::HEAD_TIME + Duration::from_secs(3)),
+            "still open after {:?}",
+            started.elapsed()
+        );
+        assert!(started.elapsed() >= loopback::HEAD_TIME - Duration::from_secs(1));
+        drop(slow);
+        drip.join().unwrap();
+        // And one that sends nothing at all.
+        let silent = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        assert!(closed_within(
+            &silent,
+            loopback::HEAD_TIME + Duration::from_secs(3)
+        ));
+        fs_cleanup(dir);
+    }
+
+    #[test]
+    fn over_loopback_http_a_server_full_of_streams_closes_a_new_connection_at_once() {
+        use std::time::Duration;
+        let (files, dir) = store();
+        let grants = StreamGrants::default();
+        // More than a connection's buffers hold, so a stream nobody reads stays open.
+        let piece = bytes(1024 * 1024);
+        let size = 64 * piece.len();
+        for index in 0..64 {
+            files
+                .append("p", "big", (index * piece.len()) as u64, &piece)
+                .unwrap();
+        }
+        let token = grants.open(&files, "p", "big", "video/mp4").unwrap();
+        let port = grants.loopback_port(&files).unwrap();
+        let request = format!("GET /{token} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+        let mut streams: Vec<_> = (0..loopback::MAX_CONNECTIONS)
+            .map(|_| {
+                let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+                std::io::Write::write_all(&mut stream, request.as_bytes()).unwrap();
+                // The answer has started: the request head is in.
+                let mut first = [0u8; 15];
+                stream.read_exact(&mut first).unwrap();
+                assert_eq!(&first, b"HTTP/1.1 200 OK");
+                stream
+            })
+            .collect();
+        // One more, even one that asks at once: closed with nothing, since no connection is still to ask.
         let mut extra = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let _ = std::io::Write::write_all(&mut extra, request.as_bytes());
         extra
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();
         let mut rest = Vec::new();
-        assert!(
-            extra.read_to_end(&mut rest).is_ok(),
-            "closed, not left open"
-        );
+        let _ = extra.read_to_end(&mut rest);
         assert!(rest.is_empty());
+        // The streams were left alone: the oldest still gets the whole file.
+        let mut oldest = streams.remove(0);
+        let mut raw = Vec::new();
+        oldest.read_to_end(&mut raw).unwrap();
+        let body = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        assert_eq!(raw.len() - body, size, "the whole file");
         // Once they go, the server answers again.
-        drop(idle);
-        let host = format!("Host: 127.0.0.1:{port}");
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        drop(streams);
+        let until = std::time::Instant::now() + Duration::from_secs(10);
         loop {
             let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-            std::io::Write::write_all(
-                &mut stream,
-                format!("GET /{token} HTTP/1.1\r\n{host}\r\n\r\n").as_bytes(),
-            )
-            .unwrap();
-            let mut raw = Vec::new();
-            let _ = stream.read_to_end(&mut raw);
-            if raw.starts_with(b"HTTP/1.1 200 OK") {
+            std::io::Write::write_all(&mut stream, request.as_bytes()).unwrap();
+            let mut first = [0u8; 15];
+            if stream.read_exact(&mut first).is_ok() && &first == b"HTTP/1.1 200 OK" {
                 break;
             }
             assert!(
                 std::time::Instant::now() < until,
                 "the server never came back"
             );
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(50));
         }
         fs_cleanup(dir);
     }
