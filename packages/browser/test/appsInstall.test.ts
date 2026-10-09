@@ -174,6 +174,21 @@ describe("updates", () => {
     expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
   });
 
+  it("a newer version its publisher revoked beside its source before the check is not installed; the one held keeps running", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    // The repository's HEAD still holds v2 after its publisher revoked it there.
+    const v2 = await bundle({ sequence: 2, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v2.bytes);
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v2.digest], "Broken build")]));
+    expect(await store.checkUpdates()).toEqual([{ ref: v1.ref, outcome: "none", run: { status: "ok" } }]);
+    expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest, run: { status: "ok" } });
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+  });
+
   it("a lower sequence is never installed over a higher one", async () => {
     const { store } = await installed({ sequence: 3 });
     const old = await bundle({ sequence: 2 });
