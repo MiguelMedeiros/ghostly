@@ -138,6 +138,11 @@ export interface StoredGroup {
     /** Joining through the group's link: its entry key, the admin's side of `linkId` (an entry session, not a contact chat). */
     entry?: string;
   };
+  /**
+   * On the admin's side: contact chats invited and not answered yet, and when. Kept so that an accept after my app
+   * started again still lets them in.
+   */
+  invited?: Record<string, number>;
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
