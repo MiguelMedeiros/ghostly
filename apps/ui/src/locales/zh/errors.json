@@ -215,6 +215,9 @@
     "tooLong": "消息超过 16 KiB"
   },
   "hold": {
+    "fullBytes": "等待联系人取走的内容将超过 {{max}} MB",
+    "fullItems": "已有 {{max}} 项在等待联系人取走",
+    "fullNext": "对方取走一些后,请重新发送。",
     "needsStorage": "无法暂存这条消息",
     "needsStorageNext": "请在个人资料 → 备份中设置 S3 存储，并请对方允许暂存消息。"
   },

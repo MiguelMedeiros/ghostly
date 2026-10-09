@@ -61,6 +61,11 @@ export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable fi
  */
 export const DESKTOP_SAVE_REFUSED = /^(?:.+ \(os error \d+\)|The chosen place has no file name)$/;
 
+/** No room left in the storage that holds items for an away contact (WISP 404, engine/hold.ts): it sends once some are picked up. */
+const HOLD_FULL_ITEMS = /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/;
+const HOLD_FULL_BYTES = /^Items waiting for this contact would exceed (?<max>\d+) MB\. Wait until some are picked up\.$/;
+export const holdFull = (cause: unknown) => [HOLD_FULL_ITEMS, HOLD_FULL_BYTES].some((full) => full.test(rawError(cause)));
+
 const NETWORK = "(?<network>Mainnet|Testnet)";
 const HOST = "(?<host>[^\\s:/]+(?::\\d+)?)";
 
@@ -113,6 +118,8 @@ const RULES: readonly Rule[] = [
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
+  { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
+  { match: HOLD_FULL_BYTES, key: "errors.hold.fullBytes", next: "errors.hold.fullNext" },
   // A held message sent again with no storage to hold it, or a contact that stopped allowing it (engine/node.ts, hold.ts).
   exact("Held messages need S3 storage (Profile → Backups) and a contact that allows them.", "errors.hold.needsStorage", "errors.hold.needsStorageNext"),
 

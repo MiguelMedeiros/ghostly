@@ -215,6 +215,9 @@
     "tooLong": "Message exceeds 16 KiB"
   },
   "hold": {
+    "fullBytes": "This would put more than {{max}} MB waiting for your contact",
+    "fullItems": "Your contact already has {{max}} items waiting",
+    "fullNext": "Send it again once they pick some up.",
     "needsStorage": "This message can't be held",
     "needsStorageNext": "Set up S3 storage in Profile → Backups, and ask your contact to allow held messages."
   },

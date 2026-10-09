@@ -215,6 +215,9 @@
     "tooLong": "Il messaggio supera i 16 KiB"
   },
   "hold": {
+    "fullBytes": "Si supererebbero i {{max}} MB in attesa per il tuo contatto",
+    "fullItems": "Il tuo contatto ha già {{max}} elementi in attesa",
+    "fullNext": "Invialo di nuovo quando il tuo contatto ne avrà ritirati alcuni.",
     "needsStorage": "Questo messaggio non può essere trattenuto",
     "needsStorageNext": "Configura uno storage S3 in Profilo → Backup e chiedi al tuo contatto di consentire i messaggi trattenuti."
   },

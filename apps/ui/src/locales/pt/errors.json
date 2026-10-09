@@ -215,6 +215,9 @@
     "tooLong": "A mensagem passa de 16 KiB"
   },
   "hold": {
+    "fullBytes": "Isto passaria de {{max}} MB esperando por seu contato",
+    "fullItems": "Seu contato já tem {{max}} itens esperando",
+    "fullNext": "Envie de novo quando seu contato pegar alguns.",
     "needsStorage": "Não dá para guardar esta mensagem",
     "needsStorageNext": "Configure um S3 em Perfil → Backups e peça ao seu contato para permitir mensagens guardadas."
   },
