@@ -329,9 +329,19 @@ function eavesdropperApp() {
     await G.storage.set("heard", heard.slice(0, 5).concat(heard.length > 5 ? ["... " + heard.length] : []));
   })();
 }
+
+/** Sends far past the request rate for as long as it runs: 2000 requests in each task. */
+function stormApp() {
+  const G: any = (window as any).ghostly;
+  const burst = () => {
+    for (let i = 0; i < 2000; i++) G.storage.get("k").catch(() => {});
+    setTimeout(burst, 0);
+  };
+  burst();
+}
 /* eslint-enable */
 
-const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
+const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp, storm: stormApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
 
 /** An app's entry: the probe's source, given its targets. */
 export function appEntry(kind: keyof typeof SOURCES, targets: object = {}): string {
