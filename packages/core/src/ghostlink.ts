@@ -1097,12 +1097,14 @@ export class GhostLink {
       // Asked as each attempt starts: once the first pairing is over, the contact reads at its chat's pace (30 s in the
       // background), and a short offer would be withdrawn before it looked.
       attemptTimeoutMs: () => this.tracker && !this.tracker.done ? PAIRING_ATTEMPT_MS : undefined,
-      // The contact may have restarted: its offer (a restarted app offers whatever its key, `resume`) is read now, not
-      // at the minute pace of a live chat, and answered at once, which ends the dead session (`DataLink.handleSignal`).
+      // The contact may have restarted: its offer (a restarted app offers whatever its key, `resume`) is read now and
+      // fast while the connection stays so, not at the minute pace of a live chat, and answered at once, which ends the
+      // dead session (`DataLink.handleSignal`).
       onDisconnected: disconnected => {
-        if (!disconnected || this.activeBinding || !this.channel) return;
+        if (!disconnected) { this.session.setDataLinkStalled(false); return; }
+        if (this.activeBinding || !this.channel) return;
         traceLink(this.myPubKeyZ32, "rtc-disconnected", {});
-        this.session.pollNow();
+        this.session.setDataLinkStalled(true);
       },
     });
     this.switcher = new TransportSwitch({
