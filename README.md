@@ -28,6 +28,8 @@
   <a href="https://github.com/MiguelMedeiros/ghostly/actions/workflows/ci.yml?query=branch%3Adev"><img src="https://img.shields.io/github/actions/workflow/status/MiguelMedeiros/ghostly/ci.yml?branch=dev&label=CI%20(dev)" alt="CI status on dev"></a>
 </p>
 
+https://github.com/user-attachments/assets/7f9e11de-4c65-44e9-9763-885664de0d64
+
 <p align="center">
   <img src="docs/assets/readme/hero.webp" alt="Ghostly on a computer and a phone: a chat with Casper, with a voice message, a photo sent straight from his app and a reply" width="720">
 </p>
