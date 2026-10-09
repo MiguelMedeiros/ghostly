@@ -3999,6 +3999,15 @@ export class GhostlyNode implements EngineImplementation {
     const text = typeof caption === "string" && caption.trim() ? caption : groupFileFallback(meta);
     return this.groups.sendFile(groupId, text, meta, file.id, reply && { i: reply.id, s: reply.snippet, f: reply.member! }, readForwarded(hops));
   }
+  /**
+   * Whether `sendGroupFile` would take a file of mine for the group now, asked before its bytes are copied in: the
+   * error it would answer for the group's pace of files or for not being in it, or null. Not a promise: it may still
+   * refuse (the minute's files can fill in between).
+   */
+  groupFileCheck({ groupId }: { groupId: string }): { error: string | null; refused?: boolean } {
+    if (typeof groupId !== "string") return { error: "No such group", refused: true };
+    return this.groups.fileCheck(groupId);
+  }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
 
   /**

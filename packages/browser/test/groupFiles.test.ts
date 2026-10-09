@@ -151,6 +151,19 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.seen.filter(s => s.frame.t === "pf-offer").every(s => s.from === "alice" && s.frame.gm === messageId)).toBe(true);
   });
 
+  it("the pace and not being in the group are known before the bytes are copied in, as the announcement answers them", async () => {
+    limits.announcePerMinute = 1;
+    const t = new FilesWorld();
+    const { peers: [alice], id } = await t.mesh(["alice", "bob"]);
+    expect(alice.groups.fileCheck(id)).toEqual({ error: null });
+    await t.send(alice, id, pattern(1_000));
+    const paced = "You sent many files to this group just now. Wait a minute.";
+    expect(alice.groups.fileCheck(id)).toEqual({ error: paced });
+    const fileId = groupFileId(id, "out");
+    expect(await alice.groups.sendFile(id, "again", { name: "a.bin", mime: "application/octet-stream", size: 1, d: sha(new Uint8Array(1)) }, fileId)).toEqual({ error: paced });
+    expect(alice.groups.fileCheck("no-such-group")).toEqual({ error: "You are not in this group yet" });
+  });
+
   it("a caption is the text under it; a voice message is fetched whatever its size", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
