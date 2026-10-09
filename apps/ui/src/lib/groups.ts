@@ -16,7 +16,7 @@ export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Tr
  * Who wrote (or reacted to) a group's message: a member by the roster's name; an author no longer in the roster
  * (removed, or back with a new member key) by the name the group knew them by, else by their key.
  */
-export const authorName = (group: Pick<GroupView, "members" | "formerNames">, key: string, t: Translate = english) => {
+export const authorName = (group: { members: readonly Pick<GroupMemberView, "key" | "me" | "nick">[]; formerNames?: GroupView["formerNames"] }, key: string, t: Translate = english) => {
   const member = group.members.find(m => m.key === key);
   return member ? memberName(member, t) : group.formerNames?.[key] || t("group.member.unnamed", { key: key.slice(0, 8) });
 };
@@ -26,7 +26,7 @@ export const authorName = (group: Pick<GroupView, "members" | "formerNames">, ke
  * identity they are shown as wins, as in the chat). Community members are not contacts: they have none here.
  */
 export function memberPhoto(
-  group: Pick<GroupView, "memberLinks">, member: { key: string; me: boolean }, links: readonly LinkView[] | undefined,
+  group: Pick<GroupView, "memberLinks">, member: { key: string; me: boolean }, links: readonly Pick<LinkView, "id" | "peerPubKeyZ32" | "peerAvatar">[] | undefined,
   faceOf: (peerKey: string | undefined) => { photo?: string } | undefined, myAvatar?: string,
 ): string | undefined {
   if (member.me) return myAvatar || undefined;
