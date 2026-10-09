@@ -24,6 +24,7 @@ class MemoryFiles implements GroupFileStore {
   /** Its copies went bad: what it serves is not what it stored. */
   corrupt = false;
   async list(groupId: string) { return [...this.records.values()].filter(r => r.linkId === `group:${groupId}`).map(r => ({ ...r })); }
+  async groups() { return [...new Set([...this.records.values()].filter(r => r.linkId.startsWith("group:")).map(r => r.linkId.slice("group:".length)))]; }
   async get(id: string) { const record = this.records.get(id); return record && { ...record }; }
   async put(file: StoredFile) { this.records.set(file.id, { ...file }); }
   async patch(id: string, fields: Pick<StoredFile, "transfer" | "group">) { const record = this.records.get(id); if (record) this.records.set(id, { ...record, ...fields }); }
@@ -491,6 +492,57 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(bob, id, big.messageId).bytes!)).toBe(big.meta.d);
     // Asked for, it does not count toward what the group fetches by itself.
     expect(t.files.get(bob)!.store.records.get(t.got(bob, id, big.messageId).message!.file!.id)!.group).toMatchObject({ asked: true });
+  });
+});
+
+describe("the files of a group this device no longer has", { timeout: 120_000 }, () => {
+  /** A file of `groupId` as an earlier run kept it: its record and its bytes. */
+  const leftOver = async (store: MemoryFiles, groupId: string) => {
+    const id = groupFileId(groupId, "in"), bytes = pattern(4_000, 9);
+    store.bytes.set(id, bytes);
+    await store.put({ id, linkId: `group:${groupId}`, direction: "in", digest: sha(bytes), createdAt: 1,
+      metadata: { name: "old.bin", size: bytes.length, mime: "application/octet-stream", timestamp: 1 },
+      transfer: { state: "done", transferred: bytes.length, size: bytes.length }, group: { message: "m1", author: "someone" } });
+    return id;
+  };
+
+  it("go at start with their bytes, and the files of the groups it has stay", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const { messageId, meta } = await t.send(alice, id, pattern(50_000, 4));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    const store = t.files.get(bob)!.store, here = t.got(bob, id, messageId).message!.file!.id;
+    // A community left on a version whose Leave kept its files: no group stored here names them.
+    const gone = await leftOver(store, "gone-community");
+    await t.world.restart(bob);
+    expect(store.records.has(gone)).toBe(false);
+    expect(store.bytes.has(gone)).toBe(false);
+    expect(sha(store.bytes.get(here)!)).toBe(meta.d);
+    expect(t.got(bob, id, messageId).transfer).toMatchObject({ state: "done" });
+  });
+
+  it("stay for a group it was removed from, whose history is kept", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const { messageId, meta } = await t.send(alice, id, pattern(50_000, 5));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    await alice.groups.remove(id, t.key(bob, id));
+    await t.world.until(() => t.world.view(bob, id)?.status === "removed", 60_000);
+    await t.world.restart(bob);
+    expect(t.world.view(bob, id)?.status).toBe("removed");
+    const { message, bytes, transfer } = t.got(bob, id, messageId);
+    expect(t.files.get(bob)!.store.records.has(message!.file!.id)).toBe(true);
+    expect(sha(bytes!)).toBe(meta.d);
+    expect(transfer).toMatchObject({ state: "done" });
+  });
+
+  it("stay on a copy that must stay as it is (limited mode)", async () => {
+    const t = new FilesWorld();
+    const { peers: [, bob] } = await t.mesh(["alice", "bob"]);
+    const store = t.files.get(bob)!.store, gone = await leftOver(store, "gone-community");
+    await bob.groups.load(true);
+    expect(store.records.has(gone)).toBe(true);
+    expect(store.bytes.has(gone)).toBe(true);
   });
 });
 
