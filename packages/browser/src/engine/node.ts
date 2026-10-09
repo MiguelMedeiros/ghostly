@@ -521,6 +521,12 @@ export interface NodeOptions {
    * relay in the settings. Ghostly Desktop posts from Rust; the CLI's `fetch` has no CORS to refuse it.
    */
   pushSend?: (request: PushRequest) => Promise<number>;
+  /**
+   * How a Lightning address or LNURL service is asked (WISP 205 § Transport). Default: `fetch`, which in a page cannot
+   * read where a redirect leads, so a service that redirects is refused there. Ghostly Desktop passes one that asks
+   * from Rust when the service redirects, where every hop is checked before it is followed.
+   */
+  lnurlFetch?: typeof fetch;
 }
 
 export interface NodeEvents {
@@ -860,6 +866,7 @@ export class GhostlyNode implements EngineImplementation {
     descriptors: () => this.providers().lightning,
     host: () => this.providerHost(network),
     hasMints: () => this.networkMints(network).length > 0,
+    fetch: (...request) => (this.options.lnurlFetch ?? globalThis.fetch)(...request),
     events: {
       changed: () => void this.refreshWallet(),
       received: (op) => void this.desk.onLightningPaid(op),
