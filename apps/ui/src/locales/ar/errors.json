@@ -389,6 +389,12 @@
     "listenerGiven": "متوقف مؤقتًا لصالح دردشة أنشط. افتح هذه الدردشة للاستئناف.",
     "listenerReleased": "متوقف مؤقتًا لصالح دردشة أخرى. افتح هذه الدردشة للاستئناف."
   },
+  "verify": {
+    "closed": "أُغلق الاتصال",
+    "closedNext": "قارن مرة أخرى بعد إعادة الاتصال.",
+    "codeChanged": "تغيّر الرمز",
+    "codeChangedNext": "قارن الرمز الجديد."
+  },
   "wallet": {
     "alreadyHave": "لديك بالفعل محفظة {{kind}} {{network}}",
     "arkProviderNetwork": "مزوّد Ark هذا يعمل على {{actual}}، لا على {{expected}}",

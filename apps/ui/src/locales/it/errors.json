@@ -389,6 +389,12 @@
     "listenerGiven": "In pausa per una chat più attiva. Apri questa chat per riprendere.",
     "listenerReleased": "In pausa per un'altra chat. Apri questa chat per riprendere."
   },
+  "verify": {
+    "closed": "La connessione si è chiusa",
+    "closedNext": "Confronta di nuovo dopo la riconnessione.",
+    "codeChanged": "Il codice è cambiato",
+    "codeChangedNext": "Confronta il nuovo codice."
+  },
   "wallet": {
     "alreadyHave": "Hai già un portafoglio {{kind}} {{network}}",
     "arkProviderNetwork": "Quel fornitore Ark funziona su {{actual}}, non su {{expected}}",

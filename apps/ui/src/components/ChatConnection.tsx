@@ -65,6 +65,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const [menuOpen, setMenuOpen] = useState(false);
   const nav = useAppNavigation();
   const [error, setError] = useState("");
+  // A refused "The codes match" (the connection changed or closed after the code was shown): said beside the code,
+  // never as the chat's connection failure.
+  const [verifyError, setVerifyError] = useState("");
   const [busy, setBusy] = useState(false), [comparing, setComparing] = useState(false);
   const root = useRef<HTMLDetailsElement>(null), trigger = useRef<HTMLElement>(null);
   // Offline either way: Ghostly's own switch, or a device with no network. The banner says the second; what the relays
@@ -166,10 +169,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const [tip, setTip] = useState(false);
   const close = () => { if (root.current?.open) { root.current.open = false; trigger.current?.focus(); } };
   useOutsideDismiss(root, menuOpen, close);
-  async function run(action: () => Promise<unknown>) {
-    setBusy(true); setError("");
+  async function run(action: () => Promise<unknown>, fail = setError) {
+    setBusy(true); fail("");
     // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
-    try { await action(); } catch (e) { setError(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }
+    try { await action(); } catch (e) { fail(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }
     finally { setBusy(false); }
   }
   // The header shows only the icon: the label is in its tooltip, its accessible name and the panel.
@@ -260,13 +263,14 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
                     <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/>{link?.peerVerified && <path d="m8 12 3 3 5-6"/>}</svg>
                     {link?.peerVerified ? t("connection.panel.verified") : t("connection.panel.notVerified")}
                   </span>
-                  {!link?.peerVerified && canCompare && !comparing && <button data-testid="pair-verify" aria-label={t("connection.panel.verifyContact")} className={`min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`} onClick={()=>setComparing(true)}>{t("connection.panel.verify")}</button>}
+                  {!link?.peerVerified && canCompare && !comparing && <button data-testid="pair-verify" aria-label={t("connection.panel.verifyContact")} className={`min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`} onClick={()=>{setVerifyError("");setComparing(true);}}>{t("connection.panel.verify")}</button>}
                 </div>
                 {comparing && canCompare && !link?.peerVerified && <div className="rounded-lg bg-surface-hover p-3">
                   <code data-testid="pair-code" className="block select-all break-words text-sm tracking-widest text-text-primary">{pair?.code}</code>
                   <p className="mt-1">{t("connection.panel.compare")}</p>
                   <button data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent px-3 text-panel-header ${focus}`}
-                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);})}>{t("connection.panel.codesMatch")}</button>
+                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</button>
+                  {verifyError && <Notice problem={problemText(verifyError, t)} tone="warning" testId="pair-verify-error" className="mt-1.5" />}
                 </div>}
               </>}
             </div>}

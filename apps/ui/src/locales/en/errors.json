@@ -389,6 +389,12 @@
     "listenerGiven": "Paused for a busier chat. Open this chat to resume.",
     "listenerReleased": "Paused for another chat. Open this chat to resume."
   },
+  "verify": {
+    "closed": "The connection closed",
+    "closedNext": "Compare again after reconnecting.",
+    "codeChanged": "The code changed",
+    "codeChangedNext": "Compare the new code."
+  },
   "wallet": {
     "alreadyHave": "You already have a {{network}} {{kind}} wallet",
     "arkProviderNetwork": "That Ark provider runs on {{actual}}, not {{expected}}",

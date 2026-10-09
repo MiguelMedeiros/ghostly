@@ -389,6 +389,12 @@
     "listenerGiven": "En pause pour une discussion plus active. Ouvrez celle-ci pour reprendre.",
     "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre."
   },
+  "verify": {
+    "closed": "La connexion s'est fermée",
+    "closedNext": "Comparez à nouveau après la reconnexion.",
+    "codeChanged": "Le code a changé",
+    "codeChangedNext": "Comparez le nouveau code."
+  },
   "wallet": {
     "alreadyHave": "Vous avez déjà un portefeuille {{kind}} {{network}}",
     "arkProviderNetwork": "Ce fournisseur Ark fonctionne sur {{actual}}, pas sur {{expected}}",
