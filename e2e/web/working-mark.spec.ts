@@ -9,7 +9,7 @@ import { HeadlessBot } from "../support/headless";
  * Whether a bot is working (WISP 405 § Showing a card): headless bots say what they do with task cards; the person on
  * the web app sees a dot on each bot's row in the chat list while one of its tasks is running, without opening
  * anything. The dot turns muted once the bot has been quiet for 15 minutes, and goes when the task is done; it comes
- * and goes without moving the row's usage meter.
+ * and goes without moving the row's usage meter. The chat's header says the same in words and opens the Tasks panel.
  */
 test.describe.configure({ timeout: 8 * 60_000 });
 
@@ -115,12 +115,39 @@ test("a bot's running task shows as a dot on its chat's row, muted once it goes 
     };
     await pictures("working");
 
+    // The chat's header says it in words, and opens the Tasks panel the header's button opens.
+    const header = async (state: string, text: RegExp) => {
+      await row("Hermes One").click();
+      const line = page.getByTestId("chat-working");
+      await expect(line).toHaveText(text);
+      await line.click();
+      await expect(page.getByTestId("chat-tasks-panel")).toContainText("Fix relay rotation");
+      await expect(line).toHaveAttribute("aria-expanded", "true");
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("chat-tasks-panel")).toHaveCount(0);
+      await line.blur();
+      await page.mouse.move(900, 700);
+      for (const scheme of ["light", "dark"] as const) {
+        await theme(page, scheme);
+        await shot(page, `header-${state}-${scheme}`);
+      }
+      await page.setViewportSize({ width: 375, height: 760 });
+      // A phone's header keeps the dot and reads the words out: the key and the meter take the line's room.
+      await expect(line).toBeVisible();
+      await expect(line).toHaveAccessibleName(text);
+      expect((await line.boundingBox())!.width).toBeLessThan(40);
+      await shot(page, `header-${state}-phone`);
+      await page.setViewportSize({ width: 1280, height: 800 });
+    };
+    await header("working", /^Working · Fix relay rotation$/);
+
     // Sixteen minutes on with no word from the bots: both dots are muted, and say for how long.
     await page.clock.setFixedTime(Date.now() + 16 * 60_000);
     await expect(dot("Hermes One")).toHaveAttribute("data-state", "stale", { timeout: 90_000 });
     await expect(dot("Hermes Two")).toHaveAttribute("data-state", "stale");
     await expect(dot("Hermes One")).toHaveAccessibleName(/^No update for 1[67] min$/);
     await pictures("stale");
+    await header("stale", /^Working\? · last update 1[67] min ago$/);
 
     // The first bot finishes: its dot goes, its meter stays where it was. The other is still at it.
     await bots[0].run("task", "update", one, "fix", "--status", "done");

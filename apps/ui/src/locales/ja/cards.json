@@ -155,6 +155,7 @@
   },
   "working": {
     "label": "作業中",
+    "quiet": "作業中？ · 最終更新 {{ago}}",
     "stale": "{{duration}}間更新なし"
   }
 }

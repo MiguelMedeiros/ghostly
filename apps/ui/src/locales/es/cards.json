@@ -155,6 +155,7 @@
   },
   "working": {
     "label": "Trabajando",
+    "quiet": "¿Trabajando? · última novedad {{ago}}",
     "stale": "Sin novedades desde hace {{duration}}"
   }
 }
