@@ -6,6 +6,7 @@ import { edgeParams } from "../src/groupCrypto";
 import { randomBytes, toBase64Url } from "../src/bytes";
 import { encodePacketTransports, parsePacketTransports } from "../src/capsRecord";
 import { buildLinkRecords, LABEL, parseLinkRecords } from "../src/records";
+import { measureRecords } from "../src/pkarr";
 import { fromBase64Url } from "../src/bytes";
 import type { PairingState } from "../src/pairedSession";
 import type { NativeTransport, PairedTransport, TransportDescriptors } from "../src/pairedTransports";
@@ -415,6 +416,33 @@ describe("`_tr` in a link's packet", () => {
     const parsed = parseLinkRecords({ pubKeyZ32: key, timestampMicros: 1n, records: built.records }, encKey);
     expect(parsed.transports).toBeNull();
     expect(parsed.services).toEqual([{ id: "chat", type: "chat" }]);
+  });
+
+  it("saying WebRTC alone takes about a hundred bytes of the packet, and no way to dial anything", () => {
+    const value = encodePacketTransports(["webrtc/1"], {});
+    expect(value).toBe('{"t":["webrtc/1"],"d":{}}');
+    const state = { messages: [], ackTimestamp: 0, services: [{ id: "chat", type: "chat" as const }] };
+    const without = buildLinkRecords(key, state, encKey), withIt = buildLinkRecords(key, { ...state, transports: value }, encKey);
+    const cost = measureRecords(key, withIt.records) - measureRecords(key, without.records);
+    expect(cost).toBeGreaterThan(0);
+    expect(cost).toBeLessThan(130);
+    expect(withIt.records.map(r => r.label)).toEqual(expect.arrayContaining([LABEL.svc, LABEL.tr]));
+  });
+
+  // What a reader goes by (link.ts `TRANSPORTS_GONE_MS`): a packet that advertises and carries no `_tr` set none.
+  it("is left out of a packet that is too big only after the advertisement is", () => {
+    const value = encodePacketTransports(["webrtc/1"], {});
+    const shapes = new Set<string>();
+    for (let length = 0; length <= 800; length += 4) {
+      let labels: string[];
+      // A signal takes the room first, as an offer or an answer does.
+      try { labels = buildLinkRecords(key, { messages: [], ackTimestamp: 0, rtcSignal: "x".repeat(length), services: [{ id: "chat", type: "chat" }], transports: value }, encKey).records.map(r => r.label); }
+      catch { shapes.add("nothing fits"); continue; }
+      const svc = labels.includes(LABEL.svc), tr = labels.includes(LABEL.tr);
+      expect(svc && !tr, `a signal of ${length} characters`).toBe(false);
+      shapes.add(svc ? "both" : tr ? "transports only" : "neither");
+    }
+    expect([...shapes]).toEqual(["both", "transports only", "neither", "nothing fits"]);
   });
 
   it("refuses what is not one", () => {
