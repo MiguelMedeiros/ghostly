@@ -4,6 +4,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GROUP_FILE_LIMITS } from "@ghostly/core";
+import { fileStore } from "@ghostly/browser/shared/idb";
 import type { FileTransferView, GroupMemberView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
@@ -40,7 +41,7 @@ const offered = (file: MessageFile): FileTransferView => ({ state: "transferring
 
 function openGroup(transfers: Record<string, FileTransferView> = {}, patch: Partial<GroupView> = {}) {
   fakeEngine.on("groupMessages", () => history).on("updateSettings", () => undefined).on("sendGroupMessage", () => ({ error: null }))
-    .on("sendGroupFile", () => ({ error: null, messageId: `${ME}:1:9` })).on("fileAction", () => undefined);
+    .on("groupFileCheck", () => ({ error: null })).on("sendGroupFile", () => ({ error: null, messageId: `${ME}:1:9` })).on("fileAction", () => undefined);
   fakeEngine.update({ groups: [group(patch)], transfers });
   return renderApp(<Routes>
     <Route path="/" element={<p>Chat list</p>} />
@@ -103,6 +104,22 @@ describe("the composer of a group takes files and voice messages", () => {
     await screen.findByText("lunch at noon?");
     fireEvent.change(screen.getByTestId("file-input"), { target: { files: [new File(["one"], "one.txt", { type: "text/plain" })] } });
     expect(await screen.findByText("You sent many files to this group just now. Wait a minute, then send it again.")).toBeInTheDocument();
+  });
+
+  it("a file the group would refuse now is refused before any of it is read or kept here", async () => {
+    const put = vi.spyOn(fileStore, "put");
+    const { engine } = openGroup();
+    engine.on("groupFileCheck", () => ({ error: "You sent many files to this group just now. Wait a minute." }));
+    await screen.findByText("lunch at noon?");
+    const file = new File(["one"], "one.txt", { type: "text/plain" });
+    const read = vi.spyOn(file, "arrayBuffer"), sliced = vi.spyOn(file, "slice");
+    fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
+    await vi.waitFor(() => expect(engine.callsTo("groupFileCheck")).toEqual([{ groupId: "group-1" }]));
+    expect(await screen.findByText("You sent many files to this group just now. Wait a minute, then send it again.")).toBeInTheDocument();
+    expect(put).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(sliced).not.toHaveBeenCalled();
+    expect(engine.callsTo("sendGroupFile")).toEqual([]);
   });
 });
 
