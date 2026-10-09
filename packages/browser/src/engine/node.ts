@@ -6394,8 +6394,9 @@ export class GhostlyNode implements EngineImplementation {
           if (state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.emitState();
         },
-        onStatus: status => { live.status = status; this.emitState(); },
-        onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
+        // Said on every read: the pages hear only of a change.
+        onStatus: status => { if (status !== live.status) { live.status = status; this.emitState(); } },
+        onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.emitState(); } },
       },
     });
     traceJoin(group, "link.start", { role });
@@ -6453,6 +6454,8 @@ export class GhostlyNode implements EngineImplementation {
     // Back after a restart, or after a handoff from another device (`resumeHere`): on a transport this app runs.
     const resumed = stored.pairedPeerKey && stored.deliveryMode !== "dht"
       ? resumeHere(this.transportLogOf(live), this.transportsHere(), stored.peerTransports ?? live.caps?.peer?.transports) : {};
+    // The DHT delivery view the pages last heard of (`onDhtDelivery`).
+    let dhtShown: string | undefined;
     live.link = new GhostLink({
       paymentMethods: stored.paymentMethods,
       paymentNetworks: this.chatNetworks(stored),
@@ -6554,9 +6557,12 @@ export class GhostlyNode implements EngineImplementation {
         },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
-        onDhtDelivery: () => {
+        onDhtDelivery: view => {
           if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}).then(() => this.editQueues.get(linkId)?.flush()).catch(() => {});
-          this.observeTransport(linkId); this.emitState();
+          this.observeTransport(linkId);
+          // Every read of the mailbox says so: the pages hear only of one that changed what the chat shows.
+          const shown = JSON.stringify(view);
+          if (shown !== dhtShown) { dhtShown = shown; this.emitState(); }
         },
         onHold: (state) => this.hold.peerSaid(linkId, state),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
@@ -6592,7 +6598,8 @@ export class GhostlyNode implements EngineImplementation {
         // Why the chat is not live: what the last attempt tried (WISP 100), never a silent retry loop.
         onLiveAttempt: () => this.emitState(),
         onRtt: ms => { const log = this.transportLogOf(live); if (log?.rtt(ms)) this.saveTransportLog(live, log); else this.emitState(); },
-        onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
+        // Said on every read (no error is `null`): the pages hear only of a change.
+        onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.emitState(); } },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
           const patch = { peerDescriptors, peerTransports, peerFallback };
           await db.patchLink(linkId, patch);
@@ -6610,13 +6617,18 @@ export class GhostlyNode implements EngineImplementation {
           this.emitState();
         },
         onStatus: (status) => {
+          const was = live.status, synced = live.lastSyncAt;
           live.status = status;
           if (status === "online") live.lastSyncAt = Date.now();
-          this.emitState();
+          // A read like the one before changes no row: only the open chat's panel shows its time, and a group's
+          // members when they were last seen.
+          if (status !== was || !synced || stored.group || linkId === this.activeLinkId) this.emitState();
         },
         onPoll: ({ polling, nextInMs }) => {
+          const was = live.poll.polling;
           live.poll = { polling, nextAt: Date.now() + nextInMs, interval: nextInMs || live.poll.interval };
-          this.emitState();
+          // Shown in the open chat's panel, and in the list only as a chat's first sync under way.
+          if (linkId === this.activeLinkId || (!live.lastSyncAt && polling !== was)) this.emitState();
         },
         onMessageReceipt: async id => {
           // A file's offer said on the floor: its bubble is in place on the contact's side, and the floor is free.
