@@ -108,6 +108,27 @@ describe("a new message, read out to a screen reader", () => {
     expect(region()).not.toHaveTextContent("Requested");
   });
 
+  it("a voice message or a video reads as the chat list says it, in the app's language, not the history's English line", () => {
+    const voice = { id: "f1", name: "Voice message.webm", size: 9_000, mime: "audio/webm", voice: { duration: 7_000, peaks: [] } };
+    const video = { id: "f2", name: "clip.mp4", size: 90_000, mime: "video/mp4", video: { duration: 4_000, width: 640, height: 360 } };
+    const view = renderApp(<MessageAnnouncer chat="c" messages={HISTORY} nameOf={nameOf} />, { language: "pt" });
+    const withVoice = [...HISTORY, peer("🎤 Voice message (0:07)", { file: voice })];
+    view.rerender(<MessageAnnouncer chat="c" messages={withVoice} nameOf={nameOf} />);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: 🎤 Mensagem de voz \(0:07\)$/);
+    wait(ANNOUNCE_CLEAR_MS);
+    const withVideo = [...withVoice, peer("🎬 Video (0:04)", { file: video })];
+    view.rerender(<MessageAnnouncer chat="c" messages={withVideo} nameOf={nameOf} />);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: 🎬 Vídeo \(0:04\)$/);
+    expect(region()).not.toHaveTextContent("Video (");
+    // Any other file keeps its own line: its name.
+    wait(ANNOUNCE_CLEAR_MS);
+    view.rerender(<MessageAnnouncer chat="c" messages={[...withVideo, peer("📎 notes.txt", { file: { id: "f3", name: "notes.txt", size: 3, mime: "text/plain" } })]} nameOf={nameOf} />);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: 📎 notes\.txt$/);
+  });
+
   it("older messages loaded above, an edit or a reaction are not news", () => {
     const { update } = setup(HISTORY);
     update([peer("older"), peer("older still"), ...HISTORY]);
