@@ -296,6 +296,8 @@ export class Apps {
   private readonly usage = new Map<string, number>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Drops what `staged` holds past `STAGED.ms`, set while it holds anything: a closed install screen sends no call. */
+  private sweep: ReturnType<typeof setTimeout> | null = null;
   private checking: Promise<AppCheckResult[]> | null = null;
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
@@ -325,6 +327,9 @@ export class Apps {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.sweep) clearTimeout(this.sweep);
+    this.sweep = null;
+    this.staged.clear();
   }
 
   private schedule(ms: number, atStart = false): void {
@@ -726,11 +731,20 @@ export class Apps {
     throw last instanceof Error ? last : new Error(String(last));
   }
 
+  /** Drops the staged bundles past `STAGED.ms`, and comes back when the oldest left is due. */
+  private sweepStaged(): void {
+    this.sweep = null;
+    for (const [digest, s] of this.staged) if (this.now() - s.at >= STAGED.ms) this.staged.delete(digest);
+    const oldest = this.staged.values().next().value;
+    if (oldest) this.sweep = setTimeout(() => this.sweepStaged(), STAGED.ms - (this.now() - oldest.at));
+  }
+
   private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string): Promise<AppPreview> {
     for (const [digest, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(digest);
     this.staged.delete(bundle.digest);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
     this.staged.set(bundle.digest, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), at: this.now() });
+    if (!this.sweep) this.sweepStaged();
 
     const { manifest, digest } = bundle;
     const version = versionOf(manifest, digest);
