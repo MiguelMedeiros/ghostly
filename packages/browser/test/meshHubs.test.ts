@@ -249,6 +249,27 @@ describe("hubs in a private group past 16 members", () => {
     expect((await leaver.store.getGroups()).some(g => g.id === id)).toBe(false);
   }, 300_000);
 
+  it("the only hub leaves: its members drop it at once, and a message said right after reaches everyone over direct edges", async () => {
+    const b = await build(20, { hubs: [3] });
+    const { world, id, peers } = b;
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const hub = peers[3], hubKey = keyOf(b, hub), rest = peers.filter(p => p !== hub);
+    expect(view(b, hub).hubs).toEqual({ hub: true });
+    await hub.groups.leave(id);
+    // On its way out it took itself out of the beacon.
+    const epoch = view(b, peers[9]).epoch!;
+    const state = (await peers[9].store.getGroups()).find(g => g.id === id)!.state!;
+    const keys = beaconKeys(meshRendezvous(fromBase64Url(state.secrets[epoch]), id, epoch), id);
+    expect(readBeacon(keys, world.pkarr.get(keys.identity.pubKeyZ32) ?? []).some(h => h.key === hubKey)).toBe(false);
+    await world.run(1_000);
+    await peers[9].groups.send(id, "after the hub left");
+    // Seconds, not the beacon's freshness and the hubs' grace (about 3.5 minutes).
+    await world.until(() => rest.every(p => world.texts(p, id).includes("after the hub left")), 30_000, 1000,
+      () => rest.filter(p => !world.texts(p, id).includes("after the hub left")).map(p => p.name).join(","));
+    expect(rest.every(p => !view(b, p).hubs)).toBe(true);
+  }, 300_000);
+
   it("a member leaves through its hubs while the admin's app is closed: the admin removes it once back", async () => {
     const b = await build(20, { hubs: [2, 5] });
     const { world, id, admin, peers } = b;
