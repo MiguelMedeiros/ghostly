@@ -116,6 +116,20 @@ describe("storage", () => {
       { ghostlyAppData: 1, app: app.ref, scope: "chat-1", entries: { a: [1, 2] } },
     ]);
   });
+
+  it("exports a key named __proto__ like any other", async () => {
+    const { store, app } = await installed();
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "__proto__", value: { board: "rnbqkbnr", turn: 7 } });
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "score", value: 3 });
+    const [file] = await store.exportData({ ref: app.ref });
+    expect(Object.keys(file.entries).sort()).toEqual(["__proto__", "score"]);
+    expect(Object.getPrototypeOf(file.entries)).toBe(Object.prototype);
+    // The file the uninstall dialog saves is this, as JSON.
+    expect(JSON.parse(JSON.stringify(file))).toEqual({
+      ghostlyAppData: 1, app: app.ref, scope: "chat-1",
+      entries: JSON.parse('{"__proto__":{"board":"rnbqkbnr","turn":7},"score":3}'),
+    });
+  });
 });
 
 describe("uninstall", () => {
