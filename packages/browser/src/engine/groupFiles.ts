@@ -205,6 +205,8 @@ interface Edge {
   /** Message ids to say in the next `group-have`, and when one last went. */
   have: Set<string>;
   haveAt: number;
+  /** Message ids its member asked for while this device served all it serves at once: said in a `group-have` once a slot frees. */
+  busy: Set<string>;
 }
 
 /** Why a want waits, as the person reads it (the app shows its own words for each `wait`). */
@@ -569,8 +571,9 @@ export class GroupFileDesk {
     if (!this.deps.settings().serveFiles || !edge.files.live) return "busy";
     this.letGo();
     const active = this.servingNow();
+    if (active.length >= GROUP_FILE_LIMITS.serveAtOnce) { edge.busy.add(messageId); return "busy"; }
     // One that has all its bytes waits only for the member's word that its check passed, which may come after this want.
-    if (active.length >= GROUP_FILE_LIMITS.serveAtOnce || active.some(a => a.peer === edge.peer && a.sending)) return "busy";
+    if (active.some(a => a.peer === edge.peer && a.sending)) return "busy";
     const today = Math.floor(this.deps.now() / 86_400_000);
     if (this.served.day !== today) this.served = { day: today, bytes: 0 };
     const reserved = active.reduce((sum, a) => sum + a.size, 0);
@@ -630,7 +633,7 @@ export class GroupFileDesk {
   private edge(groupId: string, peer: string, linkId: string): Edge {
     const known = this.edgesById.get(linkId);
     if (known) return known;
-    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), have: new Set(), haveAt: 0 };
+    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), have: new Set(), haveAt: 0, busy: new Set() };
     edge.files = new ChatFiles({
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
@@ -703,6 +706,13 @@ export class GroupFileDesk {
         this.served.bytes += record.confirmed;
         edge.serving.delete(record.id);
         edge.servedMoved.delete(record.id);
+        // A slot is free: those turned away as busy hear this device holds their file (with the next `group-have`), and
+        // ask it again rather than wait out their round.
+        const serving = this.deps.settings().serveFiles;
+        for (const other of this.edgesById.values()) {
+          if (serving) for (const id of other.busy) other.have.add(id);
+          other.busy.clear();
+        }
       }
       return;
     }
