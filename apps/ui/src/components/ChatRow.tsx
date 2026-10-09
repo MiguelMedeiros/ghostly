@@ -27,6 +27,8 @@ import { callEventText } from "../lib/callLines";
 import type { Translate } from "../locales/translate";
 import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
+import type { WorkingEntry } from "../lib/working";
+import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -35,7 +37,8 @@ import { UsagePill } from "./chat/UsageMeter";
  * What the chat is set to (muted, pinned) is a quiet mark just before the time, in the time's own tone; on a pointer
  * device the row's actions (mute, pin, delete) take the marks' and the time's place while it is hovered.
  * A bot's usage meter keeps one place on every row, whatever else the row shows: right after the key when the key has
- * its line, else at the start of a trailing column of one width (USAGE_COLUMN).
+ * its line, else at the start of a trailing column of one width (USAGE_COLUMN). The mark that says the bot is working
+ * goes just before the meter, in a place of one width that a row with a meter keeps when it has no mark.
  */
 
 const AVATAR = { compact: 46, comfortable: 52 } as const;
@@ -43,11 +46,12 @@ const AVATAR = { compact: 46, comfortable: 52 } as const;
 export const REFUSAL_SHOWN_MS = 8000;
 const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" } as const;
 /**
- * Compact has no key line, so a bot's meter stays on the last line, where nothing but the row's end is fixed: it starts
- * a column as wide as the widest meter ("100%") with the widest unread count ("99+") after it, the count at the row's
- * end as on any row. The meter so starts at the same place with or without a count, whatever the count says.
+ * Compact has no key line, so a bot's working mark and meter stay on the last line, where nothing but the row's end is
+ * fixed: they start a column as wide as the mark, the widest meter ("100%") and the widest unread count ("99+") after
+ * them, the count at the row's end as on any row. The mark and the meter so start at the same place with or without a
+ * count, whatever the count says.
  */
-const USAGE_COLUMN = "flex min-w-[105px] items-center justify-between gap-1.5";
+const USAGE_COLUMN = "flex min-w-[119px] items-center justify-between gap-1.5";
 
 /** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
 export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["delivery"]; live?: DhtOnlyBy }) {
@@ -214,6 +218,11 @@ export interface ChatRowProps {
    * Comfortable: right after the key. Compact: at the start of the last line's trailing column (USAGE_COLUMN).
    */
   usage?: UsageEntry;
+  /**
+   * The contact's running tasks (WISP 405 § Showing a card): a dot just before the meter's place, in the accent while
+   * one was updated lately, muted once they have gone quiet. A row with a meter keeps the dot's place without it.
+   */
+  working?: WorkingEntry;
 }
 
 /** A join notice as the chat's line says it (MessageBubble): mine, or the contact by the name the list shows. */
@@ -266,6 +275,9 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
   const meter = p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />;
+  // The mark's place is the same on every row: before the meter, kept empty on a row whose bot has a meter and no task.
+  const working = p.working ? <WorkingDot entry={p.working} testId="chat-row-working" /> : meter ? <WorkingGap /> : undefined;
+  const bot = working && <span className="flex shrink-0 items-center gap-1.5">{working}{meter}</span>;
   const unread = p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />;
   return (
     <div data-testid="chat-row" data-chat={p.chatId} data-muted={muted || undefined} data-dragging={p.reorder?.dragging || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} {...p.reorder?.props}
@@ -309,11 +321,13 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
         timeClass={p.unread > 0 && !muted ? "text-accent font-medium" : "text-text-muted"}
         sub={<>
           {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. A bot's meter
-              follows it: the short key is as wide on every row, so the meter starts at the same place on each. The line
-              keeps the key's height (the meter, 2px taller, is centred over it), and so the row keeps its own. */}
+              follows it, after the working mark's place: the short key is as wide on every row, so both start at the
+              same place on each. The line keeps the key's height (the meter, 2px taller, is centred over it), and so
+              the row keeps its own. */}
           {p.density === "comfortable"
             ? <span className="flex h-4 items-center gap-1.5 whitespace-nowrap">
                 <span data-testid="chat-row-key" className="shrink-0 text-[11px] leading-4 text-text-muted font-mono">{p.keyLabel}</span>
+                {working}
                 {meter}
               </span>
             : <span className="sr-only"> · {p.keyLabel}</span>}
@@ -336,7 +350,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           {muted && <MutedMark label={t("mute.bell")} />}
           {p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
         </>}
-        trailing={meter && p.density === "compact" ? <span className={USAGE_COLUMN}>{meter}{unread}</span> : unread}
+        trailing={bot && p.density === "compact" ? <span className={USAGE_COLUMN}>{bot}{unread}</span> : unread}
         timeCover={
           // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place. A row in
           // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.

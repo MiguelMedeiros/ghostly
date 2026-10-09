@@ -90,7 +90,9 @@ describe("the pill's place on a chat's row", () => {
     expect(pill).toHaveAttribute("data-left", "12");
     const key = screen.getByTestId("chat-row-key");
     expect(key).toHaveTextContent(/^abcdef\.\.\.uvwxyz$/);
-    expect(key.nextElementSibling).toBe(pill);
+    // The working mark's place (kept empty: no task is running) comes between them, on every row with a meter.
+    expect(key.nextElementSibling).toBe(screen.getByTestId("chat-row-working-gap"));
+    expect(key.nextElementSibling!.nextElementSibling).toBe(pill);
     // One line of the key's height that never wraps: the meter, a little taller, is centred over it and adds nothing.
     expect(key.parentElement!.className).toMatch(/(^| )h-4( |$)/);
     expect(key.parentElement!.className).toContain("whitespace-nowrap");
@@ -101,7 +103,7 @@ describe("the pill's place on a chat's row", () => {
 
   it("comfortable: the same place with no unread count, when the last line ends with nothing", () => {
     renderApp(<ChatRow {...props({ density: "comfortable", unread: 0 })} usage={entry()} />);
-    expect(screen.getByTestId("chat-row-key").nextElementSibling).toBe(screen.getByTestId("chat-row-usage"));
+    expect(screen.getByTestId("chat-row-key").nextElementSibling!.nextElementSibling).toBe(screen.getByTestId("chat-row-usage"));
     expect(trailing()).toBeNull();
   });
 
@@ -109,11 +111,13 @@ describe("the pill's place on a chat's row", () => {
     renderApp(<ChatRow {...props({ unread })} usage={entry({ left: 12 })} />);
     const pill = screen.getByTestId("chat-row-usage");
     expect(screen.queryByTestId("chat-row-key")).not.toBeInTheDocument();
-    const column = pill.parentElement!;
+    // The column starts with the working mark's place and the meter, which never part.
+    const column = pill.parentElement!.parentElement!;
     expect(trailing()).toContainElement(column);
-    expect(column.className).toContain("min-w-[105px]");
+    expect(column.className).toContain("min-w-[119px]");
     expect(column.className).toContain("justify-between");
-    expect(column.firstElementChild).toBe(pill);
+    expect(column.firstElementChild).toBe(pill.parentElement);
+    expect(pill.previousElementSibling).toBe(screen.getByTestId("chat-row-working-gap"));
     expect(column.childElementCount).toBe(unread ? 2 : 1);
     if (unread) expect(column.lastElementChild).toBe(screen.getByTestId("chat-row-unread"));
   });
