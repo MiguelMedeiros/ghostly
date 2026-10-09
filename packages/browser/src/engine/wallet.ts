@@ -139,6 +139,11 @@ const total = (proofs: { amount: number }[]) => proofs.reduce((sum, p) => sum + 
 
 const sats = (proofs: Proof[]) => total(proofs.map((p) => ({ amount: p.amount.toNumber() })));
 
+const MINT_QUOTE_MISMATCH = "The mint quoted another amount than this invoice's. Nothing was paid.";
+/** A melt quote that is not for this invoice (`invoice` lower case, as `decodeBolt11` gives it) and its amount. */
+const quoteMismatch = (quote: MeltQuoteBolt11Response, invoice: string, amount: number) =>
+  quote.request.trim().toLowerCase().replace(/^lightning:/, "") !== invoice || quote.amount.toNumber() !== amount;
+
 const toStored = (mint: string, p: Proof, reserved?: boolean): StoredProof => ({
   mint,
   id: p.id,
@@ -211,6 +216,8 @@ export class CashuWallet {
   private readonly failedFees = new Map<string, number>();
   /** Melt quotes that ended unpaid with proofs the mint read spent: ecash spent somewhere else, said as such. */
   private readonly spentAway = new Set<string>();
+  /** Per melt quote shown to the person: the invoice, its amount and the fee reserve the mint quoted. Only these are paid. */
+  private readonly shownQuotes = new Map<string, { request: string; amount: number; feeReserve: number }>();
 
   /**
    * `getMints`: the mints of one network (the engine's default when none is named), primary first: balances,
@@ -1182,8 +1189,11 @@ export class CashuWallet {
   async quoteInvoice(invoice: string, network?: WalletNetwork): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
     let lastError: unknown = new Error("Add a mint in Settings first");
     let mints = this.getMints(network);
+    const decoded = decodeBolt11(invoice);
+    if (!decoded) throw new Error("That is not an invoice this wallet can pay");
+    if (decoded.amountSat === null) throw new Error("Invoices without an amount are not supported");
     // A Bitcoin invoice may be real money: test sats pay one only through a mint whose Lightning is known to be fake.
-    if (decodeBolt11(invoice.trim())?.network === "bitcoin" && mints.some((mint) => mintNetwork(mint) === "testnet")) {
+    if (decoded.network === "bitcoin" && mints.some((mint) => mintNetwork(mint) === "testnet")) {
       mints = mints.filter((mint) => mintNetwork(mint) === "mainnet" || fakesLightning(mint));
       if (!mints.length) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
     }
@@ -1193,10 +1203,13 @@ export class CashuWallet {
         const quote = await wallet.createMeltQuoteBolt11(invoice.trim());
         const amount = quote.amount.toNumber();
         const feeReserve = quote.fee_reserve.toNumber();
+        // The amount shown is the invoice's: a quote for another invoice or amount is never paid.
+        if (quoteMismatch(quote, decoded.invoice, decoded.amountSat)) throw new Error(MINT_QUOTE_MISMATCH);
         if ((await this.balanceAt(mint)) < amount + feeReserve) {
           lastError = engineError("notEnoughSats");
           continue;
         }
+        this.shownQuotes.set(quote.quote, { request: decoded.invoice, amount, feeReserve });
         return { quote: quote.quote, mint, amount, feeReserve };
       } catch (error) {
         lastError = error;
@@ -1227,6 +1240,11 @@ export class CashuWallet {
     const quote = await wallet.checkMeltQuoteBolt11(quoteId);
     const inFlight = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
     if (inFlight.some((m) => m.quote === quote.quote || m.request === quote.request)) throw new Error("This invoice is already being paid");
+    // Read again from the mint: it must still be the invoice and amount shown, for no more fee than shown.
+    const shown = this.shownQuotes.get(quoteId);
+    if (!shown || quote.quote !== quoteId || quoteMismatch(quote, shown.request, shown.amount) || quote.fee_reserve.toNumber() > shown.feeReserve) {
+      throw new Error(MINT_QUOTE_MISMATCH);
+    }
     const needed = quote.amount.toNumber() + quote.fee_reserve.toNumber();
     const { inputs, keep, send, swap } = await this.split(mint, needed, await this.proofsAt(mint));
     let preview: MeltPreview<MeltQuoteBolt11Response>;
@@ -1260,6 +1278,7 @@ export class CashuWallet {
       stores[STORES.melts].put(melt);
       if (swap) stores[STORES.swaps].delete(swap.id);
     });
+    this.shownQuotes.delete(quoteId);
 
     let result: MeltProofsResponse<MeltQuoteBolt11Response>;
     try {

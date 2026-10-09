@@ -195,6 +195,11 @@ describe("a payment in a chat", () => {
     await expect(pay({ amount: 999 })).rejects.toThrow("does not match the authenticated request");
     await expect(pay({ requestId: "unknown" })).rejects.toThrow("does not match the authenticated request");
     await expect(pay({ target: bitcoinTarget() })).rejects.toThrow("Selected method or mint does not match");
+    // Refused, but its ecash not taken back yet: the contact may still redeem it.
+    node["desk"]["payments"].set("paid", { id: "paid", linkId: chat.id, kind: "payment", direction: "out", amount: 1_000, unit: "sat", state: "failed", createdAt: 2, requestId: request.id, token: "cashuBkept" });
+    await expect(pay()).rejects.toThrow("already has a payment");
+    expect(await intentRepository.list(), "nothing prepared").toEqual([]);
+    node["desk"]["payments"].delete("paid");
     const review = await pay();
     expect(review.payee, "the payee is the chat's contact, not what the page said").toBe(chat.peerPubKeyZ32);
     node["desk"]["payments"].set("paid", { id: "paid", linkId: chat.id, kind: "payment", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt: 2, requestId: request.id });

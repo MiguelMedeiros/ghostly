@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Groups, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { createIdentity, identityFromSeedB64, type GhostRecord, type GroupState } from "@ghostly/core";
+import { createIdentity, encodeCommunityLink, identityFromSeedB64, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.invite, groups.remove-member, groups.admin-change, groups.rotate, groups.leave, groups.forget, groups.link.join, groups.link.replace, groups.protocol.entry
 
@@ -658,6 +658,21 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
     await bob.handleContactFrame("chat-ab", { t: "group-invite", g: groupId, name: "Ghosts", admin: createIdentity().pubKeyZ32 });
     expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("a community link naming a private group's id is refused: the group, its history and its admin stay", async () => {
+    const { world, alice, others: [bob], groupId } = await groupOf(["bob"]);
+    await alice.send(groupId, "only copy of this note"); await world.settle();
+    const before = world.peers.get("alice")!.store.groups.get(groupId);
+    const code = encodeCommunityLink({ g: groupId, host: createIdentity().pubKeyZ32 });
+    for (const g of [alice, bob]) await expect(g.joinByLink(code)).rejects.toThrow(/private group/);
+    await world.settle();
+    expect(world.peers.get("alice")!.store.groups.get(groupId)).toEqual(before);
+    expect(view(alice, groupId)).toMatchObject({ isAdmin: true });
+    expect(view(bob, groupId).isAdmin).toBe(false);
+    expect(world.texts("alice")).toContain("only copy of this note");
+    expect(world.events("bob")).not.toContain("admin");
+    expect(world.peers.get("alice")!.entries.size + world.peers.get("bob")!.entries.size).toBe(0);
   });
 
   it("the link goes off by itself once its maker is no longer the admin; turning off a link that is not on is harmless", async () => {
