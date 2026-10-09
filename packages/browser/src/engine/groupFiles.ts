@@ -193,6 +193,8 @@ interface Edge {
   files: ChatFiles;
   /** Transfers this side serves on the edge (their wire id) → the local file. */
   serving: Map<string, string>;
+  /** Of each transfer served: the bytes the asker confirmed, and when that last changed. */
+  servedMoved: Map<string, { confirmed: number; at: number }>;
   /** Transfers this side takes on the edge (the holder's wire id) → the local file. */
   taking: Map<string, string>;
   /** Message ids to say in the next `group-have`, and when one last went. */
@@ -413,6 +415,7 @@ export class GroupFileDesk {
       else { want.tried.clear(); want.why = undefined; }
       this.ask(kept);
     }
+    this.letGo();
     for (const edge of this.edgesById.values()) {
       if (!edge.have.size || now - edge.haveAt < GROUP_FILE_LIMITS.haveEveryMs || !this.deps.ready(edge.linkId)) continue;
       this.sendHave(edge, [...edge.have]);
@@ -511,6 +514,7 @@ export class GroupFileDesk {
     if (why || !kept) { this.deps.send(edge.linkId, { t: GROUP_WANT_NO_FRAME, g: edge.groupId, id: messageId, why: why ?? "gone" }); return; }
     const wire = toBase64Url(randomBytes(12));
     edge.serving.set(wire, kept.id);
+    edge.servedMoved.set(wire, { confirmed: 0, at: this.deps.now() });
     const { name, mime, size, voice, video, image } = kept.meta;
     const file: FileInfo = { id: wire, name, mime, size, timestamp: this.deps.now(), ...(voice && { voice }), ...(video && { video }), ...(image && { image }) };
     edge.files.offer(file, kept.meta.d);
@@ -526,6 +530,7 @@ export class GroupFileDesk {
     if (!membership || !membership.couldRead(edge.peer, messageId)) return "refused";
     if (!kept) return "gone";
     if (!this.deps.settings().serveFiles || !edge.files.live) return "busy";
+    this.letGo();
     const active = this.servingNow();
     if (active.length >= GROUP_FILE_LIMITS.serveAtOnce || active.some(a => a.peer === edge.peer)) return "busy";
     const today = Math.floor(this.deps.now() / 86_400_000);
@@ -542,6 +547,23 @@ export class GroupFileDesk {
       if (record && !transferEnded(record)) active.push({ peer: edge.peer, size: record.file.size });
     }
     return active;
+  }
+
+  /**
+   * Served transfers that no longer count end, their places free for others (WISP 503 § Serving limits): the asker's
+   * session closed, it is not in the roster any more, or its bytes have not moved for `wantWaitMs` (the asker has moved
+   * on by then).
+   */
+  private letGo(): void {
+    const now = this.deps.now();
+    for (const edge of this.edgesById.values()) for (const wire of [...edge.serving.keys()]) {
+      const record = edge.files.get("out", wire);
+      if (!record || transferEnded(record)) continue;
+      let moved = edge.servedMoved.get(wire);
+      if (!moved || moved.confirmed !== record.confirmed) edge.servedMoved.set(wire, (moved = { confirmed: record.confirmed, at: now }));
+      const gone = !edge.files.live || !this.deps.membership(edge.groupId)?.inRoster(edge.peer);
+      if (gone || now - moved.at >= GROUP_FILE_LIMITS.wantWaitMs) edge.files.cancel("out", wire);
+    }
   }
 
   /** Says on an edge which files this device holds. */
@@ -570,7 +592,7 @@ export class GroupFileDesk {
   private edge(groupId: string, peer: string, linkId: string): Edge {
     const known = this.edgesById.get(linkId);
     if (known) return known;
-    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), taking: new Map(), have: new Set(), haveAt: 0 };
+    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), have: new Set(), haveAt: 0 };
     edge.files = new ChatFiles({
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
@@ -641,6 +663,7 @@ export class GroupFileDesk {
         if (this.served.day !== today) this.served = { day: today, bytes: 0 };
         this.served.bytes += record.confirmed;
         edge.serving.delete(record.id);
+        edge.servedMoved.delete(record.id);
       }
       return;
     }
