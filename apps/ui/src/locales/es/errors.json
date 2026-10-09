@@ -180,6 +180,8 @@
     "notIn": "No estás en este grupo",
     "notYet": "Todavía no estás en este grupo",
     "nothingToSend": "Nada que enviar",
+    "offline": "Estás sin conexión",
+    "offlineNext": "Conéctate en Servicios y vuelve a intentarlo.",
     "removed": "Te eliminaron de este grupo",
     "shareLinkInstead": "Comparte con esa persona el enlace del grupo: quien lo abre entra",
     "tooLong": "El mensaje supera los 16 KiB"
