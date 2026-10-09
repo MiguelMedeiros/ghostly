@@ -493,11 +493,18 @@ export class Apps {
     return { bundle: read.bundle, bytes };
   }
 
-  private async readStoreAt(url: string, heldKey?: string) {
+  /**
+   * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
+   * signature and every revocation in it were checked when it was read, so only its expiry is taken again.
+   */
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<ReturnType<typeof readAppStore>> {
     const [indexBytes, sigBytes] = await Promise.all([
       this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
       this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
     ]);
+    if (held?.index && held.digest !== undefined && toBase64Url(sha256(indexBytes)) === held.digest) {
+      return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
+    }
     return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
   }
 
@@ -602,7 +609,7 @@ export class Apps {
     for (const s of stores) {
       let next: AddedAppStore;
       try {
-        const read = await this.readStoreAt(s.url, s.key);
+        const read = await this.readStoreAt(s.url, s.key, s);
         next = read.ok ? this.withIndex(s, read.store.index, read.store.digest) : { ...s, problem: read.reason };
       } catch (error) {
         next = { ...s, problem: error instanceof AppFetchError ? error.code : "network" };
