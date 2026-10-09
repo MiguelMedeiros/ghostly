@@ -197,6 +197,25 @@ describe("AttentionFeedback in a muted chat", () => {
     expect(await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS }))).toEqual(["message"]);
   });
 
+  it("shows one system notification per chat for messages that come together, a mention still its own", async () => {
+    setup();
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    const notified = () => sound.notice.mock.calls.length;
+    await send(...Array.from({ length: 5 }, () => event({ linkId: "link-a" })), event({ linkId: "group:g1" }), event({ linkId: "group:g1" }));
+    await new Promise(r => setTimeout(r, 20));
+    expect(notified()).toBe(2);
+    clock.mockReturnValue(start + MESSAGE_BURST_MS - 1);
+    await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS - 1 }));
+    await new Promise(r => setTimeout(r, 20));
+    expect(notified()).toBe(2);
+    await send(event({ linkId: "link-a", mention: true, at: start + MESSAGE_BURST_MS - 1 }));
+    await waitFor(() => expect(notified()).toBe(3));
+    clock.mockReturnValue(start + MESSAGE_BURST_MS);
+    await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS }));
+    await waitFor(() => expect(notified()).toBe(4));
+  });
+
   it("plays nothing, muted or not, while sounds are off", async () => {
     setup();
     saveSettings({ ...loadSettings(), notifications: { soundEnabled: false, systemEnabled: false } });
