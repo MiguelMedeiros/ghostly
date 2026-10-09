@@ -102,7 +102,7 @@ test("a bot's running task shows as a dot on its chat's row, muted once it goes 
     await pictures("stale");
 
     // The first bot finishes: its dot goes, its meter stays where it was. The other is still at it.
-    await bots[0].run("task", "update", one, "fix", "--status", "done", "--wait", "sent", "--timeout", "60");
+    await bots[0].run("task", "update", one, "fix", "--status", "done");
     await expect(dot("Hermes One")).toHaveCount(0, { timeout: 60_000 });
     await expect(dot("Hermes Two")).toHaveCount(1);
     expect(await left(meter("Hermes One"))).toBe(await left(meter("Hermes Three")));

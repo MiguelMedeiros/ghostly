@@ -89,14 +89,15 @@ describe("the dot", () => {
     expect(dot.firstElementChild!.className).not.toMatch(/(^| )animate-/);
   });
 
-  it("stale: muted and still, and says for how long nothing came", () => {
+  it("stale: a muted ring, still, and says for how long nothing came", () => {
     renderApp(<WorkingDot entry={entry({ at: NOW - 40.5 * MIN })} testId="dot" />);
     const dot = screen.getByTestId("dot");
     expect(dot).toHaveAttribute("data-state", "stale");
     expect(dot).toHaveAccessibleName("No update for 40 min");
     expect(dot).toHaveAttribute("title", "No update for 40 min · Ship the fix");
-    expect(dot.firstElementChild!.className).toContain("bg-text-muted");
-    expect(dot.firstElementChild!.className).not.toContain("animate");
+    // A ring, not a filled dot: told from working by its shape too, whatever the theme's colours.
+    expect(dot.firstElementChild!.className).toContain("border-text-muted");
+    expect(dot.firstElementChild!.className).not.toMatch(/animate|bg-/);
   });
 
   it("turns stale by itself once the task has been quiet for 15 minutes", () => {

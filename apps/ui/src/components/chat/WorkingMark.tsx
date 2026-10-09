@@ -6,8 +6,9 @@ import { workingQuietMs, workingState, type WorkingEntry } from "../../lib/worki
 
 /*
  * Whether a bot is working now (WISP 405 § Showing a card), on its chat's row: a dot of one width, with no text. In
- * the accent with a slow pulse while one of its tasks is running and was updated lately; muted and still once they
- * have all gone quiet. The pulse is the app's (it rests after half a minute) and starts again with each update.
+ * the accent with a slow pulse while one of its tasks is running and was updated lately; a muted ring, still, once
+ * they have all gone quiet: a shape of its own, as the muted tone is close to the accent in some themes. The pulse is
+ * the app's (it rests after half a minute) and starts again with each update.
  */
 
 /** The dot's place: as wide with a dot as without, so what follows it never moves. */
@@ -27,7 +28,7 @@ export function WorkingDot({ entry, testId }: { entry: WorkingEntry; testId: str
   const label = state === "working" ? t("cards.working.label") : t("cards.working.stale", { duration: durationIn(language)(workingQuietMs(entry, now)) });
   return (
     <span ref={ref} role="img" aria-label={label} title={[label, entry.title, entry.step].filter(Boolean).join(" · ")} data-testid={testId} data-state={state} className={SLOT}>
-      <span key={entry.at} aria-hidden="true" className={`h-full w-full rounded-full ${state === "working" ? "bg-accent motion-safe:animate-pulse" : "bg-text-muted"}`} />
+      <span key={entry.at} aria-hidden="true" className={`h-full w-full rounded-full ${state === "working" ? "bg-accent motion-safe:animate-pulse" : "border-[1.5px] border-text-muted"}`} />
     </span>
   );
 }
