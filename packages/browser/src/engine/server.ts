@@ -38,14 +38,17 @@ export class EngineServer implements PeerServer {
    * call (WISP 06 § States and events). A client that goes away (a tab closed mid-call) is taken out with it.
    */
   private readonly onCall = new Set<EngineClientSink>();
+  /** How many history changes the engine told; per chat or group, the count at its last one (`historyMark`). */
+  private changes = 0;
+  private readonly changedAt = new Map<string, number>();
 
   constructor(options: NodeOptions = {}) {
     this.node = new GhostlyNode(
       {
         onAttention: (event) => this.broadcast({kind:"attention", event}),
         onState: (state) => this.broadcast({ kind: "state", state }),
-        onMessages: (linkId, messages) => void this.inOrder(linkId, () => this.sendHistory(linkId, messages)).catch(() => {}),
-        onMessageChanges: (linkId, changes) => void this.inOrder(linkId, () => this.sendChanges(linkId, changes)).catch(() => {}),
+        onMessages: (linkId, messages) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendHistory(linkId, messages)).catch(() => {}); },
+        onMessageChanges: (linkId, changes) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendChanges(linkId, changes)).catch(() => {}); },
         onCallSignal: (linkId, signal) => {
           if (signalKind(signal) === "o") this.offers.set(linkId, signal);
           else this.offers.delete(linkId);
@@ -65,9 +68,20 @@ export class EngineServer implements PeerServer {
     this.ready.catch(() => {});
   }
 
-  attach(client: EngineClientSink): void {
+  /** A point in the engine's history changes: a history read after it can be handed to `attach` as read. */
+  get historyMark(): number {
+    return this.changes;
+  }
+
+  /**
+   * `read`: the chats and groups whose whole history the client read itself, after `mark` (`historyMark`). One that has
+   * not changed since is not read and sent again: the client hears only what changes in it from now on.
+   */
+  attach(client: EngineClientSink, read?: { mark: number; ids: Iterable<string> }): void {
     this.clients.add(client);
-    this.histories.set(client, new Set());
+    const sent = new Set<string>();
+    if (read) for (const id of read.ids) if ((this.changedAt.get(id) ?? 0) <= read.mark) sent.add(id);
+    this.histories.set(client, sent);
     void this.ready.then(async () => {
       if (!this.clients.has(client)) return;
       client.post({ kind: "state", state: this.node.getState() });
@@ -77,6 +91,7 @@ export class EngineServer implements PeerServer {
         else this.offers.delete(linkId);
       }
       for (const link of this.node.getState().links) {
+        if (sent.has(link.id)) continue;
         await this.inOrder(link.id, async () => {
           if (!this.clients.has(client)) return;
           client.post({ kind: "messages", linkId: link.id, messages: await this.node.getMessages(link.id) });
@@ -150,6 +165,10 @@ export class EngineServer implements PeerServer {
     } catch (error) {
       return Promise.reject(error);
     }
+  }
+
+  private changed(linkId: string): void {
+    this.changedAt.set(linkId, ++this.changes);
   }
 
   private track(linkId: string, running: Promise<void>): Promise<void> {

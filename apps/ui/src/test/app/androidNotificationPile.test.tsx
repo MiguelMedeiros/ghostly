@@ -2,6 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AttentionFeedback } from "../../components/AttentionFeedback";
+import { MESSAGE_BURST_MS, resetCues } from "../../lib/cues";
 import { clearChatNotification, showPrivateNotification } from "../../lib/notifications";
 import { loadSettings, saveSettings } from "../../lib/settings";
 import { saveSession } from "../../lib/storage";
@@ -48,6 +49,7 @@ beforeEach(() => {
   saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: Date.now() - 1000 });
   fakeEngine.update({ links: [linkView({ id: "link-a", peerPubKeyZ32: PEER })] });
   tauri.invoke.mockClear();
+  resetCues();
 });
 afterEach(() => {
   visibility = "visible";
@@ -56,14 +58,22 @@ afterEach(() => {
 });
 
 describe("Android: one notification per chat", () => {
-  it("a burst of 30 messages is one notification under an opaque tag; another chat has its own; a tap opens the chat", async () => {
+  it("30 messages over time are one notification under an opaque tag; another chat has its own; a tap opens the chat", async () => {
     visibility = "hidden";
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
     renderApp(<><AttentionFeedback /><Routes><Route path="*" element={<Where />} /></Routes></>);
-    act(() => {
-      for (let i = 0; i < 30; i++) fakeEngine.emit({ kind: "attention", event: { id: `message:link-a:m${i}`, type: "message", at: Date.now(), linkId: "link-a" } });
-      fakeEngine.emit({ kind: "attention", event: { id: "message:group:g1:m1", type: "message", at: Date.now(), linkId: "group:g1" } });
-    });
-    await waitFor(() => expect(posted()).toHaveLength(31));
+    // Five bursts of six, each past the last one's: a burst posts once (lib/cues.ts `firstNoticeOfBurst`), and each
+    // post replaces the chat's notification.
+    for (let burst = 0; burst < 5; burst++) {
+      act(() => {
+        for (let i = 0; i < 6; i++) fakeEngine.emit({ kind: "attention", event: { id: `message:link-a:m${burst}-${i}`, type: "message", at: now, linkId: "link-a" } });
+      });
+      await waitFor(() => expect(posted()).toHaveLength(burst + 1));
+      now += MESSAGE_BURST_MS + 1;
+    }
+    act(() => fakeEngine.emit({ kind: "attention", event: { id: "message:group:g1:m1", type: "message", at: now, linkId: "group:g1" } }));
+    await waitFor(() => expect(posted()).toHaveLength(6));
     const tags = [...new Set(posted())];
     expect(tags).toHaveLength(2);
     // The tag says nothing of the chat: not its session, its link or its group.
@@ -92,6 +102,7 @@ describe("Android: one notification per chat", () => {
     expect(posted()[2]).not.toBe(tag);
     // A call's notice keeps its own, so it still comes up over the chat's.
     await showPrivateNotification("call:chat-1:1", "Incoming call", "chat-1");
-    expect(posted()[3]).toBe("call:chat-1:1");
+    expect(posted()[3]).not.toBe(posted()[2]);
+    expect(posted()[3]).not.toMatch(/chat-1|call/);
   });
 });

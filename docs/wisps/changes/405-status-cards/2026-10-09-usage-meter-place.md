@@ -1,0 +1,1 @@
+The usage meter on a contact's row in the chat list keeps one place on every row, with or without an unread count: right after the contact's short key when the list shows the key (Comfortable), else at the start of a column of one width before the unread count (Compact). Before, it sat beside the unread count and moved with it.

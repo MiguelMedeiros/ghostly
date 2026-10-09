@@ -25,9 +25,9 @@ const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…
 const sheet = () => screen.queryByTestId("attachment-sheet");
 
 /** What a clipboard or a drag hands the page: jsdom-likes have no DataTransfer to build one with. */
-function transfer({ files = [], text = "", html = "" }: { files?: File[]; text?: string; html?: string }) {
+function transfer({ files = [], text = "", html = "", types = [] }: { files?: File[]; text?: string; html?: string; types?: string[] }) {
   return {
-    files, types: [...(files.length ? ["Files"] : []), ...(text ? ["text/plain"] : []), ...(html ? ["text/html"] : [])],
+    files, types: [...(files.length ? ["Files"] : []), ...(text ? ["text/plain"] : []), ...(html ? ["text/html"] : []), ...types],
     items: files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file })),
     getData: (type: string) => type === "text/plain" ? text : type === "text/html" ? html : "",
     dropEffect: "none",
@@ -230,6 +230,15 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     paste(field(), {});
     expect(await screen.findByRole("alert")).toHaveTextContent("That is too large to paste. Send it with + → Document.");
     expect(huge.read).not.toHaveBeenCalled();
+  });
+
+  it("copied files the platform could not read say so, never silence", async () => {
+    // WebKitGTK shows a file manager's copy as types ["text/uri-list"], no files and no text.
+    fakeEngine.readClipboardFiles = vi.fn(async () => []);
+    composer();
+    expect(paste(field(), { types: ["text/uri-list"] })).toBe(false);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not paste those files. Send them with + → Document.");
+    expect(sheet()).toBeNull();
   });
 
   it("the web app has no such read: an empty paste is left alone", () => {

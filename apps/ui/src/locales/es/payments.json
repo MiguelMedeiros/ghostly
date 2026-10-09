@@ -274,14 +274,18 @@
       "testnet": "Dinero de prueba: no tienes una cartera Lightning Testnet para pagarla"
     },
     "onchainBitcoin": "Bitcoin on-chain",
+    "onlySat": "Aquí solo se puede canjear ecash en sat.",
     "openTitle": "Abrir en una cartera Lightning de este dispositivo",
     "openWallet": "Abrir cartera",
+    "otherUnitRequest": "Pide ecash en {{unit}}",
+    "otherUnitToken": "Un token en {{unit}}",
     "paid": "Pagada ✓",
     "pay": "Pagar",
     "payWithFee": "Pagar {{amount}} + comisión de hasta {{fee}}",
     "paying": "Pagando…",
     "paysThrough": "Se paga mediante {{domain}}",
     "pendingAtMint": "Pago pendiente en el mint…",
+    "qrTooLong": "Demasiado largo para un código QR: cópialo.",
     "redeem": "Canjear",
     "redeemed": "Canjeado ✓",
     "redeeming": "Canjeando…"

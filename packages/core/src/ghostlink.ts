@@ -339,6 +339,12 @@ export interface GhostLinkEvents {
    * Without `webrtc/1` among them, it has none, and a session takes native endpoints on this side too.
    */
   onPacketTransports?(transports: PairedTransport[], descriptors: TransportDescriptors): void;
+  /**
+   * With `packetTransports`: the member's packet has carried no `_tr` for `TRANSPORTS_GONE_MS` (link.ts), so its app
+   * publishes none, as one with WebRTC that runs no native endpoint on this link does. What an earlier packet said is
+   * forgotten here, and the owner forgets what it kept of it.
+   */
+  onPacketTransportsGone?(): void;
   onPairingState?(state: PairingState): void;
   /** How far a first pairing got (`pairingProgress` option): every change, up to `live`. */
   onPairingProgress?(progress: PairingProgress): void;
@@ -611,6 +617,12 @@ export interface GhostLinkOptions {
    * (WISP 902 § Transports). The owner starts endpoints only where one side has no WebRTC (`onPacketTransports`).
    */
   packetTransports?: boolean;
+  /**
+   * With `packetTransports`: this side published a `_tr` on this link before (in an earlier run of the app). It goes on
+   * saying what it runs now, with or without a native endpoint: the member's app kept the last value it read, and a
+   * packet with no `_tr` at all takes nothing back from an app that acts only on one that is there (WISP 902 § Transports).
+   */
+  packetTransportsSaid?: boolean;
   createPeerConnection: () => RTCPeerConnection;
   localFetch: LocalFetch;
   /** Everything this peer currently offers on this link. */
@@ -669,6 +681,10 @@ export class GhostLink {
   private signalPublishFailed = false;
   private peerDescriptors: TransportDescriptors;
   private peerTransports?: PairedTransport[];
+  /** A group link: this side published a `_tr` on it, in this run or an earlier one (`packetTransportsSaid`). */
+  private saidTransports: boolean;
+  /** A group link: what is known of the member's transports came from its packet (`_tr`), read now or kept from before. */
+  private peerPacketSaid: boolean;
   private peerFallback: boolean;
   private preferred: PairedTransport;
   private fallback: boolean;
@@ -903,6 +919,8 @@ export class GhostLink {
     this.streamWasBlocked = this.streamBlocked;
     this.peerDescriptors = options.native?.peerDescriptors ?? {};
     this.peerTransports = options.native?.peerTransports;
+    this.saidTransports = !!options.packetTransports && !!options.packetTransportsSaid;
+    this.peerPacketSaid = !!options.packetTransports && !!options.native?.peerTransports;
     this.peerFallback = options.native?.peerFallback ?? false;
     this.preferred = options.native?.preferred ?? "webrtc/1";
     this.fallback = options.native?.fallback ?? true;
@@ -945,7 +963,7 @@ export class GhostLink {
         },
         onPublish: result => {
           // Held back by the relays' request budget: nothing failed, and the session sends it when the budget frees a request.
-          if (result.waiting) return;
+          if (result.waiting) { if (result.retryInMs !== undefined) this.tracker?.heldBack(Date.now() + result.retryInMs); return; }
           if (result.error) { this.tracker?.failed("publish", true, result.error); return; }
           // An offer or answer the relays held back (their budget, an outage) has its whole attempt from when it went out.
           if (result.signalOut) { this.offerUnsent = false; this.dataLink.signalWentOut(); }
@@ -965,6 +983,7 @@ export class GhostLink {
         },
         onPeerClock: (packetAt, readBefore, readAt) => events.onPeerClock?.(packetAt, readBefore, readAt),
         onPeerTransports: value => this.peerPacketTransports(value),
+        onPeerTransportsGone: () => this.peerPacketTransportsGone(),
         onDiscoveryError: error => events.onDiscoveryError?.(error),
         onStatus: (status) => events.onStatus?.(status),
         onPoll: (poll) => events.onPoll?.(poll),
@@ -1330,6 +1349,11 @@ export class GhostLink {
   private keyStopped = false;
   /** A connection whose failure to authenticate says nothing about the contact: dialled in on a pinned chat. */
   private unproven(channel: FrameChannel): boolean { return this.dialedIn.has(channel) && !!this.options.pairing?.credentials.peerKey; }
+  /**
+   * A session that started before the pin and was refused for another key: the pin came by another path meanwhile (the
+   * DHT's first contact), and whoever this session reached held only a copy of the invite. It proves nothing either.
+   */
+  private pinnedSince(channel: FrameChannel, paired: PairedSession): boolean { return this.openedUnpinned.has(channel) && !!paired.state.keyMismatch; }
   get textDelivery(): "stream" | "dht" | "unavailable" {
     if (this.isDataLinkOpen) return "stream";
     if (!this.dht || this.securityRejected || this.keyStopped) return "unavailable";
@@ -1379,6 +1403,8 @@ export class GhostLink {
     this.emitDeliveryState();
   }
   start(): void {
+    // What this side runs on a group link now goes in its first packet (`packetTransportsSaid`).
+    if (this.saidTransports) this.publishPacketTransports();
     if (this.deliveryMode !== "dht") this.session.start();
     // Back after a restart: the contact, if it still holds the old session, dials or offers as soon as it notices;
     // its offer is looked for fast rather than at the background pace.
@@ -1399,6 +1425,8 @@ export class GhostLink {
    */
   private dialEarly(): void {
     if (!this.options.params.profile || !this.options.autoConnect || this.deliveryMode === "dht" || this.streamBlocked || this.dialing || this.channel) return;
+    // No WebRTC here (a Linux Desktop): no offer to gather, and nothing to dial before the inviter's record is read.
+    if (this.options.rtcAvailable === false) return;
     // Only as the person joins: a joined chat whose inviter never came, started again later, gathers nothing until it shows.
     const startedAt = this.options.pairingProgress?.startedAt ?? 0;
     if (Date.now() - startedAt > EARLY_DIAL_JOIN_MS) return;
@@ -1806,11 +1834,21 @@ export class GhostLink {
     }
   }
 
-  /** A group link's `_tr` in its packet: what this side runs and how to dial it, once it runs a native endpoint there. */
+  /**
+   * A group link's `_tr` in its packet: what this side runs and how to dial it, once it runs a native endpoint there.
+   * Having said one, it goes on saying what it runs with no endpoint up too (`["webrtc/1"]`): the member's app keeps the
+   * last value it read and acts only on a packet that carries one, so a `_tr` that just stopped left it dialling a
+   * native transport nobody listens on, across restarts of both apps (an edge whose WebRTC failed once, node.ts
+   * `edgeWithoutRtc`, in the next run of the app). Never an empty list: an app with no WebRTC whose endpoint is not up
+   * yet says nothing, as before, and what it said in the run before holds.
+   */
   private publishPacketTransports(): void {
     if (!this.options.packetTransports) return;
-    const value = this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null;
     const signer = this.options.pairing?.credentials.signer;
+    // A device link (WISP 06) says none without an endpoint, as before.
+    if (this.endpoints.size && !signer) this.saidTransports = true;
+    const available = this.availableTransports;
+    const value = this.endpoints.size || (this.saidTransports && available.length) ? encodePacketTransports(available, this.localDescriptors()) : null;
     if (!signer) { this.session.setTransports(value); return; }
     // A device link (WISP 06): signed with the device signing key, so a holder of `D` cannot write one in its place.
     // The latest value goes out; one overtaken while it was being signed is dropped.
@@ -1850,6 +1888,7 @@ export class GhostLink {
     if (!said) return;
     const transports = said.transports as PairedTransport[], descriptors = dialDescriptors(said.descriptors);
     traceLink(this.myPubKeyZ32, "packet-transports", { transports });
+    this.peerPacketSaid = true;
     // Its app has no WebRTC: an offer out to it is never answered, and an attempt it answered or took an answer for is
     // gone on its side (its edge started again without WebRTC when that attempt failed there, node.ts `edgeWithoutRtc`).
     // Either would hold the data link for its whole attempt (30 s), and this side would neither dial nor say it is here
@@ -1857,6 +1896,32 @@ export class GhostLink {
     if (!transports.includes("webrtc/1") && !this.channel && WEBRTC_ATTEMPT.has(this.dataLink.state)) this.disconnect();
     this.options.events?.onPacketTransports?.(transports, descriptors);
     this.learnPeerTransports(transports, descriptors, true);
+  }
+
+  /**
+   * The member's packet advertises and has carried no `_tr` for `TRANSPORTS_GONE_MS`: its app publishes none, which is
+   * what an app with WebRTC that runs no native endpoint on this link does. What an earlier packet said (kept by the
+   * owner across restarts) no longer holds: an app that said `["iroh/1"]` while its WebRTC failed and came back with
+   * WebRTC, from before it said so itself (`packetTransportsSaid`). Left as it was, this side ranked its transports
+   * against that list, found a native one nobody listens on or none at all, and never offered WebRTC again.
+   * Not on a device link: there only a signed value counts, and a missing one is signed by nobody.
+   */
+  private peerPacketTransportsGone(): void {
+    if (!this.options.packetTransports || this.stopped || !this.peerPacketSaid || this.options.pairing?.credentials.signer) return;
+    this.peerPacketSaid = false;
+    traceLink(this.myPubKeyZ32, "packet-transports-gone", {});
+    this.options.events?.onPacketTransportsGone?.();
+    // An open session said what the member's app runs itself, later than any packet kept: that stands.
+    if (this.channel) return;
+    this.peerTransports = undefined; this.peerRecordTransports = undefined; this.peerFallback = false;
+    this.peerDescriptors = {};
+    this.undescribed.clear();
+    for (const t of TRANSPORTS) if (t !== "webrtc/1") { this.nativeFailures.delete(t); this.demotedUntil.delete(t); }
+    if (this.resuming && this.resuming !== "webrtc/1") { this.resuming = undefined; this.resumingWoke = false; }
+    // WebRTC is what there is to try now: at once, not after the wait that attempts with nothing to dial built up.
+    // The presence this read brings starts it (`maybeAutoConnect`).
+    this.autoConnectFailures = 0; this.lastAutoConnectAt = 0;
+    this.notifyWait();
   }
 
   /** A connection the contact dialled on one of this side's native endpoints. */
@@ -2334,6 +2399,16 @@ export class GhostLink {
   private canDial(transport: PairedTransport): boolean {
     return transport !== "webrtc/1" && this.endpoints.has(transport) && !!this.peerDescriptors[transport];
   }
+  /**
+   * Whether a dial has anything to try: WebRTC here (the contact's record, once read, listing it), or a native transport
+   * both apps run with this side's endpoint up and the contact's descriptor read. A group link counts every dial: its
+   * fast looks for the member's `_tr` end after a few (`PACKET_TRANSPORTS_FAST_ATTEMPTS`).
+   */
+  private anythingToDial(): boolean {
+    if (!this.options.params.profile || this.options.packetTransports) return true;
+    return this.transportOffer().some(t => t === "webrtc/1" ? !this.peerTransports || this.peerTransports.includes(t)
+      : this.canDial(t) && !!this.peerTransports?.includes(t));
+  }
   private clearRace(): void {
     if (this.raceTimer) clearTimeout(this.raceTimer);
     this.raceTimer = null;
@@ -2618,10 +2693,21 @@ export class GhostLink {
       return;
     }
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
+    this.autoDial();
+  }
+
+  /**
+   * An automatic dial. One with nothing to try (`anythingToDial`) still says why (`liveAttempt`) and keeps the pace, but
+   * is no failed attempt: the wait between attempts does not grow, and a first pairing does not turn `on-dht` for it.
+   * Two Linux Desktops pairing over a slow DHT, neither having read the other's record yet, counted three such dials in
+   * 12 s: the pairing turned `on-dht` and the next dial waited 160 s, though nothing had been tried.
+   */
+  private autoDial(): void {
+    const tries = this.anythingToDial();
     this.lastAutoConnectAt = Date.now();
-    this.autoConnectFailures++;
+    if (tries) this.autoConnectFailures++;
     void this.dial().catch(error => {
-      this.tracker?.failed("transport", true);
+      if (tries) this.tracker?.failed("transport", true);
       this.dialFailed(error instanceof Error ? error.message : String(error));
       this.lookAtRetry();
     });
@@ -2636,13 +2722,7 @@ export class GhostLink {
   private redial(): void {
     if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect || this.channel || this.dialing || this.dataLink.state !== "idle") return;
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures, again: true });
-    this.lastAutoConnectAt = Date.now();
-    this.autoConnectFailures++;
-    void this.dial().catch(error => {
-      this.tracker?.failed("transport", true);
-      this.dialFailed(error instanceof Error ? error.message : String(error));
-      this.lookAtRetry();
-    });
+    this.autoDial();
   }
 
   /**
@@ -3286,6 +3366,8 @@ export class GhostLink {
    * no more than on the DHT, so it closes that connection and nothing else.
    */
   private readonly dialedIn = new WeakSet<FrameChannel>();
+  /** Connections whose session started with no key pinned nor named by the invite. */
+  private readonly openedUnpinned = new WeakSet<FrameChannel>();
 
   /**
    * `migration`: the channel is a candidate that takes over from the session open now once it authenticated. With a
@@ -3309,6 +3391,7 @@ export class GhostLink {
         }
       };
       const unproven = this.unproven(channel);
+      if (!this.options.pairing.credentials.peerKey && !this.options.pairing.credentials.expectedPeerKey) this.openedUnpinned.add(channel);
       if (!migration) {
         this.activeBinding = binding; this.channel = channel; this.channelSince = Date.now();
         // One dialled in is nobody until it authenticated: the DHT keeps its pace meanwhile (set once it is ready).
@@ -3334,16 +3417,17 @@ export class GhostLink {
         lightningPaymentsSupport: this.paymentEnabled("lightning"),
         paymentsSupport: PAYMENT_METHODS.some(m => this.paymentEnabled(m)) && !!this.options.events?.onPayment && !!this.options.events?.onPaymentRequest && !!this.options.events?.onPaymentResult,
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
-        onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
+        onState: () => { if (this.channel === channel && (!this.unproven(channel) && !this.pinnedSince(channel, paired) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
           // Another participation key than the one pinned: a device's one-time enrollment link says so (WISP 06).
           if (paired.state.keyMismatch) this.options.events?.onPeerKeyRefused?.();
-          // Dialled in and unproven, a connection that carried nothing in time, or one that brought more than this side
-          // could handle at once (`overloaded`): none says anything about the contact. The chat dials again, and its
-          // DHT layer goes on meanwhile.
-          if (this.unproven(channel) || paired.authTimedOut || paired.overloaded) {
+          // Dialled in and unproven, started before a pin made by another path, a connection that carried nothing in
+          // time, or one that brought more than this side could handle at once (`overloaded`): none says anything about
+          // the contact. The chat dials again, and its DHT layer goes on meanwhile.
+          if (this.unproven(channel) || this.pinnedSince(channel, paired) || paired.authTimedOut || paired.overloaded) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
             if (this.unproven(channel)) traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            else if (this.pinnedSince(channel, paired)) traceLink(this.myPubKeyZ32, "pinned-since-refused", { transport: binding?.transport ?? "webrtc/1" });
             else if (paired.overloaded) traceLink(this.myPubKeyZ32, "receive-overload", { transport: binding?.transport ?? "webrtc/1" });
             else traceLink(this.myPubKeyZ32, "auth-timeout", { transport: binding?.transport ?? "webrtc/1" });
             migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));

@@ -96,6 +96,11 @@ export function pasteShowsNothing(data: DataTransfer | null): boolean {
   return !!data && !filesOf(data).length && !data.getData("text/plain") && !data.getData("text/html");
 }
 
+/** Whether a paste named copied files it did not hand over (WebKitGTK shows a file manager's copy as `text/uri-list` only). */
+export function pasteNamesFiles(data: DataTransfer | null): boolean {
+  return !!data && [...(data.types ?? [])].some((type) => type === "Files" || type === "text/uri-list");
+}
+
 /** What the platform read from the clipboard, as files to send; a picture is named after the moment. */
 export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new Date()): Promise<File[]> {
   if (clips.some((clip) => clip.size > PLATFORM_PASTE_MAX)) throw new Error("That is too large to paste. Send it with + → Document.");
