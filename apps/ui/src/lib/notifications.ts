@@ -1,4 +1,5 @@
 import {invoke} from "@tauri-apps/api/core";
+import {androidApp} from "./touchOnly";
 /** "misplaced": the Desktop app runs from a temporary folder, where macOS gives it no notifications. */
 export type NoticePermission = NotificationPermission | "unavailable" | "misplaced";
 interface ExtensionNotifications {
@@ -118,10 +119,39 @@ export async function requestNotifications():Promise<NoticePermission>{
     return typeof Notification==="undefined"?"unavailable":await Notification.requestPermission();
   }catch{return "unavailable";}
 }
-/** `chat`: the chat a click opens (a session id, or `group:<id>`); it stays in this page. */
-export async function showPrivateNotification(id:string,body:string,chat?:string):Promise<void>{
+/*
+ * In the Android app a chat has one notification: its next message replaces it (with no new heads-up,
+ * GhostlyHostPlugin.kt `setOnlyAlertOnce`), and reading the chat takes it away. Android keeps an app's notifications
+ * until they are tapped or swiped, and shows none past 50. Its tag is random, kept here: it never names the chat.
+ */
+const chatTags=new Map<string,string>();
+function chatTag(chat:string):string{
+  let tag=chatTags.get(chat);
+  if(!tag){
+    tag=crypto.randomUUID();
+    chatTags.set(chat,tag);
+    if(chatTags.size>64) chatTags.delete(chatTags.keys().next().value as string);
+  }
+  return tag;
+}
+/** The chat was read in the app: its notification goes, in the Android app (elsewhere they close by themselves). */
+export function clearChatNotification(chat:string):void{
+  const tag=chatTags.get(chat);
+  if(!tag) return;
+  chatTags.delete(chat);
+  chats.delete(tag);
+  void invoke("native_clear_notification",{id:tag}).catch(()=>{/* gone already, or an older app */});
+}
+/**
+ * `chat`: the chat a click opens (a session id, or `group:<id>`); it stays in this page. `perChat`: a chat's messages,
+ * one notification for the chat in the Android app.
+ */
+export async function showPrivateNotification(id:string,body:string,chat?:string,perChat=false):Promise<void>{
   if(await notificationPermission()!=="granted") return;
   if(chat){
+    if(perChat && androidApp()) id=chatTag(chat);
+    // Newest last, so a chat's notification, posted again, is not the first to be forgotten.
+    chats.delete(id);
     chats.set(id,chat);
     // The newest few: an old notification still opens the app, only not a chat.
     if(chats.size>64) chats.delete(chats.keys().next().value as string);

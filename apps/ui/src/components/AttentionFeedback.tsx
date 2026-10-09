@@ -49,7 +49,7 @@ export function AttentionFeedback(){
       // the wallet's, are not. A mention is heard even inside a burst, as it is through a mute. Whatever else comes
       // together is one sound too, the most important (apps/ui/src/lib/soundGate.ts).
       if(outcome.sound && event.type!=="reaction" && (event.type!=="message" || event.mention || firstOfBurst(chat ?? event.linkId ?? ""))) playSound(eventSound({...event,type:event.type},notifications));
-      if(outcome.notice) await showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat);
+      if(outcome.notice) await showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat,true);
     };
     if(navigator.locks) void navigator.locks.request("ghostly-feedback",run);
     else void run();

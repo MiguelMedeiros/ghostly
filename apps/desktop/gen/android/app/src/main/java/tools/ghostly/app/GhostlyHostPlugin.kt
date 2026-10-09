@@ -62,6 +62,11 @@ class NotifyArgs {
 }
 
 @InvokeArg
+class TagArgs {
+  lateinit var id: String
+}
+
+@InvokeArg
 class SaveArgs {
   lateinit var path: String
   lateinit var name: String
@@ -290,7 +295,10 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** A silent notification on the Messages channel (the page plays its own sound); a tap opens the chat. */
+  /**
+   * A silent notification on the Messages channel (the page plays its own sound); a tap opens the chat. One posted
+   * again under the same id (a chat's next message) replaces it with no new heads-up.
+   */
   @Command
   fun notify(invoke: Invoke) {
     val args = invoke.parseArgs(NotifyArgs::class.java)
@@ -317,6 +325,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       .setCategory(NotificationCompat.CATEGORY_MESSAGE)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setSilent(true)
+      .setOnlyAlertOnce(true)
       .setAutoCancel(true)
       .setContentIntent(tap)
       .build()
@@ -326,6 +335,15 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     } catch (e: SecurityException) {
       invoke.reject("Notifications are off for Ghostly")
     }
+  }
+
+  /** Takes away the notification posted as `id` (its chat was read in the app); nothing when it is gone already. */
+  @Command
+  fun cancelNotification(invoke: Invoke) {
+    val args = invoke.parseArgs(TagArgs::class.java)
+    val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    manager.cancel(args.id, 1)
+    invoke.resolve()
   }
 
   @Command

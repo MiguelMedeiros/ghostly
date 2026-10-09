@@ -53,6 +53,7 @@ const COMMANDS: &[&str] = &[
     "native_call_support",
     "native_camera_close",
     "native_camera_open",
+    "native_clear_notification",
     "native_microphone_meter",
     "native_microphone_meter_close",
     "native_notification_permission",
