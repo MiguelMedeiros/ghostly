@@ -120,6 +120,10 @@ const RULES: readonly Rule[] = [
   exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed"),
   exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused"),
   exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
+  // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
+  // ghostlink.ts `confirmPair`).
+  { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },
+  exact("The connection closed. Compare again after reconnecting.", "errors.verify.closed", "errors.verify.closedNext"),
 
   // Cashu and Lightning in the wallet (packages/browser/src/engine/wallet.ts).
   exact("That is not a valid mint URL", "errors.cashu.badMintUrl"),

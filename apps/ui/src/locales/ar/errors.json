@@ -418,6 +418,12 @@
     "slotsFull": "كل الاتصالات الأصلية قيد الاستخدام",
     "slotsFullNext": "افصل الاتصال الأصلي لدردشة أخرى، أو انتظر حتى يصبح أحدها خاملًا."
   },
+  "verify": {
+    "closed": "أُغلق الاتصال",
+    "closedNext": "قارن مرة أخرى بعد إعادة الاتصال.",
+    "codeChanged": "تغيّر الرمز",
+    "codeChangedNext": "قارن الرمز الجديد."
+  },
   "wallet": {
     "alreadyHave": "لديك بالفعل محفظة {{kind}} {{network}}",
     "arkProviderNetwork": "مزوّد Ark هذا يعمل على {{actual}}، لا على {{expected}}",

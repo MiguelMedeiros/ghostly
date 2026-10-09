@@ -418,6 +418,12 @@
     "slotsFull": "所有原生连接都在使用中",
     "slotsFullNext": "断开另一个聊天的原生连接，或等待某个连接空闲。"
   },
+  "verify": {
+    "closed": "连接已关闭",
+    "closedNext": "重新连接后再核对一次。",
+    "codeChanged": "代码已更改",
+    "codeChangedNext": "请核对新代码。"
+  },
   "wallet": {
     "alreadyHave": "你已经有一个 {{network}} {{kind}} 钱包",
     "arkProviderNetwork": "这个 Ark 服务商运行在 {{actual}} 上，而不是 {{expected}}",
