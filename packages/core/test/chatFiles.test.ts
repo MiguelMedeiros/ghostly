@@ -42,6 +42,8 @@ class Disk {
   bytes: number[] | null;
   failAt = Infinity;
   discarded = false;
+  /** Every target opened on it, without keeping one alive. */
+  opened: WeakRef<IncomingTarget>[] = [];
   constructor(keep: boolean) { this.bytes = keep ? [] : null; }
   /** What a restart finds: the durable part, hashed again from the pattern. */
   restart(): void {
@@ -51,7 +53,7 @@ class Disk {
     if (this.bytes) this.bytes.length = this.length;
   }
   target(): IncomingTarget {
-    return {
+    const target: IncomingTarget = {
       offset: this.length,
       append: async (chunk) => {
         if (this.length + chunk.length > this.failAt) throw new Error("disk full");
@@ -63,6 +65,8 @@ class Disk {
       verify: async (digest) => this.hash.copy().digest("base64url") === digest,
       discard: async () => { this.discarded = true; this.length = this.durable = 0; this.hash = createHash("sha256"); if (this.bytes) this.bytes.length = 0; },
     };
+    this.opened.push(new WeakRef(target));
+    return target;
   }
 }
 
@@ -213,6 +217,27 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     const dataBeforeGot = w.a.sent.filter((f, i) => f.t === "pf-data" && i < w.a.sent.length).length;
     expect(firstGot).toBeGreaterThan(-1);
     expect(dataBeforeGot).toBe(Math.ceil(100_000 / FILE_LIMITS.chunkBytes));
+  });
+
+  it("a transfer that ended lets go of where it was written: done, damaged or declined", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("kept-0001", 100_000));
+    // The digest of another size: every byte arrives, and the check fails.
+    send(w, file("damaged-1", 100_000), patternDigest(1000));
+    await until(() => state(w.b, "in", "kept-0001") === "done" && state(w.b, "in", "damaged-1") === "failed");
+    w.b.decide = async () => "ask";
+    send(w, file("nope-0001", 30_000));
+    await until(() => state(w.b, "in", "nope-0001") === "asking");
+    w.b.files.decline("nope-0001");
+    await until(() => state(w.a, "out", "nope-0001") === "declined");
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    for (let i = 0; i < 3; i++) { gc(); await new Promise((r) => setTimeout(r, 10)); }
+    // A host's target holds what writes it (a 256 KiB gather buffer in the apps): kept, every file received kept one.
+    const held = [...w.b.disks].filter(([, disk]) => disk.opened.some((ref) => ref.deref())).map(([id]) => id);
+    expect(w.b.disks.size).toBe(3);
+    expect(held).toEqual([]);
   });
 
   it("an offer carries the message the file answers (r), kept with the record", async () => {
