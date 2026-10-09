@@ -304,6 +304,27 @@ const RULES: readonly Rule[] = [
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
 
+  // Held items for an away contact (packages/browser/src/engine/hold.ts, WISP 404): a message's line, and the chat's hold
+  // line and dialog. What the storage or the network answered goes behind the ⓘ: it is English, and often a status code.
+  exact("Held messages need S3 storage (Profile → Backups) and a contact that allows them.", "errors.hold.needStorage", "errors.hold.needStorageNext"),
+  exact("Held messages need S3 storage (Profile → Backups) and a pinned contact.", "errors.hold.needPinned", "errors.hold.needStorageNext"),
+  { match: /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/, key: "errors.hold.tooMany", next: "errors.hold.waitPickUp" },
+  { match: /^An item held for an away contact is at most (?<mb>\d+) MB\.$/, key: "errors.hold.tooLarge" },
+  { match: /^Items waiting for this contact would exceed (?<mb>\d+) MB\. Wait until some are picked up\.$/, key: "errors.hold.tooMuch", next: "errors.hold.waitPickUp" },
+  exact("The message is gone", "errors.hold.messageGone"),
+  exact("The file is gone", "errors.hold.fileGone"),
+  exact("The payment request is gone", "errors.hold.requestGone"),
+  { match: /^Could not store the item: [\s\S]+$/, key: "errors.hold.storeFailed", next: "errors.hold.storeFailedNext", detail: true },
+  { match: /^Stored, but could not tell the contact where: [\s\S]+$/, key: "errors.hold.pointerFailed", next: "errors.hold.retryNext", detail: true },
+  exact("Held for its whole lifetime without being picked up. Retry to hold it again.", "errors.hold.expired", "errors.hold.retryNext"),
+  exact("Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", "errors.hold.contactRefused", "errors.hold.contactRefusedNext"),
+  { match: /^Could not read the contact's pointer: [\s\S]+$/, key: "errors.hold.readFailed", next: "errors.hold.retryingNext", detail: true },
+  exact("The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", "errors.hold.addressExpired", "errors.hold.addressExpiredNext"),
+  { match: /^Refused what the contact's storage offered: [\s\S]+$/, key: "errors.hold.refusedOffer", detail: true },
+  { match: /^Could not pick up held items: [\s\S]+$/, key: "errors.hold.pickUpFailed", next: "errors.hold.retryingNext", detail: true },
+  { match: /^Refused a held item from the contact: [\s\S]+$/, key: "errors.hold.refusedItem", detail: true },
+  { match: /^Picked up, but could not acknowledge: [\s\S]+$/, key: "errors.hold.ackFailed", detail: true },
+
   // Making a wallet, connecting its source and reading it (engine/node.ts, paymentAdapters/**): why a kind could not be made or offered, and what a card says while it connects.
   { match: /^(?:You already have a|There is already a) (?<network>Mainnet|Testnet) (?<kind>Cashu|Lightning|Ark|Bark|Spark|Bitcoin|Fedimint|USDT) wallet$/, key: "errors.wallet.alreadyHave" },
   { match: /^The (?<label>.+?) wallet did not come up\. Nothing was lost: try again\.$/, key: "errors.wallet.didNotComeUp" },

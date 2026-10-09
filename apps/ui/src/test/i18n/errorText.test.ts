@@ -327,6 +327,25 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
   ["Not a relay address: ftp//x", `${BROWSER}/nostr/relay.ts`, "Not a relay address: ${value.slice(0, 40)}"],
+  // Held items for an away contact (WISP 404): a message's line, and the chat's hold line and dialog.
+  ["Held messages need S3 storage (Profile → Backups) and a contact that allows them.", `${BROWSER}/engine/hold.ts`],
+  ["At most 64 items can wait for this contact. Wait until some are picked up.", `${BROWSER}/engine/hold.ts`, " items can wait for this contact. Wait until some are picked up."],
+  ["An item held for an away contact is at most 8 MB.", `${BROWSER}/engine/hold.ts`, "An item held for an away contact is at most "],
+  ["Items waiting for this contact would exceed 64 MB. Wait until some are picked up.", `${BROWSER}/engine/hold.ts`, "Items waiting for this contact would exceed "],
+  ["Held messages need S3 storage (Profile → Backups) and a pinned contact.", `${BROWSER}/engine/hold.ts`],
+  ["The message is gone", `${BROWSER}/engine/hold.ts`],
+  ["The file is gone", `${BROWSER}/engine/hold.ts`],
+  ["The payment request is gone", `${BROWSER}/engine/hold.ts`],
+  ["Could not store the item: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not store the item: "],
+  ["Stored, but could not tell the contact where: Failed to fetch", `${BROWSER}/engine/hold.ts`, "Stored, but could not tell the contact where: "],
+  ["Held for its whole lifetime without being picked up. Retry to hold it again.", `${BROWSER}/engine/hold.ts`],
+  ["Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", `${BROWSER}/engine/hold.ts`],
+  ["Could not read the contact's pointer: Failed to fetch", `${BROWSER}/engine/hold.ts`, "Could not read the contact's pointer: "],
+  ["The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", `${BROWSER}/engine/hold.ts`],
+  ["Refused what the contact's storage offered: The manifest is malformed", `${BROWSER}/engine/hold.ts`, "Refused what the contact's storage offered: "],
+  ["Could not pick up held items: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not pick up held items: "],
+  ["Refused a held item from the contact: The held item is larger than allowed", `${BROWSER}/engine/hold.ts`, "Refused a held item from the contact: "],
+  ["Picked up, but could not acknowledge: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Picked up, but could not acknowledge: "],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
