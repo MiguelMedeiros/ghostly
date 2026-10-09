@@ -3,7 +3,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useCopyKey } from "../hooks/useCopyKey";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState, useSyncExternalStore, type FocusEvent } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
@@ -166,6 +166,12 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const [tip, setTip] = useState(false);
   const close = () => { if (root.current?.open) { root.current.open = false; trigger.current?.focus(); } };
   useOutsideDismiss(root, menuOpen, close);
+  // Focus gone to a control outside (a Tab past its end): it closes and leaves the focus there. On a phone the panel
+  // covers the messages, and the control would be under it. A click on its text moves the focus nowhere: it stays.
+  const focusLeft = (e: FocusEvent<HTMLElement>) => {
+    if (!root.current?.open || !(e.relatedTarget instanceof Node) || root.current.contains(e.relatedTarget)) return;
+    root.current.open = false; setMenuOpen(false);
+  };
   async function run(action: () => Promise<unknown>) {
     setBusy(true); setError("");
     // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
@@ -175,7 +181,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   // The header shows only the icon: the label is in its tooltip, its accessible name and the panel.
   // `toggle` is queued, and React can take a while to handle it: the click and Escape act at once instead.
   return <div className="relative shrink-0">
-  <details ref={root} onToggle={e => setMenuOpen(e.currentTarget.open)} onKeyDown={e => {
+  <details ref={root} onToggle={e => setMenuOpen(e.currentTarget.open)} onBlur={focusLeft} onKeyDown={e => {
     if (e.key !== "Escape") return;
     if (root.current?.open) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
   }} className="relative" data-testid={`${testIdPrefix}connection-menu`}>
