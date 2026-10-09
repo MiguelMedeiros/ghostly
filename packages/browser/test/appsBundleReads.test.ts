@@ -63,6 +63,14 @@ describe("installed bundles read back", () => {
     expect(await store.file({ ref, path: "icon.png" })).toEqual(icon);
   });
 
+  it("an icon kept for later holds only its own bytes, not the whole bundle it was read from", async () => {
+    const installed = await installMany(3);
+    const { store } = freshEngine();
+    for (const { ref } of installed) await store.file({ ref, path: "icon.png" });
+    const kept = [...(store as unknown as { icons: Map<string, Uint8Array | null> }).icons.values()];
+    expect(kept.map((icon) => icon?.buffer.byteLength)).toEqual(installed.map(({ icon }) => icon.length));
+  });
+
   it("an uninstalled app's icon is not handed out any more", async () => {
     const [{ ref }] = await installMany(1);
     const { store } = freshEngine();

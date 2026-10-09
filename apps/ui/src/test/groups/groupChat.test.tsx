@@ -258,20 +258,63 @@ describe("GroupChat: the options menu", () => {
     expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
   });
 
-  it("deletes the group from this device only after confirming", async () => {
+  it("deletes the group from this device only after confirming, and says it leaves the group", async () => {
     const { user, engine } = openGroup(active());
     engine.on("forgetGroup", () => undefined);
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText("Friends")).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Deleting the group from this device also leaves it.");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(engine.callsTo("forgetGroup")).toEqual([]);
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete from this device" }));
+    expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
+    expect(await screen.findByText("Chat list")).toBeInTheDocument();
+  });
+
+  it("keeps the admin from deleting the group while no member is online to become admin", async () => {
+    const { user, engine } = openGroup(active({ isAdmin: true, members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: BOB, nick: "Bob" })] }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Nobody is online to become admin" + "Make someone admin, or wait for a member.");
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
+    expect(engine.callsTo("forgetGroup")).toEqual([]);
+  });
+
+  it("tells the admin who becomes admin when they delete the group, and stays when the engine refuses", async () => {
+    const { user, engine } = openGroup(active({ isAdmin: true, members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: ALICE, nick: "Alice", online: true })] }));
+    engine.on("forgetGroup", () => { throw new Error("Nobody is online to take over"); });
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
+    await user.click(within(dialog).getByTestId("group-leave-confirm"));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Nobody is online to take over");
+    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
+  });
+
+  it("deletes a group it is no longer in as a chat: nothing to leave", async () => {
+    const { user, engine } = openGroup(active({ status: "removed", canSend: false }));
+    engine.on("forgetGroup", () => undefined);
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete chat" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
-    expect(screen.getByText("Chat list")).toBeInTheDocument();
+  });
+
+  it("keeps a community whose delete was refused, and says why", async () => {
+    const { user, engine } = openGroup(active({ profile: "community" }));
+    engine.on("forgetGroup", () => { throw new Error("Nobody in the group is connected right now to take your leave. Try again in a moment."); });
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete chat" }));
+    expect(await screen.findByTestId("group-notice")).toHaveTextContent("Nobody is online to take your leave");
+    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
+    expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
   });
 
   it("opens the members from the header", async () => {
@@ -297,6 +340,15 @@ describe("GroupChat: leaving", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("group-leave-dialog")).not.toBeInTheDocument();
     expect(engine.callsTo("leaveGroup")).toEqual([]);
+  });
+
+  // A private group takes someone to let the person back in; a community's link lets them in by itself.
+  it.each([
+    ["mesh", "to come back someone has to let you in again."],
+    ["community", "to come back, open the group's link again."],
+  ] as const)("says how to come back to a %s group", async (profile, line) => {
+    const { user } = openGroup(active({ profile }));
+    expect(await leaveFromMenu(user)).toHaveTextContent(line);
   });
 
   it("leaves, and goes back to the chat list: the group is gone from it", async () => {

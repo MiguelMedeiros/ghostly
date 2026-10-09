@@ -50,15 +50,21 @@ export async function downloadFile(platform: ServicesPlatform, file: ChatFile, n
   return "saved";
 }
 
+/** Thrown by an MP3 download when this device could not convert the recording, not when saving the MP3 failed. */
+export class Unconverted extends Error {}
+
 /**
  * A voice message converted to MP3 here (`voiceToMp3`, loaded when first asked for) and saved the same ways as
- * the original: the desktop app's save dialog, else a download. Throws when the recording cannot be converted.
+ * the original: the desktop app's save dialog, else a download. Throws `Unconverted` when the recording cannot be
+ * converted.
  */
 async function downloadMp3(platform: ServicesPlatform, file: ChatFile, name: string): Promise<"saved" | "cancelled" | "missing"> {
   const recording = await platform.getFile(file.id);
   if (!recording) return "missing";
   const { voiceToMp3 } = await import("./voiceMp3");
-  const mp3 = await voiceToMp3(recording);
+  const mp3 = await voiceToMp3(recording).catch((error: unknown) => {
+    throw new Unconverted(error instanceof Error ? error.message : String(error));
+  });
   const saved = await platform.saveBlob?.(mp3, name);
   if (saved === true) return "saved";
   if (saved === false) return "cancelled";

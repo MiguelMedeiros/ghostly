@@ -93,7 +93,8 @@ export function GroupConnection({ group }: { group: GroupView }) {
               <div className="flex min-h-8 items-center gap-2">
                 <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-text-primary">{memberName(m, t)}</span>
+                  {/* The name a member typed, in its own direction: in Arabic a long English one is cut at its end, not its start. */}
+                  <span dir="auto" className="block truncate text-text-primary">{memberName(m, t)}</span>
                   <span className="block truncate text-[11px]" data-testid="group-connection-member-status">{edgeLabel(m, now, t, agoIn(language))}</span>
                 </span>
                 {down && online && !noLinks && <button disabled={busy !== ""} onClick={() => void reconnect(m.edge!.linkId)} data-testid="group-connection-reconnect"

@@ -11,7 +11,7 @@ import type { Problem } from "../../lib/problemText";
 export type NoticeTone = "muted" | "error" | "success" | "warning" | "wait";
 
 const COLOR: Record<NoticeTone, string> = {
-  muted: "text-text-muted", wait: "text-text-secondary", error: "text-danger", success: "text-accent", warning: "text-yellow-500",
+  muted: "text-text-muted", wait: "text-text-secondary", error: "text-danger", success: "text-accent", warning: "text-warn-ink",
 };
 
 /**

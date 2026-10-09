@@ -161,7 +161,7 @@ describe("the chat's connection control and its panel", () => {
       ["Automatic", "true", false],
       ["WebRTCIn use · 12 ms", "false", false],
       ["Iroh", "false", false],
-      ["HyperDHT", "false", true],
+      ["HyperDHTYour contact's app doesn't support HyperDHT", "false", true],
       ["DHT only", "false", false],
     ]);
     // The longer word is the row's tooltip.
@@ -225,6 +225,8 @@ describe("the chat's connection control and its panel", () => {
     expect(radios.map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
       ["WebRTC", "true", false], ["Iroh", "false", true], ["HyperDHT", "false", true], ["DHT only", "false", false],
     ]);
+    // A phone has no hover for the tooltip: an option that is off says why on its own row.
+    expect(within(panel()).getByTestId("connection-option-iroh")).toHaveTextContent("IrohIroh needs Ghostly Desktop");
     // WebRTC is what it is on: nothing to ask. DHT only is there on every app.
     await user.click(within(panel()).getByTestId("connection-option-webrtc"));
     expect(engine.callsTo("setChatTransport")).toEqual([]);

@@ -782,7 +782,13 @@ export class ChatFiles {
     record.error = error;
     record.pausedBy = record.waitingFor = undefined;
     if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; }
-    if (entry.in) clearTimeout(entry.in.timer);
+    if (entry.in) {
+      const incoming = entry.in;
+      clearTimeout(incoming.timer);
+      // Its writer goes once the writes under way are done (a host's holds a 256 KiB buffer): every file received kept
+      // one until the app quit. One taken again opens a new target.
+      void incoming.writing.finally(() => { if (transferEnded(record)) incoming.target = undefined; });
+    }
     this.changed(entry);
   }
 

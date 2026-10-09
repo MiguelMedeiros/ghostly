@@ -54,6 +54,11 @@ export interface PairingProgress {
   peerSeen?: boolean;
   /** `connecting` and `live`: the transport coming up, or in use. */
   transport?: PairedTransport;
+  /**
+   * `publishing`: the relays' request budget (`REQUESTS_PER_MINUTE`) holds this side's first packet back; it goes out
+   * once the budget frees a request, about then (ms since the epoch).
+   */
+  relayWaitUntil?: number;
 }
 
 const FIRST_STAGE: Record<PairingRole, PairingStage> = { inviter: "publishing", joiner: "resolving" };
@@ -87,6 +92,13 @@ export class PairingTracker {
   published(): void {
     const { stage, reason } = this.progress;
     if (stage === "publishing" || (stage === "failed" && reason === "publish")) this.set(this.idle());
+  }
+
+  /** This side's first packet waits for the relays' request budget, which frees one at `until`: said, still `publishing`. */
+  heldBack(until: number): void {
+    if (this.progress.stage !== "publishing") return;
+    this.progress = { ...this.progress, relayWaitUntil: until };
+    this.changed(this.progress);
   }
 
   /** The contact's packet was seen: they are on the network. */
