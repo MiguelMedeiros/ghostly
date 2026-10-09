@@ -21,8 +21,8 @@ const RED = jpeg(128, 1), BLUE = jpeg(128, 2);
 class Mesh {
   readonly sessions = new Map<string, GroupSession>();
   readonly saved = new Map<string, GroupState>();
-  readonly pictures: { at: string; by: string; picture: string | undefined }[] = [];
-  readonly names: { at: string; by: string; name: string | null }[] = [];
+  readonly pictures: { at: string; by: string | undefined; picture: string | undefined }[] = [];
+  readonly names: { at: string; by: string | undefined; name: string | null }[] = [];
   /** Members whose app predates metadata: `group-meta` never reaches them, and their syncs say nothing of it. */
   readonly old = new Set<string>();
   readonly sent: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
@@ -301,6 +301,30 @@ describe("group name, group-mesh/1", () => {
     expect([alice.name, carol.name]).toEqual(["Reading club", "Reading club"]);
   });
 
+  it("a member away when the admin role moved is not told the new admin renamed it: the line names nobody", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
+    mesh.sessions.delete(carol.myKey);
+    await alice.rename("Book club");
+    await alice.setPicture(RED);
+    await mesh.settle();
+    await alice.transferAdmin(bob.myKey);
+    await mesh.settle();
+    mesh.sessions.set(carol.myKey, carol);
+    await mesh.open(carol, bob);
+    expect([carol.name, carol.picture]).toEqual(["Book club", RED]);
+    // Bob signed again what Alice set: Carol cannot tell it from a change of his own.
+    expect(mesh.names.filter(n => n.at === carol.myKey)).toEqual([{ at: carol.myKey, by: undefined, name: "Book club" }]);
+    expect(mesh.pictures.filter(p => p.at === carol.myKey)).toEqual([{ at: carol.myKey, by: undefined, picture: RED }]);
+    // Back while Bob is the admin, she has his statement: his own rename is his.
+    await bob.rename("Reading club");
+    await mesh.settle();
+    expect(mesh.names.filter(n => n.at === carol.myKey).pop()).toEqual({ at: carol.myKey, by: bob.myKey, name: "Reading club" });
+    // So is Alice's rename credited to Alice by a member that was there.
+    expect(mesh.names).toContainEqual({ at: bob.myKey, by: alice.myKey, name: "Book club" });
+  });
+
   it("an admin who signed the highest revision there is cannot leave the next admin unable to rename", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Ghosts"));
@@ -330,6 +354,8 @@ class Net {
   readonly members = new Map<string, Member>();
   readonly pictures: { at: string; picture: string | undefined }[] = [];
   readonly names: { at: string; name: string | null }[] = [];
+  /** Whom each line credits, `undefined` for one that names nobody. */
+  readonly authors: { at: string; by: string | undefined }[] = [];
   readonly relayed: CommunityFrame[] = [];
   private pending: Promise<unknown>[] = [];
   private hooks(name: string) {
@@ -345,7 +371,8 @@ class Net {
       addressed: (to: string, frame: CommunityFrame) => deliver(this.byKey(to), frame),
       message: () => {},
       changed: () => {},
-      metaChanged: (_by: string, change: GroupMetaChange) => {
+      metaChanged: (by: string | undefined, change: GroupMetaChange) => {
+        this.authors.push({ at: name, by });
         if ("picture" in change) this.pictures.push({ at: name, picture: change.picture ?? undefined });
         if ("name" in change) this.names.push({ at: name, name: change.name ?? null });
       },
@@ -522,8 +549,32 @@ describe("group name, group-community/1", () => {
     await net.meet(bob, carol);
     expect(carol.session.name).toBe("Book club");
     expect(net.names).toContainEqual({ at: "carol", name: "Book club" });
+    expect(net.authors).toContainEqual({ at: "carol", by: alice.session.myKey });
     const kept = clone(bob.saved);
     expect(JSON.parse(kept.meta!.body)).toMatchObject({ name: "Book club" });
     expect(new CommunitySession(kept, { save: async () => {}, broadcast: () => {}, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
+  });
+
+  it("a member away when the admin role moved is not told the new admin renamed it: the line names nobody", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    net.members.delete("carol");
+    await alice.session.rename("Book club");
+    await net.settle();
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    expect(bob.session.state.meta!.by).toBe(bob.session.myKey);
+    net.members.set("carol", carol);
+    await net.meet(bob, carol);
+    expect(carol.session.name).toBe("Book club");
+    // Bob signed again what Alice set: Carol cannot tell it from a change of his own.
+    expect(net.authors.filter(a => a.at === "carol")).toEqual([{ at: "carol", by: undefined }]);
+    // Back while Bob is the admin, she has his statement: his own rename is his.
+    await bob.session.rename("Reading club");
+    await net.settle();
+    expect(net.authors.filter(a => a.at === "carol").pop()).toEqual({ at: "carol", by: bob.session.myKey });
+    expect(net.authors).toContainEqual({ at: "bob", by: alice.session.myKey });
   });
 });

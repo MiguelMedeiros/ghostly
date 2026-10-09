@@ -36,6 +36,14 @@
     "unreachable": "{{host}} non raggiungibile",
     "unreachableNext": "Controlla l'indirizzo: deve essere un mint Cashu."
   },
+  "chat": {
+    "editTooMany": "Questo messaggio non si può più modificare",
+    "editTooManyNext": "Un messaggio accetta al massimo {{max}} modifiche.",
+    "replyGone": "Non puoi rispondere a quel messaggio",
+    "replyGoneNext": "Annulla la risposta e invialo di nuovo.",
+    "tooLong": "Messaggio troppo lungo",
+    "tooLongNext": "Accorcialo o invialo come file."
+  },
   "connectionFailed": "Connessione fallita",
   "engine": {
     "alreadySubmitted": "Questo pagamento è già stato inviato o non è stato possibile salvarlo",
@@ -45,6 +53,7 @@
     "cashuFeeAboveLimit": "La commissione Cashu supera il tuo limite",
     "couldNotVerify": "Non è ancora stato possibile verificare questo pagamento. Non è stato inviato un secondo pagamento.",
     "ecashAlreadySpent": "Questo ecash è già stato speso altrove",
+    "ecashOtherUnit": "Questo ecash è in {{unit}}: qui si può riscattare solo ecash in sat",
     "fedimintAlreadyJoined": "Sei già entrato in questa federazione",
     "fedimintConnecting": "Aspetta che la federazione si connetta",
     "fedimintNotEnough": "Non c’è abbastanza in questa federazione",
@@ -121,6 +130,17 @@
     "noRoomNext": "{{free}} liberi.",
     "notVoice": "Questa registrazione non può essere inviata come messaggio vocale",
     "pasteTooLarge": "È troppo grande da incollare. Invialo con + → Documento.",
+    "pasteUnreadable": "Impossibile incollare questi file. Inviali con + → Documento.",
+    "refused": {
+      "damaged": "Il file è arrivato danneggiato",
+      "expired": "Non accettato in tempo",
+      "makeRoom": "Chiedigli di liberare spazio, poi invialo di nuovo.",
+      "noRoomFree": "{{free}} liberi. Chiedigli di liberare spazio, poi invialo di nuovo.",
+      "other": "Il tuo contatto non ha potuto ricevere questo file",
+      "sendAgain": "Invialo di nuovo.",
+      "tooMany": "Il tuo contatto ha troppi file in attesa",
+      "tryLater": "Riprova più tardi."
+    },
     "tooLargeForContact": "Troppo grande per l'app del tuo contatto",
     "tooLargeForContactNext": "Max {{max}} finché non aggiorna Ghostly.",
     "updatedPeerFirst": "Connettiti prima a un peer aggiornato",
@@ -180,6 +200,8 @@
     "notIn": "Non fai parte di questo gruppo",
     "notYet": "Non fai ancora parte di questo gruppo",
     "nothingToSend": "Niente da inviare",
+    "offline": "Sei offline",
+    "offlineNext": "Vai online in Servizi, poi riprova.",
     "removed": "Sei stato rimosso da questo gruppo",
     "shareLinkInstead": "Condividi con questa persona il link del gruppo: chi lo apre entra",
     "tooLong": "Il messaggio supera i 16 KiB"
@@ -196,6 +218,8 @@
     "needPinned": "I messaggi trattenuti richiedono un S3 e un contatto fissato",
     "needStorage": "I messaggi trattenuti richiedono un S3 e un contatto che lo consenta",
     "needStorageNext": "Configura un S3 in Profilo → Backup.",
+    "needsStorage": "Questo messaggio non può essere trattenuto",
+    "needsStorageNext": "Configura uno storage S3 in Profilo → Backup e chiedi al tuo contatto di consentire i messaggi trattenuti.",
     "pickUpFailed": "Impossibile ritirare ciò che ti ha lasciato il tuo contatto",
     "pointerFailed": "Salvato, ma impossibile dire al tuo contatto dove trovarlo",
     "readFailed": "Impossibile vedere cosa ti ha lasciato il tuo contatto",
@@ -421,8 +445,28 @@
   },
   "transport": {
     "adapterFailed": "Avvio non riuscito. Riapri questa chat per riprovare.",
+    "allowAnotherNext": "Consenti un altro trasporto o attiva il Ripiego.",
+    "cannotSwitch": "L'app del tuo contatto non può cambiare trasporto",
+    "cannotSwitchNext": "La sua app va aggiornata (un Ghostly aggiornato).",
+    "hyperdhtClosed": "Il relay HyperDHT ha chiuso la connessione",
+    "hyperdhtRefused": "Il relay HyperDHT ha rifiutato questa chat",
+    "hyperdhtSilent": "Il relay HyperDHT non risponde",
+    "hyperdhtUnreachable": "Relay HyperDHT irraggiungibile",
+    "irohStopped": "Endpoint Iroh fermato",
     "listenerGiven": "In pausa per una chat più attiva. Apri questa chat per riprendere.",
-    "listenerReleased": "In pausa per un'altra chat. Apri questa chat per riprendere."
+    "listenerReleased": "In pausa per un'altra chat. Apri questa chat per riprendere.",
+    "noneConnected": "Nessun trasporto è riuscito a connettersi",
+    "noneInCommon": "Nessun modo di connettersi in comune",
+    "peerClosed": "Il tuo contatto ha chiuso la connessione",
+    "peerClosedNext": "Verifica che entrambi consentiate un trasporto in comune, poi riconnetti.",
+    "slotsFull": "Tutte le connessioni native sono in uso",
+    "slotsFullNext": "Disconnetti la connessione nativa di un'altra chat, o attendi che una resti inattiva."
+  },
+  "verify": {
+    "closed": "La connessione si è chiusa",
+    "closedNext": "Confronta di nuovo dopo la riconnessione.",
+    "codeChanged": "Il codice è cambiato",
+    "codeChangedNext": "Confronta il nuovo codice."
   },
   "wallet": {
     "alreadyHave": "Hai già un portafoglio {{kind}} {{network}}",

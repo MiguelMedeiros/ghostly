@@ -36,6 +36,14 @@
     "unreachable": "Can't reach {{host}}",
     "unreachableNext": "Check the address: it should be a Cashu mint."
   },
+  "chat": {
+    "editTooMany": "This message can't be edited again",
+    "editTooManyNext": "A message takes {{max}} edits at most.",
+    "replyGone": "That message can't be replied to",
+    "replyGoneNext": "Cancel the reply and send it again.",
+    "tooLong": "Message too long",
+    "tooLongNext": "Shorten it or send it as a file."
+  },
   "connectionFailed": "Connection failed",
   "engine": {
     "alreadySubmitted": "This payment was already submitted or could not be saved",
@@ -45,6 +53,7 @@
     "cashuFeeAboveLimit": "Cashu fee exceeds your limit",
     "couldNotVerify": "Could not verify this payment yet. No second payment was sent.",
     "ecashAlreadySpent": "This ecash was already spent somewhere else",
+    "ecashOtherUnit": "This ecash is in {{unit}}: only sat ecash can be redeemed here",
     "fedimintAlreadyJoined": "You already joined this federation",
     "fedimintConnecting": "Wait for the federation to connect",
     "fedimintNotEnough": "Not enough in this federation",
@@ -121,6 +130,17 @@
     "noRoomNext": "{{free}} free.",
     "notVoice": "That recording cannot be sent as a voice message",
     "pasteTooLarge": "That is too large to paste. Send it with + → Document.",
+    "pasteUnreadable": "Could not paste those files. Send them with + → Document.",
+    "refused": {
+      "damaged": "The file arrived damaged",
+      "expired": "Not accepted in time",
+      "makeRoom": "Ask them to make room, then send it again.",
+      "noRoomFree": "{{free}} free. Ask them to make room, then send it again.",
+      "other": "Your contact could not take this file",
+      "sendAgain": "Send it again.",
+      "tooMany": "Your contact has too many files waiting",
+      "tryLater": "Try again later."
+    },
     "tooLargeForContact": "Too large for your contact's app",
     "tooLargeForContactNext": "Max {{max}} until they update Ghostly.",
     "updatedPeerFirst": "Connect to an updated peer first",
@@ -180,6 +200,8 @@
     "notIn": "You are not in this group",
     "notYet": "You are not in this group yet",
     "nothingToSend": "Nothing to send",
+    "offline": "You are offline",
+    "offlineNext": "Go online in Services, then try again.",
     "removed": "You were removed from this group",
     "shareLinkInstead": "Share the group's link with them: anyone who opens it joins",
     "tooLong": "Message exceeds 16 KiB"
@@ -196,6 +218,8 @@
     "needPinned": "Held messages need S3 storage and a pinned contact",
     "needStorage": "Held messages need S3 storage and a contact who allows them",
     "needStorageNext": "Set up S3 storage in Profile → Backups.",
+    "needsStorage": "This message can't be held",
+    "needsStorageNext": "Set up S3 storage in Profile → Backups, and ask your contact to allow held messages.",
     "pickUpFailed": "Couldn't pick up what your contact left for you",
     "pointerFailed": "Stored, but your contact couldn't be told where",
     "readFailed": "Couldn't check what your contact left for you",
@@ -421,8 +445,28 @@
   },
   "transport": {
     "adapterFailed": "Couldn't start. Reopen this chat to retry.",
+    "allowAnotherNext": "Allow another transport, or turn Fallback on.",
+    "cannotSwitch": "Your contact's app can't switch transports",
+    "cannotSwitchNext": "Their app needs an update (an updated Ghostly).",
+    "hyperdhtClosed": "HyperDHT relay closed the connection",
+    "hyperdhtRefused": "HyperDHT relay refused this chat",
+    "hyperdhtSilent": "HyperDHT relay not answering",
+    "hyperdhtUnreachable": "HyperDHT relay unreachable",
+    "irohStopped": "Iroh endpoint stopped",
     "listenerGiven": "Paused for a busier chat. Open this chat to resume.",
-    "listenerReleased": "Paused for another chat. Open this chat to resume."
+    "listenerReleased": "Paused for another chat. Open this chat to resume.",
+    "noneConnected": "No transport could connect",
+    "noneInCommon": "No way to connect in common",
+    "peerClosed": "Your contact closed the connection",
+    "peerClosedNext": "Check that you both allow a common transport, then reconnect.",
+    "slotsFull": "All native connections in use",
+    "slotsFullNext": "Disconnect another chat's native connection, or wait for one to go quiet."
+  },
+  "verify": {
+    "closed": "The connection closed",
+    "closedNext": "Compare again after reconnecting.",
+    "codeChanged": "The code changed",
+    "codeChangedNext": "Compare the new code."
   },
   "wallet": {
     "alreadyHave": "You already have a {{network}} {{kind}} wallet",

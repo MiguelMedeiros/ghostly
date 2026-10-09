@@ -140,6 +140,43 @@ describe("paired profile policy boundaries", () => {
       expect(await p.link.sendMessage("blocked")).not.toBeNull();
     } finally { await p.stop(); }
   });
+  it("a connection that started before the pin and meets another key once the DHT pinned closes, and stops nothing", async () => {
+    // Two copies of a fresh invite used at once: one's first contact pins it on the DHT while the other's session is
+    // still authenticating here. That session reached a copy of the invite, not the contact.
+    const saved = createIdentity(), params = { ...createLink().mine, profile: "paired-chat/1" as const };
+    const credentials: { seedB64: string; peerKey?: string; requireSignedSignals?: boolean } = { seedB64: createIdentity().seedB64 };
+    let dial!: (connection: BoundChannel) => void;
+    const endpoint: NativeEndpoint = { transport: "iroh/1", descriptor: {}, onConnection: null, onDescriptor: null,
+      close: async () => {}, connect: () => new Promise(resolve => { dial = resolve; }) };
+    const onPairingState = vi.fn(), onDhtDelivery = vi.fn();
+    const link = new GhostLink({ params, pairing: { credentials, pinPeer: vi.fn() },
+      dht: { state: { sequence: 0, peerSequence: 0, peerMode: "stream" }, save: vi.fn(async () => {}) },
+      native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": {} }, peerTransports: ["iroh/1"] },
+      transport: { publish: vi.fn(), resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) },
+      rtcAvailable: false, createPeerConnection: () => { throw new Error("no WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+      events: { onPairingState, onDhtDelivery },
+    });
+    link.registerEndpoint(endpoint);
+    const [mine, theirs] = createChannelPair();
+    const binding = { transport: "iroh/1" as const, context: "a".repeat(64), identities: ["b".repeat(64), "c".repeat(64)] as [string, string] };
+    const other = new PairedSession(theirs, { credentials: { seedB64: createIdentity().seedB64 }, rendezvousKeys: [params.peerPubKeyZ32, link.myPubKeyZ32], binding,
+      transports: ["iroh/1"], trustOnFirstUse: true, pinPeer: async () => {}, onState: () => {}, onReady: () => {}, onApplication: () => {}, onFailure: () => {} });
+    const close = vi.spyOn(mine, "close");
+    try {
+      const pending = link.connect().catch(() => {});
+      await vi.waitFor(() => expect(dial).toBeTypeOf("function"));
+      dial({ channel: mine, binding });
+      await vi.waitFor(() => expect(onPairingState.mock.calls.some(([state]) => state.status === "negotiating")).toBe(true));
+      // The DHT pins the first contact's key, as its envelope does (dhtDelivery), before this session's offer arrives.
+      credentials.peerKey = saved.pubKeyZ32; credentials.requireSignedSignals = true;
+      other.start(); await pending;
+      await vi.waitFor(() => expect(close).toHaveBeenCalled());
+      expect(onDhtDelivery.mock.lastCall?.[0].foreignKeySeenAt).toBeGreaterThan(0);
+      expect(onPairingState.mock.calls.some(([state]) => state.status === "error" || state.keyMismatch)).toBe(false);
+      expect(credentials.peerKey).toBe(saved.pubKeyZ32);
+      expect(link.textDelivery).toBe("dht");
+    } finally { other.stop(); await link.stop(false); }
+  });
   it("reports failed discovery publication when explicitly requested", async () => {
     const session = new LinkSession({ params: createLink().mine,
       transport: { publish: async () => { throw new Error("Discovery unavailable"); }, resolve: async () => null,

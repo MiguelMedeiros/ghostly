@@ -67,6 +67,8 @@ function desktop(os: "MacIntel" | "Win32" | "Linux x86_64", answers: Record<stri
   });
 }
 const commands = () => tauri.invoke.mock.calls.map(([command, args]) => (args === undefined ? [command] : [command, args]));
+/** The ids the native command was given, in order: the system's, never the page's. */
+const nativeIds = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_private_notification").map(([, args]) => (args as { id: string }).id);
 
 beforeEach(() => {
   FakeNotification.permission = "default";
@@ -150,7 +152,8 @@ describe("where a notification goes, and what a click opens", () => {
     FakeNotification.permission = "granted";
     await showPrivateNotification("event-1", "New message", "chat-a");
     expect(FakeNotification.shown).toHaveLength(1);
-    expect(FakeNotification.shown[0]).toMatchObject({ title: "Ghostly", options: { body: "New message", tag: "event-1", silent: true } });
+    expect(FakeNotification.shown[0]).toMatchObject({ title: "Ghostly", options: { body: "New message", silent: true } });
+    expect(FakeNotification.shown[0]!.options.tag).not.toContain("event-1");
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     FakeNotification.shown[0]!.onclick!();
     expect(focus).toHaveBeenCalled();
@@ -172,20 +175,47 @@ describe("where a notification goes, and what a click opens", () => {
     const stop = onNotificationOpen(opened);
     await showPrivateNotification("event-1", "New message", "group:g1");
     await showPrivateNotification("event-2", "New message");
-    expect(commands()).toContainEqual(["native_private_notification", { id: "event-1", body: "New message" }]);
+    // The same page id again is the same notification: the system's id repeats, so it replaces the first.
+    await showPrivateNotification("event-1", "New message", "group:g1");
+    const [first, second, again] = nativeIds();
+    expect(commands()).toContainEqual(["native_private_notification", { id: first, body: "New message" }]);
+    expect(again).toBe(first);
+    expect(second).not.toBe(first);
     expect(tauri.plugin.sendNotification).not.toHaveBeenCalled();
     expect(FakeNotification.shown).toEqual([]);
     await waitFor(() => expect(tauri.opened).toBeDefined());
-    // One without a chat, or one from before a restart: the app comes forward (Rust), no chat opens.
-    tauri.opened!({ payload: "event-2" });
+    // One without a chat, one from before a restart, or the page's own id: the app comes forward (Rust), no chat opens.
+    tauri.opened!({ payload: second! });
     tauri.opened!({ payload: "event-9" });
-    expect(opened).not.toHaveBeenCalled();
     tauri.opened!({ payload: "event-1" });
+    expect(opened).not.toHaveBeenCalled();
+    tauri.opened!({ payload: first! });
     expect(opened).toHaveBeenCalledWith("group:g1");
     // Opened once: a second click on the same one does nothing more.
-    tauri.opened!({ payload: "event-1" });
+    tauri.opened!({ payload: first! });
     expect(opened).toHaveBeenCalledTimes(1);
     stop();
+  });
+
+  it("Android: the id the system gets names no chat, and a tap on it still opens the chat", async () => {
+    // A notification's id is its Android tag, which any app with notification access reads. The engine's id for a
+    // group message holds the group id that the group's public link carries (`group2/<groupId>/<host>`).
+    const { showPrivateNotification, onNotificationOpen } = await lib();
+    desktop("Linux x86_64", { native_notification_permission: "granted", native_private_notification: true });
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36");
+    const opened = vi.fn();
+    onNotificationOpen(opened);
+    vi.spyOn(window, "focus").mockImplementation(() => {});
+    const groupId = "Gx7pQ2mN9vR4tY8wK1zL5b";
+    await showPrivateNotification(`message:group:${groupId}:peer_w1`, "New message", `group:${groupId}`);
+    await showPrivateNotification("message:a1b2c3d4e5f6a7b8:peer_w2", "New message", "chat-a");
+    const ids = nativeIds();
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const id of ids) expect(id).not.toMatch(/group|message|peer|Gx7pQ2mN9vR4tY8wK1zL5b|a1b2c3d4e5f6a7b8/);
+    await waitFor(() => expect(tauri.opened).toBeDefined());
+    tauri.opened!({ payload: ids[0]! });
+    expect(opened).toHaveBeenCalledWith(`group:${groupId}`);
   });
 
   it("Desktop on Windows and Linux: the plugin shows it", async () => {
@@ -210,15 +240,17 @@ describe("where a notification goes, and what a click opens", () => {
     onNotificationOpen(opened);
     vi.spyOn(window, "focus").mockImplementation(() => {});
     await showPrivateNotification("event-1", "New message", "chat-a");
-    expect(chrome.notifications.create).toHaveBeenCalledWith("event-1", expect.objectContaining({ title: "Ghostly", message: "New message", silent: true }));
+    expect(chrome.notifications.create).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ title: "Ghostly", message: "New message", silent: true }));
+    const id = chrome.notifications.create.mock.calls[0]![0];
+    expect(id).not.toContain("event-1");
     // Another page's notification: this page does nothing, and stays where it is.
     clicked!("event-other");
     expect(opened).not.toHaveBeenCalled();
     expect(chrome.notifications.clear).not.toHaveBeenCalled();
     expect(chrome.tabs.update).not.toHaveBeenCalled();
-    clicked!("event-1");
+    clicked!(id);
     expect(opened).toHaveBeenCalledWith("chat-a");
-    expect(chrome.notifications.clear).toHaveBeenCalledWith("event-1");
+    expect(chrome.notifications.clear).toHaveBeenCalledWith(id);
     // The app page is a tab: window.focus() cannot bring a background tab forward, so the tab and its window are.
     await waitFor(() => expect(chrome.windows.update).toHaveBeenCalledWith(3, { focused: true }));
     expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
@@ -241,10 +273,11 @@ describe("where a notification goes, and what a click opens", () => {
     chrome.permissions = { contains: vi.fn(async () => true), request: vi.fn(async () => true) };
     vi.spyOn(window, "focus").mockImplementation(() => {});
     await showPrivateNotification("event-1", "New message", "chat-a");
-    expect(notifications.create).toHaveBeenCalledWith("event-1", expect.objectContaining({ message: "New message" }));
-    clicked!("event-1");
+    expect(notifications.create).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ message: "New message" }));
+    const id = notifications.create.mock.calls[0]![0];
+    clicked!(id);
     expect(opened).toHaveBeenCalledWith("chat-a");
-    expect(notifications.clear).toHaveBeenCalledWith("event-1");
+    expect(notifications.clear).toHaveBeenCalledWith(id);
   });
 });
 
@@ -381,8 +414,9 @@ describe("AttentionFeedback: which chat a notification opens", () => {
     const first = event({ linkId: "link-a" }), second = event({ linkId: "group:g1" });
     act(() => { fakeEngine.emit({ kind: "attention", event: first }); fakeEngine.emit({ kind: "attention", event: second }); });
     await waitFor(() => expect(FakeNotification.shown).toHaveLength(2));
-    // The text is private; the chat stays in the page.
-    expect(FakeNotification.shown.map(n => [n.options.tag, n.options.body])).toEqual([[first.id, "New message"], [second.id, "New message"]]);
+    // The text is private, and so is the tag: the chat stays in the page.
+    expect(FakeNotification.shown.map(n => n.options.body)).toEqual(["New message", "New message"]);
+    for (const n of FakeNotification.shown) expect([first.id, second.id]).not.toContain(n.options.tag);
     vi.spyOn(window, "focus").mockImplementation(() => {});
     act(() => FakeNotification.shown[0]!.onclick!());
     expect(screen.getByTestId("where")).toHaveTextContent("/chat/a");
