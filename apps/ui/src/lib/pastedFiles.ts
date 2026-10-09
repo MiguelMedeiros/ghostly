@@ -101,22 +101,29 @@ export function pasteNamesFiles(data: DataTransfer | null): boolean {
   return !!data && [...(data.types ?? [])].some((type) => type === "Files" || type === "text/uri-list");
 }
 
-/** What the platform read from the clipboard, as files to send; a picture is named after the moment. */
+/**
+ * What the platform read from the clipboard, as files to send; a picture is named after the moment. Read or not
+ * (too large, a read that failed), the platform is told it may let its copies go.
+ */
 export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new Date()): Promise<File[]> {
-  if (clips.some((clip) => clip.size > PLATFORM_PASTE_MAX)) throw new Error("That is too large to paste. Send it with + → Document.");
-  const files: File[] = [];
-  for (const clip of clips) {
-    const parts: Uint8Array[] = [];
-    for (let offset = 0; offset < clip.size;) {
-      const bytes = await clip.read(offset, READ_STEP);
-      if (!bytes.length) break;
-      parts.push(bytes);
-      offset += bytes.length;
+  try {
+    if (clips.some((clip) => clip.size > PLATFORM_PASTE_MAX)) throw new Error("That is too large to paste. Send it with + → Document.");
+    const files: File[] = [];
+    for (const clip of clips) {
+      const parts: Uint8Array[] = [];
+      for (let offset = 0; offset < clip.size;) {
+        const bytes = await clip.read(offset, READ_STEP);
+        if (!bytes.length) break;
+        parts.push(bytes);
+        offset += bytes.length;
+      }
+      const type = clip.mime ?? TYPES[clip.name?.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+      files.push(new File(parts as BlobPart[], clip.name ?? pastedImageName(type || "image/png", at), { type, lastModified: at.getTime() }));
     }
-    const type = clip.mime ?? TYPES[clip.name?.split(".").pop()?.toLowerCase() ?? ""] ?? "";
-    files.push(new File(parts as BlobPart[], clip.name ?? pastedImageName(type || "image/png", at), { type, lastModified: at.getTime() }));
+    return files;
+  } finally {
+    for (const clip of clips) clip.done?.();
   }
-  return files;
 }
 
 /** The clipboard's files as the platform reads them (the desktop app), or null where the paste event is the only way. */

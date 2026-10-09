@@ -396,8 +396,9 @@ pub fn incoming_share_take<R: tauri::Runtime>(
     Ok(None)
 }
 
-/// The page read a share's files ([`incoming_share_take`]'s tokens): they leave the shelf, and on Android their
-/// copies leave the app's cache (the Kotlin side removes only its own share folders).
+/// The page read a share's files ([`incoming_share_take`]'s tokens) or a paste's ([`read_clipboard_files`]'s): they
+/// leave the shelf, a pasted picture's PNG with them, and on Android a share's copies leave the app's cache (the
+/// Kotlin side removes only its own share folders; a pasted file is the user's and stays where it is).
 #[tauri::command]
 pub async fn incoming_share_done<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
