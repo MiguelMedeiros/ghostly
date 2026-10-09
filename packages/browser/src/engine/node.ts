@@ -226,6 +226,8 @@ const NATIVE_SLOTS = 8;
 export const GROUP_NATIVE_SLOTS = 4;
 /** How often a group link that found no free native slot tries again. */
 const GROUP_NATIVE_RETRY_MS = 15_000;
+/** The longest a group link whose native listener failed to start waits before trying again (its wait doubles up to it). */
+const GROUP_NATIVE_FAILED_MAX_MS = 5 * 60_000;
 /** "Clear all data": how long taking things back from the network may hold up the clear, in all. */
 export const CLEAR_WITHDRAW_MS = 6_000;
 /**
@@ -2792,6 +2794,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   wake(params: { network?: boolean } = {}): void {
     if (params.network) { this.transport.networkChanged?.(); this.directPath.reset(); }
+    // A group link whose native listener failed to start on the old network tries again at the next tick, its wait anew.
+    if (params.network) for (const failed of this.groupNativeFailed.values()) { failed.at = 0; failed.wait = 0; }
     for (const live of this.links.values()) live.link?.wake({ network: params.network });
     this.hold.wake();
     // A wallet source that could not be reached at start-up (no network yet, a server asleep) tries again.
@@ -6118,6 +6122,7 @@ export class GhostlyNode implements EngineImplementation {
     this.quietEdges.delete(linkId);
     // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
     this.groupNativeWaiting.delete(linkId);
+    this.groupNativeFailed.delete(linkId);
     this.groupNativeRetryAt = 0;
     // A member who held the subscription and is no longer in the group (removed, or I left): the app replaces it.
     // An edge a group on hubs no longer keeps is still a member's: nothing to replace.
@@ -6932,16 +6937,25 @@ export class GhostlyNode implements EngineImplementation {
       // A group's link with no native endpoint because none was free: its member's row says so, and it is tried
       // again as slots free up (`retryGroupNative`).
       if (live.stored.group && this.keepsGroupNative(live.stored)) {
-        const waiting = full.some(Boolean) && !link.availableTransports.some(t => t !== "webrtc/1");
+        const waiting = full.includes("no-slot") && !link.availableTransports.some(t => t !== "webrtc/1");
         if (waiting) this.groupNativeWaiting.add(linkId); else this.groupNativeWaiting.delete(linkId);
-      }
+        // One whose listener failed to start (Iroh's relay out of reach while the network was down) tries again later,
+        // as a chat does when its screen opens: started once, it stayed without it for as long as the app ran.
+        if (full.includes("failed")) {
+          const wait = Math.min(Math.max(GROUP_NATIVE_RETRY_MS, (this.groupNativeFailed.get(linkId)?.wait ?? 0) * 2), GROUP_NATIVE_FAILED_MAX_MS);
+          this.groupNativeFailed.set(linkId, { at: Date.now() + wait, wait });
+        } else this.groupNativeFailed.delete(linkId);
+      } else this.groupNativeFailed.delete(linkId);
       this.emitState();
     });
   }
 
-  /** One transport's listener for one chat, in that transport's queue. True when a group's link found no slot free. */
+  /**
+   * One transport's listener for one chat, in that transport's queue. "no-slot" when a group's link found no slot free,
+   * "failed" when the listener could not start.
+   */
   private async startNativeEndpoint(linkId: string, expected: GhostLink | null | undefined, key: NativeTransport,
-    factory: (seedB64: string) => Promise<NativeEndpoint>, inUse: boolean): Promise<boolean> {
+    factory: (seedB64: string) => Promise<NativeEndpoint>, inUse: boolean): Promise<"no-slot" | "failed" | false> {
     const live = this.links.get(linkId), link = live?.link;
     if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return false;
     // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
@@ -6955,7 +6969,7 @@ export class GhostlyNode implements EngineImplementation {
       const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
       // A group's links take at most half of them, and never one a chat holds: 1:1 chats keep what they had
       // before group links went native (WISP 902 § Transports). One that finds none waits for a slot.
-      if (group && (owners.length >= NATIVE_SLOTS || owners.filter(other => other.stored.group).length >= GROUP_NATIVE_SLOTS)) return true;
+      if (group && (owners.length >= NATIVE_SLOTS || owners.filter(other => other.stored.group).length >= GROUP_NATIVE_SLOTS)) return "no-slot";
       if (owners.length >= NATIVE_SLOTS) {
         const now = Date.now();
         const taking = !group && (this.activeLinkId === linkId || inUse);
@@ -7013,6 +7027,7 @@ export class GhostlyNode implements EngineImplementation {
       this.emitState();
     } catch (error) {
       live.transportErrors[key] = error instanceof Error ? error.message : "Native adapter could not start. Reopen this chat to retry.";
+      return "failed";
     }
     return false;
   }
@@ -7079,8 +7094,21 @@ export class GhostlyNode implements EngineImplementation {
   /** Group links waiting for a free native slot (`ensureNativeEndpoints`), by link id. */
   private readonly groupNativeWaiting = new Set<string>();
   private groupNativeRetryAt = 0;
-  /** Now and then, the group links that found no free native slot try again: a chat or another group may have let one go. */
+  /** Group links whose native listener failed to start, by link id: when each tries again, and how long it waited last. */
+  private readonly groupNativeFailed = new Map<string, { at: number; wait: number }>();
+  /**
+   * Now and then, the group links that found no free native slot try again: a chat or another group may have let one go.
+   * Those whose listener failed to start try again once their wait is over.
+   */
   private retryGroupNative(): void {
+    const now = Date.now();
+    for (const [linkId, failed] of this.groupNativeFailed) {
+      if (now < failed.at) continue;
+      if (!this.links.get(linkId)?.link) { this.groupNativeFailed.delete(linkId); continue; }
+      // Not again while this start is under way (Iroh waits up to 10 s for its relay).
+      failed.at = now + failed.wait;
+      void this.ensureNativeEndpoints(linkId);
+    }
     if (!this.groupNativeWaiting.size || Date.now() < this.groupNativeRetryAt) return;
     this.groupNativeRetryAt = Date.now() + GROUP_NATIVE_RETRY_MS;
     for (const linkId of [...this.groupNativeWaiting]) {
