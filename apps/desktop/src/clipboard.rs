@@ -205,6 +205,23 @@ impl PasteShelf {
                 Held::Path(p) => Held::Path(p.clone()),
             })
     }
+
+    /// Takes these tokens off the shelf: they read nothing from then on. The paths they held, for whoever made the
+    /// files to remove them.
+    fn release(&self, tokens: &[String]) -> Vec<PathBuf> {
+        let mut shelf = self.0.lock().unwrap();
+        let mut paths = Vec::new();
+        shelf.held.retain(|(token, held)| {
+            if !tokens.contains(token) {
+                return true;
+            }
+            if let Held::Path(path) = held {
+                paths.push(path.clone());
+            }
+            false
+        });
+        paths
+    }
 }
 
 /// One thing a paste brought, for the page's sheet. `name` is None for a picture (the page
@@ -377,6 +394,27 @@ pub fn incoming_share_take<R: tauri::Runtime>(
     }
     #[cfg(not(target_os = "android"))]
     Ok(None)
+}
+
+/// The page read a share's files ([`incoming_share_take`]'s tokens): they leave the shelf, and on Android their
+/// copies leave the app's cache (the Kotlin side removes only its own share folders).
+#[tauri::command]
+pub async fn incoming_share_done<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    tokens: Vec<String>,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Not allowed from this window".into());
+    }
+    let paths = window
+        .try_state::<PasteShelf>()
+        .map(|shelf| shelf.release(&tokens))
+        .unwrap_or_default();
+    #[cfg(target_os = "android")]
+    crate::android::share_done(paths).await?;
+    #[cfg(not(target_os = "android"))]
+    drop(paths);
+    Ok(())
 }
 
 /// A step of what a paste brought ([`read_clipboard_files`]), as raw bytes: at most 16 MiB
@@ -620,6 +658,54 @@ mod tests {
             incoming_share_take(other),
             Err("Not allowed from this window".into())
         );
+    }
+
+    /// Once the page read a share, its tokens leave the shelf (the paths go back for the Kotlin side to remove the
+    /// copies); every other paste stays, and only the main window may say so.
+    #[test]
+    fn a_share_the_page_read_leaves_the_shelf() {
+        let dir = scratch();
+        std::fs::write(dir.join("photo.jpg"), b"jpeg bytes").unwrap();
+        std::fs::write(dir.join("video.mp4"), b"mp4 bytes").unwrap();
+        let app = paste_app(PasteSource::fixed(|| Ok(Pasted::Nothing)));
+        let main = main_window(&app);
+        let shelf = app.state::<PasteShelf>();
+        let pasted = shelf.put(Held::Bytes(Arc::new(b"png".to_vec())));
+        let share = shelve_share(
+            &shelf,
+            String::new(),
+            String::new(),
+            vec![(dir.join("photo.jpg"), None), (dir.join("video.mp4"), None)],
+        );
+        let tokens: Vec<String> = share.files.iter().map(|f| f.token.clone()).collect();
+        let url = "ghostly-svc://atlas.peer/".parse().unwrap();
+        let other = WebviewWindowBuilder::new(&app, "svc-1", WebviewUrl::CustomProtocol(url))
+            .build()
+            .unwrap();
+        assert_eq!(
+            tauri::async_runtime::block_on(incoming_share_done(other, tokens.clone())),
+            Err("Not allowed from this window".into())
+        );
+        assert_eq!(bytes(&main, &tokens[0], 64).unwrap(), b"jpeg bytes");
+
+        assert_eq!(
+            shelf.release(&tokens),
+            vec![dir.join("photo.jpg"), dir.join("video.mp4")]
+        );
+        for token in &tokens {
+            assert_eq!(
+                bytes(&main, token, 64),
+                Err("That paste is gone. Paste it again.".into())
+            );
+        }
+        assert_eq!(bytes(&main, &pasted, 64).unwrap(), b"png");
+        assert_eq!(shelf.release(&tokens), Vec::<PathBuf>::new());
+        assert_eq!(
+            tauri::async_runtime::block_on(incoming_share_done(main.clone(), vec![pasted.clone()])),
+            Ok(())
+        );
+        assert!(bytes(&main, &pasted, 64).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

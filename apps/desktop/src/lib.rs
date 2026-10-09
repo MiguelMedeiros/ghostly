@@ -102,6 +102,7 @@ macro_rules! commands {
             app_sandbox::app_close,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
