@@ -407,6 +407,7 @@
     "cantPlay": "Cet appareil ne peut pas lire cette vidéo ({{format}}). Téléchargez-la pour la regarder.",
     "exitFullScreen": "Quitter le plein écran",
     "fullScreen": "Plein écran",
+    "label": "Vidéo, {{length}}",
     "play": "Lire la vidéo",
     "save": "Enregistrer la vidéo",
     "tooLarge": "Trop volumineux pour être lu ici. Téléchargez-le pour le regarder."

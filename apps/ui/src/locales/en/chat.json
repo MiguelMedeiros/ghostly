@@ -407,6 +407,7 @@
     "cantPlay": "This device can't play this video ({{format}}). Download it to watch.",
     "exitFullScreen": "Exit full screen",
     "fullScreen": "Full screen",
+    "label": "Video, {{length}}",
     "play": "Play video",
     "save": "Save video",
     "tooLarge": "Too large to play here. Download it to watch."

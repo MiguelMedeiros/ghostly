@@ -162,7 +162,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     resumeAt.current = clamped;
     if (audioRef.current && srcRef.current) audioRef.current.currentTime = clamped;
   };
-  mediaRef.current = { title: file.name, artist: sender === "me" ? "You" : peerName, play: () => void play(), pause, seekTo: seek };
+  mediaRef.current = { title: file.name, artist: sender === "me" ? t("chat.reply.you") : peerName, play: () => void play(), pause, seekTo: seek };
 
   const act = (action: FileAction) => {
     setActionError("");

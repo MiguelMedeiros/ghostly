@@ -407,6 +407,7 @@
     "cantPlay": "此设备无法播放此视频（{{format}}）。请下载后观看。",
     "exitFullScreen": "退出全屏",
     "fullScreen": "全屏",
+    "label": "视频，{{length}}",
     "play": "播放视频",
     "save": "保存视频",
     "tooLarge": "文件太大，无法在此播放。请下载后观看。"
