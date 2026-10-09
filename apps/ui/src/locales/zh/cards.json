@@ -155,6 +155,7 @@
   },
   "working": {
     "label": "工作中",
+    "quiet": "工作中？ · 上次更新 {{ago}}",
     "stale": "已有 {{duration}} 没有更新"
   }
 }

@@ -1,9 +1,11 @@
 import { act, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, type TaskCard, type UsageCard } from "@ghostly/core";
 import type { CardIndexRow, StoredMessage } from "@ghostly/browser/shared/types";
 import { ChatRow, type ChatRowProps } from "../../components/ChatRow";
-import { WorkingDot } from "../../components/chat/WorkingMark";
+import { TasksButton } from "../../components/chat/TasksButton";
+import { WorkingDot, WorkingLine } from "../../components/chat/WorkingMark";
 import { useWorkingByPeer } from "../../hooks/useWorking";
 import { WORKING_FRESH_MS, workingByChat, workingQuietMs, workingState, type WorkingEntry } from "../../lib/working";
 import { linkView } from "../fakeEngine";
@@ -212,5 +214,65 @@ describe("the chat list's marks", () => {
     rows = [row("link-1", task({ id: "run", status: "done" }), { id: "card-1", editedAt: NOW })];
     act(() => rendered.engine.messages("link-1", [{ id: "card-1", linkId: "link-1", sender: "peer", text: "", timestamp: NOW - 60 * MIN, via: "datalink", card: rows[0].card, edit: { seq: 1, at: NOW, history: [] } } as StoredMessage]));
     await waitFor(() => expect(screen.getByTestId("working-count")).toHaveTextContent("0"));
+  });
+});
+
+/** The header of a chat, as the page puts it together: the working line and the Tasks button share the panel. */
+function Header({ found, cards = true }: { found: WorkingEntry; cards?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const rows = cards ? [{ id: "m1", card: task({ step: "Running the tests" }), sender: "peer", timestamp: NOW - MIN }] : [];
+  return <>
+    <WorkingLine entry={found} open={open} onToggle={rows.length ? setOpen : undefined} />
+    <TasksButton rows={rows} open={open} onOpenChange={setOpen} />
+  </>;
+}
+
+describe("the header's line", () => {
+  it("working: says what the bot is working on, and how many more tasks are running", () => {
+    const { rerender } = renderApp(<WorkingLine entry={entry({ step: "Running the tests" })} />);
+    const line = screen.getByTestId("chat-working");
+    expect(line).toHaveAttribute("data-state", "working");
+    expect(line).toHaveTextContent(/^Working · Ship the fix$/);
+    expect(line.parentElement).toHaveAttribute("title", "Ship the fix · Running the tests");
+    // The title is the bot's text: in its own direction, whatever the app's.
+    expect(screen.getByTestId("chat-working-text").querySelector("bdi")).toHaveTextContent("Ship the fix");
+    rerender(<WorkingLine entry={entry({ count: 3 })} />);
+    expect(screen.getByTestId("chat-working")).toHaveTextContent(/^Working · Ship the fix \+2$/);
+  });
+
+  it("stale: asks, and says when the last update came", () => {
+    renderApp(<WorkingLine entry={entry({ at: NOW - 40.5 * MIN, count: 2 })} />);
+    const line = screen.getByTestId("chat-working");
+    expect(line).toHaveAttribute("data-state", "stale");
+    expect(line).toHaveTextContent(/^Working\? · last update 40 min ago$/);
+    expect(line.className).toContain("text-text-muted");
+  });
+
+  it("opens the chat's Tasks panel, the same one its button opens, and closes it again", async () => {
+    const { user } = renderApp(<Header found={entry()} />);
+    const line = screen.getByTestId("chat-working");
+    expect(line.tagName).toBe("BUTTON");
+    expect(line).toHaveAttribute("aria-expanded", "false");
+    await user.click(line);
+    expect(screen.getByTestId("chat-tasks-panel")).toBeInTheDocument();
+    expect(line).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("chat-tasks")).toHaveAttribute("aria-expanded", "true");
+    await user.click(line);
+    await waitFor(() => expect(screen.queryByTestId("chat-tasks-panel")).not.toBeInTheDocument());
+    await user.click(screen.getByTestId("chat-tasks"));
+    expect(screen.getByTestId("chat-tasks-panel")).toBeInTheDocument();
+    expect(line).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("is plain words, no button, while the chat shows no card to list (its card is further back than what is loaded)", () => {
+    renderApp(<Header found={entry()} cards={false} />);
+    expect(screen.getByTestId("chat-working").tagName).toBe("SPAN");
+    expect(screen.queryByTestId("chat-tasks")).not.toBeInTheDocument();
+  });
+
+  it("the Tasks button alone still keeps its own state", async () => {
+    const { user } = renderApp(<TasksButton rows={[{ id: "m1", card: task(), sender: "peer", timestamp: NOW }]} />);
+    await user.click(screen.getByTestId("chat-tasks"));
+    expect(screen.getByTestId("chat-tasks-panel")).toBeInTheDocument();
   });
 });

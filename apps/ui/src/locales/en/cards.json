@@ -155,6 +155,7 @@
   },
   "working": {
     "label": "Working",
+    "quiet": "Working? · last update {{ago}}",
     "stale": "No update for {{duration}}"
   }
 }
