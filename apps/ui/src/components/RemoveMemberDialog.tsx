@@ -4,7 +4,7 @@ import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useI18n } from "../contexts/I18nContext";
 
 /**
- * Removing a member, asked before it happens: Remove sits in a list, beside Make admin, one tap from the next row's.
+ * Removing a member, asked before it happens: Remove sits in a list, beside Hand over admin, one tap from the next row's.
  * It opens over the members list, inside it in React's tree: its Escape stops here and leaves the list open.
  * `linkOn`: the group's link works, and whoever is removed still has it: they can join again until it is replaced.
  */

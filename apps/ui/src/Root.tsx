@@ -36,7 +36,8 @@ import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNoti
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
-import { errorText } from "./lib/errorText";
+import { problemText, type Problem } from "./lib/problemText";
+import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
 
@@ -127,7 +128,8 @@ function JoinNotice() {
 
 /**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
- * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app.
+ * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
+ * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
  */
 function GroupLinkIntake() {
   const { pathname } = useLocation();
@@ -135,7 +137,7 @@ function GroupLinkIntake() {
   const nav = useAppNavigation();
   const { hasUnlocked } = useLockScreen();
   const [code, setCode] = useState("");
-  const [problem, setProblem] = useState("");
+  const [problem, setProblem] = useState<Problem | null>(null);
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
@@ -148,18 +150,14 @@ function GroupLinkIntake() {
     setCode("");
     engine.call("joinGroupByLink", { link: code })
       .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => setProblem(cause instanceof Error ? errorText(cause, t) : t("group.link.broken")));
+      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, hasUnlocked]);
-  useEffect(() => {
-    if (!problem) return;
-    const timer = setTimeout(() => setProblem(""), 6000);
-    return () => clearTimeout(timer);
-  }, [problem]);
   return problem ? (
-    <div role="alert" data-testid="group-link-invalid" onClick={() => setProblem("")}
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
-      {problem}
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex w-max max-w-[calc(100vw_-_2rem)] items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
+      <Notice problem={problem} testId="group-link-invalid" className="min-w-0 text-sm" />
+      <button type="button" data-testid="group-link-invalid-close" onClick={() => setProblem(null)} aria-label={t("common.close")}
+        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
     </div>
   ) : null;
 }

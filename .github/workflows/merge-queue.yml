@@ -1,7 +1,7 @@
 name: Merge queue
 
 # Runs the merge train (tools/scripts/merge-train.mjs): pull requests labelled `queue` land on their base (dev or an
-# epic/* branch) in batches of up to 5, in the order they were queued (`queue:priority` first). Each run moves every
+# epic/* branch) in batches of up to 12, in the order they were queued (`queue:priority` first). Each run moves every
 # base's train one step: board a batch, merge a green one, split a red one, and update each queued pull request's
 # place in line. See docs/TESTING.md#the-merge-queue.
 #
@@ -42,10 +42,12 @@ jobs:
   bases:
     name: Bases with a train
     # A pull request's CI ending can turn a batch or a queued pull request green; CI on a push already ran this. A label
-    # matters only when it is one of the train's.
+    # matters only when it is one of the train's. A push matters when a person moved the base: the train's own pushes
+    # (a batch lands as one squash merge per pull request) come from the run that goes on by itself.
     if: >-
       (github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request') &&
-      (github.event_name != 'pull_request_target' || startsWith(github.event.label.name, 'queue'))
+      (github.event_name != 'pull_request_target' || startsWith(github.event.label.name, 'queue')) &&
+      (github.event_name != 'push' || github.event.sender.type != 'Bot')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -110,8 +112,25 @@ jobs:
     # Nothing here uses the workflow's own token: the checkout and the train act as the queue app.
     permissions: {}
     steps:
+      # The train reads CI from the jobs of ci.yml's own run, which needs "Actions: read": a check run named "CI Success"
+      # can be posted by any workflow of the repository. Until the app has that permission, GitHub refuses this token,
+      # and the next step's token reads CI from check runs (the train warns in its log).
       - name: App token
         id: token
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.QUEUE_APP_ID }}
+          private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-checks: read
+          permission-actions: read
+
+      - name: App token (no Actions read)
+        id: token-checks
+        if: steps.token.outcome == 'failure'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
@@ -127,15 +146,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
-          token: ${{ steps.token.outputs.token }}
+          token: ${{ steps.token.outputs.token || steps.token-checks.outputs.token }}
           fetch-depth: 0
           filter: blob:none
 
       - name: Run the train
         env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_TOKEN: ${{ steps.token.outputs.token || steps.token-checks.outputs.token }}
           # The train trusts only its own position comments: the ones this app's bot wrote.
-          MERGE_TRAIN_LOGIN: ${{ steps.token.outputs.app-slug }}[bot]
+          MERGE_TRAIN_LOGIN: ${{ steps.token.outputs.app-slug || steps.token-checks.outputs.app-slug }}[bot]
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           BASE: ${{ matrix.base }}
         run: |

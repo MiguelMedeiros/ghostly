@@ -58,7 +58,9 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
         <QRCodeSVG value={qrText(uri)} size={size} title={label ?? t("payments.external.qrLabel")} bgColor="#ffffff" fgColor="#0b0f1a" level="L" className="block max-w-full h-auto" />
       </div>
       <div className="min-w-0 flex-[1_1_12rem] space-y-2">
-        <code className="block break-all select-all bg-black/20 rounded-lg p-2 text-[10px] text-inherit opacity-80 font-mono max-h-20 overflow-y-auto" data-testid={testId}>{value}</code>
+        {/* A long invoice scrolls in its box. Focusable, so its end can be read with the keys: WebKit (Safari, the
+            iPhone app, the Desktop app's WebView) never takes Tab into a scrolling box by itself, Chromium does. */}
+        <code tabIndex={0} className="block break-all select-all bg-black/20 rounded-lg p-2 text-[10px] text-inherit opacity-80 font-mono max-h-20 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" data-testid={testId}>{value}</code>
         <div className="flex flex-wrap gap-1.5">
           <button type="button" className={`${button} bg-accent text-on-accent hover:bg-accent-hover`} data-testid={`${testId}-copy`} onClick={() => void copy()}>{copied ? t("payments.external.copied") : t("common.copy")}</button>
           {/* Only a URI a wallet can open (`lightning:`, `bitcoin:`): a Spark address has no scheme wallets agree on. */}

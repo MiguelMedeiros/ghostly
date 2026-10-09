@@ -639,6 +639,27 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     expect(world.peers.get("bob")!.entries.size).toBe(1);
   });
 
+  it("a contact who came in through the link and is invited again declines: the admin's row is no longer Invited…", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const world = new World();
+    const alice = world.add("alice", timings), bob = world.add("bob", timings);
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await bob.joinByLink(await alice.enableLink(groupId)); await world.settle();
+    for (let i = 0; i < 6 && view(bob, groupId)?.status !== "active"; i++) {
+      vi.setSystemTime(Date.now() + 2_000);
+      await alice.tick(Date.now()); await bob.tick(Date.now()); await world.settle(); await world.meetEntries(); await world.meet();
+    }
+    expect(view(bob, groupId).status).toBe("active");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(alice, groupId).invited).toEqual([]);
+    expect(view(bob, groupId)).toMatchObject({ status: "active" });
+    // Someone who names another admin learns nothing: no answer.
+    const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
+    await bob.handleContactFrame("chat-ab", { t: "group-invite", g: groupId, name: "Ghosts", admin: createIdentity().pubKeyZ32 });
+    expect(sent).not.toHaveBeenCalled();
+  });
+
   it("the link goes off by itself once its maker is no longer the admin; turning off a link that is not on is harmless", async () => {
     const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
     await alice.disableLink(groupId);

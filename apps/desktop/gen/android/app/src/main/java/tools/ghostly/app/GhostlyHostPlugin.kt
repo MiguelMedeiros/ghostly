@@ -35,6 +35,9 @@ import app.tauri.plugin.Plugin
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 @InvokeArg
@@ -90,6 +93,11 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     private const val CHANNEL = "messages"
     /** At most this many files from one share, as a paste (clipboard.rs `MAX_PASTED_FILES`). */
     private const val MAX_SHARED_FILES = 32
+    /**
+     * The latest share's number: an older share still copying stops, and is never handed over after a newer one.
+     * Starts at the clock, so a share's folder is newer than any a previous run left.
+     */
+    private val shareGeneration = AtomicLong(System.currentTimeMillis())
   }
 
   /** Rust (src/android.rs): `kind` is "oidc", "share", "notification" or "network". */
@@ -160,8 +168,10 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   /**
    * "Share to Ghostly" from another app: its text and its streams. Each stream is copied into the app's cache (a
-   * folder per file, under the name the sharing app gave), off the main thread, then handed to Rust; the share before
-   * it is removed first. The page reads the copies by token, as a paste's.
+   * folder per share and per file, under the name the sharing app gave), off the main thread, then handed to Rust.
+   * Shares are numbered as they arrive: one that a newer share overtook stops copying and is never handed over, so a
+   * big share that ends late cannot replace the one made after it. Older shares' copies go once a newer one is
+   * handed over. The page reads the copies by token, as a paste's.
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
@@ -169,23 +179,51 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     val streams = streamsOf(intent).take(MAX_SHARED_FILES)
     val resolver = activity.contentResolver
     val root = File(activity.cacheDir, "shared")
+    val generation = shareGeneration.incrementAndGet()
+    val latest = { shareGeneration.get() == generation }
     thread(name = "ghostly-share") {
-      root.deleteRecursively()
+      val own = File(root, generation.toString())
+      own.deleteRecursively()
       val files = JSONArray()
-      streams.forEachIndexed { index, uri ->
+      for ((index, uri) in streams.withIndex()) {
+        if (!latest()) break
         try {
           val name = displayName(uri)?.replace('/', '_')?.takeIf { it.isNotBlank() && it != "." && it != ".." }
             ?: "shared-${index + 1}"
-          val folder = File(root, index.toString()).apply { mkdirs() }
+          val folder = File(own, index.toString()).apply { mkdirs() }
           val file = File(folder, name)
-          resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } ?: return@forEachIndexed
+          val copied = resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyWhile(input, it, latest) } }
+          if (copied != true) continue
           files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
         } catch (e: Exception) {
           // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share.
         }
       }
+      if (!latest()) {
+        own.deleteRecursively()
+        return@thread
+      }
       val share = JSONObject().put("title", title).put("text", text).put("files", files)
-      activity.runOnUiThread { received("share", share.toString()) }
+      activity.runOnUiThread {
+        // Checked again on the main thread, where shares arrive: a newer one may have come during the hop.
+        if (!latest()) return@runOnUiThread
+        received("share", share.toString())
+        // Only older ones: a newer share may be copying into its own folder already.
+        thread(name = "ghostly-share-clean") {
+          root.listFiles()?.filter { (it.name.toLongOrNull() ?: 0L) < generation }?.forEach { it.deleteRecursively() }
+        }
+      }
+    }
+  }
+
+  /** Copies `input` whole while `going` holds; false when it stopped first. */
+  private fun copyWhile(input: InputStream, output: OutputStream, going: () -> Boolean): Boolean {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
+    while (true) {
+      if (!going()) return false
+      val read = input.read(buffer)
+      if (read < 0) return true
+      output.write(buffer, 0, read)
     }
   }
 

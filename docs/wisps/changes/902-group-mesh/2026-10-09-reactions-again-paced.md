@@ -1,0 +1,1 @@
+The reactions a member says again when an edge opens (its latest 32) now go the newest twenty at once and the rest eleven seconds later, while that edge stays open. All 32 at once went past the 30 in 10 seconds a receiver takes from one member, and the oldest two were dropped until the next edge opening. Nothing on the wire changes; an app from before still says them at once.

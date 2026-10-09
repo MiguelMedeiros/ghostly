@@ -14,6 +14,8 @@ import { sanitizeNick } from "./text";
 export const LIMITS = {
   /** Largest control frame accepted, headers included. */
   maxControlFrameBytes: 60 * 1024,
+  /** Longest payment endpoint value (a Cashu token, an invoice) a payment frame may carry; a longer one is dropped. */
+  maxPaymentEndpointChars: 32 * 1024,
   /** Largest DataChannel message sent. 16 KiB is safe across WebRTC stacks. */
   maxChunkMessageBytes: 16 * 1024,
   maxRequestBodyBytes: 8 * 1024 * 1024,
@@ -259,7 +261,7 @@ function isEndpoint(value: unknown): value is WireEndpoint {
     value[0].length <= 64 &&
     /^[a-z0-9][a-z0-9-]*(?:\/[1-9][0-9]*)?$/.test(value[0]) &&
     typeof value[1] === "string" &&
-    value[1].length <= 32 * 1024
+    value[1].length <= LIMITS.maxPaymentEndpointChars
   );
 }
 
