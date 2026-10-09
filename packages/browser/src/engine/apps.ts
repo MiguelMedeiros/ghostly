@@ -898,9 +898,13 @@ export class Apps {
       const revocations = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])]);
       const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
       for (const r of revocations) merged.set(canonicalJson(r), r);
-      // Removed meanwhile: not put back. Its store removed meanwhile: not pinned again.
+      // Removed meanwhile: not put back, and the files this check wrote go too. Its store removed meanwhile: not pinned again.
       const current = await this.app(app.ref);
-      if (!current) continue;
+      if (!current) {
+        if (app.digest !== first.digest) await this.removeBundle(app.bytes, app.digest);
+        if (app.pending && app.pending.digest !== first.pending?.digest) await this.removeBundle(app.pending.bytes, app.pending.digest);
+        continue;
+      }
       if (app.store !== undefined && current.store === undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
       app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
       await this.putApp(app);
