@@ -117,10 +117,29 @@ const RESERVED = ["price", "recovery"] as const;
  */
 export interface AppManifestOptions { strict?: boolean }
 /**
- * Keys refused in every mode, wherever a reader ignores unknown keys: kept and passed on, they would name an object's
- * prototype the moment anything spreads or assigns a manifest or a listing.
+ * Keys refused in every mode and at any level, wherever a reader ignores unknown keys: kept and passed on, they would
+ * name an object's prototype the moment anything spreads or assigns a manifest or a listing.
  */
 export const APP_FORBIDDEN_KEYS: readonly string[] = ["__proto__", "constructor", "prototype"];
+
+/**
+ * The path of an `APP_FORBIDDEN_KEYS` key anywhere in a parsed JSON value (`later.0.__proto__`), the values of ignored
+ * keys included, or undefined: WISP 1200 refuses them at any level. `JSON.parse` makes `__proto__` an own key, so
+ * `Object.keys` sees it. A stack, not recursion: a `listing.json` is read with `JSON.parse` alone, at any depth.
+ */
+export function findAppForbiddenKey(value: unknown): string | undefined {
+  const stack: [unknown, string][] = [[value, ""]];
+  for (let next = stack.pop(); next; next = stack.pop()) {
+    const [v, path] = next;
+    if (typeof v !== "object" || v === null) continue;
+    for (const key of Object.keys(v)) {
+      const at = path ? `${path}.${key}` : key;
+      if (APP_FORBIDDEN_KEYS.includes(key)) return at;
+      stack.push([(v as Record<string, unknown>)[key], at]);
+    }
+  }
+  return undefined;
+}
 /** At most this many clients in `runtime.clients`. */
 const MAX_CLIENTS = 16;
 
@@ -201,8 +220,9 @@ const bad = (field: string, detail = `${field} is not valid`): AppManifestCheck 
 export function checkAppManifest(value: unknown, options: AppManifestOptions = {}): AppManifestCheck {
   if (!isObject(value)) return bad("manifest", "The manifest is not an object");
   if (value.ghostlyApp !== undefined && value.ghostlyApp !== 1) return { ok: false, reason: "unsupported-format", detail: "ghostlyApp is not 1" };
+  const forbidden = findAppForbiddenKey(value);
+  if (forbidden !== undefined) return { ok: false, reason: "unknown-key", detail: forbidden };
   for (const key of Object.keys(value)) {
-    if (APP_FORBIDDEN_KEYS.includes(key)) return { ok: false, reason: "unknown-key", detail: key };
     if ((RESERVED as readonly string[]).includes(key)) return { ok: false, reason: "reserved-key", detail: key };
     if (options.strict && !(REQUIRED as readonly string[]).includes(key) && !(OPTIONAL as readonly string[]).includes(key)) return { ok: false, reason: "unknown-key", detail: key };
   }
@@ -225,7 +245,7 @@ export function checkAppManifest(value: unknown, options: AppManifestOptions = {
   if (!isObject(runtime)) return bad("runtime");
   for (const key of Object.keys(runtime)) {
     if (key === "host" || key === "clients") continue;
-    if (options.strict || APP_FORBIDDEN_KEYS.includes(key)) return { ok: false, reason: "unknown-key", detail: `runtime.${key}` };
+    if (options.strict) return { ok: false, reason: "unknown-key", detail: `runtime.${key}` };
   }
   if (typeof runtime.host !== "string" || !HOST.test(runtime.host)) return bad("runtime");
   // Advisory (WISP 1200 · Manifest): a writer names only the clients it knows, a reader accepts a later client's name.

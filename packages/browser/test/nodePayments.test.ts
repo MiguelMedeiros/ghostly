@@ -195,6 +195,11 @@ describe("a payment in a chat", () => {
     await expect(pay({ amount: 999 })).rejects.toThrow("does not match the authenticated request");
     await expect(pay({ requestId: "unknown" })).rejects.toThrow("does not match the authenticated request");
     await expect(pay({ target: bitcoinTarget() })).rejects.toThrow("Selected method or mint does not match");
+    // Refused, but its ecash not taken back yet: the contact may still redeem it.
+    node["desk"]["payments"].set("paid", { id: "paid", linkId: chat.id, kind: "payment", direction: "out", amount: 1_000, unit: "sat", state: "failed", createdAt: 2, requestId: request.id, token: "cashuBkept" });
+    await expect(pay()).rejects.toThrow("already has a payment");
+    expect(await intentRepository.list(), "nothing prepared").toEqual([]);
+    node["desk"]["payments"].delete("paid");
     const review = await pay();
     expect(review.payee, "the payee is the chat's contact, not what the page said").toBe(chat.peerPubKeyZ32);
     node["desk"]["payments"].set("paid", { id: "paid", linkId: chat.id, kind: "payment", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt: 2, requestId: request.id });
@@ -553,6 +558,18 @@ describe("the Cashu wallet and Lightning", () => {
     await node["refreshWallet"]();
     await node["refreshWallet"]();
     expect(events.onAttention.mock.calls.map(([e]) => e.type).sort()).toEqual(["coin", "coin", "confirmed"]);
+  });
+
+  it("chimes for a Mainnet receipt when each network's view holds only its own history", async () => {
+    const { node, view, events } = track(engine());
+    node["settings"].mints = ["https://real.example", TEST_MINT];
+    const tx = (id: string, mint: string) => ({ id, mint, kind: "ecash-in", amount: 10, fee: 0, timestamp: Date.now() + 1_000 });
+    const history = [tx("old", "https://real.example")];
+    view.mockImplementation(async (network) => ({ mints: [], balance: 0, history: history.filter((t) => (t.mint === TEST_MINT) === (network === "testnet")), feesPaid: 0 }) as never);
+    await node["refreshWallet"]();
+    history.push(tx("new", "https://real.example"), tx("test-in", TEST_MINT));
+    await node["refreshWallet"]();
+    expect(events.onAttention.mock.calls.map(([e]) => e.type)).toEqual(["coin", "coin"]);
   });
 
   it("a wallet backup that does not restore connects nothing; one that does, connects", async () => {

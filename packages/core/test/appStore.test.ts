@@ -113,6 +113,9 @@ async function build(): Promise<Vectors> {
   await no("a __proto__ key in the index", "unknown-key", { ...base, ...proto });
   await no("a __proto__ key in a listing", "unknown-key", { ...base, apps: [{ ...listing, ...proto }] });
   await no("a constructor key in a removal", "unknown-key", { ...base, removed: [{ ...base.removed[0]!, constructor: 1 }] });
+  // At any level: in the value of a key the reader ignores too.
+  await no("a __proto__ key two levels inside a later key of the index", "unknown-key", { ...base, emergency: { a: proto } });
+  await no("a constructor key two levels inside a later key of a listing", "unknown-key", { ...base, apps: [{ ...listing, titles: { a: { constructor: 1 } } }] });
   await no("no expires", "missing-key", { ...base, expires: undefined });
   await no("format version 2", "unsupported-format", { ...base, ghostlyStore: 2 });
   await no("another kind", "bad-field", { ...base, kind: "official" });
@@ -136,6 +139,7 @@ async function build(): Promise<Vectors> {
       { name: "a listing with a store's key", strict: true, refusal: "unknown-key", json: JSON.stringify({ ...listing, expires: 1 }) },
       { name: "a listing with a later key that misses a required one", strict: false, refusal: "missing-key", json: JSON.stringify({ ...listing, icon: "x", tagline: undefined }) },
       { name: "a listing with a __proto__ key, in any mode", strict: false, refusal: "unknown-key", json: JSON.stringify({ ...listing, __placeholder: {} }).replace("__placeholder", "__proto__") },
+      { name: "a listing with a __proto__ key two levels inside a later key, in any mode", strict: false, refusal: "unknown-key", json: JSON.stringify({ ...listing, later: { a: { __placeholder: {} } } }).replace("__placeholder", "__proto__") },
       { name: "a listing without urls", strict: true, refusal: "missing-key", json: JSON.stringify({ ...listing, urls: undefined }) },
       { name: "a listing with a jsDelivr branch", strict: true, refusal: "bad-field", json: JSON.stringify({ ...listing, urls: ["https://cdn.jsdelivr.net/gh/o/r@main/app.ghostlyapp"] }) },
     ],

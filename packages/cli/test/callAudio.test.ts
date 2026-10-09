@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CallAudio, type RtpTrack } from "../src/calls/audio";
 import { callIceServers, loadCallStack, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
@@ -160,6 +160,36 @@ describe("a call's audio through Opus", () => {
       a.stop(); b.stop();
     });
   }
+
+  it("catches up after the daemon stalls, so a program writing at real time is not heard later and later", async () => {
+    vi.useFakeTimers();
+    try {
+      const { a, b } = await pair(48000);
+      const frame = tone(440, 48000, 20);
+      // A program writing 20 ms every 20 ms, as a microphone does.
+      const writer = setInterval(() => a.queue.push(frame), 20);
+      a.start();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(20);
+      for (const stall of [150, 300, 800]) {
+        // The event loop is busy (a journal fsync, a Pkarr publish): nothing runs for a while. The program kept
+        // writing meanwhile; what it wrote is read once the loop is free.
+        vi.setSystemTime(Date.now() + stall);
+        for (let i = 0; i < stall / 20; i++) a.queue.push(frame);
+        await vi.advanceTimersByTimeAsync(500);
+        expect(a.queue.queuedMs, `after a ${stall} ms stall`).toBeLessThanOrEqual(40);
+      }
+      // A stall past MAX_CATCH_UP_MS is not replayed as a burst of that much audio.
+      const sent = a.sent;
+      vi.setSystemTime(Date.now() + 5000);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(a.sent - sent).toBeLessThanOrEqual(2);
+      clearInterval(writer);
+      a.stop(); b.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("stops sending the program's audio the moment it is flushed", async () => {
     const { a, b, heard } = await pair(48000);

@@ -22,6 +22,7 @@ import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
 import { setAppOpener, takedownText } from "../../ui/src/lib/apps/open";
 import { webOpener } from "../../ui/src/lib/apps/webOpener";
+import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
@@ -96,6 +97,7 @@ addEventListener("pagehide", () => webHost.announceDeparture());
 if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
   setAppOpener(webOpener({
     apps: () => servicesPlatform?.apps,
+    nameIn: nameInChat,
     closeLabel: () => profileTranslator()("common.close"),
     stoppedLabel: (title, takedown) => takedownText(title, takedown, profileTranslator()),
   }));

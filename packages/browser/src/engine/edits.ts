@@ -12,6 +12,16 @@ import { RESEND_POLICY, type ResendPolicy } from "./outbox";
  * there, at most `EDIT_SEND_LIMIT` per window; the rest wait for the window, a confirmation, or the next session. A
  * message that never left yet (`waiting`) carries its latest text when it goes, and its edit follows it.
  */
+/**
+ * A card that goes again live (`restore`, WISP 405 § Cards that went as text) goes at most once per this long: one a
+ * reconnect owes many go in a trickle, not a burst. Two edit slots of the pace (10 in 10 s), so cards going again
+ * take at most half of it and the author's live updates keep the rest; the CLI paces a card's own updates alike (2.5 s).
+ */
+export const CARD_RESTORE_GAP_MS = 2 * EDIT_RATE_WINDOW_MS / EDIT_SEND_LIMIT;
+
+/** What makes a card the same card across messages: a new message may reuse a card's id, and the newest stands for it. */
+const cardKey = (message: StoredMessage) => message.card && `${message.card.kind}\n${message.card.id}`;
+
 export interface EditQueueDeps {
   read(): Promise<StoredMessage[]>;
   /** Says one edit of this message: an error when it could not go now (it is tried again later). */
@@ -24,6 +34,7 @@ export interface EditQueueDeps {
   policy?: Partial<ResendPolicy>;
   /** How long an edit sent now waits for its confirmation before it may go again (the DHT floor takes minutes). */
   receiptMs?: number | (() => number);
+  restoreGapMs?: number;
 }
 
 export class EditQueue {
@@ -32,6 +43,8 @@ export class EditQueue {
   private readonly now: () => number;
   /** Per message: the edit number last sent, when, and how many times that number went. */
   private sent = new Map<string, { seq: number; at: number; attempts: number; receiptMs: number }>();
+  /** When a card that goes again last went (`CARD_RESTORE_GAP_MS`). */
+  private restoredAt = -Infinity;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private flushing: Promise<void> | null = null;
   private again = false;
@@ -94,14 +107,21 @@ export class EditQueue {
     const now = this.now();
     // Edits not said yet first, oldest first; then those said without a confirmation: a resend never holds a new edit back.
     const said = (m: StoredMessage) => this.sent.get(m.id)?.seq === m.edit!.seq ? 1 : 0;
-    const due = (await this.deps.read())
+    const rows = await this.deps.read();
+    // The newest message of mine of each card: a card going again from an older one would show an older version.
+    const newest = new Map<string, number>();
+    for (const m of rows) { const key = m.sender === "me" && cardKey(m); if (key && m.timestamp > (newest.get(key) ?? -Infinity)) newest.set(key, m.timestamp); }
+    const due = rows
       .filter(m => m.sender === "me" && m.edit?.pending && m.wireId)
       .sort((a, b) => said(a) - said(b) || a.edit!.at - b.edit!.at);
+    const gap = this.deps.restoreGapMs ?? CARD_RESTORE_GAP_MS;
     let next = Infinity;
     for (const message of due) {
       const edit = message.edit!;
       // Past the resend window: given up on, as an unconfirmed message is.
       if (now - edit.at >= this.policy.windowMs) { this.sent.delete(message.id); await this.deps.settle(message.id, edit.seq); continue; }
+      // A card going again that a newer message of the same card stands for now: dropped, not sent.
+      if (edit.restore && message.timestamp < (newest.get(cardKey(message) || "") ?? -Infinity)) { this.sent.delete(message.id); await this.deps.settle(message.id, edit.seq); continue; }
       // Never sent yet: it goes with its latest text, and its edit after it.
       if (message.delivery === "waiting") continue;
       if (!this.deps.ready()) return;
@@ -112,6 +132,8 @@ export class EditQueue {
         const at = last.at + Math.max(wait, last.receiptMs);
         if (at > now) { next = Math.min(next, at); continue; }
       }
+      // Cards going again go one per gap; a live edit after them is not held back.
+      if (edit.restore && this.restoredAt + gap > now) { next = Math.min(next, this.restoredAt + gap); continue; }
       const pace = this.pace.wait();
       if (pace > 0) { next = Math.min(next, now + pace); break; }
       if (!this.pace.take()) break;
@@ -119,6 +141,7 @@ export class EditQueue {
       const error = await this.deps.send({ id: message.wireId!, e: edit.seq, ts: edit.at, m: message.text, ...(message.preview && { pv: message.preview }), ...(message.card && { sc: message.card }) }, message);
       // This one cannot go now (too long for the DHT, its message not confirmed yet): the others still may.
       if (error) continue;
+      if (edit.restore) this.restoredAt = now;
       this.sent.set(message.id, { seq: edit.seq, at: now, attempts: (last?.seq === edit.seq ? last.attempts : 0) + 1, receiptMs });
       next = Math.min(next, now + receiptMs);
     }

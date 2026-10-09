@@ -3,7 +3,7 @@ import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
-import { canRetryFile, fileHeld, fileStatus, groupFileHint, groupFileOffered, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, groupFileOffered, stalledAction } from "../../lib/fileStatus";
 import { formatFileSize } from "../../lib/format";
 import type { ChatFile } from "../../lib/types";
 import {
@@ -351,7 +351,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const failed = transfer?.state === "failed";
   const canRetry = canRetryFile(file, transfer, platform);
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
-  const reason = retryError || (failed ? transfer.error : undefined);
+  const reason = retryError ? { text: retryError } : failedReason(transfer, t);
   const hint = reason ? null : groupFileHint(file, transfer, t);
   // A group's voice message this device did not fetch by itself (automatic downloads off): its Download (WISP 503).
   const offered = groupFileOffered(file, transfer) && !!platform?.fileAction;
@@ -464,7 +464,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
           {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
       )}
-      {(reason || hint) && why && <WhyText id={whyId} testId="voice-why-text">{reason || hint}</WhyText>}
+      {(reason || hint) && why && <WhyText id={whyId} testId="voice-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
     </div>
   );
 }

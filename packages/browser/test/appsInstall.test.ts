@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { canonicalJsonBytes } from "@ghostly/core";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { canonicalJsonBytes, toBase64Url, utf8Encode } from "@ghostly/core";
 import { fileBytes } from "../src/shared/fileBytes";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, keyOf,
@@ -204,6 +205,34 @@ describe("updates", () => {
     expect((await again.store.install({ digest: v2.digest, grant: ["chat"] })).equivocation).toBeUndefined();
   });
 
+  it("an app uninstalled while its update downloads stays uninstalled, with neither version's files kept", async () => {
+    for (const permissions of [[], ["chat", "name"]] as const) {
+      await emptyProfile();
+      const { store, v1 } = await installed();
+      const v2 = await bundle({ sequence: 2, permissions: [...permissions] });
+      net.put(PINNED_URL, v2.bytes);
+      await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+      await store.addStore({ url: STORE_URL });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let downloading!: () => void;
+      const started = new Promise<void>((resolve) => { downloading = resolve; });
+      const answer = net.fetch.getMockImplementation()!;
+      net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === PINNED_URL) { downloading(); await held; }
+        return answer(input, init);
+      });
+      const check = store.checkUpdates();
+      await started;
+      await store.uninstall({ ref: v1.ref });
+      release();
+      expect(await check, permissions.length ? "the update that waits" : "the update that installs by itself").toEqual([]);
+      expect(await appRows()).toEqual([]);
+      expect(await bundleIds()).toEqual([]);
+      net.fetch.mockImplementation(answer);
+    }
+  });
+
   it("with no app installed the check asks nothing", async () => {
     await net.putStore(await storeFiles());
     expect(await apps(net).checkUpdates()).toEqual([]);
@@ -270,6 +299,25 @@ describe("an app installed from a store updates only to the version that store l
     expect(net.requests).not.toContain(HEAD);
     expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest, from: pinned2 });
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+  });
+
+  it("a listing that names a version its URL does not hold costs one peek per index, never the whole bundle", async () => {
+    const { store, v1 } = await fromStore();
+    const lie = { ...listing(v1, [PINNED_URL]), sequence: 99, digest: toBase64Url(sha256(utf8Encode("no bundle has this"))) };
+    await net.putStore(await storeFiles({ sequence: 2, apps: [lie] }));
+    net.fetch.mockClear();
+    const reads = () => net.fetch.mock.calls.filter(([url]) => String(url) === PINNED_URL).map(([, init]) => ((init?.headers ?? {}) as Record<string, string>).range ? "peek" : "whole");
+    for (let visit = 0; visit < 3; visit++) expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    expect(reads(), "peeked once, never read whole").toEqual(["peek"]);
+    // The store's next index: peeked again once; then the version it lists at a URL that holds it installs.
+    await net.putStore(await storeFiles({ sequence: 3, apps: [lie] }));
+    for (let visit = 0; visit < 2; visit++) await store.checkUpdates();
+    expect(reads()).toEqual(["peek", "peek"]);
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 4, apps: [listing(v2, [PINNED_URL])] }));
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest });
   });
 
   it("another store's listing of a newer version is not taken; once the person removes the store, the sources count again", async () => {
@@ -656,6 +704,20 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     await store.entry({ ref: v1.ref, runAnyway: true });
     net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v1.digest])]));
     await store.checkUpdates();
+    await cutOff(store, v1.ref);
+  });
+
+  it("the stores are not read again at each call (an index may be 4 MiB), and a refresh's removal still stops the next one", async () => {
+    const { v1, store } = await running();
+    await net.putStore(await storeFiles());
+    await store.addStore({ url: STORE_URL });
+    const getAll = vi.spyOn(IDBObjectStore.prototype, "getAll");
+    const storeReads = () => getAll.mock.contexts.filter((s) => (s as IDBObjectStore).name === "appStores").length;
+    for (let i = 0; i < 20; i++) await store.storageGet({ ref: v1.ref, scope: "chat-1", key: "game" });
+    await store.chatRunnable({ ref: v1.ref });
+    expect(storeReads()).toBe(1);
+    await net.putStore(await storeFiles({ sequence: 2, removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.refreshStores();
     await cutOff(store, v1.ref);
   });
 

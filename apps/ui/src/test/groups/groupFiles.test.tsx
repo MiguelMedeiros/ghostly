@@ -136,7 +136,7 @@ describe("a group's file bubbles", () => {
   });
 
   it("nobody connected has it: said, and what happens next behind the ⓘ", async () => {
-    const { user } = openGroup({ [REPORT.id]: { state: "transferring", stage: "waiting", transferred: 0, size: REPORT.size, direction: "in", note: "Nobody you are connected to has this file yet" } });
+    const { user } = openGroup({ [REPORT.id]: { state: "transferring", stage: "waiting", transferred: 0, size: REPORT.size, direction: "in", wait: "nobody", note: "Nobody you are connected to has this file yet" } });
     const bubble = await vi.waitFor(() => within(row(`${ALICE}:1:1`)).getByTestId("file-bubble"));
     expect(within(bubble).getByTestId("file-status")).toHaveTextContent("Nobody you are connected to has this file yet");
     await user.click(within(bubble).getByTestId("file-why"));

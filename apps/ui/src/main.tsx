@@ -19,6 +19,7 @@ import { openProfile } from "./lib/profileStart";
 import { listen } from "@tauri-apps/api/event";
 import { setAppOpener } from "./lib/apps/open";
 import { desktopOpener } from "./lib/apps/desktopOpener";
+import { nameInChat } from "./lib/apps/nameInChat";
 import { appWithContact } from "./lib/apps/running";
 import { loadSettings } from "./lib/settings";
 import { locales } from "./locales";
@@ -28,6 +29,8 @@ import { androidApp } from "./lib/touchOnly";
 import { followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares } from "./desktop/android";
 
 async function boot() {
+  // Asked first, so Rust starts GStreamer while the profile opens (see createDesktopHost below).
+  const calls = nativeCallSupport();
   let profile = "";
   try {
     profile = await invoke<string>("get_profile");
@@ -56,7 +59,9 @@ async function boot() {
   const version = await getVersion().catch(() => "0.0.0");
   // What a handoff reads and writes of a profile's storage (WISP 06 § The handoff), before the host starts the engine.
   setHandoffProfileHost(handoffProfileHost(version, "desktop"));
-  const host = createDesktopHost(version, await nativeCallSupport());
+  // Whether calls work here is not waited for: on Linux the answer starts GStreamer (0.6 s on a first launch), and
+  // the page is drawn meanwhile. The engine starts once it has come.
+  const host = createDesktopHost(version, calls);
   setBrowserHost(host);
   // The Android app: its system bars follow the theme, shares from other apps open the Share to… picker, and the
   // page knows when the app is in the background (its WebView never says so).
@@ -71,7 +76,7 @@ async function boot() {
     const language = loadSettings().language;
     return appWithContact(title, linkId, translateWith(locales[language] || locales.en, locales[language] ? language : "en"));
   };
-  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, windowTitle }));
+  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
   // The app is exiting (apps/desktop's lib.rs `on_run_event`): contacts hear it now, in the moment it waits for this.

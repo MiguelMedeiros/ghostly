@@ -104,12 +104,15 @@ export function followSystemBars(invoke: Invoke, root: HTMLElement = document.do
 /**
  * "Share to Ghostly" from another app: taken when the app starts (a share can be what started it) and whenever Rust
  * says one arrived. Its files are read whole into the page, as a paste's; one too large to paste is left out. The page
- * then shows the Share to… picker, as the web app's share target does.
+ * then shows the Share to… picker, as the web app's share target does. A share taken later wins over one still
+ * being read: a big share's files that end late never replace the one made after it.
  */
 export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
+  let latest = 0;
   const take = async () => {
     const shared = await invoke<Shared | null>("incoming_share_take");
     if (!shared) return;
+    const mine = ++latest;
     const clips: ClipboardFile[] = shared.files
       .filter((file) => file.size <= PLATFORM_PASTE_MAX)
       .map(({ token, ...file }) => ({
@@ -121,6 +124,7 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
         },
       }));
     const files = await readPlatformFiles(clips);
+    if (mine !== latest) return;
     receiveShare({ title: shared.title, text: shared.text, url: "", files });
     if (location.hash !== "#/shared") location.hash = "#/shared";
   };

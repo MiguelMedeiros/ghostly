@@ -42,6 +42,12 @@ describe("the text a share puts in the draft", () => {
     expect(takeShareFor("chat-1")?.text).toBe("hi");
     expect(takeShareFor("chat-1")).toBeNull();
   });
+
+  it("an empty share never clears the one that waits", () => {
+    receiveShare(share({ text: "newer text" }));
+    receiveShare(share());
+    expect(incomingShare()?.text).toBe("newer text");
+  });
 });
 
 describe("in the composer", () => {
@@ -115,6 +121,14 @@ describe("the Share to… picker", () => {
     await user.click(screen.getByTestId("share-group"));
     expect(takeShareFor(groupChat("g1"))?.files.map((f) => f.name)).toEqual(["a.png", "b.png"]);
     expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
+  });
+
+  it("shows the shared text and file name in their own direction, so in Arabic an English text keeps its '!' at its end", () => {
+    receiveShare(share({ text: "Look at this, it's great!", files: [file("Quarterly report (final draft).pdf")] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveAttribute("dir", "auto");
+    expect(screen.getByTestId("share-files")).toHaveTextContent("Quarterly report (final draft).pdf");
+    expect(screen.getByTestId("share-files")).toHaveAttribute("dir", "auto");
   });
 
   it("Cancel drops the share and goes home", async () => {

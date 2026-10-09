@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createIdentity, encodeCommunityLink, encodeGroupEntryLink } from "@ghostly/core";
+import { MAX_GROUP_NAME_LENGTH, createIdentity, encodeCommunityLink, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { GroupLinkPanel } from "../../components/GroupLinkPanel";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
@@ -62,6 +62,7 @@ describe("GroupMembersDialog", () => {
     engine.on("makeGroupAdmin", () => undefined).on("removeGroupMember", () => undefined);
     expect(within(row(ME)).queryByRole("button")).not.toBeInTheDocument();
     await user.click(within(row(ALICE)).getByTestId("group-make-admin"));
+    await user.click(screen.getByTestId("group-make-admin-confirm"));
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
     await user.click(screen.getByTestId("group-remove-confirm"));
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
@@ -87,6 +88,32 @@ describe("GroupMembersDialog", () => {
     expect(screen.getByTestId("group-members-dialog")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(engine.callsTo("removeGroupMember")).toEqual([]);
+  });
+
+  it.each(["mesh", "community"] as const)("asks before handing the admin role over (%s), naming who gets it and what the admin gives up; Cancel and Escape change nothing", async profile => {
+    const { user, engine, onClose } = members_(groupView({ status: "active", isAdmin: true, profile, members }));
+    engine.on("makeGroupAdmin", () => undefined);
+    const button = within(row(BOB)).getByTestId("group-make-admin");
+    expect(button, "the label says the role moves, not that an admin is added").toHaveTextContent("Hand over admin");
+    await user.click(button);
+    const ask = screen.getByTestId("group-make-admin-dialog");
+    expect(ask).toHaveAccessibleName("Make Bob the admin?");
+    expect(ask).toHaveAccessibleDescription("You will no longer be the admin. Only Bob can then rename the group, change its picture and link, invite or remove members, and give the role back.");
+    expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(engine.callsTo("makeGroupAdmin")).toEqual([]);
+    await user.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-make-admin-dialog")).not.toBeInTheDocument();
+    await user.click(within(row(ALICE)).getByTestId("group-make-admin"));
+    expect(screen.getByTestId("group-make-admin-dialog")).toHaveAccessibleName("Make Alice the admin?");
+    // Escape, as the browser says it to the topmost dialog: only the question closes.
+    act(() => { screen.getByTestId("group-make-admin-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.queryByTestId("group-make-admin-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-members-dialog")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(engine.callsTo("makeGroupAdmin")).toEqual([]);
+    await user.click(within(row(ALICE)).getByTestId("group-make-admin"));
+    await user.click(within(screen.getByTestId("group-make-admin-dialog")).getByRole("button", { name: "Hand over admin" }));
+    expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
   });
 
   it("gives a community group's member the link's QR too, and none of the admin's controls", async () => {
@@ -182,6 +209,17 @@ describe("GroupMembersDialog", () => {
     const most = Array.from({ length: 31 }, (_, i) => member({ key: String(i).padEnd(52, "y"), me: i === 0 }));
     members_(groupView({ status: "active", isAdmin: true, members: most, invited: ["link-pending"] }), [paired({ id: "link-carol" }), paired({ id: "link-pending" })]);
     expect(screen.getByTestId("group-invite")).toBeDisabled();
+    expect(screen.getByTestId("group-invite-full")).toHaveTextContent("The group is full (32 of 32), counting invitations not answered yet (1). Nobody else can be invited until someone leaves.");
+  });
+
+  it("says a group of 32 members is full, and nothing while there is room", () => {
+    const all = Array.from({ length: 32 }, (_, i) => member({ key: String(i).padEnd(52, "y"), me: i === 0 }));
+    const { unmount } = members_(groupView({ status: "active", isAdmin: true, members: all }), [paired({ id: "link-carol" })]);
+    expect(screen.getByTestId("group-invite-full")).toHaveTextContent("The group is full (32 of 32). Nobody joins until someone leaves.");
+    unmount();
+    members_(groupView({ status: "active", isAdmin: true, members: all.slice(0, 30), invited: ["link-pending"] }), [paired({ id: "link-carol" })]);
+    expect(screen.queryByTestId("group-invite-full")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-invite")).toBeEnabled();
   });
 
   it("says when there is nobody left to invite", () => {
@@ -212,7 +250,8 @@ describe("GroupLinkPanel", () => {
   it("creates the group's link", async () => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin()} />);
     engine.on("enableGroupLink", () => ({ link: entryLink }));
-    expect(screen.getByText(/The link is off: nobody can join with it/)).toBeInTheDocument();
+    // Turning it on makes a new link: the words do not promise the old one works again.
+    expect(screen.getByTestId("group-link")).toHaveTextContent("The link is off: nobody can join with it, and the link shared before will not work again. Turning it on makes a new link to share.");
     await user.click(screen.getByRole("button", { name: "Turn on the link" }));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id }]);
   });
@@ -250,6 +289,7 @@ describe("GroupLinkPanel", () => {
   it("replaces the link, or turns it off", async () => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
     engine.on("enableGroupLink", () => ({ link: entryLink })).on("disableGroupLink", () => undefined);
+    expect(screen.getByTestId("group-link-disable")).toHaveAttribute("title", "The link stops working. Turning it on makes a new link to share again.");
     await user.click(screen.getByTestId("group-link-reset"));
     await user.click(screen.getByTestId("group-link-disable"));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id, reset: true }]);
@@ -296,6 +336,13 @@ describe("NewGroupDialog", () => {
     // A community is what a new group is unless the person picks Private.
     expect(engine.callsTo("createGroup")).toEqual([{ name: "Climbing", profile: "community" }]);
     expect(onCreated).toHaveBeenCalledWith("new-group");
+  });
+
+  it("takes a name as long as Rename does, and no longer", async () => {
+    const { user, engine } = open();
+    engine.on("createGroup", () => ({ groupId: "long" }));
+    await user.type(screen.getByTestId("new-group-name"), `${"x".repeat(MAX_GROUP_NAME_LENGTH)}yz{Enter}`);
+    expect(engine.callsTo("createGroup")).toEqual([{ name: "x".repeat(MAX_GROUP_NAME_LENGTH), profile: "community" }]);
   });
 
   it("makes a private group (up to 32, contacts or a link) when that kind is picked", async () => {

@@ -11,6 +11,7 @@ import {
   type Identity,
   type DiscoveryChange,
   type DiscoveryStatus,
+  type CallMedia,
   type GhostRecord,
   type LocalFetch,
   type PkarrRequestOptions,
@@ -27,10 +28,11 @@ import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { getIdentifier } from "@tauri-apps/api/app";
 import type { PubkyCookieSession } from "@ghostly/browser/host";
+import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
-import { desktopAtproto } from "./atproto";
+import { desktopAtprotoHost } from "./atproto";
 import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appCommands";
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
@@ -62,18 +64,30 @@ const STATUS_EVERY_MS = 2_000;
 export function createTauriTransport(): PkarrTransport {
   let status: DiscoveryStatus | undefined;
   let askedAt = 0;
+  let later: ReturnType<typeof setTimeout> | null = null;
   const listeners = new Set<(change?: DiscoveryChange) => void>();
-  // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering.
-  const refresh = () => {
-    if (Date.now() - askedAt < STATUS_EVERY_MS) return;
+  // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering, and
+  // of the path changing (no change named: the panel shows it, links do nothing). A read before any path is known is
+  // asked about at once: a new chat's first writes (an inviter's first envelope, a joiner's claim) go before its first
+  // reads, and the pair can be live within a second of those. Any other read or write within 2 s of the last ask is asked
+  // about when the 2 s are up, as it may be the last for a while.
+  let asks = 0;
+  const refresh = (read = false) => {
+    const wait = read && !status?.path ? 0 : askedAt + STATUS_EVERY_MS - Date.now();
+    if (wait > 0) { later ??= setTimeout(() => { later = null; refresh(); }, wait); return; }
     askedAt = Date.now();
+    const ask = ++asks;
     void invoke<DiscoveryStatus>("pkarr_status").then((next) => {
+      // An answer to an older ask, come after a newer one's.
+      if (ask < asks && status) return;
       const health = (s?: DiscoveryStatus) => JSON.stringify(s?.relays.map((r) => [r.relay, r.state]) ?? []);
       const changed = health(next) !== health(status);
+      const moved = JSON.stringify(next.path) !== JSON.stringify(status?.path ?? null);
       // A relay that was failing answers again: links look and publish now rather than at their pace.
       const recovered = !!status && next.relays.some((r) => r.state === "ok" && status!.relays.some((was) => was.relay === r.relay && was.state !== "ok"));
       status = next;
       if (changed) for (const listener of listeners) listener(recovered ? "recovered" : "tripped");
+      else if (moved) for (const listener of listeners) listener();
     }).catch(() => {});
   };
   return {
@@ -91,7 +105,7 @@ export function createTauriTransport(): PkarrTransport {
         publicKeyZ32: pubKeyZ32,
         background: !!options?.background,
         urgent: !!options?.urgent,
-      }).finally(refresh);
+      }).finally(() => refresh(true));
       // Rust verified the signature while resolving.
       return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
     },
@@ -290,11 +304,12 @@ export function desktopApps(runsApps: boolean) {
   };
 }
 
-/** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
-export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
-  const { node: callOptions, callMedia } = nativeCallOptions(calls);
-  // Native calls capture and play in Rust: the microphones, cameras and speakers to choose from are GStreamer's.
-  if (callMedia) setDeviceSource(nativeDevices);
+/**
+ * `calls`: what Rust says about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. It may still be
+ * coming: on Linux it starts GStreamer, 0.6 s on a first launch, and the page is drawn meanwhile. The engine starts
+ * once it is there, since it tells contacts whether this app takes calls.
+ */
+export function createDesktopHost(version: string, calls: NativeCallSupport | null | Promise<NativeCallSupport | null> = null) {
   // The title bar follows the app's Light / Dark choice (null: the system's). On a Mac this is the app's appearance, so
   // the page's `prefers-color-scheme` follows it too, and comes back to the system's with System.
   setWindowThemeSink((value) => void invoke("plugin:window|set_theme", { label: "main", value }).catch(() => {}));
@@ -312,21 +327,31 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
   const apps = desktopApps(appsPlatform());
-  return createInPageHost({
+  const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
+    // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
+    pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
+    // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
+    defaultWallets: defaultWalletsAllowed(desktopUnderTest),
+    ...apps.node, ...macPeerBudget() };
+  let callMedia: CallMedia | undefined;
+  const heard = (said: NativeCallSupport | null) => {
+    const options = nativeCallOptions(said);
+    Object.assign(node, options.node);
+    callMedia = options.callMedia;
+    // Native calls capture and play in Rust: the microphones, cameras and speakers to choose from are GStreamer's.
+    if (callMedia) setDeviceSource(nativeDevices);
+  };
+  const callsKnown = calls instanceof Promise ? calls.then(heard) : heard(calls);
+  const host = createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
     ...apps.host,
-    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
-      // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
-      pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
-      // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
-      defaultWallets: defaultWalletsAllowed(desktopUnderTest),
-      ...apps.node, ...macPeerBudget(), ...callOptions },
-    callMedia,
+    node,
     onServer: serveServiceWindows,
     oidc: desktopOidc,
-    atproto: desktopAtproto,
+    // Not in the Android app yet (no redirect the phone receives): Bluesky is not offered there.
+    atproto: desktopAtprotoHost(),
     // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
     fullscreenWindow: (on) => invoke("plugin:window|set_fullscreen", { label: "main", value: on }),
@@ -355,5 +380,10 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
       await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId });
     },
+  });
+  const connect = host.connect;
+  return Object.defineProperties(host, {
+    connect: { value: async (...args: Parameters<typeof connect>) => { await callsKnown; return connect(...args); } },
+    callMedia: { get: () => callMedia },
   });
 }

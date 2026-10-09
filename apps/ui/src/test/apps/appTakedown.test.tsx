@@ -50,7 +50,7 @@ beforeEach(() => {
   run = { status: "ok" };
   forgetInstalledApps();
   fakeEngine.on("appList", () => [installed()]);
-  open = webOpener({ apps: () => host, closeLabel: () => "Close", stoppedLabel: (title, takedown) => takedownText(title, takedown, translateWith(locales.en, "en")) });
+  open = webOpener({ apps: () => host, nameIn: () => undefined, closeLabel: () => "Close", stoppedLabel: (title, takedown) => takedownText(title, takedown, translateWith(locales.en, "en")) });
 });
 afterEach(() => {
   document.querySelectorAll("[data-place=alone]").forEach((node) => node.remove());

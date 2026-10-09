@@ -1,9 +1,9 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, type IncomingMessage, type PairingState, type SignedPacket, type WireEdit } from "@ghostly/core";
+import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { EditBuffer, EditQueue } from "../src/engine/edits";
+import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet } from "./helpers/fakeNative";
@@ -277,10 +277,10 @@ const t = async (linkId: string, messageId: string) => (await db.getMessages(lin
 describe("EditQueue", () => {
   const rows = new Map<string, StoredMessage>();
   const row = (n: number, fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "l", id: `me_${n}`, wireId: String(n).padStart(22, "W"), text: `t${n}`, sender: "me", timestamp: 1, via: "datalink", delivery: "delivered", edit: { seq: 1, at: 1_000 + n, history: [], pending: true }, ...fields });
-  function queue(now: { t: number }, ready = true) {
+  function queue(now: { t: number } | null, ready = true, receiptMs = 1_000) {
     const sent: WireEdit[] = [], settled: [string, number][] = [];
     const q = new EditQueue({
-      read: async () => [...rows.values()], ready: () => ready, now: () => now.t, receiptMs: 1_000,
+      read: async () => [...rows.values()], ready: () => ready, now: now ? () => now.t : () => Date.now(), receiptMs,
       send: edit => { sent.push(edit); return null; },
       settle: async (id, seq) => { settled.push([id, seq]); const r = rows.get(id)!; rows.set(id, { ...r, edit: { ...r.edit!, pending: undefined } }); },
     });
@@ -335,6 +335,61 @@ describe("EditQueue", () => {
     const { q, sent } = queue({ t: 10_000 }, false);
     await q.flush();
     expect(sent).toEqual([]);
+  });
+
+  describe("a card that goes again (`restore`)", () => {
+    const task = (id: string, progress: number) => readStatusCard({ kind: "task", id, title: id, status: "running", progress })!;
+    /** A card of mine due to go again live, as `restoreCards` leaves it: an edit of the card alone, marked `restore`. */
+    const restore = (n: number, card: StatusCard, timestamp = n) => row(n, { timestamp, card, edit: { seq: 1, at: 1_000 + n, history: [], pending: true, restore: true } });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("goes one per gap, by its own timer, while my own edit is not held back", async () => {
+      vi.useFakeTimers({ now: 100_000 });
+      for (const n of [1, 2, 3]) rows.set(`me_${n}`, restore(n, task(`t${n}`, 10)));
+      const { q, sent } = queue(null, true, 60_000);
+      await q.flush();
+      expect(sent.map(e => e.m)).toEqual(["t1"]);
+      await vi.advanceTimersByTimeAsync(CARD_RESTORE_GAP_MS - 1);
+      expect(sent.map(e => e.m)).toEqual(["t1"]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sent.map(e => e.m)).toEqual(["t1", "t2"]);
+      // An edit of mine meanwhile goes at once: the gap is for cards going again, not for live updates.
+      rows.set("me_9", row(9, { edit: { seq: 1, at: 100_500, history: [], pending: true } }));
+      await q.flush();
+      expect(sent.map(e => e.m)).toEqual(["t1", "t2", "t9"]);
+      await vi.advanceTimersByTimeAsync(CARD_RESTORE_GAP_MS);
+      expect(sent.map(e => e.m)).toEqual(["t1", "t2", "t9", "t3"]);
+      await vi.advanceTimersByTimeAsync(CARD_RESTORE_GAP_MS * 5);
+      expect(sent).toHaveLength(4);
+    });
+
+    it("a card updated again while the others wait sends only its newest version", async () => {
+      vi.useFakeTimers({ now: 100_000 });
+      rows.set("me_1", restore(1, task("a", 10)));
+      rows.set("me_2", restore(2, task("b", 10)));
+      const { q, sent } = queue(null, true, 60_000);
+      await q.flush();
+      expect(sent.map(e => e.id)).toEqual([row(1).wireId]);
+      // The bot updates b before its restore went: one edit, the newer number, the newer card.
+      const b = task("b", 80);
+      rows.set("me_2", row(2, { timestamp: 2, text: "b 80%", card: b, edit: { seq: 2, at: 100_100, history: [], pending: true } }));
+      await q.flush();
+      await vi.advanceTimersByTimeAsync(CARD_RESTORE_GAP_MS * 3);
+      expect(sent.filter(e => e.id === row(2).wireId).map(e => [e.e, e.sc])).toEqual([[2, b]]);
+    });
+
+    it("a newer message of the same card while it waits: the older one's restore is dropped, not sent", async () => {
+      vi.useFakeTimers({ now: 100_000 });
+      rows.set("me_1", restore(1, task("a", 10)));
+      rows.set("me_2", restore(2, task("b", 10)));
+      const { q, sent, settled } = queue(null, true, 60_000);
+      await q.flush();
+      // The bot sends task b again, live, as a new message: it stands for b now.
+      rows.set("me_3", row(3, { timestamp: 50, card: task("b", 90), edit: undefined }));
+      await vi.advanceTimersByTimeAsync(CARD_RESTORE_GAP_MS * 3);
+      expect(sent.map(e => e.id)).toEqual([row(1).wireId]);
+      expect(settled).toContainEqual(["me_2", 1]);
+    });
   });
 });
 

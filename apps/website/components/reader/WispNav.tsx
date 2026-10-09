@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
+import { IntentLink } from "@/components/site/IntentLink";
 
 export type WispNavGroup = {
   id: string;
@@ -110,10 +110,10 @@ export function WispNav({ groups, current, t }: { groups: WispNavGroup[]; curren
                 <ul>
                   {g.items.map((x) => (
                     <li key={x.id} data-child={x.child} data-assigned={x.assigned}>
-                      <Link href={`/wisps/${x.slug}`} aria-current={x.slug === current ? "page" : undefined}>
+                      <IntentLink href={`/wisps/${x.slug}`} aria-current={x.slug === current ? "page" : undefined}>
                         <span className="mono">{x.number}</span>
                         {x.name}
-                      </Link>
+                      </IntentLink>
                     </li>
                   ))}
                 </ul>

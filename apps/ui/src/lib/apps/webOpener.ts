@@ -21,8 +21,8 @@ export interface WebOpenerOptions {
   closeLabel: () => string;
   /** "Chess was stopped: its maker revoked this version", in the person's language (an app opened alone). */
   stoppedLabel?: (title: string, takedown: AppTakedown) => string;
-  /** The person's name in a chat, for an app granted `name`. */
-  nameIn?: (linkId: string) => string | undefined;
+  /** The person's name in a chat, for an app granted `name`: what the contact was told, or none (`nameInChat`). */
+  nameIn: (linkId: string) => string | undefined;
   onStop?: (ref: string, reason: AppStopReason) => void;
 }
 
@@ -44,7 +44,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     const internet = entry.permissions.includes("internet");
     if (!(await runnerAvailable(runnerFor(host, entry), fetch, internet))) throw new Error("This server does not send the policy apps run under");
 
-    const launch = { ...entry, chat: linkId ? { linkId, name: nameIn?.(linkId) } : null };
+    const launch = { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null };
     const view: AppView = {
       theme: () => (document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"),
       locale: () => document.documentElement.lang || navigator.language,
@@ -93,6 +93,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     const title = document.createElement("span");
     title.className = "flex-1 truncate font-medium";
     title.setAttribute("data-testid", "mini-app-title");
+    title.dir = "auto";
     title.textContent = entry.title;
     const close = document.createElement("button");
     close.type = "button";

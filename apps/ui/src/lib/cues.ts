@@ -99,23 +99,41 @@ export function playCue(cue: CueName, { chat, mention = false, key }: { chat?: s
 }
 
 /**
- * Messages in one chat that come together (a catch-up, a bot's answer in pieces) are one sound: after a chat's message
- * sound, the next one from that chat plays no sooner than this.
+ * Messages that come together (a catch-up, a bot's answer in pieces) are one sound: after a message sound, the next one
+ * from that chat, and from any other chat (the app restarts and every chat catches up at once), plays no sooner than this.
  */
 export const MESSAGE_BURST_MS = 1_500;
 const burstAt = new Map<string, number>();
+/** When the last message sound of any chat played. */
+let anyBurstAt: number | undefined;
 
-/** Whether a message sound for `chat` may play now, and if so, marks it played. */
+const inBurst = (last: number | undefined, now: number) => last !== undefined && now - last < MESSAGE_BURST_MS && now >= last;
+
+/** Whether a message sound for `chat` may play now (no burst of its own, nor of all chats), and if so, marks it played. */
 export function firstOfBurst(chat: string, now = Date.now()): boolean {
-  const last = burstAt.get(chat);
-  if (last !== undefined && now - last < MESSAGE_BURST_MS && now >= last) return false;
+  if (inBurst(burstAt.get(chat), now) || inBurst(anyBurstAt, now)) return false;
+  burstAt.delete(chat);
   burstAt.set(chat, now);
+  anyBurstAt = now;
   if (burstAt.size > 256) burstAt.delete(burstAt.keys().next().value as string);
   return true;
 }
 
+/**
+ * Messages that come together are one system notification per chat too: after one, the next for that chat shows no
+ * sooner than MESSAGE_BURST_MS. Another chat's still shows, which a notification is for. Marks it shown when it may.
+ */
+const noticeAt = new Map<string, number>();
+export function firstNoticeOfBurst(chat: string, now = Date.now()): boolean {
+  if (inBurst(noticeAt.get(chat), now)) return false;
+  noticeAt.delete(chat);
+  noticeAt.set(chat, now);
+  if (noticeAt.size > 256) noticeAt.delete(noticeAt.keys().next().value as string);
+  return true;
+}
+
 /** Forgets what played (tests). */
-export function resetCues(): void { lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); }
+export function resetCues(): void { lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); anyBurstAt = undefined; noticeAt.clear(); }
 
 /** The chat on screen, as the mute store names it, for cues played from inside its messages (a spoiler, a delete). */
 export const CueChat = createContext<string | undefined>(undefined);
