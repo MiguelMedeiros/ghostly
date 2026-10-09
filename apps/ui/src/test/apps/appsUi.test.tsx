@@ -552,6 +552,40 @@ describe("with the apps flag on", () => {
     expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
   });
 
+  it("a store at the format's limit of 4096 listings opens with its first 50, Show more for the next, and a search over them all", async () => {
+    const apps = Array.from({ length: 4096 }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` }));
+    fakeEngine.on("appList", () => [installed({ ref: `${KEY}/app4000` })]).on("appCheckUpdates", () => [])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+        name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps,
+        removed: [{ ref: `${KEY}/app4001`, digest: DIGEST, reason: "Malware", at: 1 }] }]);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByText("Big"));
+    const listing = screen.getByTestId("app-store-listing");
+    expect(within(listing).getAllByTestId("app-listing")).toHaveLength(50);
+    await user.click(screen.getByTestId("app-store-more"));
+    expect(within(listing).getAllByTestId("app-listing")).toHaveLength(100);
+    expect(screen.getByTestId("app-store-more")).toHaveTextContent("Show more (3996)");
+
+    await user.type(screen.getByTestId("app-store-filter"), "App 400");
+    const rows = within(listing).getAllByTestId("app-listing");
+    expect(rows.map((r) => r.getAttribute("data-ref"))).toEqual([400, ...Array.from({ length: 10 }, (_, i) => 4000 + i)].map((i) => `${KEY}/app${i}`));
+    expect(screen.queryByTestId("app-store-more")).not.toBeInTheDocument();
+    // An installed listing and a removed one still say so.
+    expect(rows[1]).toHaveTextContent("Installed");
+    expect(rows[2]).toHaveTextContent("Malware");
+    expect(within(rows[2]).queryByTestId("app-listing-install")).not.toBeInTheDocument();
+    await user.clear(screen.getByTestId("app-store-filter"));
+    await user.type(screen.getByTestId("app-store-filter"), "nothing like it");
+    expect(within(listing).queryByTestId("app-listing")).not.toBeInTheDocument();
+    expect(listing).toHaveTextContent("No app in this store matches.");
+
+    // Closed and opened again: the first page, not every listing shown before.
+    await user.clear(screen.getByTestId("app-store-filter"));
+    await user.click(screen.getByText("Big"));
+    await user.click(screen.getByText("Big"));
+    expect(within(screen.getByTestId("app-store-listing")).getAllByTestId("app-listing")).toHaveLength(50);
+  });
+
   it("gives the card's title its own direction", async () => {
     fakeEngine.on("appList", () => []);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
