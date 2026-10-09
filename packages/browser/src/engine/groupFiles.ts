@@ -167,6 +167,11 @@ interface Kept {
    */
   fresh?: boolean;
   unclear?: boolean;
+  /**
+   * Holders whose bytes failed the author's digest: not asked again for it, whatever the round, until its person asks
+   * for it again (Download). Once every holder known is here, it is fetched no more (`DAMAGED`).
+   */
+  damaged: Set<string>;
 }
 
 /** A file being asked for: of one holder at a time. */
@@ -200,6 +205,8 @@ interface Edge {
 
 /** Why a want waits, as the person reads it. */
 const NOBODY_CONNECTED = "Nobody you are connected to has this file yet";
+/** Why a want stopped: every holder served bytes that are not the author's file. */
+const DAMAGED = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
 
 export class GroupFileDesk {
   private readonly kept = new Map<string, Kept>();
@@ -231,9 +238,11 @@ export class GroupFileDesk {
         const { name, size, mime, voice, video, image } = file.metadata;
         const kept: Kept = { id: file.id, groupId, message: file.group.message, author: file.group.author,
           meta: { name, size, mime, d: file.digest, ...(voice && { voice }), ...(video && { video }), ...(image && { image }) },
-          mine: file.direction === "out", auto: !!file.group.auto, asked: !!file.group.asked, held: file.transfer?.state === "done", holders: [] };
+          mine: file.direction === "out", auto: !!file.group.auto, asked: !!file.group.asked, held: file.transfer?.state === "done", holders: [], damaged: new Set() };
         this.add(kept);
         if (kept.held) this.show(kept, { state: "done", transferred: size, size, direction: kept.mine ? "out" : "in" });
+        // Every holder served it damaged: it waits for its person to ask again, not fetched again by itself.
+        else if (file.transfer?.state === "failed") this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error: file.transfer.error ?? DAMAGED });
         else if (kept.auto || kept.asked) this.wants.set(kept.id, this.newWant());
         else this.show(kept, { state: "transferring", stage: "asking", transferred: 0, size, direction: "in" });
       }
@@ -267,7 +276,7 @@ export class GroupFileDesk {
     if (ownId) {
       this.own.delete(`${groupId}\n${m.file.d}`);
       this.pace(this.sentPace, groupId, GROUP_FILE_LIMITS.announcePerMinute, 60_000).take();
-      const kept: Kept = { id: ownId, groupId, message: m.id, author: me, meta: m.file, mine: true, auto: false, asked: false, held: true, holders: [] };
+      const kept: Kept = { id: ownId, groupId, message: m.id, author: me, meta: m.file, mine: true, auto: false, asked: false, held: true, holders: [], damaged: new Set() };
       this.add(kept);
       const transfer = { state: "done" as const, transferred: m.file.size, size: m.file.size };
       await this.deps.store.patch(ownId, { group: { message: m.id, author: me }, transfer }).catch(() => {});
@@ -281,7 +290,7 @@ export class GroupFileDesk {
     const auto = this.deps.settings().autoDownloads && fetchesByItself(m.file, this.keptAutomatically(groupId));
     const holders = this.ahead.get(`${groupId}\n${m.id}`) ?? [];
     this.ahead.delete(`${groupId}\n${m.id}`);
-    const kept: Kept = { id, groupId, message: m.id, author: m.sender, meta: m.file, mine: false, auto, asked: false, held: false, holders };
+    const kept: Kept = { id, groupId, message: m.id, author: m.sender, meta: m.file, mine: false, auto, asked: false, held: false, holders, damaged: new Set() };
     const { name, size, mime, voice, video, image } = m.file;
     // Known at once: the same message coming again meanwhile (another copy of it) is this file.
     this.add(kept);
@@ -305,8 +314,12 @@ export class GroupFileDesk {
       kept.asked = true;
       await this.deps.store.patch(kept.id, { group: this.groupField(kept) }).catch(() => {});
     }
+    // Asked again: every holder is worth asking again, one that served it damaged too.
+    kept.damaged.clear();
+    if (this.deps.transfers.get(kept.id)?.state === "failed") {
+      await this.deps.store.patch(kept.id, { transfer: { state: "transferring", transferred: 0, size: kept.meta.size } }).catch(() => {});
+    }
     const want = this.wants.get(kept.id);
-    // Asked again: every holder is worth asking again.
     if (!want) this.wants.set(kept.id, this.newWant());
     else if (!want.wire) want.tried.clear();
     this.ask(kept);
@@ -442,8 +455,11 @@ export class GroupFileDesk {
     if (!want || kept.held || want.wire) return;
     const membership = this.deps.membership(kept.groupId);
     const edges = this.deps.edges(kept.groupId);
-    const order = [kept.author, ...kept.holders.filter(key => key !== kept.author)]
-      .filter(key => membership && key !== membership.me && membership.inRoster(key) && !want.tried.has(key));
+    const known = [kept.author, ...kept.holders.filter(key => key !== kept.author)]
+      .filter(key => membership && key !== membership.me && membership.inRoster(key));
+    // Every holder known served it damaged: asking again would fetch the same bytes, all of them, round after round.
+    if (known.length && known.every(key => kept.damaged.has(key))) { this.stopDamaged(kept); return; }
+    const order = known.filter(key => !want.tried.has(key) && !kept.damaged.has(key));
     for (const key of order) {
       const linkId = edges.get(key);
       if (!linkId || !this.deps.ready(linkId) || !this.edgesById.get(linkId)?.files.live) continue;
@@ -454,6 +470,14 @@ export class GroupFileDesk {
     }
     Object.assign(want, { holder: undefined, linkId: undefined, at: this.deps.now() });
     this.show(kept, { state: "transferring", stage: "waiting", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in", note: NOBODY_CONNECTED });
+  }
+
+  /** No holder serves the author's bytes: the want stops, and stays stopped after a restart, until Download. */
+  private stopDamaged(kept: Kept): void {
+    this.wants.delete(kept.id);
+    const { size } = kept.meta;
+    void this.deps.store.patch(kept.id, { transfer: { state: "failed", transferred: 0, size, error: DAMAGED } }).catch(() => {});
+    this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error: DAMAGED });
   }
 
   /** A holder's no: the next one is asked. One that deleted the file is no holder any more. */
@@ -604,7 +628,8 @@ export class GroupFileDesk {
       verify: async () => { damaged = (await writer.digest()) !== kept.meta.d; return !damaged; },
       // Only damaged bytes go. Left with a holder that stalled or stopped, what came is kept for the next holder.
       discard: () => {
-        if (damaged) { kept.stored = 0; if (resumed) kept.fresh = kept.unclear = true; }
+        // Whole from this holder and damaged: its bytes are not the author's, and it is not asked for them again.
+        if (damaged) { kept.stored = 0; if (resumed) kept.fresh = kept.unclear = true; else kept.damaged.add(edge.peer); }
         return (kept.idle = (damaged ? writer.discard() : writer.close()).catch(() => {}));
       },
     };

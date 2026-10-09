@@ -123,6 +123,19 @@ describe("FileBubble: files/3", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
   });
 
+  it("a file that arrived damaged from everyone who had it offers Ask again; one that just did not arrive does not", async () => {
+    const lost = show({ state: "failed", direction: "in", transferred: 0, size: 10, error: "Connection lost" });
+    expect(screen.queryByTestId("file-request")).toBeNull();
+    lost.unmount();
+    show({ state: "failed", direction: "in", transferred: 0, size: 10, retry: true, error: "Every copy of this file arrived damaged and was deleted. Ask for it again later." });
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^Did not arrive$/);
+    fireEvent.click(screen.getByTestId("file-why"));
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent("arrived damaged");
+    expect(screen.getByTestId("file-request")).toHaveAttribute("title", "Asks the group's members for it again, those whose copy came damaged too.");
+    fireEvent.click(screen.getByTestId("file-request"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
+  });
+
   it("an offer or a pause is waiting for a person, not stuck: no Send again or Ask again", () => {
     const offer = show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB });
     expect(screen.queryByTestId("file-request")).toBeNull();

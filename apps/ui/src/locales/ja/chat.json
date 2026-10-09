@@ -122,6 +122,7 @@
     "accept": "受け取る",
     "askAgain": "もう一度頼む",
     "askAgainHint": "残りを相手に頼みます。届いた分はそのまま残ります。",
+    "askGroupAgainHint": "グループのメンバーにもう一度頼みます。壊れたコピーが届いたメンバーにも頼みます。",
     "askingThem": "{{name}} の承認待ち · {{size}}",
     "askingYou": "{{size}} · あなたの返答待ち",
     "cancelled": "キャンセルされました",

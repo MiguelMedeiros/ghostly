@@ -192,6 +192,27 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.seen.filter(s => s.to === "carol" && s.frame.t === "pf-offer").map(s => s.from)).toEqual(["alice", "bob"]);
   });
 
+  it("a file every holder serves damaged is fetched once, then shows it arrived damaged until Download asks again", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    // The author's copy (or the author) serves bytes that do not match the digest it signed, and nobody else holds it.
+    t.files.get(alice)!.store.corrupt = true;
+    const { messageId, meta } = await t.send(alice, id, pattern(200_000, 3));
+    await t.world.run(10 * 60_000);
+    const damaged = () => t.seen.filter(s => s.from === "bob" && s.frame.t === "pf-refuse" && s.frame.why === "damaged").length;
+    expect(damaged()).toBe(1);
+    const { message, transfer } = t.got(bob, id, messageId);
+    expect(transfer).toMatchObject({ state: "failed", direction: "in", retry: true, error: expect.stringContaining("damaged") });
+    // Kept so: a restart does not fetch it again by itself.
+    expect(t.files.get(bob)!.store.records.get(message!.file!.id)!.transfer).toMatchObject({ state: "failed" });
+    // Download asks every holder again: the author's copy is good now.
+    t.files.get(alice)!.store.corrupt = false;
+    await bob.groups.downloadFile(message!.file!.id);
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
+    expect(damaged()).toBe(1);
+  });
+
   it("a holder that stalls mid-way is left, and the next holder goes on from the bytes stored here", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);

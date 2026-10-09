@@ -122,6 +122,7 @@
     "accept": "Accetta",
     "askAgain": "Richiedi di nuovo",
     "askAgainHint": "Chiede il resto al tuo contatto. Ciò che è arrivato resta.",
+    "askGroupAgainHint": "Lo chiede di nuovo ai membri del gruppo, anche a quelli la cui copia è arrivata danneggiata.",
     "askingThem": "In attesa che {{name}} accetti · {{size}}",
     "askingYou": "{{size}} · in attesa della tua risposta",
     "cancelled": "Annullato",

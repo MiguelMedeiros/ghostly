@@ -78,9 +78,11 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
 
 /**
  * What a stuck files/3 transfer offers its person: "Send again" (sending) or "Ask again" (receiving), with a one-line
- * hint. Either goes on from what the receiver holds; null when it is moving, or waits for a person.
+ * hint. Either goes on from what the receiver holds; null when it is moving, or waits for a person. A group's file
+ * that stopped arriving (every copy came damaged, `retry`) offers "Ask again" too: its members are asked once more.
  */
 export function stalledAction(transfer: FileTransferState | null, tr: Translate = englishT): { action: Extract<FileAction, "resend" | "request">; label: string; hint: string } | null {
+  if (transfer?.state === "failed" && transfer.direction === "in" && transfer.retry) return { action: "request", label: tr("chat.file.askAgain"), hint: tr("chat.file.askGroupAgainHint") };
   if (transfer?.state !== "transferring" || !transfer.stalled || !transfer.direction) return null;
   return transfer.direction === "out"
     ? { action: "resend", label: tr("chat.message.retry"), hint: tr("chat.file.resendHint") }

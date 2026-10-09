@@ -122,6 +122,7 @@
     "accept": "Aceptar",
     "askAgain": "Pedir de nuevo",
     "askAgainHint": "Pide el resto a tu contacto. Lo que llegó se queda.",
+    "askGroupAgainHint": "Lo pide de nuevo a los miembros del grupo, también a aquellos cuya copia llegó dañada.",
     "askingThem": "Esperando a que {{name}} acepte · {{size}}",
     "askingYou": "{{size}} · esperando tu respuesta",
     "cancelled": "Cancelado",

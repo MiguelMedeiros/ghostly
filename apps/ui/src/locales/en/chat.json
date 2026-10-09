@@ -122,6 +122,7 @@
     "accept": "Accept",
     "askAgain": "Ask again",
     "askAgainHint": "Asks your contact for the rest. What arrived stays.",
+    "askGroupAgainHint": "Asks the group's members for it again, those whose copy came damaged too.",
     "askingThem": "Waiting for {{name}} to accept · {{size}}",
     "askingYou": "{{size}} · waiting for your answer",
     "cancelled": "Cancelled",

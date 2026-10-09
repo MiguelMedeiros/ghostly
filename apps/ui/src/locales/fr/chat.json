@@ -122,6 +122,7 @@
     "accept": "Accepter",
     "askAgain": "Redemander",
     "askAgainHint": "Demande le reste à votre contact. Ce qui est arrivé est conservé.",
+    "askGroupAgainHint": "Le redemande aux membres du groupe, y compris ceux dont la copie est arrivée endommagée.",
     "askingThem": "En attente de l'accord de {{name}} · {{size}}",
     "askingYou": "{{size}} · en attente de votre réponse",
     "cancelled": "Annulé",
