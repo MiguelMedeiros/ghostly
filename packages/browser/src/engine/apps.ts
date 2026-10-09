@@ -380,6 +380,22 @@ export class Apps {
   private async putApp(app: InstalledApp): Promise<void> {
     await wrap((await store(STORES.apps, "readwrite")).put(app));
   }
+  /**
+   * Writes an app's record back only while that install is still there (the same `installedAt`), read and written in
+   * one transaction: an app uninstalled (or installed again) while the update check was reading is not put back.
+   */
+  private async putAppIfInstalled(app: InstalledApp, installedAt: number): Promise<boolean> {
+    const tx = (await openDb()).transaction(STORES.apps, "readwrite");
+    let put = false;
+    const read = tx.objectStore(STORES.apps).get(app.ref);
+    read.onsuccess = () => {
+      if ((read.result as InstalledApp | undefined)?.installedAt !== installedAt) return;
+      tx.objectStore(STORES.apps).put(app);
+      put = true;
+    };
+    await done(tx);
+    return put;
+  }
   private async storeRecord(key: string): Promise<AddedAppStore | undefined> {
     return wrap((await store(STORES.appStores, "readonly")).get(key));
   }
@@ -477,6 +493,12 @@ export class Apps {
     this.verified.delete(digest);
     this.icons.delete(digest);
     await (await fileBytesOf(kind))?.remove(bundleId(digest)).catch(() => {});
+  }
+
+  /** A bundle's bytes removed unless the app's record (installed again meanwhile) holds that version, or waits for it. */
+  private async removeUnusedBundle(ref: string, kind: FileBytesKind, digest: string): Promise<void> {
+    const app = await this.app(ref);
+    if (app?.digest !== digest && app?.pending?.digest !== digest) await this.removeBundle(kind, digest);
   }
 
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
@@ -832,6 +854,7 @@ export class Apps {
       if (!first) continue;
       let app = first;
       let outcome: AppCheckOutcome = "none";
+      let wrote: { bytes: FileBytesKind; digest: string } | undefined;
       // A store the person removed pins nothing any more (as `removeStore` does).
       if (app.store !== undefined && !stores.some((s) => s.key === app.store)) { const { store: _s, ...unpinned } = app; app = unpinned; }
       // A waiting update its store no longer lists goes, so the version the store lists now is looked at instead.
@@ -881,11 +904,16 @@ export class Apps {
         if (this.runStatus(version, this.storeViews(stores), app.revocations).status !== "ok") continue;
         if (app.pending && version.sequence < app.pending.sequence) continue;
         const kind = await this.writeBundle(version.digest, bytes);
+        wrote = { bytes: kind, digest: version.digest };
         if (plan.action === "install") {
           const old = app;
-          app = this.versionRecord(app, bundle, kind, url, app.store);
-          if (old.pending && old.pending.sequence <= version.sequence) { await this.removeBundle(old.pending.bytes, old.pending.digest); delete app.pending; }
-          await this.putApp(app);
+          const next = this.versionRecord(app, bundle, kind, url, app.store);
+          const passed = old.pending && old.pending.sequence <= version.sequence ? old.pending : undefined;
+          if (passed) delete next.pending;
+          // Uninstalled while it downloaded: not put back.
+          if (!(await this.putAppIfInstalled(next, first.installedAt))) break;
+          app = next;
+          if (passed) await this.removeBundle(passed.bytes, passed.digest);
           await this.removeBundle(old.bytes, old.digest);
           outcome = "updated";
         } else {
@@ -898,12 +926,14 @@ export class Apps {
       const revocations = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])]);
       const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
       for (const r of revocations) merged.set(canonicalJson(r), r);
-      // Removed meanwhile: not put back. Its store removed meanwhile: not pinned again.
+      // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
       const current = await this.app(app.ref);
-      if (!current) continue;
-      if (app.store !== undefined && current.store === undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
+      if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
       app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
-      await this.putApp(app);
+      if (!(await this.putAppIfInstalled(app, first.installedAt))) {
+        if (wrote) await this.removeUnusedBundle(app.ref, wrote.bytes, wrote.digest);
+        continue;
+      }
       out.push({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores) });
     }
     return out;

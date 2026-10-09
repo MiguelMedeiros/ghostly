@@ -460,11 +460,19 @@ export class Communities {
     this.host.emit();
   }
 
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard, file?: GroupFileMeta): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
+  /** Whether a message of mine could go to the group now: the refusal `send` would answer for not being in it, or null. */
+  sendCheck(groupId: string): { error: string | null; refused?: boolean } {
     const live = this.live.get(groupId);
     if (!live) return { error: "You are not in this group yet", refused: true };
     // Not a member (removed, the history forked, an admission that lost): refused, not something to try again.
     if (!live.session.isMember) return { error: live.session.state.statusReason ?? "You are not in this group", refused: true };
+    return { error: null };
+  }
+
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard, file?: GroupFileMeta): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
+    const check = this.sendCheck(groupId);
+    if (check.error) return check;
+    const live = this.live.get(groupId)!;
     // Dated by the engine's clock, as the commits it signs and the session's own decisions are: a frame said again once
     // its author has caught up (`CommunitySession.reseal`) goes to the members let in before it, judged by the commits'
     // times against the frame's. Dated by the wall clock, a frame read as written before admissions it came after
@@ -1369,6 +1377,17 @@ export class Communities {
   }
 
   /**
+   * Let in: my knock leaves the record I knocked in. It stayed there until it aged out, and someone opening the link in
+   * the next minute read it as a person still waiting to be let in. Once, in the background; if it fails, it ages out.
+   */
+  private async unknock(link: GroupEntryLink, n: number, seedB64: string): Promise<void> {
+    const me = identityFromSeedB64(seedB64).pubKeyZ32, record = knockRecord(link, n);
+    const knocks = readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true)) ?? []);
+    if (!knocks.some(k => k.key === me)) return;
+    await this.host.publish(knockIdentity(record), knockRecords(record, knocks.filter(k => k.key !== me)), true);
+  }
+
+  /**
    * The entry sessions this device runs for joiners go (it is no door any more). Its own, when it is knocking at the
    * link itself, stays: a hub taken out of the group that opened the link again at once had that session closed by
    * its next tick (it stops being a hub and a door there), and knocked for good with nothing for a member to answer on.
@@ -1479,6 +1498,7 @@ export class Communities {
         await this.store.putGroup(member);
         if (!again) await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE_COMMUNITY}`, now, joined.state.chain.length - 1);
         else if (back) await this.event(g, "joined", "You joined again", now, joined.state.chain.length - 1);
+        if (this.knocked.has(g)) void this.unknock({ g, host: joining.host }, this.knockAt.get(g) ?? KNOCK_BELL, joining.seedB64).catch(() => {});
         this.lastKnock.delete(g);
         this.knocked.delete(g);
         this.knockAt.delete(g);
