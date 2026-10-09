@@ -318,13 +318,21 @@ export function TasksButton({ rows, nameOf, faceOf, open: openGiven, onOpenChang
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const entries = useMemo(() => cardEntries(rows), [rows]);
+  // What opened the panel, when it is not the button: the header's other control that opens it (the working line), in
+  // focus as it opens. Read before the panel takes the focus (its own effect, after this one).
+  const opener = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const at = open ? document.activeElement : null;
+    opener.current = at instanceof HTMLElement && at.matches("[aria-haspopup=dialog]") ? at : null;
+  }, [open]);
   if (!entries.length) return null;
   const active = activeTaskCount(entries);
   const close = () => {
-    // Back to the button, unless a tap outside put the focus somewhere else.
+    // Back to what opened it (the button, when that is gone), unless a tap outside put the focus somewhere else.
     const at = document.activeElement;
+    const back = opener.current?.isConnected ? opener.current : button.current;
     setOpen(false);
-    if (!at || at === document.body || at.closest("[data-testid=chat-tasks-panel]")) button.current?.focus({ preventScroll: true });
+    if (!at || at === document.body || at.closest("[data-testid=chat-tasks-panel]")) back?.focus({ preventScroll: true });
   };
   const jump = ({ messageId }: CardEntry) => {
     setOpen(false);
