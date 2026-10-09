@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, appDigest, appViewOf, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision, appUpdateDecision,
   canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocations, readAppStore,
   toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
@@ -516,13 +516,16 @@ export class Apps {
     return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
   }
 
-  /** The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error. */
-  private async readRevocations(ref: string, urls: string[]): Promise<SignedAppRevocation[]> {
-    const out: SignedAppRevocation[] = [];
+  /**
+   * The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error.
+   * Null when no file answered.
+   */
+  private async readRevocations(ref: string, urls: string[]): Promise<SignedAppRevocation[] | null> {
+    let out: SignedAppRevocation[] | null = null;
     for (const url of new Set(urls.filter(isAppFetchUrl).map((u) => besideUrl(u, "ghostly-revoke.json")))) {
       try {
         const read = readAppRevocations(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
-        if (read.ok) out.push(...read.revocations.filter((r) => r.statement.app === ref));
+        if (read.ok) (out ??= []).push(...read.revocations.filter((r) => r.statement.app === ref));
       } catch { /* not published there, or not reachable now */ }
     }
     return out;
@@ -895,9 +898,12 @@ export class Apps {
         }
         break;
       }
+      // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version. While no
+      // file answers, every kept one stays (it may name a version not found yet): a file that changes does not pile up.
       const revocations = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])]);
-      const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
-      for (const r of revocations) merged.set(canonicalJson(r), r);
+      const versions: AppVersion[] = [app, ...(app.pending ? [versionOf(app.pending.manifest, app.pending.digest)] : [])];
+      const stays = (app.revocations ?? []).filter((r) => !revocations || versions.some((v) => appRevocationFor(v, [r])));
+      const merged = new Map([...stays, ...(revocations ?? [])].map((r) => [canonicalJson(r), r]));
       // Removed meanwhile: not put back. Its store removed meanwhile: not pinned again.
       const current = await this.app(app.ref);
       if (!current) continue;
