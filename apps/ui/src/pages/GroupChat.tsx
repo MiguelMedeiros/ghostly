@@ -216,8 +216,11 @@ function usePast(since: number | undefined, ms: number): boolean {
 }
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
 
-function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate): { title: string; body: string } {
+function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate, full?: { n: number; max: number }): { title: string; body: string } {
   const waiting = t("group.join.waiting");
+  // No room yet (WISP 902 § A full group): why it waits, not a hint that the link may have been replaced.
+  if (stage === "full") return { title: t("group.join.fullTitle"), body: full ? t("group.join.full", { n: full.n, max: full.max }) : t("group.join.fullUnknown") };
+  if (stage === "blocked") return { title: t("group.join.blockedTitle"), body: t("group.join.blocked") };
   if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
     body: community ? t("group.join.admittedCommunity") : t("group.join.admitted") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
@@ -418,7 +421,10 @@ export function GroupChat() {
   // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
   const noLinks = state?.transport.groupLinks === false;
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
-    : joiningText(stage, group.name, group.profile === "community", t);
+    : joiningText(stage, group.name, group.profile === "community", t, group.invitation?.full);
+  // Told there is no room yet: the knock was left and answered, and nothing moves until someone leaves (or updates).
+  const noRoom = stage === "full" || stage === "blocked";
+  const stepStage: GroupJoinStage = noRoom ? "knocked" : stage;
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = messages.some(m => m.event === "joined" && !m.member && Date.now() - m.timestamp < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
@@ -518,14 +524,14 @@ export function GroupChat() {
       {joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
         <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
-            <svg className={noLinks ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
+            <svg className={noLinks || noRoom ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
           </div>
           <h2 className="mt-4 text-base font-semibold text-text-primary">{joining.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
           <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
             {joinSteps(group.profile === "community", t).map(step => {
-              const done = JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step.stage);
-              const current = !done && JOIN_ORDER[JOIN_ORDER.indexOf(step.stage) - 1] === stage;
+              const done = JOIN_ORDER.indexOf(stepStage) >= JOIN_ORDER.indexOf(step.stage);
+              const current = !done && !noRoom && JOIN_ORDER[JOIN_ORDER.indexOf(step.stage) - 1] === stepStage;
               return <li key={step.stage} data-state={done ? "done" : current ? "current" : "todo"} className={`flex items-center gap-2 ${done ? "text-text-primary" : current ? "text-accent" : "text-text-muted"}`}>
                 <span aria-hidden="true" className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${done ? "bg-accent text-on-accent" : current ? "border border-accent" : "border border-border"}`}>{done ? "✓" : ""}</span>
                 {step.label}

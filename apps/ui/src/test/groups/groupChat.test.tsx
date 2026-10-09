@@ -144,6 +144,29 @@ describe("GroupChat: joining through a link", () => {
     expect(steps()).toEqual(states);
   });
 
+  it("told the group is full: says so with its numbers, and after two minutes nothing about a replaced link", async () => {
+    const full = groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "full", full: { n: 256, max: 256 } } });
+    openGroup(full);
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is full");
+    expect(card).toHaveTextContent("It has 256 of 256 members. You get in once someone leaves");
+    expect(card.querySelector(".animate-spin")).toBeNull();
+    expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", "full");
+    expect(steps()).toEqual(["done", "todo", "todo", "todo"]);
+    expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+    await new Promise(resolve => setTimeout(resolve, 800));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
+  it("told the group waits for everyone to update: says so, not that it is full", () => {
+    openGroup(staged("blocked"));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("Waiting for the group to update");
+    expect(card).toHaveTextContent("grows past 8 members only once everyone in it is on an updated Ghostly");
+    expect(card).not.toHaveTextContent("full");
+  });
+
   it("in a community, says a member (any) is answering, then that it connects to the group", () => {
     const labels = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.textContent);
     openGroup({ ...staged("answered"), profile: "community" });
