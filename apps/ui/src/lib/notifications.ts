@@ -44,9 +44,22 @@ export async function openNoticeSettings():Promise<void>{
 
 /*
  * A click on a notification opens its chat. Which chat is known only here, by the notification's id: the
- * notification itself carries no chat data.
+ * notification itself carries no chat data, its id neither. The page's id for one (the engine's names its chat:
+ * `message:group:<groupId>:…`) stays here, and the system gets a random one for it, which other apps can read (an
+ * Android notification's tag, which every notification listener sees; macOS's identifier; the extension's id).
  */
 const chats=new Map<string,string>();
+const notices=new Map<string,string>();
+/** The system's id for the page's `id`: random, and the same for the same `id`, so it still replaces its notification. */
+function noticeId(id:string):string{
+  let notice=notices.get(id);
+  if(!notice){
+    notice=crypto.randomUUID();
+    notices.set(id,notice);
+    if(notices.size>64) notices.delete(notices.keys().next().value as string);
+  }
+  return notice;
+}
 const openers=new Set<(chat:string)=>void>();
 let listening=false;
 /** Opens the chat of a notification shown from this page; false when it was not. */
@@ -118,9 +131,10 @@ export async function requestNotifications():Promise<NoticePermission>{
     return typeof Notification==="undefined"?"unavailable":await Notification.requestPermission();
   }catch{return "unavailable";}
 }
-/** `chat`: the chat a click opens (a session id, or `group:<id>`); it stays in this page. */
-export async function showPrivateNotification(id:string,body:string,chat?:string):Promise<void>{
+/** `chat`: the chat a click opens (a session id, or `group:<id>`); it and `event`, the page's id for the notification, stay in this page. */
+export async function showPrivateNotification(event:string,body:string,chat?:string):Promise<void>{
   if(await notificationPermission()!=="granted") return;
+  const id=noticeId(event);
   if(chat){
     chats.set(id,chat);
     // The newest few: an old notification still opens the app, only not a chat.
