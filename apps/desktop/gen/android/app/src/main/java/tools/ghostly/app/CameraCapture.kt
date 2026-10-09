@@ -48,7 +48,7 @@ object CameraFiles {
     folder(cacheDir).deleteRecursively()
   }
 
-  /** A file input that asks for a photo from the camera (`accept="image/*" capture`), which [CameraChromeClient] takes. */
+  /** A file input that asks for a photo from the camera (`capture`, accepting images and no video), which [CameraChromeClient] takes. */
   fun takesPhoto(capture: Boolean, acceptTypes: Array<String>): Boolean =
     capture && "image/*" in acceptTypes && "video/*" !in acceptTypes
 }
