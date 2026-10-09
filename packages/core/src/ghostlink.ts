@@ -945,7 +945,7 @@ export class GhostLink {
         },
         onPublish: result => {
           // Held back by the relays' request budget: nothing failed, and the session sends it when the budget frees a request.
-          if (result.waiting) return;
+          if (result.waiting) { if (result.retryInMs !== undefined) this.tracker?.heldBack(Date.now() + result.retryInMs); return; }
           if (result.error) { this.tracker?.failed("publish", true, result.error); return; }
           // An offer or answer the relays held back (their budget, an outage) has its whole attempt from when it went out.
           if (result.signalOut) { this.offerUnsent = false; this.dataLink.signalWentOut(); }
