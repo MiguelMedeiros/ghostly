@@ -121,6 +121,13 @@ describe("ChatConnection: what the header says", () => {
     expect(screen.getByTestId("connection-state")).toHaveTextContent("Connected · Iroh · 333 ms");
   });
 
+  it("isolates the round trip on the panel's first line, so in Arabic its number stays by its unit, not by the transport", () => {
+    banner({ pairing: ready({ transport: "webrtc/1" }), transportRttMs: 4 });
+    const rtt = screen.getByTestId("connection-rtt");
+    expect(rtt.tagName).toBe("BDI");
+    expect(rtt).toHaveTextContent(/^4 ms$/);
+  });
+
   it("marks what is in use apart from what is chosen: WebRTC chosen, live over Iroh at 333 ms", () => {
     banner({ pairing: ready({ transport: "iroh/1" }), preferredTransport: "webrtc/1", transportAutomatic: false, transportRttMs: 333 });
     const webrtc = screen.getByRole("radio", { name: "WebRTC" }), iroh = screen.getByRole("radio", { name: "Iroh" });

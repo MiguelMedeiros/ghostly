@@ -160,7 +160,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const iconKind: ConnectionKind = liveOn && !failure ? "connected" : kind;
   const holding = !ready && link?.textDelivery === "hold";
   const summary = liveOn ? connectionSummary(link, Date.now(), undefined, t) : undefined;
-  // The state line's round trip, once live and not moving.
+  // The state line's round trip, once live and not moving: isolated, so its number stays by its unit, not by a Latin transport name.
   const rtt = liveOn && !failure && !pair?.transitionTarget ? link?.transportRttMs : undefined;
   const keyOfMine = myKey || link?.myPubKeyZ32;
   const [tip, setTip] = useState(false);
@@ -190,7 +190,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     <div role="dialog" aria-label={t("connection.panel.title")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
       <div className="flex items-center gap-2 px-1 font-medium text-text-primary" data-testid="connection-state">
         {glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />}
-        <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · {t("connection.ms", { ms: rtt })}</span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
+        <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · <bdi data-testid="connection-rtt">{t("connection.ms", { ms: rtt })}</bdi></span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
       </div>
       {progress && (pairingOn || pairingFailed || onDhtWhy) && <div data-testid="connection-pairing" data-stage={stage} className="mt-1 space-y-0.5 px-1">
         {step > 0 && <p data-testid="connection-pairing-step">{t("pairing.stepOf", { n: step, total: steps.length })}{progress.attempt > 1 && ` · ${t("pairing.attempt", { n: progress.attempt })}`}</p>}
