@@ -34,7 +34,7 @@
   "dependencies": {
     "@arkade-os/sdk": "0.4.78",
     "@atproto/jwk-webcrypto": "^0.3.4",
-    "@atproto/oauth-client": "^0.8.8",
+    "@atproto/oauth-client": "^0.8.9",
     "@bitcoindevkit/bdk-wallet-web": "0.3.0",
     "@bitcoinerlab/descriptors-scure": "^3.2.0",
     "@cashu/cashu-ts": "^4.11.0",
@@ -72,7 +72,7 @@
     "@ghostly/iroh-web": "*",
     "@types/node": "^26.6.4",
     "typescript": "^5.9.3",
-    "vite": "^8.3.2",
+    "vite": "^8.3.3",
     "vitest": "^5.0.3"
   }
 }
