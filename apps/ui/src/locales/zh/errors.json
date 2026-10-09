@@ -36,6 +36,14 @@
     "unreachable": "无法连接 {{host}}",
     "unreachableNext": "请检查地址：它应当是一个 Cashu 铸币厂。"
   },
+  "chat": {
+    "editTooMany": "这条消息无法再编辑",
+    "editTooManyNext": "一条消息最多可编辑 {{max}} 次。",
+    "replyGone": "无法回复那条消息",
+    "replyGoneNext": "取消回复后再发送一次。",
+    "tooLong": "消息太长",
+    "tooLongNext": "请缩短，或作为文件发送。"
+  },
   "connectionFailed": "连接失败",
   "engine": {
     "alreadySubmitted": "此付款已提交，或无法保存",

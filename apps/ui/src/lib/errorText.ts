@@ -138,6 +138,13 @@ const RULES: readonly Rule[] = [
   { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },
   exact("The connection closed. Compare again after reconnecting.", "errors.verify.closed", "errors.verify.closedNext"),
 
+  // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
+  { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
+  { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
+  { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
+  exact("Someone else joined with this invite first. Ask your contact for a new one.", "pairing.reason.taken"),
+  exact("Chat has been burned", "chat.compat.burned"),
+
   // Cashu and Lightning in the wallet (packages/browser/src/engine/wallet.ts).
   exact("That is not a valid mint URL", "errors.cashu.badMintUrl"),
   exact("Mints must use https", "errors.cashu.mintHttps"),
