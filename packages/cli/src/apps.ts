@@ -204,6 +204,9 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
     }
   };
   walk(dir);
+  // The manifest lists every path in code-unit order, across folders: `lib-extra.js` before `lib/x.js`, which the walk
+  // reaches first (`-` and `.` sort before `/`).
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { files, skipped };
 }
 
