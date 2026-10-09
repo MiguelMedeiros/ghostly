@@ -85,6 +85,13 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
   return { positionals, options };
 }
 
+/** The global option a word names (`--profile`, `--profile=bot`, `-p`), else undefined. */
+export function globalOption(arg: string): OptionSpec | undefined {
+  const eq = arg.indexOf("=");
+  const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : arg.length === 2 && arg.startsWith("-") ? Object.entries(GLOBAL_OPTIONS).find(([, o]) => o.short === arg.slice(1))?.[0] : undefined;
+  return name && Object.hasOwn(GLOBAL_OPTIONS, name) ? GLOBAL_OPTIONS[name] : undefined;
+}
+
 /**
  * Global options given before the command (`ghostly --profile bot send …`) move after it, where every command's
  * parser reads them. Stops at `--` and at the first word that is not a global option.
@@ -95,8 +102,7 @@ export function liftGlobals(argv: readonly string[]): string[] {
   while (i < argv.length) {
     const arg = argv[i];
     const eq = arg.indexOf("=");
-    const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : arg.length === 2 && arg.startsWith("-") ? Object.entries(GLOBAL_OPTIONS).find(([, o]) => o.short === arg.slice(1))?.[0] : undefined;
-    const option = name ? GLOBAL_OPTIONS[name] : undefined;
+    const option = globalOption(arg);
     if (!option || arg === "--") break;
     const takesValue = option.type !== "boolean" && eq === -1;
     lifted.push(...argv.slice(i, i + (takesValue ? 2 : 1)));

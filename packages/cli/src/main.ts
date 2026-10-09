@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
-import { GLOBAL_OPTIONS, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
+import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { callApi, redactSettings } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, positionals, TEXT_COMMANDS } from "./commands";
@@ -127,6 +127,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     signer: o("string", "Which signer makes the proof (identity providers lists them)"), field: o("list", "A field of the provider's form, name=value"),
     days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval"),
   }],
+  ["version", "This CLI's version (also ghostly --version)"],
 ];
 
 function help(): string {
@@ -679,7 +680,8 @@ function helpAsked(argv: readonly string[]): string[] | null {
 
 export async function main(input: string[]): Promise<number> {
   const argv = liftGlobals(input);
-  const helpFor = argv.length === 0 ? [] : helpAsked(argv);
+  // Global options alone (`ghostly --pretty`, `ghostly -p bot`) name no command: lifted, one of them comes first.
+  const helpFor = argv.length === 0 || globalOption(argv[0]) ? [] : helpAsked(argv);
   if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help()) + "\n"); return 0; }
   if (argv[0] === "--version" || argv[0] === "version") { print({ version: VERSION }); return 0; }
   const [first, second] = argv;

@@ -57,4 +57,21 @@ describe("help", () => {
     expect((await ghostly(["frobnicate"])).json).toMatchObject({ error: { code: "usage", message: "Unknown command: frobnicate (ghostly help)" } });
     expect((await ghostly(["help", "listen"])).stdout).toContain("[--print]");
   });
+
+  it("a line of only global options names no command: it is the help, not an unknown command", async () => {
+    for (const args of [["--pretty"], ["-p", "bot"], ["--profile", "bot"], ["--profile=bot", "--pretty"], ["--home", "/h"]]) {
+      const { code, stdout } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(stdout, args.join(" ")).toContain("Usage: ghostly <command>");
+    }
+  });
+
+  it("the version is in the help, and help version answers it", async () => {
+    expect((await ghostly(["help"])).stdout).toMatch(/^ {2}version\s.*--version/m);
+    const one = await ghostly(["help", "version"]);
+    expect(one.code).toBe(0);
+    expect(one.stdout).toContain("Usage: ghostly version");
+    expect((await ghostly(["version"])).json).toHaveProperty("version");
+    expect((await ghostly(["--pretty", "--version"])).json).toHaveProperty("version");
+  });
 });
