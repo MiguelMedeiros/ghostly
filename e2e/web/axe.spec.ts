@@ -38,13 +38,15 @@ async function look(page: Page, language: string, scheme: "light" | "dark"): Pro
 async function findings(page: Page, { frames = true }: { frames?: boolean } = {}): Promise<string[]> {
   // Past the colour transitions and the fade-ins, so contrast is read on the colours as they end: until a frame has
   // none running, since one may start while another ends. Not past the loops: those that end by themselves take half
-  // a minute or more (a "connecting" dot, a spinner), and none is text.
+  // a minute or more (a "connecting" dot, a spinner), and none is text. Never more than a second on one look nor ten
+  // in all: an animation whose end is never told would hold the test until its timeout.
   await page.evaluate(async () => {
-    for (;;) {
+    const until = performance.now() + 10_000;
+    while (performance.now() < until) {
       await new Promise(requestAnimationFrame);
       const running = document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations === 1 && a.playState === "running");
       if (!running.length) return;
-      await Promise.all(running.map((a) => a.finished.catch(() => {})));
+      await Promise.race([Promise.all(running.map((a) => a.finished.catch(() => {}))), new Promise((done) => setTimeout(done, 1000))]);
     }
   });
   const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
