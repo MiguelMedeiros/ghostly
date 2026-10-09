@@ -401,6 +401,7 @@ describe("errors in the app's language", () => {
     expect(errorText("That picture is too large to paste", pt)).toBe("Isso é grande demais para colar. Envie com + → Documento.");
     expect(errorText("That paste is gone. Paste it again.", pt)).toBe("Essa colagem expirou. Cole de novo.");
     expect(errorText("Clipboard unavailable", pt)).toBe("Não foi possível ler a área de transferência. Anexe com +.");
+    expect(errorText("Could not read the file: Permission denied (os error 13)", pt)).toBe("Não foi possível ler o arquivo colado. Anexe com +.");
     expect(knownErrorParts("Could not read the file: Permission denied (os error 13)", pt)?.detail).toBe("Could not read the file: Permission denied (os error 13)");
   });
 

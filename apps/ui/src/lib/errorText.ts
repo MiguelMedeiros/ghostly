@@ -121,7 +121,7 @@ const RULES: readonly Rule[] = [
   exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
   exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
   exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
-  { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.pasteUnreadable", next: "errors.files.pasteUnreadableNext", detail: true },
+  { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
