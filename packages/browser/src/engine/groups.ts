@@ -290,6 +290,13 @@ export const FAREWELL_KEPT_MS = LEFT_KEPT_MS;
  */
 const ACCEPT_AGAIN_MS = 60_000;
 const ACCEPT_AGAINS = 5;
+/** Invitee side: the invitations one contact chat may have waiting here at a time. More are answered as declined. */
+const MAX_INVITATIONS_PER_CHAT = 4;
+/** What an invitation says of its group, kept as a claim within what a group can be: an epoch from 0, a roster of 1 to the most a group holds. */
+function invitationClaims(frame: Record<string, unknown>): { e: number; n: number } {
+  const e = Number.isSafeInteger(frame.e) ? frame.e as number : 0, n = Number.isSafeInteger(frame.n) ? frame.n as number : 1;
+  return { e: Math.max(e, 0), n: Math.min(Math.max(n, 1), GROUP_MEMBER_CAP.max) };
+}
 /** Members removed while away that an admin waits for, per group: each costs an edge that looks for its member. */
 const MAX_FAREWELLS = 8;
 /** Syncs of a removed member answered with the commits it lacks, per farewell: it needs one. */
@@ -520,7 +527,7 @@ export class Groups {
       if (!session) {
         const invitation = group.invitation!;
         return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
-          invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: invitation.n, accepted: !!invitation.seedB64,
+          invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
             ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
       }
       const nicks = session.state.nicks;
@@ -1273,7 +1280,7 @@ export class Groups {
         if (existing?.invitation?.entry && !existing.state) {
           if (existing.invitation.linkId !== linkId) return;
           existing.invitation = { ...existing.invitation, name: groupName(frame.name) ?? "Group", admin: frame.admin, pieces: [],
-            e: Number.isSafeInteger(frame.e) ? frame.e as number : 0, n: Number.isSafeInteger(frame.n) ? frame.n as number : 1 };
+            ...invitationClaims(frame) };
           await this.store.putGroup(existing);
           traceJoin(g, "invite.received");
           this.host.sendOnLink(linkId, { t: "group-accept", g, key: identityFromSeedB64(existing.invitation.seedB64!).pubKeyZ32 });
@@ -1288,12 +1295,18 @@ export class Groups {
         // Already accepting one. The same admin inviting again over the same chat never got my accept: this one replaces it.
         if (existing?.invitation?.seedB64 && (existing.invitation.linkId !== linkId || existing.invitation.admin !== frame.admin)) return;
         if ([...this.stored.values()].filter(x => x.invitation).length >= 32) return;
+        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
+        // Past that the inviter is told no, as it would be by a Decline, and may invite again later.
+        if (!existing?.invitation && [...this.stored.values()].filter(x => x.invitation?.linkId === linkId).length >= MAX_INVITATIONS_PER_CHAT) {
+          try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* they may invite again */ }
+          return;
+        }
         // Removed and invited again: the history stays, and the names it was written under with it.
         const known = { ...existing?.formerNames, ...existing?.state?.nicks };
         // Declined, the removed group comes back as it was (an invitation that replaced another keeps the one it kept).
         const previous = existing?.state ? existing : existing?.previous;
         const invitation: StoredGroup = { id: g, createdAt: Date.now(), invitation: { name: groupName(frame.name) ?? "Group", admin: frame.admin, linkId,
-          e: Number.isSafeInteger(frame.e) ? frame.e as number : 0, n: Number.isSafeInteger(frame.n) ? frame.n as number : 1, pieces: [] },
+          ...invitationClaims(frame), pieces: [] },
           ...(Object.keys(known).length ? { formerNames: known } : {}), ...(previous ? { previous } : {}) };
         if (existing) { this.sessions.delete(g); for (const edge of this.host.edges(g).values()) await this.host.closeEdge(edge); }
         this.stored.set(g, invitation);

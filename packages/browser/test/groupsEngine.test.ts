@@ -408,10 +408,52 @@ describe("invitations: what the admission exchange ignores", () => {
 
     const carol = world.add("carol");
     const id = (i: number) => `${String(i).padStart(2, "0")}${"B".repeat(20)}`;
-    for (let i = 0; i < 33; i++) await carol.handleContactFrame("chat-xc", { t: "group-invite", g: id(i), name: `g${i}`, admin: intruder, e: 0, n: 1 });
+    // More than 32 waiting, all chats together, are not kept.
+    for (let i = 0; i < 33; i++) await carol.handleContactFrame(`chat-${i >> 2}`, { t: "group-invite", g: id(i), name: `g${i}`, admin: intruder, e: 0, n: 1 });
     expect(carol.views()).toHaveLength(32);
     expect(carol.views().map(v => v.id)).not.toContain(id(32));
     expect(carol.views()[0].invitation).toMatchObject({ admin: intruder, members: 1 });
+  });
+
+  it("one chat holds four invitations at a time: its next is answered as declined, and another contact's still arrives", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]); world.chats.set("chat-cb", ["carol", "bob"]);
+    const admin = createIdentity().pubKeyZ32;
+    const id = (i: number) => `${String(i).padStart(2, "0")}${"B".repeat(20)}`;
+    const declined: unknown[] = [];
+    const declines = vi.spyOn(carol, "handleContactFrame").mockImplementation(async (_link, frame) => { if (frame.t === "group-decline") declined.push(frame.g); });
+    for (let i = 0; i < 40; i++) await bob.handleContactFrame("chat-cb", { t: "group-invite", g: id(i), name: `g${i}`, admin, e: 0, n: 1 });
+    await world.settle();
+    expect(bob.views().map(v => v.id).sort()).toEqual([0, 1, 2, 3].map(id));
+    expect(declined).toEqual(Array.from({ length: 36 }, (_, i) => id(i + 4)));
+    declines.mockRestore();
+    // One of the four sent again replaces itself, and takes no room.
+    await bob.handleContactFrame("chat-cb", { t: "group-invite", g: id(3), name: "renamed", admin, e: 0, n: 1 });
+    expect(view(bob, id(3)).name).toBe("renamed");
+
+    // Another contact's invitation is unaffected, and can be accepted.
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(bob, groupId).invitation).toMatchObject({ linkId: "chat-ab", accepted: false });
+    await bob.accept(groupId); await world.settle();
+    expect(view(bob, groupId).status).toBe("active");
+
+    // An answered one frees its place.
+    await bob.decline(id(0));
+    await bob.handleContactFrame("chat-cb", { t: "group-invite", g: id(9), name: "g9", admin, e: 0, n: 1 });
+    expect(bob.views().map(v => v.id)).toContain(id(9));
+  });
+
+  it("an invitation's member count and epoch are kept within what a group can be", async () => {
+    const world = new World();
+    const bob = world.add("bob");
+    const admin = createIdentity().pubKeyZ32;
+    const id = (i: number) => `${String(i).padStart(2, "0")}${"B".repeat(20)}`;
+    const claims = [{ n: -7, e: -3 }, { n: Number.MAX_SAFE_INTEGER, e: 2 }, { n: 0 }, { n: 1.5, e: "x" }, { n: 12, e: 5 }];
+    for (const [i, claim] of claims.entries()) await bob.handleContactFrame(`chat-${i}`, { t: "group-invite", g: id(i), name: `g${i}`, admin, ...claim });
+    expect(claims.map((_, i) => view(bob, id(i)).invitation!.members)).toEqual([1, 32, 1, 1, 12]);
+    expect(claims.map((_, i) => world.peers.get("bob")!.store.groups.get(id(i))!.invitation)).toMatchObject([{ n: 1, e: 0 }, { n: 32, e: 2 }, { n: 1, e: 0 }, { n: 1, e: 0 }, { n: 12, e: 5 }]);
   });
 
   it("an invitation's name shows cleaned: no invisible, direction-changing or line-breaking text", async () => {
