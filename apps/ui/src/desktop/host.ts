@@ -366,12 +366,17 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).
     readClipboardText: () => invoke<string>("read_clipboard_text"),
     // A paste the webview showed the page nothing of (no files, no text): Rust looks for copied files or a picture.
-    // Their bytes stay in Rust, read by token; the page never names a path.
+    // Their bytes stay in Rust, read by token; the page never names a path. Once the page has them, Rust lets them
+    // go (`incoming_share_done`, named after a share, takes a paste's tokens too): a pasted picture's PNG is not kept.
     readClipboardFiles: async () => (await invoke<{ token: string; name: string | null; size: number; mime: string | null }[]>("read_clipboard_files"))
-      .map(({ token, ...item }) => ({ ...item, read: async (offset: number, length: number) => {
-        const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
-        return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
-      } })),
+      .map(({ token, ...item }) => ({
+        ...item,
+        read: async (offset: number, length: number) => {
+          const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
+          return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+        },
+        done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
+      })),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
     // answer per profile: `local_fetch` reaches only an address allowed there.
     requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin }),
