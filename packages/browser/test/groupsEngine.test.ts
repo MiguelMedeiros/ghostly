@@ -436,6 +436,34 @@ describe("invitations: what the admission exchange ignores", () => {
     void bob;
   });
 
+  it("an accept naming a key already in the roster, or the admin's own, changes nothing about that member", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]); world.chats.set("chat-ac", ["alice", "carol"]);
+    // Carol's app announced groups up to version 2 (rosters of eight); Bob's takes larger ones.
+    world.oldChats.add("chat-ac");
+    for (const g of [alice, bob, carol]) await g.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ac"); await world.settle();
+    await carol.accept(groupId); await world.settle();
+    const carolKey = view(carol, groupId).myKey!, aliceKey = view(alice, groupId).myKey!;
+    const stored = () => world.peers.get("alice")!.store.groups.get(groupId)!;
+    const nameOf = (key: string) => view(alice, groupId).members!.find(m => m.key === key)?.nick;
+    expect(nameOf(carolKey)).toBe("contact:chat-ac");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    for (const key of [carolKey, aliceKey]) await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key });
+    await world.settle();
+    expect(nameOf(carolKey)).toBe("contact:chat-ac");
+    expect(stored().state!.nicks).toEqual({ [carolKey]: "contact:chat-ac" });
+    expect(view(alice, groupId).members).toHaveLength(2);
+    expect(view(alice, groupId).invited).toHaveLength(1);
+    // Bob's own accept still lets him in, and only his app is recorded as taking a larger roster.
+    await bob.accept(groupId); await world.settle();
+    expect(view(alice, groupId).members).toHaveLength(3);
+    expect(nameOf(carolKey)).toBe("contact:chat-ac");
+    expect(stored().large).toEqual([view(bob, groupId).myKey]);
+  });
+
   it("chain pieces from another chat or beyond the limit, and a broken welcome, do not spoil the real welcome", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");

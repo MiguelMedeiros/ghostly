@@ -1306,6 +1306,8 @@ export class Groups {
         const session = this.sessions.get(g);
         if (!session?.isAdmin || !this.invited.get(g)?.has(linkId) || typeof frame.key !== "string" || !MEMBER_KEY.test(frame.key)) return;
         const group = this.stored.get(g)!;
+        // A key already in the roster (ours too) is nobody new: dropped before anything is noted about its member.
+        if (frame.key === session.myKey || rosterHas(session.roster, frame.key)) return;
         // Through the link, the member key must be the one the entry session is pinned to: the one that knocked.
         const entryPeer = this.hostEntry(g, linkId);
         if ([...this.host.entries(g).values()].includes(linkId) && entryPeer !== frame.key) return;
