@@ -16,13 +16,13 @@ beforeEach(async () => {
   net = new FakeNet();
 });
 
-async function installMany(count: number): Promise<{ ref: string; icon: Uint8Array }[]> {
+async function installMany(count: number, data?: Uint8Array): Promise<{ ref: string; icon: Uint8Array }[]> {
   const store = apps(net);
   const out: { ref: string; icon: Uint8Array }[] = [];
   for (let i = 0; i < count; i++) {
     const url = `https://raw.githubusercontent.com/ana/app${i}/HEAD/app.ghostlyapp`;
     const icon = iconPng(32 + i);
-    const built = await bundle({ name: `app${i}`, icon });
+    const built = await bundle({ name: `app${i}`, icon, ...(data && { data }) });
     net.put(url, built.bytes);
     await store.preview({ url });
     await store.install({ digest: built.digest, grant: ["chat"] });
@@ -54,6 +54,19 @@ describe("installed bundles read back", () => {
     const { store, reads } = freshEngine();
     expect(await Promise.all([1, 2, 3, 4].map(() => store.file({ ref, path: "icon.png" })))).toEqual([icon, icon, icon, icon]);
     expect(reads()).toBe(1);
+  });
+
+  it("the icons kept in memory hold the icons, not the whole bundles they were read from", async () => {
+    const installed = await installMany(4, new Uint8Array(2 * 1024 * 1024).fill(7));
+    const { store } = freshEngine();
+    for (const { ref } of installed) await store.file({ ref, path: "icon.png" });
+    // Every buffer the engine keeps alive, the two checked bundles of its cache (WISP 1200: "again before it runs") aside.
+    const kept = store as unknown as { icons: Map<string, Uint8Array | null>; verified: Map<string, { files: Map<string, Uint8Array> }> };
+    const cached = new Set([...kept.verified.values()].map((b) => b.files.get("index.html")!.buffer));
+    const held = new Set([...kept.icons.values()].map((icon) => icon!.buffer).filter((buffer) => !cached.has(buffer)));
+    const bytes = [...held].reduce((sum, buffer) => sum + buffer.byteLength, 0);
+    // Before: the two bundles out of the cache stayed whole behind their icons (2 x 2 MiB); now 64 bytes per icon.
+    expect(bytes).toBeLessThanOrEqual(4 * 64);
   });
 
   it("an icon handed out is a copy: changing it changes nothing kept", async () => {
