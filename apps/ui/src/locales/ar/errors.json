@@ -125,10 +125,18 @@
   "files": {
     "cannotDecodeRecording": "لا يستطيع هذا الجهاز فك ترميز التسجيل",
     "cannotRetry": "لا يمكن إعادة محاولة هذا الملف",
+    "clipboardUnavailable": "تعذّرت قراءة الحافظة",
+    "clipboardUnavailableNext": "أرفقه عبر +.",
     "gone": "لم يعد هذا الملف هنا",
     "noRoom": "لا مساحة على جهاز جهة اتصالك",
     "noRoomNext": "المتاح {{free}}.",
     "notVoice": "لا يمكن إرسال هذا التسجيل كرسالة صوتية",
+    "pasteDamaged": "تعذّرت قراءة الصورة المنسوخة",
+    "pasteDamagedNext": "انسخها مرة أخرى أو أرفقها عبر +.",
+    "pasteFileUnreadable": "تعذّرت قراءة الملف الملصوق",
+    "pasteFileUnreadableNext": "أرفقه عبر +.",
+    "pasteGone": "لم يعد هذا اللصق متاحًا",
+    "pasteGoneNext": "الصقه مرة أخرى.",
     "pasteTooLarge": "هذا أكبر من أن يُلصق. أرسله عبر + ← مستند.",
     "pasteUnreadable": "تعذّر لصق هذه الملفات. أرسلها عبر + ← مستند.",
     "refused": {

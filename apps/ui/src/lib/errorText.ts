@@ -116,6 +116,12 @@ const RULES: readonly Rule[] = [
   { match: /^That file is too large for your contact's app \(max (?<max>.+)\)\. Larger files need an updated Ghostly on their side\.$/, key: "errors.files.tooLargeForContact", next: "errors.files.tooLargeForContactNext" },
   { match: /^That file is too large \(max (?<size>.+)\)\.$/, key: "chat.fileTooLarge" },
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
+  // A paste the app's clipboard commands refused (apps/desktop/src/clipboard.rs). The system's reason stays English, behind the ⓘ.
+  exact("That picture is too large to paste", "errors.files.pasteTooLarge"),
+  exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
+  exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
+  exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
+  { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
