@@ -373,6 +373,40 @@ describe("a private group's edge that opens", () => {
     expect(sent.map(frame => [frame.id, frame.e])).toEqual([["admin:5:0", "🎉"]]);
   });
 
+  it("gets my newest reaction through to a member who missed it, after 32 reactions", async () => {
+    // Said again: my 32 latest, oldest first; the member takes 30 a window, so the newest two never landed.
+    const g = `many-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const row = (fields: Partial<StoredMessage>): StoredMessage => ({ linkId: chat, id: "x", text: "", sender: "peer", timestamp: 1, via: "datalink", ...fields });
+    const mine = Array.from({ length: 32 }, (_, i) => row({ id: `alice:0:${i + 1}`, member: "alice", text: `m${i + 1}`, timestamp: 2_000 + i, reactions: { me: { e: "👍", n: i + 1, at: 3_000 + i } } }));
+    for (const message of [row({ id: "event:1:joined:1000", event: "joined", text: "You joined.", timestamp: 1_000 }), ...mine]) await db.addMessage(message);
+    cleanup.push(async () => { for (const m of await db.getMessages(chat)) await db.deleteMessage(chat, m.id); });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as { links: Map<string, unknown>; groups: { signReaction(): object }; resendGroupReactions(groupId: string, linkId: string): Promise<void> };
+    const sent: Record<string, unknown>[] = [];
+    inner.links.set("edge", { link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.push(frame); } } });
+    vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
+    // The rest go a window later: not in this test's time.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    cleanup.push(async () => { vi.useRealTimers(); });
+    await inner.resendGroupReactions(g, "edge");
+    // The member's side: every reaction of mine but the newest, which came while it was away.
+    const theirs = mine.map(m => ({ ...m, reactions: m.reactions!.me.n < 32 ? { bob: m.reactions!.me } : undefined }));
+    const reactions = new Reactions({
+      messages: async () => theirs,
+      patch: async (_chat, id, change) => {
+        const i = theirs.findIndex(r => r.id === id), patch = change(theirs[i]);
+        if (patch) theirs[i] = { ...theirs[i], ...patch };
+        return theirs[i];
+      },
+      changed: () => {},
+    });
+    for (const frame of sent) await reactions.receive(chat, "bob", { id: frame.id as string, e: frame.e as string, n: frame.n as number });
+    expect(theirs.at(-1)!.reactions?.bob).toMatchObject({ e: "👍", n: 32 });
+    expect(sent[0]).toMatchObject({ id: "alice:0:32", n: 32 });
+    expect(sent.length).toBeLessThan(REACTION_LIMITS.receive);
+  });
+
   it("edges that open together read the group's history once for my reactions and edits said again", async () => {
     // A member back in a group of 8 opens 7 edges at once: each read the whole history twice, 14 reads (4 s at 10k rows).
     const g = `burst-${crypto.randomUUID()}`, chat = `group:${g}`;
@@ -413,7 +447,8 @@ describe("a private group's edge that opens", () => {
     cleanup.push(async () => { vi.useRealTimers(); });
     await inner.resendGroupReactions(g, "edge");
     await inner.resendGroupReactions(g, "closes");
-    expect(sent.map(frame => frame.id)).toEqual(Array.from({ length: REACTION_LIMITS.send }, (_, i) => `admin:1:${40 - REACTION_LIMITS.send + i}`));
+    // Newest first.
+    expect(sent.map(frame => frame.id)).toEqual(Array.from({ length: REACTION_LIMITS.send }, (_, i) => `admin:1:${39 - i}`));
     // That edge closed and opened again: the next one says them all from the start.
     inner.links.set("closes", { link: { sendGroupFrame: vi.fn() } });
     await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
