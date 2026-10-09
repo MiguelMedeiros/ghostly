@@ -182,6 +182,20 @@ describe("an audio file in the chat", () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it("gone while its stream is being opened (the chat closed), it lets go of the stream once it comes", async () => {
+    getFile.mockResolvedValue(null);
+    const release = vi.fn();
+    let answer: (source: { url: string; release: () => void }) => void = () => {};
+    vi.spyOn(servicesPlatform!, "streamFile").mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const view = show(song());
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    view.unmount();
+    answer({ url: "ghostly-file://localhost/song-late", release });
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it("a stream the player refuses is played again from the file's bytes, once, from where it was", async () => {
     const release = vi.fn();
     vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/song-2", release });
