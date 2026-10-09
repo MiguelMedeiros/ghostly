@@ -3,7 +3,7 @@ import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
@@ -244,7 +244,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const failed = transfer?.state === "failed";
   const status = moving || failed ? fileStatus(file, transfer, named, false, t) : null;
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
-  const reason = actionError || (failed ? transfer.error : undefined);
+  const reason = actionError ? { text: actionError } : failedReason(transfer, t);
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
@@ -398,7 +398,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           <button type="button" className={linkButton} data-testid="video-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
-      {reason && why && <WhyText id={whyId} testId="video-why-text">{reason}</WhyText>}
+      {reason && why && <WhyText id={whyId} testId="video-why-text" english={reason.english}>{reason.text}</WhyText>}
       {problemText && (
         <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
           {problemText}{" "}

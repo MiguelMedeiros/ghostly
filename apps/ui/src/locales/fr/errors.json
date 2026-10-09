@@ -122,6 +122,16 @@
     "noRoomNext": "{{free}} libres.",
     "notVoice": "Cet enregistrement ne peut pas être envoyé comme message vocal",
     "pasteTooLarge": "C'est trop volumineux pour être collé. Envoyez-le avec + → Document.",
+    "refused": {
+      "damaged": "Le fichier est arrivé endommagé",
+      "expired": "Pas accepté à temps",
+      "makeRoom": "Demandez-lui de libérer de l'espace, puis renvoyez-le.",
+      "noRoomFree": "{{free}} libres. Demandez-lui de libérer de l'espace, puis renvoyez-le.",
+      "other": "Votre contact n'a pas pu recevoir ce fichier",
+      "sendAgain": "Renvoyez-le.",
+      "tooMany": "Votre contact a trop de fichiers en attente",
+      "tryLater": "Réessayez plus tard."
+    },
     "tooLargeForContact": "Trop gros pour l'app de votre contact",
     "tooLargeForContactNext": "Max {{max}} tant qu'il n'a pas mis Ghostly à jour.",
     "updatedPeerFirst": "Connectez-vous d'abord à un pair à jour",

@@ -153,10 +153,10 @@ export interface LinkSessionEvents {
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
   /**
    * A publish finished: how long it took, and whether it carried an `_rtc` signal. `error` when it failed; `waiting`
-   * when the relays' request budget held it back (nothing went out, and it goes again once the budget frees a request).
-   * `signalOut` when it is the first to carry the current `_rtc` signal: an offer or an answer went out now.
+   * when the relays' request budget held it back (nothing went out, and it goes again once the budget frees a request,
+   * in about `retryInMs`). `signalOut` when it is the first to carry the current `_rtc` signal: an offer or an answer went out now.
    */
-  onPublish?(result: { ms: number; rtc: boolean; error?: string; waiting?: boolean; signalOut?: boolean }): void;
+  onPublish?(result: { ms: number; rtc: boolean; error?: string; waiting?: boolean; retryInMs?: number; signalOut?: boolean }): void;
   /** The first read of the peer's key is done (with `firstPublish: "after-first-poll"`, what to publish is decided now). */
   onFirstPoll?(): void;
 }
@@ -597,7 +597,7 @@ export class LinkSession {
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
       traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
-      this.events.onPublish?.({ ms, rtc: !!rtcSignal, error: error instanceof Error ? error.message : String(error), ...(waiting && { waiting }) });
+      this.events.onPublish?.({ ms, rtc: !!rtcSignal, error: error instanceof Error ? error.message : String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
       throw error;
     }
     const ms = Date.now() - started;

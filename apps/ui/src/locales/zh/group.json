@@ -117,6 +117,7 @@
     "blockedCommunityNext": "请稍后再试。",
     "blockedNext": "先指定一位管理员，或等待成员上线。",
     "body": "群组及其历史记录将从此设备移除。你将无法阅读之后的内容，想回来需要有人再次让你进入。",
+    "bodyCommunity": "群组及其历史记录将从此设备移除。你将无法阅读之后的内容，想回来请再次打开群组链接。",
     "forgetBody": "从此设备删除群组也会让你退出该群组。",
     "forgetTitle": "删除 {{name}}？",
     "forgetTitleUnnamed": "删除此群组？",
