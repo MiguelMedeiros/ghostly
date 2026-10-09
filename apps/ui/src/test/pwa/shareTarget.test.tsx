@@ -121,6 +121,14 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
   });
 
+  it("shows the shared text and file name in their own direction, so in Arabic an English text keeps its '!' at its end", () => {
+    receiveShare(share({ text: "Look at this, it's great!", files: [file("Quarterly report (final draft).pdf")] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveAttribute("dir", "auto");
+    expect(screen.getByTestId("share-files")).toHaveTextContent("Quarterly report (final draft).pdf");
+    expect(screen.getByTestId("share-files")).toHaveAttribute("dir", "auto");
+  });
+
   it("Cancel drops the share and goes home", async () => {
     receiveShare(share({ text: "never mind" }));
     const { user } = picker();

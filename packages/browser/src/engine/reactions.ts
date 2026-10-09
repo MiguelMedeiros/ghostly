@@ -53,9 +53,6 @@ export function noteAfterChange(current: ReactionNote, message: StoredMessage): 
   return snippet === current.snippet ? undefined : { ...current, snippet };
 }
 
-/** My latest reactions said again on a private group's edge that opens: below what a receiver takes in one window. */
-export const GROUP_REACTION_RESEND = 16;
-
 /**
  * My reactions in a private group to say again to an edge that opened, in case it missed them: the newest `limit`,
  * newest first (what the member is likeliest to have missed lands before its pace runs out), of this membership only.
@@ -80,7 +77,7 @@ function lastMine(messages: readonly StoredMessage[], pending: readonly WireReac
 }
 
 export class Reactions {
-  /** Reactions to messages not here yet, per chat, until `REACTION_LIMITS.bufferMs` after they came. */
+  /** Reactions to messages not here yet, per chat, until `REACTION_LIMITS.bufferMs` after they came (`buffer` per sender). */
   private readonly waiting = new Map<string, { by: string; reaction: WireReaction; until: number }[]>();
   /** One chat's reactions at a time: a burst for one message lands in order. */
   private queue = Promise.resolve();
@@ -121,7 +118,7 @@ export class Reactions {
 
   /**
    * A reaction that came from `by` (`peer`, or a member's key), already authenticated as theirs. A message not here
-   * yet keeps it for a minute; past the room for that, it is dropped (and, on a 1:1 session, not confirmed).
+   * yet keeps it for five minutes; past the room for that sender, it is dropped (and, on a 1:1 session, not confirmed).
    */
   receive(chat: string, by: string, reaction: WireReaction): Promise<ReactionOutcome> {
     if (isGroup(chat)) {
@@ -182,7 +179,8 @@ export class Reactions {
     if (same && same.reaction.n >= reaction.n) return "stale";
     const kept = list.filter(w => w !== same);
     this.waiting.set(chat, kept);
-    if (kept.length >= REACTION_LIMITS.buffer) return "dropped";
+    // Room per sender: in a group, one member's reactions leave the others' theirs.
+    if (kept.filter(w => w.by === by).length >= REACTION_LIMITS.buffer) return "dropped";
     kept.push({ by, reaction, until: now + REACTION_LIMITS.bufferMs });
     return "waiting";
   }

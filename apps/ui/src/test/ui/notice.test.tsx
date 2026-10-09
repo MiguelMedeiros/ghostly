@@ -26,4 +26,10 @@ describe("Notice: a few words, the rest behind the ⓘ", () => {
     renderApp(<Notice tone="error" testId="w">Not enough sats</Notice>);
     expect(screen.getByRole("alert")).toHaveTextContent("Not enough sats");
   });
+
+  it("writes a warning in the warn ink, which the light themes darken to 4.5:1", () => {
+    renderApp(<Notice tone="warning" testId="w">Experimental</Notice>);
+    expect(screen.getByTestId("w").className).toContain("text-warn-ink");
+    expect(screen.getByTestId("w").className).not.toContain("text-yellow-500");
+  });
 });

@@ -274,14 +274,18 @@
       "testnet": "テスト用のお金：支払える Testnet の Lightning ウォレットがありません"
     },
     "onchainBitcoin": "オンチェーン Bitcoin",
+    "onlySat": "ここで受け取れるのは sat の ecash だけです。",
     "openTitle": "この端末の Lightning ウォレットで開く",
     "openWallet": "ウォレットを開く",
+    "otherUnitRequest": "{{unit}} の ecash を求めています",
+    "otherUnitToken": "{{unit}} のトークン",
     "paid": "支払い済み ✓",
     "pay": "支払う",
     "payWithFee": "{{amount}} + 手数料最大 {{fee}} を支払う",
     "paying": "支払い中…",
     "paysThrough": "{{domain}} 経由で支払い",
     "pendingAtMint": "ミントで支払いを処理中…",
+    "qrTooLong": "QR コードには長すぎます。コピーしてください。",
     "redeem": "受け取る",
     "redeemed": "受け取り済み ✓",
     "redeeming": "受け取り中…"

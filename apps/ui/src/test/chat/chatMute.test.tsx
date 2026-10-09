@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { AttentionFeedback } from "../../components/AttentionFeedback";
+import { MuteMenu } from "../../components/ChatMute";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import {
@@ -195,6 +196,25 @@ describe("AttentionFeedback in a muted chat", () => {
     sound.playSound.mockClear();
     clock.mockReturnValue(start + MESSAGE_BURST_MS);
     expect(await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS }))).toEqual(["message"]);
+  });
+
+  it("shows one system notification per chat for messages that come together, a mention still its own", async () => {
+    setup();
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    const notified = () => sound.notice.mock.calls.length;
+    await send(...Array.from({ length: 5 }, () => event({ linkId: "link-a" })), event({ linkId: "group:g1" }), event({ linkId: "group:g1" }));
+    await new Promise(r => setTimeout(r, 20));
+    expect(notified()).toBe(2);
+    clock.mockReturnValue(start + MESSAGE_BURST_MS - 1);
+    await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS - 1 }));
+    await new Promise(r => setTimeout(r, 20));
+    expect(notified()).toBe(2);
+    await send(event({ linkId: "link-a", mention: true, at: start + MESSAGE_BURST_MS - 1 }));
+    await waitFor(() => expect(notified()).toBe(3));
+    clock.mockReturnValue(start + MESSAGE_BURST_MS);
+    await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS }));
+    await waitFor(() => expect(notified()).toBe(4));
   });
 
   it("plays nothing, muted or not, while sounds are off", async () => {
@@ -405,5 +425,15 @@ describe("a muted chat in the list", () => {
     expect(within(group).getByTestId("chat-row-muted")).toBeInTheDocument();
     expect(within(group).getByTestId("chat-row-mute")).toHaveAccessibleName("Notifications muted");
     expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+  });
+
+  it("formats no end time while a row's mute menu is closed", () => {
+    // Every chat and group row mounts its bell's menu closed; a long list redraws them all at start and while idle.
+    const long = vi.spyOn(Date.prototype, "toLocaleString");
+    const short = vi.spyOn(Date.prototype, "toLocaleTimeString");
+    const anchor = { current: null };
+    renderApp(<>{["a", "b", groupChat("g")].map(c => <MuteMenu key={c} chat={c} open={false} onClose={() => {}} anchorRef={anchor} portal mentions={c.startsWith("group:")} />)}</>);
+    expect(screen.queryByTestId("mute-menu")).not.toBeInTheDocument();
+    expect(long.mock.calls.length + short.mock.calls.length).toBe(0);
   });
 });

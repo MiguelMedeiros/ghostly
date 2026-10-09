@@ -126,3 +126,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.gate.outputs.version }}
         run: gh workflow run npm-publish.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="v$VERSION"
+
+  # The same for web-latest.yml, which moves the web image's `latest` to the release's image.
+  web:
+    name: Web image latest
+    needs: [gate, notes]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch web-latest.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: gh workflow run web-latest.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="v$VERSION"

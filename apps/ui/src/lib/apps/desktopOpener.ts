@@ -12,6 +12,7 @@
  *   second load is the answer to `writing`.
  * - The app stops when the broker says so (`app_close`) or when the person closes its window (`ghostly-app-closed`).
  */
+import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
 import { registerRunningApp, type AppOpener } from "./open";
 import type { AppsPlatform } from "../platform";
@@ -45,14 +46,11 @@ const defaultView: AppView = {
   locale: () => document.documentElement.lang || navigator.language,
 };
 
-/** Base64 of bytes, in pieces (a file may be megabytes). */
-export function toBase64(bytes: Uint8Array): string {
-  let text = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(text);
-}
-
-/** A broker message as it travels to Rust: JSON, a file's bytes as base64 (`bytes`), which the runner turns back. */
+/**
+ * A broker message as it travels to Rust: JSON, a file's bytes as base64 (`bytes`), which the runner turns back. A file
+ * may be 16 MiB and is encoded on this window's thread: with core's encoder (the runtime's own, or a table), not `btoa`
+ * over character codes, which took about 100 ms a MiB.
+ */
 export function forIpc(message: unknown): unknown {
   if (!message || typeof message !== "object") return message;
   const { value, ...rest } = message as { value?: unknown };
