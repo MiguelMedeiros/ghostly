@@ -57,6 +57,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   /** A stream the player refused was tried again from the file's bytes, once. */
   const fellBack = useRef(false);
   const resumeAt = useRef(0);
+  /** On screen: a stream that opens after the bubble went is let go at once. */
+  const mounted = useRef(false);
   /** What the system's media controls call (lock screen, media keys): set on every render, below. */
   const mediaRef = useRef<MediaSessionPlayer | null>(null);
 
@@ -94,6 +96,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     setPlayState("loading");
     // Desktop streams its files from Rust, in ranges (a large one plays too); elsewhere the bytes come as a Blob.
     const source = await openStoredMedia(platform, file.id, file.mime, { bytes: !ready || fellBack.current });
+    if (!mounted.current) { source?.release(); return; }
     if (!source) {
       releasePlayback(file.id);
       setPlayState("idle");
@@ -140,12 +143,16 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   // Another audio file, video or voice message starts: this one stops and lets go of its bytes.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
 
-  useEffect(() => () => {
-    releasePlayback(file.id);
-    releaseMediaSession(file.id);
-    sourceRef.current?.release();
-    sourceRef.current = null;
-    srcRef.current = null;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      releasePlayback(file.id);
+      releaseMediaSession(file.id);
+      sourceRef.current?.release();
+      sourceRef.current = null;
+      srcRef.current = null;
+    };
   }, [file.id]);
 
   const pause = () => audioRef.current?.pause();

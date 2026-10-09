@@ -70,6 +70,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   /** A stream the player refused was tried again from the file's bytes, once. */
   const fellBack = useRef(false);
   const resumeAt = useRef(0);
+  /** On screen: a stream that opens after the bubble went is let go at once. */
+  const mounted = useRef(false);
   /** A play started by a tap: the element gets the keyboard once it is there. */
   const focusOnStart = useRef(false);
 
@@ -133,6 +135,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     // its way from here streams too once it has been copied (WebKitGTK stops a large one from a Blob partway), and
     // plays from what the page holds where nothing streams it.
     const source = await openStoredMedia(platform, file.id, file.mime, { bytes: fellBack.current || (!ready && sender !== "me") });
+    if (!mounted.current) { source?.release(); return; }
     if (!source) {
       releasePlayback(file.id);
       setPhase("poster");
@@ -191,11 +194,15 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     return () => clearTimeout(timer);
   }, [visible, phase, unload]);
 
-  useEffect(() => () => {
-    releasePlayback(file.id);
-    sourceRef.current?.release();
-    sourceRef.current = null;
-    srcRef.current = null;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      releasePlayback(file.id);
+      sourceRef.current?.release();
+      sourceRef.current = null;
+      srcRef.current = null;
+    };
   }, [file.id]);
 
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);

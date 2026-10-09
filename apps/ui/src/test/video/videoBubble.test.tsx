@@ -222,6 +222,20 @@ describe("a video in the chat", () => {
     expect(release).toHaveBeenCalledTimes(2);
   });
 
+  it("gone while its stream is being opened (the chat closed), it lets go of the stream once it comes", async () => {
+    getFile.mockResolvedValue(null);
+    const release = vi.fn();
+    let answer: (source: { url: string; release: () => void }) => void = () => {};
+    vi.spyOn(servicesPlatform!, "streamFile").mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const view = show(video({ size: 700 * MB }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    view.unmount();
+    answer({ url: "ghostly-file://localhost/token-late", release });
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it("a streamed one stops being served when another video starts", async () => {
     const big = video({ size: 700 * MB }), small = video();
     getFile.mockImplementation(async (id: string) => (id === big.id ? null : new Blob(["mp4"], { type: "video/mp4" })));
