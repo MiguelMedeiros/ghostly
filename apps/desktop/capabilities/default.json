@@ -63,6 +63,7 @@
     "allow-native-call-support",
     "allow-native-camera-close",
     "allow-native-camera-open",
+    "allow-native-clear-notification",
     "allow-native-microphone-meter",
     "allow-native-microphone-meter-close",
     "allow-native-notification-permission",

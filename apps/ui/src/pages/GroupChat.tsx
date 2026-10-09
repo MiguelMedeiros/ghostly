@@ -26,6 +26,7 @@ import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { authorName, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { clearChatNotification } from "../lib/notifications";
 import { authorsOf, type MessageAuthor } from "../lib/senderRuns";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatsByPeer } from "../lib/identities";
@@ -346,7 +347,11 @@ export function GroupChat() {
   const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink, t, returnFocus: optionsRef });
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
   const pageShown = usePageShown();
-  useEffect(() => { if (group && pageShown) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group, pageShown]);
+  useEffect(() => {
+    if (!group || !pageShown) return;
+    markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now()));
+    clearChatNotification(`group:${group.id}`);
+  }, [group?.id, group?.lastMessageAt, group, pageShown]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
     const answering = replyingRef.current;

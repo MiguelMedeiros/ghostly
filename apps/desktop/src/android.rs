@@ -118,6 +118,13 @@ pub async fn notify(id: &str, body: &str) -> Result<(), String> {
         .map(drop)
 }
 
+/// Takes away the notification posted as `id`, if it is still there.
+pub async fn cancel_notification(id: &str) -> Result<(), String> {
+    call_async::<Value>("cancelNotification", json!({ "id": id }))
+        .await
+        .map(drop)
+}
+
 /// The app's page in the system's notification settings.
 pub fn open_notification_settings() -> Result<(), String> {
     call::<Value>("openNotificationSettings", json!({})).map(drop)
