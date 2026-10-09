@@ -493,6 +493,25 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     // Asked for, it does not count toward what the group fetches by itself.
     expect(t.files.get(bob)!.store.records.get(t.got(bob, id, big.messageId).message!.file!.id)!.group).toMatchObject({ asked: true });
   });
+
+  it("a member who leaves keeps none of the group's files: they go with its history, not when the admin has heard", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    const theirs = await t.send(alice, id, pattern(40_000, 2), { name: "plans.bin" });
+    const mine = await t.send(bob, id, pattern(30_000, 3), { name: "reply.bin" });
+    await t.world.until(() => [alice, bob, carol].every(p => t.done(p, id, theirs.messageId) && t.done(p, id, mine.messageId)), 5 * 60_000);
+    const { store, transfers } = t.files.get(bob)!;
+    expect(store.bytes.size).toBe(2);
+    // The admin is away: its commit taking bob out does not come back, and the leave waits for it for a week.
+    alice.online = false;
+    await t.world.run(5_000);
+    await bob.groups.leave(id);
+    await t.world.run(60_000);
+    expect(bob.messages.filter(m => m.linkId === `group:${id}`)).toEqual([]);
+    expect([...store.records.keys()]).toEqual([]);
+    expect([...store.bytes.keys()]).toEqual([]);
+    expect([...transfers.keys()]).toEqual([]);
+  });
 });
 
 describe("the files of a group this device no longer has", { timeout: 120_000 }, () => {
@@ -568,5 +587,31 @@ describe("a file in a community", { timeout: 120_000 }, () => {
       expect(from.length).toBeGreaterThan(0);
       expect(from.every(name => hubs.some(h => h.name === name))).toBe(true);
     }
+  });
+
+  it("a member who leaves keeps none of the community's files, and none is left after the app starts again", async () => {
+    const t = new FilesWorld();
+    const admin = t.add("admin");
+    const id = await admin.groups.create("Open door");
+    const link = await admin.groups.enableLink(id);
+    const others = Array.from({ length: 3 }, (_, i) => t.add(`p${i}`));
+    for (const p of others) await p.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await t.world.until(() => others.every(p => t.world.member(p, id)), 10 * 60_000);
+    await t.world.run(30_000);
+    const [author, reader] = others;
+    const theirs = await t.send(author, id, pattern(40_000, 5), { name: "minutes.bin" });
+    const mine = await t.send(reader, id, pattern(30_000, 6), { name: "answer.bin" });
+    await t.world.until(() => t.done(reader, id, theirs.messageId) && t.done(reader, id, mine.messageId), 5 * 60_000);
+    const { store, transfers } = t.files.get(reader)!;
+    expect(store.bytes.size).toBe(2);
+    await reader.groups.leave(id);
+    await t.world.run(60_000);
+    expect(t.world.view(reader, id)).toBeUndefined();
+    expect(reader.messages.filter(m => m.linkId === `group:${id}`)).toEqual([]);
+    expect([...store.records.keys()]).toEqual([]);
+    expect([...store.bytes.keys()]).toEqual([]);
+    expect([...transfers.keys()]).toEqual([]);
+    await t.world.restart(reader);
+    expect([...store.records.keys()]).toEqual([]);
   });
 });
