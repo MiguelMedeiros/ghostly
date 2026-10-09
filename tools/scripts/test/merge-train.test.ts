@@ -138,6 +138,8 @@ function fakeRepo() {
   };
   const built = new Map<string, string>();
   const conflicts = new Set<number>();
+  /** Pull requests whose commits do not replay on the tip while their head merges cleanly (a conflict resolved in a merge of the base). */
+  const unrebasable = new Set<number>();
   let lastSha = "";
   const git = {
     build: async (base: string, prs: Pr[]) => {
@@ -170,7 +172,7 @@ function fakeRepo() {
     /** A rebase onto the tip: a new head that sits on it, unless the head already does and nothing forces new commits. */
     rebase: async (base: string, p: Pr, { force = false } = {}) => {
       if (moved.has(p.number)) return { baseSha: tips[base], dropped: "moved" };
-      if (conflicts.has(p.number)) return { baseSha: tips[base], dropped: "conflict" };
+      if (conflicts.has(p.number) || unrebasable.has(p.number)) return { baseSha: tips[base], dropped: "conflict" };
       if (!force && sitsOn.get(p.sha) === tips[base]) return { baseSha: tips[base], sha: p.sha };
       const sha = `r${p.number}.${++rebases}`;
       sitsOn.set(sha, tips[base]);
@@ -210,7 +212,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, comments, runs, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, comments, runs, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -1232,6 +1234,40 @@ describe("one pull request alone", () => {
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/conflicts with `dev`/)]);
   });
 
+  it("sends one that resolved its conflict in a merge of the base the batch way, where its head merges cleanly", async () => {
+    const repo = fakeRepo();
+    repo.unrebasable.add(11);
+    repo.add(11, { behind: true });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(r.log).toContain("ALONE #11: its commits do not rebase onto `dev`; it goes the batch way.");
+    expect(r.opened).toHaveLength(1);
+    expect(repo.members()).toEqual([11]);
+    expect(repo.pushes).toEqual([]); // its branch stays as the author left it
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.queue]);
+    repo.settle();
+    expect((await repo.run()).merged).toEqual([11]);
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
+  it("sends a rebased one the batch way when the base moves and its commits no longer replay, with its rerun still spent", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.settle([11]);
+    await repo.run(); // red once: a second run on a fresh rebase
+    expect(repo.alone(11)!.retried).toBe(true);
+    repo.tips.dev = "dev1";
+    repo.unrebasable.add(11);
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11]);
+    expect(readState(repo.batch()!.body).retried).toBe(true);
+    repo.settle([11]);
+    const red = await repo.run();
+    expect(red.failed).toEqual([11]); // no third run
+    expect(r.dropped).toEqual([]);
+  });
+
   it("still builds a batch for two or more, and never pushes to their branches", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
@@ -1653,6 +1689,43 @@ describe("building a batch with git", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000); // some forty git calls: slow on a busy machine
+
+  it("takes a head that resolved a conflict in a merge of the base, which a rebase of its commits cannot", async () => {
+    const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+    const origin = join(root, "origin");
+    const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const write = (text: string, message: string) => {
+      writeFileSync(join(origin, "file.txt"), text);
+      git(["add", "file.txt"]);
+      git(["commit", "-q", "-m", message]);
+    };
+    try {
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      write("base\n", "base");
+      git(["checkout", "-q", "-b", "fix-1"]);
+      write("theirs\n", "the fix");
+      git(["checkout", "-q", "dev"]);
+      write("ours\n", "dev moves");
+      // The author merges dev in and resolves the conflict there: the branch's own commit still conflicts by itself.
+      git(["checkout", "-q", "fix-1"]);
+      expect(() => git(["merge", "-q", "dev"])).toThrow();
+      write("ours and theirs\n", "Merge dev");
+      git(["update-ref", "refs/pull/1/head", "HEAD"]);
+      const pr = { number: 1, title: "fix: number 1", sha: git(["rev-parse", "HEAD"]) };
+      git(["checkout", "-q", "dev"]);
+      git(["clone", "-q", "origin", "clone"], root);
+      const clone = join(root, "clone");
+      const layer = gitLayer({ cwd: clone });
+      expect(await layer.rebase("dev", pr)).toEqual({ baseSha: git(["rev-parse", "dev"]), dropped: "conflict" });
+      const built = await layer.build("dev", [pr]);
+      expect(built).toMatchObject({ applied: [1], dropped: [] });
+      expect(git(["show", `${built.sha}:file.txt`], clone)).toBe("ours and theirs");
+      expect(git(["rev-parse", `${built.sha}^`], clone)).toBe(built.baseSha);
+      layer.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 describe("a stalled request or git call", () => {
