@@ -62,23 +62,46 @@ describe("useRowWindow", () => {
     expect(result.current.more("down")).toBe(false);
   });
 
-  it("at the end with more than its most rows (messages that came while open), trims to the last rows; otherwise leaves them", () => {
-    const { result, rerender } = renderHook(({ ids }) => useRowWindow(ids, "chat-1"), { initialProps: { ids: rows(50) } });
-    rerender({ ids: rows(50 + MAX_ROWS) });
-    expect(range(result.current)).toEqual([0, 50 + MAX_ROWS]);
-    let trimmed = false;
-    act(() => { trimmed = result.current.trim(); });
-    expect(trimmed).toBe(true);
-    expect(range(result.current)).toEqual([50 + MAX_ROWS - OPEN_ROWS, 50 + MAX_ROWS]);
+  it("at the bottom, a batch at the end past its most rows draws only the last rows, never the whole batch", () => {
+    const drawn: number[] = [];
+    const { result, rerender } = renderHook(({ ids }) => {
+      const w = useRowWindow(ids, "chat-1");
+      drawn.push(w.to - w.from);
+      return w;
+    }, { initialProps: { ids: rows(5_000) } });
+    expect(range(result.current)).toEqual([5_000 - OPEN_ROWS, 5_000]);
+    rerender({ ids: rows(8_000) });
+    expect(range(result.current)).toEqual([8_000 - OPEN_ROWS, 8_000]);
     expect(result.current.detached).toBe(false);
-    // As many as the most, or up the history: nothing goes.
-    act(() => { trimmed = result.current.trim(); });
-    expect(trimmed).toBe(false);
-    for (let i = 0; i < 4; i++) act(() => { result.current.more("up"); });
-    const held = range(result.current);
-    act(() => { trimmed = result.current.trim(); });
-    expect(trimmed).toBe(false);
-    expect(range(result.current)).toEqual(held);
+    expect(Math.max(...drawn)).toBeLessThanOrEqual(MAX_ROWS);
+    // A few more at a time keep it at the end, past the most rows too (a chat left open at its bottom all day).
+    let ids = rows(8_000);
+    for (let i = 0; i < MAX_ROWS; i++) { ids = rows(ids.length + 1); rerender({ ids }); }
+    expect(result.current.to).toBe(ids.length);
+    expect(Math.max(...drawn)).toBeLessThanOrEqual(MAX_ROWS);
+  });
+
+  it("up from the bottom, a batch at the end stays below the window, which keeps its rows", () => {
+    let bottom = true;
+    const drawn: number[] = [];
+    const { result, rerender } = renderHook(({ ids }) => {
+      const w = useRowWindow(ids, "chat-1");
+      w.watch(() => bottom);
+      drawn.push(w.to - w.from);
+      return w;
+    }, { initialProps: { ids: rows(5_000) } });
+    act(() => { result.current.more("up"); });
+    expect(range(result.current)).toEqual([5_000 - OPEN_ROWS - PAGE_ROWS, 5_000]);
+    bottom = false;
+    // Under the most rows, still drawn: the window reaches the end.
+    rerender({ ids: rows(5_050) });
+    expect(range(result.current)).toEqual([5_000 - OPEN_ROWS - PAGE_ROWS, 5_050]);
+    rerender({ ids: rows(8_000) });
+    expect(range(result.current)).toEqual([5_000 - OPEN_ROWS - PAGE_ROWS, 5_050]);
+    expect(result.current.detached).toBe(true);
+    expect(Math.max(...drawn)).toBeLessThanOrEqual(MAX_ROWS);
+    act(() => result.current.attach(true));
+    expect(range(result.current)).toEqual([8_000 - OPEN_ROWS, 8_000]);
   });
 
   it("goes back to the last rows on attach", () => {

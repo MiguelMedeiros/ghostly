@@ -38,7 +38,7 @@ function testnet() {
 }
 afterEach(() => vi.useRealTimers());
 
-it("an inviter's first envelope goes out as its delivery starts, not after its first read; the joiner reads it on its first read, with no put more", async () => {
+it("an inviter's first envelope goes out as its delivery starts, not after its first read; the joiner reads it on its first read, with no put more before the pin", async () => {
   vi.useFakeTimers();
   const net = testnet();
   const inviterSeed = createIdentity().seedB64;
@@ -56,8 +56,12 @@ it("an inviter's first envelope goes out as its delivery starts, not after its f
   expect(joiner.credentials.peerKey, "pinned on its first read, 1.5 s after the join").toBe(identityFromSeedB64(inviterSeed).pubKeyZ32);
   await vi.advanceTimersByTimeAsync(20_000);
   expect(inviter.credentials.peerKey, "and the inviter pins the joiner").toBe(identityFromSeedB64(joiner.credentials.seedB64).pubKeyZ32);
-  // One envelope each, as before: the first put moved, none was added.
-  expect(net.puts).toHaveLength(2);
+  // One envelope each, as before: the first put moved. Then the inviter's sealed to the joiner it pinned replaces its
+  // first, which any copy of the invite opens: a later holder reads there that the invite was taken.
+  const [inviterBox, joinerBox] = net.puts;
+  expect(joinerBox).not.toBe(inviterBox);
+  expect(net.puts).toEqual([inviterBox, joinerBox, inviterBox]);
+  expect(net.packets.get(inviterBox)?.records.map(r => r.label)).toEqual(["_dm", "_dmk"]);
   // A stop waits for the read in flight.
   const stopped = Promise.all([inviter.delivery.stop(), joiner.delivery.stop()]);
   await vi.advanceTimersByTimeAsync(3_000); await stopped;

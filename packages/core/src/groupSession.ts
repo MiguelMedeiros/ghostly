@@ -376,6 +376,8 @@ export class GroupSession {
   private pendingCommits = new Map<number, GroupCommitFrame>();
   /** When each member was last asked to catch me up, so a stream of unreadable frames is one question, not a loop. */
   private asked = new Map<string, number>();
+  /** The signed leave of each member I last passed on (its signature). In memory only. */
+  private byesPassed = new Map<string, string>();
   private queue = Promise.resolve();
   /** One metadata frame that names a commit or an epoch I do not have yet: tried again when the chain moves. */
   private pendingMeta: { from: string; frame: unknown } | undefined;
@@ -521,6 +523,39 @@ export class GroupSession {
     if (!entry) return 0;
     const lowest = Math.max(0, entry.high - GROUP_LIMITS.window + 1);
     return Math.max(0, entry.high - lowest + 1 - (1 + entry.window.filter(n => n >= lowest).length));
+  }
+
+  /**
+   * The other members some of whose messages below the highest seen never arrived (what a sync names in `miss`), each
+   * with a mark that changes when what is missing does: an author answers only from its own last `outlog`, so the rest
+   * is for another member to hand on.
+   */
+  lacking(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const [sender, epochs] of Object.entries(this.state.seen)) {
+      if (sender === this.myKey || !rosterHas(this.roster, sender)) continue;
+      const marks = Object.entries(epochs).filter(([, entry]) => this.gaps(entry).length)
+        .map(([e, entry]) => `${e}:${entry.high}:${entry.window.length}`);
+      if (marks.length) out.set(sender, marks.join(","));
+    }
+    return out;
+  }
+
+  /** What a sync names in `miss` for one sender now: per epoch, the newest `GROUP_LIMITS.miss` numbers that never arrived. */
+  missOf(sender: string): Record<string, number[]> {
+    const out: Record<string, number[]> = {};
+    for (const [e, entry] of Object.entries(this.state.seen[sender] ?? {})) { const gaps = this.gaps(entry); if (gaps.length) out[e] = gaps; }
+    return out;
+  }
+
+  /** Whether any of `asked` (per epoch, as `missOf` gave them) arrived since: the member asked holds what is missing. */
+  filledSince(sender: string, asked: Record<string, number[]>): boolean {
+    return Object.entries(asked).some(([e, numbers]) => {
+      const entry = this.state.seen[sender]?.[e];
+      if (!entry) return false;
+      const got = new Set(entry.window);
+      return numbers.some(n => got.has(n));
+    });
   }
 
   private serialize<T>(run: () => Promise<T>): Promise<T> {
@@ -996,6 +1031,10 @@ export class GroupSession {
     if (bye.e < this.admittedAt(bye.k)) return;
     // An admin whose admin work is off on this device passes the leave on, as a member does: it commits nothing.
     if (this.isAdmin && this.hooks.adminWork?.() !== false && (await this.commitUnlessTurnUnconfirmed("remove", bye.k))) return;
+    // Passed on the first time only, so it does not go round the hubs while the admin is away; again only from its
+    // member, who says it on every edge to a hub that opens until the admin hears it.
+    if (from !== bye.k && this.byesPassed.get(bye.k) === bye.sig) return;
+    this.byesPassed.set(bye.k, bye.sig);
     this.took(bye);
   }
 

@@ -3,6 +3,8 @@ import { redial } from './redial.mjs'
 
 export const MAX_FRAME = 60 * 1024
 const PREFACE = 'ghostly/paired-chat/1'
+/** How long a closing channel waits for what it sent last to go out before the stream is destroyed anyway. */
+const CLOSE_FLUSH_MS = 300
 
 /** Native UDP + NoiseSecretStream. The binding comes from the authenticated
  * stream itself, never from an application frame supplied by the other peer. */
@@ -22,6 +24,7 @@ export async function createHyperEndpoint(seed, options = {}) {
     let reader = null
     let closeHandler = null
     let closed = false
+    let ending = null
     let pending = []
     let buffer = Buffer.alloc(0)
     let preface = false
@@ -49,11 +52,22 @@ export async function createHyperEndpoint(seed, options = {}) {
           socket.once('drain', done); socket.once('close', gone)
         })
       },
-      close() { socket.destroy() },
+      // What was sent last (a goodbye, as an app stops) goes out before the stream ends: destroyed at once, it was
+      // dropped unsent. A contact that never finishes the stream has CLOSE_FLUSH_MS.
+      close() {
+        if (closed || ending) return ending ?? Promise.resolve()
+        ending = new Promise(resolve => { socket.once('close', resolve) })
+        const timer = setTimeout(() => socket.destroy(), CLOSE_FLUSH_MS)
+        timer.unref?.()
+        socket.end()
+        return ending
+      },
     }
     channels.add(channel)
     onChannel?.(channel)
     socket.on('error', error => rejectOpen(error))
+    // The contact ended its side (its channel closed): this one ends too, so the stream closes now, not on its timer.
+    socket.on('end', () => socket.end())
     socket.on('close', () => {
       closed = true; pending = []; clearTimeout(timer); channels.delete(channel)
       rejectOpen(new Error('Native channel closed')); closeHandler?.()
@@ -116,6 +130,7 @@ export async function createHyperEndpoint(seed, options = {}) {
           close() { if (counted) channels.delete(counted); socket.destroy() } }
       })
     },
-    async close() { stopped = true; for (const channel of channels) channel.close(); waiting.length = 0; await server.close(); await node.destroy() },
+    // The channels end first (their last frames out, CLOSE_FLUSH_MS at most): the node's socket goes with it.
+    async close() { stopped = true; const ended = [...channels].map(channel => channel.close()); waiting.length = 0; await Promise.all(ended); await server.close(); await node.destroy() },
   }
 }

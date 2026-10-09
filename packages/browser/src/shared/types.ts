@@ -241,9 +241,11 @@ export type GroupEdgeCause = "relays" | "session" | "other";
 
 /**
  * How far a join through a group's link got, as the joiner can know it: the knock is being left,
- * it is there for the admin's app to read, that app opened the entry session, it let me in.
+ * it is there for the admin's app to read, that app opened the entry session, it let me in. Or a member's app
+ * answered that there is no room yet (`group-full`, WISP 902 § A full group): `full`, or `blocked` while the group
+ * waits for every member's app to take more than eight; the joiner goes on knocking.
  */
-export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted";
+export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked";
 
 export interface GroupView {
   id: string;
@@ -264,8 +266,11 @@ export interface GroupView {
   adminOff?: true;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
-  /** `waiting`: joining a community through its link, how many others were knocking with me when I last knocked. */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number };
+  /**
+   * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
+   * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
+   */
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -392,7 +397,12 @@ export interface FileTransferView {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
-  /** A group file (WISP 503) waiting, `waiting`: why, in a few words ("Nobody you are connected to has this file yet"). */
+  /**
+   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
+   * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
+   */
+  wait?: "nobody" | "busy" | "damaged";
+  /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
 

@@ -50,7 +50,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
       {forget && <p>{t("group.leave.forgetBody")}</p>}
       <p>{t("group.leave.body")}</p>
       {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}</p>}
-      {blocked && <Notice tone="error" className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
+      {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
     </div>
     {error && <Notice problem={error} className="mt-2 text-sm" />}
     <div className="mt-5 flex justify-end gap-2">

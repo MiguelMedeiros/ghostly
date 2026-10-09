@@ -129,7 +129,7 @@
     "copied": "Copié",
     "copyFailed": "La copie n'a pas fonctionné. Sélectionnez le lien et copiez-le.",
     "disable": "Désactiver",
-    "disableHint": "Personne ne peut rejoindre avec le lien tant qu'il n'est pas réactivé",
+    "disableHint": "Le lien cesse de fonctionner. Le réactiver crée un nouveau lien à partager.",
     "enable": "Activer le lien",
     "enableFailed": "Impossible d'activer le lien",
     "full": "Le groupe est plein ({{count}} sur {{count}}). Personne n'entre avant qu'un membre parte.",
@@ -137,7 +137,7 @@
     "hideQr": "Masquer le QR",
     "note": "Quiconque ouvre ce lien rejoint le groupe, sans être votre contact ni dire qui il est. Il entre tant que votre app est ouverte, jusqu'à {{count}} membres.",
     "noteCommunity": "Quiconque ouvre ce lien rejoint le groupe, sans être le contact de personne ni dire qui il est. L'app de n'importe quel membre le fait entrer, donc cela marche en votre absence ; jusqu'à {{count}} membres. Retirer quelqu'un ne l'empêche pas de rouvrir le lien : l'admin en crée un nouveau pour cela.",
-    "off": "Le lien est désactivé : personne ne peut rejoindre avec. Activez-le pour laisser entrer quiconque l'a, sans être votre contact.",
+    "off": "Le lien est désactivé : personne ne peut rejoindre avec, et le lien partagé avant ne fonctionnera plus. L'activer crée un nouveau lien à partager.",
     "qrTitle": "QR code du lien du groupe",
     "reset": "Nouveau lien",
     "resetHint": "Un nouveau lien ; l'actuel cesse de fonctionner",
@@ -148,6 +148,10 @@
     "shared": "Partagé",
     "showQr": "Afficher le QR",
     "title": "Lien du groupe"
+  },
+  "makeAdmin": {
+    "body": "Vous ne serez plus l'admin. Seule la personne {{name}} pourra renommer le groupe, changer sa photo et son lien, inviter ou retirer des membres, et vous rendre le rôle.",
+    "title": "Faire de {{name}} l'admin ?"
   },
   "member": {
     "connected": "Connecté · {{transport}}",
@@ -170,10 +174,11 @@
     "admin": "admin",
     "changePicture": "Changer la photo",
     "epoch": "époque {{epoch}}",
+    "fullInvited": "Le groupe est plein ({{max}} sur {{max}}), en comptant les invitations encore sans réponse ({{invited}}). Personne d'autre ne peut être invité avant qu'un membre parte.",
     "invite": "Inviter un contact",
     "inviteAction": "Inviter",
     "invited": "Invité…",
-    "makeAdmin": "Nommer admin",
+    "makeAdmin": "Céder l'admin",
     "missing": "{{count}} manquants",
     "missingHint": "Messages de cette époque que personne n'a pu récupérer",
     "needsBothHint": "Les groupes demandent que les deux apps soient connectées et à jour",

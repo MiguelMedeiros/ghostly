@@ -139,6 +139,11 @@ export interface FileTransferState {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
+  /**
+   * A group's file, `waiting`: why. `nobody` connected has it, its holders are `busy`, or what came was `damaged`
+   * (it was dropped; `stalled`, so its person can ask again).
+   */
+  wait?: "nobody" | "busy" | "damaged";
 }
 
 export interface MintInfo {
