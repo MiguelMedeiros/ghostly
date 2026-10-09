@@ -137,7 +137,7 @@ describe("BIP 21 links", () => {
     const uriOf = (text: string) => (findMoney(text) as { request: { uri?: string } }).request.uri;
     // A test address with a mainnet invoice: the card is test money, so what it hands out carries no lnbc.
     expect(uriOf(`pay me here bitcoin:${TB1Q}?amount=0.00001&lightning=${INVOICE}`)).toBe(`bitcoin:${TB1Q}?amount=0.00001`);
-    expect(uriOf(`bitcoin:${BC1Q}?amount=0.00021&lightning=${INVOICE.toUpperCase()}`)).toBe(`bitcoin:${BC1Q}?amount=0.00021&lightning=${INVOICE}`);
+    expect(uriOf(`bitcoin:${BC1Q}?amount=0.000021&lightning=${INVOICE.toUpperCase()}`)).toBe(`bitcoin:${BC1Q}?amount=0.000021&lightning=${INVOICE}`);
     // Legs the on-chain card does not show, and a repeated amount read one way here and maybe another elsewhere.
     expect(uriOf(`bitcoin:${TB1Q}?lno=${BOLT12_SPEC_MINIMAL}&ark=${arkadeAddress("ark")}&AMOUNT=0.00001&amount=1`)).toBe(`bitcoin:${TB1Q}?amount=0.00001`);
     // What keeps this app from paying keeps a wallet from paying too.
