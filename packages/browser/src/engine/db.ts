@@ -123,16 +123,27 @@ export const db = {
   },
   async deleteLink(linkId: string): Promise<void> {
     await wrap((await store(STORES.links, "readwrite")).delete(linkId));
-    const messages = await store(STORES.messages, "readwrite");
-    const keys = await wrap(messages.index("byLink").getAllKeys(linkId));
-    await Promise.all(keys.map((key) => wrap(messages.delete(key))));
+    // By key range, inside IndexedDB: a chat of many rows builds no key list and no request per row on this thread.
+    await wrap((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([linkId], [linkId, []])));
     await fileStore.deleteForLink(linkId);
     await removeFileBytes(`${linkId}-in-`);
     await removeFileBytes(`${linkId}-out-`);
-    // What mini-apps kept for this chat (WISP 1200 § Permissions: storage per app and per chat) is the chat's.
+    // What mini-apps kept for this chat (WISP 1200 § Permissions: storage per app and per chat) is the chat's. The key is
+    // (app, scope, key): the chat's index finds each app's first row, one range takes that app's rows of the chat, and the
+    // cursor goes on to the next app's (the deleted rows are no longer in the index). One step per app, not per row.
     const appStorage = await store(STORES.appStorage, "readwrite");
-    const appKeys = await wrap(appStorage.index(APP_STORAGE_CHAT_INDEX).getAllKeys(linkId));
-    await Promise.all(appKeys.map((key) => wrap(appStorage.delete(key))));
+    await new Promise<void>((resolve, reject) => {
+      appStorage.transaction.oncomplete = () => resolve();
+      appStorage.transaction.onerror = appStorage.transaction.onabort = () => reject(appStorage.transaction.error ?? new Error("App storage failed"));
+      const request = appStorage.index(APP_STORAGE_CHAT_INDEX).openKeyCursor(IDBKeyRange.only(linkId));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const [ref] = cursor.primaryKey as [string, string, string];
+        appStorage.delete(IDBKeyRange.bound([ref, linkId], [ref, linkId, []]));
+        cursor.continue();
+      };
+    });
   },
 
   async getMessages(linkId: string): Promise<StoredMessage[]> {
