@@ -1045,6 +1045,8 @@ export class Groups {
     for (const [groupId, at] of this.removedAt) if (now - at >= REMOVED_LINGER_MS) { this.removedAt.delete(groupId); this.reconcileEdges(groupId); }
     for (const [groupId, session] of this.sessions) {
       const group = this.stored.get(groupId);
+      // Taken out as a hub, my last act done: no edges held for it in the budget of the other groups (`room`).
+      if (session.status !== "active" && !this.removedAt.has(groupId) && this.hubs.isHub(groupId)) this.hubs.forget(groupId);
       if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) continue;
       await this.hubs.tick(groupId, session, group, now).catch(() => false);
       if (this.hubReconcile.has(groupId)) continue;
