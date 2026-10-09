@@ -262,7 +262,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
-  const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? deliveryPeer.pairing.error ?? t("chat.keyChanged") : undefined;
+  // The hints say it in the app's language; the engine's English sentence (pairing.error) is the connection panel's.
+  const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? t("chat.keyChanged") : undefined;
   // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
   // invite code is forgotten when the contact shows up.
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
