@@ -118,6 +118,13 @@ pub async fn notify(id: &str, body: &str) -> Result<(), String> {
         .map(drop)
 }
 
+/// Takes away the notification posted as `id`, if it is still there.
+pub async fn cancel_notification(id: &str) -> Result<(), String> {
+    call_async::<Value>("cancelNotification", json!({ "id": id }))
+        .await
+        .map(drop)
+}
+
 /// The app's page in the system's notification settings.
 pub fn open_notification_settings() -> Result<(), String> {
     call::<Value>("openNotificationSettings", json!({})).map(drop)
@@ -137,6 +144,17 @@ pub async fn save_file(path: PathBuf, name: &str) -> Result<bool, String> {
             .await?
             .saved,
     )
+}
+
+/// The page read a share's copies, at `paths`: the Kotlin side removes their share's folder from the app's cache.
+pub async fn share_done(paths: Vec<PathBuf>) -> Result<(), String> {
+    let paths: Vec<&str> = paths.iter().filter_map(|path| path.to_str()).collect();
+    if paths.is_empty() {
+        return Ok(());
+    }
+    call_async::<Value>("shareDone", json!({ "paths": paths }))
+        .await
+        .map(drop)
 }
 
 /// The system bars around the page take its background colour, and light or dark icons to go on it.

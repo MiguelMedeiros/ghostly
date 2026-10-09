@@ -113,12 +113,22 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
   });
 
-  it("files go to 1:1 chats only: groups do not take files yet", () => {
+  it("files go to groups too (WISP 503): picking one hands them to its composer", async () => {
     receiveShare(share({ files: [file("a.png"), file("b.png")] }));
-    picker();
+    const { user } = picker();
     expect(screen.getByTestId("share-files")).toHaveTextContent("2 files");
-    expect(screen.queryByTestId("share-group")).toBeNull();
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+    await user.click(screen.getByTestId("share-group"));
+    expect(takeShareFor(groupChat("g1"))?.files.map((f) => f.name)).toEqual(["a.png", "b.png"]);
+    expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
+  });
+
+  it("shows the shared text and file name in their own direction, so in Arabic an English text keeps its '!' at its end", () => {
+    receiveShare(share({ text: "Look at this, it's great!", files: [file("Quarterly report (final draft).pdf")] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveAttribute("dir", "auto");
+    expect(screen.getByTestId("share-files")).toHaveTextContent("Quarterly report (final draft).pdf");
+    expect(screen.getByTestId("share-files")).toHaveAttribute("dir", "auto");
   });
 
   it("Cancel drops the share and goes home", async () => {

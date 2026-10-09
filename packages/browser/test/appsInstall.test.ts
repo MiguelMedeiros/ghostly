@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { canonicalJsonBytes } from "@ghostly/core";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { canonicalJsonBytes, toBase64Url, utf8Encode } from "@ghostly/core";
 import { fileBytes } from "../src/shared/fileBytes";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, keyOf,
@@ -174,6 +175,21 @@ describe("updates", () => {
     expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
   });
 
+  it("a newer version its publisher revoked beside its source before the check is not installed; the one held keeps running", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    // The repository's HEAD still holds v2 after its publisher revoked it there.
+    const v2 = await bundle({ sequence: 2, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v2.bytes);
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v2.digest], "Broken build")]));
+    expect(await store.checkUpdates()).toEqual([{ ref: v1.ref, outcome: "none", run: { status: "ok" } }]);
+    expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest, run: { status: "ok" } });
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+  });
+
   it("a lower sequence is never installed over a higher one", async () => {
     const { store } = await installed({ sequence: 3 });
     const old = await bundle({ sequence: 2 });
@@ -298,6 +314,25 @@ describe("an app installed from a store updates only to the version that store l
     expect(net.requests).not.toContain(HEAD);
     expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest, from: pinned2 });
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+  });
+
+  it("a listing that names a version its URL does not hold costs one peek per index, never the whole bundle", async () => {
+    const { store, v1 } = await fromStore();
+    const lie = { ...listing(v1, [PINNED_URL]), sequence: 99, digest: toBase64Url(sha256(utf8Encode("no bundle has this"))) };
+    await net.putStore(await storeFiles({ sequence: 2, apps: [lie] }));
+    net.fetch.mockClear();
+    const reads = () => net.fetch.mock.calls.filter(([url]) => String(url) === PINNED_URL).map(([, init]) => ((init?.headers ?? {}) as Record<string, string>).range ? "peek" : "whole");
+    for (let visit = 0; visit < 3; visit++) expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    expect(reads(), "peeked once, never read whole").toEqual(["peek"]);
+    // The store's next index: peeked again once; then the version it lists at a URL that holds it installs.
+    await net.putStore(await storeFiles({ sequence: 3, apps: [lie] }));
+    for (let visit = 0; visit < 2; visit++) await store.checkUpdates();
+    expect(reads()).toEqual(["peek", "peek"]);
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 4, apps: [listing(v2, [PINNED_URL])] }));
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest });
   });
 
   it("another store's listing of a newer version is not taken; once the person removes the store, the sources count again", async () => {

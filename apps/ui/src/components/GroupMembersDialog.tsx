@@ -19,6 +19,7 @@ import { Select } from "./ui/Select";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { initial } from "../lib/initial";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -78,9 +79,10 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const contactKey = (key: string) => contactOf(key)?.peerPubKeyZ32;
   // In a community my app holds an edge only with a hub or two (as a hub, with its members): everyone else is reached
   // through the hubs, which is not "not reachable". That holds for a hub my edge to is not up (yet, or any more) while
-  // another edge is: what it says still comes through the hub I am linked to. With no edge up, each edge says its own state.
+  // another edge is: what it says still comes through the hub I am linked to. With no edge up, no hub carries anyone to me:
+  // each edge says its own state, and a member without one has no connection.
   const linked = live.members.some(m => m.edge?.state === "open");
-  const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && (!m.edge || (linked && m.edge.state !== "open"));
+  const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && linked && m.edge?.state !== "open";
   const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
   // The member whose name or picture was tapped in the chat: their row, in sight and marked.
   const list = useRef<HTMLUListElement>(null);
@@ -187,7 +189,7 @@ function MemberAvatar({ src, name }: { src?: string; name: string }) {
       className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover text-xs">
       {src
         ? <img src={src} alt="" draggable={false} className="h-full w-full object-cover" />
-        : <span aria-hidden="true" data-initial={name.charAt(0).toUpperCase()} className="text-text-muted before:content-[attr(data-initial)]" />}
+        : <span aria-hidden="true" data-initial={initial(name)} className="text-text-muted before:content-[attr(data-initial)]" />}
     </AvatarOpener>
   );
 }

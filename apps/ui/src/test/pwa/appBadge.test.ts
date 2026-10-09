@@ -1,9 +1,10 @@
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { badgeCount, canBadge, resetAppBadge, setAppBadgeTarget, showAppBadge } from "../../lib/appBadge";
+import { badgeCount, canBadge, resetAppBadge, setAppBadgeTarget, showAppBadge, useAppBadge } from "../../lib/appBadge";
 import { dockBadge } from "../../desktop/dockBadge";
 import { groupChat, setChatMute, setMentionsNotify } from "../../lib/chatMute";
 import { markGroupRead } from "../../lib/groups";
-import { getPrefix } from "../../lib/storage";
+import { getPrefix, saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
 
 // covers: app.attention.badge
@@ -113,5 +114,33 @@ describe("on Desktop, the Dock icon", () => {
   it("without a target, the browser's own navigator is asked", () => {
     setAppBadgeTarget(null);
     expect(canBadge()).toBe(typeof (navigator as { setAppBadge?: unknown }).setAppBadge === "function");
+  });
+});
+
+describe("keeping it in step", () => {
+  afterEach(() => { setAppBadgeTarget(null); resetAppBadge(); vi.restoreAllMocks(); });
+
+  // Every 3 s and on every stored message: parsing each chat again each time took 11 ms at 100 long chats.
+  it("parses again only a chat whose stored text changed", () => {
+    const icon: number[] = [];
+    setAppBadgeTarget({ setAppBadge: async (count) => { icon.push(count ?? 0); }, clearAppBadge: async () => { icon.push(0); } });
+    saveSession(session("a", 2));
+    saveSession(session("b", 1));
+    const parse = vi.spyOn(JSON, "parse");
+    const chatsParsed = () => parse.mock.calls.filter(([raw]) => typeof raw === "string" && raw.includes("\"peerPubKeyB64\"")).length;
+    const { unmount } = renderHook(() => useAppBadge());
+    expect(chatsParsed()).toBe(2);
+    expect(icon).toEqual([3]);
+
+    parse.mockClear();
+    act(() => { window.dispatchEvent(new Event("session-updated")); });
+    expect(chatsParsed()).toBe(0);
+
+    saveSession(session("a", 4));
+    parse.mockClear();
+    act(() => { window.dispatchEvent(new Event("session-updated")); });
+    expect(chatsParsed()).toBe(1);
+    expect(icon).toEqual([3, 5]);
+    unmount();
   });
 });

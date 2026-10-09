@@ -22,7 +22,7 @@ export function AppChatPicker({ app, options, onClose }: { app: InstalledAppView
   const ref = useRef<HTMLDivElement>(null);
   useDialogFocus(ref, onClose);
   const backdrop = useBackdropDismiss(onClose);
-  const all = useChatTargets({ files: true });
+  const all = useChatTargets();
   // A paired 1:1 chat with its link: where an app's panel is.
   const paired = new Set(listSessions().filter((s) => s.profile === "paired-chat/1").map((s) => s.id));
   const targets = all.filter((target) => target.kind === "chat" && !!target.target && paired.has(target.chat));

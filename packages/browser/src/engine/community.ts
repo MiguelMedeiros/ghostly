@@ -12,13 +12,18 @@ import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
 import { groupFileText, type GroupFileDesk, type GroupFileMembership } from "./groupFiles";
 
-/** The line a change of a group's picture leaves in its history (both profiles). */
-export const pictureText = (name: string, set: boolean) => `${name} ${set ? "changed" : "removed"} the group's picture`;
+/** The line a change of a group's picture leaves in its history (both profiles); without a name, nobody is credited. */
+export const pictureText = (name: string | undefined, set: boolean) =>
+  name === undefined ? `The group's picture was ${set ? "changed" : "removed"}` : `${name} ${set ? "changed" : "removed"} the group's picture`;
 /** The line a new name leaves (both profiles): `group` is the name the group has now. */
-export const renameText = (name: string, group: string) => `${name} renamed the group to “${group}”`;
+export const renameText = (name: string | undefined, group: string) =>
+  name === undefined ? `The group is now called “${group}”` : `${name} renamed the group to “${group}”`;
 
-/** The lines a statement that changed the group's name or picture leaves in its history, in that order. */
-export function metaLines(name: string, change: GroupMetaChange, group: string): { event: GroupEvent; text: string }[] {
+/**
+ * The lines a statement that changed the group's name or picture leaves in its history, in that order. No `name` when
+ * the core cannot say who made the change (a new admin signed again what the last one set).
+ */
+export function metaLines(name: string | undefined, change: GroupMetaChange, group: string): { event: GroupEvent; text: string }[] {
   return [
     ...("name" in change ? [{ event: "renamed" as const, text: renameText(name, group) }] : []),
     ...("picture" in change ? [{ event: "picture" as const, text: pictureText(name, !!change.picture) }] : []),
@@ -587,6 +592,8 @@ export class Communities {
     this.knockRead.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
+    // No row is kept of a community that is gone from here: its files go now, or nothing would name them again.
+    await this.files?.drop(groupId);
     this.host.historyGone?.(groupId);
     this.host.emit();
   }
@@ -1634,7 +1641,7 @@ export class Communities {
       pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
       metaChanged: (by, change, at) => {
-        const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
+        const name = by === undefined ? undefined : by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
         // When the admin signed it, as a membership line keeps its commit's time (`membershipChanged`).
         const when = receivedTimestamp(at, this.now());
         void (async () => {

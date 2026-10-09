@@ -362,16 +362,47 @@ describe("DataLink refuses signals it must not act on", () => {
     expect(a.dl.state).toBe("connecting");
   });
 
-  it("ignores an offer while it is still answering another", async () => {
+  // The offerer's own answer was refused (`ANSWER_REFUSED_REDIALS`) and it offered again at once, while this side was
+  // answering its first offer again (`REANSWERS`). A signal is fed once: dropped, the new offer was never answered, and
+  // the offerer waited its whole attempt for it (a group's edge, 90 s after the member was let in, 2026-10-09).
+  it("answers a newer offer that comes while it is still answering an earlier one", async () => {
     const b = link("bbbb", "aaaa", (pc) => (pc.iceGatheringState = "gathering"));
-    const answering = b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW })));
+    const first = b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW })));
     await vi.advanceTimersByTimeAsync(0);
     expect(b.dl.state).toBe("answering");
-    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + 1 })));
-    expect(b.pcs).toHaveLength(1);
+    const second = b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + 1 })));
     await vi.advanceTimersByTimeAsync(5_000);
-    await answering;
+    await Promise.all([first, second]);
+    expect(b.pcs).toHaveLength(2);
+    expect(b.pcs[0].closed).toBe(true);
+    expect(b.pcs[1].closed).toBe(false);
     expect(b.dl.state).toBe("connecting");
+    // One answer, for the offer that stands: none for the one it replaced.
+    const answers = b.options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null).map((s) => parseRtcSignal(s)!);
+    expect(answers.map((s) => [s.t, s.o])).toEqual([["a", NOW + 1]]);
+    expect(b.states).toEqual(["answering", "connecting"]);
+  });
+
+  it("goes on answering the newer offer when the connection for the earlier one fails as it is closed", async () => {
+    // The first connection's answer is still being made when the newer offer closes it: making it then fails.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const b = link("bbbb", "aaaa", (pc) => {
+      if (b.pcs.length) return;
+      pc.createAnswer = async () => { await held; throw new Error("closed"); };
+    });
+    const first = b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW })));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("answering");
+    const second = b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + 1 })));
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await Promise.all([first, second]);
+    expect(b.pcs).toHaveLength(2);
+    expect(b.pcs[1].closed).toBe(false);
+    expect(b.dl.state).toBe("connecting");
+    expect(parseRtcSignal(b.lastSignal())).toMatchObject({ t: "a", o: NOW + 1 });
+    expect(b.options.publishSignal.mock.calls.filter(([s]) => s === null)).toEqual([]);
   });
 });
 

@@ -26,6 +26,7 @@ import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { authorName, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { clearChatNotification } from "../lib/notifications";
 import { authorsOf, type MessageAuthor } from "../lib/senderRuns";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatsByPeer } from "../lib/identities";
@@ -39,7 +40,10 @@ import { useGroupTypingSender } from "../hooks/useTyping";
 import { GroupTypingText, type GroupTyper } from "../components/TypingIndicator";
 import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
-import { COMMUNITY_LIMITS, GROUP_LIMITS, mayPin, replySnippet, type GroupMention, type RoutineCard } from "@ghostly/core";
+import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType, mayPin, replySnippet, type GroupMention, type RoutineCard, type VoiceMeta } from "@ghostly/core";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { formatFileSize } from "../lib/format";
+import { videoMetaOf } from "../lib/videoPoster";
 import { messageSnippet, quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
@@ -64,7 +68,9 @@ function toChatMessage(message: StoredMessage, group: GroupView, t: Translate, m
   return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, ...(message.sentAt !== undefined && { sentAt: message.sentAt }), paymentId: message.paymentId,
     nick: message.sender === "peer" && message.member ? authorName(group, message.member, t) : undefined,
     ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }),
-    ...(message.edit && { edit: message.edit }), ...(message.forwarded && { forwarded: message.forwarded }), ...(message.card && { card: message.card }) };
+    ...(message.edit && { edit: message.edit }), ...(message.forwarded && { forwarded: message.forwarded }), ...(message.card && { card: message.card }),
+    // A file or voice message a member announced (WISP 503): its bubble, its bytes fetched from whoever holds them.
+    ...(message.file && { file: message.file }) };
 }
 
 /** A member as a reply's quote names them: me, the roster's name, or for a key no longer in the roster its former name or its start. */
@@ -135,6 +141,15 @@ function writtenEvent(event: StoredMessage["event"], text: string, t: Translate)
   return at > 0 && text.endsWith("”") ? t("group.event.renamed", { name: writtenName(text.slice(0, at), t), group: text.slice(at + marker.length, -1) }) : undefined;
 }
 
+/** A name or picture change the engine wrote crediting nobody (a new admin signed again what the last one set), said in the interface's language. */
+function namelessEvent(event: StoredMessage["event"], text: string, t: Translate): string | undefined {
+  const renamed = "The group is now called “";
+  if (event === "renamed" && text.startsWith(renamed) && text.endsWith("”")) return t("group.event.renamedNoName", { group: text.slice(renamed.length, -1) });
+  if (event === "picture" && text === "The group's picture was changed") return t("group.event.pictureChangedNoName");
+  if (event === "picture" && text === "The group's picture was removed") return t("group.event.pictureRemovedNoName");
+  return undefined;
+}
+
 /**
  * A membership line, naming its member as the roster knows them now; what was stored, when they are gone. The engine
  * stores it in English: the line is said again in the interface's language from its kind, where the stored text has
@@ -153,8 +168,9 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: writtenName(text.slice(0, -gone.length), t) });
     // A community's line about a member who has left since: no roster or former name says who it was, but the stored
-    // line does, in the shape the engine writes. Said again in the interface's language with that name.
-    const written = message.member ? writtenEvent(message.event, text, t) : undefined;
+    // line does, in the shape the engine writes. Said again in the interface's language with that name; a change that
+    // credits nobody, without one.
+    const written = message.member ? writtenEvent(message.event, text, t) : namelessEvent(message.event, text, t);
     if (written) return written;
     // My own removal or fork: the core's reason ("Member … holds a different membership history for epoch 4. …") is
     // English, and its detail is the notice's (behind its ⓘ). The line says what happened, from its kind.
@@ -331,7 +347,11 @@ export function GroupChat() {
   const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink, t, returnFocus: optionsRef });
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
   const pageShown = usePageShown();
-  useEffect(() => { if (group && pageShown) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group, pageShown]);
+  useEffect(() => {
+    if (!group || !pageShown) return;
+    markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now()));
+    clearChatNotification(`group:${group.id}`);
+  }, [group?.id, group?.lastMessageAt, group, pageShown]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
     const answering = replyingRef.current;
@@ -346,6 +366,25 @@ export function GroupChat() {
     }
     catch (e) { return e instanceof Error ? problemLine(e, t) : t("group.chat.sendFailed"); }
   }, [groupId, t]);
+
+  // Files and voice messages (WISP 503): the 1:1 composer's, within the group's limit. The first thing sent after
+  // Reply carries it, as a text does.
+  const platform = useServicesPlatform();
+  const sendFile = useCallback(async (source: File, voice?: VoiceMeta): Promise<string | null> => {
+    if (!platform?.sendGroupFile) return null;
+    if (source.size > GROUP_FILE_LIMITS.maxBytes) return t("chat.fileTooLarge", { size: formatFileSize(GROUP_FILE_LIMITS.maxBytes) });
+    const answering = replyingRef.current;
+    try {
+      // A video goes with its length, size and first frame, so members see it before they fetch it.
+      const video = !voice && isPlayableVideoType(source.type) ? await videoMetaOf(source).catch(() => undefined) : undefined;
+      await platform.sendGroupFile(groupId, source, { ...(voice && { voice }), ...(video && { video }), ...(answering && { replyTo: answering.id }) });
+      if (answering) {
+        if (replyingRef.current === answering) replyingRef.current = null;
+        setReplyingTo(current => current === answering ? null : current);
+      }
+      return null;
+    } catch (e) { return problemLine(e, t); }
+  }, [platform, groupId, t]);
 
   // Typing (WISP 902 · Group Mesh § Typing): private groups only; a community does not carry it yet.
   const onTyping = useGroupTypingSender(rosterGroup?.profile === "mesh" && rosterGroup.status === "active" ? groupId : undefined);
@@ -430,7 +469,8 @@ export function GroupChat() {
     : community && group.status === "active" ? (community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
     : group.invitation ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
-    : group.status === "active" ? t("group.chat.reachable", { members: count, reachable, total: others.length })
+    // Nobody else in it (just created, or everyone left): there is no one to reach, so only the count.
+    : group.status === "active" ? (others.length === 0 ? count : t("group.chat.reachable", { members: count, reachable, total: others.length }))
     : outOfIt;
   // In a community every member can let people in, so every member hands the link out; in a private group, the admin.
   const canShare = group.status === "active" && (group.isAdmin || (group.profile === "community" && !!group.entryLink));
@@ -451,7 +491,7 @@ export function GroupChat() {
     <CueChat.Provider value={groupChat(groupId)}>
     {/* Each member's colour, given out over the roster: the same on every member's device (lib/memberColors.ts). */}
     <MemberColorsProvider keys={group.members.map(m => m.key)}>
-    {/* A file dropped anywhere on the group is answered by the composer (`data-file-drop`): groups take no files yet, and it says so. */}
+    {/* A file dropped anywhere on the group goes to the composer (`data-file-drop`), as in a chat. */}
     <div data-file-drop className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       {/* A member's message that comes while the group is open, read out once to a screen reader. */}
       <MessageAnnouncer chat={groupId} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} />
@@ -575,7 +615,7 @@ export function GroupChat() {
           const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card);
           if (last) { setReplyingTo(null); setEditing(last); }
         } : undefined}
-        fileUnavailable={t("group.chat.noFiles")}
+        onSendFile={platform?.sendGroupFile ? sendFile : undefined}
         paymentsUnavailable={others.length === 0 ? t("group.chat.nobodyElse") : undefined}
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}
 
@@ -584,8 +624,12 @@ export function GroupChat() {
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmLeave(false); nav.home(); }} />}
-      {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
-        onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
+      {/* Deleting an active private group leaves it: said so, and refused as Leave is while nobody could become admin. */}
+      {confirmForget && group.status === "active" && group.profile !== "community" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
+        onConfirm={async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmForget(false); nav.home(); }} />
+      : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
+        // A community is left first: refused (nobody connected to take the leave), it stays, and the notice says why.
+        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); nav.home(); }); }} />}
     </div>
     </MemberColorsProvider>
     </CueChat.Provider>
