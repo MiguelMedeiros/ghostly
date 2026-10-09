@@ -758,8 +758,8 @@ export class Groups {
   }
 
   /**
-   * Leaves, and the group is gone from this device at once: its row, its history and every edge
-   * but the one to the admin, which stays until the admin's commit removing me comes back (or a
+   * Leaves, and the group is gone from this device at once: its row, its history, its files and every
+   * edge but the one to the admin, which stays until the admin's commit removing me comes back (or a
    * week passes), so a leave said while the admin was away still reaches it. An admin with other
    * members hands the role to one who is online first; alone, the group simply goes.
    */
@@ -794,6 +794,8 @@ export class Groups {
     this.lastMentionAt.delete(groupId);
     await this.store.deleteGroup(groupId);
     await this.store.putGroup(group);
+    // The files go with the history, not when the admin has heard: its app may be away for the week the tombstone stays.
+    await this.files?.drop(groupId);
     this.host.historyGone?.(groupId);
     for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
     this.host.emit();
@@ -945,7 +947,7 @@ export class Groups {
   async forget(groupId: string): Promise<void> {
     // A community I am active in is left first (the request to the hubs, an admin's role handed on), or the others keep
     // me as a member, and as their admin, for good: refused when nothing is connected to carry it, as Leave is.
-    if (this.isCommunity(groupId)) { await this.communities.leave(groupId); await this.files?.drop(groupId); return; }
+    if (this.isCommunity(groupId)) return this.communities.leave(groupId);
     const session = this.sessions.get(groupId);
     // Deleting an active group leaves it. An admin with members who cannot hand the role on is refused, as Leave is:
     // gone with the role, the group would have no admin for good. Anyone else's failed goodbye does not keep it here.
