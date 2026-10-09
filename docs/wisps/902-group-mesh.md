@@ -189,7 +189,7 @@ A member reacts to a group message ([400](400-chat.md#reactions), revision 0.7) 
 { "t": "group-react", "g": <group id>, "id": <message id>, "e": <emoji or "">, "n": <number> }
 ```
 
-It is believed only from the member the edge is pinned to, and only while that member is in the roster: the edge authenticates it, so it needs no signature of its own. Reactions are not in the message log and not handed on in a catch-up: a member hears again the reactor's latest reactions (up to 32) when their edge opens. They are not sealed under the epoch key: an edge is already a session between exactly those two members. In a group on hubs, a reaction also carries the reactor's signature, and hubs pass it on as `group-reacted` (§ Hubs).
+It is believed only from the member the edge is pinned to, and only while that member is in the roster: the edge authenticates it, so it needs no signature of its own. Reactions are not in the message log and not handed on in a catch-up: a member hears again the reactor's latest reactions (up to 32) when their edge opens, the newest twenty at once and the rest eleven seconds later, within the 30 in 10 seconds a receiver takes from one member ([400](400-chat.md#reactions)). They are not sealed under the epoch key: an edge is already a session between exactly those two members. In a group on hubs, a reaction also carries the reactor's signature, and hubs pass it on as `group-reacted` (§ Hubs).
 
 ## Pinned message
 
