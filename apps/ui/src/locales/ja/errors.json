@@ -179,6 +179,7 @@
     "fileTooLarge": "グループに送れるファイルは {{size}} までです",
     "filesPaced": "このグループに短時間で多くのファイルを送りました",
     "filesPacedNext": "1分待ってから、もう一度送ってください。",
+    "filesPacedNextMinutes": "{{minutes}}分待ってから、もう一度送ってください。",
     "filesUnsupported": "このアプリはグループにファイルを送れません",
     "filesUnsupportedNext": "Ghostly を更新してから、もう一度お試しください。",
     "forked": "グループの変更は一時停止中です",

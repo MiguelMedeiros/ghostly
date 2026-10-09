@@ -179,6 +179,7 @@
     "fileTooLarge": "تقبل المجموعة ملفات حتى {{size}}",
     "filesPaced": "أرسلت ملفات كثيرة إلى هذه المجموعة للتو",
     "filesPacedNext": "انتظر دقيقة، ثم أرسله مرة أخرى.",
+    "filesPacedNextMinutes": "انتظر {{minutes}} دقائق، ثم أرسله مرة أخرى.",
     "filesUnsupported": "لا يمكن لهذا التطبيق إرسال ملفات إلى المجموعات",
     "filesUnsupportedNext": "حدّث Ghostly، ثم حاول مرة أخرى.",
     "forked": "تغييرات المجموعة متوقفة مؤقتًا",

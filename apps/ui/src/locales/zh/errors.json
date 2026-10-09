@@ -179,6 +179,7 @@
     "fileTooLarge": "群组接受的文件最大为 {{size}}",
     "filesPaced": "你刚刚向这个群组发送了很多文件",
     "filesPacedNext": "请等一分钟后再发送。",
+    "filesPacedNextMinutes": "请等 {{minutes}} 分钟后再发送。",
     "filesUnsupported": "此应用无法向群组发送文件",
     "filesUnsupportedNext": "请更新 Ghostly 后重试。",
     "forked": "群组变更已暂停",
