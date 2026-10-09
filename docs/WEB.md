@@ -10,7 +10,7 @@ From the root of a clone:
 docker compose -f infra/docker-compose.yml up --build -d
 ```
 
-Then open <http://localhost:8080>. `docker compose -f infra/docker-compose.yml down` stops it. Releases also publish the image (`ghcr.io/miguelmedeiros/ghostly-web`): `docker compose -f infra/docker-compose.yml pull`, then `up -d`, runs it without building.
+Then open <http://localhost:8080>. `docker compose -f infra/docker-compose.yml down` stops it. Releases also publish the image (`ghcr.io/miguelmedeiros/ghostly-web`; `latest` is the newest published release, and each version has its own tag for `GHOSTLY_WEB_TAG`): `docker compose -f infra/docker-compose.yml pull`, then `up -d`, runs it without building.
 
 Compose reads its settings (`GHOSTLY_WEB_BIND`, `GHOSTLY_WEB_TAG`) from `infra/.env`, the compose file's folder, not from the root. To keep a `.env` at the root, name it: `docker compose -f infra/docker-compose.yml --env-file .env up --build -d`. The project is still called `ghostly`, so the container is `ghostly-web-1` as before. GIF search uses GifCities (Internet Archive) without an API key.
 

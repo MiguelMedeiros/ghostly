@@ -79,4 +79,16 @@ describe("renaming a group in the app", () => {
     const lines = await screen.findAllByTestId("group-event");
     expect(lines.map(l => l.textContent)).toEqual(["Alice renamed the group to “Book club”"]);
   });
+
+  it("a change the engine credits nobody with (a new admin signed again what the last one set) names nobody, in the app's language", async () => {
+    const history: StoredMessage[] = [
+      { linkId: "group:group-1", id: "e1", text: "The group is now called “Book club”", sender: "peer", event: "renamed", timestamp: 1, via: "datalink" },
+      { linkId: "group:group-1", id: "e2", text: "The group's picture was changed", sender: "peer", event: "picture", timestamp: 2, via: "datalink" },
+    ];
+    fakeEngine.update({ groups: [notAdmin({ name: "Book club" })] });
+    fakeEngine.on("groupMessages", () => history).on("updateSettings", () => undefined);
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    const lines = await screen.findAllByTestId("group-event");
+    expect(lines.map(l => l.textContent)).toEqual(["O grupo agora se chama “Book club”", "A foto do grupo foi alterada"]);
+  });
 });

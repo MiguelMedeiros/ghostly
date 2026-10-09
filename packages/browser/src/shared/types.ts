@@ -138,6 +138,11 @@ export interface StoredGroup {
     /** Joining through the group's link: its entry key, the admin's side of `linkId` (an entry session, not a contact chat). */
     entry?: string;
   };
+  /**
+   * On the admin's side: contact chats invited and not answered yet, and when. Kept so that an accept after my app
+   * started again still lets them in.
+   */
+  invited?: Record<string, number>;
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
@@ -154,6 +159,8 @@ export interface StoredGroup {
    * since go on naming what they wrote.
    */
   formerNames?: Record<string, string>;
+  /** Removed, then invited again: the removed group as it was, which a Decline puts back (with the history it kept). */
+  previous?: StoredGroup;
   /**
    * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
@@ -397,7 +404,12 @@ export interface FileTransferView {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
-  /** A group file (WISP 503) waiting, `waiting`: why, in a few words ("Nobody you are connected to has this file yet"). */
+  /**
+   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
+   * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
+   */
+  wait?: "nobody" | "busy" | "damaged";
+  /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
 

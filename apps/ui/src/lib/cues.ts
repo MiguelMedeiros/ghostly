@@ -119,8 +119,21 @@ export function firstOfBurst(chat: string, now = Date.now()): boolean {
   return true;
 }
 
+/**
+ * Messages that come together are one system notification per chat too: after one, the next for that chat shows no
+ * sooner than MESSAGE_BURST_MS. Another chat's still shows, which a notification is for. Marks it shown when it may.
+ */
+const noticeAt = new Map<string, number>();
+export function firstNoticeOfBurst(chat: string, now = Date.now()): boolean {
+  if (inBurst(noticeAt.get(chat), now)) return false;
+  noticeAt.delete(chat);
+  noticeAt.set(chat, now);
+  if (noticeAt.size > 256) noticeAt.delete(noticeAt.keys().next().value as string);
+  return true;
+}
+
 /** Forgets what played (tests). */
-export function resetCues(): void { lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); anyBurstAt = undefined; }
+export function resetCues(): void { lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); anyBurstAt = undefined; noticeAt.clear(); }
 
 /** The chat on screen, as the mute store names it, for cues played from inside its messages (a spoiler, a delete). */
 export const CueChat = createContext<string | undefined>(undefined);

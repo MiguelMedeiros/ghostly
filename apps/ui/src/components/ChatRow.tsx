@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
@@ -18,6 +18,7 @@ import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chat
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import { problemText } from "../lib/problemText";
+import { sameValue } from "../lib/sameValue";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
@@ -33,12 +34,20 @@ import { UsagePill } from "./chat/UsageMeter";
  * key out of the row — it is in the row's tooltip and the chat's header; `comfortable` gives it its own line.
  * What the chat is set to (muted, pinned) is a quiet mark just before the time, in the time's own tone; on a pointer
  * device the row's actions (mute, pin, delete) take the marks' and the time's place while it is hovered.
+ * A bot's usage meter keeps one place on every row, whatever else the row shows: right after the key when the key has
+ * its line, else at the start of a trailing column of one width (USAGE_COLUMN).
  */
 
 const AVATAR = { compact: 46, comfortable: 52 } as const;
 /** How long a group invitation's row says why its answer did not go. */
 export const REFUSAL_SHOWN_MS = 8000;
 const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" } as const;
+/**
+ * Compact has no key line, so a bot's meter stays on the last line, where nothing but the row's end is fixed: it starts
+ * a column as wide as the widest meter ("100%") with the widest unread count ("99+") after it, the count at the row's
+ * end as on any row. The meter so starts at the same place with or without a count, whatever the count says.
+ */
+const USAGE_COLUMN = "flex min-w-[105px] items-center justify-between gap-1.5";
 
 /** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
 export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["delivery"]; live?: DhtOnlyBy }) {
@@ -200,7 +209,10 @@ export interface ChatRowProps {
    * listens to, whether it is the one in the hand, and the line on its edge when the dragged row would land there.
    */
   reorder?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
-  /** A bot's usage card (WISP 405 § Usage): how much of its quota is left, a small meter beside the unread count. */
+  /**
+   * A bot's usage card (WISP 405 § Usage): how much of its quota is left, a small meter in the same place on every row.
+   * Comfortable: right after the key. Compact: at the start of the last line's trailing column (USAGE_COLUMN).
+   */
   usage?: UsageEntry;
 }
 
@@ -223,8 +235,26 @@ function usePaymentLine(paymentId: string | undefined, t: Translate): string | u
   });
 }
 
-/** A 1:1 chat in the list. */
-export function ChatRow(p: ChatRowProps) {
+/**
+ * A 1:1 chat in the list.
+ *
+ * The list is drawn again on every engine state (a few a second while the links poll, with nothing new) and every time
+ * it reads the chats again, each a new copy with the same content; with dozens of chats, drawing every row each time
+ * kept the page busy. So a row is drawn again only when what it shows changes, by content (`sameValue`), as a chat's
+ * bubbles are (MessageBubble). The callbacks it gets call the latest ones given.
+ */
+export function ChatRow(props: ChatRowProps) {
+  const latest = useRef(props);
+  latest.current = props;
+  const stable = useMemo(() => ({
+    onOpen: () => latest.current.onOpen(),
+    onTogglePin: () => latest.current.onTogglePin(),
+    onDelete: (e: React.MouseEvent) => latest.current.onDelete(e),
+  }), []);
+  return <SameChatRow {...props} {...stable} />;
+}
+
+const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const { t } = useI18n();
   const muted = useChatMute(p.chatId) !== undefined;
   const size = AVATAR[p.density];
@@ -235,6 +265,8 @@ export function ChatRow(p: ChatRowProps) {
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
+  const meter = p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />;
+  const unread = p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />;
   return (
     <div data-testid="chat-row" data-chat={p.chatId} data-muted={muted || undefined} data-dragging={p.reorder?.dragging || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} {...p.reorder?.props}
       // A row that can be dragged: a held finger moves it, so it selects no text and asks for no callout. In the hand it is
@@ -276,9 +308,14 @@ export function ChatRow(p: ChatRowProps) {
         time={p.time}
         timeClass={p.unread > 0 && !muted ? "text-accent font-medium" : "text-text-muted"}
         sub={<>
-          {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. */}
+          {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. A bot's meter
+              follows it: the short key is as wide on every row, so the meter starts at the same place on each. The line
+              keeps the key's height (the meter, 2px taller, is centred over it), and so the row keeps its own. */}
           {p.density === "comfortable"
-            ? <span data-testid="chat-row-key" className="block text-[11px] leading-4 text-text-muted font-mono whitespace-nowrap">{p.keyLabel}</span>
+            ? <span className="flex h-4 items-center gap-1.5 whitespace-nowrap">
+                <span data-testid="chat-row-key" className="shrink-0 text-[11px] leading-4 text-text-muted font-mono">{p.keyLabel}</span>
+                {meter}
+              </span>
             : <span className="sr-only"> · {p.keyLabel}</span>}
         </>}
         // The contact writing now takes the last message's place, in the accent, until it stops or the message comes.
@@ -299,10 +336,7 @@ export function ChatRow(p: ChatRowProps) {
           {muted && <MutedMark label={t("mute.bell")} />}
           {p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
         </>}
-        trailing={(p.usage || p.unread > 0) && <>
-          {p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />}
-          {p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />}
-        </>}
+        trailing={meter && p.density === "compact" ? <span className={USAGE_COLUMN}>{meter}{unread}</span> : unread}
         timeCover={
           // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place. A row in
           // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.
@@ -324,17 +358,31 @@ export function ChatRow(p: ChatRowProps) {
       />
     </div>
   );
-}
+}, sameValue);
 
-/** A group (private or community), or an invitation to one, in the chat list. */
+/**
+ * A group (private or community), or an invitation to one, in the chat list. Drawn again only when what it shows
+ * changes, as a chat's row (`ChatRow`): its time and when it was read are taken here, at each draw of the list.
+ */
 export function GroupRow({ group, active, density, onOpen }: { group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void }) {
   const { t, language } = useI18n();
+  const latest = useRef(onOpen);
+  latest.current = onOpen;
+  const open = useCallback(() => latest.current(), []);
+  const time = group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined;
+  return <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} />;
+}
+
+const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt }: {
+  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number;
+}) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const invitation = group.invitation;
-  const unread = !active && !invitation && groupUnreadAt(group) > groupReadAt(group.id);
+  const unread = !active && !invitation && groupUnreadAt(group) > readAt;
   // An unread message that names me: "@" beside the dot, in the accent unless the mute keeps mentions quiet too.
-  const mention = unread && (group.lastMentionAt ?? 0) > groupReadAt(group.id);
+  const mention = unread && (group.lastMentionAt ?? 0) > readAt;
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   // Why the last answer did not go, for a few seconds: Accept needs the inviter's chat live, which takes a moment after
   // the app opens, and a click that did nothing and said nothing looked broken.
@@ -373,7 +421,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
           name={group.name || t("group.chat.unnamed")}
           previewId={previewId}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
-          time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined}
+          time={time}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
           status={muted && <MutedMark label={t("mute.bell")} />}
           timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}
@@ -392,4 +440,4 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
       </div>
     </div>
   );
-}
+}, sameValue);
