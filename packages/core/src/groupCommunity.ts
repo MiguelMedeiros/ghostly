@@ -178,8 +178,11 @@ function parseCommit(raw: unknown): CommunityCommit | null {
   return out;
 }
 
-/** The roster a commit of this kind makes of the previous one; null when it is not allowed. */
-export function communityRoster(previous: Roster | null, c: Pick<CommunityCommit, "k" | "by" | "s" | "x" | "n" | "ls" | "g">): Roster | null {
+/**
+ * The roster a commit of this kind makes of the previous one; null when it is not allowed. `trusted`: the commit was
+ * verified when it was accepted (a replay of the stored main branch), so a leave's statement is not checked again.
+ */
+export function communityRoster(previous: Roster | null, c: Pick<CommunityCommit, "k" | "by" | "s" | "x" | "n" | "ls" | "g">, trusted = false): Roster | null {
   if (c.k === "create") return previous === null && !c.s && !!c.x && !!c.n ? [[c.by, "admin"]] : null;
   if (!previous || !rosterHas(previous, c.by)) return null;
   const admin = rosterAdmin(previous);
@@ -189,7 +192,7 @@ export function communityRoster(previous: Roster | null, c: Pick<CommunityCommit
       return sortRoster([...previous, [c.s, "member"]]);
     case "leave":
       if (!c.s || c.s === c.by || c.s === admin || !rosterHas(previous, c.s) || !c.ls) return null;
-      if (!verify(fromBase64Url(c.ls), leaveStatement(c.g, c.s), publicKeyFromZ32(c.s))) return null;
+      if (!trusted && !verify(fromBase64Url(c.ls), leaveStatement(c.g, c.s), publicKeyFromZ32(c.s))) return null;
       return previous.filter(([k]) => k !== c.s);
     case "remove":
       if (c.by !== admin || !c.s || c.s === c.by || !rosterHas(previous, c.s)) return null;
@@ -609,13 +612,16 @@ export class CommunitySession {
 
   // -- the tree of commits -------------------------------------------------------------------------
 
-  /** Replays the main branch (rosters kept for its window) and places the side commits. */
+  /**
+   * Replays the main branch (rosters kept for its window) and places the side commits. The main branch was verified
+   * commit by commit when it was accepted: its signatures are not checked again.
+   */
   private rebuild(): void {
     this.known.clear(); this.rosters.clear(); this.mainIndex.clear();
     let roster: Roster | null = null;
     const keepFrom = Math.max(0, this.state.chain.length - 1 - COMMUNITY_LIMITS.window);
     this.state.chain.forEach((commit, i) => {
-      roster = communityRoster(roster, commit);
+      roster = communityRoster(roster, commit, true);
       if (!roster) throw new Error("Stored membership chain does not replay");
       const h = communityCommitHash(commit);
       this.known.set(h, commit); this.mainIndex.set(h, i);
@@ -642,7 +648,7 @@ export class CommunitySession {
     const i = this.mainIndex.get(h);
     if (i === undefined) return undefined;
     let roster: Roster | null = null;
-    for (let j = 0; j <= i; j++) roster = communityRoster(roster, this.state.chain[j]);
+    for (let j = 0; j <= i; j++) roster = communityRoster(roster, this.state.chain[j], true);
     if (roster) this.rosters.set(h, roster);
     return roster ?? undefined;
   }
