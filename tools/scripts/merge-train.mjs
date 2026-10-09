@@ -36,9 +36,10 @@
 //   tip and CI Success is green on it, the train merges the pull request itself (dev: GitHub's squash merge at that
 //   head; an epic: a fast-forward), with no batch and no new CI run. When it is behind, the train rebases its branch
 //   onto the tip (a push with --force-with-lease, so an author's push wins), waits for CI on exactly that commit, and
-//   merges it the same way. Red there gets one more run on a fresh rebase, then `queue:failed`; a conflict,
-//   `queue:conflict`. A fork, or a head branch the train must never push to (dev, main, an epic, a batch), goes the
-//   batch way.
+//   merges it the same way. Red there gets one more run on a fresh rebase, then `queue:failed`. A fork, or a head
+//   branch the train must never push to (dev, main, an epic, a batch), goes the batch way. So does one whose commits
+//   do not rebase onto the tip: a rebase skips the branch's merges, so a conflict resolved in a merge of the base comes
+//   back, while the batch's squash merge takes the head as it is. If that conflicts too: `queue:conflict`.
 // - Signatures: GitHub writes and signs the commit of a squash merge, so what the train lands on `dev`, alone or in a
 //   batch, shows as Verified, with one message format ("<title> (#n)", then one "* <subject>" line per commit). The
 //   train reads each new commit back and warns when it is not verified. GitHub never signs a rebase merge, and a
@@ -249,7 +250,7 @@ export function squashMessage(p, commits) {
 const conflictText = (base, reason) =>
   reason === "empty"
     ? `Merge train: this pull request has no changes left against \`${base}\`, so it left the line. Close it if it already landed.`
-    : `Merge train: this pull request conflicts with \`${base}\` (or with the pull requests ahead of it), so it left the line. Rebase it onto \`origin/${base}\`, push, and add \`queue\` again once CI is green.`;
+    : `Merge train: this pull request conflicts with \`${base}\` (or with the pull requests ahead of it), so it left the line. Rebase it onto \`origin/${base}\` (or merge \`origin/${base}\` into it), push, and add \`queue\` again once CI is green.`;
 
 /**
  * One run of the train for one base. `gh` reads and writes GitHub, `git` builds and pushes batches (both are fakes
@@ -637,6 +638,12 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       return (await board([p])) ?? false;
     }
     const built = await git.rebase(base, p, { force: rerun });
+    if (built.dropped === "conflict") {
+      // A rebase replays the branch's own commits and skips its merges, so a conflict the author resolved in a merge of
+      // the base comes back. The batch's squash merge takes the head as it is: it decides whether this is a conflict.
+      say(`ALONE #${p.number}: its commits do not rebase onto \`${base}\`; it goes the batch way.`);
+      return board([p], [], retried ? { retried } : {});
+    }
     if (built.dropped) {
       say(`DROP #${p.number} (${built.dropped})`);
       if (built.dropped === "moved") return false; // pushed after its CI was read: the next run reads it again
@@ -1041,8 +1048,8 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
     },
     /**
      * Rebases one pull request's head onto `base`'s tip in the temporary worktree, without pushing: { baseSha, sha }, or
-     * { baseSha, dropped } with "moved" (its head is not `p.sha`), "conflict" or "empty" (nothing left against the
-     * base). `force` makes new commits even when the head already sits on the tip (a fresh commit for another CI run).
+     * { baseSha, dropped } with "moved" (its head is not `p.sha`), "conflict" (its commits do not replay, which a head
+     * that resolved a conflict in a merge of the base does not either) or "empty" (nothing left against the base). `force` makes new commits even when the head already sits on the tip (a fresh commit for another CI run).
      */
     async rebase(base, p, { force = false } = {}) {
       signal?.throwIfAborted();
