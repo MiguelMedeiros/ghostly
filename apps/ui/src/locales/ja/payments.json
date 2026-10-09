@@ -285,6 +285,7 @@
     "paying": "支払い中…",
     "paysThrough": "{{domain}} 経由で支払い",
     "pendingAtMint": "ミントで支払いを処理中…",
+    "qrTooLong": "QR コードには長すぎます。コピーしてください。",
     "redeem": "受け取る",
     "redeemed": "受け取り済み ✓",
     "redeeming": "受け取り中…"

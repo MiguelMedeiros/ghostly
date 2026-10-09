@@ -140,6 +140,19 @@ describe("MessageBubble: money in a message", () => {
     expect(engine.callsTo("walletInspectCashu")).toEqual([{ text: TOKEN }]);
   });
 
+  it("keeps the card of a token too long for a QR, with Redeem and Copy", async () => {
+    // 11 proofs with their DLEQ come to about 3,300 characters, past the 2,953 bytes one QR code holds.
+    const big = "cashuB" + "o".repeat(3300);
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 2047, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+    bubble({ text: `here you go ${big}` });
+    const card = await screen.findByTestId("cashu-token-bubble");
+    expect(screen.queryByTestId("message-unshowable")).not.toBeInTheDocument();
+    expect(within(card).getByTestId("token-redeem")).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(within(card).getByTestId("qr-too-long")).toHaveTextContent("Too long for a QR code");
+    expect(card.querySelector("svg")).toBeNull();
+  });
+
   it("shows an ecash token of another unit as one this wallet cannot take", async () => {
     // 500 usd is $5.00 (the unit's cents): never a bolt and a raw 500, and nothing to redeem.
     fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 500, unit: "usd", mint: "https://mint.example.com", accepted: false } }));

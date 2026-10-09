@@ -285,6 +285,7 @@
     "paying": "付款中…",
     "paysThrough": "经由 {{domain}} 支付",
     "pendingAtMint": "铸币厂正在处理付款…",
+    "qrTooLong": "内容太长，无法生成二维码：请改为复制。",
     "redeem": "兑换",
     "redeemed": "已兑换 ✓",
     "redeeming": "兑换中…"
