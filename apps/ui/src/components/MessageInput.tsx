@@ -165,6 +165,9 @@ export function MessageInput({
   const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string } | null>(null);
   /** Files pasted or dropped here, waiting on the sheet for Send. */
   const [attached, setAttached] = useState<File[] | null>(null);
+  /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
+  const [reading, setReading] = useState(false);
+  const readingRef = useRef(false);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -448,14 +451,21 @@ export function MessageInput({
     const files = pastedFiles(data);
     if (files) return offerFiles(files);
     if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
-    const reading = platformPastedFiles();
-    if (!reading) return false;
+    // Ctrl+V again while the first is read would read the same clipboard beside it: every file twice on the sheet.
+    if (readingRef.current) return true;
+    const read = platformPastedFiles();
+    if (!read) return false;
+    readingRef.current = true;
+    setReading(true);
+    // With what it brought, in one go: the line gives way to the sheet, or to the reason there is none.
+    const ended = () => { readingRef.current = false; setReading(false); };
     // Copied files the platform could not read either are said, not dropped in silence; an empty clipboard stays quiet.
     const named = pasteNamesFiles(data);
-    reading.then((found) => {
+    read.then((found) => {
+      ended();
       if (found.length) offerRef.current(found);
       else if (named) showToast(t("errors.files.pasteUnreadable"));
-    }, (error: unknown) => showToast(problemLine(error, t)));
+    }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
@@ -622,12 +632,19 @@ export function MessageInput({
       </button>
     </div>
   );
+  const readingLine = reading && !locked && (
+    <p role="status" data-testid="paste-reading" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
+      <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+      {t("composer.pasteReading")}
+    </p>
+  );
 
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
-      {toastBox && !sheetOpen && (
-        <div role="alert" className="absolute bottom-full left-4 right-4 mb-2 z-50 animate-fade-in">
-          {toastBox}
+      {(toastBox || readingLine) && !sheetOpen && (
+        <div className="absolute bottom-full left-4 right-4 mb-2 z-50 flex flex-col gap-2">
+          {readingLine && <div className="self-start bg-panel-header border border-border rounded-lg px-3 py-2 shadow-lg">{readingLine}</div>}
+          {toastBox && <div role="alert" className="animate-fade-in">{toastBox}</div>}
         </div>
       )}
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
@@ -767,7 +784,7 @@ export function MessageInput({
           }} />
       )}
       {sheetOpen && (
-        <AttachmentSheet files={attached} alert={toastBox} onPaste={takePaste}
+        <AttachmentSheet files={attached} alert={toastBox} status={readingLine} onPaste={takePaste}
           onRemove={(index) => setAttached((was) => was && was.length > 1 ? was.filter((_, i) => i !== index) : null)}
           onCancel={() => setAttached(null)}
           onSend={(caption) => void sendAttached(caption)} />

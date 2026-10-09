@@ -193,7 +193,8 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     const { user } = composer();
     expect(paste(field(), {})).toBe(false);
     const open = await screen.findByTestId("attachment-sheet");
-    expect(within(open).getByTestId("attachment-name").textContent).toMatch(/^Pasted image .*\.png · 8 B$/);
+    // The sheet draws the picture a moment after it opens (its address is made once it is on screen).
+    expect((await within(open).findByTestId("attachment-name")).textContent).toMatch(/^Pasted image .*\.png · 8 B$/);
     await user.click(within(open).getByTestId("attachment-send"));
     await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
     const [sent] = onSendFile.mock.calls[0];
@@ -280,6 +281,53 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     expect(huge.read).not.toHaveBeenCalled();
     // What was waiting still is.
     expect(within(open).getByTestId("attachment-image")).toBeInTheDocument();
+  });
+
+  /** A read of the clipboard that ends when the test says so. */
+  function slowRead(clips: ClipboardFile[]) {
+    let end = () => {};
+    fakeEngine.readClipboardFiles = vi.fn(() => new Promise<ClipboardFile[]>((resolve) => { end = () => resolve(clips); }));
+    return () => act(async () => end());
+  }
+
+  it("while the paste is read the composer says so, and Ctrl+V again reads nothing more: each file is on the sheet once", async () => {
+    const end = slowRead([held("scan.pdf", [37, 80, 68, 70]), held("notes", [1])]);
+    composer();
+    expect(screen.queryByTestId("paste-reading")).toBeNull();
+    expect(paste(field(), {})).toBe(false);
+    expect(await screen.findByRole("status")).toHaveTextContent("Reading what you pasted…");
+    expect(sheet()).toBeNull();
+    // The natural reaction to a paste that shows nothing yet.
+    expect(paste(field(), {})).toBe(false);
+    expect(paste(screen.getByTestId("messages"), {})).toBe(false);
+    expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+    await end();
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getAllByTestId("attachment-item")).toHaveLength(2);
+    expect(screen.queryByTestId("paste-reading")).toBeNull();
+    // Read to its end, the next paste is read again.
+    slowRead([]);
+    paste(within(open).getByTestId("attachment-caption"), {});
+    expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("a paste that is being read does not keep one the page can see from the sheet, and a read that fails ends it too", async () => {
+    let fail = () => {};
+    fakeEngine.readClipboardFiles = vi.fn(() => new Promise<ClipboardFile[]>((_, reject) => { fail = () => reject(new Error("no clipboard")); }));
+    composer();
+    paste(field(), {});
+    await screen.findByTestId("paste-reading");
+    paste(field(), { files: [new File(["boo"], "notes.pdf", { type: "application/pdf" })] });
+    const open = await screen.findByTestId("attachment-sheet");
+    // The composer is behind the sheet's veil now: the line is on the sheet.
+    expect(within(open).getByRole("status")).toHaveTextContent("Reading what you pasted…");
+    expect(screen.getAllByTestId("paste-reading")).toHaveLength(1);
+    await act(async () => fail());
+    await waitFor(() => expect(screen.queryByTestId("paste-reading")).toBeNull());
+    expect(within(open).getAllByTestId("attachment-item")).toHaveLength(1);
+    fakeEngine.readClipboardFiles = vi.fn(async () => [held("scan.pdf", [37, 80, 68, 70])]);
+    paste(within(open).getByTestId("attachment-caption"), {});
+    await waitFor(() => expect(within(open).getAllByTestId("attachment-item")).toHaveLength(2));
   });
 
   it("the web app has no such read: an empty paste is left alone", () => {
