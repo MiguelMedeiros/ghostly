@@ -363,10 +363,14 @@ fn android_tls() -> Result<(), String> {
     let android = ndk_context::android_context();
     // SAFETY: the pointers are the process's JavaVM and the application context, which tao keeps as a global
     // reference for the life of the process.
-    let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) }.map_err(|e| e.to_string())?;
-    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-    let context = unsafe { jni::objects::JObject::from_raw(android.context().cast()) };
-    rustls_platform_verifier::android::init_with_env(&mut env, context).map_err(|e| e.to_string())
+    let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) };
+    // For the scope: a thread this attaches is detached again, and one the JVM attached (Android's main thread) is
+    // left as it was.
+    vm.attach_current_thread_for_scope(|env| {
+        let context = unsafe { jni::objects::JObject::from_raw(env, android.context().cast()) };
+        rustls_platform_verifier::android::init_with_env(env, context)
+    })
+    .map_err(|e: jni::errors::Error| e.to_string())
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
