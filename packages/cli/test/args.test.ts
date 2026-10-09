@@ -119,6 +119,38 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["file accept"], ["a", "b", "c"])).toThrow(/Too many/);
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
   });
+
+  it("says a required name, path or --to is missing as a usage error, before anything opens", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    const usage = (name: string, argv: string[], message: string) => {
+      let error: unknown;
+      try { params(name, argv); } catch (caught) { error = caught; }
+      expect(error, name).toBeInstanceOf(CliError);
+      expect((error as CliError).code, name).toBe("usage");
+      expect((error as CliError).message, name).toBe(message);
+    };
+    usage("group create", [], "Missing <name>: ghostly group create <name...> [--mesh]");
+    usage("group create", ["--mesh"], "Missing <name>: ghostly group create <name...> [--mesh]");
+    usage("group rename", ["g1"], "Missing <name>: ghostly group rename <group> <name...> [--show-secret]");
+    usage("lightning rename", ["c1"], "Missing <name>: ghostly lightning rename <card> <name...> [--network testnet]");
+    usage("profile picture", [], "Missing <jpeg>: ghostly profile picture <jpeg> | --clear");
+    usage("group picture", ["g1"], "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
+    usage("forward", ["g1"], `Missing <message>: ghostly ${COMMANDS.forward.usage}`);
+    usage("forward", ["g1", "m1"], `Missing --to: ghostly ${COMMANDS.forward.usage}`);
+    // What may be left out still may: a picture cleared, a chat's own name back, a reaction taken back, the only call.
+    expect(params("profile picture", ["--clear"])).toEqual({ path: undefined, clear: true });
+    expect(params("group picture", ["g1", "--clear"])).toEqual({ group: "g1", path: undefined, clear: true });
+    expect(params("chat rename", ["abc"])).toEqual({ chat: "abc", name: "" });
+    expect(params("react", ["alice", "peer_x", "--remove"])).toMatchObject({ emoji: undefined, remove: true });
+    expect(params("call hangup", [])).toEqual({ call: undefined });
+    expect(params("call auto", [])).toEqual({});
+    expect(positionals(TEXT_COMMANDS.send, ["alice"])).toEqual({ chat: "alice", text: undefined });
+    expect(params("forward", ["g1", "m1", "m2", "--to", "bob"])).toMatchObject({ chat: "g1", messages: ["m1", "m2"], to: ["bob"] });
+  });
 });
 
 describe("errors", () => {
