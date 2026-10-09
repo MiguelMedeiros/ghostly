@@ -252,7 +252,17 @@ describe("GroupConnection: a community is connected through its hubs", () => {
     const group = community([me, alice({ state: "waiting", transport: undefined, lastSeenAt: 0 }), away(BOB, "Bob")]);
     const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
     act(() => view.engine.update({ groups: [group] }));
-    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Not reachable · not seen yet", "Through a hub"]);
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Not reachable · not seen yet", "No connection yet"]);
+  });
+
+  it("the members panel says nobody is reached through a hub while my app reaches nobody", () => {
+    // Offline, or every hub's app closed: no edge at all, so no hub carries anyone's messages to me.
+    const group = community([me, away(ALICE, "Alice"), away(BOB, "Bob")]);
+    const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+    act(() => view.engine.update({ groups: [group] }));
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["No connection yet", "No connection yet"]);
+    const dots = screen.getAllByTestId("group-member").map(row => within(row).getAllByRole("img")[0].getAttribute("aria-label"));
+    expect(dots).toEqual(["reachable", "not reachable", "not reachable"]);
   });
 });
 
