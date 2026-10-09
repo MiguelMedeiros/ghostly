@@ -85,8 +85,8 @@ export interface OnchainProvider {
   history(limit: number): Promise<OnchainTx[]>;
   /**
    * Optional: the transactions paying this address of the wallet, newest first, `amount` being what each
-   * paid to it. How the payee of a chat request knows it was paid; without it, the payer's txid receipt is
-   * checked against `history`.
+   * paid to it. How the payee of a chat request knows it was paid; without it, a request is never seen paid
+   * (the payer's txid receipt is not proof: it can name any receive of the wallet).
    */
   received?(address: string): Promise<OnchainTx[]>;
   close(): Promise<void>;

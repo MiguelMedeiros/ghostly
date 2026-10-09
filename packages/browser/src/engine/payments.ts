@@ -125,10 +125,10 @@ export interface DeskBitcoin {
   /** Where to be paid: a fresh address of the active source, as a request carries it. */
   requestTarget(): Promise<PaymentTarget>;
   /**
-   * A transaction of the active source that pays this target at least `amount`, and is none of `claimed`;
-   * `hint` is the txid the contact said it paid with. Undefined while there is none.
+   * A transaction of the active source that pays this target at least `amount`, and is none of `claimed`.
+   * Undefined while there is none. The contact's txid is never asked: it proves nothing.
    */
-  received(target: PaymentTarget, amount: number, claimed: ReadonlySet<string>, hint?: string): Promise<{ txid: string; confirmations: number } | undefined>;
+  received(target: PaymentTarget, amount: number, claimed: ReadonlySet<string>): Promise<{ txid: string; confirmations: number } | undefined>;
 }
 
 /** Spark as the desk needs it (the engine's SparkWallet): an invoice per request, and the wallet's own receives. */
@@ -476,9 +476,10 @@ export class PaymentDesk {
     if (request.target) throw new Error("Review and explicitly approve this payment before sending");
     if (request.state !== "pending") throw new Error("This request is no longer open");
     if (request.lightningPending) throw new Error("A Lightning payment for this request is still pending");
-    // Ecash already sent for it is waiting on the contact's answer; paying again would pay twice.
+    // Ecash already sent for it is waiting on the contact's answer; paying again would pay twice. A failed payment
+    // still holding its token was not taken back yet: the contact may still redeem it.
     const inFlight = [...this.payments.values()].some(
-      (p) => p.kind === "payment" && p.direction === "out" && p.requestId === request.id && p.state !== "reclaimed" && p.state !== "failed",
+      (p) => p.kind === "payment" && p.direction === "out" && p.requestId === request.id && p.state !== "reclaimed" && (p.state !== "failed" || !!p.token),
     );
     if (inFlight) throw new Error("You already paid this request");
     // Real money only once the person confirmed it as such: nothing below runs without it.
@@ -1224,8 +1225,7 @@ export class PaymentDesk {
       for(const request of [...this.payments.values()]) {
         if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="bitcoin")continue;
         const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bitcoin" && p.kind==="request" && p.id!==request.id && p.txid).map(p=>p.txid!));
-        const receipt=[...this.payments.values()].find(p=>p.kind==="payment" && p.direction==="in" && p.requestId===request.id && p.linkId===request.linkId);
-        const seen=await this.bitcoin[walletNetworkOf(request.target.network)].received(request.target,request.amount,claimed,receipt?.txid).catch(()=>undefined);
+        const seen=await this.bitcoin[walletNetworkOf(request.target.network)].received(request.target,request.amount,claimed).catch(()=>undefined);
         if(!seen || seen.confirmations<1)continue;
         await this.settleRequest(request,{txid:seen.txid});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid:seen.txid});
