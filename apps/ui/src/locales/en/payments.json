@@ -274,8 +274,11 @@
       "testnet": "Test money: you have no Testnet Lightning wallet to pay it from"
     },
     "onchainBitcoin": "On-chain Bitcoin",
+    "onlySat": "Only sat ecash can be redeemed here.",
     "openTitle": "Open in a Lightning wallet on this device",
     "openWallet": "Open wallet",
+    "otherUnitRequest": "Asks for ecash in {{unit}}",
+    "otherUnitToken": "A {{unit}} token",
     "paid": "Paid ✓",
     "pay": "Pay",
     "payWithFee": "Pay {{amount}} + up to {{fee}} fee",
