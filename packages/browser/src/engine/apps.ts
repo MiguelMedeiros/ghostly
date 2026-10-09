@@ -1,8 +1,8 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision, appUpdateDecision,
-  canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocations, readAppStore,
-  toBase64Url, utf8Decode, utf8Encode,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
+  appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocation,
+  readAppStore, readCanonicalJson, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
@@ -48,6 +48,10 @@ export const APP_CHECK_TIMINGS = {
   freshMs: 60 * 60 * 1000,
 } as const;
 
+/** Revocations are checked this long at a time before the page's thread is let go. */
+const REVOCATIONS_SLICE_MS = 10;
+/** `ghostly-revoke.json` files whose result is kept, so an unchanged one is not checked again (the oldest dropped first). */
+const REVOCATION_FILES_KEPT = 64;
 /** A fetched bundle kept for its install screen: at most this many, for this long. */
 const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
@@ -307,6 +311,8 @@ export class Apps {
    * index listing the same is not peeked again at every check.
    */
   private readonly listingMisses = new Map<string, string>();
+  /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused. */
+  private readonly revocationFiles = new Map<string, SignedAppRevocation[] | null>();
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -573,10 +579,36 @@ export class Apps {
       if (read.has(url)) continue;
       read.add(url);
       try {
-        const read = readAppRevocations(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
-        if (read.ok) (out ??= []).push(...read.revocations.filter((r) => r.statement.app === ref));
+        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
+        if (file) (out ??= []).push(...file.filter((r) => r.statement.app === ref));
       } catch { /* not published there, or not reachable now */ }
     }
+    return out;
+  }
+
+  /**
+   * `readAppRevocations` (one entry that does not verify refuses the file, null here), with a pause every few ms: the
+   * engine shares the page's thread, and each entry is a signature check. The same bytes are not checked again.
+   */
+  private async readRevocationsFile(bytes: Uint8Array): Promise<SignedAppRevocation[] | null> {
+    const id = toBase64Url(sha256(bytes));
+    const known = this.revocationFiles.get(id);
+    if (known !== undefined) return known;
+    const read = readCanonicalJson(bytes);
+    let out: SignedAppRevocation[] | null = null;
+    if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
+      out = [];
+      let since = performance.now();
+      for (const entry of read.value) {
+        if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+        const one = readAppRevocation(entry);
+        if (!one.ok) { out = null; break; }
+        out.push(one.revocation);
+      }
+    }
+    this.revocationFiles.delete(id);
+    this.revocationFiles.set(id, out);
+    for (const old of this.revocationFiles.keys()) if (this.revocationFiles.size > REVOCATION_FILES_KEPT) this.revocationFiles.delete(old);
     return out;
   }
 
