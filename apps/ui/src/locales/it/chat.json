@@ -407,6 +407,7 @@
     "cantPlay": "Questo dispositivo non può riprodurre questo video ({{format}}). Scaricalo per guardarlo.",
     "exitFullScreen": "Esci da schermo intero",
     "fullScreen": "Schermo intero",
+    "label": "Video, {{length}}",
     "play": "Riproduci video",
     "save": "Salva video",
     "tooLarge": "Troppo grande per riprodurlo qui. Scaricalo per guardarlo."

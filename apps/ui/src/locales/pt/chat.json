@@ -407,6 +407,7 @@
     "cantPlay": "Este aparelho não reproduz este vídeo ({{format}}). Baixe para assistir.",
     "exitFullScreen": "Sair da tela cheia",
     "fullScreen": "Tela cheia",
+    "label": "Vídeo, {{length}}",
     "play": "Reproduzir vídeo",
     "save": "Salvar vídeo",
     "tooLarge": "Grande demais para tocar aqui. Baixe para assistir."

@@ -407,6 +407,7 @@
     "cantPlay": "Este dispositivo no puede reproducir este vídeo ({{format}}). Descárgalo para verlo.",
     "exitFullScreen": "Salir de pantalla completa",
     "fullScreen": "Pantalla completa",
+    "label": "Vídeo, {{length}}",
     "play": "Reproducir vídeo",
     "save": "Guardar vídeo",
     "tooLarge": "Demasiado grande para reproducirlo aquí. Descárgalo para verlo."
