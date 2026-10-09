@@ -1038,7 +1038,11 @@ export class Groups {
     const existing = this.stored.get(link.g);
     if (existing?.state?.status === "active" || existing?.invitation?.entry === link.host) return link.g;
     if (existing?.invitation?.seedB64 && !existing.invitation.entry) throw new Error("You are already joining this group");
-    // Out of it (left, removed), invited without answering, or an older link of it: this one replaces that.
+    // Opening a link never deletes what is kept or drops what a contact sent: a group I am out of (removed, forked) still
+    // holds its history, and an invitation over a contact chat waits for my answer. Each is refused, and stays as it is.
+    if (existing?.invitation && !existing.invitation.entry) throw new Error("You have an invitation to this group. Answer it first.");
+    if (existing?.state && !existing.left) throw new Error("You are out of this group and its history is still here. Delete it from this device to join with a link.");
+    // Left (a tombstone, its history gone with the leave), or an older link of it: this one replaces that.
     if (existing) await this.forget(link.g);
     // A member key whose entry session the admin's side dials: it opens that session on seeing the knock, when this
     // side has been there since it knocked, so its offer goes in its first packet (two trips through Pkarr, not three).

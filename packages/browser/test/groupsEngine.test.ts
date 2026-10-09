@@ -598,6 +598,34 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     expect(hostEntries()).toBe(1);
   });
 
+  it("a link to a group this profile is out of, or is invited to, is refused: the kept history and the invitation stay", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    world.add("carol"); world.chats.set("chat-ac", ["alice", "carol"]);
+    await alice.send(groupId, "dinner at 8"); await bob.send(groupId, "the only copy of my note"); await world.settle();
+    await alice.remove(groupId, key(bob)); await world.settle(); await world.meet();
+    await alice.invite(groupId, "chat-ac"); await world.settle();
+    const carol = world.peers.get("carol")!, removed = world.peers.get("bob")!;
+    const deleted = [vi.spyOn(removed.store, "deleteGroup"), vi.spyOn(carol.store, "deleteGroup")];
+    const before = [structuredClone(removed.store.groups.get(groupId)), structuredClone(carol.store.groups.get(groupId))];
+    // Any member knows the id; the key is nobody's.
+    const code = `group1/${groupId}/${createIdentity().pubKeyZ32}`;
+    await expect(bob.joinByLink(code)).rejects.toThrow(/history is still here/);
+    await expect(carol.groups.joinByLink(code)).rejects.toThrow(/have an invitation/);
+    await world.settle();
+    expect([removed.store.groups.get(groupId), carol.store.groups.get(groupId)]).toEqual(before);
+    for (const spy of deleted) expect(spy).not.toHaveBeenCalled();
+    expect(view(bob, groupId)).toMatchObject({ status: "removed" });
+    expect(world.texts("bob")).toEqual(expect.arrayContaining(["dinner at 8", "the only copy of my note"]));
+    expect(view(carol.groups, groupId).invitation).toMatchObject({ linkId: "chat-ac" });
+    expect(view(alice, groupId).invited).toEqual(["chat-ac"]);
+    expect(removed.entries.size + carol.entries.size).toBe(0);
+    // The invitation still answers, and the removed member's own choice still deletes.
+    await carol.groups.accept(groupId); await world.settle();
+    expect(view(carol.groups, groupId).status).toBe("active");
+    await bob.forget(groupId);
+    expect(bob.views()).toEqual([]);
+  });
+
   it("at most four admissions run at once", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const world = new World();
