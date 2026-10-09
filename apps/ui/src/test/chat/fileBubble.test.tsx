@@ -44,6 +44,10 @@ describe("what a file's status line says", () => {
     ["broken off, sent from here", { state: "failed", direction: "out", transferred: 0, size: f.size, error: "Connection lost" } as FileTransferState, "Not sent"],
     ["stuck", t({ stalled: true, rate: 12 * 1024 ** 2 }), "Not moving · 62% of 4.2 GB"],
     ["stuck, no connection: the connection is the reason", t({ stalled: true, stage: "waiting" }), "Waiting for connection · 62% done"],
+    ["a group's file, its holders busy", t({ stage: "waiting", direction: "in", wait: "busy" }), "Busy, trying again soon · 62% done"],
+    ["a group's file, its holders busy, nothing here yet", t({ stage: "waiting", direction: "in", wait: "busy", transferred: 0 }), "Busy, trying again soon · 4.2 GB"],
+    ["a group's file that came damaged", t({ stage: "waiting", direction: "in", wait: "damaged", stalled: true, transferred: 0 }), "Arrived damaged · 4.2 GB"],
+    ["a group's file nobody in reach has", t({ stage: "waiting", direction: "in", wait: "nobody", transferred: 0 }), "Waiting for connection · 4.2 GB"],
   ])("%s", (_, transfer, text) => {
     expect(fileStatus(f, transfer, "Ana", false)).toBe(text);
   });
@@ -119,6 +123,14 @@ describe("FileBubble: files/3", () => {
 
     show({ state: "transferring", stage: "waiting", direction: "in", transferred: GB, size: 4.2 * GB, stalled: true });
     expect(screen.queryByTestId("file-resend")).toBeNull();
+    fireEvent.click(screen.getByTestId("file-request"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
+  });
+
+  it("a group's file that came damaged offers Ask again, which asks the group anew", async () => {
+    show({ state: "transferring", stage: "waiting", direction: "in", wait: "damaged", stalled: true, transferred: 0, size: 4.2 * GB });
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived damaged · 4.2 GB");
+    expect(screen.getByTestId("file-request")).toHaveAttribute("title", "Asks the group for it again. The damaged bytes are gone.");
     fireEvent.click(screen.getByTestId("file-request"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
   });

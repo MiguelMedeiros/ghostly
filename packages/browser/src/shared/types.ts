@@ -392,7 +392,12 @@ export interface FileTransferView {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
-  /** A group file (WISP 503) waiting, `waiting`: why, in a few words ("Nobody you are connected to has this file yet"). */
+  /**
+   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
+   * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
+   */
+  wait?: "nobody" | "busy" | "damaged";
+  /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
 
