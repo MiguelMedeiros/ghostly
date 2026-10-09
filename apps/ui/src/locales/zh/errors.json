@@ -137,6 +137,7 @@
     "pasteFileUnreadableNext": "请用 + 添加附件。",
     "pasteGone": "该粘贴内容已失效",
     "pasteGoneNext": "请重新粘贴。",
+    "pasteLate": "刚才粘贴的内容暂时无法添加。请在完成后重新粘贴。",
     "pasteTooLarge": "内容太大,无法粘贴。请用 + → 文档 发送。",
     "pasteUnreadable": "无法粘贴这些文件。请用 + → 文档 发送。",
     "refused": {

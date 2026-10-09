@@ -16,9 +16,10 @@ const onSendFile = vi.fn<(file: File) => Promise<string | null>>();
 
 type Props = Partial<Parameters<typeof MessageInput>[0]>;
 /** A 1:1 chat's composer inside the chat's column, which takes dropped files. */
+const column = (props: Props = {}) => (<LockScreenProvider><div data-file-drop data-testid="column"><p data-testid="messages">messages</p>
+  <MessageInput onSend={onSend} onSendFile={onSendFile} {...props} /></div></LockScreenProvider>);
 function composer(props: Props = {}) {
-  return renderApp(<LockScreenProvider><div data-file-drop data-testid="column"><p data-testid="messages">messages</p>
-    <MessageInput onSend={onSend} onSendFile={onSendFile} {...props} /></div></LockScreenProvider>);
+  return renderApp(column(props));
 }
 
 const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
@@ -328,6 +329,18 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     fakeEngine.readClipboardFiles = vi.fn(async () => [held("scan.pdf", [37, 80, 68, 70])]);
     paste(within(open).getByTestId("attachment-caption"), {});
     await waitFor(() => expect(within(open).getAllByTestId("attachment-item")).toHaveLength(2));
+  });
+
+  it("a read that ends after an edit began says its files could not be added, not nothing", async () => {
+    const end = slowRead([held("scan.pdf", [37, 80, 68, 70])]);
+    const { rerender } = composer();
+    paste(field(), {});
+    await screen.findByTestId("paste-reading");
+    rerender(column({ edit: { key: "m1", text: "boo", snippet: "boo", onSave: vi.fn(async () => null), onClose: vi.fn() } }));
+    await end();
+    expect(await screen.findByRole("alert")).toHaveTextContent("What you pasted could not be added just now. Paste it again when you are done here.");
+    expect(sheet()).toBeNull();
+    expect(screen.queryByTestId("paste-reading")).toBeNull();
   });
 
   it("the web app has no such read: an empty paste is left alone", () => {
