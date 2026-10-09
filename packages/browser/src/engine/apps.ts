@@ -293,6 +293,11 @@ export class Apps {
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
   private views: Promise<AppStoreView[]> | null = null;
+  /**
+   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest>`): the same
+   * index listing the same is not peeked again at every check.
+   */
+  private readonly listingMisses = new Map<string, string>();
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -876,22 +881,41 @@ export class Apps {
       // in that store's listing and takes only the digest it lists: a newer version at the publisher's sources, or at a
       // listing URL that moved on (a repository's HEAD), waits until the store lists it.
       const pinned = app.store;
-      const candidates = new Map<string, { digest?: string }>();
+      // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept.
+      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string] }>();
+      const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
       for (const s of stores) {
         if (pinned !== undefined && s.key !== pinned) continue;
         const listing = s.index?.apps.find((a) => a.ref === app.ref);
-        if (!listing || !(listing.sequence > highest || (listing.sequence >= app.sequence && !known.has(listing.digest)))) continue;
-        for (const url of listingUrls(listing.urls)) if (!candidates.has(url)) candidates.set(url, pinned !== undefined ? { digest: listing.digest } : {});
+        if (!listing || !newer(listing)) continue;
+        const seen = `${s.digest} ${listing.digest}`;
+        for (const url of listingUrls(listing.urls)) {
+          const missed = `${s.key} ${app.ref} ${url}`;
+          if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
+          candidates.set(url, { ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
+        }
       }
       if (pinned === undefined) {
         for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
+          if (candidates.has(url)) continue;
           try {
             const peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }));
-            if (peek && peek.ref === app.ref && (peek.sequence > highest || (peek.sequence >= app.sequence && !known.has(peek.digest))) && !candidates.has(url)) candidates.set(url, {});
+            if (peek && newer(peek)) candidates.set(url, {});
           } catch { /* this source does not answer now */ }
         }
       }
       for (const [url, want] of candidates) {
+        // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
+        // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
+        // index lists the same.
+        if (want.peek) {
+          let peek: ReturnType<typeof peekAppManifest>;
+          try { peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true })); } catch { continue; }
+          if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
+            if (want.miss) this.listingMisses.set(...want.miss);
+            continue;
+          }
+        }
         let fetched: { bundle: AppBundle; bytes: Uint8Array };
         try { fetched = await this.fetchBundle(url); } catch { continue; }
         const { bundle, bytes } = fetched;
