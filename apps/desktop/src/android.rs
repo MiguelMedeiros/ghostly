@@ -139,6 +139,17 @@ pub async fn save_file(path: PathBuf, name: &str) -> Result<bool, String> {
     )
 }
 
+/// The page read a share's copies, at `paths`: the Kotlin side removes their share's folder from the app's cache.
+pub async fn share_done(paths: Vec<PathBuf>) -> Result<(), String> {
+    let paths: Vec<&str> = paths.iter().filter_map(|path| path.to_str()).collect();
+    if paths.is_empty() {
+        return Ok(());
+    }
+    call_async::<Value>("shareDone", json!({ "paths": paths }))
+        .await
+        .map(drop)
+}
+
 /// The system bars around the page take its background colour, and light or dark icons to go on it.
 pub fn system_bars(color: u32, dark: bool) -> Result<(), String> {
     call::<Value>("systemBars", json!({ "color": color, "dark": dark })).map(drop)
