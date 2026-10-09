@@ -418,6 +418,12 @@
     "slotsFull": "Toutes les connexions natives sont utilisées",
     "slotsFullNext": "Déconnectez la connexion native d'une autre discussion, ou attendez qu'une devienne inactive."
   },
+  "verify": {
+    "closed": "La connexion s'est fermée",
+    "closedNext": "Comparez à nouveau après la reconnexion.",
+    "codeChanged": "Le code a changé",
+    "codeChangedNext": "Comparez le nouveau code."
+  },
   "wallet": {
     "alreadyHave": "Vous avez déjà un portefeuille {{kind}} {{network}}",
     "arkProviderNetwork": "Ce fournisseur Ark fonctionne sur {{actual}}, pas sur {{expected}}",

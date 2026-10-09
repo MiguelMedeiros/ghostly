@@ -418,6 +418,12 @@
     "slotsFull": "ネイティブ接続がすべて使用中です",
     "slotsFullNext": "別のチャットのネイティブ接続を切断するか、どれかが待機状態になるまでお待ちください。"
   },
+  "verify": {
+    "closed": "接続が閉じました",
+    "closedNext": "再接続してから、もう一度照合してください。",
+    "codeChanged": "コードが変わりました",
+    "codeChangedNext": "新しいコードを照合してください。"
+  },
   "wallet": {
     "alreadyHave": "{{network}} の {{kind}} ウォレットはすでにあります",
     "arkProviderNetwork": "その Ark プロバイダーは {{expected}} ではなく {{actual}} で動いています",

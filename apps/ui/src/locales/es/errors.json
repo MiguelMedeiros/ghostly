@@ -418,6 +418,12 @@
     "slotsFull": "Todas las conexiones nativas en uso",
     "slotsFullNext": "Desconecta la conexión nativa de otro chat, o espera a que una quede inactiva."
   },
+  "verify": {
+    "closed": "La conexión se cerró",
+    "closedNext": "Vuelve a comparar después de reconectar.",
+    "codeChanged": "El código cambió",
+    "codeChangedNext": "Compara el código nuevo."
+  },
   "wallet": {
     "alreadyHave": "Ya tienes una billetera {{kind}} {{network}}",
     "arkProviderNetwork": "Ese proveedor Ark funciona en {{actual}}, no en {{expected}}",
