@@ -130,6 +130,7 @@
     "noRoomNext": "{{free}} liberi.",
     "notVoice": "Questa registrazione non può essere inviata come messaggio vocale",
     "pasteTooLarge": "È troppo grande da incollare. Invialo con + → Documento.",
+    "pasteUnreadable": "Impossibile incollare questi file. Inviali con + → Documento.",
     "refused": {
       "damaged": "Il file è arrivato danneggiato",
       "expired": "Non accettato in tempo",
