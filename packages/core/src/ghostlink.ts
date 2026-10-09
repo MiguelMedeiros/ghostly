@@ -1425,6 +1425,8 @@ export class GhostLink {
    */
   private dialEarly(): void {
     if (!this.options.params.profile || !this.options.autoConnect || this.deliveryMode === "dht" || this.streamBlocked || this.dialing || this.channel) return;
+    // No WebRTC here (a Linux Desktop): no offer to gather, and nothing to dial before the inviter's record is read.
+    if (this.options.rtcAvailable === false) return;
     // Only as the person joins: a joined chat whose inviter never came, started again later, gathers nothing until it shows.
     const startedAt = this.options.pairingProgress?.startedAt ?? 0;
     if (Date.now() - startedAt > EARLY_DIAL_JOIN_MS) return;
@@ -2397,6 +2399,16 @@ export class GhostLink {
   private canDial(transport: PairedTransport): boolean {
     return transport !== "webrtc/1" && this.endpoints.has(transport) && !!this.peerDescriptors[transport];
   }
+  /**
+   * Whether a dial has anything to try: WebRTC here (the contact's record, once read, listing it), or a native transport
+   * both apps run with this side's endpoint up and the contact's descriptor read. A group link counts every dial: its
+   * fast looks for the member's `_tr` end after a few (`PACKET_TRANSPORTS_FAST_ATTEMPTS`).
+   */
+  private anythingToDial(): boolean {
+    if (!this.options.params.profile || this.options.packetTransports) return true;
+    return this.transportOffer().some(t => t === "webrtc/1" ? !this.peerTransports || this.peerTransports.includes(t)
+      : this.canDial(t) && !!this.peerTransports?.includes(t));
+  }
   private clearRace(): void {
     if (this.raceTimer) clearTimeout(this.raceTimer);
     this.raceTimer = null;
@@ -2681,10 +2693,21 @@ export class GhostLink {
       return;
     }
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
+    this.autoDial();
+  }
+
+  /**
+   * An automatic dial. One with nothing to try (`anythingToDial`) still says why (`liveAttempt`) and keeps the pace, but
+   * is no failed attempt: the wait between attempts does not grow, and a first pairing does not turn `on-dht` for it.
+   * Two Linux Desktops pairing over a slow DHT, neither having read the other's record yet, counted three such dials in
+   * 12 s: the pairing turned `on-dht` and the next dial waited 160 s, though nothing had been tried.
+   */
+  private autoDial(): void {
+    const tries = this.anythingToDial();
     this.lastAutoConnectAt = Date.now();
-    this.autoConnectFailures++;
+    if (tries) this.autoConnectFailures++;
     void this.dial().catch(error => {
-      this.tracker?.failed("transport", true);
+      if (tries) this.tracker?.failed("transport", true);
       this.dialFailed(error instanceof Error ? error.message : String(error));
       this.lookAtRetry();
     });
@@ -2699,13 +2722,7 @@ export class GhostLink {
   private redial(): void {
     if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect || this.channel || this.dialing || this.dataLink.state !== "idle") return;
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures, again: true });
-    this.lastAutoConnectAt = Date.now();
-    this.autoConnectFailures++;
-    void this.dial().catch(error => {
-      this.tracker?.failed("transport", true);
-      this.dialFailed(error instanceof Error ? error.message : String(error));
-      this.lookAtRetry();
-    });
+    this.autoDial();
   }
 
   /**

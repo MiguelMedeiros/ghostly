@@ -53,12 +53,14 @@ function useCopy(value: string) {
   };
 }
 
-function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
+function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId }: {
   label: string;
   /** Which money: the network's tag beside the label. */
   tag?: React.ReactNode;
   amount: number | null;
   unit: string;
+  /** Said instead of the amount: ecash of a unit this wallet does not take, whose amount is in that unit's cents. */
+  otherUnit?: string;
   lines: (string | undefined)[];
   qr: string;
   children: React.ReactNode;
@@ -70,7 +72,9 @@ function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId}>
       <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{label}{tag}</p>
       <p className="m-0 mt-0.5 leading-tight">
-        {amount === null ? (
+        {otherUnit ? (
+          <span className="text-[15px] font-semibold" data-testid="money-other-unit">{otherUnit}</span>
+        ) : amount === null ? (
           <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>
         ) : (
           <>
@@ -282,6 +286,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
         label={t("payments.invoice.ecashRequest")}
         amount={inspection.amount}
         unit={inspection.unit}
+        otherUnit={inspection.unit === "sat" ? undefined : t("payments.invoice.otherUnitRequest", { unit: inspection.unit })}
         lines={[inspection.description, inspection.mints.length > 0 ? t("payments.invoice.mints", { mints: inspection.mints.map(host).join(", ") }) : undefined]}
         qr={value}
       >
@@ -290,13 +295,16 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
     );
   }
 
+  // Only sat ecash is redeemed here: a token of another unit is said as one, whatever its mint.
+  const otherUnit = inspection.unit !== "sat";
   return (
     <Card
       testId="cashu-token-bubble"
       label={t("payments.invoice.ecashToken")}
       amount={inspection.amount}
       unit={inspection.unit}
-      lines={[inspection.memo, t("payments.invoice.mint", { mint: host(inspection.mint) }), !inspection.accepted && !mine ? t("payments.invoice.mintNotAdded") : undefined]}
+      otherUnit={otherUnit ? t("payments.invoice.otherUnitToken", { unit: inspection.unit }) : undefined}
+      lines={[inspection.memo, t("payments.invoice.mint", { mint: host(inspection.mint) }), !inspection.accepted && !mine ? t(otherUnit ? "payments.invoice.onlySat" : "payments.invoice.mintNotAdded") : undefined]}
       qr={value}
     >
       {redeemed ? (

@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, createLink, identityFromSeedB64, type IncomingMessage, type PairingState } from "@ghostly/core";
+import { GhostLink, createIdentity, createLink, identityFromSeedB64, readStatusCard, type IncomingMessage, type PairingState } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { groupReply, pairedWireReply, receivedPairedReply, replyRef } from "../src/shared/replies";
@@ -113,6 +113,51 @@ describe("a reply over the live link", () => {
       expect(result.error).toBeTruthy();
     }
     expect((await t.messages()).filter(m => m.text === "hi")).toHaveLength(0);
+  });
+});
+
+describe("a received reply in a long history", () => {
+  // A node that only keeps what it receives, and the chat's whole-history reads it makes meanwhile (the UI takes changes).
+  async function keeper(linkId: string, rows: StoredMessage[]) {
+    for (const row of rows) await db.putMessage(row);
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onMessageChanges: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    cleanup.push(async () => { await node.shutdown(); await db.deleteLink(linkId); });
+    const whole = vi.spyOn(db, "getMessages");
+    cleanup.push(async () => whole.mockRestore());
+    const store = (node as unknown as { storeMessage(m: StoredMessage): Promise<void> }).storeMessage.bind(node);
+    return { whole: () => whole.mock.calls.filter(([chat]) => chat === linkId).length, store, row: (id: string) => db.getMessage(linkId, id) };
+  }
+  const history = (linkId: string, row: (i: number) => Partial<StoredMessage>) => Array.from({ length: 50 }, (_, i): StoredMessage =>
+    ({ linkId, id: `x${i}`, text: `line ${i}`, sender: "peer", timestamp: 1_700_000_000_000 + i, via: "datalink", ...row(i) }));
+
+  it("in a group, finds its original by its id alone: neither one here nor one not here reads the whole history", async () => {
+    const linkId = `group:${crypto.randomUUID()}`;
+    const t = await keeper(linkId, history(linkId, i => ({ id: `k1:0:${i}`, member: "k1" })));
+    await t.store({ linkId, id: "k2:0:1", text: "agreed", sender: "peer", member: "k2", timestamp: Date.now(), via: "datalink", replyTo: { id: "k1:0:7", snippet: "not the line", from: "peer", member: "k1" } });
+    expect((await t.row("k2:0:1"))?.replyTo).toEqual({ id: "k1:0:7", snippet: "line 7", from: "peer", member: "k1", messageId: "k1:0:7" });
+    await t.store({ linkId, id: "k2:0:2", text: "and?", sender: "peer", member: "k2", timestamp: Date.now(), via: "datalink", replyTo: { id: "k3:0:1", snippet: "a line", from: "peer", member: "k3" } });
+    expect((await t.row("k2:0:2"))?.replyTo).toEqual({ id: "k3:0:1", snippet: "a line", from: "peer", member: "k3" });
+    expect(t.whole()).toBe(0);
+  });
+
+  it("in a group, a press on my open buttons still reads who already answered", async () => {
+    const linkId = `group:${crypto.randomUUID()}`;
+    const card = readStatusCard({ kind: "buttons", id: "ask", buttons: [{ id: "yes", label: "Yes", once: true }, { id: "no", label: "No", once: true }] })!;
+    const t = await keeper(linkId, [...history(linkId, i => ({ id: `k1:0:${i}`, member: "k1" })), { linkId, id: "me:0:1", text: "Yes or no?", sender: "me", member: "me", timestamp: 1_700_000_001_000, via: "datalink", card }]);
+    const press = (id: string, text: string, button: string): StoredMessage => ({ linkId, id, text, sender: "peer", member: "k2", timestamp: Date.now(), via: "datalink", replyTo: { id: "me:0:1", snippet: "", from: "me", member: "me", button } });
+    await t.store(press("k2:0:1", "Yes", "yes"));
+    expect((await t.row("k2:0:1"))?.press).toEqual({ messageId: "me:0:1", button: "yes", label: "Yes" });
+    // The same member's second answer to a once question is only a reply.
+    await t.store(press("k2:0:2", "No", "no"));
+    expect(await t.row("k2:0:2")).not.toHaveProperty("press");
+  });
+
+  it("in a chat, finds a text's original by its row alone", async () => {
+    const linkId = `long-${crypto.randomUUID()}`, wire = (i: number) => `${"W".repeat(20)}${String(i).padStart(2, "0")}`;
+    const t = await keeper(linkId, history(linkId, i => ({ id: `peer_${wire(i)}` })));
+    await t.store({ linkId, id: `peer_${"R".repeat(22)}`, text: "yes", sender: "peer", timestamp: Date.now(), via: "pkarr", replyTo: receivedPairedReply({ i: wire(7) }) });
+    expect((await t.row(`peer_${"R".repeat(22)}`))?.replyTo).toEqual({ id: wire(7), snippet: "line 7", from: "peer", messageId: `peer_${wire(7)}` });
+    expect(t.whole()).toBe(0);
   });
 });
 

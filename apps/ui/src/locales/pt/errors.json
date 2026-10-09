@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "A taxa do Cashu passa do seu limite",
     "couldNotVerify": "Ainda não foi possível verificar este pagamento. Nenhum segundo pagamento foi enviado.",
     "ecashAlreadySpent": "Este ecash já foi gasto em outro lugar",
+    "ecashOtherUnit": "Este ecash está em {{unit}}: aqui só dá para resgatar ecash em sat",
     "fedimintAlreadyJoined": "Você já entrou nesta federação",
     "fedimintConnecting": "Espere a federação se conectar",
     "fedimintNotEnough": "Não há o suficiente nesta federação",
@@ -185,6 +186,10 @@
     "removed": "Você foi removido deste grupo",
     "shareLinkInstead": "Compartilhe o link do grupo com a pessoa: quem abrir o link entra",
     "tooLong": "A mensagem passa de 16 KiB"
+  },
+  "hold": {
+    "needsStorage": "Não dá para guardar esta mensagem",
+    "needsStorageNext": "Configure um S3 em Perfil → Backups e peça ao seu contato para permitir mensagens guardadas."
   },
   "host": {
     "noApp": "Nenhum app deste telefone consegue abrir isto",
@@ -396,6 +401,9 @@
   },
   "transport": {
     "adapterFailed": "Não iniciou. Reabra esta conversa para tentar de novo.",
+    "allowAnotherNext": "Permita outro transporte ou ligue a Alternativa.",
+    "cannotSwitch": "O app do seu contato não troca de transporte",
+    "cannotSwitchNext": "O app dele precisa de uma atualização (um Ghostly atualizado).",
     "hyperdhtClosed": "O relay HyperDHT fechou a conexão",
     "hyperdhtRefused": "O relay HyperDHT recusou esta conversa",
     "hyperdhtSilent": "O relay HyperDHT não respondeu",
@@ -403,8 +411,18 @@
     "irohStopped": "Endpoint Iroh parado",
     "listenerGiven": "Pausado para uma conversa mais ativa. Abra esta conversa para retomar.",
     "listenerReleased": "Pausado para outra conversa. Abra esta conversa para retomar.",
+    "noneConnected": "Nenhum transporte conseguiu conectar",
+    "noneInCommon": "Nenhuma forma de conexão em comum",
+    "peerClosed": "Seu contato fechou a conexão",
+    "peerClosedNext": "Confira se vocês dois permitem um transporte em comum e reconecte.",
     "slotsFull": "Todas as conexões nativas em uso",
     "slotsFullNext": "Desconecte a conexão nativa de outra conversa, ou espere uma ficar ociosa."
+  },
+  "verify": {
+    "closed": "A conexão foi fechada",
+    "closedNext": "Compare de novo depois de reconectar.",
+    "codeChanged": "O código mudou",
+    "codeChangedNext": "Compare o novo código."
   },
   "wallet": {
     "alreadyHave": "Você já tem uma carteira {{kind}} {{network}}",

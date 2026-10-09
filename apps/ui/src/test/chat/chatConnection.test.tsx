@@ -417,10 +417,31 @@ describe("ChatConnection: what the panel does", () => {
 
   it("keeps the code on screen when the confirmation fails", async () => {
     const { user, engine } = banner({ peerParticipationKey: "saved", pairing: ready({ code: "4821 0937", peerKey: "peer" }) });
-    engine.on("confirmPair", () => { throw new Error("The code changed"); });
+    engine.on("confirmPair", () => { throw new Error("No authenticated peer to verify"); });
     await user.click(screen.getByRole("button", { name: "Verify this contact" }));
     await user.click(screen.getByRole("button", { name: "The codes match" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The code changed");
+    expect(await screen.findByTestId("pair-verify-error")).toHaveTextContent("No authenticated peer to verify");
+    expect(screen.getByTestId("pair-code")).toBeInTheDocument();
+  });
+
+  // The connection changed or closed between showing the code and the click: a code to compare again, said in the
+  // app's language beside the code. It is no connection issue: the chat's icon stays as it was.
+  it.each([
+    ["The connection changed. Compare the current code again.", "O código mudou", "Compare o novo código."],
+    ["Compare the current code again.", "O código mudou", "Compare o novo código."],
+    ["The connection closed. Compare again after reconnecting.", "A conexão foi fechada", "Compare de novo depois de reconectar."],
+  ])("says a refused comparison beside the code, never as a connection issue: %s", async (raw, title, next) => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />, { language: "pt" });
+    act(() => engine.update({ links: [linkView({ availableTransports: all, peerParticipationKey: "saved", pairing: ready({ code: "4821 0937", peerKey: "peer" }) })] }));
+    const before = header();
+    engine.on("confirmPair", () => { throw new Error(raw); });
+    await user.click(screen.getByTestId("pair-verify"));
+    await user.click(screen.getByTestId("pair-verify-confirm"));
+    expect(await screen.findByTestId("pair-verify-error-title")).toHaveTextContent(title);
+    expect(screen.getByTestId("pair-verify-error-next")).toHaveTextContent(next);
+    expect(screen.getByTestId("pair-verify-error")).not.toHaveAttribute("data-tone", "error");
+    expect(screen.queryByTestId("connection-failure")).not.toBeInTheDocument();
+    expect(header()).toEqual(before);
     expect(screen.getByTestId("pair-code")).toBeInTheDocument();
   });
 

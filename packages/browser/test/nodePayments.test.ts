@@ -560,6 +560,18 @@ describe("the Cashu wallet and Lightning", () => {
     expect(events.onAttention.mock.calls.map(([e]) => e.type).sort()).toEqual(["coin", "coin", "confirmed"]);
   });
 
+  it("chimes for a Mainnet receipt when each network's view holds only its own history", async () => {
+    const { node, view, events } = track(engine());
+    node["settings"].mints = ["https://real.example", TEST_MINT];
+    const tx = (id: string, mint: string) => ({ id, mint, kind: "ecash-in", amount: 10, fee: 0, timestamp: Date.now() + 1_000 });
+    const history = [tx("old", "https://real.example")];
+    view.mockImplementation(async (network) => ({ mints: [], balance: 0, history: history.filter((t) => (t.mint === TEST_MINT) === (network === "testnet")), feesPaid: 0 }) as never);
+    await node["refreshWallet"]();
+    history.push(tx("new", "https://real.example"), tx("test-in", TEST_MINT));
+    await node["refreshWallet"]();
+    expect(events.onAttention.mock.calls.map(([e]) => e.type)).toEqual(["coin", "coin"]);
+  });
+
   it("a wallet backup that does not restore connects nothing; one that does, connects", async () => {
     const { node } = track(engine());
     for (const [kind, restore] of [["ark", node.arkRestoreBackup], ["bark", node.barkRestoreBackup], ["usdt", node.usdtRestoreBackup]] as const) {

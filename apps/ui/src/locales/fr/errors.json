@@ -45,6 +45,7 @@
     "cashuFeeAboveLimit": "Les frais Cashu dépassent votre limite",
     "couldNotVerify": "Impossible de vérifier ce paiement pour l’instant. Aucun second paiement n’a été envoyé.",
     "ecashAlreadySpent": "Cet ecash a déjà été dépensé ailleurs",
+    "ecashOtherUnit": "Cet ecash est en {{unit}} : seul l’ecash en sat peut être encaissé ici",
     "fedimintAlreadyJoined": "Vous avez déjà rejoint cette fédération",
     "fedimintConnecting": "Attendez que la fédération se connecte",
     "fedimintNotEnough": "Pas assez dans cette fédération",
@@ -185,6 +186,10 @@
     "removed": "Vous avez été retiré de ce groupe",
     "shareLinkInstead": "Partagez le lien du groupe avec cette personne : quiconque l'ouvre rejoint le groupe",
     "tooLong": "Le message dépasse 16 Kio"
+  },
+  "hold": {
+    "needsStorage": "Ce message ne peut pas être gardé",
+    "needsStorageNext": "Configurez un stockage S3 dans Profil → Sauvegardes, et demandez à votre contact d'autoriser les messages gardés."
   },
   "host": {
     "noApp": "Aucune app de ce téléphone ne peut l'ouvrir",
@@ -396,6 +401,9 @@
   },
   "transport": {
     "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",
+    "allowAnotherNext": "Autorisez un autre transport ou activez le Secours.",
+    "cannotSwitch": "L'app de votre contact ne peut pas changer de transport",
+    "cannotSwitchNext": "Son app doit être mise à jour (un Ghostly à jour).",
     "hyperdhtClosed": "Le relais HyperDHT a fermé la connexion",
     "hyperdhtRefused": "Le relais HyperDHT a refusé cette discussion",
     "hyperdhtSilent": "Le relais HyperDHT ne répond pas",
@@ -403,8 +411,18 @@
     "irohStopped": "Point d'accès Iroh arrêté",
     "listenerGiven": "En pause pour une discussion plus active. Ouvrez celle-ci pour reprendre.",
     "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre.",
+    "noneConnected": "Aucun transport n'a pu se connecter",
+    "noneInCommon": "Aucun moyen de connexion en commun",
+    "peerClosed": "Votre contact a fermé la connexion",
+    "peerClosedNext": "Vérifiez que vous autorisez tous deux un transport commun, puis reconnectez-vous.",
     "slotsFull": "Toutes les connexions natives sont utilisées",
     "slotsFullNext": "Déconnectez la connexion native d'une autre discussion, ou attendez qu'une devienne inactive."
+  },
+  "verify": {
+    "closed": "La connexion s'est fermée",
+    "closedNext": "Comparez à nouveau après la reconnexion.",
+    "codeChanged": "Le code a changé",
+    "codeChangedNext": "Comparez le nouveau code."
   },
   "wallet": {
     "alreadyHave": "Vous avez déjà un portefeuille {{kind}} {{network}}",
