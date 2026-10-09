@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { callApi, redactSettings } from "./api";
+import { callApi, redactSettings, SETTABLE } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
@@ -516,6 +516,8 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
     if (!key || value === undefined || parsed.positionals.length > 2) throw new CliError("usage", "ghostly settings set <key> <json-value>");
     let parsedValue: unknown;
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
+    // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
+    if (SETTABLE[key] === "string" && typeof parsedValue !== "string") parsedValue = value;
     print(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })));
     return;
   }
