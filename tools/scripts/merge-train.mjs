@@ -6,7 +6,8 @@
 // - The line, per base: `queue:priority` first, then by the time each got `queue` (the latest `labeled` event, so
 //   taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request with
 //   neither CI Success nor the draft's fast tier (CI Success (draft)) green on its last commit, or with CI Success red
-//   there, waits without losing its place.
+//   there, waits without losing its place. A green run of CI that skipped jobs the pull request's own files turn on
+//   (ci.yml planned it from other files: a run for another base) does not count; the run before it does.
 // - One batch per base at a time: up to 12 pull requests from the front of the line, built on the base's tip with one
 //   squash commit per pull request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one
 //   comment, `queue` taken off. The batch is a pull request from `batch/<base>-<stamp>`; CI runs on it once, and that
@@ -128,6 +129,62 @@ export function ciState(runs) {
   return "failure";
 }
 
+/**
+ * ci.yml's jobs that its plan (tools/scripts/ci-changes.mjs) may leave out, by the start of their names, each with the
+ * gate that decides it. A job left out is listed as skipped under the name ci.yml gives it, a matrix's placeholders
+ * unfilled. tools/scripts/test/merge-train.test.ts holds this list to ci.yml.
+ */
+export const PLANNED_JOBS = {
+  "Frontend tests (app)": "full",
+  "Frontend tests (packages ": "packages",
+  "CLI on Linux ARM64": "packages",
+  "Frontend builds": "full",
+  "Tauri Backend": "rust",
+  "Website browser checks": "website_e2e",
+  Website: "website",
+  "Desktop media": "app",
+  "Desktop on macOS": "app",
+};
+
+/** The gate that decides a job of ci.yml, from the job's name (the longest start that fits), or undefined. */
+export const gateOf = (name) =>
+  PLANNED_JOBS[
+    Object.keys(PLANNED_JOBS)
+      .filter((start) => name?.startsWith(start))
+      .sort((a, b) => b.length - a.length)[0]
+  ];
+
+/**
+ * The gates a run of CI planned off, from its jobs: the ones with a skipped job. ci.yml plans each run from the files
+ * its pull request changed against the base it had then, and its CI Success passes a job the plan left out. So a second
+ * run on the same commit for another base (the pull request retargeted, or a second one from the same branch) can be
+ * green without the tests this pull request's own files need.
+ */
+export const skippedGates = (jobs) => [...new Set(jobs.filter((j) => j.conclusion === "skipped").map((j) => gateOf(j.name)).filter(Boolean))];
+
+let planner;
+/**
+ * ci.yml's plan for a ready pull request that changes `files` (null: every gate on), or null when the plan cannot be
+ * read. Loaded on first use: `--list-bases` runs from a checkout that holds only this file.
+ */
+export async function ciPlan(files) {
+  planner ??= import("./ci-changes.mjs").then(
+    (m) => m.plan,
+    () => null,
+  );
+  const plan = await planner;
+  return plan ? plan(files, { draft: false }) : null;
+}
+
+/**
+ * A pull request that changes one of these plans its own runs (ci.yml takes both from the pull request's merge with
+ * its base), so the plan of the base's copy says nothing about them: its green run counts as it is, as before.
+ */
+export const PLAN_SOURCES = ["tools/scripts/ci-changes.mjs", ".github/workflows/ci.yml"];
+
+/** How many of CI's runs on one commit are read, newest first, for one that counts. */
+export const CI_RUNS_READ = 5;
+
 export const ordinal = (n) => {
   const v = n % 100;
   return `${n}${["th", "st", "nd", "rd"][(v - 20) % 10] ?? ["th", "st", "nd", "rd"][v] ?? "th"}`;
@@ -153,6 +210,7 @@ export function waiting(pr) {
   // The fast tier is enough to board: the batch's full CI is the gate.
   if (pr.ci === "success" || pr.fast === "success") return null;
   if (pr.fast === "failure") return "CI Success (draft) is red on its last commit and CI Success has not passed on it yet";
+  if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base); run CI on it again";
   return "CI Success has not passed on its last commit yet";
 }
 
@@ -265,6 +323,28 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const done = { merged: [], failed: [], dropped: [], opened: [], closed: [] };
   const gone = new Set();
 
+  // Which of CI's runs on a commit count for pull request `p` (null: the base's own commit, where everything runs): a
+  // green run that skipped a job this pull request's files turn on was planned for other files (see `skippedGates`),
+  // so the run before it speaks. The files are read only for a green run that skipped something, once per run of the train.
+  const plans = new Map();
+  const planned = (p) => async (jobs) => {
+    const skipped = ciState(jobs) === "success" ? skippedGates(jobs) : [];
+    if (!skipped.length) return true;
+    const key = p?.number ?? null;
+    if (!plans.has(key)) {
+      const files = p ? await gh.pullFiles(p.number) : null;
+      plans.set(key, files?.some((f) => PLAN_SOURCES.includes(f)) ? "own" : await ciPlan(files));
+    }
+    const plan = plans.get(key);
+    if (plan === "own") return true;
+    // No plan to read (a checkout without ci-changes.mjs): every gate counts as on.
+    const missing = skipped.filter((gate) => !plan || plan[gate]);
+    if (!missing.length) return true;
+    say(`${p ? `#${p.number}` : `\`${base}\``}: a green CI run skipped what ${p ? "its files turn" : "a push turns"} on (${missing.join(", ")}), so it was planned for other files and does not count.`);
+    if (p) p.misplanned = true;
+    return false;
+  };
+
   const open = await gh.pulls(base);
   const batches = open.filter((p) => isBatch(p, base)).sort((a, b) => a.number - b.number);
   const queued = open.filter((p) => !isBatch(p, base) && (p.labels.includes(LABEL.queue) || also.includes(p.number)));
@@ -272,7 +352,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const events = await gh.events(p.number);
     p.queuedAt = queuedAt(events, p.createdAt);
     p.priority = p.labels.includes(LABEL.priority);
-    p.ci = ciState(await gh.ciJobs(p.sha));
+    p.ci = ciState(await gh.ciJobs(p.sha, planned(p)));
     // The fast tier on the same head: read only when CI Success alone does not decide.
     if (p.ci !== "success" && p.ci !== "failure") p.fast = draftState(await gh.draftJobs(p.sha));
     p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
@@ -419,9 +499,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const state = readState(batch.body);
     const members = state.prs.map((s) => (gone.has(s.number) ? undefined : byNumber.get(s.number)));
     const next = state.next.map((n) => byNumber.get(n)).filter((p) => p && !gone.has(p.number) && !waiting(p));
-    const ci = ciState(await gh.ciJobs(batch.sha));
+    const ci = ciState(await gh.ciJobs(batch.sha, planned(batch)));
     const tip = await gh.branchSha(base);
-    const baseCi = ci === "failure" ? ciState(await gh.ciJobs(state.baseSha)) : null;
+    const baseCi = ci === "failure" ? ciState(await gh.ciJobs(state.baseSha, planned(null))) : null;
     const stay = { number: batch.number, members };
     const names = (list) => list.map((s) => `#${s.number}`).join(" ");
     say(`BATCH #${batch.number} [${names(state.prs)}] CI ${ci}`);
@@ -674,7 +754,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried });
     if (p.ci === "failure") {
-      const baseCi = ciState(await gh.ciJobs(mark.baseSha));
+      const baseCi = ciState(await gh.ciJobs(mark.baseSha, planned(null)));
       if (baseCi === "failure" || baseCi === "pending") {
         say(`HOLD #${p.number}: CI Success on \`${base}\` itself is ${baseCi === "failure" ? "red" : "still running"}; nobody is blamed until it is green.`);
         return stay;
@@ -859,9 +939,11 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     /**
      * The jobs of CI's own run on a commit (its latest attempt; see `ciRun`), or none when CI has no run there. A token
      * that may not read Actions (a queue app without "Actions: read") gets the commit's check runs from GitHub Actions
-     * instead, with a warning once: any workflow of the repository can post one named "CI Success" there.
+     * instead, with a warning once: any workflow of the repository can post one named "CI Success" there. `counts`
+     * (given the jobs of a run) may pass over a run: then the one before it is read, up to CI_RUNS_READ runs. Check
+     * runs are not asked: they mix every run on the commit.
      */
-    ciJobs: async (sha) => {
+    ciJobs: async (sha, counts = () => true) => {
       const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
       if (r.status === 403) {
         if (!warnedChecks) warn(`This token may not read Actions (${r.data?.message ?? "HTTP 403"}), so CI is read from check runs, which any workflow of the repository can post. Give the queue app "Actions: read".`);
@@ -869,8 +951,25 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
         return (await all(`/commits/${sha}/check-runs?filter=latest`)).filter((c) => c.app?.slug === "github-actions");
       }
       if (!r.ok) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
-      const run = ciRun(r.data.workflow_runs, repo, sha);
-      return run ? all(`/actions/runs/${run.id}/jobs?filter=latest`) : [];
+      for (const run of ciRuns(r.data.workflow_runs, repo, sha).slice(0, CI_RUNS_READ)) {
+        const jobs = await all(`/actions/runs/${run.id}/jobs?filter=latest`);
+        if (await counts(jobs)) return jobs;
+      }
+      return [];
+    },
+    /**
+     * The files a pull request changes against its base, a renamed file by both names (as ci.yml lists them), or null
+     * when it changes none or more than GitHub lists (3000): ci.yml turns every gate on then.
+     */
+    pullFiles: async (n) => {
+      const files = [];
+      for (let page = 1; page <= 30; page++) {
+        const list = await must("GET", `/pulls/${n}/files?per_page=100&page=${page}`);
+        files.push(...list);
+        if (list.length < 100) break;
+      }
+      if (!files.length || files.length >= 3000) return null;
+      return files.flatMap((f) => (f.previous_filename ? [f.filename, f.previous_filename] : [f.filename]));
     },
     /**
      * The draft gate of the newest of CI's runs on a commit that has one (leaving draft starts a newer, full run on the
