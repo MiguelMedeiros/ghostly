@@ -39,16 +39,16 @@ Apps announce `{ "t": "paired-groups", "v": [1, 2] }`. Community frames flow onl
 ## Membership chain
 
 ```
-{ v: 2, g, e, p, k, m: <roster hash>, by, s?, x?, n?, ls?, ts, c, sig }
+{ v: 2, g, e, p, k, m: <roster hash>, by, s?, x?, n?, ls?, ls3?, ts, c, sig }
 ```
 
-`k` is one of `create`, `add`, `leave`, `remove`, `role`, `rotate`, `link`. Unlike `group-mesh/1`, a commit does not carry the roster, which would grow with every member of a large group: it carries `m`, the SHA-256 of the canonical roster after it, and every member replays the chain to know the roster. `x` is the entry key (`create`, `link`; empty turns the link off); `n` the genesis nonce; `ls` the leaver's signature over `["ghostly-group/2 leave", g, s]`. Hash and signature cover the canonical tuple of all fields but `sig`, as in the mesh.
+`k` is one of `create`, `add`, `leave`, `remove`, `role`, `rotate`, `link`. Unlike `group-mesh/1`, a commit does not carry the roster, which would grow with every member of a large group: it carries `m`, the SHA-256 of the canonical roster after it, and every member replays the chain to know the roster. `x` is the entry key (`create`, `link`; empty turns the link off); `n` the genesis nonce; `ls` the leaver's signature over `["ghostly-group/2 leave", g, s]`; `ls3` (revision 2026-10-10, proposed) the leaver's signature over `["ghostly-group/3 leave", g, s, h]`, `h` the hash of the commit that last put `s` in the roster (§ Leaving and removal). Hash and signature cover the canonical tuple of all fields but `sig` and `ls3`, as in the mesh.
 
 | Kind | Who signs | Rule | Secret of the new epoch |
 |---|---|---|---|
 | `create` | the creator, who is admin | genesis only; `g` derives from `by` and `n` | fresh |
 | `add` | any member | `s` not in the roster; roster below the cap | derived |
-| `leave` | any member but `s` | `s` a member but not the admin; `ls` valid | fresh |
+| `leave` | any member but `s` | `s` a member but not the admin; `ls` valid, and the leave is for this admission of `s` (§ Leaving and removal) | fresh |
 | `remove` | the admin | `s` a member, not the admin | fresh |
 | `role` | the admin | `s` a member; becomes the admin, the signer a member | derived |
 | `rotate` | the admin | nothing else changes | fresh |
@@ -242,7 +242,35 @@ The joiner checks the whole chain from its genesis, including that the genesis p
 
 ## Leaving and removal
 
-A member leaves by sending `{ "t": "group-leave", "v": 2, "g", "s", "ls" }` to its hubs and wiping its secrets; any member other than the leaver commits `leave` (the leaver cannot, since the committer chooses the next secret). An admin leaving first hands the role to a member (a `role` commit, preferably to one it is connected to), then leaves like anyone else; the app needs one edge up to carry the request. The group then goes from the leaver's device at once. The admin removes with `remove`; the removed member is sent the commit without a secret. Both give the remaining members a fresh secret, sealed to each and relayed by the hubs; members who were away get it from whoever they meet.
+A member leaves by sending `{ "t": "group-leave", "v": 2, "g", "s", "ls", "ls3" }` to its hubs and wiping its secrets; any member other than the leaver commits `leave` (the leaver cannot, since the committer chooses the next secret). An admin leaving first hands the role to a member (a `role` commit, preferably to one it is connected to), then leaves like anyone else; the app needs one edge up to carry the request. The group then goes from the leaver's device at once. The admin removes with `remove`; the removed member is sent the commit without a secret. Both give the remaining members a fresh secret, sealed to each and relayed by the hubs; members who were away get it from whoever they meet.
+
+### A leave ends one admission
+
+Revision 2026-10-10. **Proposed, not built**: the app on `dev`, and every release up to 1.2.0, does what the paragraph above says with `ls` alone. This section, and the `ls3` field wherever this document names it, is the design the implementation follows once it is accepted. It changes what a leaver signs and which chains a member takes in, so it ships in a minor release (1.3.0), not in a patch.
+
+`ls` says the same thing at every admission of a member: the group and the member's key, nothing that changes. A member who left, and was let in again through the link, had already signed the statement that takes it out, and every member holds it (it is in the chain). So a leave names the admission it ends.
+
+The leaver signs two statements: `ls`, as before, and `ls3` over `["ghostly-group/3 leave", g, s, h]`, where `h` is the hash of the commit that last put `s` in the roster on the branch the leaver follows: its `add`, or the `create` it signed (a creator who handed the role on). Both go in the request and in the `leave` commit. `ls3` is not part of the commit's canonical tuple, so the commit's hash and the committer's signature are what an app from before computes: it stands by the leaver's key alone. An `ls3` that is not 64 bytes, or sits in a commit of another kind, is read as absent.
+
+A member takes in a `leave` commit (and keeps or commits a leave request) only when `ls` is valid and one of these holds, read on the branch the commit extends:
+
+1. `ls3` is valid for the commit that last admitted `s`; or
+2. no earlier `leave` on that branch carries the same `ls`: the first leave of a member whose app signs `ls` alone.
+
+Anything else is refused like any commit that breaks a rule: it is not placed, not followed and not passed on. A request that carries a valid `ls3` takes the place of a held one that carries none (a hub from before passes `ls` on alone).
+
+The chain a newcomer is handed in its welcome is checked as before this revision, `ls` alone: a chain written before it may hold a member's second leave under the one statement there was, and holding the past to the rule would shut every newcomer out of that group. From its admission on, the newcomer holds every commit it takes in to the rule above.
+
+What it does not cover while apps from before are in a group is in § Compatibility; what is still to decide, in § Open decisions.
+
+The implementation is accepted with tests in [`groupCommunity.test.ts`](../../packages/core/test/groupCommunity.test.ts) that show, and this document's § Conformance then lists:
+
+- the statement of an earlier leave, as a request or in a commit signed by hand, with or without the `ls3` of the earlier admission, takes nobody out of a later one; a hub that still holds a request another member committed does not commit it once the member is back;
+- a member let in again leaves by itself, each time; a restart and a newcomer replay that chain;
+- a creator who handed the role on leaves the admission its genesis gave it;
+- a `leave` commit has the same hash and committer signature with and without `ls3`;
+- a first leave under `ls` alone counts; a commit that lost its `ls3` on the way is refused, then taken when it comes whole;
+- a newcomer takes a chain from before that holds a second leave under `ls` alone.
 
 **What was said before a leave (revision 2026-10-13).** The two differ in what is said of the member afterwards. A member removed is heard no more, even for an epoch it was in (whose secret it still holds): its frames are not taken, and none in a store is handed on. A member who left is heard for what it wrote before its leave, and only that: those frames are taken and handed on from the store like any frame, to members of the epochs they were written for. Before this revision a leave was a removal here too, so the members away when someone said goodbye and left came back to the leave with the goodbye missing, while those online had read it. The leaver still holds the secrets of those epochs, and a copy of its state (a modified app, a backup restored) could sign more frames for them after the leave; its own app is not trusted to stop. So the member who commits the leave also signs how far it had heard the leaver: `{ "t": "group-left", "v": 2, "g", "h", "hi", "sig" }`, where `h` is the leave commit's hash, `hi` maps each epoch it heard the leaver in (`e:h16`, as in `have`) to the leaver's highest number there, and `sig` is the committer's signature over `["ghostly-group/2 left", g, h, [[e:h16, n], ...]]` (the pairs sorted by key). It broadcasts the frame with the commit, and a member who hands on a leaver's stored frame in a catch-up hands this frame first. A leaver's frame is taken, and handed on, only when the member holds the mark of the leave commit on its branch, signed by that commit's signer, and the frame's number is at or below the mark for its epoch (a member keeps the first mark it takes for a leave, and drops any other for it: neither taken nor handed on); without a mark (it has not come yet, or the committer's app is older) nothing of the leaver is taken, as for a removed member. What the leaver said that its committer had not heard yet reaches only the members who had it before the leave.
 
@@ -313,6 +341,15 @@ The final admin changes (revision 0.6) change only which branch a member follows
 
 A frame said again (revision 2026-10-03) reaches an app from before as a message of its own: a member of that app that read the first frame shows the text twice, once under each identity. It happens only to a frame its author said with no edge up while others were let in.
 
+A leave of one admission (revision 2026-10-10, proposed) adds `ls3` to the `group-leave` request and to the `leave` commit, outside the commit's hash and signature. An app from before ignores it and drops it from what it keeps and hands on (it passes a frame on as it came), so:
+
+- A member's **first** leave works across both, whichever app signs or commits it.
+- A member let in again whose app is from before signs `ls` alone, the same bytes as its first leave. Apps from before follow that leave; apps of this revision do not, and the two keep different branches until the older ones update or the admin removes that member (`remove` needs no statement). While a group mixes the two, a member let in again that needs to go again SHOULD update first, or ask the admin.
+- A second leave signed by an app of this revision reaches a member of this revision through an app from before as a commit without `ls3`, when that app hands it on from what it kept (a sync, a catch-up): it is refused there, and taken once it comes whole from any member that holds it whole.
+- A member of this revision that was away while apps from before followed such a leave, and cannot take it, opens the link again: the welcome's chain is not held to the rule.
+- Apps from before still follow a `leave` that reuses an earlier `ls`. The rule protects a group once its members run this revision.
+- `ls` stays required while apps from before are supported. A statement a member signed and that no commit ever carried (its request was overtaken by a `remove`) can still be used once, as that member's first leave. That ends when `ls` is retired, in a later revision.
+
 ## Bounds
 
 256 members; 2048 commits; 8 hubs, 48 members per hub, one hub per member; 256 stored frames and 1 MiB (payment frames included); 96 epoch secrets; 512 commits off the main branch; ties between branches decided within 64 epochs; 16 KiB of text, mentions included (at most 16), in a message or an edit; 100 edits per message, 10 said and 30 taken per 10 seconds, 256 kept for the next window; 8 KiB of application frame or pair payload; 60 KiB per frame; four knock records and lobbies of six entries each; 64 leave marks kept, each naming at most 64 epochs. The member cap is what the load test below measured; see Conformance.
@@ -322,6 +359,7 @@ A frame said again (revision 2026-10-03) reaches an app from before as a message
 - Every member can admit anyone, read every message of the epochs it is in, and relay. A member cannot forge another member's messages, read before its admission, or read after its removal.
 - The admin cannot be bypassed for removal, role, rotation or link changes, and a member cannot undo one by outgrowing it with a longer branch (§ Races and forks). The admin cannot equivocate without halting the group, nor can an admin who handed the role on.
 - A compromised member seed is healed by removal, as in the mesh; there are no member key updates.
+- Only the member itself, or the admin, takes a member out the first time. A member who left and was let in again can be taken out by any member, each time it comes back: its earlier `ls` is in the chain and says the same at every admission. Revision 2026-10-10 (proposed, § A leave ends one admission) ends that: a leave is signed by the leaver for one admission.
 - Hubs see who is connected to them and when, and relay ciphertext they can read (they are members), except pair payloads: those only their recipient opens.
 - Someone removed is told so when it comes back, by the commit that removed it; hubs exchange the group's frames with current members only (§ Removed while away). It can still read the beacon and the lobbies and write into them (it holds the rendezvous secret); members ignore a removed key there. A key it makes up and writes into a lobby gets a moment's edge on which a hub says where it is and takes commits, within bounds, and none of what the group says (§ A key no commit names); it still sees who is listed in the beacon and who asks in the lobbies.
 - The beacon's head (§ Head) tells anyone who holds the rendezvous secret when the group last had a frame and from which member key. Members see that anyway; a removed member keeps the secret, so it can also follow the group's activity by time after its removal (never what was said), as it can already follow who the hubs are.
@@ -376,6 +414,13 @@ On public relays each trip through Pkarr (a packet published, then seen by the o
 ## Open decisions
 
 Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; calls (files and voice messages are [503](503-group-files.md)); native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
+
+On a leave of one admission (revision 2026-10-10, proposed); the text above takes the first choice of each:
+
+1. **The welcome's chain.** Checked with `ls` alone, so a group whose past holds a second leave under the old statement still takes newcomers. The cost: a member that is also the door can admit a newcomer onto a branch the others refuse, and the newcomer is alone with it until it sees the branch the others follow. Held to the rule instead, such a group could never take a newcomer on an app of this revision.
+2. **When the refusal starts.** In the release that adds `ls3`, so a group is protected as soon as its members update, at the price of the split § Compatibility describes for a member let in again whose app is from before. Staged instead (this release signs and carries `ls3`, the next one refuses), no group splits, and the flaw stays open one release longer.
+3. **A statement signed and never committed.** Left usable once, as that member's first leave, until `ls` is retired. Closing it earlier means refusing every leave under `ls` alone, which shuts out the apps from before.
+4. **Retiring `ls`.** Which later revision stops requiring it, after which a `leave` stands by `ls3` alone and apps from before cannot leave a group or follow a leave.
 
 ## Revision log
 
