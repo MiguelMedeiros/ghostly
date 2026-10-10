@@ -176,6 +176,12 @@ export async function ciPlan(files) {
   return plan ? plan(files, { draft: false }) : null;
 }
 
+/**
+ * A pull request that changes one of these plans its own runs (ci.yml takes both from the pull request's merge with
+ * its base), so the plan of the base's copy says nothing about them: its green run counts as it is, as before.
+ */
+export const PLAN_SOURCES = ["tools/scripts/ci-changes.mjs", ".github/workflows/ci.yml"];
+
 /** How many of CI's runs on one commit are read, newest first, for one that counts. */
 export const CI_RUNS_READ = 5;
 
@@ -325,8 +331,12 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const skipped = ciState(jobs) === "success" ? skippedGates(jobs) : [];
     if (!skipped.length) return true;
     const key = p?.number ?? null;
-    if (!plans.has(key)) plans.set(key, await ciPlan(p ? await gh.pullFiles(p.number) : null));
+    if (!plans.has(key)) {
+      const files = p ? await gh.pullFiles(p.number) : null;
+      plans.set(key, files?.some((f) => PLAN_SOURCES.includes(f)) ? "own" : await ciPlan(files));
+    }
     const plan = plans.get(key);
+    if (plan === "own") return true;
     // No plan to read (a checkout without ci-changes.mjs): every gate counts as on.
     const missing = skipped.filter((gate) => !plan || plan[gate]);
     if (!missing.length) return true;
@@ -949,11 +959,16 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     },
     /**
      * The files a pull request changes against its base, a renamed file by both names (as ci.yml lists them), or null
-     * when it changes none or more than is read here: ci.yml turns every gate on then.
+     * when it changes none or more than GitHub lists (3000): ci.yml turns every gate on then.
      */
     pullFiles: async (n) => {
-      const files = await all(`/pulls/${n}/files`);
-      if (!files.length || files.length >= 1000) return null;
+      const files = [];
+      for (let page = 1; page <= 30; page++) {
+        const list = await must("GET", `/pulls/${n}/files?per_page=100&page=${page}`);
+        files.push(...list);
+        if (list.length < 100) break;
+      }
+      if (!files.length || files.length >= 3000) return null;
       return files.flatMap((f) => (f.previous_filename ? [f.filename, f.previous_filename] : [f.filename]));
     },
     /**

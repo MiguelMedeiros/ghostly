@@ -1526,6 +1526,13 @@ describe("a green CI run planned for other files", () => {
     expect(repo.landed).toEqual(["#21"]);
   });
 
+  it("lands a pull request that changes the plan itself: its runs are planned by its own copy", async () => {
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    repo.files.set(21, ["tools/scripts/ci-changes.mjs", "tools/scripts/test/ci-changes.test.ts"]);
+    expect((await repo.run()).merged).toEqual([21]);
+  });
+
   it("does not land a batch on it", async () => {
     const repo = fakeRepo();
     repo.add(11);
