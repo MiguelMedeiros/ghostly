@@ -137,6 +137,7 @@
     "pasteFileUnreadableNext": "Adjúntalo con +.",
     "pasteGone": "Ese pegado ya no está",
     "pasteGoneNext": "Pégalo de nuevo.",
+    "pasteLate": "No se pudo añadir ahora lo que pegaste. Pégalo de nuevo cuando termines.",
     "pasteTooLarge": "Es demasiado grande para pegarlo. Envíalo con + → Documento.",
     "pasteUnreadable": "No se pudieron pegar esos archivos. Envíalos con + → Documento.",
     "refused": {

@@ -137,6 +137,7 @@
     "pasteFileUnreadableNext": "Joignez-le avec +.",
     "pasteGone": "Ce collage n'est plus disponible",
     "pasteGoneNext": "Collez-le à nouveau.",
+    "pasteLate": "Impossible d'ajouter pour l'instant ce que vous avez collé. Collez-le à nouveau quand vous aurez terminé.",
     "pasteTooLarge": "C'est trop volumineux pour être collé. Envoyez-le avec + → Document.",
     "pasteUnreadable": "Impossible de coller ces fichiers. Envoyez-les avec + → Document.",
     "refused": {

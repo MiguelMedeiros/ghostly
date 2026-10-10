@@ -137,6 +137,7 @@
     "pasteFileUnreadableNext": "Anexe com +.",
     "pasteGone": "Essa colagem expirou",
     "pasteGoneNext": "Cole de novo.",
+    "pasteLate": "Não foi possível adicionar agora o que você colou. Cole de novo quando terminar.",
     "pasteTooLarge": "Isso é grande demais para colar. Envie com + → Documento.",
     "pasteUnreadable": "Não foi possível colar esses arquivos. Envie-os com + → Documento.",
     "refused": {
