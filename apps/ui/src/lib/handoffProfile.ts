@@ -33,6 +33,8 @@ const stagedKeys = (ns: string): string[] => {
   return Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
 };
 const isStaged = (file: Partial<HandoffFile>): file is Pick<HandoffFile, "size" | "sha256"> => typeof file.sha256 === "string" && Number.isSafeInteger(file.size);
+/** `Staging.restore` writes the files' records in transactions of this many, and of about this many bytes of small files (held in memory until written). */
+const RESTORE_FILES = 200, RESTORE_BYTES = 32 * 1024 * 1024;
 const spaceOf = (database: string): string => (database === "ghostly" ? "" : database.replace(/^ghostly_/, ""));
 
 /** The peer database opened as it is stored (no version, so nothing migrates); only read-only transactions on it. */
@@ -240,19 +242,38 @@ class Staging implements HandoffStaging {
     const kind = (await fileBytes()).kind;
     const db = await wrap(indexedDB.open(this.database));
     try {
-      for (const file of files) {
-        const row = await wrap(db.transaction("files", "readonly").objectStore("files").get(file.id)) as StoredFile | undefined;
-        if (!row) continue;
-        const { blob: _blob, bytes: _bytes, ...rest } = row;
-        let next: StoredFile;
-        if (file.size <= SMALL_FILE_BYTES) {
+      for (let at = 0; at < files.length;) {
+        // The small files' bytes are read before the transaction opens: one left with nothing asked of it commits.
+        const small = new Map<string, Uint8Array>();
+        let end = at;
+        for (let held = 0; end < files.length && end - at < RESTORE_FILES && held < RESTORE_BYTES; end++) {
+          const file = files[end];
+          if (file.size > SMALL_FILE_BYTES) continue;
           const bytes = new Uint8Array(file.size);
-          for (let done = 0; done < file.size;) { const part = await store.read(file.id, done, Math.min(FILE_BYTES_STEP, file.size - done)); bytes.set(part, done); done += part.length; }
-          next = { ...rest, blob: new Blob([bytes as BlobPart], { type: row.metadata?.mime ?? "" }), digest: row.digest ?? file.sha256 };
-        } else next = { ...rest, bytes: kind, digest: row.digest ?? file.sha256 };
-        const tx = db.transaction("files", "readwrite");
-        tx.objectStore("files").put(next);
-        await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("The file's record could not be written")); });
+          for (let done = 0; done < file.size;) {
+            const part = await store.read(file.id, done, Math.min(FILE_BYTES_STEP, file.size - done));
+            if (!part.length) throw new Error("The file is shorter than it says");
+            bytes.set(part, done);
+            done += part.length;
+          }
+          small.set(file.id, bytes);
+          held += file.size;
+        }
+        const tx = db.transaction("files", "readwrite"), records = tx.objectStore("files");
+        for (const file of files.slice(at, end)) {
+          const read = records.get(file.id);
+          read.onsuccess = () => {
+            const row = read.result as StoredFile | undefined;
+            if (!row) return;
+            const { blob: _blob, bytes: _bytes, ...rest } = row;
+            const bytes = small.get(file.id);
+            records.put(bytes
+              ? { ...rest, blob: new Blob([bytes as BlobPart], { type: row.metadata?.mime ?? "" }), digest: row.digest ?? file.sha256 }
+              : { ...rest, bytes: kind, digest: row.digest ?? file.sha256 });
+          };
+        }
+        await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("The files' records could not be written")); });
+        at = end;
       }
     } finally { db.close(); }
     for (const file of files) if (file.size <= SMALL_FILE_BYTES) await store.remove(file.id).catch(() => {});
