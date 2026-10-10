@@ -62,6 +62,16 @@ describe("group administration", () => {
     expect(() => findMember(group, "me")).toThrow(/No member/);
   });
 
+  it("a member's whole key is that member, whatever another member calls itself", () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u", OTHER = "o".repeat(52);
+    const named = { name: "G", members: [{ key: "me", me: true }, { key: KEY, nick: "Bob", me: false }, { key: OTHER, nick: KEY, me: false }] } as unknown as GroupView;
+    expect(findMember(named, KEY).key).toBe(KEY);
+    expect(findMember(named, OTHER).key).toBe(OTHER);
+    // A prefix and a name still stand side by side: two members is an error, never a guess.
+    const prefixed = { name: "G", members: [{ key: "anaq77", nick: "Bo", me: false }, { key: "zzzz11", nick: "Ana", me: false }] } as unknown as GroupView;
+    expect(() => findMember(prefixed, "ana")).toThrow(/more than one/);
+  });
+
   it("takes a picture only as a JPEG within the bounds a contact checks", async () => {
     expect(await pictureFrom(join(fixtures, "avatar.jpg"))).toMatch(/^data:image\/jpeg;base64,\/9j/);
     await expect(pictureFrom(join(fixtures, "avatar.png"))).rejects.toMatchObject({ code: "bad_request" });

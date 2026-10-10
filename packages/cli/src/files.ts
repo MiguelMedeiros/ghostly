@@ -6,9 +6,9 @@ import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { GroupView, LinkView, MessageFile } from "@ghostly/browser/shared/types";
+import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
-import { bool, chatOf, findGroup, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { endTyping } from "./typing";
@@ -43,20 +43,8 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
   }));
 }
 
-/**
- * The chat a file command names, or else a group (`group:<id>`, or a group's id, prefix or name where no chat has it),
- * as `forward` reads them. A name that is neither says what a chat would.
- */
-function chatOrGroupOf(ctx: ApiContext, params: Params): { link: LinkView } | { group: GroupView } {
-  const ref = str(params, "chat", true);
-  if (ref.startsWith("group:")) return { group: findGroup(state(ctx).groups, ref.slice("group:".length)) };
-  try {
-    return { link: chatOf(ctx, params) };
-  } catch (error) {
-    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
-    try { return { group: findGroup(state(ctx).groups, ref) }; } catch { throw error; }
-  }
-}
+/** The chat or the group a file command names (`findChatOrGroup`). */
+const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
 
 /**
  * The chat or group a file belongs to: a file id starts with its chat's id (a group's file with `group-<id>-`), so it

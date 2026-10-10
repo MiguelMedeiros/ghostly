@@ -184,6 +184,21 @@ reactions, typing).
 | Shared services | `service add <name> http://127.0.0.1:<port>`, `service share <service> <chat>`, `service peer\|open\|close` |
 | Voice calls | `call start <chat>`, `call answer`, `call auto on [--from <chat>]`, `call hangup\|list\|flush`, `call pipe`: the audio as raw PCM on a Unix socket per call, for a program of yours |
 
+A chat is named by its id, a unique prefix of it, its contact's key or its name (the label you gave it first, then
+the name the contact gave itself); a group by its id, a unique prefix or its name; a member by its key, a unique
+prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
+group's and a member its own, so a bot or a script addresses by id (`<chat id>`, `group:<group id>`, a member's whole
+key), which every answer and event carries. What the CLI does when names meet:
+
+- Where a command takes a chat or a group (`forward --to`, `file send`, `task`, `routine`, `usage`, `pin`, `button`), a
+  chat found only by the name its contact gave itself never takes what also names a group. The group's id is the
+  group; a prefix of it or the name of a group you are in is refused (exit 2, `details.chat` and `details.groups`):
+  use the chat's id or `group:<id>`. A label you gave the chat still wins.
+- A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
+  by a name or prefix none of your groups has.
+- A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members
+  is refused.
+
 Safety rules the CLI enforces:
 
 - **Real money.** Wallets default to Testnet. A Mainnet spend needs `--network mainnet --confirm-real`; without the
