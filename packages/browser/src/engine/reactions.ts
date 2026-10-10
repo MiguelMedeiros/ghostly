@@ -68,11 +68,10 @@ export function groupReactionsToResend(messages: readonly StoredMessage[], limit
   }).sort((a, b) => b.n - a.n).slice(0, limit);
 }
 
-/** This side's highest number in a chat: the next one goes past it (and past what still waits to be confirmed). */
-function lastMine(messages: readonly StoredMessage[], pending: readonly WireReaction[] = []): number {
+/** This side's highest number in a chat's history: the next one goes past it. */
+function lastMine(messages: readonly StoredMessage[]): number {
   let last = 0;
   for (const m of messages) last = Math.max(last, m.reactions?.me?.n ?? 0);
-  for (const p of pending) last = Math.max(last, p.n);
   return last;
 }
 
@@ -83,6 +82,11 @@ export class Reactions {
   private queue = Promise.resolve();
   /** A group member's reactions taken per window (chat and member key), as a paired chat's session limits them. */
   private readonly memberPace = new Map<string, ReactionWindow>();
+  /**
+   * This side's highest number per chat: read from its history the first time I react in it, then each number given
+   * out. It only has to grow, so a row deleted since leaves it too high and nothing is wrong.
+   */
+  private readonly last = new Map<string, number>();
 
   constructor(private readonly host: ReactionsHost) {}
 
@@ -104,13 +108,15 @@ export class Reactions {
       if (typeof messageId !== "string" || !messageId) return { error: "No message to react to" };
       const e = emoji === "" ? "" : reactionEmoji(emoji);
       if (e === null) return { error: "A reaction is one emoji" };
-      const messages = await this.host.messages(chat), group = isGroup(chat);
-      const target = messages.find(m => m.id === messageId) ?? reactionTarget(messages, messageId, group);
-      const id = target && replyRef(target, group);
+      const target = await this.named(chat, messageId);
+      const id = target && replyRef(target, isGroup(chat));
       if (!target || !id) return { error: "That message is not in this chat, or takes no reaction" };
       const current = target.reactions?.me;
       if (!e && !current?.e) return { error: "No reaction of yours to take back" };
-      const reaction: WireReaction = { id, e, n: nextReactionNumber(lastMine(messages, pending), this.now()) };
+      let last = this.last.get(chat) ?? lastMine(await this.host.messages(chat));
+      for (const p of pending) last = Math.max(last, p.n);
+      const reaction: WireReaction = { id, e, n: nextReactionNumber(last, this.now()) };
+      this.last.set(chat, reaction.n);
       const message = await this.write(chat, target, "me", reaction) ?? target;
       return { reaction, message };
     });
@@ -151,6 +157,13 @@ export class Reactions {
     });
   }
 
+  /** The row I react to: by its id here, as the pages name it, read alone; else by the id both sides know it by. */
+  private async named(chat: string, id: string): Promise<StoredMessage | undefined> {
+    if (this.host.message) return await this.host.message(chat, id) ?? this.find(chat, id);
+    const messages = await this.host.messages(chat);
+    return messages.find(m => m.id === id) ?? reactionTarget(messages, id, isGroup(chat));
+  }
+
   /**
    * The row a received reaction names. Most often the row of that id (a group's), or of `peer_` or `me_` and that id (a
    * chat's): those are read alone. Any other (a file's, a payment's, one not here yet) is looked for in the whole chat;
@@ -168,8 +181,11 @@ export class Reactions {
     return reactionTarget(await this.host.messages(chat), id, group);
   }
 
-  /** A chat is gone: nothing waits for it any more. */
-  forget(chat: string): void { this.waiting.delete(chat); }
+  /** A chat is gone: nothing waits for it any more, and my highest number in it is read again if it comes back. */
+  forget(chat: string): void {
+    this.waiting.delete(chat);
+    this.last.delete(chat);
+  }
 
   private wait(chat: string, by: string, reaction: WireReaction): ReactionOutcome {
     const now = this.now();
