@@ -383,6 +383,35 @@ describe("sending, requesting and asking", () => {
     expect(JSON.stringify(node.getState())).not.toContain("cashuBsecret-bearer-token");
   });
 
+  it("a state that changed no payment carries the copy already made, and a payment that changed makes a new one", async () => {
+    const { node } = track(engine());
+    const sent = (id: string): StoredPayment => ({ id, linkId: "chat", kind: "payment", direction: "out", amount: 5, unit: "sat", state: "pending", createdAt: 1, token: `cashuB${id}` });
+    for (let i = 0; i < 500; i++) node["desk"]["payments"].set(`p${i}`, sent(`p${i}`));
+    // Each copy of a record reads its `amount` once: the copies made are counted there.
+    let copies = 0;
+    const counted = sent("counted");
+    Object.defineProperty(counted, "amount", { enumerable: true, get: () => { copies += 1; return 5; } });
+    node["desk"]["payments"].set(counted.id, counted);
+
+    const first = node.getState().payments;
+    expect(Object.keys(first)).toHaveLength(501);
+    expect(copies).toBe(1);
+    // Typing, a file's progress, a contact coming online: states that are not about payments.
+    for (let i = 0; i < 20; i++) expect(node.getState().payments).toBe(first);
+    expect(copies).toBe(1);
+
+    // A change is seen by the next state, and the copy a page already holds is left as it was.
+    node["desk"]["payments"].set("p0", { ...sent("p0"), state: "settled" });
+    const second = node.getState().payments;
+    expect(second).not.toBe(first);
+    expect(second.p0.state).toBe("settled");
+    expect(first.p0.state).toBe("pending");
+    node["desk"]["payments"].delete("p1");
+    expect(node.getState().payments).not.toHaveProperty("p1");
+    expect(second).toHaveProperty("p1");
+    expect(JSON.stringify(node.getState().payments)).not.toContain("cashuB");
+  });
+
   it("a refused reviewed payment is marked failed with the sats back, only while it was still in flight", async () => {
     const { node } = track(engine());
     const submitted = savedReview({ state: "submitted" }), settled = savedReview({ state: "settled" });

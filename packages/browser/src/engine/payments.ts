@@ -164,8 +164,22 @@ const fedimintSats = (msats: number) => Math.floor(msats / 1000);
 type Each<T extends object> = T | PerNetwork<T>;
 /** The distinct wallets of a per-network set (one object may stand for both). */
 const distinct = <T>(each: PerNetwork<T>): T[] => [...new Set(WALLET_NETWORKS.map((n) => each[n]))];
+/**
+ * Every payment this device keeps, with the copy of them the pages get. The copy is made again only after a payment
+ * changed: a state about anything else (typing, a file's progress) carries the one already made.
+ */
+class PaymentBook extends Map<string, StoredPayment> {
+  private shown: Record<string, PaymentView> | null = null;
+  override set(id: string, payment: StoredPayment): this { this.shown = null; return super.set(id, payment); }
+  override delete(id: string): boolean { this.shown = null; return super.delete(id); }
+  override clear(): void { this.shown = null; super.clear(); }
+  views(): Record<string, PaymentView> {
+    // The token is money: it stays with the peer and never reaches a page.
+    return this.shown ??= Object.fromEntries([...this].map(([id, { token: _token, ...view }]) => [id, view]));
+  }
+}
 export class PaymentDesk {
-  private readonly payments = new Map<string, StoredPayment>();
+  private readonly payments = new PaymentBook();
   private readonly paying = new Map<string, Promise<void>>();
   private readonly receiving = new Map<string, Promise<void>>();
   private readonly reclaims = new Map<string, Promise<Reclaimed | undefined>>();
@@ -232,10 +246,8 @@ export class PaymentDesk {
   /** Every payment as stored, tokens included: for the engine's own reading, never for a page. */
   records(): StoredPayment[] { return [...this.payments.values()]; }
 
-  views(): Record<string, PaymentView> {
-    // The token is money: it stays with the peer and never reaches a page.
-    return Object.fromEntries([...this.payments].map(([id, { token: _token, ...view }]) => [id, view]));
-  }
+  /** What the pages see of every payment. The same record until a payment changes: read it, never write to it. */
+  views(): Readonly<Record<string, PaymentView>> { return this.payments.views(); }
 
   async forgetLink(linkId: string): Promise<void> {
     const paymentStore = await store(STORES.payments, "readwrite");
