@@ -626,6 +626,28 @@ describe("with the apps flag on", () => {
     expect(within(screen.getByTestId("app-store-listing")).getAllByTestId("app-listing")).toHaveLength(50);
   });
 
+  it("Show more from the keyboard moves the focus to the first listing it added, not to the page once the button is gone", async () => {
+    const apps = Array.from({ length: 120 }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` }));
+    fakeEngine.on("appList", () => [installed({ ref: `${KEY}/app100` })]).on("appCheckUpdates", () => [])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+        name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps, removed: [] }]);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByText("Big"));
+    const rows = () => within(screen.getByTestId("app-store-listing")).getAllByTestId("app-listing");
+    screen.getByTestId("app-store-more").focus();
+    await user.keyboard("{Enter}");
+    expect(rows()).toHaveLength(100);
+    expect(within(rows()[50]).getByTestId("app-listing-install")).toHaveFocus();
+
+    // The last page takes the button away. Its first listing is installed, with no button: the row itself takes the focus.
+    screen.getByTestId("app-store-more").focus();
+    await user.keyboard("{Enter}");
+    expect(rows()).toHaveLength(120);
+    expect(screen.queryByTestId("app-store-more")).not.toBeInTheDocument();
+    expect(rows()[100]).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
   it("gives the card's title its own direction", async () => {
     fakeEngine.on("appList", () => []);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
