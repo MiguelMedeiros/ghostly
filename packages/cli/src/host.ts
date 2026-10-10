@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { announceJoins } from "./announce";
+import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
 import { CallManager } from "./calls/manager";
 import { asCliError, CliError } from "./errors";
@@ -53,6 +54,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
+    reportAppFrames(hub, node, paths.dir);
     runtime.server.attach(hub.sink, { mark, ids: histories.keys() });
   } catch (error) {
     await runtime.close().catch(() => {});
