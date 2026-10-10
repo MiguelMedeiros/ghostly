@@ -416,9 +416,10 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 E2E_COMPAT_115
   serves it with a small static server: the export keeps no `node_modules`.
 - **The old Desktop.** A release attaches its Desktop build, so nothing is built: `tools/scripts/fetch-compat-desktop.mjs`
   downloads the release's `Ghostly_<version>_amd64.deb`, checks it against the release's `SHA256SUMS.txt`, unpacks it
-  with `dpkg-deb -x` into `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints
-  `usr/bin/ghostly`; the spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
-  system libraries as the current Desktop (WebKitGTK 4.1, GStreamer).
+  with `dpkg-deb -x` (or, where there is none, as on Arch, with `tar` on the package's `data.tar.*`) into
+  `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints `usr/bin/ghostly`; the spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
+  system libraries as the current Desktop (WebKitGTK 4.1, GStreamer). A machine where no tool unpacks the package skips
+  the spec with the reason.
 - **The config.** `playwright.compat.config.ts` starts four servers (the current build, with mini-apps on as in the
   main suite, v0.4.0, v1.1.4 and v1.1.5) and hands the old ones' addresses to the specs as `config.metadata.compatURL`
   and `releases` (by version). The apps meet on the test's Pkarr relay, as everywhere.

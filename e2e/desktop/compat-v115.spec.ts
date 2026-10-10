@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { attachDesktopLogs, desktopHome } from "../support/desktop";
 import { LocalRelay } from "../support/relay";
@@ -19,10 +19,16 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * this process, as in native-upgrade.spec.ts.
  */
 
-/** The v1.1.5 binary: fetched once, then from the cache. */
-const oldBinary = () => execFileSync(process.execPath, ["tools/scripts/fetch-compat-desktop.mjs", "--tag", "v1.1.5"], {
-  cwd: fileURLToPath(new URL("../..", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
-}).trim();
+/** The v1.1.5 binary: fetched once, then from the cache. Skips the test where no tool unpacks the release's package. */
+const oldBinary = () => {
+  const fetched = spawnSync(process.execPath, ["tools/scripts/fetch-compat-desktop.mjs", "--tag", "v1.1.5"], {
+    cwd: fileURLToPath(new URL("../..", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  });
+  process.stderr.write(fetched.stderr ?? "");
+  test.skip(fetched.status === 3, `The v1.1.5 package cannot be unpacked here: ${(fetched.stderr ?? "").trim().split("\n").at(-1)}`);
+  if (fetched.error || fetched.status !== 0) throw fetched.error ?? new Error(`fetch-compat-desktop.mjs ended with status ${fetched.status}`);
+  return fetched.stdout.trim();
+};
 
 /** How many times the open conversation shows this exact text: once, or it was lost or doubled. */
 const count = (p: DesktopPerson, text: string) => p.app.execute<number>(`
