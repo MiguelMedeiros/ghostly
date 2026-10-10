@@ -216,6 +216,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, the peer behind it is the one Rust backs, and `<html lang>`/`<html dir>` follow the language |
+| `desktop/select.spec.ts` | the Desktop tests' `choose` waits for a select on a page that is not drawn yet (Settings loads when first opened), with a stand-in page and no app |
 | `desktop/private-bus.spec.ts` | the D-Bus session bus each Linux Desktop app under test gets activates only xdg-desktop-portal and its permission store (a call's picture needs them): on a Linux desktop it started the person's portals and their backends once per app |
 | `desktop/wayland-clipboard.spec.ts` | Linux: Join → Paste reads text a Wayland app copied, on a headless Sway of its own (the person's clipboard is never touched). Skips without `sway` and `wl-copy` |
 | `desktop/dht-direct.spec.ts` | two Desktop apps pair and go live reading the Mainline DHT directly (a DHT of their own, `support/mainlineTestnet.ts`), never reading a relay |
