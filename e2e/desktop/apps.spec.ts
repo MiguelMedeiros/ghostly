@@ -1,5 +1,5 @@
 import http from "node:http";
-import { test, expect, desktopWindows, type DesktopApp } from "../support/desktop";
+import { test, expect, desktopWindows } from "../support/desktop";
 import { STORE_URL, testStore } from "../support/appStore";
 
 /*
@@ -49,14 +49,6 @@ async function storeServer(files: Map<string, Uint8Array>): Promise<{ base: stri
   return { base: `http://127.0.0.1:${port}`, asked, close: () => new Promise((done) => server.close(() => done())) };
 }
 
-/** Clicks the first element under `selector` whose text has `text` (the store's row among others). */
-async function clickWithText(app: DesktopApp, selector: string, text: string): Promise<void> {
-  await expect.poll(() => app.execute<boolean>(`
-    const hit = [...document.querySelectorAll(arguments[0])].find((e) => e.textContent.includes(arguments[1]) && !e.disabled);
-    if (hit) hit.click();
-    return !!hit;`, selector, text)).toBe(true);
-}
-
 test("installs Chess from a store and opens it in an app window of its own, which reaches the broker and nothing else", { tag: ["@feature:apps.desktop-sandbox"] }, async ({ app }) => {
   // A full-screen app: the Apps page opens it alone, in a window the Ghostly window's size.
   const store = await testStore({ entry: PROBE, view: "full" });
@@ -74,7 +66,6 @@ test("installs Chess from a store and opens it in an app window of its own, whic
     await app.click('[data-testid="apps-add-check"]');
     await expect.poll(() => app.text('[data-testid="apps-add-store"]')).toContain(store.storeName);
     await app.click('[data-testid="apps-add-store-confirm"]');
-    await clickWithText(app, '[data-testid="app-store"] button[aria-expanded]', store.storeName);
     await expect.poll(() => app.text('[data-testid="app-listing-install"]')).not.toBeNull();
     await app.click('[data-testid="app-listing-install"]');
     await expect.poll(() => app.text('[data-testid="app-install"]')).toContain("Talk to the same app on your contact's side");

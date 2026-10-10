@@ -442,7 +442,6 @@ describe("focus on the Apps page", () => {
       .on("appInstall", () => { list = [app]; return app as never; });
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const store = await screen.findByTestId("app-store");
-    await user.click(within(store).getByRole("button", { name: /Ghostly/ }));
     await user.click(within(store).getByTestId("app-listing-install"));
     await user.click(await screen.findByTestId("app-install-confirm"));
     await waitFor(() => expect(within(screen.getByTestId("installed-app")).getByTestId("installed-app-open")).toHaveFocus());

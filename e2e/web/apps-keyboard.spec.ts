@@ -23,7 +23,6 @@ test("a store's Refresh and Uninstall's Export keep the keyboard focus once thei
   await expect(refresh).toBeEnabled();
   await expect(refresh).toBeFocused();
 
-  await listed.getByRole("button", { name: new RegExp(store.storeName) }).click();
   await listed.getByTestId("app-listing-install").click();
   await ana.page.getByTestId("app-install-confirm").click();
   await ana.page.getByTestId("installed-app").getByRole("button", { name: `${store.title}: details` }).click();
