@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A released app speaks no cleartext, from the WebView or from Android's own code. This is the app's config in place
+     of the one inside the rustls-platform-verifier .aar, which lets Android fetch certificate revocation lists from
+     about 380 certificate authorities' hosts over http://. Without those, a revocation check that needs the network
+     finds nothing and the certificate passes (the verifier asks Android to fail soft), as before that list existed.
+     A debug build has its own file (src/debug). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

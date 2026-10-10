@@ -116,6 +116,12 @@ const RULES: readonly Rule[] = [
   { match: /^That file is too large for your contact's app \(max (?<max>.+)\)\. Larger files need an updated Ghostly on their side\.$/, key: "errors.files.tooLargeForContact", next: "errors.files.tooLargeForContactNext" },
   { match: /^That file is too large \(max (?<size>.+)\)\.$/, key: "chat.fileTooLarge" },
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
+  // A paste the app's clipboard commands refused (apps/desktop/src/clipboard.rs). The system's reason stays English, behind the ⓘ.
+  exact("That picture is too large to paste", "errors.files.pasteTooLarge"),
+  exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
+  exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
+  exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
+  { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
@@ -359,6 +365,25 @@ const RULES: readonly Rule[] = [
   exact("An empty file cannot go to a group", "errors.group.fileEmpty"),
   exact("This app takes no group files", "errors.group.filesUnsupported", "errors.group.filesUnsupportedNext"),
   { match: /^A group takes files of up to (?<size>[\d.]+ [KMGT]?B)$/, key: "errors.group.fileTooLarge" },
+
+  // Held items for an away contact (packages/browser/src/engine/hold.ts, WISP 404): a message's line, and the chat's hold
+  // line and dialog. What the storage or the network answered goes behind the ⓘ: it is English, and often a status code.
+  // No storage, a contact that stopped allowing it and no room left are above, with the files' (`HOLD_FULL_ITEMS`).
+  exact("Held messages need S3 storage (Profile → Backups) and a pinned contact.", "errors.hold.needPinned", "errors.hold.needStorageNext"),
+  { match: /^An item held for an away contact is at most (?<mb>\d+) MB\.$/, key: "errors.hold.tooLarge" },
+  exact("The message is gone", "errors.hold.messageGone"),
+  exact("The file is gone", "errors.hold.fileGone"),
+  exact("The payment request is gone", "errors.hold.requestGone"),
+  { match: /^Could not store the item: [\s\S]+$/, key: "errors.hold.storeFailed", next: "errors.hold.storeFailedNext", detail: true },
+  { match: /^Stored, but could not tell the contact where: [\s\S]+$/, key: "errors.hold.pointerFailed", next: "errors.hold.retryNext", detail: true },
+  exact("Held for its whole lifetime without being picked up. Retry to hold it again.", "errors.hold.expired", "errors.hold.retryNext"),
+  exact("Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", "errors.hold.contactRefused", "errors.hold.contactRefusedNext"),
+  { match: /^Could not read the contact's pointer: [\s\S]+$/, key: "errors.hold.readFailed", next: "errors.hold.retryingNext", detail: true },
+  exact("The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", "errors.hold.addressExpired", "errors.hold.addressExpiredNext"),
+  { match: /^Refused what the contact's storage offered: [\s\S]+$/, key: "errors.hold.refusedOffer", detail: true },
+  { match: /^Could not pick up held items: [\s\S]+$/, key: "errors.hold.pickUpFailed", next: "errors.hold.retryingNext", detail: true },
+  { match: /^Refused a held item from the contact: [\s\S]+$/, key: "errors.hold.refusedItem", detail: true },
+  { match: /^Picked up, but could not acknowledge: [\s\S]+$/, key: "errors.hold.ackFailed", detail: true },
 
   // Making a wallet, connecting its source and reading it (engine/node.ts, paymentAdapters/**): why a kind could not be made or offered, and what a card says while it connects.
   { match: /^(?:You already have a|There is already a) (?<network>Mainnet|Testnet) (?<kind>Cashu|Lightning|Ark|Bark|Spark|Bitcoin|Fedimint|USDT) wallet$/, key: "errors.wallet.alreadyHave" },

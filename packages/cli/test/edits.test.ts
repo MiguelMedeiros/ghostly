@@ -19,6 +19,7 @@ function fake(result: { error: string | null; refused?: boolean; messageId?: str
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
+    getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
     editMessage: vi.fn(async () => result),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;

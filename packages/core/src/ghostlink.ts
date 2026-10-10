@@ -190,7 +190,7 @@ const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paire
  * `disconnected`) otherwise went on until its consent checks gave up, 27 s after the crash (CI run 36741701666).
  */
 export const PONG_WAIT_MS = 4_000;
-/** How long `handled` waits for the contact to answer its ping before it says it cannot tell. */
+/** How long `handled` waits for the contact to answer its ping before it says it is late. */
 export const HANDLED_WAIT_MS = 10_000;
 /**
  * Back in front after an absence (`wake`), a live session that ends this soon after it was lost while the app was
@@ -755,7 +755,7 @@ export class GhostLink {
   /** The liveness ping whose pong measures the round trip: its number in `pingsSent`. */
   private rttPing = 0;
   /** `handled` callers, each waiting for the pong to its ping. */
-  private handledWaiters: { ping: number; done: (exact: boolean) => void }[] = [];
+  private handledWaiters: { ping: number; done: (exact: boolean | "late") => void }[] = [];
   /** The last ping's `PONG_WAIT_MS`: running until something comes back from the contact. */
   private pongWait: ReturnType<typeof setTimeout> | null = null;
   /** The last ping's wait ran out with nothing back, and nothing came since (`restartedRedial`). */
@@ -1097,12 +1097,14 @@ export class GhostLink {
       // Asked as each attempt starts: once the first pairing is over, the contact reads at its chat's pace (30 s in the
       // background), and a short offer would be withdrawn before it looked.
       attemptTimeoutMs: () => this.tracker && !this.tracker.done ? PAIRING_ATTEMPT_MS : undefined,
-      // The contact may have restarted: its offer (a restarted app offers whatever its key, `resume`) is read now, not
-      // at the minute pace of a live chat, and answered at once, which ends the dead session (`DataLink.handleSignal`).
+      // The contact may have restarted: its offer (a restarted app offers whatever its key, `resume`) is read now and
+      // fast while the connection stays so, not at the minute pace of a live chat, and answered at once, which ends the
+      // dead session (`DataLink.handleSignal`).
       onDisconnected: disconnected => {
-        if (!disconnected || this.activeBinding || !this.channel) return;
+        if (!disconnected) { this.session.setDataLinkStalled(false); return; }
+        if (this.activeBinding || !this.channel) return;
         traceLink(this.myPubKeyZ32, "rtc-disconnected", {});
-        this.session.pollNow();
+        this.session.setDataLinkStalled(true);
       },
     });
     this.switcher = new TransportSwitch({
@@ -3837,23 +3839,24 @@ export class GhostLink {
    * Resolves once the contact's app handled every frame sent on this session so far: it answers a ping in the order
    * frames come (every app since 1.0), so the pong to one sent now says so, however slowly it handles them. A group
    * member's catch-up answer goes a slice at a time on it (`GroupSessionHooks.handled`). `false` when it cannot tell:
-   * no session, a contact that answers no ping, or no answer within `HANDLED_WAIT_MS`.
+   * no session, or a contact that answers no ping. `"late"` with no answer within `HANDLED_WAIT_MS`: a contact that
+   * answers pings is still handling what came before (a phone with a long history), not one that cannot say.
    */
-  handled(): Promise<boolean> {
+  handled(): Promise<boolean | "late"> {
     const channel = this.channel;
     if (!channel || !this.peerAnswersPings || this.paired?.state.status !== "ready") return Promise.resolve(false);
     try { this.sendPing(channel, false); } catch { return Promise.resolve(false); }
     return new Promise(resolve => {
       const waiter = {
         ping: this.pingsSent,
-        done: (exact: boolean) => {
+        done: (exact: boolean | "late") => {
           clearTimeout(timer);
           const at = this.handledWaiters.indexOf(waiter);
           if (at >= 0) this.handledWaiters.splice(at, 1);
           resolve(exact);
         },
       };
-      const timer = setTimeout(() => waiter.done(false), HANDLED_WAIT_MS);
+      const timer = setTimeout(() => waiter.done("late"), HANDLED_WAIT_MS);
       this.handledWaiters.push(waiter);
     });
   }

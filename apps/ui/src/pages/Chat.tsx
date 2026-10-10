@@ -6,7 +6,7 @@ import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
-import { ChatHoldDialog } from "../components/ChatHoldDialog";
+import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
 import { FaceCorner, IdentityStack } from "../components/identities/ContactMarks";
 import { shownContactName, useChosenProfile, useContactFace } from "../components/identities/contactFace";
@@ -932,16 +932,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
       </div>
 
-      {chatPeer?.hold && (chatPeer.hold.outstanding > 0 || chatPeer.hold.error) && (
-        <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border truncate" role="status">
-          {chatPeer.hold.outstanding > 0 && t(chatPeer.hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
-            count: chatPeer.hold.outstanding, name: shownName,
-            used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(chatPeer.hold.bytes / 1024 / 1024),
-            max: new Intl.NumberFormat(language).format(Math.round(chatPeer.hold.maxBytes / 1024 / 1024)) })}
-          {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
-          {chatPeer.hold.error && <span className="text-danger">{problemLine(chatPeer.hold.error, t)}</span>}
-        </div>
-      )}
+      {chatPeer?.hold && <ChatHoldLine hold={chatPeer.hold} name={shownName} />}
 
       {/* Input; while messages are chosen, what to do with them. */}
       {forwarding.bar}
@@ -976,6 +967,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
         softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
+        // The engine's limit is 16 KiB of UTF-8, not characters: "é" counts two, an emoji four.
+        textBytes={paired ? 16_384 : undefined}
         onSendFile={platform ? sendFile : undefined}
         fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? t("chat.filesNeedUpdate") : undefined) : undefined}
         // The + → Payment row still opens on these: its Accept side is where this chat's ways of paying are chosen.

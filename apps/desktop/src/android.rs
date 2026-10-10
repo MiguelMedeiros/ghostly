@@ -245,17 +245,18 @@ fn received(kind: &str, value: String) {
 /// Kotlin's `external fun received(kind: String, value: String)`. On Android's main thread: what it starts runs
 /// elsewhere, and nothing here calls back into Kotlin.
 #[no_mangle]
-pub extern "system" fn Java_tools_ghostly_app_GhostlyHostPlugin_received(
-    mut env: jni::JNIEnv,
-    _this: jni::objects::JObject,
-    kind: jni::objects::JString,
-    value: jni::objects::JString,
+pub extern "system" fn Java_tools_ghostly_app_GhostlyHostPlugin_received<'local>(
+    mut env: jni::EnvUnowned<'local>,
+    _this: jni::objects::JObject<'local>,
+    kind: jni::objects::JString<'local>,
+    value: jni::objects::JString<'local>,
 ) {
-    let (Ok(kind), Ok(value)) = (env.get_string(&kind), env.get_string(&value)) else {
-        return;
-    };
-    let kind: String = kind.into();
-    let value: String = value.into();
-    // A panic must never cross into the JVM.
-    let _ = std::panic::catch_unwind(|| received(&kind, value));
+    // A panic must never cross into the JVM: `with_env` catches it, and a string that cannot be read is dropped.
+    let _ = env
+        .with_env(|env| -> jni::errors::Result<()> {
+            let (kind, value) = (kind.try_to_string(env)?, value.try_to_string(env)?);
+            received(&kind, value);
+            Ok(())
+        })
+        .into_outcome();
 }

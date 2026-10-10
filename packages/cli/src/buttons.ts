@@ -112,7 +112,7 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const result = await node(ctx).editMessage({ linkId: target.linkId, messageId: message.id, text, card });
   if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
-  let edited = (target.group ? await node(ctx).groupMessages({ groupId: target.id }) : await node(ctx).getMessages(target.linkId)).find((m) => m.id === message.id);
+  let edited = target.group ? (await node(ctx).groupMessages({ groupId: target.id })).find((m) => m.id === message.id) : await node(ctx).getMessage(target.linkId, message.id);
   if (wait === "confirmed" && edited?.edit?.pending) edited = await waitForEdit(ctx, target.linkId, message.id, ms);
   const edges = wait === "sent" && edited?.edit ? await waitForGroupFrame(ctx, target.id, message.id, edited.edit.seq, ms) : undefined;
   return {
@@ -152,7 +152,7 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
     const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, replyId, undefined, ms) : node(ctx).groupTaken({ groupId: target.id, messageId: replyId });
     return { ...answer, edges };
   }
-  const reply = wait === "none" ? (await node(ctx).getMessages(target.linkId)).find((m) => m.id === replyId) : await waitForMessage(ctx, target.linkId, replyId, wait, ms);
+  const reply = wait === "none" ? await node(ctx).getMessage(target.linkId, replyId) : await waitForMessage(ctx, target.linkId, replyId, wait, ms);
   return { ...answer, delivery: reply?.delivery ?? null };
 }
 

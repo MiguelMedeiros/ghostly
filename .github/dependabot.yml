@@ -22,6 +22,9 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+        # hyperdht arrives alone, never in the weekly group: its four copies (this lockfile's two, the sidecar's
+        # and the relay's below) and tools/patches/hyperdht+<version>.patch move in one pull request, by hand.
+        exclude-patterns: [hyperdht]
         update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /apps/website
@@ -108,7 +111,13 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  # Node images stay on the major they name: an update offers the newest one, long-term or not (22 to 25
+  # for the HyperDHT relay, a line that had already reached its end). A move to the next long-term
+  # release is made by hand.
   - package-ecosystem: docker
     directories: [/apps/web, /apps/website, /e2e/infra/atproto, /infra/services/hyperdht-relay]
     schedule: { interval: weekly, day: monday }
     target-branch: dev
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

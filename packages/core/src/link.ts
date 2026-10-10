@@ -80,6 +80,11 @@ export const EXPECT_PEER_MS = 30_000;
  * or the session dropped): an app that restarts is back within this, and its dial or offer is seen in seconds.
  */
 export const WATCH_PEER_MS = 2 * 60_000;
+/**
+ * The longest a link reads fast for a data link whose connection went `disconnected` (`setDataLinkStalled`): a little
+ * past the 12 s such a connection is given (`DISCONNECT_GRACE_MS`), by when it is back or the session is gone.
+ */
+export const STALLED_LOOK_MS = 15_000;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
 /**
@@ -235,6 +240,8 @@ export class LinkSession {
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private connected = false;
+  /** The open data link's connection is `disconnected`, and read fast until then (`setDataLinkStalled`). */
+  private stalledUntil = 0;
   private readonly firstPublish: "at-start" | "after-first-poll";
   private firstPublishTimer: ReturnType<typeof setTimeout> | null = null;
   private firstPollDone = false;
@@ -394,7 +401,22 @@ export class LinkSession {
   /** The data link carries chat and services while it is up. */
   setDataLinkOpen(open: boolean): void {
     this.connected = open;
+    this.stalledUntil = 0;
     if (!open) this.pollNow();
+  }
+
+  /**
+   * The open data link's connection went `disconnected` (true), or came back: the contact's app may have crashed, and
+   * once it starts again its offer is on Pkarr, which nothing on a dead data link says. Read fast for as long as it
+   * lasts (the connection is given up or back within seconds), not at the connected pace. One read as it went
+   * `disconnected` found only an offer already out: an app back a moment later (a tab opened again by hand) waited for
+   * the connection's grace to run out (web/restart-relink.spec.ts, 20 s on a busy machine). Never longer than
+   * `STALLED_LOOK_MS`, whatever becomes of the connection.
+   */
+  setDataLinkStalled(stalled: boolean): void {
+    if (stalled === Date.now() < this.stalledUntil) return;
+    this.stalledUntil = stalled ? Date.now() + STALLED_LOOK_MS : 0;
+    if (stalled) this.pollNow();
   }
 
   async setCallSignal(signal: string | null): Promise<void> {
@@ -524,7 +546,8 @@ export class LinkSession {
 
   /** How urgently this link looks right now. */
   private pace(): keyof PollIntervals {
-    // Connected peers signal over the data link; no reason to hurry Pkarr.
+    // Connected peers signal over the data link; no reason to hurry Pkarr, unless it stopped answering.
+    if (Date.now() < this.stalledUntil) return "fast";
     if (this.connected) return "connected";
     if (Date.now() < this.fastPollUntil) return "fast";
     if (Date.now() < this.watchUntil) return "active";

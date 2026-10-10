@@ -616,6 +616,26 @@ describe("MessageBubble: deleting", () => {
     expect(screen.queryByTestId("message-delete-menu")).not.toBeInTheDocument();
   });
 
+  it("a file still on its way says it stops, not that the contact keeps a copy; once here it does", async () => {
+    vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
+    const moving = { state: "transferring" as const, transferred: 1_000_000, size: 30_000_000 };
+    fakeEngine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peer" })], transfers: {
+      "link-1-out-a": { ...moving, direction: "out" }, "link-1-in-b": { ...moving, direction: "in" }, "link-1-in-c": { state: "done", transferred: 30_000_000, size: 30_000_000 },
+    } });
+    const hint = async (patch: Partial<ChatMessage>) => {
+      const view = bubble({ text: "f.bin", ...patch }, { onDelete: () => {} });
+      await view.user.click(screen.getByTestId("message-options"));
+      await view.user.click(screen.getByRole("button", { name: "Delete message" }));
+      const words = screen.getByTestId("message-delete-menu").querySelector("p")!.textContent;
+      view.unmount();
+      return words;
+    };
+    const file = (id: string) => ({ id, name: "f.bin", size: 30_000_000, mime: "application/octet-stream" });
+    expect(await hint({ id: "me_a", sender: "me", file: file("link-1-out-a") })).toBe("Deleted only here. Sending stops; your contact won't get the file.");
+    expect(await hint({ id: "peer_b", file: file("link-1-in-b") })).toBe("Deleted only here. The file stops arriving; your contact sees it cancelled.");
+    expect(await hint({ id: "peer_c", file: file("link-1-in-c") })).toBe("Deleted only here. Your contact keeps their copy.");
+  });
+
   it("closes the menu on a click elsewhere", async () => {
     const onDelete = vi.fn();
     const { user } = renderApp(<><p>elsewhere</p><MessageBubble message={message({ sender: "me" })} onDelete={onDelete} /></>);
