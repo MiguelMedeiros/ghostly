@@ -2146,13 +2146,22 @@ export class GhostlyNode implements EngineImplementation {
     return { ...(tokens.length && { wakeTokens: tokens }), ...(this.settings.wakeMutedGroups?.includes(group.id) && { wakeMuted: true }) };
   }
 
+  /** Per community, the members a payment here names, as read from one copy of the payments (`PaymentDesk.views`). */
+  private communityPaid?: { of: object; members: Map<string, Set<string>> };
+
   /** Community members payments go to (or came from), as links the payment bubbles and the composer look up by key. */
   private communityPayViews(groups: GroupView[]): LinkView[] {
-    const withPayments = new Map<string, Set<string>>();
-    for (const p of Object.values(this.desk.views())) {
-      const at = parsePayLink(p.linkId);
-      if (at?.member) { const set = withPayments.get(at.groupId) ?? new Set<string>(); set.add(at.member); withPayments.set(at.groupId, set); }
+    // Read from the payments once per change of them, not once per state.
+    const payments = this.desk.views();
+    if (this.communityPaid?.of !== payments) {
+      const members = new Map<string, Set<string>>();
+      for (const p of Object.values(payments)) {
+        const at = parsePayLink(p.linkId);
+        if (at?.member) { const set = members.get(at.groupId) ?? new Set<string>(); set.add(at.member); members.set(at.groupId, set); }
+      }
+      this.communityPaid = { of: payments, members };
     }
+    const withPayments = this.communityPaid.members;
     return groups.filter(g => g.profile === "community" && g.status === "active" && g.myKey)
       .flatMap(g => this.communityPay.views(g.id, g.myKey!, g.members.map(m => m.key), withPayments.get(g.id) ?? new Set()));
   }
