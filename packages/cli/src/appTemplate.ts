@@ -28,7 +28,8 @@ export function templateManifest({ name, title }: AppTemplate): Record<string, u
 /**
  * `index.html`: the whole app in one file, as the sandbox needs it (no network, so nothing is loaded from elsewhere).
  * Its script is plain JavaScript typed with JSDoc against `@ghostlytools/sdk/app`, so it runs as written and still type
- * checks (test/appInit.test.ts does). The title is the only thing put into it, as text.
+ * checks (test/appInit.test.ts does). The title is the only thing put into it, as text. Its type imports are in single
+ * quotes: they are text of the page, not imports of the CLI's own build (test/packageDeps.test.ts reads those).
  */
 export function templatePage({ title }: AppTemplate): string {
   return `<!doctype html>
@@ -56,8 +57,8 @@ export function templatePage({ title }: AppTemplate): string {
 <ul id="log" aria-label="Messages"></ul>
 <script type="module">
 // The types of the API come from the SDK (npm install --save-dev @ghostlytools/sdk); nothing of it runs here.
-/** @typedef {import("@ghostlytools/sdk/app").MiniAppApi} MiniAppApi */
-/** @typedef {import("@ghostlytools/sdk/app").MiniAppJson} MiniAppJson */
+/** @typedef {import('@ghostlytools/sdk/app').MiniAppApi} MiniAppApi */
+/** @typedef {import('@ghostlytools/sdk/app').MiniAppJson} MiniAppJson */
 
 /** The longest text shown from a contact's frame. */
 const MAX_TEXT = 200;

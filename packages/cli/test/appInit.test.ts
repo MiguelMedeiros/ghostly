@@ -85,7 +85,7 @@ describe("app init", () => {
     ok(await ghostly(["app", "init", dir]));
     const page = readFileSync(join(dir, "index.html"), "utf8");
     const script = /<script type="module">\n([\s\S]*?)<\/script>/.exec(page)?.[1];
-    expect(script).toContain(`import("@ghostlytools/sdk/app").MiniAppApi`);
+    expect(script).toContain(`import('@ghostlytools/sdk/app').MiniAppApi`);
     const file = join(dir, "page.js");
     writeFileSync(file, script!);
     const program = ts.createProgram([file], {
