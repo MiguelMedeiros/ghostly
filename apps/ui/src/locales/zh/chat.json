@@ -25,8 +25,10 @@
   },
   "connecting": "连接中",
   "createdHere": "此聊天由你创建",
+  "deleteArrivingFileHint": "仅在此设备上删除。接收将停止，对方会看到发送已取消。",
   "deleteMessage": "删除消息",
   "deleteMessageHint": "仅在此设备上删除，对方仍保留副本。",
+  "deleteSendingFileHint": "仅在此设备上删除。发送将停止，对方不会收到该文件。",
   "delivery": {
     "delivered": "已送达",
     "failed": "未发送",

@@ -47,6 +47,11 @@ interface MessageInputProps {
    * sent, waiting for a live connection (or held) instead of being refused.
    */
   softBytes?: number;
+  /**
+   * The most UTF-8 bytes a message may have (the engine's 16 KiB): the counter near the end counts bytes then, not
+   * characters, and a longer text stays in the field with why. An accented letter takes two, most CJK three, an emoji four.
+   */
+  textBytes?: number;
   /** Present when the platform can send files; returns an error message or null. */
   fileUnavailable?: string;
   /**
@@ -125,6 +130,7 @@ export function MessageInput({
   maxLength = DEFAULT_MAX,
   maxBytes,
   softBytes,
+  textBytes,
   onSendFile,
   payments,
   paymentComposer,
@@ -306,6 +312,7 @@ export function MessageInput({
     if (!text.trim() || disabled) return;
     const bytes = new TextEncoder().encode(text.trim()).length;
     if (maxBytes && bytes > maxBytes) { showToast(t("composer.dhtTooLong", { bytes, max: maxBytes })); return; }
+    if (textBytes && bytes > textBytes) { showToast(t("composer.tooLongBytes", { bytes: formatAmount(bytes, t.language), max: formatAmount(textBytes, t.language) })); return; }
     const found = confirmed ? null : findSecret(text);
     if (found) { setSecret({ finding: found }); return; }
     if (edit) {
@@ -468,7 +475,8 @@ export function MessageInput({
     const named = pasteNamesFiles(data);
     read.then((found) => {
       ended();
-      if (found.length) offerRef.current(found);
+      // Read to its end where files cannot go any more (an edit began meanwhile): said, as a paste never read is.
+      if (found.length) { if (!offerRef.current(found)) showToast(t("errors.files.pasteLate")); }
       else if (named) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
     return true;
@@ -600,9 +608,11 @@ export function MessageInput({
       onSelect: () => cameraByFileInput() ? cameraInputRef.current?.click() : setShowCamera(true) });
   }
 
-  const bytes = maxBytes || softBytes ? new TextEncoder().encode(text.trim()).length : 0;
-  const remaining = maxBytes ? maxBytes - bytes : maxLength - text.length;
+  const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
+  const remaining = maxBytes ? maxBytes - bytes : textBytes ? textBytes - bytes : maxLength - text.length;
   const overSoft = !!softBytes && bytes > softBytes;
+  // Near the limit that refuses, its count wins over the DHT's (past 16 KiB is past 256 B too).
+  const nearHard = remaining < 100 && (!softBytes || !!maxBytes || !!textBytes);
 
   // With the sheet open the composer is behind its veil, outside the dialog: what it has to say is said on the sheet.
   const sheetOpen = !!attached && !locked;
@@ -691,17 +701,17 @@ export function MessageInput({
               rows={1}
               className="composer-textarea"
             />
-            {softBytes && !maxBytes && bytes > softBytes - 60 && (
+            {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (
               <span data-testid="dht-byte-count" title={overSoft ? t("composer.overSoft", { bytes: softBytes }) : undefined}
                 className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-amber-500" : "text-text-muted"}`}>
                 {bytes} / {softBytes} B
               </span>
             )}
-            {!(softBytes && !maxBytes) && remaining < 100 && (
-              <span
+            {nearHard && (
+              <span data-testid="composer-left"
                 className={`absolute end-2.5 bottom-1 text-[10px] ${remaining < 50 ? "text-danger" : "text-text-muted"}`}
               >
-                {remaining}{maxBytes ? " B" : ""}
+                {remaining}{maxBytes || textBytes ? " B" : ""}
               </span>
             )}
           </div>

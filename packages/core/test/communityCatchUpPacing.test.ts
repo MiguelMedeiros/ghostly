@@ -209,8 +209,10 @@ describe("a community member's catch-up answer goes a slice at a time", { timeou
         },
         ...(paced && { handled: () => handling.then(() => true) }),
       });
-      await vi.waitFor(() => expect(done).toBe(sentCount));
-      await sleep(50);
+      // Until every frame that went was handled and no slice follows. Not a waitFor: handling them is one stretch of
+      // promises (about a second for the 281 at once) that no timer interrupts, and once it runs past waitFor's second
+      // its timeout fires before a check sees them handled.
+      do { await handling; await sleep(50); } while (done < sentCount);
       await handling;
       return { got, receiver, sentCount, mostWaiting };
     };

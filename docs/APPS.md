@@ -33,14 +33,32 @@ In the code the store is `DEFAULT_STORE_URL` and `DEFAULT_STORE_KEY` in
 `DEFAULT_STORE_KEY` is empty the default store is off**: a new profile starts with no store. It stays empty until the
 owner makes the key and signs the first index.
 
+## Starting an app
+
+```sh
+ghostly app init my-app                       # my-app/ghostly-app.json, index.html, README.md
+ghostly app publish my-app --key ~/ghostly-keys/my-app-publisher.key
+ghostly app verify my-app/app.ghostlyapp
+```
+
+`app init` writes a small working app: opened in a 1:1 chat, each side can say hello to the other. Its `index.html` is
+the whole app, plain JavaScript typed against [`@ghostlytools/sdk/app`](SDK.md), and its README has the steps from
+there to a store. `--name` and `--title` set the app's name and title; by default they come from the folder's name. It
+writes nothing over a file that is there unless `--force`.
+
+`app publish` takes every file of the folder but dot files, the README included. Once the app has sources and a build,
+publish a folder that holds only the built `index.html` and `ghostly-app.json`, as
+[ghostly-chess](https://github.com/MiguelMedeiros/ghostly-chess) does with its `scripts/stage.mjs`.
+
 ## Submitting an app
 
 The store's [CONTRIBUTING](https://github.com/MiguelMedeiros/ghostly-store/blob/main/CONTRIBUTING.md) has the details.
 In short:
 
-1. Build the app as one self-contained HTML file (scripts, styles and images inline). Chess, in
-   [`apps/mini/chess`](../apps/mini/chess), is an example.
-2. Write `ghostly-app.json` beside it (the manifest without `publisher`, `sequence` and `files`) and run
+1. Start with `ghostly app init <dir>` ([Starting an app](#starting-an-app)), or build the app yourself as one
+   self-contained HTML file (scripts, styles and images inline). Chess, in [`apps/mini/chess`](../apps/mini/chess),
+   is an example.
+2. Keep `ghostly-app.json` beside it (the manifest without `publisher`, `sequence` and `files`) and run
    `ghostly app publish <dir> --key <your publisher key>`. The first run makes the key: keep it outside the app's folder
    (publish refuses a key inside it, and any private key file found there), back it up, never commit it.
    Set `view` to say where it shows: `"chat"` (the default) for an app that runs inside a chat with one contact, such
@@ -91,9 +109,11 @@ ghostly app publish <that folder> --key ~/ghostly-keys/chess-publisher.key --out
 
 Then update `sequence` and `digest` in its `listing.json`, and sign the index again.
 
-The end-to-end tests and the store-keys test run a pinned copy of Chess, `e2e/fixtures/chess`: its page, its
-`ghostly-app.json`, and `chess.json` saying where they came from. Refresh it after any change to `apps/mini/chess`
-with `node tools/scripts/refresh-chess-fixture.mjs`, or from the signed bundle with
-`--bundle <app.ghostlyapp, or a URL pinned to a commit>`, which checks Chess's publisher key.
-`tools/scripts/test/chessFixture.test.ts` fails while the fixture is older than `apps/mini/chess`, and CI runs
-`--check`, which rebuilds Chess and compares the bytes. A release bump of `package.json`'s version does not count.
+The end-to-end tests run a pinned copy of Chess, `e2e/fixtures/chess`: its page, its `ghostly-app.json`, and
+`chess.json` saying where they came from. Chess lives in its own repository, so the fixture is never built here: after
+a new version is published, refresh it from the signed bundle with
+`node tools/scripts/refresh-chess-fixture.mjs --bundle <app.ghostlyapp, or a URL pinned to a commit>`, which checks
+Chess's publisher key and the files' hashes. `--check` fetches the bundle `chess.json` names and compares the bytes;
+CI does not run it, since it needs the network. `tools/scripts/test/chessFixture.test.ts` checks, offline, that the
+files are the ones `chess.json` describes. `e2e/fixtures/chess/1.0.2` is the last Chess built in this repository,
+kept for the update test and the store-keys test.

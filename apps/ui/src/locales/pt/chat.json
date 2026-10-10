@@ -25,8 +25,10 @@
   },
   "connecting": "conectando",
   "createdHere": "Você criou esta conversa",
+  "deleteArrivingFileHint": "Apagada só aqui. O arquivo para de chegar; seu contato vê o envio cancelado.",
   "deleteMessage": "Apagar mensagem",
   "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele.",
+  "deleteSendingFileHint": "Apagada só aqui. O envio para; seu contato não vai receber o arquivo.",
   "delivery": {
     "delivered": "Entregue",
     "failed": "Não enviada",

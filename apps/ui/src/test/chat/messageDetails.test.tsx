@@ -5,7 +5,7 @@ import { LONG_PRESS_MS, MessageBubble } from "../../components/MessageBubble";
 import { buildDetails, formatBytes, formatDuration, pathWords } from "../../lib/messageDetails";
 import type { ChatMessage } from "../../lib/types";
 import { servicesPlatform } from "../../lib/platform";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -62,6 +62,25 @@ describe("opening and closing", () => {
     await user.click(screen.getByTestId("message-details-backdrop"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
     expect(container.querySelector("[data-message-row]")).not.toHaveAttribute("data-details-open");
+  });
+
+  it("a double click on a file's buttons is theirs: Accept, Pause and Cancel open no details; on the file's name it does", async () => {
+    fakeEngine.on("messageDetails", () => textView());
+    fakeEngine.on("fileAction", () => undefined);
+    fakeEngine.update({ transfers: {
+      "link-1-in-a": { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 30_000_000 },
+      "link-1-out-b": { state: "transferring", direction: "out", transferred: 1_000_000, size: 30_000_000 },
+    } });
+    const offered = bubble({ id: "peer_a", sender: "peer", text: "offered.bin", delivery: undefined, file: { id: "link-1-in-a", name: "offered.bin", size: 30_000_000, mime: "application/octet-stream" } });
+    await offered.user.dblClick(screen.getByTestId("file-accept"));
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+    await offered.user.dblClick(screen.getByTitle("offered.bin"));
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
+    offered.unmount();
+    const moving = bubble({ id: "me_b", text: "moving.bin", delivery: undefined, file: { id: "link-1-out-b", name: "moving.bin", size: 30_000_000, mime: "application/octet-stream" } });
+    await moving.user.dblClick(screen.getByTestId("file-pause"));
+    await moving.user.dblClick(screen.getByTestId("file-cancel"));
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
   });
 
   it("the ⋮ menu has Details beside Delete, and Details opens them", async () => {

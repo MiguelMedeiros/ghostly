@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UnsupportedBrowser } from "../../components/UnsupportedBrowser";
 import { bootDetails, missingEssentials } from "../../lib/bootCheck";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { englishT, translateWith } from "../../locales/translate";
 
 // covers: app.boot

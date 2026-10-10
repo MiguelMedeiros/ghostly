@@ -1,3 +1,4 @@
+import { CliError } from "../errors";
 import { type Command, here } from "./shared";
 
 /** The profile's status, its picture, the event journal: one entry per command, in alphabetical order (test/commands.test.ts checks). */
@@ -7,9 +8,12 @@ export const commands: Record<string, Command> = {
     options: { since: { type: "number", description: "Only events after this seq" } }, params: ({ options }) => ({ since: options.since ?? 0 }),
   },
   "profile picture": {
-    method: "profile.picture", usage: "profile picture <jpeg> | --clear", summary: "The picture contacts see (a square JPEG, 128 px is what the app sends)", args: ["path..."],
+    method: "profile.picture", usage: "profile picture <jpeg> | --clear", summary: "The picture contacts see (a square JPEG, 128 px is what the app sends)", args: ["path...?"],
     options: { clear: { type: "boolean", description: "Remove the picture" } },
-    params: ({ options }, a) => ({ path: here(a.path), clear: options.clear === true }),
+    params: ({ options }, a) => {
+      if (a.path === undefined && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly profile picture <jpeg> | --clear");
+      return { path: here(a.path), clear: options.clear === true };
+    },
   },
   "status": { method: "status", usage: "status", summary: "The profile, its chats and whether a daemon runs it" },
 };

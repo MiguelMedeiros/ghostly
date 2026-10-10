@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { canonicalJsonBytes, toBase64Url, utf8Encode } from "@ghostly/core";
+import { canonicalJsonBytes, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
 import { fileBytes } from "../src/shared/fileBytes";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, keyOf,
@@ -157,6 +157,23 @@ describe("updates", () => {
     expect(accepted).toMatchObject({ sequence: 2, digest: v2.digest, permissions: ["chat", "name"] });
     expect(accepted.pending).toBeUndefined();
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+  });
+
+  it("an app uninstalled while an update that adds a permission downloads leaves no files behind", async () => {
+    const { store, v1 } = await installed();
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    // The person uninstalls it while the check fetches the update.
+    const answer = net.fetch.getMockImplementation()!;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === PINNED_URL) await store.uninstall({ ref: v1.ref });
+      return answer(input, init);
+    });
+    expect(await store.checkUpdates()).toEqual([]);
+    expect(await appRows()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
   });
 
   it("a newer version found at the app's own source, peeked first", async () => {
@@ -535,6 +552,38 @@ describe("before a run", () => {
     expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
     await expect(store.entry({ ref: v1.ref, runAnyway: true })).rejects.toThrow(/^revoked/);
     await expect(store.file({ ref: v1.ref, path: "index.html" })).rejects.toThrow(/^stopped/);
+  });
+
+  it("the app's record keeps only revocations that can still apply, so a publisher's changing file does not pile up", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    const v2 = await bundle({ sequence: 2, sources: [BUNDLE_URL] });
+    const v3 = await bundle({ sequence: 3, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const REVOKE = `${REPO}/ghostly-revoke.json`;
+    const kept = async () => ((await appRows()) as { revocations?: SignedAppRevocation[] }[])[0]!.revocations?.map((r) => r.statement) ?? [];
+    net.put(REVOKE, canonicalJsonBytes([await revocation(v1.ref, [v2.digest])]));
+    await store.checkUpdates();
+    expect(await kept()).toEqual([expect.objectContaining({ digests: [v2.digest] })]);
+    // The file changes: what it no longer serves and names no version here goes.
+    net.put(REVOKE, canonicalJsonBytes([await revocation(v1.ref, [v3.digest])]));
+    await store.checkUpdates();
+    expect(await kept()).toEqual([expect.objectContaining({ digests: [v3.digest] })]);
+    // No file answers: what is kept stays, and still stops the version it names.
+    net.files.delete(REVOKE);
+    net.put(BUNDLE_URL, v3.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    expect(await kept()).toEqual([expect.objectContaining({ digests: [v3.digest] })]);
+    // The installed version's stays when the file drops it.
+    net.put(BUNDLE_URL, v1.bytes);
+    net.put(REVOKE, canonicalJsonBytes([await revocation(v1.ref, [v1.digest])]));
+    await store.checkUpdates();
+    net.put(REVOKE, canonicalJsonBytes([]));
+    await store.checkUpdates();
+    expect(await kept()).toEqual([expect.objectContaining({ digests: [v1.digest] })]);
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
   });
 
   it("a revocation by another key is not taken", async () => {

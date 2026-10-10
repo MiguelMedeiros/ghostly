@@ -88,12 +88,12 @@ const SHOTS: Record<string, Shot> = {
   },
   groups: {
     src: "/screenshots/current/groups.webp",
-    alt: "A private group called Lake house trip: its picture, four members talking, and a request to the group paid by Wendy",
+    alt: "A private group called Lake house trip: its picture, four members talking, a request to the group paid by Wendy, and a photo Casper sent",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The conversation's end: the request to the group paid by Wendy, and the voices around it.
-    crop: { x: 0.36, y: 0.36, w: 0.64 },
+    // The conversation's end: the photo Casper sent, whole, between the thanks for the paid request and the goodbye.
+    crop: { x: 0.36, y: 0.34, w: 0.64 },
     mobile: "/screenshots/current/groups-mobile.webp",
   },
   identities: {

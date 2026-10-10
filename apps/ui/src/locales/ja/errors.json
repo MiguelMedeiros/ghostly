@@ -137,6 +137,7 @@
     "pasteFileUnreadableNext": "+ から添付してください。",
     "pasteGone": "その貼り付けはもう使えません",
     "pasteGoneNext": "もう一度貼り付けてください。",
+    "pasteLate": "貼り付けた内容を今は追加できませんでした。終わってからもう一度貼り付けてください。",
     "pasteTooLarge": "貼り付けるには大きすぎます。+ → 書類 から送ってください。",
     "pasteUnreadable": "これらのファイルを貼り付けられませんでした。+ → 書類 から送ってください。",
     "refused": {

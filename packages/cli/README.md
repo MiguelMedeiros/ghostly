@@ -90,6 +90,7 @@ The rows are in alphabetical order of their first command, and every command of 
 
 | Command | What it does |
 |---|---|
+| `app init <dir> [--name <name>] [--title <title>] [--force]` | Start an app (WISP 1200, Apps), run here with no profile or daemon: a small working one in `<dir>` (made when missing), which `app publish <dir>` signs as it is. It writes `ghostly-app.json` (`view: chat`, the `chat` permission), an `index.html` that says hello to the same app on the contact's side, typed against `@ghostlytools/sdk/app`, and a `README.md` with build, publish, verify and how to list it in a store. The name is `--name` (a lowercase letter, then up to 31 lowercase letters, digits or hyphens), else the folder's (`My App` gives `my-app`); the title is `--title` (one line, up to 40 characters), else the name's. When one of the three files is there nothing is written and it is `refused` (`details.reason` `exists`, `details.files`), unless `--force`, which replaces those three only. Answers `{dir, name, title, files, replaced?, next}` |
 | `app publish <dir> --key <file> [--out <file>] [--sequence n]`, `app verify <bundle\|url>` | The publisher tools of WISP 1200 (Apps), run here with no profile or daemon. `app publish` bundles and signs an app: `<dir>/ghostly-app.json` holds the manifest's fields but `publisher`, `sequence` and `files`, and every other file in `<dir>` goes in (dot files are left out and listed in `skipped`). It writes `<dir>/app.ghostlyapp` (or `--out`), its `sequence` one more than the bundle already there, which only the same key may follow (`--sequence n` sets it, refused unless higher). `--key` names the publisher key file, a PKCS #8 PEM: made owner-only on first use (back it up: an app is updated only with its key), refused when others may read it or when it is inside `<dir>`, never printed; a folder holding any private key file is refused (`details.reason` `private-key`). `app verify` checks a bundle from a file or an `https` URL as a client does (jsDelivr only at a full commit, 16 MiB at most) and answers its manifest and digest, or `refused` (exit 1) with the WISP's reason in `details.reason` |
 | `app revoke <dir> --key <file> (--digest <digest>… \| --up-to <sequence>) [--reason <text>] [--bundle <file>]` | Revoke versions of your app (WISP 1200 · Revocation): by digest (base64url, as `app verify` prints it; `--digest` again for each, up to 64) or every version up to a `sequence`, with an optional one-line reason. The statement names the app of `<dir>/app.ghostlyapp` (or `--bundle`), is signed with that app's publisher key (any other key is refused, and none is made here), and is added to `<dir>/ghostly-revoke.json`, published beside the bundle; a client that reads it stops those versions. Answers `{app, digests \| upTo, current, added, revocations, file}`; `current` says whether the bundle in `<dir>` is among them |
 | `button press <chat\|group> <message> <button> [--wait none\|sent\|delivered] [--timeout s]` | Press a button of someone else's question, as a tap in the app does (WISP 406 · Message Buttons): the reply carries the button's label, and the asker hears `button.pressed`. `<message>` is the question's id (its event or `chat history`), `<button>` a button's id from its `card`. Refused (exit 1) like a tap: closed buttons, a second answer past `--once`, a second press within a second. A one-shot in a chat waits until it went out, as `send`. Answers `{chat \| group, messageId, button, label, replyId, delivery \| edges}` |
@@ -112,10 +113,10 @@ The rows are in alphabetical order of their first command, and every command of 
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 | `events [--since seq]` | What the event journal holds, without following |
-| `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3). A file's id names its chat, so `<chat>` may be left out |
-| `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
+| `file list <chat\|group>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3), and so does a group's file that did not come by itself (over 8 MiB). A file's id names its chat or its group, so `<chat>` may be left out |
+| `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact (a group's file: from whoever holds it); either goes on from the bytes the receiver holds (files/3) |
 | `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk (never over one without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first) |
-| `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does |
+| `file send <chat\|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does. To a group (`group:<id>` when a chat has the same name), up to 100 MiB: every member sees it at once and each member's app fetches it from a member who has it (WISP 503) |
 | `file wait [<chat>] <file> [--timeout s]` | Wait until a transfer ends: exit `0` when the file is all here, `1` with the transfer's error when it failed (`details.retry`: `file resend` can go on), `4` on timeout (default 300 s) |
 | `forward <chat\|group> <message>… --to <chat\|group>… [--force] [--wait none\|sent] [--timeout s]` | Forward messages to up to 5 chats and groups (`--to` again for each; `group:<id>` names a group when a chat has the same name; an id that starts with a dash is taken as it is, `--to -Ab…` or `--to=-Ab…`). Each is a new message of yours that says it was forwarded (`forwarded`, the hop count) and nothing of who wrote it. Files go from the bytes this profile holds, never fetched again; a group takes texts only. A text that looks like a seed, a key or ecash needs `--force`. Answers `{from, results: [{to, kind, messageIds, error}]}`; any refusal fails the command (exit 1) with the results in `details`. `--wait sent`: each text on its way (a group's taken by an edge), each file's transfer done |
 | `group create <name> [--mesh]`, `group join <link>` | A community (a link anyone can open), or a private mesh. `group join` with the link of a community the profile was removed from asks to be let in again, and keeps its history |
@@ -282,7 +283,7 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.mentioned`
   (`{group, messageId, message}`: a mention of this profile learned after the message's `group.message`, which said
   none: a copy another member handed on without it, completed by the author's, or an edit that names this profile; once), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
-  `file.stage`, `file.done`, `file.failed` (each with `chat`, `file`, `messageId`), `chat.held` and
+  `file.stage`, `file.done`, `file.failed` (each with `chat`, or `group` for a group's file, `file`, `messageId`), `chat.held` and
   `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
   showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted`, `group.removed`, `payment.created` and
   `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
@@ -323,7 +324,8 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
   `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment.
-- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only.
+- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A redirect is
+  not followed (the event counts as not taken).
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the
@@ -387,8 +389,10 @@ with no framing:
   decoded (up to 40 ms more when a packet is late; a lost one becomes 20 ms of silence).
 
 **Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`,
-`call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, and `call.ended`
-`{call, chat, direction, reason, duration?}` with `reason`:
+`call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, `call.stalled`
+`{call, chat, direction, silentMs}` (a connected call heard no packet from the contact for 5 s: its side may have died;
+`call.get` says `stalled: true`), `call.resumed` `{call, chat, direction, silentMs}` (packets came back after
+`silentMs` without any), and `call.ended` `{call, chat, direction, reason, duration?}` with `reason`:
 
 | `reason` | |
 |---|---|
@@ -398,7 +402,7 @@ with no framing:
 | `rejected` | The contact declined this side's call |
 | `unanswered` | This side's call rang 60 s with no answer |
 | `crossed` | Both sides called at once and the contact's call came first: it rings here instead (`call.incoming` follows) |
-| `failed` | The media did not connect within 30 s, or dropped, or the contact's app could not connect (it hung up saying so) |
+| `failed` | The media did not connect within 30 s, or dropped, or heard no packet from the contact for 15 s, or the contact's app could not connect (it hung up saying so) |
 | `stopped` | The daemon stopped (its calls are hung up first) |
 
 **Rules**, as in the apps: one call per chat, several chats may each have one; a call needs the chat live (the call
