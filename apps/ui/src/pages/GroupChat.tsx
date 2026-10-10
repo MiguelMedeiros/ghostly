@@ -293,6 +293,11 @@ export function GroupChat() {
   // A new group opens on its link (the sidebar says so in the navigation's state); the header's Share link opens it again.
   const location = useLocation();
   const [sharing, setSharing] = useState<"" | "created" | "share">("");
+  // Its dialog waits for the link (a new group's, or one just turned on, comes with the state that follows), then stays
+  // until it is closed: turned off in it, the link says so there, and one turned on again later opens nothing by itself.
+  const [shareShown, setShareShown] = useState(false);
+  if (sharing && rosterGroup?.entryLink && !shareShown) setShareShown(true);
+  const closeShare = () => { setSharing(""); setShareShown(false); };
   useEffect(() => {
     if ((location.state as { share?: string } | null)?.share !== "created") return;
     setSharing("created");
@@ -623,7 +628,7 @@ export function GroupChat() {
 
       {showMembers && <GroupMembersDialog group={group} focusKey={focusMember} returnFocus={optionsRef} onClose={() => { setShowMembers(false); setFocusMember(undefined); }} />}
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
-      {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={() => setSharing("")} />}
+      {sharing && (group.entryLink || shareShown) && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={closeShare} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmLeave(false); nav.home(); }} />}
       {/* Deleting an active private group leaves it: said so, and refused as Leave is while nobody could become admin. */}
