@@ -940,6 +940,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       <div className={forwarding.selecting ? "hidden" : "contents"}>
       <MessageInput draftId={sessionId}
         key={sessionId}
+        onScreen={visible}
         // Said to the contact on the live session only; stops when the text goes, the chat is left or the page is hidden.
         onTyping={paired ? onTyping : undefined}
         // A paired chat has no mentions; a link preview made in the composer goes with the text, and so does a reply.

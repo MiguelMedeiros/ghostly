@@ -408,10 +408,52 @@ describe("invitations: what the admission exchange ignores", () => {
 
     const carol = world.add("carol");
     const id = (i: number) => `${String(i).padStart(2, "0")}${"B".repeat(20)}`;
-    for (let i = 0; i < 33; i++) await carol.handleContactFrame("chat-xc", { t: "group-invite", g: id(i), name: `g${i}`, admin: intruder, e: 0, n: 1 });
+    // More than 32 waiting, all chats together, are not kept.
+    for (let i = 0; i < 33; i++) await carol.handleContactFrame(`chat-${i >> 2}`, { t: "group-invite", g: id(i), name: `g${i}`, admin: intruder, e: 0, n: 1 });
     expect(carol.views()).toHaveLength(32);
     expect(carol.views().map(v => v.id)).not.toContain(id(32));
     expect(carol.views()[0].invitation).toMatchObject({ admin: intruder, members: 1 });
+  });
+
+  it("one chat holds four invitations at a time: its next is answered as declined, and another contact's still arrives", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]); world.chats.set("chat-cb", ["carol", "bob"]);
+    const admin = createIdentity().pubKeyZ32;
+    const id = (i: number) => `${String(i).padStart(2, "0")}${"B".repeat(20)}`;
+    const declined: unknown[] = [];
+    const declines = vi.spyOn(carol, "handleContactFrame").mockImplementation(async (_link, frame) => { if (frame.t === "group-decline") declined.push(frame.g); });
+    for (let i = 0; i < 40; i++) await bob.handleContactFrame("chat-cb", { t: "group-invite", g: id(i), name: `g${i}`, admin, e: 0, n: 1 });
+    await world.settle();
+    expect(bob.views().map(v => v.id).sort()).toEqual([0, 1, 2, 3].map(id));
+    expect(declined).toEqual(Array.from({ length: 36 }, (_, i) => id(i + 4)));
+    declines.mockRestore();
+    // One of the four sent again replaces itself, and takes no room.
+    await bob.handleContactFrame("chat-cb", { t: "group-invite", g: id(3), name: "renamed", admin, e: 0, n: 1 });
+    expect(view(bob, id(3)).name).toBe("renamed");
+
+    // Another contact's invitation is unaffected, and can be accepted.
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(bob, groupId).invitation).toMatchObject({ linkId: "chat-ab", accepted: false });
+    await bob.accept(groupId); await world.settle();
+    expect(view(bob, groupId).status).toBe("active");
+
+    // An answered one frees its place.
+    await bob.decline(id(0));
+    await bob.handleContactFrame("chat-cb", { t: "group-invite", g: id(9), name: "g9", admin, e: 0, n: 1 });
+    expect(bob.views().map(v => v.id)).toContain(id(9));
+  });
+
+  it("an invitation's member count and epoch are kept within what a group can be", async () => {
+    const world = new World();
+    const bob = world.add("bob");
+    const admin = createIdentity().pubKeyZ32;
+    const id = (i: number) => `${String(i).padStart(2, "0")}${"B".repeat(20)}`;
+    const claims = [{ n: -7, e: -3 }, { n: Number.MAX_SAFE_INTEGER, e: 2 }, { n: 0 }, { n: 1.5, e: "x" }, { n: 12, e: 5 }];
+    for (const [i, claim] of claims.entries()) await bob.handleContactFrame(`chat-${i}`, { t: "group-invite", g: id(i), name: `g${i}`, admin, ...claim });
+    expect(claims.map((_, i) => view(bob, id(i)).invitation!.members)).toEqual([1, 32, 1, 1, 12]);
+    expect(claims.map((_, i) => world.peers.get("bob")!.store.groups.get(id(i))!.invitation)).toMatchObject([{ n: 1, e: 0 }, { n: 32, e: 2 }, { n: 1, e: 0 }, { n: 1, e: 0 }, { n: 12, e: 5 }]);
   });
 
   it("an invitation's name shows cleaned: no invisible, direction-changing or line-breaking text", async () => {
@@ -434,6 +476,34 @@ describe("invitations: what the admission exchange ignores", () => {
     await world.settle();
     expect(view(alice).members).toHaveLength(1);
     void bob;
+  });
+
+  it("an accept naming a key already in the roster, or the admin's own, changes nothing about that member", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]); world.chats.set("chat-ac", ["alice", "carol"]);
+    // Carol's app announced groups up to version 2 (rosters of eight); Bob's takes larger ones.
+    world.oldChats.add("chat-ac");
+    for (const g of [alice, bob, carol]) await g.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ac"); await world.settle();
+    await carol.accept(groupId); await world.settle();
+    const carolKey = view(carol, groupId).myKey!, aliceKey = view(alice, groupId).myKey!;
+    const stored = () => world.peers.get("alice")!.store.groups.get(groupId)!;
+    const nameOf = (key: string) => view(alice, groupId).members!.find(m => m.key === key)?.nick;
+    expect(nameOf(carolKey)).toBe("contact:chat-ac");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    for (const key of [carolKey, aliceKey]) await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key });
+    await world.settle();
+    expect(nameOf(carolKey)).toBe("contact:chat-ac");
+    expect(stored().state!.nicks).toEqual({ [carolKey]: "contact:chat-ac" });
+    expect(view(alice, groupId).members).toHaveLength(2);
+    expect(view(alice, groupId).invited).toHaveLength(1);
+    // Bob's own accept still lets him in, and only his app is recorded as taking a larger roster.
+    await bob.accept(groupId); await world.settle();
+    expect(view(alice, groupId).members).toHaveLength(3);
+    expect(nameOf(carolKey)).toBe("contact:chat-ac");
+    expect(stored().large).toEqual([view(bob, groupId).myKey]);
   });
 
   it("chain pieces from another chat or beyond the limit, and a broken welcome, do not spoil the real welcome", async () => {
@@ -596,6 +666,34 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     await alice.tick(t2 + 72_000);
     await alice.tick(t2 + 74_000);
     expect(hostEntries()).toBe(1);
+  });
+
+  it("a link to a group this profile is out of, or is invited to, is refused: the kept history and the invitation stay", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    world.add("carol"); world.chats.set("chat-ac", ["alice", "carol"]);
+    await alice.send(groupId, "dinner at 8"); await bob.send(groupId, "the only copy of my note"); await world.settle();
+    await alice.remove(groupId, key(bob)); await world.settle(); await world.meet();
+    await alice.invite(groupId, "chat-ac"); await world.settle();
+    const carol = world.peers.get("carol")!, removed = world.peers.get("bob")!;
+    const deleted = [vi.spyOn(removed.store, "deleteGroup"), vi.spyOn(carol.store, "deleteGroup")];
+    const before = [structuredClone(removed.store.groups.get(groupId)), structuredClone(carol.store.groups.get(groupId))];
+    // Any member knows the id; the key is nobody's.
+    const code = `group1/${groupId}/${createIdentity().pubKeyZ32}`;
+    await expect(bob.joinByLink(code)).rejects.toThrow(/history is still here/);
+    await expect(carol.groups.joinByLink(code)).rejects.toThrow(/have an invitation/);
+    await world.settle();
+    expect([removed.store.groups.get(groupId), carol.store.groups.get(groupId)]).toEqual(before);
+    for (const spy of deleted) expect(spy).not.toHaveBeenCalled();
+    expect(view(bob, groupId)).toMatchObject({ status: "removed" });
+    expect(world.texts("bob")).toEqual(expect.arrayContaining(["dinner at 8", "the only copy of my note"]));
+    expect(view(carol.groups, groupId).invitation).toMatchObject({ linkId: "chat-ac" });
+    expect(view(alice, groupId).invited).toEqual(["chat-ac"]);
+    expect(removed.entries.size + carol.entries.size).toBe(0);
+    // The invitation still answers, and the removed member's own choice still deletes.
+    await carol.groups.accept(groupId); await world.settle();
+    expect(view(carol.groups, groupId).status).toBe("active");
+    await bob.forget(groupId);
+    expect(bob.views()).toEqual([]);
   });
 
   it("at most four admissions run at once", async () => {

@@ -227,6 +227,27 @@ test("an app in a chat talks to its contact's app through the broker, and keeps 
   expect(await stored(page, ref)).toEqual({});
 });
 
+test("what an app posts to the other app frames of the page reaches none of them: not an app with internet, not its own instance in another chat", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const talker = "gamepublisherkey/talker";
+  const outbound = "netpublisherkey/outbound";
+  // The same app in two chats: its storage is scoped per chat, so one instance must not hand data to the other.
+  await open(page, outbound, appEntry("eavesdropper"), { permissions: ["internet"] });
+  await open(page, talker, appEntry("eavesdropper"), { permissions: ["chat"], chat: { linkId: "link-other" } });
+  await expect.poll(() => stored(page, outbound)).toMatchObject({ ready: true });
+  await expect.poll(() => stored(page, talker, "link-other")).toMatchObject({ ready: true });
+  await open(page, talker, appEntry("talker", { name: "talker" }), { permissions: ["chat"], chat: { linkId: "link-one" } });
+  await expect.poll(() => stored(page, talker, "link-one"), { timeout: 30_000 }).toHaveProperty("talked");
+  // It did post: to every app frame of the page, about 30 times each.
+  expect((await stored(page, talker, "link-one")).talked).toMatchObject({ frames: 3, n: expect.any(Number) });
+  await expect.poll(() => stored(page, outbound), { timeout: 30_000 }).toHaveProperty("heard");
+  await expect.poll(() => stored(page, talker, "link-other"), { timeout: 30_000 }).toHaveProperty("heard");
+  expect((await stored(page, outbound)).heard).toEqual([]);
+  expect((await stored(page, talker, "link-other")).heard).toEqual([]);
+});
+
 test("the runner refuses to run outside its sandboxed frame, and its server sends its policy", {
   tag: ["@feature:apps.web-sandbox"],
 }, async ({ page, request }) => {

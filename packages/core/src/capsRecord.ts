@@ -8,6 +8,7 @@ import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import type { TransportDescriptors } from "./pairedTransports";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { sanitizeNick } from "./text";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 
 /**
@@ -292,8 +293,10 @@ export class CapsKeys {
       throw new CapsRefusedError("signature", "The capability record's signature does not verify.");
     }
     if (options.minRev !== undefined && (rev as number) < options.minRev) throw new CapsRefusedError("rev", "An older capability record than one already seen.");
+    // The name is the contact's text, shown as it is: cleaned as a nickname from any other source, empty when nothing
+    // visible is left.
     return { rev: rev as number, issued: issued as number, author, versions: versions as number[], transports: transports as string[],
-      capabilities: capabilities as string[], extensions: extensions as string[], descriptors, name, ...(choice !== undefined ? { choice: choice as string } : {}) };
+      capabilities: capabilities as string[], extensions: extensions as string[], descriptors, name: sanitizeNick(name) ?? "", ...(choice !== undefined ? { choice: choice as string } : {}) };
   }
 }
 

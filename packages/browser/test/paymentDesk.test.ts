@@ -474,12 +474,12 @@ describe("asks to pay without a request", () => {
   it("the payer ties a request to its ask only for the same way of paying, and only while it is fresh", async () => {
     const { desk, sent } = setup();
     await expect(desk.ask({ linkId: "l", amount: 1.5, method: "usdt", timestamp: 1 })).rejects.toThrow("positive amount");
-    const { askId: usdtAsk } = await desk.ask({ linkId: "l", amount: 2_000_000, method: "usdt", timestamp: 1 });
+    const { askId: usdtAsk } = await desk.ask({ linkId: "l", amount: 2_000_000, method: "usdt", timestamp: 1, network: "testnet" });
     expect(sent[0].frame.amount).toEqual({ value: "2000000", asset: "usdtbase" });
     await desk.onPaymentRequest("l", { id: "u1", timestamp: 2, amount: { value: "2000000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: usdtAsk });
     expect(desk.payment("u1")?.ask).toBe(usdtAsk);
 
-    const { askId } = await desk.ask({ linkId: "l", amount: 700, method: "arkade", timestamp: 1 });
+    const { askId } = await desk.ask({ linkId: "l", amount: 700, method: "arkade", timestamp: 1, network: "testnet" });
     await desk.onPaymentRequest("l", { id: "b1", timestamp: 2, amount: { value: "700", asset: "sat" }, endpoints: [[ENDPOINT.bitcoin, JSON.stringify(btc())]], ask: askId });
     expect(desk.payment("b1")?.ask, "an on-chain request does not answer an Ark ask").toBeUndefined();
     const now = Date.now();

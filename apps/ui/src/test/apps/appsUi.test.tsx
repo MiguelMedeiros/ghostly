@@ -297,6 +297,24 @@ describe("with the apps flag on", () => {
     expect(screen.queryByTestId("app-card-install")).not.toBeInTheDocument();
   });
 
+  it("a card for an app installed here names the installed app, the one Open starts, not the card's own title", async () => {
+    const notes = installed({ title: "Private Notes", version: "3.1.0", permissions: ["chat", "name"] });
+    fakeEngine.on("appList", () => [notes]);
+    const opener = vi.fn(async () => {});
+    setAppOpener(opener);
+    // Every field is Ana's to choose: the installed app's ref under another name and version.
+    const card: AppCard = { ...CARD, title: "Chess", version: "1.0.0" };
+    const { user } = renderApp(<MessageBubble message={cardMessage({ card, text: statusCardText(card) })} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(false)] }));
+    const shown = await screen.findByTestId("app-card");
+    await waitFor(() => expect(within(shown).getByTestId("app-card-check")).toHaveTextContent("Installed"));
+    expect(within(shown).getByTestId("app-card-title")).toHaveTextContent("Private Notes 3.1.0");
+    expect(within(shown).getByTestId("app-card-title")).not.toHaveTextContent("Chess");
+    expect(within(shown).getByTestId("app-card-waiting")).toHaveTextContent("Private Notes needs you both online");
+    await user.click(within(shown).getByTestId("app-card-open"));
+    await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
+  });
+
   it("keeps the card's text in a group, where apps do not run", async () => {
     fakeEngine.on("appList", () => []);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="group:g1" />);

@@ -112,6 +112,14 @@ fn may_open_now(last: Option<std::time::Instant>, now: std::time::Instant) -> bo
     last.is_none_or(|last| now.saturating_duration_since(last) >= EXTERNAL_LINK_SPACING)
 }
 
+/// Whether a download a page asks for may start: never, in a window that shows a contact's page or an
+/// installed app (`app_sandbox`). With no answer at all WebKitGTK and WebView2 save the file themselves, in
+/// the person's Downloads folder under the name the page gives, with no click and no question. Answering no
+/// to the request cancels it before a byte is written.
+pub fn may_download(event: &tauri::webview::DownloadEvent<'_>) -> bool {
+    !matches!(event, tauri::webview::DownloadEvent::Requested { .. })
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -154,6 +162,8 @@ pub fn open<R: tauri::Runtime>(
             }
             tauri::webview::NewWindowResponse::Deny
         })
+        // The app never saves a file by itself.
+        .on_download(|_, event| may_download(&event))
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;
@@ -422,6 +432,24 @@ mod tests {
     }
 
     #[test]
+    fn every_download_a_page_asks_for_is_refused() {
+        let url: url::Url = format!("{SCHEME}://atlas.{PEER}/report.pdf")
+            .parse()
+            .unwrap();
+        let mut destination = std::path::PathBuf::from("/home/someone/Downloads/report.pdf");
+        assert!(!may_download(&tauri::webview::DownloadEvent::Requested {
+            url: url.clone(),
+            destination: &mut destination,
+        }));
+        // The end of one is only told, nothing is asked: wry does not read the answer.
+        assert!(may_download(&tauri::webview::DownloadEvent::Finished {
+            url,
+            path: None,
+            success: false,
+        }));
+    }
+
+    #[test]
     fn links_open_outside_at_most_once_every_two_seconds() {
         let start = std::time::Instant::now();
         assert!(may_open_now(None, start));
@@ -655,5 +683,25 @@ mod routing_tests {
             assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
         }
         assert!(asked.try_recv().is_err(), "nothing reached the main window");
+    }
+}
+
+/// The real window on WebKitGTK: what a contact's page can leave on disk.
+#[cfg(all(test, target_os = "linux"))]
+mod download_tests {
+    use super::*;
+
+    const PEER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[test]
+    #[ignore = "needs a display and a process of its own (test_support::saved_by_a_window)"]
+    fn a_download_the_page_starts_saves_no_file() {
+        // covers: services.desktop-viewer
+        let saved = crate::test_support::saved_by_a_window(
+            SCHEME,
+            |app| app.manage(ViewerState::default()),
+            |app| open(app, PEER.into(), "atlas".into(), "Atlas".into()).unwrap(),
+        );
+        assert_eq!(saved, Vec::<String>::new());
     }
 }

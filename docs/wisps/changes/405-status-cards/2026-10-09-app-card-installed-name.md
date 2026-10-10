@@ -1,0 +1,1 @@
+An app card whose `ref` is an app installed on the reader's side shows the installed app's checked title and version (and its icon), not the card's own `title` and `version`: the card's fields are the sender's, and the installed app is the one that opens. A card for an app that is not installed is unchanged.

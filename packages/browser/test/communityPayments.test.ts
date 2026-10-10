@@ -26,7 +26,7 @@ interface Payer {
   wallet: { receiveToken: ReturnType<typeof vi.fn>; createToken: ReturnType<typeof vi.fn>; view: ReturnType<typeof vi.fn>; inspect: ReturnType<typeof vi.fn>; reclaim: ReturnType<typeof vi.fn> };
 }
 
-function member(world: CommunityWorld, name: string): Payer {
+function member(world: CommunityWorld, name: string, network: "mainnet" | "testnet" = "testnet"): Payer {
   // Each needs the others: filled in below.
   const late = {} as { desk: PaymentDesk; notes: GroupPayments };
   const membership = (p: Peer, groupId: string) => {
@@ -70,8 +70,8 @@ function member(world: CommunityWorld, name: string): Payer {
     groupLinks: g => [groupLinkId(g)],
     storeMessage: putMessage,
     onChange: () => { void late.notes.sync(); },
-    // The members pay each other on the public test mint: Testnet.
-    defaultNetwork: () => "testnet",
+    // The members pay each other on the public test mint: Testnet, unless a test says otherwise.
+    defaultNetwork: () => network,
   }, undefined, undefined, undefined, lightning as unknown as DeskLightning);
   late.notes = new GroupPayments({
     payments: () => Object.values(desk.views()),
@@ -85,9 +85,9 @@ function member(world: CommunityWorld, name: string): Payer {
   return { peer, pay, desk, wallet };
 }
 
-async function community(names: string[]) {
+async function community(names: string[], network?: "mainnet" | "testnet") {
   const world = new CommunityWorld();
-  const members = names.map(n => member(world, n));
+  const members = names.map(n => member(world, n, network));
   for (const m of members) await m.desk.start();
   const [admin, ...rest] = members;
   const id = await admin.peer.groups.create("Pizza club");
@@ -210,5 +210,31 @@ describe("payments in a community on headless engines", { timeout: 180_000 }, ()
     // Not a member: no link.
     expect(alice.pay.link(pairLinkId(id, "y".repeat(52)))?.supportsPayments).toBe(true);
     await expect(alice.pay.link(pairLinkId(id, "y".repeat(52)))!.requirePaymentSupport()).rejects.toThrow("They are no longer in this group");
+  });
+
+  it("a request and an ask keep their network between members, whatever each app's default", async () => {
+    // Both apps default to Mainnet; the members pay each other on their Testnet cards.
+    const { world, id, members } = await community(["admin", "p1", "p2", "p3"], "mainnet");
+    const [alice, bob] = members.filter(m => !hub(m, id));
+    const aliceKey = keyOf(world, alice, id), bobKey = keyOf(world, bob, id);
+    await alice.pay.hello(id, bobKey);
+    await world.until(() => alice.pay.known(id, bobKey), 60_000);
+
+    // A Testnet ask reaches Bob as one: answered from his Testnet wallet, never his Mainnet one.
+    const asked = vi.spyOn(bob.desk, "onPaymentAsk").mockResolvedValue();
+    const { askId } = await alice.desk.ask({ linkId: pairLinkId(id, bobKey), amount: 1000, method: "bitcoin", timestamp: world.now, network: "testnet" });
+    await world.until(() => asked.mock.calls.length > 0, 60_000);
+    expect(asked.mock.calls[0][1]).toMatchObject({ id: askId, method: "bitcoin", network: "testnet" });
+
+    // A Testnet Lightning request (a test mint's invoice reads like a Bitcoin one) is Testnet on both sides.
+    const { paymentId } = await bob.desk.request({ linkId: pairLinkId(id, aliceKey), amount: 500, timestamp: world.now, rail: "lightning", network: "testnet" });
+    await world.until(() => !!alice.desk.views()[paymentId], 60_000);
+    expect(bob.desk.views()[paymentId]).toMatchObject({ network: "testnet" });
+    expect(alice.desk.views()[paymentId]).toMatchObject({ direction: "in", network: "testnet" });
+
+    // So does one to the whole group.
+    const { paymentId: everyone } = await bob.desk.request({ linkId: groupLinkId(id), amount: 300, timestamp: world.now, rail: "lightning", network: "testnet" });
+    await world.until(() => !!alice.desk.views()[everyone], 60_000);
+    expect(alice.desk.views()[everyone]).toMatchObject({ direction: "in", network: "testnet" });
   });
 });

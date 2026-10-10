@@ -1,3 +1,4 @@
+import { bech32 } from "@scure/base";
 import { describe, expect, it } from "vitest";
 import { ETHEREUM_USDT, SEPOLIA_TEST_USDT } from "@ghostly/core";
 import { findMoney } from "../../lib/money";
@@ -10,6 +11,7 @@ import {
   BARK_MAINNET, BARK_TESTNET, BC1P, BC1Q, BOLT12_SPEC_MINIMAL, EVM, EVM_BAD_CASE, P2PKH, P2SH, TB1Q, TEST_P2PKH,
   arkadeAddress, bcrt1q, bolt12Offer, corrupt,
 } from "./moneyFormatFixtures";
+import { REGTEST_INVOICE } from "./fixtures";
 
 // covers: payments.money.onchain-card, payments.money.bolt12-card, payments.money.ark-card, payments.money.usdt-card, payments.money.network
 
@@ -77,11 +79,43 @@ describe("BIP 21 links", () => {
     // A mainnet invoice is not the same payment as a regtest address: left out.
     expect(findMoney(`here: ${uri}.`)).toEqual({
       type: "onchain",
-      request: { address, chain: "regtest", network: "testnet", amountSat: 20_000, label: "Luke Jr", message: "Donation for the project", uri },
+      request: { address, chain: "regtest", network: "testnet", amountSat: 20_000, label: "Luke Jr", message: "Donation for the project", uri: `bitcoin:${address}?amount=0.0002&label=Luke%20Jr&message=Donation%20for%20the%20project` },
       rest: "here: .",
     });
-    const mainnet = findMoney(`BITCOIN:${BC1Q.toUpperCase()}?amount=0.00021&lightning=${INVOICE}`);
-    expect(mainnet).toMatchObject({ type: "onchain", request: { address: BC1Q.toUpperCase(), network: "mainnet", amountSat: 21_000, lightning: { amountSat: 2100 } } });
+    const mainnet = findMoney(`BITCOIN:${BC1Q.toUpperCase()}?amount=0.000021&lightning=${INVOICE}`);
+    expect(mainnet).toMatchObject({ type: "onchain", request: { address: BC1Q.toUpperCase(), network: "mainnet", amountSat: 2100, lightning: { amountSat: 2100 } } });
+  });
+
+  it("keeps the Lightning fallback only when it is the same payment: the link's amount, a link that may be paid", () => {
+    const address = bcrt1q();
+    const fallback = (query: string) => (findMoney(`bitcoin:${address}?${query}`) as { request: { lightning?: unknown; unsupported?: string[] } }).request;
+    // The 250,000-sat invoice beside the same amount: the same payment.
+    expect(fallback(`amount=0.0025&lightning=${REGTEST_INVOICE}`).lightning).toMatchObject({ amountSat: 250_000 });
+    // Beside another amount it is another payment: left out, the link is still paid on-chain for its own amount.
+    expect(fallback(`amount=0.00001&lightning=${REGTEST_INVOICE}`)).toMatchObject({ amountSat: 1000 });
+    expect(fallback(`amount=0.00001&lightning=${REGTEST_INVOICE}`).lightning).toBeUndefined();
+    expect(fallback(`lightning=${REGTEST_INVOICE}`).lightning).toBeUndefined();
+    // An invoice for any amount is not the link's amount either.
+    const anyAmount = bech32.encode("lnbcrt", bech32.decode(REGTEST_INVOICE as `${string}1${string}`, false).words, false);
+    expect(findMoney(anyAmount)).toMatchObject({ type: "lightning", invoice: { network: "regtest", amountSat: null } });
+    expect(fallback(`amount=0.0025&lightning=${anyAmount}`).lightning).toBeUndefined();
+    expect(fallback(`lightning=${anyAmount}`).lightning).toMatchObject({ amountSat: null });
+    // A link that must not be paid is not paid over Lightning either.
+    expect(fallback(`amount=0.0025&req-somethingnew=1&lightning=${REGTEST_INVOICE}`)).toMatchObject({ unsupported: ["req-somethingnew"] });
+    expect(fallback(`amount=0.0025&req-somethingnew=1&lightning=${REGTEST_INVOICE}`).lightning).toBeUndefined();
+    expect(fallback(`amount=1e3&lightning=${REGTEST_INVOICE}`).lightning).toBeUndefined();
+  });
+
+  it("reads nothing as money in a link with no address that must not be paid", () => {
+    const ark = arkadeAddress("tark");
+    expect(findMoney(`bitcoin:?req-somethingnew=1&lightning=${REGTEST_INVOICE}`)).toBeNull();
+    expect(findMoney(`bitcoin:?lno=${BOLT12_SPEC_MINIMAL}&req-somethingnew=1`)).toBeNull();
+    expect(findMoney(`bitcoin:?ark=${ark}&req-somethingnew=1`)).toBeNull();
+    // An amount it cannot read is not turned into "any amount".
+    expect(findMoney(`bitcoin:?ark=${ark}&amount=1e3`)).toBeNull();
+    expect(previewText(`bitcoin:?ark=${ark}&amount=1e3`)).toBe(`bitcoin:?ark=${ark}&amount=1e3`);
+    // A known parameter written as required is fine.
+    expect(findMoney(`bitcoin:?ark=${ark}&req-amount=0.00005`)).toMatchObject({ type: "ark" });
   });
 
   it("keeps a link it cannot fully read from being paid: unknown req- parameters, an unreadable amount", () => {
@@ -97,6 +131,30 @@ describe("BIP 21 links", () => {
     expect(findMoney(`bitcoin:?lno=${BOLT12_SPEC_MINIMAL}`)).toMatchObject({ type: "bolt12", rest: "" });
     const ark = arkadeAddress("tark");
     expect(findMoney(`pay bitcoin:?ark=${ark}&amount=0.00005`)).toMatchObject({ type: "ark", request: { address: ark, kind: "arkade", network: "testnet", amountSat: 5000 }, rest: "pay" });
+  });
+
+  it("hands a wallet the link it read, not the text: no dropped leg, no second amount", () => {
+    const uriOf = (text: string) => (findMoney(text) as { request: { uri?: string } }).request.uri;
+    // A test address with a mainnet invoice: the card is test money, so what it hands out carries no lnbc.
+    expect(uriOf(`pay me here bitcoin:${TB1Q}?amount=0.00001&lightning=${INVOICE}`)).toBe(`bitcoin:${TB1Q}?amount=0.00001`);
+    expect(uriOf(`bitcoin:${BC1Q}?amount=0.000021&lightning=${INVOICE.toUpperCase()}`)).toBe(`bitcoin:${BC1Q}?amount=0.000021&lightning=${INVOICE}`);
+    // Legs the on-chain card does not show, and a repeated amount read one way here and maybe another elsewhere.
+    expect(uriOf(`bitcoin:${TB1Q}?lno=${BOLT12_SPEC_MINIMAL}&ark=${arkadeAddress("ark")}&AMOUNT=0.00001&amount=1`)).toBe(`bitcoin:${TB1Q}?amount=0.00001`);
+    // What keeps this app from paying keeps a wallet from paying too.
+    expect(uriOf(`bitcoin:${BC1Q}?req-somethingnew=1&somethingelse=2`)).toBe(`bitcoin:${BC1Q}?req-somethingnew=1`);
+    expect(uriOf(`bitcoin:${BC1Q}?amount=1e3`)).toBe(`bitcoin:${BC1Q}?amount=1e3`);
+    const ark = arkadeAddress("tark");
+    expect(uriOf(`bitcoin:?ark=${ark}&amount=0.00005&amount=1&lightning=${INVOICE}`)).toBe(`bitcoin:?ark=${ark}&amount=0.00005`);
+  });
+
+  it("reads a link whose label or message ends in half a character: it is left out of what a wallet gets", () => {
+    const uriOf = (text: string) => (findMoney(text) as { request: { uri?: string } }).request.uri;
+    // The label is cut at 140: here the cut falls inside an emoji.
+    expect(uriOf(`bitcoin:${BC1Q}?amount=0.001&label=${"a".repeat(139)}%F0%9F%98%80`)).toBe(`bitcoin:${BC1Q}?amount=0.001&label=${"a".repeat(139)}`);
+    expect(uriOf(`bitcoin:${BC1Q}?message=${"b".repeat(139)}\u{1F600}&label=ok%20\u{1F600}`)).toBe(`bitcoin:${BC1Q}?label=ok%20%F0%9F%98%80&message=${"b".repeat(139)}`);
+    // Half a pair written as it is, in a field and in what keeps the link from being paid.
+    expect(uriOf(`bitcoin:${BC1Q}?label=x\uD83Dy&req-new=\uDE00z`)).toBe(`bitcoin:${BC1Q}?req-new=z&label=xy`);
+    expect(previewText(`bitcoin:${BC1Q}?label=${"a".repeat(139)}%F0%9F%98%80`)).toBeTruthy();
   });
 
   it("is not fooled by a link with a bad address", () => {
@@ -176,8 +234,13 @@ describe("USDT addresses", () => {
 
   it("reads a transfer link: the token, the chain (network), the recipient and the amount", () => {
     const uri = `ethereum:${ETHEREUM_USDT}@1/transfer?address=${EVM}&uint256=2.5e6`;
-    expect(findMoney(`pay me ${uri}`)).toEqual({ type: "usdt", request: { recipient: EVM, chainId: 1, network: "mainnet", token: ETHEREUM_USDT.toLowerCase(), amount: 2_500_000n, uri }, rest: "pay me" });
+    const handedOut = `ethereum:${ETHEREUM_USDT.toLowerCase()}@1/transfer?address=${EVM}&uint256=2500000`;
+    expect(findMoney(`pay me ${uri}`)).toEqual({ type: "usdt", request: { recipient: EVM, chainId: 1, network: "mainnet", token: ETHEREUM_USDT.toLowerCase(), amount: 2_500_000n, uri: handedOut }, rest: "pay me" });
     expect(findUsdtAddress(`ethereum:${SEPOLIA_TEST_USDT}@11155111/transfer?address=${EVM}`)?.request).toMatchObject({ network: "testnet", chainId: 11155111 });
+    // What a wallet gets is what the card read: the first amount only, no ether `value` beside the transfer.
+    expect(findUsdtAddress(`usdt ethereum:${SEPOLIA_TEST_USDT}@11155111/transfer?address=${EVM}&uint256=1&uint256=9e6&value=1e18`)?.request.uri)
+      .toBe(`ethereum:${SEPOLIA_TEST_USDT.toLowerCase()}@11155111/transfer?address=${EVM}&uint256=1`);
+    expect(findUsdtAddress(`usdt ethereum:${EVM}@11155111?value=1e18`)?.request.uri).toBe(`ethereum:${EVM}@11155111`);
   });
 
   it("is conservative: a bare 0x address needs USDT named, and then says no network", () => {

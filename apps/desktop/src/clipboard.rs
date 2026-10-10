@@ -121,10 +121,17 @@ impl PasteSource {
     pub fn system() -> Self {
         Self(Arc::new(|| {
             let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-            // Files first: a file manager puts their icon beside them, which is not what was copied.
-            if let Ok(files) = clipboard.get().file_list() {
-                if !files.is_empty() {
-                    return Ok(Pasted::Files(files));
+            // Files first: a file manager puts their icon beside them, which is not what was copied. On Linux the
+            // list is a target any web page can write, so it counts only with a file manager's own target beside it.
+            #[cfg(target_os = "linux")]
+            let files = crate::copied_files::on_the_clipboard();
+            #[cfg(not(target_os = "linux"))]
+            let files = true;
+            if files {
+                if let Ok(files) = clipboard.get().file_list() {
+                    if !files.is_empty() {
+                        return Ok(Pasted::Files(files));
+                    }
                 }
             }
             match clipboard.get_image() {
@@ -918,6 +925,47 @@ mod tests {
         let main = main_window(&app);
         assert_eq!(files(&main).unwrap(), Vec::new());
         assert!(bytes(&main, "paste-1", 10).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The real clipboard, read as the app reads it. A web page's copy can leave a `text/uri-list` there that names
+    /// any file on disk; the list of a file manager comes with the file manager's own target. Run alone, under an
+    /// Xvfb or a headless Sway of its own (`cargo test -- --ignored the_real_clipboard`).
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "takes the clipboard of the display it runs on"]
+    fn on_the_real_clipboard_a_file_list_is_taken_only_from_a_file_manager() {
+        use crate::copied_files::testing::own;
+        let dir = scratch();
+        std::fs::write(dir.join("id_ed25519"), b"secret").unwrap();
+        let uri = url::Url::from_file_path(dir.join("id_ed25519")).unwrap();
+        let list = || format!("{uri}\r\n").into_bytes();
+        let pasted = || (PasteSource::system().0)().unwrap();
+
+        let page = own(vec![("text/uri-list", list())]);
+        assert!(matches!(pasted(), Pasted::Nothing), "the list alone");
+        drop(page);
+        let page = own(vec![
+            ("text/uri-list", list()),
+            ("text/plain", uri.to_string().into_bytes()),
+            ("org.webkitgtk.WebKit.custom-pasteboard-data", vec![0; 8]),
+        ]);
+        assert!(matches!(pasted(), Pasted::Nothing), "a web page's copy");
+        drop(page);
+
+        let copied = format!("copy\n{uri}").into_bytes();
+        let file_manager = own(vec![
+            ("text/uri-list", list()),
+            ("x-special/gnome-copied-files", copied),
+        ]);
+        let Pasted::Files(paths) = pasted() else {
+            panic!("a file manager's copy brought no files");
+        };
+        assert_eq!(
+            pasted_files(paths),
+            vec![(dir.join("id_ed25519"), "id_ed25519".into(), 6)]
+        );
+        drop(file_manager);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

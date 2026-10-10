@@ -329,6 +329,11 @@ export class LinkSession {
     void this.publish().catch(() => {});
   }
 
+  /** This side's packet goes out again as it is: another writer of its key (a second device on a device code) may have replaced it. */
+  republish(): void {
+    if (this.running) void this.publish().catch(() => {});
+  }
+
   /** Stops the loops. With `announce`, first tells the peer we are gone. */
   async stop(announce = true): Promise<void> {
     if (!this.running) return;

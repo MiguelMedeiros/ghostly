@@ -51,6 +51,8 @@
   const rootOf = Object.getOwnPropertyDescriptor(Document.prototype, "documentElement").get;
   const httpEquiv = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "httpEquiv").set;
   const metaContent = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "content").set;
+  const listen = EventTarget.prototype.addEventListener;
+  const stopImmediately = Event.prototype.stopImmediatePropagation;
   // ghostly:hint-guard:start
   // Defence in depth for what no policy governs in WebKit: a <link rel=preconnect> connects from here there, even in
   // a srcdoc frame (measured). No <link>, frame, object or embed of the entry is written, and one the app makes is
@@ -268,6 +270,14 @@
 
   const write = ({ html, scripts }) => {
     document.open();
+    // Every other app frame in the client's page can post to this window (parent.frames[i]), and neither the sandbox
+    // nor a policy governs that, so this end is closed: the app talks to the broker over its port only, and nothing
+    // posted to the window reaches the app. A capture listener on the window runs before any of the app's, `onmessage`
+    // included (a capture listener the app adds runs after this first one); it is added after document.open, which
+    // erases the window's listeners, and out of the app's reach, so no removeEventListener names it.
+    const deaf = (event) => { reflectApply(stopImmediately, event, []); };
+    reflectApply(listen, window, ["message", deaf, true]);
+    reflectApply(listen, window, ["messageerror", deaf, true]);
     if (hintGuard) hintGuard.install();
     reflectApply(documentWrite, document, [html]);
     // The app writes no markup into the page while it is parsed: it would go in past the guard and the broker's

@@ -46,7 +46,7 @@ interface Side {
   engine: HoldEngine;
   stored: StoredLink;
   messages: Map<string, { text?: string; file?: { name: string; size: number; mime: string }; request?: PaymentRequest; timestamp: number }>;
-  received: { kind: string; id: string; text?: string; name?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: unknown; timestamp: number }[];
+  received: { kind: string; id: string; text?: string; name?: string; mime?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: unknown; timestamp: number }[];
   replies: Map<string, { i: string; s: string; f: string }>;
   delivery: Map<string, { state: string; error?: string }>;
   files: Map<string, { bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta }>;
@@ -74,7 +74,7 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       file: async (fileId) => side.files!.get(fileId) ?? null,
       paymentRequest: (paymentId) => side.requests!.get(paymentId) ?? null,
       receiveText: async (_id, m) => { side.received!.push({ kind: "text", id: m.id, text: m.text, timestamp: m.timestamp, ...(m.reply && { reply: m.reply }) }); },
-      receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, bytes, timestamp: f.timestamp, ...(f.voice && { voice: f.voice }), ...(f.video && { video: f.video }), ...(f.image && { image: f.image }) }); return null; },
+      receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, mime: f.mime, bytes, timestamp: f.timestamp, ...(f.voice && { voice: f.voice }), ...(f.video && { video: f.video }), ...(f.image && { image: f.image }) }); return null; },
       receivePaymentRequest: async (_id, request) => { side.received!.push({ kind: "pay-req", id: request.id, request, timestamp: request.timestamp }); },
       changed: () => {},
       // Bob reads Alice's bucket and Alice reads Bob's: each fetches from wherever the manifest points.
@@ -165,6 +165,34 @@ describe("store-and-forward engine", () => {
     b.engine.start();
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(b.received).toEqual([]);
+  });
+
+  it("cleans the name and the media type of a held file as it does for a file that arrives live", async () => {
+    const { a, b } = setup();
+    engines.push(a.engine, b.engine);
+    const voice: VoiceMeta = { duration: 2, waveform: "AQID" };
+    const held = [
+      { name: "../../.bashrc\u202Efdp.exe\n", mime: "text/html\r\nx" },
+      { name: "..\\..\\CON", mime: "IMAGE/PNG" },
+      { name: "\u200B/\u0000", mime: "audio/webm; codecs=opus\u0000", voice },
+    ];
+    for (const [i, file] of held.entries()) {
+      a.files.set(`link-a-out-n${i}`, { bytes: new Uint8Array(10).fill(i), size: 10, ...file });
+      a.messages.set(`me_${i}`, { file: { name: file.name, size: 10, mime: file.mime }, timestamp: 1000 + i });
+      await a.engine.hold("link-a", { kind: "file", id: `wire-name-${i}`, messageId: `me_${i}`, ref: `link-a-out-n${i}`, bytes: 10, timestamp: 1000 + i });
+    }
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(3));
+    expect(b.received.map((r) => [r.name, r.mime])).toEqual([
+      ["bashrcfdp.exe", "application/octet-stream"],
+      ["_CON", "image/png"],
+      ["file", "application/octet-stream"],
+    ]);
+    // No path part, no control or direction character, never a dotfile.
+    for (const r of b.received) expect(r.name).toMatch(/^[^./\\:\p{Cc}\p{Cf}][^/\\:\p{Cc}\p{Cf}]*$/u);
+    // A description of a voice message stands only beside a media type that is audio once cleaned.
+    expect(b.received[2].voice).toBeUndefined();
+    expect(b.engine.view("link-b").refused).toBe(0);
   });
 
   it("holds text, a file and a payment request in order, the contact picks them up in order and the sender sees them delivered", async () => {

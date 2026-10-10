@@ -372,6 +372,8 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     // A crafted link: control and invisible reordering marks are dropped from the name it shows.
     expect(readDeviceLink(`${origin}/#A%0AB%E2%80%AEC%E2%80%8B#${device}`)).toEqual({ code: device, profile: "ABC" });
     expect(readDeviceLink(`${origin}/#%E2%80%AE#${device}`)).toEqual({ code: device });
+    // Every invisible or direction-changing mark, as a contact's name loses them: ALM, line and paragraph separators, BOM, word joiner.
+    expect(readDeviceLink(`${origin}/#${encodeURIComponent("A\u061CB\u2028C\u2029D\uFEFFE\u2060F\u2064")}#${device}`)).toEqual({ code: device, profile: "ABCDEF" });
     expect(readDeviceLink(device)).toEqual({ code: device });
     expect(readDeviceLink(`${origin}/#${device}`)).toEqual({ code: device });
     // From the desktop app, which has no address another device opens: the public web app.

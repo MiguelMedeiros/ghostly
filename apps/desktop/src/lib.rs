@@ -12,6 +12,10 @@ mod app_window;
 mod bitcoind_rpc;
 mod clipboard;
 mod commands;
+// The e2e build pastes from a stand-in, never from the clipboard.
+#[cfg(target_os = "linux")]
+#[cfg_attr(feature = "e2e-driver", allow(dead_code))]
+mod copied_files;
 mod crypto;
 mod device_state;
 mod diagnostics;
@@ -41,6 +45,8 @@ mod oidc;
 mod paired_transport;
 mod pkarr_client;
 mod pkarr_network;
+#[cfg(any(target_os = "linux", test))]
+mod proxy_env;
 mod pubky_session;
 mod push_send;
 mod records;
@@ -223,6 +229,10 @@ fn paste_source() -> clipboard::PasteSource {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before the WebView and any other thread: a proxy in the environment is never handed this machine's own
+    // requests (the stored files the page plays from 127.0.0.1).
+    #[cfg(target_os = "linux")]
+    proxy_env::exempt_loopback();
     // First of all, before anything here can make an HTTPS request (logcat shows it: RustStdoutStderr).
     #[cfg(target_os = "android")]
     if let Err(error) = android_tls() {
