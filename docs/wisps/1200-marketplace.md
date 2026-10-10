@@ -171,8 +171,8 @@ Games are among the first apps the owner wants. The design rules none out; each 
 | Turn-based, open | Chess, checkers, go | `apps/1` in a 1:1 chat, as written ([In a chat](#in-a-chat-apps1)) | **1** |
 | Turn-based, hidden information | Battleship, card games | The same, plus **commit-reveal** in the app: each side sends the SHA-256 of its secret state with a random 32-byte salt first, and reveals state and salt only when the rules say, so the other side checks the reveal against the commitment. Neither side can read or change the other's hidden state unseen. The template ships a helper; the client enforces nothing here | **1** |
 | Light real-time, versus | Tetris versus (cleared lines sent to the opponent), Snake versus | Ordered `apps/1` as it is: each side runs its own game and sends little (a few events a second, well under the 50 a second limit) and tolerates tens of milliseconds. Tetris versus keeps two separate boards and sends only garbage lines and a periodic score. Snake on one shared board runs in lockstep with a short input delay, and is smooth when the chat link is direct and laggy on a relay; the app measures the round trip itself with its own ping frames | **1**: these can be the first real-time apps, before the unordered mode exists |
-| Real-time | Pong, Tron, a Quake-like | WebAssembly (`'wasm-unsafe-eval'` is in the runner's CSP on every client from phase 1); bundles up to 64 MiB, sent as files rather than in a card; an unordered, droppable message mode on `apps/1` over the live WebRTC data channel (never the DHT text floor), with higher receiver limits granted by the `realtime` permission shown at install | **2**: the unordered mode is new transport work (today's chat data channel is ordered and reliable, and the native transports are streams), so it is not cheap in phase 1 |
-| Group games | Party games, a shared board for many | Group frames, after `apps/1` in groups | Later, with groups |
+| Real-time | Pong, Tron, a Quake-like | WebAssembly (`'wasm-unsafe-eval'` is in the runner's CSP on every client from phase 1); bundles up to 64 MiB, sent as files rather than in a card; an unordered, droppable message mode on `apps/1` over the live WebRTC data channel (never the DHT text floor), with higher receiver limits granted by the `realtime` permission shown at install | **2**: the unordered mode is new transport work (today's chat data channel is ordered and reliable, and the native transports are streams), so it is not cheap in phase 1. Designed in the [phase 2 proposal](#phase-2-proposal-real-time-apps-game-data-and-apps-in-groups), which is not accepted yet and would change this row: two Linux desktops have no WebRTC between them |
+| Group games | Party games, a shared board for many | Group frames, after `apps/1` in groups | Later, with groups ([proposal](#apps-in-groups)) |
 
 ## The package
 
@@ -564,6 +564,193 @@ A new derivation adds a row here, or to the WISP that owns it with a link here.
 - **Sybil resistance:** no global score, no follower counts, no weight for payment, and no "Bought it" mark (it would link licence keys across publishers).
 - **Conflicts are shown:** "In <store> · removed by <other store>".
 
+## Phase 2 proposal: real-time apps, game data and apps in groups
+
+**A proposal, written on 2026-10-10. Nothing in this section is accepted or built, and no code starts before the owner answers [the questions at its end](#questions-for-the-owner).** It designs what the [games table](#games) calls phase 2: a game where two or more people move at once (Pong, Tron, a Quake-like), with an open engine and data the person brings or free data. Where it lists options, the one marked **Proposed** is the editors' choice and the others stay open. Names of calls, frames and capabilities are sketches until an option is chosen; fixed encodings and vectors come then ([00](00-process.md#revisions)).
+
+### What exists for it today (evidence)
+
+Read on `dev` on 2026-10-10, each in the file it names.
+
+| Fact | Where |
+|---|---|
+| The session's WebRTC data link is one negotiated channel, `ghostly/1`, id 0, ordered and reliable. Nothing sets `maxRetransmits` or `maxPacketLifeTime`; no second channel exists | `packages/core/src/datalink.ts` (`createDataChannel`), `packages/core/src/signal.ts`, [101](101-webrtc.md) |
+| The session adds no cipher of its own. It signs a transcript bound to the transport's own handshake (the two DTLS fingerprints, Iroh's TLS exporter, HyperDHT's Noise handshake hash), and frames are plain JSON inside that transport. So no counter of the session breaks when a frame is lost or arrives out of order | `packages/core/src/pairedSession.ts`, `packages/core/src/pairedTransports.ts` |
+| The session reads frames one at a time, and fails when more than 1024 frames or 64 times 60 KiB wait to be read | `packages/core/src/pairedSession.ts` (`SESSION_RECEIVE_PENDING`) |
+| Iroh carries the session on one bidirectional QUIC stream. Iroh 1.3.0 has QUIC datagrams on the same connection (`Connection::send_datagram`, `read_datagram`, `max_datagram_size`); Ghostly calls none of them | `native/transports/src/iroh_transport.rs`, `apps/desktop/src/paired_transport.rs`, iroh 1.3.0 `endpoint/connection.rs` |
+| In a browser, the extension and the CLI, Iroh always goes through a relay over a WebSocket; Desktop keeps direct paths. Through the public relays a frame's round trip was 290 to 380 ms | `native/transports/iroh-web/src/lib.rs`, [102](102-iroh.md) |
+| HyperDHT carries the session on a Noise SecretStream over UDX. SecretStream also has unordered messages (`send`, `trySend`, each sealed under the handshake's keys); Ghostly calls neither. In a browser HyperDHT goes through a relay over one WebSocket, whose protocol carries a stream's data, its end and its destroy, and no unordered message | `native/transports/hyperdht/endpoint.mjs`, `@hyperswarm/secret-stream` 6.9.2 (`index.js`), `@hyperswarm/dht-relay` 0.4.3 (`lib/stream.js`), [103](103-hyperdht.md) |
+| Desktop on Linux has no WebRTC in its WebView: two Linux desktops are live over Iroh or HyperDHT | [101](101-webrtc.md), [401](401-paired-chat.md#capabilities-on-this-session) |
+| The client knows "relayed" for Iroh and HyperDHT only. A WebRTC pair that runs through a TURN server is not marked. The round trip it shows is one `paired-ping` every 15 seconds on the ordered channel | `packages/core/src/pairedTransports.ts`, `packages/core/src/ghostlink.ts` (`relayedPath`, `LIVENESS_PING_MS`) |
+| A session on a relayed transport moves once to a direct one when both apps say `upgrade/1` | [100](100-transports.md#relayed-transports-revision-03) |
+| Desktop's broker answers at most 50 requests a second per app window, checked in Rust, and its values travel as JSON | `apps/desktop/src/app_sandbox.rs`, [The runner and the broker](#the-runner-and-the-broker) |
+| The web frame is `sandbox="allow-scripts"` with `allow=""`; the runner's header says `sandbox allow-scripts` and `worker-src 'none'` | `apps/ui/src/lib/apps/broker.ts` (`startApp`), `apps/web/runnerPolicy.ts` |
+| Desktop sets no permission handler on its windows, and turns the Fullscreen API off in the main window on Linux, where WebKitGTK 2.50 aborted the app when an element went full screen | `apps/desktop/src/app_sandbox.rs`, `apps/desktop/src/fullscreen.rs`, wry 0.57 `webkitgtk/mod.rs` |
+| A private group is a full mesh up to 16 members and runs on hubs past 16 (two hubs per member, up to 32 members); a community (up to 256) gives each member one hub. Hubs pass on stored frames. Typing reaches only the members a writer has an edge with, and a community carries nothing that is not a stored frame | [902](902-group-mesh.md#hubs), [903](903-group-community.md), `packages/core/src/groupHubs.ts` (`MESH_HUBS`) |
+| A session between two members who share no edge is specified for group files and not built: such a file waits for a holder the member has an edge with | [503](503-group-files.md#the-file-session), `packages/browser/src/engine/groupFiles.ts` |
+| An app card rides every group path already; a person's app sends one only in a 1:1 chat | [405](405-status-cards.md#an-app) |
+
+### Messages that may be lost
+
+A `paired-app` frame is ordered and reliable: one late frame holds every frame behind it. A real-time game wants the opposite: the newest position now, and an old one never.
+
+**What the app gets.** `ghostly.chat.lossy.send(bytes)` hands at most **1024 bytes** to the link, and `ghostly.chat.on("lossy", f)` receives them. A lossy message may be lost, arrive twice or arrive out of order; the app numbers what it sends. `send` answers `true` when the message was handed to the link and `false` when it was dropped at once (the link is busy, the app is past its rate, the peer does not take them); it never waits and never queues. Bytes, not JSON: at 60 messages a second the encoding is the cost.
+
+**On the wire.** One lossy message is: a byte `0x01`, the 16 bytes of the chat app id ([In a chat](#in-a-chat-apps1), the id before base64url), then the payload of 1 to 1024 bytes. A receiver drops any other first byte, so a later kind can be added. 1041 bytes fit one packet on every path below, so a message is never split and half lost.
+
+**Where it travels, per transport.**
+
+| Transport and path | The lossy path | What the app sees |
+|---|---|---|
+| WebRTC, direct | A second negotiated channel on the session's own peer connection: `ghostly-rt/1`, id 1, `ordered: false`, `maxRetransmits: 0`. Same DTLS connection and the same two fingerprints the session's transcript binds, so it needs no signaling and no new trust | Real loss, no waiting |
+| WebRTC through TURN | The same channel. Over a `turn:` server on UDP, as direct. Over `turns:` or `?transport=tcp`, nothing is lost and late messages arrive late | The client marks this pair as relayed (new: it reads the selected candidate pair) |
+| Iroh, direct (Desktop, native) | QUIC datagrams on the session's connection, at most `max_datagram_size()` | Real loss, no waiting |
+| Iroh through a relay (always in a browser, the extension and the CLI) | The same datagrams, inside a WebSocket to the relay: late, not lost. To be confirmed by the spike that the browser build gives datagrams at all | Relayed; hundreds of milliseconds |
+| HyperDHT, direct (Desktop and the CLI) | SecretStream's unordered messages (`trySend`) | Real loss, no waiting |
+| HyperDHT through a relay (browsers) | None: the relay carries the stream only | Not lossy |
+| The DHT text floor, a hold | Never | `send` answers `false` |
+
+Three ways to treat a path with no lossy mode:
+
+| Option | What it does | Cost |
+|---|---|---|
+| **A. Proposed: lossy where the path has it, the ordered frame elsewhere** | Where there is no lossy path, the message goes as a `paired-app` frame with `u` (the payload in base64url) in place of `d`, and the sender drops it instead of queueing when the channel already holds unsent bytes. The app is told which it has | One more form of `paired-app`. A game is smooth on a direct path and playable or not on a relay, and says so itself |
+| B. WebRTC only | As the games table said until now | Two Linux desktops (no WebRTC) get nothing, the owner's own case |
+| C. A connection of its own for the app | A second peer connection, signalled on the session as a call's is | Does nothing for Linux; a second ICE run per game; a second place where addresses are gathered |
+
+**A session capability of its own, `apps-rt/1`**, beside `apps/1`, which does not change (Proposed; the other way is `apps/2`, which would make every app client implement the lossy path to stay current). A side lists it in `paired-capabilities` only where its current transport and client can carry lossy messages or the `u` form. On top of that, per app: an `open` frame gains `"rt": 1` when this side's copy of the app holds the `realtime` permission. Lossy messages for an app are taken only while both sides said `open` with `rt` and neither closed, on the session they were said on. An older client ignores the key.
+
+**What the app is told about the link.** `ghostly.chat.link()` and a `chat.link` event when it changes, only for an app with `realtime`: `{"lossy": true or false, "path": "direct" or "relayed", "rttMs": <the client's last round trip, or absent>}`. `lossy: false` means messages go as ordered frames (option A). The client's round trip is a hint, one sample every 15 seconds on the ordered channel; a game measures its own with its own lossy pings. The transport's name, the relay's name and any address are not told.
+
+**Rules.** Lossy messages are live only, as every `paired-app` frame. They do not go through the session's read queue and never count toward its bounds: a slow app loses messages and never fails the chat. They are no sign of life for the session's liveness. On a transport switch they follow the session; some are lost while the old channel retires. On Desktop they do not count as broker requests (the 50 a second is for requests), and their path through the window is measured first ([Order of work](#order-of-work)).
+
+### The `realtime` permission
+
+| | Without it | With it |
+|---|---|---|
+| Ordered `paired-app` data | 32 KiB a frame, 50 a second taken per app | The same. Ordered frames share the chat's channel, so more of them would slow the chat itself |
+| Lossy messages | None: `ghostly.chat.lossy` and `ghostly.chat.link` answer `not-allowed` | 1024 bytes each. The receiver takes **128 a second per app** and **256 a second per session** over all apps; the sender's client keeps to 120 per app |
+| At most, from one contact | About 1.6 MiB a second of ordered frames per app (unchanged) | 256 KiB a second more per session, only while the app is open on both sides |
+
+**Shown at install as:** "Plays in real time: sends your contact many small messages a second while you both have it open. Uses more data and battery."
+
+**What stops an app from flooding a contact.** The same four things as for `apps/1`, counted by the receiver, since the sender's client may be the attacker: nothing is taken for an app the person has not opened in that chat; nothing is taken unless the person's own copy of the app holds `realtime` (the grant is the receiver's, never the sender's word); the per-app and per-session rates are counted on the first 17 bytes before anything else is read, and what passes them is dropped, not queued; and closing the app, or the chat going down, ends it. The numbers are the editors' first guess for a 60-a-second game with room to spare, and Pong sets them before they are fixed.
+
+`realtime` is about messages only. What a game needs from the screen is a second permission ([The frame](#what-a-shooter-needs-from-the-frame-measured)), so Pong asks for one line and a turn-based game that wants the whole screen for the other.
+
+### Bigger bundles and the person's own files
+
+**Size.** A bundle may be up to **64 MiB** from the release that ships this, for any app, not tied to a permission: the size is on the install screen, and a download past 25 MiB asks first, the number a chat file already uses. An older client refuses it as `too-large`, as it should. Two things change with it:
+
+- **Reading a file in pieces.** `ghostly.file(path)` answers a whole file. It gains `ghostly.file(path, {offset, length})`, at most 1 MiB a call: on Desktop a file travels as base64 inside one broker answer, and 64 MiB there is one message nobody wants.
+- **Where a store finds it.** Every listing must carry a jsDelivr URL at a full commit, and jsDelivr serves no file over 20 MB.
+
+| Option | What it does | Cost |
+|---|---|---|
+| **A. Proposed: raw GitHub at a full commit counts as the immutable URL for a bundle over 20 MB** | `https://raw.githubusercontent.com/<owner>/<repo>/<40 hex>/app.ghostlyapp`. One file, one digest, as today | It is gone when the repository is. A store that wants it kept hosts the bundle in its own repository, which then grows by the bundle at every version |
+| B. Data packs | The bundle stays under 16 MiB and its manifest lists further files by SHA-256, each under 20 MB, fetched by digest when the app first asks | A second fetch path, partial installs to explain, a new manifest key older clients would install without |
+| C. Sent as a file only | No store listing for big apps; a contact sends the bundle over `files/3` | Only friends of someone who has it can install |
+
+Not measured: one read of a 64 MiB file from `raw.githubusercontent.com` in a page (it needs a public repository holding one). Sending a bundle as a file is already planned for 1.2.x and takes any size with consent.
+
+**Files the person owns.** A Quake needs its `.pak`, and no bundle may carry data its publisher has no right to give out: a store refuses such a listing, and an engine ships with free data or none. So the person brings the file, once, and the client keeps it.
+
+- **Asking.** `ghostly.library.request({"name": "pak0.pak", "bytes": <most it accepts>, "sha256": [<digests it accepts, optional>]})`. The client, not the frame, shows the request ("Quake asks for a file: pak0.pak") and its own file picker, on a click the person makes. Measured: the platform's picker also opens from inside today's frame and the frame reads the file (Chromium), so an app can read a picked file into memory already; what it cannot do is keep it.
+- **Keeping.** The client stores the bytes in its file store by SHA-256, listed per app under the name the app asked for. `ghostly.library.list()` gives names, sizes and digests; `ghostly.library.read(name, {offset, length})` gives bytes, 1 MiB a call. **The library is per app, not per chat, and the app cannot write to it.** Only a file the person chose goes in, as it is. That keeps the rule that storage per chat protects: an app has no place of its own to leave a mark in one chat and read it in another.
+- **How much.** 1 GiB per app unless the person raises it, shown on the Apps page with each file, where the person removes one. Uninstall removes them. A backup carries the list, not the bytes, and the app shows "Needs its files" as for a bundle.
+- **The 5 MiB of storage per chat** stays as it is: saved games fit, and it is the part that follows a backup.
+
+### What a shooter needs from the frame (measured)
+
+Measured on 2026-10-10 with a page served as the runner serves an app: the runner's header with the `sandbox` tokens varied, in a frame with the `sandbox` and `allow` attributes varied (the web), and as a top-level page (Desktop's app window). Chromium 153 (Playwright's, headless, site isolation on, real clicks) and WebKitGTK 2.52.6 (the Linux Desktop engine, under Xvfb, software rendering, gestures made by the host's own script call).
+
+| Need | Frame as it is today | What changes it |
+|---|---|---|
+| WebGL and WebGL 2 | **Work**, both engines, frame and top-level | Nothing |
+| WebAssembly, with 1 GiB of memory | **Works**, both engines | Nothing |
+| Sound | An `AudioContext` starts suspended and runs after the first click, both engines. An `AudioWorklet` module is refused (the policy allows no script from a `blob:`) | Nothing: an engine mixes on the main thread (`ScriptProcessor`), as single-thread builds do |
+| Threads | No worker starts (`worker-src 'none'`), and there is no `SharedArrayBuffer` | Nothing in this proposal: engines are built single-thread. Workers stay a question for the owner |
+| Keyboard | Keys reach the frame once it was clicked (Chromium) | Nothing |
+| Frames a second | 60 in Chromium and in a WebKitGTK top-level page. **21 to 23 in a WebKitGTK frame nobody clicked yet**; not measured after a click (the probe could not click inside a frame there) | To measure in Safari with a real click |
+| Pointer lock (mouse look) | **Refused**: "the frame is sandboxed and the 'allow-pointer-lock' permission is not set", both engines | `allow-pointer-lock` in the `sandbox` attribute **and** in the runner's header: either alone still refuses (Chromium). In a top-level page the header alone is enough (both engines). WebKitGTK also asks the host (a permission request); left unanswered, as Desktop leaves it today, the lock is given |
+| Full screen | **Refused** in the frame ("Disallowed by permissions policy"). Allowed in a top-level page in both engines | Two ways. The frame's own: `allow="fullscreen"` on the frame is enough in Chromium, and WebKitGTK needs `allow="fullscreen *"`. **Or the client's**: on a click made inside today's frame, the page around it may go full screen itself (Chromium: the click counts for the page too) |
+| Full screen on Linux Desktop | An element went full screen in a top-level page of 2.52.6 with no abort, on a gesture made by script. The abort that turned the API off in the main window was on 2.50 with a real click | Not cleared by this run: the window's own full screen, which the main window already uses there, is the safe path |
+| Gamepad | `navigator.getGamepads()` answers in today's frame in Chromium, and in WebKitGTK top-level. In a WebKitGTK frame it answers unless `allow` names `gamepad` without `*`, which refuses it | Nothing on the web as measured; `gamepad *` if `allow` ever names it. No pad was plugged in: the events are not measured |
+| The person's file picker | Opens from today's frame, and the frame reads the 8 MiB file picked (Chromium) | Nothing |
+
+Not measured here, each a run for the owner or a later round: Firefox and Safari (this host's Playwright has Chromium only), WKWebView (macOS), WebView2 (Windows), a real gamepad, a real GPU (both runs drew in software).
+
+**Proposed from it:**
+
+- **A second permission, `fullscreen`**: "Can fill the screen and hold the mouse pointer. Esc gives both back." It gives the two things below and nothing else.
+- **Pointer lock is the frame's own.** The web frame of an app granted `fullscreen` gets `sandbox="allow-scripts allow-pointer-lock"`, and both runner headers gain `allow-pointer-lock` for every app: the header alone gives nothing (measured), so the attribute is the gate, and no third runner address is needed. On Desktop the app window's header gains the token for a granted app only, and Linux answers the pointer lock request itself: yes for a granted app, no for any other.
+- **Full screen is the client's, not the frame's.** `ghostly.view.fullscreen(true or false)`, asked on a click. On the web the client puts its own panel in full screen, with the frame in it, and the frame gets no `allow`; on Desktop the host puts the app window in full screen. One path for every engine, the one Linux needs anyway, and the client decides what stays on screen: a thin bar with the app's name and "Leave full screen" that hides after a moment and comes back when the pointer is freed. An app that draws a fake Ghostly screen to ask for a secret is the risk of full screen, and that bar is what answers it.
+- **Nothing for WebGL, WebAssembly, sound, keys and the gamepad**: they work in today's frame.
+
+### Apps in groups
+
+An app opened in a group is a **table**: one member opens it, the others see a card and join.
+
+- **The card.** The `app` card of [405](405-status-cards.md#an-app) with `opened`, as a group message: "Ana opened Quake", with **Join**. It already rides every group path. A member without the app sees "Install to play", as in a 1:1 chat; an older app shows the card's text.
+- **Who is in it.** The member who opened it is the **host**; a member who presses Join is a **player**. At most 8 players with the host (Proposed; the bound is the host's cost). Only members of the group at that moment: a removed member's edge closes, and the table drops them. The app knows a player by a number of the table, never by a member key, and by the name the group shows only with `name`.
+- **Nothing of a table is a group frame.** Only the card is. A community keeps 256 frames and 1 MiB for everyone's catch-up; a game's frames there would push the chat out.
+
+How frames reach the players:
+
+| Option | How | Addresses | Cost |
+|---|---|---|---|
+| **A. Proposed: a star to the host** | Each player keeps one session with the host: the edge the two have in a full mesh, or a session of that pair opened for the table where they share none ([503](503-group-files.md#the-file-session) derives it, pinned to the two member keys). `apps/1` and `apps-rt/1` run on it exactly as in a 1:1 chat. A player talks to the host; the host talks to each player. What goes from player to player, the host's app passes on | In a full mesh, nothing new. Elsewhere the host and each player learn each other's address, and players do not learn each other's | The host carries it all (a shooter's server does that anyway). The table ends when the host leaves |
+| B. A mesh among the players | Every two players keep a session | Every player learns every other's address | 28 sessions for 8 players; each can take 5 to 80 seconds to come up ([903](903-group-community.md#why-not-a-direct-session-for-the-payment)) |
+| C. Through the hubs | A new frame hubs pass on without storing | Nothing new | Two hops and a hub's bandwidth for every frame; hubs are ordered streams, so nothing lossy. Fine for a turn-based table, not for a shooter. It is the frame typing in large groups also waits for |
+
+**Host or lockstep** is the app's choice, not the client's: with a star, a shooter runs its server in the host's app, and a lockstep game sends its inputs through the host. The client checks no game rule.
+
+**Joining late.** Join opens the session and says `open` with the table's id; the host's app hears a new player and sends what it needs to catch up, as an app does after a lost session in a 1:1 chat. The client replays nothing. A full table answers `full`.
+
+**What this waits for.** Sessions between two members who share no edge are specified for files and not built, and whether members who only met through hubs should connect at all is not decided: a direct session shows each of the two the other's address. So:
+
+1. **Private groups in a full mesh (up to 16 members)** can have tables as soon as 1:1 real-time works: every pair has its edge, and nothing new is learned by anyone.
+2. **Private groups on hubs and communities** wait for that decision. If it is yes, Join says so before it connects: "Joining connects you to Ana's device directly. Ana's app learns your IP address, and yours learns hers."
+
+A capability of its own says an app takes tables: the next number in `paired-groups` ([902](902-group-mesh.md#compatibility)).
+
+### Order of work
+
+1. **Pong, 1:1.** `apps-rt/1`, the lossy path on WebRTC and on native Iroh, the `u` form elsewhere, `realtime` and its limits, `ghostly.chat.link`. Measured first: 120 small messages a second each way through Desktop's app window, and Iroh's datagrams in the browser build. Pong is the first-party app that sets the numbers.
+2. **Bundles and the frame.** 64 MiB, reading in pieces, the library, `fullscreen`. Measured first: the frame table again on Safari, Firefox, WKWebView and WebView2, and a 64 MiB read from raw GitHub.
+3. **Tables in a full mesh**, then, after the decision on sessions between members with no edge, in larger groups and communities.
+
+### What it adds to the threats
+
+| Threat | What limits it | What remains |
+|---|---|---|
+| A contact's client floods lossy messages | The receiver's rates, counted before reading; taken only for an app open on both sides whose local copy holds `realtime`; dropped, never queued | 256 KiB a second while the app stays open |
+| A lossy message replayed or reordered | It is inside the transport's own encryption, on the authenticated connection | Duplicates and reordering are part of the contract: the app numbers its messages |
+| An app in full screen imitates Ghostly or the system | Full screen is the client's own, with its bar; asked on a click; a permission the person granted | A person who types a secret into a game |
+| An app holds the pointer | The engine frees it on Esc; a permission | None known |
+| WebGL in the sandbox | Nothing new: it works in today's frame | The GPU's name where the engine tells it (Chromium did, WebKitGTK said "Apple GPU"), and the graphics stack as attack surface, both already there in phase 1 |
+| The library links a person's chats | The app cannot write to it; only whole files the person picked go in | Which files a person has, to an app they gave them to |
+| A table shows addresses | The star: only the host and each player; a line before Join; none in a full mesh | The host learns every player's address |
+
+### What changes in other WISPs once an option is chosen
+
+Written then, since each depends on the answer: [401](401-paired-chat.md#capabilities-on-this-session) (`apps-rt/1`, lossy messages outside the read queue and liveness), [101](101-webrtc.md) (the second channel), [102](102-iroh.md) and [103](103-hyperdht.md) (datagrams and unordered messages), [100](100-transports.md) (which transports say they carry lossy messages; a TURN pair marked relayed), [405](405-status-cards.md#an-app) (the card's Join in a group), [900](900-group-sessions.md), [902](902-group-mesh.md) and [903](903-group-community.md) (tables, their capability, sessions for a table), [503](503-group-files.md) (the session of two members shared with tables).
+
+### Questions for the owner
+
+| # | Question | Proposed |
+|---|---|---|
+| 1 | A path with no lossy mode (a relay, HyperDHT in a browser) | Option A: the ordered frame there, and the app is told |
+| 2 | `apps-rt/1` beside `apps/1`, or `apps/2` | `apps-rt/1` |
+| 3 | One permission or two | Two: `realtime` (messages) and `fullscreen` (screen and pointer), with the two lines above |
+| 4 | Bundles over 20 MB in a store | Option A: raw GitHub at a full commit |
+| 5 | The library: per app, read-only for the app, 1 GiB | As written |
+| 6 | Full screen by the client with its bar, or by the frame | By the client |
+| 7 | Workers for apps (threads, `AudioWorklet`) | Not now: single-thread engines |
+| 8 | Tables: a star to the host, at most 8 | Option A |
+| 9 | Tables where members share no edge: connect directly, with the line before Join? | Yes, with the line. It is the same decision as for group files |
+| 10 | Who may open a table in a community | Any member, as any member may write |
+
 ## Security and privacy
 
 ### Threats
@@ -635,7 +822,7 @@ Phase 1 has no payments, no reviews, no themes, no per-site network permission (
 | Phase | What it gives |
 |---|---|
 | 1.2.x, 1.3 | The SDK's commit-reveal helper, and `ghostly catalog submit` (`ghostly app init` and the app types are in release 1.2). Apps in the extension, after a test submission passes the Chrome Web Store review. A bundle sent as a file over `files/3`. The `store` card. The crawler and the default index (1.3) |
-| 2 | Real-time games: the `realtime` permission, the unordered mode on `apps/1` over WebRTC, 64 MiB bundles. Bots on the other side of `apps/1` (`ghostly app serve`, `app.message` events, `ghostly app send`) and the `cards` permission. Themes as typed values. Paid apps on Testnet, then Mainnet when the owner says. Licences, reviews and reports, and an optional indexer service with search. Key rotation with a pinned recovery key. The publisher's Pkarr record. The `network` permission as an exact list of sites. Apps in groups |
+| 2 | Real-time games: the `realtime` permission, the unordered mode on `apps/1` over WebRTC, 64 MiB bundles ([proposal](#phase-2-proposal-real-time-apps-game-data-and-apps-in-groups), with its order of work and its questions for the owner). Bots on the other side of `apps/1` (`ghostly app serve`, `app.message` events, `ghostly app send`) and the `cards` permission. Themes as typed values. Paid apps on Testnet, then Mainnet when the owner says. Licences, reviews and reports, and an optional indexer service with search. Key rotation with a pinned recovery key. The publisher's Pkarr record. The `network` permission as an exact list of sites. Apps in groups |
 | 3 | Bots for the CLI as signed packages under an operating-system sandbox. A frame in the chat on Desktop once tested. Package sources over peer-to-peer content addressing |
 | Research | A permissioned host for adapter plugins (WebAssembly components get only the capabilities the host gives them, [component model](https://component-model.bytecodealliance.org/)); process isolation for apps; a transparency log for publisher keys; reproducible-build checks by stores |
 
@@ -647,7 +834,7 @@ If an iOS client appears, paid apps would meet Apple's in-app purchase rule; tha
 
 **Decided for the owner by the coordinator (2026-10-03):** a self-hosted web server that cannot send the runner's header gets no apps, and the client hides Apps there, documented in the self-hosting notes; phase 1 chat cards fetch only from `raw.githubusercontent.com` and jsDelivr, other hosts later with a warning naming the host before any request; the owner's offline key signs both the default store and the default index, with a separate index key (signed by the owner's key) only if signing by hand becomes the bottleneck.
 
-**No question is open for the owner.** What is left belongs to the builders, each decided above or by the phase 1 piece named:
+**No question of phase 1 is open for the owner.** Phase 2 has ten, in [its proposal](#questions-for-the-owner). What is left of phase 1 belongs to the builders, each decided above or by the phase 1 piece named:
 
 | Builder decision | Where it is settled |
 |---|---|
