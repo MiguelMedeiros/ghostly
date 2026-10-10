@@ -71,5 +71,6 @@
   "skinTone": "Tonalità della pelle",
   "takePhoto": "Scatta una foto",
   "tooLong": "È troppo lungo da inviare ({{count}} caratteri, il limite è {{max}}).",
+  "tooLongBytes": "È troppo lungo da inviare ({{bytes}} byte, il limite è {{max}}). Accorcialo o invialo come file.",
   "tooLongDht": "Troppo lungo per la DHT. Ci sta quando siete connessi direttamente."
 }
