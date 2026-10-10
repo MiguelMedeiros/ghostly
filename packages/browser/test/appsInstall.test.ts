@@ -779,7 +779,7 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     const storeReads = () => getAll.mock.contexts.filter((s) => (s as IDBObjectStore).name === "appStores").length;
     for (let i = 0; i < 20; i++) await store.storageGet({ ref: v1.ref, scope: "chat-1", key: "game" });
     await store.chatRunnable({ ref: v1.ref });
-    expect(storeReads()).toBe(1);
+    expect(storeReads(), "held since the store was added").toBe(0);
     await net.putStore(await storeFiles({ sequence: 2, removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
     await store.refreshStores();
     await cutOff(store, v1.ref);

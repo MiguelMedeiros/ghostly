@@ -307,6 +307,7 @@ export class Apps {
   private readonly anyway = new Set<string>();
   private views: Promise<AppStoreView[]> | null = null;
   private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
+  private heldStores: Promise<Map<string, AddedAppStore>> | null = null;
   /**
    * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest>`): the same
    * index listing the same is not peeked again at every check.
@@ -338,6 +339,8 @@ export class Apps {
     this.sweep = null;
     this.staged.clear();
     this.held.clear();
+    this.heldStores = null;
+    this.views = null;
   }
 
   private schedule(ms: number, atStart = false): void {
@@ -431,28 +434,44 @@ export class Apps {
     try { await done(tx); } finally { this.held.delete(app.ref); }
     return put;
   }
-  private async storeRecord(key: string): Promise<AddedAppStore | undefined> {
-    return wrap((await store(STORES.appStores, "readonly")).get(key));
-  }
-  private async putStore(record: AddedAppStore): Promise<void> {
-    await wrap((await store(STORES.appStores, "readwrite")).put(record));
-    this.views = null;
-  }
-  private async deleteStore(key: string): Promise<void> {
-    await wrap((await store(STORES.appStores, "readwrite")).delete(key));
-    this.views = null;
-  }
   /**
-   * The stores' views, read once and again after a store is written here (the only writer: pages in other tabs share
-   * this engine). An app's every storage call and chat frame checks them, and an index may be 4 MiB.
+   * The stores' records by key, read once and kept in step by the writes here (the only writer: pages in other tabs
+   * share this engine). A record holds its store's whole index, up to 4 MiB, and IndexedDB reads and writes it whole:
+   * the Apps page, the update check and an app's every storage call and chat frame ask for them.
    */
+  private records(): Promise<Map<string, AddedAppStore>> {
+    return this.heldStores ??= store(STORES.appStores, "readonly").then((s) => wrap<AddedAppStore[]>(s.getAll()))
+      .then((all) => new Map(all.map((r) => [r.key, r])), (error: unknown) => { this.heldStores = null; throw error; });
+  }
+  private async storeRecord(key: string): Promise<AddedAppStore | undefined> {
+    return (await this.records()).get(key);
+  }
+  /** A write of the stores' records: what is asked while it runs waits for it, as a read of IndexedDB would; one that fails leaves what was held. */
+  private async writeStores(write: (records: IDBObjectStore) => IDBRequest, apply: (held: Map<string, AddedAppStore>) => void): Promise<void> {
+    const before = this.records();
+    const written = before.then(async (held) => {
+      await wrap(write(await store(STORES.appStores, "readwrite")));
+      apply(held);
+      this.views = null;
+    });
+    const after = written.then(() => before, () => before);
+    this.heldStores = after;
+    after.catch(() => { if (this.heldStores === after) this.heldStores = null; });
+    await written;
+  }
+  private putStore(record: AddedAppStore): Promise<void> {
+    return this.writeStores((records) => records.put(record), (held) => held.set(record.key, record));
+  }
+  private deleteStore(key: string): Promise<void> {
+    return this.writeStores((records) => records.delete(key), (held) => held.delete(key));
+  }
+  /** The stores' views, made once and again after a store is written here: an app's every storage call and chat frame checks them. */
   private heldViews(): Promise<AppStoreView[]> {
     return this.views ??= this.stores().then((s) => this.storeViews(s), (error: unknown) => { this.views = null; throw error; });
   }
-  /** The stores the person has (a removed default is not one). */
+  /** The stores the person has (a removed default is not one), in the order of their keys, as IndexedDB lists them. */
   private async stores(): Promise<AddedAppStore[]> {
-    const all = await wrap<AddedAppStore[]>((await store(STORES.appStores, "readonly")).getAll());
-    return all.filter((s) => !s.removed);
+    return [...(await this.records()).values()].filter((s) => !s.removed).sort((a, b) => (a.key < b.key ? -1 : 1));
   }
 
   private storeViews(stores: AddedAppStore[]): AppStoreView[] {
@@ -719,8 +738,12 @@ export class Apps {
         next = { ...s, problem: error instanceof AppFetchError ? error.code : "network" };
       }
       // Removed meanwhile: not put back.
-      if (!(await this.storeRecord(s.key)) || (await this.storeRecord(s.key))?.removed) continue;
-      await this.putStore(next);
+      const now = await this.storeRecord(s.key);
+      if (!now || now.removed) continue;
+      // Nothing to keep but when it was read: held here, not written (the whole index would be written with it).
+      const unchanged = now === s && next.index === s.index && next.digest === s.digest && next.problem === s.problem && next.equivocation === s.equivocation;
+      if (unchanged) (await this.records()).set(s.key, next);
+      else await this.putStore(next);
       out.push(this.summary(next));
     }
     return out;
