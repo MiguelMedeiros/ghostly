@@ -13,6 +13,7 @@ const NEXT: Partial<Record<TranslationKey, TranslationKey>> = {
   "devices.handoff.fail.mainnet": "devices.handoff.fail.mainnetNext",
   "devices.handoff.fail.stalled": "devices.handoff.fail.stalledNext",
   "devices.takeover.fail.noCopy": "devices.takeover.fail.noCopyNext",
+  "devices.takeover.fail.changed": "devices.takeover.fail.changedNext",
   "devices.takeover.fail.noPassword": "devices.takeover.fail.noPasswordNext",
   "profile.backups.protection.mainnet": "profile.backups.protection.mainnetNext",
   "profile.backups.protection.warning": "profile.backups.protection.warningNext",

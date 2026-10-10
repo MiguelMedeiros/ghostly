@@ -335,6 +335,8 @@
     "checking": "Comprobando qué dispositivo está activo · unos 30 segundos",
     "confirm": "Escribe {{device}} para confirmar",
     "fail": {
+      "changed": "La contraseña de bloqueo cambió después de que este dispositivo tuvo el perfil",
+      "changedNext": "Elige Usar aquí y escribe la contraseña nueva.",
       "lockedOut": "Demasiados intentos. Inténtalo más tarde.",
       "name": "Escribe el nombre del dispositivo que se detiene.",
       "noCopy": "Este dispositivo no tiene copia del perfil",

@@ -173,7 +173,7 @@ export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): 
 const TAKEOVER_FAILURES: Record<string, TranslationKey> = {
   password: "devices.password.wrong", "locked-out": "devices.takeover.fail.lockedOut", refused: "devices.takeover.fail.refused",
   "no-copy": "devices.takeover.fail.noCopy", "no-password": "devices.takeover.fail.noPassword", name: "devices.takeover.fail.name",
-  offline: "devices.takeover.fail.offline", state: "devices.takeover.fail.state",
+  offline: "devices.takeover.fail.offline", state: "devices.takeover.fail.state", changed: "devices.takeover.fail.changed",
 };
 
 export function takeoverErrorKey(error: unknown): TranslationKey | null {

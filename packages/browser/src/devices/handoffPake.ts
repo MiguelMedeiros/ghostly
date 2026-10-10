@@ -47,6 +47,11 @@ export function isHandoffVerifier(value: unknown): value is HandoffVerifier {
   return !!v && typeof v === "object" && v.v === 1 && typeof v.setup === "string" && B64URL.test(v.setup) && typeof v.record === "string" && B64URL.test(v.record);
 }
 
+/** Loads the password proof. Throws when it cannot be loaded: nothing can then be made or checked (`provesHandoffPassword` says false). */
+export async function handoffPakeReady(): Promise<void> {
+  await opaque();
+}
+
 /** A verifier for this password: both halves of the registration, run on this device. */
 export async function makeHandoffVerifier(password: string): Promise<HandoffVerifier> {
   if (!password) throw new Error("A password is needed");
