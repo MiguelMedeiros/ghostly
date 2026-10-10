@@ -111,7 +111,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           <button ref={back} type="button" data-testid="mini-app-back" onClick={() => (app?.stopped ? setChatApp(linkId, null) : updateChatApp(linkId, { shown: false }))}
             aria-label={t("apps.view.back")} title={t("apps.view.back")}
             className="w-9 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 19l-7-7 7-7" /></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
         )}
         <span data-testid="mini-app-avatar" className="relative w-9 h-9 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
