@@ -6,7 +6,8 @@ import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
-import { dragHasFiles, droppedFiles, pastedFiles } from "../lib/pastedFiles";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../lib/pastedFiles";
+import { rawError } from "../lib/errorText";
 import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
@@ -157,7 +158,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   const readImage = async (file?: File) => {
     if (!file || busyRef.current || joined.current || closed.current) return;
     stop(); setError(null);
-    if (file.size > 12 * 1024 * 1024) { setError({ tone: "error", title: t("join.imageSize") }); return; }
+    if (file.size > IMAGE_MAX) { setError({ tone: "error", title: t("join.imageSize") }); return; }
     busyRef.current = true; setBusy(true);
     const current = generation.current;
     try {
@@ -175,13 +176,29 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     } catch { if (current === generation.current) setError({ tone: "error", title: t("join.imageFailed") }); }
     finally { if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); } }
   };
-  // A screenshot of the QR, pasted (the desktop app's WebKit hands it as a file) or dropped: read as "Open image" reads
+  // A screenshot of the QR, pasted (the Mac app's WebKit hands it as a file) or dropped: read as "Open image" reads
   // one. A paste of text is left to the field.
   const pastedImage = (event: ClipboardEvent) => {
     const image = pastedFiles(event.clipboardData)?.find(file => file.type.startsWith("image/"));
-    if (!image) return;
+    if (image) { event.preventDefault(); void readImage(image); return; }
+    // The Linux app's webview shows the page nothing of a copied picture (no files, no text): the app reads it.
+    if (busyRef.current || joined.current || closed.current || !pasteShowsNothing(event.clipboardData)) return;
+    const reading = platformPastedImage(IMAGE_MAX);
+    if (!reading) return;
     event.preventDefault();
-    void readImage(image);
+    stop(); setError(null); busyRef.current = true; setBusy(true);
+    const current = generation.current, named = pasteNamesFiles(event.clipboardData);
+    const ended = () => { if (current !== generation.current || closed.current) return false; busyRef.current = false; setBusy(false); return true; };
+    reading.then(found => {
+      if (!ended()) return;
+      if (found === "tooLarge") setError(said(t("join.imageSize")));
+      else if (found) void readImage(found);
+      // Copied files with no picture among them are said, as a dropped one is; an empty clipboard stays quiet.
+      else if (named) setError(said(t("join.imageFailed")));
+    }, (cause: unknown) => {
+      // In the dialog's own words: the composer's point at its +, which Join has none of.
+      if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.imageSize" : "join.imageFailed")));
+    });
   };
   const droppedImage = (event: DragEvent) => {
     if (!dragHasFiles(event.dataTransfer)) return;
@@ -235,6 +252,9 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     </form>}
   </dialog>;
 }
+
+/** The largest picture a QR is read from, opened, dropped or pasted. */
+const IMAGE_MAX = 12 * 1024 * 1024;
 
 /** A line of the app's own as an error notice. */
 const said = (title: string): Problem => ({ tone: "error", title });

@@ -19,6 +19,8 @@ import { RESEND_POLICY } from "./outbox";
 
 export interface GroupEditsHost {
   messages(chat: string): Promise<StoredMessage[]>;
+  /** The chat's history for `resend`: one read shared by the edges that open together (`messages` when not given). */
+  history?(chat: string): Promise<StoredMessage[]>;
   /** One row by its id (`db.getMessage`): an edit names its message so, and a long group is not read whole for it. */
   message?(chat: string, id: string): Promise<StoredMessage | undefined>;
   /** Changes one row in place (`db.patchMessage`); undefined when the row is gone or nothing changed. */
@@ -183,7 +185,8 @@ export class GroupEdits {
 
   /** An edge of a private group opened: the member at its other end hears my latest edits again, in case it missed them. */
   async resend(groupId: string, to: string): Promise<void> {
-    const mine = (await this.host.messages(chatOf(groupId)))
+    const chat = chatOf(groupId);
+    const mine = (await (this.host.history ? this.host.history(chat) : this.host.messages(chat)))
       .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
       .sort((a, b) => b.edit!.at - a.edit!.at).slice(0, GROUP_EDIT_RESEND).reverse();
     // One that cannot go (its epoch's key is gone) does not hold the others back.

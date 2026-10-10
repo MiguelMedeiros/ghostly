@@ -6,7 +6,7 @@ import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
-import { ChatHoldDialog } from "../components/ChatHoldDialog";
+import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
 import { FaceCorner, IdentityStack } from "../components/identities/ContactMarks";
 import { shownContactName, useChosenProfile, useContactFace } from "../components/identities/contactFace";
@@ -94,14 +94,17 @@ import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
 import { UsageButton } from "../components/chat/UsageMeter";
 import { useUsageOf } from "../hooks/useUsage";
+import { WorkingLine } from "../components/chat/WorkingMark";
+import { useWorkingOf } from "../hooks/useWorking";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
-import { routineStacks } from "../lib/statusCards";
+import { panelCard, routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
 import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
+import { clearChatNotification } from "../lib/notifications";
 import { showChatOnScreen } from "../lib/appBadge";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
 
@@ -262,7 +265,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
-  const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? deliveryPeer.pairing.error ?? t("chat.keyChanged") : undefined;
+  // The hints say it in the app's language; the engine's English sentence (pairing.error) is the connection panel's.
+  const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? t("chat.keyChanged") : undefined;
   // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
   // invite code is forgotten when the contact shows up.
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
@@ -296,7 +300,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
       if (!platform || !peerKey) return null;
-      const tooLarge = platform.fileTooLarge ? platform.fileTooLarge(peerKey, source.size)
+      // The platform says it in English, as sendFile throws it: the same words in the app's language.
+      const refused = platform.fileTooLarge?.(peerKey, source.size);
+      const tooLarge = platform.fileTooLarge ? refused && problemLine(refused, t)
         : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes) }) : null;
       if (tooLarge) return tooLarge;
       // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
@@ -519,7 +525,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown).
   const pageShown = usePageShown();
   useEffect(() => {
-    if (visible && pageShown) markSessionAsRead(sessionId);
+    if (!visible || !pageShown) return;
+    markSessionAsRead(sessionId);
+    clearChatNotification(sessionId);
   }, [visible, pageShown, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
   useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
@@ -556,6 +564,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const locked = useIsLocked();
   // A bot's usage card (WISP 405 § Usage): the meter in the header.
   const usage = useUsageOf(params?.peerPubKeyB64);
+  // Whether the bot is working (WISP 405 § Showing a card): a line in the header that opens the Tasks panel.
+  const working = useWorkingOf(params?.peerPubKeyB64);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  useEffect(() => setTasksOpen(false), [sessionId]);
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -723,6 +735,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={truncatedPeerKey} />
               {/* A bot's usage (WISP 405 § Usage): what is left of its quota and when it resets; a tap says more. */}
               {usage && <UsageButton entry={usage} />}
+              {/* What the bot is working on, from its running tasks; it opens the Tasks panel while the chat shows a card. */}
+              {working && <WorkingLine entry={working} open={tasksOpen} onToggle={messages.some((m) => panelCard(m.card)) ? setTasksOpen : undefined} />}
             </div>
           </div>
         </div>
@@ -734,7 +748,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <CallButtons blocked={webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
             onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
-          <TasksButton rows={messages} />
+          <TasksButton rows={messages} open={tasksOpen} onOpenChange={setTasksOpen} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button
@@ -918,16 +932,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
       </div>
 
-      {chatPeer?.hold && (chatPeer.hold.outstanding > 0 || chatPeer.hold.error) && (
-        <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border truncate" role="status">
-          {chatPeer.hold.outstanding > 0 && t(chatPeer.hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
-            count: chatPeer.hold.outstanding, name: shownName,
-            used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(chatPeer.hold.bytes / 1024 / 1024),
-            max: new Intl.NumberFormat(language).format(Math.round(chatPeer.hold.maxBytes / 1024 / 1024)) })}
-          {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
-          {chatPeer.hold.error && <span className="text-danger">{problemLine(chatPeer.hold.error, t)}</span>}
-        </div>
-      )}
+      {chatPeer?.hold && <ChatHoldLine hold={chatPeer.hold} name={shownName} />}
 
       {/* Input; while messages are chosen, what to do with them. */}
       {forwarding.bar}
@@ -942,13 +947,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           const answering = replyingRef.current;
           const error = await sendMessage(text, answering ? { ...extra, replyTo: answering.id } : extra);
           if (!error && answering) replied(answering);
-          return error;
+          // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
+          return error && problemLine(error, t);
         }}
         reply={replyBar}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }

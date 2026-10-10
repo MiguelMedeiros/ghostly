@@ -152,5 +152,10 @@
     "updatedLabel": "Mis à jour",
     "used": "{{used}} sur {{limit}} utilisés",
     "usedLabel": "Utilisé"
+  },
+  "working": {
+    "label": "Au travail",
+    "quiet": "Au travail ? · dernière mise à jour {{ago}}",
+    "stale": "Aucune mise à jour depuis {{duration}}"
   }
 }

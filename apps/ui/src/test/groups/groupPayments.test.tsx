@@ -184,8 +184,8 @@ describe("GroupChat: payments in the timeline", () => {
   it("+ → Payment opens whom-to-pay; with nobody else in the group it says so", async () => {
     const view = openGroup([]);
     await view.user.click(screen.getByTestId("composer-more"));
-    // A group offers what groups carry: payments, not files or identities.
-    expect(screen.getAllByRole("button").filter((b) => b.hasAttribute("data-menu-item")).map((b) => b.dataset.action)).toEqual(["payment"]);
+    // A group offers what groups carry: payments and files (WISP 503), not identities.
+    expect(screen.getAllByRole("button").filter((b) => b.hasAttribute("data-menu-item")).map((b) => b.dataset.action)).toEqual(["payment", "document", "media"]);
     await view.user.click(screen.getByTestId("payment-button"));
     expect(screen.getByTestId("group-pay-recipients")).toBeInTheDocument();
     act(() => view.engine.update({ groups: [group({ members: [members[0]] })] }));

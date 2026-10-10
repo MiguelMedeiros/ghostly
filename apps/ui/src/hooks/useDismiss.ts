@@ -93,8 +93,12 @@ function tabbables(root: HTMLElement): HTMLElement[] {
 export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () => void, restore: () => boolean = () => true) {
   const callback = useRef(onClose); callback.current = onClose;
   const restoring = useRef(restore); restoring.current = restore;
+  // Where the focus goes back to, read as the modal first renders: a field's autoFocus has moved the focus into the
+  // modal by the time the effect runs, and that field is gone once the modal closes.
+  const opener = useRef<Element | null | undefined>(undefined);
+  if (opener.current === undefined) opener.current = document.activeElement;
   useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
+    const before = opener.current as HTMLElement | null;
     if (ref.current && !ref.current.contains(document.activeElement)) ref.current.focus();
     modals.push(ref);
     const key = (e: KeyboardEvent) => {

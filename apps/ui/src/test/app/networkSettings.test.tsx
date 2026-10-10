@@ -119,6 +119,20 @@ describe("Settings, Network: Iroh relays on the Desktop", () => {
   });
 });
 
+describe("Settings, Network: HyperDHT relay", () => {
+  it("is offered in a browser, and not on the Desktop, which runs HyperDHT itself and ignores it", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-hyperdht-relay")).toBeInTheDocument();
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, hyperdhtRelay: "wss://relay.example.org" } }));
+    expect(screen.queryByTestId("network-hyperdht-relay")).toBeNull();
+    expect(screen.queryByText("HyperDHT relay")).toBeNull();
+    // Saving the rest leaves the relay as it is (a web app standing by for this profile may still use it).
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).not.toHaveProperty("settings.hyperdhtRelay");
+  });
+});
+
 describe("Settings, Network: TURN server", () => {
   const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS };
 

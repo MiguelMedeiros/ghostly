@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GhostLink } from "../src/ghostlink";
-import { RELAY_POLL_INTERVALS } from "../src/link";
+import { RELAY_POLL_INTERVALS, TRANSPORTS_GONE_MS } from "../src/link";
 import { createIdentity, type Identity } from "../src/identity";
 import { edgeParams } from "../src/groupCrypto";
 import { randomBytes, toBase64Url } from "../src/bytes";
 import { encodePacketTransports, parsePacketTransports } from "../src/capsRecord";
 import { buildLinkRecords, LABEL, parseLinkRecords } from "../src/records";
+import { measureRecords } from "../src/pkarr";
 import { fromBase64Url } from "../src/bytes";
 import type { PairingState } from "../src/pairedSession";
-import type { NativeTransport, PairedTransport } from "../src/pairedTransports";
+import type { NativeTransport, PairedTransport, TransportDescriptors } from "../src/pairedTransports";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, rtc, useFakeWorld, yieldToLoop } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
 // covers: groups.native-links, groups.send
@@ -25,47 +26,84 @@ import { NativeWorld } from "./support/nativeWorld";
  * it has none (`onPacketTransports`, `keepsGroupNative` in node.ts).
  */
 
+/**
+ * What the engine keeps of an edge from one run of the app to the next (node.ts `StoredLink`): what the member's packet
+ * said (`onPacketTransports`), and that this side ran a native endpoint there (its seed, `transportSeeds`).
+ */
+interface Kept { peerTransports?: PairedTransport[]; peerDescriptors?: TransportDescriptors; peerFallback?: boolean; seeds?: boolean }
+
 interface Member {
   name: string; link: GhostLink; states: PairingState[]; frames: unknown[];
   /** What the member's packet said, each time it said something new. */
   heard: PairedTransport[][];
+  /** How many times what the member's packet had said was forgotten (`onPacketTransportsGone`). */
+  gone: number;
+  kept: Kept;
+  /** The WebRTC connections this app made (an offer out, or an answer). */
+  rtcMade: number;
+  /** The app quits (a goodbye, its endpoints closed), if it has not, and starts again with what it kept; `change`: what differs in that run. */
+  restart(change?: Partial<MemberOptions>): Promise<void>;
+  quit(): Promise<void>;
 }
 
 let pkarr: MemoryPkarr, native: NativeWorld;
 
-function member(name: string, group: string, me: Identity, peer: Identity, options: { rtc: boolean; transports?: NativeTransport[]; entry?: "host" | "guest"; endpointAfterMs?: number; offAfterFailure?: boolean }): Member {
+interface MemberOptions {
+  rtc: boolean; transports?: NativeTransport[]; entry?: "host" | "guest"; endpointAfterMs?: number; offAfterFailure?: boolean;
+  /** No native slot is free for this edge (node.ts `GROUP_NATIVE_SLOTS`): it starts no endpoint, whatever it heard. */
+  noSlot?: boolean;
+  /** An app from before `packetTransportsSaid` (1.1.6): with no endpoint up, it publishes no `_tr`, whatever it said before. */
+  neverRetracts?: boolean;
+}
+
+function member(name: string, group: string, me: Identity, peer: Identity, options: MemberOptions): Member {
   const states: PairingState[] = [], frames: unknown[] = [], heard: PairedTransport[][] = [];
   const transports = options.transports ?? ["iroh/1"];
-  let started = false, rtcOn = options.rtc;
+  const kept: Kept = {};
+  let started = false, rtcOn = options.rtc, runs = 0, quitted = false;
   const startEndpoints = () => {
-    if (started) return;
+    if (started || quitted || options.noSlot) return;
     started = true;
+    kept.seeds = true;
     for (const transport of transports) result.link.registerEndpoint(native.endpoint(transport, name));
+  };
+  /** As node.ts `keepsGroupNative`: no WebRTC here, or none on the member's app as its packet said. */
+  const keepsNative = () => !rtcOn || (!!kept.peerTransports && !kept.peerTransports.includes("webrtc/1"));
+  const startNative = () => {
+    const mine = runs;
+    if (options.endpointAfterMs) setTimeout(() => { if (mine === runs) startEndpoints(); }, options.endpointAfterMs); else startEndpoints();
   };
   const make = () => new GhostLink({
     params: edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32),
     rtcAvailable: rtcOn,
     pairing: { credentials: { seedB64: me.seedB64, peerKey: peer.pubKeyZ32, requireSignedSignals: true, verifiedPeerKey: peer.pubKeyZ32 },
       pinPeer: async key => { if (key !== peer.pubKeyZ32) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
-    native: { automatic: true },
+    native: { peerDescriptors: kept.peerDescriptors, peerTransports: kept.peerTransports, peerFallback: kept.peerFallback, automatic: true },
     // An entry session opens so (node.ts `startEdge`): one exchange, the member's side publishing after its first look.
     ...(options.entry ? { oneShot: true, firstPublish: options.entry === "host" ? "after-first-poll" as const : "at-start" as const } : {}),
     packetTransports: true,
+    packetTransportsSaid: !!kept.seeds && !options.neverRetracts,
     transport: pkarr.transport(),
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
     groupsSupport: true,
     createPeerConnection: () => {
       if (!rtcOn) throw new ReferenceError("RTCPeerConnection is not defined");
+      result.rtcMade++;
       return fakePeerConnection(name);
     },
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
     events: {
       onPairingState: state => { states.push(state); },
       onGroupFrame: frame => { frames.push(frame); },
-      onPacketTransports: said => {
+      onPacketTransports: (said, descriptors) => {
         heard.push(said);
+        Object.assign(kept, { peerTransports: said, peerDescriptors: descriptors, peerFallback: true });
         if (!said.includes("webrtc/1")) setTimeout(startEndpoints, options.endpointAfterMs ?? 0);
+      },
+      onPacketTransportsGone: () => {
+        result.gone++;
+        Object.assign(kept, { peerTransports: undefined, peerDescriptors: undefined, peerFallback: undefined });
       },
       // `offAfterFailure`: as the engine does (node.ts `edgeWithoutRtc`), an edge whose WebRTC attempt connected nothing
       // starts again as on an app with no WebRTC, its native endpoints up, for this run of the app.
@@ -82,10 +120,28 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
       },
     },
   });
-  const result: Member = { name, link: make(), states, frames, heard };
+  const quit = async () => {
+    runs++; quitted = true;
+    // Its goodbye is a packet out: time passes while it goes.
+    let over = false;
+    void result.link.stop().then(() => { over = true; });
+    while (!over) await run(250);
+  };
+  const result: Member = { name, link: make(), states, frames, heard, gone: 0, kept, rtcMade: 0, quit,
+    restart: async (change = {}) => {
+      if (!quitted) await quit();
+      Object.assign(options, change);
+      // What an edge whose WebRTC failed did for that run only (`edgeWithoutRtc`) is over: the app has WebRTC again.
+      rtcOn = options.rtc;
+      started = quitted = false;
+      states.length = 0;
+      result.link = make();
+      result.link.start();
+      if (keepsNative()) startNative();
+    } };
   result.link.start();
   if (options.entry === "guest") result.link.expectPeer();
-  if (!options.rtc) { if (options.endpointAfterMs) setTimeout(startEndpoints, options.endpointAfterMs); else startEndpoints(); }
+  if (keepsNative()) startNative();
   return result;
 }
 
@@ -101,6 +157,13 @@ async function untilLive(a: Member, b: Member, limit: number): Promise<number> {
   return Infinity;
 }
 const liveOn = (m: Member) => [...m.states].reverse().find(s => s.status === "ready")?.transport;
+
+/** The labels of the packet a member has out now. */
+function labels(pkarr: MemoryPkarr, m: Member): string[] {
+  const encKey = fromBase64Url((m.link as unknown as { options: { params: { encKeyB64: string } } }).options.params.encKeyB64);
+  const packet = (pkarr as unknown as { packets: Map<string, { packet: Parameters<typeof parseLinkRecords>[0] }> }).packets.get(m.link.myPubKeyZ32)?.packet;
+  return packet ? parseLinkRecords(packet, encKey).rawRecordNames : [];
+}
 
 /** Every `_tr` a key published, decrypted with the edge's key. */
 function published(pkarr: MemoryPkarr, m: Member, peer: Member): string[] {
@@ -209,6 +272,129 @@ describe("a group's edge with a member whose app has no WebRTC", () => {
   }, 120_000);
 });
 
+/**
+ * A member whose edge went native once (its WebRTC connected nothing, `edgeWithoutRtc`) said `_tr = ["iroh/1"]`, and the
+ * other member's app kept that. In its next run that member has WebRTC again and runs no native endpoint: it published
+ * no `_tr` at all, and the other app, which acts only on a `_tr` that is there, went on ranking its transports against
+ * the kept `["iroh/1"]`: an Iroh endpoint nobody listens on, or nothing in common at all ("No transport both apps allow
+ * is available yet"). Neither side's restart changed it (a private group of six, "0 of 5 reachable", 2026-10-09).
+ */
+describe("a member whose edge went native once, back with WebRTC", () => {
+  /** The edge as it was left: live over Iroh for that run, `reader` keeping `["iroh/1"]`; both apps quit, WebRTC connects again. */
+  async function wentNativeOnce(dials: "the member back" | "the reader", options: { back?: Partial<MemberOptions>; reader?: Partial<MemberOptions> } = {}) {
+    // The attempt that fails is the member's own: its offer's, or its answer's.
+    rtc.blocked = true;
+    if (dials === "the member back") rtc.blockedFailsAfterMs = 0; else rtc.answerFailsAfterMs = 0;
+    const group = toBase64Url(randomBytes(16));
+    let [one, two] = [createIdentity(), createIdentity()];
+    const edgeKey = (me: Identity, peer: Identity) => edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32).peerPubKeyZ32;
+    // `one` dials: its link key is the lower.
+    if (edgeKey(two, one) > edgeKey(one, two)) [one, two] = [two, one];
+    const [b, r] = dials === "the member back" ? [one, two] : [two, one];
+    const back = member("back", group, b, r, { rtc: true, offAfterFailure: true, ...options.back });
+    const reader = member("reader", group, r, b, { rtc: true, ...options.reader });
+    expect(await untilLive(back, reader, 60_000)).toBeLessThan(60_000);
+    expect(liveOn(reader)).toBe("iroh/1");
+    expect(reader.kept.peerTransports).toEqual(["iroh/1"]);
+    await back.quit(); await reader.quit();
+    rtc.blocked = false; rtc.blockedFailsAfterMs = undefined; rtc.answerFailsAfterMs = undefined;
+    return { back, reader };
+  }
+  const said = (m: Member, peer: Member) => published(pkarr, m, peer).map(value => parsePacketTransports(value));
+
+  // Either key order, and a reader with its Iroh endpoint up (it dials one nobody listens on) or with none (no slot
+  // free: it has nothing in common with the kept list). The reader is told nothing new: it overwrites what it kept on a
+  // `_tr` that is there, as the released apps do (1.1.5, 1.1.6), and never needs the rule below.
+  for (const dials of ["the member back", "the reader"] as const) for (const slot of ["an Iroh endpoint", "no native slot"] as const)
+    it(`it says \`["webrtc/1"]\`, and a reader with ${slot} that only overwrites on a \`_tr\` goes live over WebRTC (${dials} dials)`, async () => {
+      const { back, reader } = await wentNativeOnce(dials);
+      // The reader's app starts first, with what it kept; then the member's, with WebRTC and no endpoint.
+      await reader.restart({ noSlot: slot === "no native slot" });
+      await run(5_000);
+      await back.restart();
+      const took = await untilLive(back, reader, TRANSPORTS_GONE_MS - 30_000);
+      console.log(`GROUP_EDGE_NATIVE back with WebRTC, ${dials} dials, reader with ${slot}: live in ${took / 1000} s`);
+      expect(took).toBeLessThan(TRANSPORTS_GONE_MS - 30_000);
+      expect(liveOn(back)).toBe("webrtc/1");
+      expect(liveOn(reader)).toBe("webrtc/1");
+      // What it runs now, and no way to dial anything: it runs no endpoint.
+      expect(said(back, reader)).toEqual([{ transports: ["webrtc/1"], descriptors: {} }]);
+      expect(reader.heard.at(-1)).toEqual(["webrtc/1"]);
+      expect(reader.kept.peerTransports).toEqual(["webrtc/1"]);
+      expect(reader.gone).toBe(0);
+    }, 120_000);
+
+  // The member's app is from before it said so (1.1.6): it publishes no `_tr`. The reader stays as the bug left it for
+  // `TRANSPORTS_GONE_MS`, then forgets the kept list on the member's packet that advertises with no `_tr`.
+  for (const slot of ["an Iroh endpoint", "no native slot"] as const)
+    it(`a reader with ${slot} forgets the kept list once the member's packet has said no \`_tr\` for two minutes, and offers WebRTC`, async () => {
+      const { back, reader } = await wentNativeOnce("the reader", { back: { neverRetracts: true } });
+      await reader.restart({ noSlot: slot === "no native slot" });
+      await run(5_000);
+      await back.restart();
+      expect(said(back, reader)).toEqual([]);
+      // As it was: the reader's turn to dial, and nothing it can dial.
+      expect(await untilLive(back, reader, TRANSPORTS_GONE_MS - 10_000)).toBe(Infinity);
+      expect(reader.gone).toBe(0);
+      expect(reader.kept.peerTransports).toEqual(["iroh/1"]);
+      const took = await untilLive(back, reader, 3 * 60_000);
+      console.log(`GROUP_EDGE_NATIVE member back publishes no \`_tr\`, reader with ${slot}: live ${took / 1000} s after two minutes`);
+      expect(took).toBeLessThan(3 * 60_000);
+      expect(reader.gone).toBe(1);
+      expect(reader.kept.peerTransports).toBeUndefined();
+      expect(reader.kept.peerDescriptors).toBeUndefined();
+      expect(liveOn(reader)).toBe("webrtc/1");
+      // Started again, it is an edge between two apps with WebRTC, as it was before that network.
+      await reader.restart();
+      expect(await untilLive(back, reader, 3 * 60_000)).toBeLessThan(3 * 60_000);
+      expect(liveOn(reader)).toBe("webrtc/1");
+    }, 120_000);
+
+  it("an app with no WebRTC that starts again keeps what its member kept of it: nothing is forgotten before its endpoint is up, nor while it waits for a slot less than two minutes", async () => {
+    const group = toBase64Url(randomBytes(16));
+    const [one, two] = [createIdentity(), createIdentity()];
+    // Its endpoints take ten seconds to come up, each run (a HyperDHT with its DHT out of reach, a browser's Iroh relay).
+    const linux = member("linux", group, one, two, { rtc: false, endpointAfterMs: 10_000 });
+    const web = member("web", group, two, one, { rtc: true });
+    expect(await untilLive(linux, web, 3 * 60_000)).toBeLessThan(90_000);
+    expect(web.kept.peerTransports).toEqual(["iroh/1"]);
+    const offered = web.rtcMade;
+    for (const endpointAfterMs of [10_000, TRANSPORTS_GONE_MS - 30_000]) {
+      await linux.restart({ endpointAfterMs });
+      // Its first packets of this run advertise and carry no `_tr`: nothing is up yet.
+      await run(Math.min(endpointAfterMs - 2_000, 8_000));
+      expect(said(linux, web)).toEqual([]);
+      const took = await untilLive(linux, web, 4 * 60_000);
+      console.log(`GROUP_EDGE_NATIVE app with no WebRTC back, endpoint after ${endpointAfterMs / 1000} s: live in ${took / 1000} s`);
+      expect(took).toBeLessThan(4 * 60_000);
+      expect(liveOn(web)).toBe("iroh/1");
+      expect(web.gone).toBe(0);
+      expect(web.kept.peerTransports).toEqual(["iroh/1"]);
+      // It was offered no WebRTC meanwhile.
+      expect(web.rtcMade).toBe(offered);
+    }
+  }, 120_000);
+
+  it("an edge between two apps with WebRTC that never left it publishes no `_tr`, across restarts too: its packet is byte for byte what it was", async () => {
+    const group = toBase64Url(randomBytes(16));
+    const [one, two] = [createIdentity(), createIdentity()];
+    const a = member("a", group, one, two, { rtc: true }), b = member("b", group, two, one, { rtc: true });
+    expect(await untilLive(a, b, 3 * 60_000)).toBeLessThan(60_000);
+    await a.restart(); await b.restart();
+    expect(await untilLive(a, b, 3 * 60_000)).toBeLessThan(60_000);
+    // Long enough for a reader to decide a `_tr` is gone: there was none to forget.
+    await run(TRANSPORTS_GONE_MS + 60_000);
+    expect(liveOn(a)).toBe("webrtc/1");
+    for (const [m, peer] of [[a, b], [b, a]] as const) {
+      expect(m.heard).toEqual([]);
+      expect(m.gone).toBe(0);
+      expect(m.kept).toEqual({});
+      expect(published(pkarr, m, peer)).toEqual([]);
+      expect(labels(pkarr, m)).not.toContain(LABEL.tr);
+    }
+  }, 120_000);
+});
+
 describe("`_tr` in a link's packet", () => {
   const encKey = randomBytes(32);
   const key = createIdentity().pubKeyZ32;
@@ -230,6 +416,33 @@ describe("`_tr` in a link's packet", () => {
     const parsed = parseLinkRecords({ pubKeyZ32: key, timestampMicros: 1n, records: built.records }, encKey);
     expect(parsed.transports).toBeNull();
     expect(parsed.services).toEqual([{ id: "chat", type: "chat" }]);
+  });
+
+  it("saying WebRTC alone takes about a hundred bytes of the packet, and no way to dial anything", () => {
+    const value = encodePacketTransports(["webrtc/1"], {});
+    expect(value).toBe('{"t":["webrtc/1"],"d":{}}');
+    const state = { messages: [], ackTimestamp: 0, services: [{ id: "chat", type: "chat" as const }] };
+    const without = buildLinkRecords(key, state, encKey), withIt = buildLinkRecords(key, { ...state, transports: value }, encKey);
+    const cost = measureRecords(key, withIt.records) - measureRecords(key, without.records);
+    expect(cost).toBeGreaterThan(0);
+    expect(cost).toBeLessThan(130);
+    expect(withIt.records.map(r => r.label)).toEqual(expect.arrayContaining([LABEL.svc, LABEL.tr]));
+  });
+
+  // What a reader goes by (link.ts `TRANSPORTS_GONE_MS`): a packet that advertises and carries no `_tr` set none.
+  it("is left out of a packet that is too big only after the advertisement is", () => {
+    const value = encodePacketTransports(["webrtc/1"], {});
+    const shapes = new Set<string>();
+    for (let length = 0; length <= 800; length += 4) {
+      let labels: string[];
+      // A signal takes the room first, as an offer or an answer does.
+      try { labels = buildLinkRecords(key, { messages: [], ackTimestamp: 0, rtcSignal: "x".repeat(length), services: [{ id: "chat", type: "chat" }], transports: value }, encKey).records.map(r => r.label); }
+      catch { shapes.add("nothing fits"); continue; }
+      const svc = labels.includes(LABEL.svc), tr = labels.includes(LABEL.tr);
+      expect(svc && !tr, `a signal of ${length} characters`).toBe(false);
+      shapes.add(svc ? "both" : tr ? "transports only" : "neither");
+    }
+    expect([...shapes]).toEqual(["both", "transports only", "neither", "nothing fits"]);
   });
 
   it("refuses what is not one", () => {

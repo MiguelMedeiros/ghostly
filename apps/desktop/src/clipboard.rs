@@ -149,6 +149,8 @@ impl PasteSource {
 pub const MAX_PASTED_FILES: usize = 32;
 /// The largest picture a paste turns into a PNG (100 megapixels, a 400 MB bitmap).
 pub const MAX_PASTED_PIXELS: usize = 100_000_000;
+/// How hard a pasted picture's PNG is packed (deflate, 1 to 9): see [`encode_png`].
+const PASTED_PNG_LEVEL: u8 = 2;
 /// The most bytes one read hands the page.
 const MAX_READ: u64 = 16 * 1024 * 1024;
 /// What the shelf keeps: the latest pastes, a bounded amount of picture bytes.
@@ -205,6 +207,23 @@ impl PasteShelf {
                 Held::Path(p) => Held::Path(p.clone()),
             })
     }
+
+    /// Takes these tokens off the shelf: they read nothing from then on. The paths they held, for whoever made the
+    /// files to remove them.
+    fn release(&self, tokens: &[String]) -> Vec<PathBuf> {
+        let mut shelf = self.0.lock().unwrap();
+        let mut paths = Vec::new();
+        shelf.held.retain(|(token, held)| {
+            if !tokens.contains(token) {
+                return true;
+            }
+            if let Held::Path(path) = held {
+                paths.push(path.clone());
+            }
+            false
+        });
+        paths
+    }
 }
 
 /// One thing a paste brought, for the page's sheet. `name` is None for a picture (the page
@@ -229,6 +248,9 @@ pub fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, S
     let mut encoder = png::Encoder::new(&mut out, width as u32, height as u32);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
+    // The sheet waits for this. The crate's own level (6) took 1 to 6 s for a 4K picture; level 2 takes a fifth to
+    // a tenth of that for 10 to 20% more bytes. Its fastest packer made a screenshot six times larger to send.
+    encoder.set_deflate_compression(png::DeflateCompression::Level(PASTED_PNG_LEVEL));
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
     writer.write_image_data(rgba).map_err(|e| e.to_string())?;
     writer.finish().map_err(|e| e.to_string())?;
@@ -236,11 +258,17 @@ pub fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, S
 }
 
 /// The files of a paste the page may read: regular files only (a copied folder is not sent),
-/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes.
+/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes. On Linux arboard splits
+/// the file manager's `text/uri-list` on '\n' alone, so each path keeps the '\r' of its CRLF line
+/// end (RFC 2483, as GTK and Qt write it): dropped here, or no copied file was ever found.
 pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
     let mut seen = std::collections::HashSet::new();
     paths
         .into_iter()
+        .map(|path| {
+            let trimmed = path.to_str().and_then(|p| p.strip_suffix('\r'));
+            trimmed.map(PathBuf::from).unwrap_or(path)
+        })
         .filter(|path| path.is_absolute() && seen.insert(path.clone()))
         .filter_map(|path| {
             let meta = std::fs::metadata(&path).ok()?;
@@ -371,6 +399,28 @@ pub fn incoming_share_take<R: tauri::Runtime>(
     }
     #[cfg(not(target_os = "android"))]
     Ok(None)
+}
+
+/// The page read a share's files ([`incoming_share_take`]'s tokens) or a paste's ([`read_clipboard_files`]'s): they
+/// leave the shelf, a pasted picture's PNG with them, and on Android a share's copies leave the app's cache (the
+/// Kotlin side removes only its own share folders; a pasted file is the user's and stays where it is).
+#[tauri::command]
+pub async fn incoming_share_done<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    tokens: Vec<String>,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Not allowed from this window".into());
+    }
+    let paths = window
+        .try_state::<PasteShelf>()
+        .map(|shelf| shelf.release(&tokens))
+        .unwrap_or_default();
+    #[cfg(target_os = "android")]
+    crate::android::share_done(paths).await?;
+    #[cfg(not(target_os = "android"))]
+    drop(paths);
+    Ok(())
 }
 
 /// A step of what a paste brought ([`read_clipboard_files`]), as raw bytes: at most 16 MiB
@@ -616,6 +666,54 @@ mod tests {
         );
     }
 
+    /// Once the page read a share, its tokens leave the shelf (the paths go back for the Kotlin side to remove the
+    /// copies); every other paste stays, and only the main window may say so.
+    #[test]
+    fn a_share_the_page_read_leaves_the_shelf() {
+        let dir = scratch();
+        std::fs::write(dir.join("photo.jpg"), b"jpeg bytes").unwrap();
+        std::fs::write(dir.join("video.mp4"), b"mp4 bytes").unwrap();
+        let app = paste_app(PasteSource::fixed(|| Ok(Pasted::Nothing)));
+        let main = main_window(&app);
+        let shelf = app.state::<PasteShelf>();
+        let pasted = shelf.put(Held::Bytes(Arc::new(b"png".to_vec())));
+        let share = shelve_share(
+            &shelf,
+            String::new(),
+            String::new(),
+            vec![(dir.join("photo.jpg"), None), (dir.join("video.mp4"), None)],
+        );
+        let tokens: Vec<String> = share.files.iter().map(|f| f.token.clone()).collect();
+        let url = "ghostly-svc://atlas.peer/".parse().unwrap();
+        let other = WebviewWindowBuilder::new(&app, "svc-1", WebviewUrl::CustomProtocol(url))
+            .build()
+            .unwrap();
+        assert_eq!(
+            tauri::async_runtime::block_on(incoming_share_done(other, tokens.clone())),
+            Err("Not allowed from this window".into())
+        );
+        assert_eq!(bytes(&main, &tokens[0], 64).unwrap(), b"jpeg bytes");
+
+        assert_eq!(
+            shelf.release(&tokens),
+            vec![dir.join("photo.jpg"), dir.join("video.mp4")]
+        );
+        for token in &tokens {
+            assert_eq!(
+                bytes(&main, token, 64),
+                Err("That paste is gone. Paste it again.".into())
+            );
+        }
+        assert_eq!(bytes(&main, &pasted, 64).unwrap(), b"png");
+        assert_eq!(shelf.release(&tokens), Vec::<PathBuf>::new());
+        assert_eq!(
+            tauri::async_runtime::block_on(incoming_share_done(main.clone(), vec![pasted.clone()])),
+            Ok(())
+        );
+        assert!(bytes(&main, &pasted, 64).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn a_picture_becomes_a_png_of_the_same_pixels() {
         let rgba: Vec<u8> = (0..3 * 2 * 4).map(|i| (i * 21) as u8).collect();
@@ -630,6 +728,78 @@ mod tests {
         assert_eq!(
             encode_png(MAX_PASTED_PIXELS, 2, &[]),
             Err("That picture is too large to paste".into())
+        );
+    }
+
+    /// A photo-like picture: two gradients with a little noise on them, the kind that packs slowest.
+    fn photo(width: usize, height: usize) -> Vec<u8> {
+        let mut seed = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut rgba = Vec::with_capacity(width * height * 4);
+        for y in 0..height {
+            for x in 0..width {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let noise = (seed >> 16) as i32 % 9 - 4;
+                let base = ((x * 255 / width) as i32 + (y * 255 / height) as i32) / 2;
+                let channel = |v: i32| (v + noise).clamp(0, 255) as u8;
+                rgba.extend([
+                    channel(base),
+                    channel(255 - base),
+                    channel((x ^ y) as i32 % 64 + 96),
+                    255,
+                ]);
+            }
+        }
+        rgba
+    }
+
+    /// The same picture as the png crate writes it when nothing is chosen: the yardstick.
+    fn png_by_default(width: usize, height: usize, rgba: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(rgba).unwrap();
+        writer.finish().unwrap();
+        out
+    }
+
+    /// How hard a PNG's pixels were packed, as its zlib header says (RFC 1950, FLEVEL): 0 fastest, 1 fast,
+    /// 2 default, 3 hardest.
+    fn packing(png_bytes: &[u8]) -> u8 {
+        let mut at = 8;
+        loop {
+            let length = u32::from_be_bytes(png_bytes[at..at + 4].try_into().unwrap()) as usize;
+            if &png_bytes[at + 4..at + 8] == b"IDAT" {
+                return png_bytes[at + 9] >> 6;
+            }
+            at += length + 12;
+        }
+    }
+
+    /// The sheet opens only once the picture is a PNG, so a paste waits for it. The png crate's own choice (zlib's
+    /// default level) took 1 to 6 s for a 4K picture; the fast level takes a fifth to a tenth of that, for a few
+    /// more bytes to send.
+    #[test]
+    fn a_pasted_picture_is_packed_fast_and_about_as_small_as_the_png_default() {
+        let (width, height) = (800, 450);
+        let rgba = photo(width, height);
+        let by_default = png_by_default(width, height, &rgba);
+        let pasted = encode_png(width, height, &rgba).unwrap();
+        assert_eq!(packing(&by_default), 2, "the png crate's own choice");
+        assert_eq!(packing(&pasted), 1, "a pasted picture is packed fast");
+        assert_eq!(
+            decode(&pasted),
+            (width as u32, height as u32, rgba),
+            "the same pixels"
+        );
+        assert!(
+            pasted.len() * 10 <= by_default.len() * 13,
+            "a pasted picture is {} bytes, the png default {}",
+            pasted.len(),
+            by_default.len()
         );
     }
 
@@ -708,6 +878,27 @@ mod tests {
             bytes(&main, "paste-999", 10),
             Err("That paste is gone. Paste it again.".into())
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Nautilus, Dolphin and Thunar offer "file:///…/a%20b.txt\r\nfile:///…/c.txt\r\n"; arboard
+    /// splits it on '\n' and hands back each path with its '\r'.
+    #[test]
+    fn files_from_a_crlf_uri_list_are_found() {
+        let dir = scratch();
+        std::fs::write(dir.join("a b.txt"), b"ab").unwrap();
+        std::fs::write(dir.join("c.txt"), b"c").unwrap();
+        let carriage = |name: &str| PathBuf::from(format!("{}\r", dir.join(name).display()));
+        let paths = vec![carriage("a b.txt"), carriage("c.txt")];
+        let app = paste_app(PasteSource::fixed(move || Ok(Pasted::Files(paths.clone()))));
+        let main = main_window(&app);
+        let items = files(&main).unwrap();
+        let named: Vec<_> = items
+            .iter()
+            .map(|i| (i.name.clone().unwrap(), i.size))
+            .collect();
+        assert_eq!(named, vec![("a b.txt".into(), 2), ("c.txt".into(), 1)]);
+        assert_eq!(bytes(&main, &items[0].token, 10).unwrap(), b"ab");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -1,7 +1,7 @@
 import { expect, say, test, type Peer } from "../support/fixtures";
 
 /**
- * On a phone the admin's members list names each member beside Make admin and Remove. The key label kept its width
+ * On a phone the admin's members list names each member beside Hand over admin and Remove. The key label kept its width
  * and the name gave way, down to nothing: the admin saw a key fragment next to Remove, not who it removes. Then the
  * two buttons still left the name ~7 characters ("Beatriz A…"): they go under it when the row is too narrow.
  */

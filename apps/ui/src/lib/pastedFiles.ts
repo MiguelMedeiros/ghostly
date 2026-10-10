@@ -19,7 +19,7 @@ const TYPES: Record<string, string> = {
   mp3: "audio/mpeg", m4a: "audio/mp4", ogg: "audio/ogg", opus: "audio/ogg", wav: "audio/wav", mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
 };
 
-/** The most a paste read by the platform brings into the page: larger files go through + → Document. */
+/** The most a paste read by the platform brings into the page, all its files together: more goes through + → Document. */
 export const PLATFORM_PASTE_MAX = 256 * 1024 * 1024;
 const READ_STEP = 16 * 1024 * 1024;
 
@@ -96,26 +96,60 @@ export function pasteShowsNothing(data: DataTransfer | null): boolean {
   return !!data && !filesOf(data).length && !data.getData("text/plain") && !data.getData("text/html");
 }
 
-/** What the platform read from the clipboard, as files to send; a picture is named after the moment. */
-export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new Date()): Promise<File[]> {
-  if (clips.some((clip) => clip.size > PLATFORM_PASTE_MAX)) throw new Error("That is too large to paste. Send it with + → Document.");
-  const files: File[] = [];
-  for (const clip of clips) {
-    const parts: Uint8Array[] = [];
-    for (let offset = 0; offset < clip.size;) {
-      const bytes = await clip.read(offset, READ_STEP);
-      if (!bytes.length) break;
-      parts.push(bytes);
-      offset += bytes.length;
+/** Whether a paste named copied files it did not hand over (WebKitGTK shows a file manager's copy as `text/uri-list` only). */
+export function pasteNamesFiles(data: DataTransfer | null): boolean {
+  return !!data && [...(data.types ?? [])].some((type) => type === "Files" || type === "text/uri-list");
+}
+
+/** The type of something the platform read: the one it gave, or the one its name's extension says ("" when neither does). */
+const clipType = (clip: ClipboardFile) => clip.mime ?? TYPES[clip.name?.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+
+/**
+ * What the platform read from the clipboard, as files to send; a picture is named after the moment. Read or not
+ * (too large, a read that failed), the platform is told it may let its copies go. `together`: the files must fit
+ * the limit as one, not each alone (a paste: every byte read is held in the page until the sheet sends or drops it).
+ */
+export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new Date(), together = false): Promise<File[]> {
+  try {
+    const largest = together ? clips.reduce((sum, clip) => sum + clip.size, 0) : Math.max(0, ...clips.map((clip) => clip.size));
+    if (largest > PLATFORM_PASTE_MAX) throw new Error("That is too large to paste. Send it with + → Document.");
+    const files: File[] = [];
+    for (const clip of clips) {
+      const parts: Uint8Array[] = [];
+      for (let offset = 0; offset < clip.size;) {
+        const bytes = await clip.read(offset, READ_STEP);
+        if (!bytes.length) break;
+        parts.push(bytes);
+        offset += bytes.length;
+      }
+      const type = clipType(clip);
+      files.push(new File(parts as BlobPart[], clip.name ?? pastedImageName(type || "image/png", at), { type, lastModified: at.getTime() }));
     }
-    const type = clip.mime ?? TYPES[clip.name?.split(".").pop()?.toLowerCase() ?? ""] ?? "";
-    files.push(new File(parts as BlobPart[], clip.name ?? pastedImageName(type || "image/png", at), { type, lastModified: at.getTime() }));
+    return files;
+  } finally {
+    for (const clip of clips) clip.done?.();
   }
-  return files;
 }
 
 /** The clipboard's files as the platform reads them (the desktop app), or null where the paste event is the only way. */
 export function platformPastedFiles(): Promise<File[]> | null {
   const read = servicesPlatform?.readClipboardFiles();
-  return read ? read.then((clips) => readPlatformFiles(clips)) : null;
+  return read ? read.then((clips) => readPlatformFiles(clips, new Date(), true)) : null;
+}
+
+/**
+ * The clipboard's first picture as the platform reads it, for a place that takes one picture (Join's QR screenshot);
+ * null where the paste event is the only way. Resolves to null when the clipboard holds no picture, and to "tooLarge"
+ * for one over `max` bytes, which is not read. Whatever else was copied with it is not read either.
+ */
+export function platformPastedImage(max: number): Promise<File | "tooLarge" | null> | null {
+  const read = servicesPlatform?.readClipboardFiles();
+  if (!read) return null;
+  return read.then(async (clips) => {
+    const image = clips.find((clip) => clipType(clip).startsWith("image/"));
+    for (const clip of clips) if (clip !== image) clip.done?.();
+    if (!image) return null;
+    if (image.size > max) { image.done?.(); return "tooLarge"; }
+    return (await readPlatformFiles([image]))[0] ?? null;
+  });
 }

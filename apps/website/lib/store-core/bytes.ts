@@ -29,13 +29,42 @@ export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-export function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+type NativeToBase64 = (this: Uint8Array, options?: { alphabet?: "base64" | "base64url"; omitPadding?: boolean }) => string;
+/** `Uint8Array.prototype.toBase64` (Node 25+, Chrome 140+, Firefox 133+, Safari 18.2+): ~200x the JS below. */
+const nativeToBase64 = (Uint8Array.prototype as { toBase64?: NativeToBase64 }).toBase64;
+
+const tableOf = (chars: string) => Uint8Array.from(chars, (c) => c.charCodeAt(0));
+const BASE64_TABLE = tableOf("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
+const BASE64URL_TABLE = tableOf("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_");
+
+/**
+ * Base64 where the runtime has no native encoder (Node 22 and 24, older WebViews): the characters go into bytes and
+ * become one string at the end. Every file chunk is encoded (files/3 `pf-data`), so this is on a transfer's path.
+ */
+function encodeBase64(bytes: Uint8Array, table: Uint8Array, pad: boolean): string {
+  const out = new Uint8Array(Math.ceil(bytes.length / 3) * 4);
+  let o = 0, i = 0;
+  for (; i + 2 < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    out[o++] = table[n >>> 18];
+    out[o++] = table[(n >>> 12) & 63];
+    out[o++] = table[(n >>> 6) & 63];
+    out[o++] = table[n & 63];
   }
-  return btoa(binary);
+  const rest = bytes.length - i;
+  if (rest) {
+    const n = (bytes[i] << 16) | (rest === 2 ? bytes[i + 1] << 8 : 0);
+    out[o++] = table[n >>> 18];
+    out[o++] = table[(n >>> 12) & 63];
+    if (rest === 2) out[o++] = table[(n >>> 6) & 63];
+    else if (pad) out[o++] = 61; // "="
+    if (pad) out[o++] = 61;
+  }
+  return textDecoder.decode(out.subarray(0, o));
+}
+
+export function toBase64(bytes: Uint8Array): string {
+  return nativeToBase64 ? nativeToBase64.call(bytes) : encodeBase64(bytes, BASE64_TABLE, true);
 }
 
 export function fromBase64(str: string): Uint8Array {
@@ -46,7 +75,7 @@ export function fromBase64(str: string): Uint8Array {
 }
 
 export function toBase64Url(bytes: Uint8Array): string {
-  return toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return nativeToBase64 ? nativeToBase64.call(bytes, { alphabet: "base64url", omitPadding: true }) : encodeBase64(bytes, BASE64URL_TABLE, false);
 }
 
 export function fromBase64Url(str: string): Uint8Array {

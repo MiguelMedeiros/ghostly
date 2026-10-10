@@ -48,6 +48,7 @@
   "noEmoji": "لم يُعثر على إيموجي",
   "noGifs": "لم يُعثر على صور GIF",
   "overSoft": "يتجاوز {{bytes}} بايت التي تحملها DHT: يُرسل عند الاتصال المباشر",
+  "pasteReading": "جارٍ قراءة ما لصقته…",
   "payment": "دفع",
   "placeholder": "رسالة…",
   "previewLoading": "جارٍ تحميل معاينة {{host}}…",
