@@ -15,8 +15,8 @@
  *
  * It refuses a version that must not ship a feature flag that is on (RELEASE_GUARDS in changes.mjs): Apps
  * (APPS_ENABLED) ship from 1.2.0, so a 1.1.x bump stops while the flag is true. And the other way: a bump to 1.2.0 or
- * later stops while the flag is still false and Apps entries held for 1.2 would go out. The flag flips only on the
- * release/1.2.0 branch, before its bump.
+ * later stops while the flag is still false and Apps entries held for 1.2 would go out. The flag is on from the 1.2
+ * cut (docs/RELEASING.md), so a 1.1.x patch is cut from `main`.
  *
  *   node tools/scripts/bump-version.mjs --check [<version>]   only the flag check, for the package.json version by
  *                                                             default (the release workflow runs it on the tag)

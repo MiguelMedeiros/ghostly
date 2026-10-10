@@ -434,7 +434,7 @@ export interface NodeOptions {
   reactions?: boolean;
   /**
    * Mini-apps in 1:1 chats (`apps/1`, WISP 1200 § In a chat): offered on paired sessions, and the `app*` calls. Default:
-   * `APPS_ENABLED` (off until the feature ships). A host that runs no mini-app (the CLI, the extension, the Android app) pins it to false
+   * `APPS_ENABLED` (on from release 1.2). A host that runs no mini-app (the CLI, the extension, the Android app) pins it to false
    * whatever the flag says, and its app calls are refused as "not on this client"; tests turn it on.
    */
   apps?: boolean;
@@ -6497,7 +6497,7 @@ export class GhostlyNode implements EngineImplementation {
       // 1:1 chats only: back after an absence over a relay at once, then to a direct path on the session (WISP 100).
       upgradeSupport: true,
       peerUpgrades: () => !!live.caps?.peer?.capabilities.includes(UPGRADE_CAPABILITY),
-      // 1:1 chats only, behind the apps flag: what this side has open outlives the link, so a restarted one says it again.
+      // 1:1 chats only, where apps are on: what this side has open outlives the link, so a restarted one says it again.
       appsSupport: this.appsOn,
       appsOpen: this.appsOn ? (live.appsOpen ??= new Map()) : undefined,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",

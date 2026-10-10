@@ -104,8 +104,9 @@ describe("bump-version", () => {
       return dir;
     };
 
-    it("is as the repository's own version ships it (off on dev at 1.1.x, on from release/1.2.0)", () => {
-      expect(guardProblems(root, json(root, "package.json").version, undefined, readFragments(root))).toEqual([]);
+    it("is on in the repository, which releases as 1.2.0 or later and never as a 1.1.x patch", () => {
+      expect(guardProblems(root, "1.2.0", undefined, readFragments(root))).toEqual([]);
+      expect(guardProblems(root, "1.1.99")).toEqual([expect.stringMatching(/APPS_ENABLED is true.*1\.2\.0/)]);
     });
 
     it("stops a version before 1.2.0 while it is on, and lets 1.2.0 and later go", () => {

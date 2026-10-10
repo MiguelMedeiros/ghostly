@@ -1,10 +1,29 @@
-# Apps: the official store
+# Apps and the official store
 
-Ghostly 1.2 installs mini-apps, such as Chess, that run in a sandbox and can play with a contact in a chat. The format,
-the signatures and the sandbox are [WISP 1200](wisps/1200-marketplace.md). This page is about the store Ghostly
-preloads, and how an app gets into it.
+From 1.2, Ghostly installs mini-apps, such as Chess, that run in a sandbox and can play with a contact in a chat. The
+format, the signatures and the sandbox are [WISP 1200](wisps/1200-marketplace.md). This page is about using apps, the
+store Ghostly preloads, and how an app gets into it.
 
-Apps are behind a flag on `dev` and are not in a release yet.
+## Using apps
+
+- **Where:** the web app and Ghostly Desktop on macOS and Linux. Not yet on Desktop on Windows or in the browser
+  extension, and the CLI runs none (it has the publisher's tools). A web app you host without the Docker
+  image needs the runner's two locations ([On the web](WEB.md)).
+- **Get one:** the **Apps** page lists your stores, starting with the official one. **Add** takes the link of an app or
+  of another store. An app a contact shared or opened in a chat arrives as a card with **Install**.
+- **Before it installs** Ghostly checks the app against its publisher's signature and shows the publisher's key, the
+  store that lists it and what it asks for: talking to the same app on your contact's side, your name in that chat,
+  the internet. Nothing is installed until you say so.
+- **Play with a contact:** in a 1:1 chat, **Apps** in the composer opens an installed app with that contact. It is live
+  only: both of you are online, and the game is kept on each side, so it is back when you open it again.
+- **What an app cannot do:** it runs in a sandbox, apart from your chats, keys and wallets. Without the internet
+  permission it reaches no server. Safari, and every browser on iPhone and iPad, cannot fully enforce that: the
+  install screen says so there.
+- **Updates and takedowns:** an app from a store updates to the version the store lists. A version its publisher
+  revoked, or a store removed, is stopped. **Uninstall** deletes its files and its data in every chat; **Export data**
+  keeps a copy first.
+
+Chess is the first app in the official store. Apps are free; there are no payments in them yet.
 
 ## How the official store works
 
@@ -29,9 +48,9 @@ Apps are behind a flag on `dev` and are not in a release yet.
   the Apps page, and once an app is installed, at start and every 24 hours.
 
 In the code the store is `DEFAULT_STORE_URL` and `DEFAULT_STORE_KEY` in
-[`packages/browser/src/engine/appDefaults.ts`](../packages/browser/src/engine/appDefaults.ts). **While
-`DEFAULT_STORE_KEY` is empty the default store is off**: a new profile starts with no store. It stays empty until the
-owner makes the key and signs the first index.
+[`packages/browser/src/engine/appDefaults.ts`](../packages/browser/src/engine/appDefaults.ts). The key is set, so a
+new profile starts with the official store. With an empty `DEFAULT_STORE_KEY` (a fork that wants no default store) a
+new profile starts with none.
 
 ## Starting an app
 
