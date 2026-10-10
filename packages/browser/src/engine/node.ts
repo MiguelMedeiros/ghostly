@@ -4333,9 +4333,10 @@ export class GhostlyNode implements EngineImplementation {
     const live = typeof linkId === "string" ? this.links.get(linkId) : undefined;
     if (!live || live.stored.group || !live.stored.profile) throw new Error("No such chat");
     if (!isAppRef(ref)) throw new Error("Not an app reference");
-    const { participationSeed, pairedPeerKey } = live.stored;
-    if (!participationSeed || !pairedPeerKey) throw new Error("This chat is not paired yet");
-    return { live, app: chatAppId(identityFromSeedB64(participationSeed).publicKey, publicKeyFromZ32(pairedPeerKey), ref) };
+    // This side's key as kept for the chat, not derived from its seed at every frame an app sends.
+    const mine = participationKeyOf(live), { pairedPeerKey } = live.stored;
+    if (!mine || !pairedPeerKey) throw new Error("This chat is not paired yet");
+    return { live, app: chatAppId(publicKeyFromZ32(mine), publicKeyFromZ32(pairedPeerKey), ref) };
   }
 
   /** The chat app id of an app in a paired chat: how the contact's frames name it. */
