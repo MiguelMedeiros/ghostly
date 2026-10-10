@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { appErrorCode, appErrorView } from "../../lib/apps/errors";
 // covers: apps.page

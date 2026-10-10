@@ -1,10 +1,9 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
 import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { RestArkProvider } from "@arkade-os/sdk";
 import { validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
 import { deleteDatabase, store, STORES, transact, wrap } from "../../shared/idb";
-import { ARK_NETWORKS, ArkadeAdapter, type ArkConfig } from "./arkade";
+import type { ArkadeAdapter, ArkConfig } from "./arkade";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 import { snapshotArkDatabase,restoreArkDatabase,encodeBackup,decodeBackup,type ArkDatabaseSnapshot } from "./backup";
 import type { SavedIntent } from "./coordinator";
@@ -19,6 +18,8 @@ export interface ArkWalletView { configured:boolean; locked:boolean; read?:true;
 /** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
 interface StoredArk {config:ArkConfig;seed:EncryptedSeed;deviceKey?:string}
 export interface ArkCreate {network:ArkConfig["network"];provider:string;explorer:string;password?:string;mnemonic?:string}
+/** The Ark SDK, a large part of the app: loaded once an Ark wallet is made, opened or restored, not with the engine. */
+const loadArkade=()=>import("./arkade");
 /** Every new profile starts with this wallet: nothing to set up before receiving. */
 export const DEFAULT_ARK = {network:"bitcoin",provider:"https://arkade.computer",explorer:"https://mempool.space/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
 const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:"configuration",expiresAt:Date.now()+60000});};
@@ -83,6 +84,7 @@ export class ArkWallet {
   private async createNow(params:ArkCreate) {
     // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
     refuseAway(`arkade:${this.network}`, "Ark");
+    const [{ARK_NETWORKS,ArkadeAdapter},{RestArkProvider}]=await Promise.all([loadArkade(),import("@arkade-os/sdk")]);
     if(!ARK_NETWORKS.includes(params.network))throw new Error("Unsupported Ark network");
     if(arkMode(params.network)!==this.network)throw new WrongNetworkError(arkMode(params.network),`${params.network==="bitcoin"?"Bitcoin":params.network} is a ${networkLabel(arkMode(params.network))} network: this is the ${networkLabel(this.network)} Ark wallet`);
     checkProviders(params.network,params.provider,params.explorer);
@@ -110,6 +112,7 @@ export class ArkWallet {
     const key=this.saved.deviceKey??password;
     if(!key)throw new Error("Enter the Ark wallet password");
     const mnemonic=await unsealSeed(this.saved.seed,key);
+    const {ArkadeAdapter}=await loadArkade();
     this.adapter=await this.gate.within(ArkadeAdapter.connect(this.saved.config,mnemonic),a=>a.dispose());await this.refresh();
   }
   /** Shutting down: nothing reconnects afterwards. */
@@ -148,6 +151,7 @@ export class ArkWallet {
     const payload=decodeBackup(await unsealSeed(envelope.vault,password)) as {format:string;version:number;sdk:string;mnemonic:string;config:ArkConfig;database:ArkDatabaseSnapshot;intents:SavedIntent[]};
     if(payload.format!=="ghostly-ark" || payload.version!==1 || payload.sdk!=="0.4.74" || !validateMnemonic(payload.mnemonic,wordlist) || !Array.isArray(payload.intents))throw new Error("Invalid Ark backup payload");
     const config={...payload.config,walletId:crypto.randomUUID()};
+    const {ARK_NETWORKS}=await loadArkade();
     if(!ARK_NETWORKS.includes(config.network))throw new Error("Unsupported Ark network in backup");
     if(arkMode(config.network)!==this.network)throw new WrongNetworkError(arkMode(config.network),`This backup is a ${networkLabel(arkMode(config.network))} Ark wallet`);
     checkProviders(config.network,config.provider,config.explorer);
