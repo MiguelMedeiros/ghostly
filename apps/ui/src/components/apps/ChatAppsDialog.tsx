@@ -60,8 +60,8 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                 <div key={app.ref} className="flex items-center gap-3 px-4 py-3" data-testid="chat-app" data-ref={app.ref}>
                   <AppIcon size={36} installed={app} />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-text-primary truncate">{app.title}</p>
-                    <p className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t("apps.app.stopped")}</p>
+                    <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
+                    <p dir="auto" className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t("apps.app.stopped")}</p>
                   </div>
                   <Button variant="primary" data-testid="chat-app-open" disabled={app.run.status !== "ok" || busy !== null} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
                 </div>

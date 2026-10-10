@@ -65,7 +65,7 @@ The `Release` workflow (`.github/workflows/release.yml`) runs the `E2E` workflow
 
 - the desktop apps (macOS arm64 and x64, Windows, Linux);
 - the extension zip;
-- the web image (`ghcr.io/miguelmedeiros/ghostly-web`, tagged with the version and `latest`);
+- the web image (`ghcr.io/miguelmedeiros/ghostly-web`, tagged with the version; `latest` moves only once the release is published, step 4.7);
 - a **draft** release with `SHA256SUMS.txt`, its GPG signature and `latest.json`.
 
 `latest.json` is the whole of what the app's updater reads. Writing it needs `TAURI_SIGNING_PRIVATE_KEY` and its password, and the job fails rather than publish a version nobody can update to.
@@ -97,6 +97,8 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
    The same workflow publishes the SDK as `@ghostlytools/sdk` (with the mini-app types at `@ghostlytools/sdk/app`), under the same rules. `verify-sdk` runs `npm run test:sdk-example` on the tag with no token and keeps the tarball it checked; `publish-sdk` publishes that very file with `--ignore-scripts`, with no checkout or install. It runs only while the repository variable `SDK_NPM_PUBLISH` is `true`; until then it writes "not published" in the run's summary. The SDK is not on npm yet, and `/app` is for Apps, which run from release 1.2: its first publish is the owner's (the steps below, for `@ghostlytools/sdk`, then set the variable).
 
    Only the two publish jobs can ask for an OIDC token, and both run in the GitHub environment `npm`. The checks that install a package from npm run in jobs without a token.
+
+7. Publishing it also starts `Web image latest` (`.github/workflows/web-latest.yml`), which points the web image's `latest` (what `infra/docker-compose.yml` pulls by default) at the release's image. It moves only to GitHub's Latest release and never back: a release with a newer one published leaves it where it is, and the run's summary says why. A draft, or a tag built again, never touches it. If the release was published before the Release workflow's web image was pushed, run it again: `gh workflow run web-latest.yml -f tag=v1.0.0`. A security autorelease dispatches it itself.
 
 ### npm trusted publishing
 

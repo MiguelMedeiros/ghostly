@@ -8,7 +8,7 @@
   "scripts": { "start": "node server.mjs" },
   "dependencies": {
     "@hyperswarm/dht-relay": "0.4.3",
-    "hyperdht": "6.34.0",
-    "ws": "8.21.3"
+    "hyperdht": "6.34.1",
+    "ws": "8.22.0"
   }
 }

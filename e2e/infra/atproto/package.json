@@ -5,8 +5,13 @@
   "type": "module",
   "scripts": { "start": "node server.mjs" },
   "dependencies": {
-    "@atproto/crypto": "0.5.5",
-    "@atproto/pds": "0.5.35",
+    "@atproto/crypto": "0.5.7",
+    "@atproto/pds": "0.5.37",
     "@did-plc/server": "0.0.1"
+  },
+  "overrides": {
+    "@opentelemetry/propagator-jaeger": "2.12.0",
+    "kysely": "0.29.6",
+    "nodemailer": "10.0.16"
   }
 }

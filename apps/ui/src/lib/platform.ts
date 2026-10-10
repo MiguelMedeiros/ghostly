@@ -139,6 +139,13 @@ export interface FileTransferState {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
+  /**
+   * A group's file, `waiting`: why. `nobody` connected has it, its holders are `busy`, or what came was `damaged`
+   * (it was dropped; `stalled`, so its person can ask again).
+   */
+  wait?: "nobody" | "busy" | "damaged";
+  /** The same, in the engine's words. */
+  note?: string;
 }
 
 export interface MintInfo {
@@ -524,6 +531,12 @@ export interface ServicesPlatform {
    * message of this chat it answers, as a text reply names it (WISP 400 § Replies).
    */
   sendFile(peerPubKeyZ32: string, file: File, options?: { voice?: ChatFile["voice"]; video?: ChatFile["video"]; replyTo?: string }): Promise<{ timestamp: number; file: ChatFile }>;
+  /**
+   * Announces a file or a voice message in a group (WISP 503): its bytes are kept on this device first, then every
+   * member sees it and fetches it from here, then from each other. Throws, with nothing kept, when the group refuses it.
+   * `messageId`: the announcement's.
+   */
+  sendGroupFile?(groupId: string, file: File, options?: { voice?: ChatFile["voice"]; video?: ChatFile["video"]; replyTo?: string }): Promise<{ file: ChatFile; messageId?: string }>;
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   retryFile?(fileId: string): Promise<void>;
   getTransfer(fileId: string): FileTransferState | null;

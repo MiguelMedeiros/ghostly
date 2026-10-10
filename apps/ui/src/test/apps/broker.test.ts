@@ -187,6 +187,35 @@ describe("requests", () => {
     expect(host.calls.length).toBe(before);
   });
 
+  it("refuses a huge or binary request without writing it as JSON first", () => {
+    // A structured clone carries what JSON.stringify takes seconds to write (a 16 MiB Uint8Array took 1.6 s on the
+    // page's thread): it is refused from a count that stops at 64 KiB, and binary data from its type alone.
+    const { broker, posted, run } = setup();
+    run();
+    // Counted by hand: a spy would keep (and print) what it was called with.
+    const stringify = JSON.stringify;
+    let written = 0;
+    JSON.stringify = ((...args: Parameters<typeof stringify>) => { written++; return stringify(...args); }) as typeof stringify;
+    const wide: Record<string, number> = {};
+    for (let i = 0; i < 20_000; i++) wide[`k${i}`] = i;
+    const requests: [unknown[], Record<string, unknown>, string][] = [
+      [[new Uint8Array(16 * 1024 * 1024)], {}, "bad-request"],
+      [[new Float64Array(8)], {}, "bad-request"],
+      [[new ArrayBuffer(16 * 1024 * 1024)], {}, "bad-request"],
+      [[], { extra: new DataView(new ArrayBuffer(1024 * 1024)) }, "bad-request"],
+      [[new Array(1_000_000)], {}, "too-large"],
+      [["x".repeat(64 * 1024 * 1024)], {}, "too-large"],
+      [[wide], {}, "too-large"],
+    ];
+    try {
+      requests.forEach(([args, extra], i) => broker.message({ id: 100 + i, type: "storage.get", args, ...extra }));
+    } finally {
+      JSON.stringify = stringify;
+    }
+    expect(written).toBe(0);
+    expect(posted.slice(-requests.length).map((p) => p.message)).toEqual(requests.map(([, , error], i) => ({ id: 100 + i, ok: false, error })));
+  });
+
   it("answers at most 50 requests a second, malformed ones counted", async () => {
     const { broker, host, run, posted, clock } = setup();
     run();

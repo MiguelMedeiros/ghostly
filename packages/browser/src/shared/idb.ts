@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 14;
+export const DB_VERSION = 15;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -96,6 +96,8 @@ function storedVersion(name: string): Promise<number | undefined> {
 }
 /** The messages store's index of card messages (`card.kind`): what `db.getCardMessages` reads. */
 export const CARD_INDEX = "byCardKind";
+/** The wallet history's index by (mint, time): what `newestWalletTx` reads. */
+export const WALLET_TX_INDEX = "byMintTime";
 
 export const STORES = {
   links: "links",
@@ -240,6 +242,9 @@ export function openDb(): Promise<IDBDatabase> {
         storage.createIndex(APP_STORAGE_SCOPE_INDEX, ["ref", "scope"]);
         storage.createIndex(APP_STORAGE_CHAT_INDEX, "scope");
       }
+      // v15: the wallet history by mint and time, so a refresh reads each network's newest movements without the rest.
+      const walletTx = request.transaction!.objectStore(STORES.walletTx);
+      if (!walletTx.indexNames.contains(WALLET_TX_INDEX)) walletTx.createIndex(WALLET_TX_INDEX, ["mint", "timestamp"]);
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
@@ -350,6 +355,37 @@ export async function transact(names: string[], work: (stores: Record<string, ID
   return done;
 }
 
+/**
+ * The `count` newest wallet movements of the mints `wanted` picks, newest first. Read backwards on the history index, a
+ * mint at a time: a mint not wanted, or one whose `count` newest are read, is stepped over at once. What it reads grows
+ * with the number of mints, never with the history's length.
+ */
+export async function newestWalletTx<T extends { timestamp: number }>(wanted: (mint: string) => boolean, count: number): Promise<T[]> {
+  const index = (await store(STORES.walletTx, "readonly")).index(WALLET_TX_INDEX);
+  const rows: T[] = [];
+  await new Promise<void>((resolve, reject) => {
+    let mint: string | undefined, taken = 0;
+    const read = (below: IDBKeyRange | null) => {
+      const request = index.openCursor(below, "prev");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { resolve(); return; }
+        const [at] = cursor.key as [string, number];
+        if (at !== mint) { mint = at; taken = 0; }
+        // A new cursor below every key of this mint starts at the next mint's newest movement. Not `continue(key)`:
+        // fake-indexeddb (the CLI's and Desktop-headless' IndexedDB) walks every key that skips.
+        if (taken >= count || !wanted(at)) { read(IDBKeyRange.upperBound([at, -Infinity], true)); return; }
+        rows.push(cursor.value as T);
+        taken++;
+        cursor.continue();
+      };
+    };
+    read(null);
+  });
+  return rows.sort((a, b) => b.timestamp - a.timestamp).slice(0, count);
+}
+
 /** A stored file as it stands: its record, with what changed since it was stored read over it. */
 function withState(file: StoredFile, state: FileState | undefined): StoredFile {
   if (!state) return file;
@@ -399,6 +435,21 @@ export const fileStore = {
     const files = await wrap<StoredFile[]>(tx.objectStore(STORES.files).index("byLink").getAll(linkId));
     const states = await Promise.all(files.map((file) => wrap<FileState | undefined>(tx.objectStore(STORES.fileState).get(file.id))));
     return files.map((file, i) => withState(file, states[i]));
+  },
+  /** The id of every group a stored file is of (`linkId` `group:<id>`), read off the index: no record is loaded. */
+  async groupIds(): Promise<string[]> {
+    const index = (await store(STORES.files, "readonly")).index("byLink"), ids: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const request = index.openKeyCursor(IDBKeyRange.bound("group:", "group:\uffff"), "nextunique");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve();
+        ids.push(String(cursor.key).slice("group:".length));
+        cursor.continue();
+      };
+    });
+    return ids;
   },
   async delete(id: string): Promise<void> {
     await transact([STORES.files, STORES.fileState], stores => {

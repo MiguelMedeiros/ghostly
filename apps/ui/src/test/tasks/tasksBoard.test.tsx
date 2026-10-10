@@ -6,7 +6,7 @@ import type { CardIndexRow, StoredMessage } from "@ghostly/browser/shared/types"
 import { SidebarTasks } from "../../components/tasks/SidebarTasks";
 import { saveSession } from "../../lib/storage";
 import { Tasks } from "../../pages/Tasks";
-import { groupView, linkView } from "../fakeEngine";
+import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
 // covers: chat.tasks-board
@@ -441,5 +441,30 @@ describe("the way to the board, above the chat list", () => {
     expect(entry).toHaveAccessibleName("Tasks");
     expect(entry).toHaveAttribute("aria-current", "page");
     expect(within(entry).getByTestId("sidebar-tasks-summary")).toHaveTextContent("Nothing running");
+  });
+
+  it("reads the cards once at start, and again only when a chat's cards change, not for every message of a bot's chat", async () => {
+    const sent = row("link-1", task({ id: "relay" }));
+    let rows = [sent];
+    fakeEngine.on("statusCardIndex", () => rows);
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    await screen.findByTestId("sidebar-tasks");
+    const reads = () => engine.callsTo("statusCardIndex").length;
+    const settled = () => act(() => new Promise((done) => setTimeout(done, 300)));
+    const text = (id: string) => ({ linkId: "link-1", id, text: "hi", sender: "peer", timestamp: NOW, via: "datalink" }) as StoredMessage;
+    const card = { linkId: "link-1", id: sent.id, text: "", sender: "peer", timestamp: sent.timestamp, via: "datalink", card: sent.card } as StoredMessage;
+    expect(reads()).toBe(1);
+
+    // The whole history the engine posts at start, then texts in the bot's chat: its cards are the ones read.
+    act(() => engine.messages("link-1", [card, text("t1")]));
+    act(() => engine.messages("link-1", [card, text("t1"), text("t2")]));
+    await settled();
+    expect(reads()).toBe(1);
+
+    // The bot edits its card: read again.
+    rows = [{ ...sent, card: task({ id: "relay", status: "done" }), editedAt: NOW }];
+    act(() => engine.messages("link-1", [{ ...card, card: rows[0].card, edit: { seq: 1, at: NOW, history: [] } }, text("t1"), text("t2")]));
+    await waitFor(() => expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks"));
+    expect(reads()).toBe(2);
   });
 });

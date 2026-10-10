@@ -57,6 +57,14 @@
   "defaultNicknameHint": "Utilisé quand vous démarrez une discussion",
   "deleteAllChatsConfirm": "Supprimer les {{count}} discussions ?",
   "deleteAllChatsHint": "Messages et fichiers partent. Réglages et portefeuilles restent.",
+  "groupDownloads": {
+    "always": "Toujours",
+    "hint": "Messages vocaux et petits fichiers",
+    "info": "Les messages vocaux, et les fichiers jusqu'à {{file}}, se téléchargent tout seuls jusqu'à ce que ce qui est arrivé ainsi d'un groupe atteigne {{group}} sur cet appareil. Les fichiers plus gros attendent Télécharger. Chaque appareil décide pour lui-même ; rien n'en est envoyé au groupe.",
+    "off": "Désactivé",
+    "title": "Télécharger automatiquement dans les groupes",
+    "wifi": "Wi-Fi uniquement"
+  },
   "incorrectPassword": "Mot de passe incorrect",
   "language": "Langue",
   "license": "Licence",
@@ -142,6 +150,7 @@
     "colour": "couleur, accent, thème",
     "deleteChats": "effacer, historique",
     "domains": "DNS, DoH",
+    "groupDownloads": "automatique, téléchargement automatique, médias, Wi-Fi, données mobiles, messages vocaux, fichiers, groupes",
     "language": "traduction, région",
     "linkPreviews": "liens, URL",
     "lock": "mot de passe, PIN, sécurité",

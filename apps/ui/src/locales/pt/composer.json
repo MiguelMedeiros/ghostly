@@ -48,6 +48,7 @@
   "noEmoji": "Nenhum emoji encontrado",
   "noGifs": "Nenhum GIF encontrado",
   "overSoft": "Acima dos {{bytes}} bytes que a DHT leva: é enviado quando houver conexão direta",
+  "pasteReading": "Lendo o que você colou…",
   "payment": "Pagamento",
   "placeholder": "Mensagem…",
   "previewLoading": "Carregando prévia de {{host}}…",

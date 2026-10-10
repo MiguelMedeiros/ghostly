@@ -25,9 +25,9 @@ const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…
 const sheet = () => screen.queryByTestId("attachment-sheet");
 
 /** What a clipboard or a drag hands the page: jsdom-likes have no DataTransfer to build one with. */
-function transfer({ files = [], text = "", html = "" }: { files?: File[]; text?: string; html?: string }) {
+function transfer({ files = [], text = "", html = "", types = [] }: { files?: File[]; text?: string; html?: string; types?: string[] }) {
   return {
-    files, types: [...(files.length ? ["Files"] : []), ...(text ? ["text/plain"] : []), ...(html ? ["text/html"] : [])],
+    files, types: [...(files.length ? ["Files"] : []), ...(text ? ["text/plain"] : []), ...(html ? ["text/html"] : []), ...types],
     items: files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file })),
     getData: (type: string) => type === "text/plain" ? text : type === "text/html" ? html : "",
     dropEffect: "none",
@@ -193,7 +193,8 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     const { user } = composer();
     expect(paste(field(), {})).toBe(false);
     const open = await screen.findByTestId("attachment-sheet");
-    expect(within(open).getByTestId("attachment-name").textContent).toMatch(/^Pasted image .*\.png · 8 B$/);
+    // The sheet draws the picture a moment after it opens (its address is made once it is on screen).
+    expect((await within(open).findByTestId("attachment-name")).textContent).toMatch(/^Pasted image .*\.png · 8 B$/);
     await user.click(within(open).getByTestId("attachment-send"));
     await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
     const [sent] = onSendFile.mock.calls[0];
@@ -230,6 +231,103 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     paste(field(), {});
     expect(await screen.findByRole("alert")).toHaveTextContent("That is too large to paste. Send it with + → Document.");
     expect(huge.read).not.toHaveBeenCalled();
+  });
+
+  it("files too large together are not read, though each alone would fit", async () => {
+    const part = (name: string): ClipboardFile => ({ name, size: Math.ceil(PLATFORM_PASTE_MAX / 3) + 1, mime: null, read: vi.fn(), done: vi.fn() });
+    const parts = [part("one.mkv"), part("two.mkv"), part("three.mkv")];
+    fakeEngine.readClipboardFiles = vi.fn(async () => parts);
+    composer();
+    paste(field(), {});
+    expect(await screen.findByRole("alert")).toHaveTextContent("That is too large to paste. Send it with + → Document.");
+    for (const file of parts) {
+      expect(file.read).not.toHaveBeenCalled();
+      expect(file.done).toHaveBeenCalledTimes(1);
+    }
+    expect(sheet()).toBeNull();
+  });
+
+  it("copied files the platform could not read say so, never silence", async () => {
+    // WebKitGTK shows a file manager's copy as types ["text/uri-list"], no files and no text.
+    fakeEngine.readClipboardFiles = vi.fn(async () => []);
+    composer();
+    expect(paste(field(), { types: ["text/uri-list"] })).toBe(false);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not paste those files. Send them with + → Document.");
+    expect(sheet()).toBeNull();
+  });
+
+  it("with the sheet open, another such paste adds the platform's file to it; words pasted into the caption stay words", async () => {
+    fakeEngine.readClipboardFiles = vi.fn(async () => [held("scan.pdf", [37, 80, 68, 70])]);
+    composer();
+    paste(field(), { files: [png()] });
+    const open = await screen.findByTestId("attachment-sheet");
+    const caption = within(open).getByTestId("attachment-caption");
+    expect(paste(caption, {})).toBe(false);
+    await waitFor(() => expect(within(open).getAllByTestId("attachment-item")).toHaveLength(2));
+    expect(within(open).getByText("scan.pdf")).toBeInTheDocument();
+    expect(paste(caption, { text: "words" })).toBe(true);
+    expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("with the sheet open, a paste too large says so inside the sheet, not behind it", async () => {
+    const huge: ClipboardFile = { name: "film.mkv", size: PLATFORM_PASTE_MAX + 1, mime: null, read: vi.fn() };
+    fakeEngine.readClipboardFiles = vi.fn(async () => [huge]);
+    composer();
+    paste(field(), { files: [png()] });
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(paste(within(open).getByTestId("attachment-caption"), {})).toBe(false);
+    expect(await within(open).findByRole("alert")).toHaveTextContent("That is too large to paste. Send it with + → Document.");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(huge.read).not.toHaveBeenCalled();
+    // What was waiting still is.
+    expect(within(open).getByTestId("attachment-image")).toBeInTheDocument();
+  });
+
+  /** A read of the clipboard that ends when the test says so. */
+  function slowRead(clips: ClipboardFile[]) {
+    let end = () => {};
+    fakeEngine.readClipboardFiles = vi.fn(() => new Promise<ClipboardFile[]>((resolve) => { end = () => resolve(clips); }));
+    return () => act(async () => end());
+  }
+
+  it("while the paste is read the composer says so, and Ctrl+V again reads nothing more: each file is on the sheet once", async () => {
+    const end = slowRead([held("scan.pdf", [37, 80, 68, 70]), held("notes", [1])]);
+    composer();
+    expect(screen.queryByTestId("paste-reading")).toBeNull();
+    expect(paste(field(), {})).toBe(false);
+    expect(await screen.findByRole("status")).toHaveTextContent("Reading what you pasted…");
+    expect(sheet()).toBeNull();
+    // The natural reaction to a paste that shows nothing yet.
+    expect(paste(field(), {})).toBe(false);
+    expect(paste(screen.getByTestId("messages"), {})).toBe(false);
+    expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+    await end();
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getAllByTestId("attachment-item")).toHaveLength(2);
+    expect(screen.queryByTestId("paste-reading")).toBeNull();
+    // Read to its end, the next paste is read again.
+    slowRead([]);
+    paste(within(open).getByTestId("attachment-caption"), {});
+    expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("a paste that is being read does not keep one the page can see from the sheet, and a read that fails ends it too", async () => {
+    let fail = () => {};
+    fakeEngine.readClipboardFiles = vi.fn(() => new Promise<ClipboardFile[]>((_, reject) => { fail = () => reject(new Error("no clipboard")); }));
+    composer();
+    paste(field(), {});
+    await screen.findByTestId("paste-reading");
+    paste(field(), { files: [new File(["boo"], "notes.pdf", { type: "application/pdf" })] });
+    const open = await screen.findByTestId("attachment-sheet");
+    // The composer is behind the sheet's veil now: the line is on the sheet.
+    expect(within(open).getByRole("status")).toHaveTextContent("Reading what you pasted…");
+    expect(screen.getAllByTestId("paste-reading")).toHaveLength(1);
+    await act(async () => fail());
+    await waitFor(() => expect(screen.queryByTestId("paste-reading")).toBeNull());
+    expect(within(open).getAllByTestId("attachment-item")).toHaveLength(1);
+    fakeEngine.readClipboardFiles = vi.fn(async () => [held("scan.pdf", [37, 80, 68, 70])]);
+    paste(within(open).getByTestId("attachment-caption"), {});
+    await waitFor(() => expect(within(open).getAllByTestId("attachment-item")).toHaveLength(2));
   });
 
   it("the web app has no such read: an empty paste is left alone", () => {

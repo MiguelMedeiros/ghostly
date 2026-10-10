@@ -133,6 +133,39 @@ describe("a share from another app", () => {
     expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]);
   });
 
+  it("lets its copies go once read, the ones too large to paste and an overtaken share's too", async () => {
+    const shares: unknown[] = [{ title: "", text: "", files: [{ token: "video", name: "VID_1.mp4", size: 4, mime: "video/mp4" }] }];
+    let videoRead: (bytes: number[]) => void = () => {};
+    const done: unknown[] = [];
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      if (command === "incoming_share_done") return void done.push(args!.tokens);
+      if (command === "read_pasted_bytes") {
+        if (args!.token === "video") return new Promise<number[]>((resolve) => { videoRead = resolve; });
+        return args!.offset === 0 ? [1, 2, 3] : [];
+      }
+      throw new Error(command);
+    });
+    let arrived: () => void = () => {};
+    takeIncomingShares(invoke as never, async (_event, handler) => { arrived = handler; });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("read_pasted_bytes", expect.objectContaining({ token: "video" })));
+    // Still being read: its copy stays.
+    expect(done).toEqual([]);
+
+    shares.push({
+      title: "",
+      text: "",
+      files: [{ token: "photo", name: "IMG_1.jpg", size: 3, mime: "image/jpeg" }, { token: "huge", name: "huge.bin", size: 2 ** 40, mime: null }],
+    });
+    arrived();
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]));
+    expect(done).toEqual([["photo", "huge"]]);
+
+    // The overtaken video, read in the end: its copy goes too.
+    videoRead([1, 2, 3, 4]);
+    await vi.waitFor(() => expect(done).toEqual([["photo", "huge"], ["video"]]));
+  });
+
   it("is nothing when none waits", async () => {
     const invoke = vi.fn(async () => null);
     takeIncomingShares(invoke as never, async () => undefined);

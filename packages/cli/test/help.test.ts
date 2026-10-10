@@ -57,4 +57,32 @@ describe("help", () => {
     expect((await ghostly(["frobnicate"])).json).toMatchObject({ error: { code: "usage", message: "Unknown command: frobnicate (ghostly help)" } });
     expect((await ghostly(["help", "listen"])).stdout).toContain("[--print]");
   });
+
+  it("a line of only global options names no command: it is the help, not an unknown command", async () => {
+    for (const args of [["--pretty"], ["-p", "bot"], ["--profile", "bot"], ["--profile=bot", "--pretty"], ["--home", "/h"]]) {
+      const { code, stdout } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(stdout, args.join(" ")).toContain("Usage: ghostly <command>");
+    }
+  });
+
+  it("the version is in the help, and help version answers it", async () => {
+    expect((await ghostly(["help"])).stdout).toMatch(/^ {2}version\s.*--version/m);
+    const one = await ghostly(["help", "version"]);
+    expect(one.code).toBe(0);
+    expect(one.stdout).toContain("Usage: ghostly version");
+    expect((await ghostly(["version"])).json).toHaveProperty("version");
+    expect((await ghostly(["--pretty", "--version"])).json).toHaveProperty("version");
+  });
+
+  it("shows an option only in the form the command takes, its text apart from it however long it is", async () => {
+    const backup = (await ghostly(["help", "profile", "backup"])).stdout;
+    // The command refuses a passphrase on the line: only --no-passphrase works.
+    expect(backup).toMatch(/^ {2}--no-passphrase\s+Do not encrypt/m);
+    expect(backup).not.toMatch(/^ {2}--passphrase\s/m);
+    for (const words of [["profile", "backup"], ["profile", "restore"]]) {
+      const { stdout } = await ghostly(["help", ...words]);
+      expect(stdout, words.join(" ")).toMatch(/--passphrase-file <value> {2,}The passphrase/);
+    }
+  });
 });
