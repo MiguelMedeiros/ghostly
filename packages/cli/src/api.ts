@@ -18,6 +18,7 @@ import { IDENTITY_METHODS } from "./identities";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
+import { APP_SERVE_METHODS } from "./appServe";
 import { WALLET_METHODS } from "./wallets";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
@@ -101,6 +102,7 @@ const METHODS: Record<string, Method> = {
   ...SERVICE_METHODS,
   ...BACKUP_METHODS,
   ...CALL_METHODS,
+  ...APP_SERVE_METHODS,
 
   async status(ctx) {
     const s = state(ctx);

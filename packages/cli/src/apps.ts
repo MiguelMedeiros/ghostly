@@ -174,11 +174,17 @@ function described(bundle: AppBundle, bytes: Uint8Array) {
 
 /** `app verify <bundle|url>`: every check a client makes before it stores a bundle (WISP 1200 · Reading a bundle). */
 export async function verifyApp(source: string): Promise<Record<string, unknown>> {
+  const { bundle, bytes } = await checkedBundle(source);
+  return { valid: true, ...described(bundle, bytes), manifest: bundle.manifest };
+}
+
+/** A bundle from a file or an https URL, with every check of `app verify`; `url` when it came from one. */
+export async function checkedBundle(source: string): Promise<{ bundle: AppBundle; bytes: Uint8Array; url?: string }> {
   const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(source);
   const bytes = isUrl ? await fetchBundle(source) : readBundleFile(resolve(source));
   const read = readAppBundle(bytes);
   if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
-  return { valid: true, ...described(read.bundle, bytes), manifest: read.bundle.manifest };
+  return { bundle: read.bundle, bytes, ...(isUrl && { url: source }) };
 }
 
 // ---------- starting an app ----------

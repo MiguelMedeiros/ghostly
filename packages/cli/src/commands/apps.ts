@@ -1,6 +1,6 @@
 import { initApp, publishApp, revokeApp, signStore, verifyApp } from "../apps";
 import { CliError } from "../errors";
-import type { Command } from "./shared";
+import { here, type Command } from "./shared";
 
 /** The key file a command signs with: always named, never a default, never on the command line itself. */
 function keyFile(value: unknown, usage: string): string {
@@ -11,8 +11,9 @@ function keyFile(value: unknown, usage: string): string {
 const key = { type: "string", description: "The key file (made, owner-only, when it is missing)" } as const;
 
 /**
- * The publisher tools of WISP 1200 (Apps · Publishing): they run here, on files, with no profile or daemon. One entry
- * per command, in alphabetical order (test/commands.test.ts checks).
+ * The publisher tools of WISP 1200 (Apps · Publishing): they run here, on files, with no profile or daemon. And the
+ * apps a profile serves as a bot (`app serve`, `app served`, `app unserve`), which are the profile's. One entry per
+ * command, in alphabetical order (test/commands.test.ts checks).
  */
 export const commands: Record<string, Command> = {
   "app init": {
@@ -52,6 +53,26 @@ export const commands: Record<string, Command> = {
       digests: options.digest as string[] | undefined, upTo: options["up-to"] as number | undefined,
       reason: options.reason as string | undefined, bundle: options.bundle as string | undefined,
     }),
+  },
+  "app serve": {
+    method: "app.serve", usage: "app serve <bundle|url> --grant chat [--grant name] [--url <url>]",
+    summary: "Serve an app as a bot (WISP 1200): its signed .ghostlyapp is checked as a client would, and the profile speaks the app's messages in chats itself; each permission the app asks needs its --grant",
+    args: ["bundle"],
+    options: {
+      grant: { type: "list", description: "A permission the app asks and you allow: chat (talk to the contact's app) or name (your name in that chat); again for each" },
+      url: { type: "string", description: "Where a contact's app reads the bundle, for the card (default: the URL it was served from, else the manifest's first source)" },
+    },
+    params: ({ options }, a) => ({ bundle: /^[a-z][a-z0-9+.-]*:\/\//i.test(a.bundle ?? "") ? a.bundle : here(a.bundle), grant: options.grant, url: options.url }),
+  },
+  "app served": {
+    method: "app.served", usage: "app served",
+    summary: "The apps this profile serves as a bot, and whether apps/1 is offered to contacts now",
+  },
+  "app unserve": {
+    method: "app.unserve", usage: "app unserve <ref|name>",
+    summary: "Stop serving an app, by its reference or its name",
+    args: ["ref"],
+    params: (_, a) => ({ ref: a.ref }),
   },
   "app verify": {
     method: "app.verify", usage: "app verify <bundle|url>",
