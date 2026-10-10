@@ -26,6 +26,9 @@ section: For users / Chat
 - Until 1.2.0, an Apps entry (section `... / Apps`, or text about the apps flag, WISP 1200 or `apps/1`) must say
   `release: 1.2`, and `section` and `release` are the only keys: the check refuses anything else, so a misspelled
   `release` never lets an entry out early.
+- Until 1.3.0, an entry about the native Android app (section `... / Android`, or text that names the Android app or
+  an APK) must say `release: 1.3`: the app is in no release before it. The web app on an Android phone is not the
+  native app; write "on Android" there.
 
 ```markdown
 ---

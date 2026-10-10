@@ -45,6 +45,14 @@ export const RELEASE_GUARDS = [
     about: "Apps",
     entry: ({ group, body }) => group === "Apps" || /apps flag|WISP 1200|\bapps\/1\b/i.test(body ?? ""),
   },
+  // No flag, so it holds entries only: the native Android app is a build of its own, in no release before
+  // ANDROID_FROM in .github/workflows/release.yml (the owner's decision, 2026-10-10), which `from` follows.
+  {
+    from: "1.3.0",
+    release: "1.3",
+    about: "Android app",
+    entry: ({ group, body }) => group === "Android" || /\bAndroid app\b|\bAPK\b/i.test(body ?? ""),
+  },
 ];
 
 /** The only front matter keys a fragment has: a misspelled `release` would otherwise leave its entry unheld. */
@@ -83,7 +91,8 @@ export function parseFragment(name, text, version) {
     if (version !== undefined && !versionBefore(version, guard.from)) continue;
     if (!guard.entry({ group, body })) continue;
     if (release === undefined || (releaseOk && versionBefore(release, guard.release))) {
-      problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (it ships with ${guard.flag} from ${guard.from})`);
+      const ships = guard.flag ? `it ships with ${guard.flag} from ${guard.from}` : `it is in no release before ${guard.from}`;
+      problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (${ships})`);
     }
   }
   return { heading, group, body, release, problems };
