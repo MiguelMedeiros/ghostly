@@ -1,7 +1,8 @@
 import { useId, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { AppPreview, AppStorePreview } from "@ghostly/browser/engine/apps";
+import type { AppPreview, AppStorePreview, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { useFocusBack } from "../../hooks/useFocusBack";
 import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice, input } from "../wallet/ui";
 import { AppInstallDialog } from "./AppInstallDialog";
@@ -20,7 +21,7 @@ function hostOf(url: string): string {
   try { return new URL(url).host; } catch { return url; }
 }
 
-export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; onStoreAdded: () => void }) {
+export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: () => void; onStoreAdded: () => void; onInstalled?: (app: InstalledAppView) => void }) {
   const { t } = useI18n();
   const titleId = useId();
   const fieldId = useId();
@@ -29,6 +30,7 @@ export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; o
   useDialogFocus(ref, onClose);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const focusBack = useFocusBack(busy);
   const [error, setError] = useState<string | null>(null);
   const [app, setApp] = useState<{ url: string; preview: AppPreview } | null>(null);
   const [store, setStore] = useState<AppStorePreview | null>(null);
@@ -36,6 +38,7 @@ export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; o
   const check = async () => {
     const link = url.trim();
     if (!link) return;
+    focusBack();
     setBusy(true); setError(null); setStore(null);
     try {
       if (!/\.json(?:[?#].*)?$/i.test(link)) {
@@ -53,12 +56,13 @@ export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; o
 
   const addStore = async () => {
     if (!store) return;
+    focusBack();
     setBusy(true); setError(null);
     try { await engine.call("appStoreAdd", { url: store.url, key: store.key }); onStoreAdded(); onClose(); }
     catch (e) { setError(appErrorText(e, t)); } finally { setBusy(false); }
   };
 
-  if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} />;
+  if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="apps-add-dialog"
@@ -80,13 +84,13 @@ export function AddAppDialog({ onClose, onStoreAdded }: { onClose: () => void; o
         {store && (
           <div className="space-y-3" data-testid="apps-add-store">
             <div className="bg-surface rounded-xl px-4 py-3 space-y-1">
-              <p className="text-sm text-text-primary">{store.name}</p>
+              <p dir="auto" className="text-sm text-text-primary">{store.name}</p>
               <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
                 <span>{store.kind === "indexed" ? t("apps.store.indexed") : t("apps.store.curated")}</span>
                 <span>{t(store.apps === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps })}</span>
                 <Fingerprint value={store.fingerprint} />
               </p>
-              {store.description && <p className="text-xs text-text-secondary whitespace-pre-line">{store.description}</p>}
+              {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires) })}</p>}
             </div>
             <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>

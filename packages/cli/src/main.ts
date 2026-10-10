@@ -2,10 +2,10 @@ import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
-import { GLOBAL_OPTIONS, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { callApi, redactSettings } from "./api";
+import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
+import { callApi, redactSettings, SETTABLE } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
-import { COMMANDS, idSlot, positionals, TEXT_COMMANDS } from "./commands";
+import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -103,7 +103,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["profile use <name>", "Make a profile the current one"],
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)") }],
-  ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: o("boolean", "--no-passphrase: do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
+  ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
   ["daemon status", "Whether a daemon runs the profile, its version, and its socket (for the socket API)"],
@@ -127,6 +127,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     signer: o("string", "Which signer makes the proof (identity providers lists them)"), field: o("list", "A field of the provider's form, name=value"),
     days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval"),
   }],
+  ["version", "This CLI's version (also ghostly --version)"],
 ];
 
 function help(): string {
@@ -191,7 +192,10 @@ export function commandHelp(words: readonly string[]): string {
       const options = Object.entries(row.options ?? {}).filter(([, o]) => o.description);
       if (options.length) {
         lines.push("", "Options:");
-        for (const [name, o] of options) lines.push(`  --${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`.padEnd(26) + o.description);
+        const labels = options.map(([name, o]) => `  --${o.negatedOnly ? "no-" : ""}${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`);
+        // At least two spaces between an option and its text, however long the option.
+        const width = Math.max(26, ...labels.map((label) => label.length + 2));
+        options.forEach(([, o], i) => lines.push(labels[i].padEnd(width) + o.description));
       }
       // A text that starts with a dash goes after `--`, and so does everything else on the line.
       if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))
@@ -234,6 +238,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     case "list": {
+      noMoreThan(0, parsed.positionals, "profile list");
       const current = currentProfile(g.home);
       print({ profiles: listProfiles(g.home).map((name) => ({ name, current: name === current, running: lockOwner(profilePaths(g.home, name)) !== null })), home: g.home });
       return;
@@ -241,14 +246,17 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     case "use": {
       const [name] = parsed.positionals;
       if (!name) throw new CliError("usage", "ghostly profile use <name>");
+      noMoreThan(1, parsed.positionals, "profile use <name>");
       selectProfile(g.home, name);
       print({ current: name });
       return;
     }
     case "show":
+      noMoreThan(0, parsed.positionals, "profile show");
       print(await withSession(g, (s) => s.call("profile.get")));
       return;
     case "set": {
+      noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile]");
       const params: Record<string, unknown> = {};
       if (parsed.options.name !== undefined) params.name = parsed.options.name;
       if (parsed.options["share-profile"] !== undefined) params.shareProfile = parsed.options["share-profile"];
@@ -257,6 +265,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     case "backup": {
+      noMoreThan(0, parsed.positionals, "profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]");
       const out = parsed.options.out;
       if (typeof out !== "string") throw new CliError("usage", "ghostly profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light] (or GHOSTLY_BACKUP_PASSPHRASE)");
       // Encrypted unless --no-passphrase says otherwise, and never a guess: a passphrase and --no-passphrase together are refused.
@@ -272,6 +281,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     case "restore": {
       const [file, name] = parsed.positionals;
       if (!file || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
       const protection = await backupFileProtection(file);
       const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"]));
@@ -332,6 +342,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
+  if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub}` : "daemon [--detach]");
   if (sub === "status") {
     const client = await connectDaemon(g.paths.socket);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
@@ -484,7 +495,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, list: { type: "boolean", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (parsed.options.list) { print({ methods: [...ENGINE_METHODS, ...ENGINE_READS].sort() }); return; }
+  if (parsed.options.list) { noMoreThan(0, parsed.positionals, "engine --list"); print({ methods: [...ENGINE_METHODS, ...ENGINE_READS].sort() }); return; }
   const [method, raw] = parsed.positionals;
   if (!method || parsed.positionals.length > 2) throw new CliError("usage", "ghostly engine <method> [json-params | -]");
   if (!ENGINE_METHODS.includes(method) && !ENGINE_READS.includes(method)) throw new CliError("not_found", `The engine has no call ${method} (ghostly engine --list)`);
@@ -510,12 +521,14 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
   const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (sub === "get") { print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }))); return; }
+  if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }))); return; }
   if (sub === "set") {
     const [key, value] = parsed.positionals;
     if (!key || value === undefined || parsed.positionals.length > 2) throw new CliError("usage", "ghostly settings set <key> <json-value>");
     let parsedValue: unknown;
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
+    // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
+    if (SETTABLE[key] === "string" && typeof parsedValue !== "string") parsedValue = value;
     print(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })));
     return;
   }
@@ -679,7 +692,8 @@ function helpAsked(argv: readonly string[]): string[] | null {
 
 export async function main(input: string[]): Promise<number> {
   const argv = liftGlobals(input);
-  const helpFor = argv.length === 0 ? [] : helpAsked(argv);
+  // Global options alone (`ghostly --pretty`, `ghostly -p bot`) name no command: lifted, one of them comes first.
+  const helpFor = argv.length === 0 || globalOption(argv[0]) ? [] : helpAsked(argv);
   if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help()) + "\n"); return 0; }
   if (argv[0] === "--version" || argv[0] === "version") { print({ version: VERSION }); return 0; }
   const [first, second] = argv;

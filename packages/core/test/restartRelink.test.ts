@@ -146,10 +146,11 @@ function report(result: Result): void {
  * `endpointAfterMs`: the restarted app's native endpoint starts this long after it.
  * `cli`: the staying side's WebRTC never says `disconnected` and goes `failed` `rtcFailsAfterMs` after the crash
  * (node-datachannel), and the restarted app's native dials do not reach it, failing after `dialFailMs`.
+ * `restartAfterMs`: how long the app is gone.
  */
 async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number, endpointAfterMs?: number,
   cli?: { rtcFailsAfterMs: number; dialFailMs: number },
-  readsHeld?: { afterMs: number; forMs: number; restartedWrites?: { afterMs: number; forMs: number } }): Promise<Result> {
+  readsHeld?: { afterMs: number; forMs: number; restartedWrites?: { afterMs: number; forMs: number } }, restartAfterMs = RESTART_AFTER_MS): Promise<Result> {
   const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
   // The inviter has the lower link key here: it is the one that dials.
   const made = invitationWhere("inviter");
@@ -169,7 +170,7 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budg
   // When the staying side lets the old session go (it may only do so once the other app is back).
   let downSeenAt = 0;
   const watch = () => { if (!downSeenAt && channelOf(stays) !== before) downSeenAt = Date.now(); };
-  for (let t = 0; t < RESTART_AFTER_MS; t += 100) { await run(100); watch(); }
+  for (let t = 0; t < restartAfterMs; t += 100) { await run(100); watch(); }
   const dhtState = goes.dhtState;
   goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, dhtState, true, endpointAfterMs);
   const restartedAt = Date.now();
@@ -219,6 +220,22 @@ describe.each(["iroh", "webrtc"] as const)("a paired chat over %s after one app 
       expect(result.dialFailures).toBe(0);
     }, 240_000);
   });
+});
+
+/**
+ * A tab that crashed is opened again by hand, or by a busy machine: seconds later, once the contact's connection already
+ * went `disconnected` (5 s here, 7.6 s in Chromium). The contact read the packet once as it did, found no offer yet, and
+ * read again only when the connection's grace ran out, 12 s later: two pages were live 11 s after the reload (19.9 s
+ * after the crash), past the 15 s e2e/web/restart-relink.spec.ts allows whenever the reload was that slow.
+ */
+describe("a WebRTC chat whose crashed app is back after the contact's connection went disconnected", () => {
+  it.each(["lower", "higher"] as const)("the app with the %s key: its offer is read while the connection stays so, not when its grace runs out", async restarted => {
+    const result = await restart("webrtc", restarted, "crash", undefined, undefined, undefined, undefined, 6_000);
+    // Before: 9.3 s (lower) and 9.6 s (higher), the rest of the grace; 3.3 s and 3.6 s now.
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(5_000);
+    expect(result.requestsPerMin).toBeLessThanOrEqual(10);
+    expect(result.dialFailures).toBe(0);
+  }, 240_000);
 });
 
 /**

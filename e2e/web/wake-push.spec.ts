@@ -13,7 +13,19 @@ import { chat, connect, expect, link, openProfilePage, say, test, type Peer } fr
  */
 const deployed = !!process.env.E2E_WEB_URL;
 // Chromium's headless shell refuses notifications outright; the full browser in its headless mode shows them.
-test.use({ channel: "chromium" });
+test.use({
+  channel: "chromium",
+  launchOptions: {
+    args: [
+      // The project's own arguments, and `NativeNotifications` off: Chromium then keeps a notification in its own list.
+      // Handed to the machine's notification service instead, it stays in `getNotifications()` only as long as that
+      // service keeps it (under 50 ms on a desktop whose service drops it), and the specs read that list.
+      "--disable-features=WebRtcHideLocalIpsWithMdns,NativeNotifications",
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
+    ],
+  },
+});
 const ENDPOINT = "https://fcm.googleapis.com/fcm/send/bo";
 
 /** Bo's browser subscription: the test keeps its private halves, to read what arrives. */

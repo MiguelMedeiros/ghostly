@@ -119,6 +119,7 @@
   "option": {
     "automatic": "Automático",
     "automaticHint": "Os apps escolhem, WebRTC primeiro",
+    "automaticHintNative": "Os apps escolhem, {{transport}} primeiro: este app não tem WebRTC",
     "chosenNotInUse": "Escolhido · fora de uso",
     "chosenWaiting": "Escolhido · aguardando",
     "contactLacks": "O app do seu contato não suporta {{transport}}",
@@ -198,6 +199,7 @@
     "afterDrop": "Automático: a conversa voltou via {{transport}} depois que o transporte anterior caiu.",
     "afterDropShort": "automático, após uma queda",
     "automatic": "Automático: os dois apps preferem {{transport}}.",
+    "automaticNoWebrtc": "Automático: os apps usam {{transport}}, que os dois têm; um deles não tem WebRTC.",
     "automaticWebrtc": "Automático: os dois apps preferem WebRTC, e um primeiro pareamento sempre usa WebRTC.",
     "contactChose": "{{contact}} escolheu {{transport}} para esta conversa.",
     "fallback": "Você escolheu {{preferred}} para esta conversa; ele não está disponível agora, então a conversa usa {{transport}}.",

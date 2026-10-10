@@ -48,6 +48,7 @@
   "noEmoji": "絵文字が見つかりません",
   "noGifs": "GIF が見つかりません",
   "overSoft": "DHT で送れる {{bytes}} バイトを超えています。直接接続されると送信されます",
+  "pasteReading": "貼り付けた内容を読み込んでいます…",
   "payment": "支払い",
   "placeholder": "メッセージ…",
   "previewLoading": "{{host}} のプレビューを読み込み中…",

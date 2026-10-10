@@ -140,6 +140,32 @@ describe("MessageBubble: money in a message", () => {
     expect(engine.callsTo("walletInspectCashu")).toEqual([{ text: TOKEN }]);
   });
 
+  it("keeps the card of a token too long for a QR, with Redeem and Copy", async () => {
+    // 11 proofs with their DLEQ come to about 3,300 characters, past the 2,953 bytes one QR code holds.
+    const big = "cashuB" + "o".repeat(3300);
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 2047, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+    bubble({ text: `here you go ${big}` });
+    const card = await screen.findByTestId("cashu-token-bubble");
+    expect(screen.queryByTestId("message-unshowable")).not.toBeInTheDocument();
+    expect(within(card).getByTestId("token-redeem")).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(within(card).getByTestId("qr-too-long")).toHaveTextContent("Too long for a QR code");
+    expect(card.querySelector("svg")).toBeNull();
+  });
+
+  it("shows an ecash token of another unit as one this wallet cannot take", async () => {
+    // 500 usd is $5.00 (the unit's cents): never a bolt and a raw 500, and nothing to redeem.
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 500, unit: "usd", mint: "https://mint.example.com", accepted: false } }));
+    bubble({ text: TOKEN });
+    const card = await screen.findByTestId("cashu-token-bubble");
+    expect(card).toHaveTextContent("A usd token");
+    expect(card).toHaveTextContent("Only sat ecash can be redeemed here.");
+    expect(card).not.toHaveTextContent("⚡");
+    expect(card).not.toHaveTextContent("You have not added this mint");
+    expect(within(card).queryByTestId("money-amount")).not.toBeInTheDocument();
+    expect(within(card).queryByTestId("token-redeem")).not.toBeInTheDocument();
+  });
+
   it("leaves a payment's text to its payment bubble", () => {
     bubble({ text: INVOICE, paymentId: "pay-9" });
     expect(screen.queryByTestId("invoice-bubble")).not.toBeInTheDocument();
@@ -420,6 +446,41 @@ describe("MessageBubble: delivery", () => {
     expect(engine.callsTo("retryMessage")).toEqual([{ linkId: "link-1", messageId: "m1" }]);
   });
 
+  it.each([
+    ["64 items", "At most 64 items can wait for this contact. Wait until some are picked up.", "Your contact already has 64 items waiting. Send it again once they pick some up."],
+    ["64 MB", "Items waiting for this contact would exceed 64 MB. Wait until some are picked up.", "This would put more than 64 MB waiting for your contact. Send it again once they pick some up."],
+  ])("a held message with no room left in the contact's storage (%s) says why on its red mark, and again when a tap is refused", async (_, full, said) => {
+    const { user, engine } = bubble({ sender: "me", delivery: "failed", deliveryError: full });
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("retryMessage", () => { throw new Error(full); });
+    const red = screen.getByRole("button", { name: said });
+    await user.hover(red);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(said);
+    await user.unhover(red);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await user.click(red);
+    expect(engine.callsTo("retryMessage")).toHaveLength(1);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(said);
+    // The mark said it: not a second time under the message.
+    expect(screen.queryByTestId("message-retry-error")).not.toBeInTheDocument();
+  });
+
+  it("⋮ → Send again refused for a full storage says it under the message, where there is no mark to say it on", async () => {
+    const full = "At most 64 items can wait for this contact. Wait until some are picked up.";
+    const { user, engine } = bubble({ sender: "me", delivery: "failed", deliveryError: full });
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("retryMessage", () => { throw new Error(full); });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-retry"));
+    expect(await screen.findByTestId("message-retry-error-title")).toHaveTextContent("Your contact already has 64 items waiting");
+    expect(screen.getByTestId("message-retry-error-next")).toHaveTextContent("Send it again once they pick some up.");
+  });
+
+  it("says a full storage in the person's language", () => {
+    renderApp(<MessageBubble message={message({ sender: "me", delivery: "failed", deliveryError: "At most 64 items can wait for this contact. Wait until some are picked up." })} peerPubKey="peer" />, { language: "pt" });
+    expect(screen.getByTestId("message-delivery")).toHaveAccessibleName("Seu contato já tem 64 itens esperando. Envie de novo quando seu contato pegar alguns.");
+  });
+
   it("⋮ → Send again sends a message that was not sent; a sent one has no such row", async () => {
     const { user, engine, rerender } = bubble({ sender: "me", delivery: "failed" });
     act(() => engine.update({ links: [linkView()] }));
@@ -460,6 +521,28 @@ describe("MessageBubble: delivery", () => {
     expect(onDelete).toHaveBeenCalledOnce();
   });
 
+  it("says why a Send again was refused under the message, in the app's words, until the message is sent", async () => {
+    const { user, engine, rerender } = bubble({ sender: "me", delivery: "failed" });
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("retryMessage", () => { throw new Error("Held messages need S3 storage (Profile → Backups) and a contact that allows them."); });
+    await user.click(screen.getByRole("button", { name: "Not sent. Send again" }));
+    const notice = await screen.findByTestId("message-retry-error");
+    expect(notice).toHaveAttribute("data-tone", "error");
+    expect(screen.getByTestId("message-retry-error-title")).toHaveTextContent("This message can't be held");
+    expect(screen.getByTestId("message-retry-error-next")).toHaveTextContent("Set up S3 storage in Profile → Backups, and ask your contact to allow held messages.");
+    rerender(<MessageBubble message={message({ sender: "me", delivery: "sent" })} peerPubKey="peer" />);
+    expect(screen.queryByTestId("message-retry-error")).not.toBeInTheDocument();
+  });
+
+  it("says why Cancel sending was refused", async () => {
+    const { user, engine } = bubble({ sender: "me", delivery: "waiting" });
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("deleteMessage", () => { throw new Error("Chat not found"); });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-cancel-sending"));
+    expect(await screen.findByTestId("message-retry-error-title")).toHaveTextContent("Chat not found");
+  });
+
   it("does not retry into a chat that is not there", async () => {
     const { user, engine } = bubble({ sender: "me", delivery: "failed" });
     await user.click(screen.getByRole("button", { name: "Not sent. Send again" }));
@@ -479,6 +562,16 @@ describe("MessageBubble: delivery", () => {
     // Declined: the message arrived, its file did not; the ticks stay and nothing is offered again.
     act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 0, size: 10, error: "Declined by your contact" } } }));
     expect(mark()).toHaveAttribute("data-delivery", "delivered");
+  });
+
+  it("says why the red mark could not send a file again", async () => {
+    vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
+    vi.spyOn(servicesPlatform!, "retryFile").mockRejectedValue(new Error("This file is no longer here"));
+    const file = { id: "link-1-out-f", name: "report.pdf", size: 10, mime: "application/pdf" };
+    const { user, engine } = bubble({ sender: "me", text: "report.pdf", file, delivery: "delivered" });
+    act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 2, size: 10, error: "Connection lost", retry: true } } }));
+    await user.click(screen.getByRole("button", { name: "Not sent. Send again" }));
+    expect(await screen.findByTestId("message-retry-error-title")).toHaveTextContent("This file is no longer here");
   });
 
   it("marks a picture of mine on the dark chip over it, the same way", () => {

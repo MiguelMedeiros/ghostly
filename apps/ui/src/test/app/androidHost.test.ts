@@ -134,6 +134,84 @@ describe("a share from another app", () => {
     expect([...new Set(reads)]).toEqual(["paste-1", "paste-2", "paste-3", "paste-4", "paste-32"]);
   });
 
+  it("taken later wins over a big one a chat still reads, and an emptied late one clears nothing", async () => {
+    const shares: unknown[] = [{ title: "", text: "", files: [{ token: "video", name: "VID_1.mp4", size: 4, mime: "video/mp4" }] }];
+    let videoRead: (bytes: number[]) => void = () => {};
+    const done: unknown[] = [];
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      if (command === "incoming_share_done") return void done.push(args!.tokens);
+      if (command === "read_pasted_bytes") {
+        if (args!.token === "video") return new Promise<number[]>((resolve) => { videoRead = resolve; });
+        return args!.offset === 0 ? [1, 2, 3] : [];
+      }
+      throw new Error(command);
+    });
+    let arrived: () => void = () => {};
+    takeIncomingShares(invoke as never, async (_event, handler) => { arrived = handler; });
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["VID_1.mp4"]));
+    // A chat takes the video: its read goes on.
+    const video = shareFiles(incomingShare()!);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("read_pasted_bytes", expect.objectContaining({ token: "video" })));
+
+    // The person changed their mind: a photo, in the picker at once.
+    shares.push({ title: "", text: "", files: [{ token: "photo", name: "IMG_1.jpg", size: 3, mime: "image/jpeg" }] });
+    arrived();
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]));
+    // Still being read: the video's copy stays.
+    expect(done).toEqual([]);
+
+    // The video's read ends after it: the photo stays, and the video's copy goes.
+    videoRead([1, 2, 3, 4]);
+    expect((await video).map((file) => file.name)).toEqual(["VID_1.mp4"]);
+    expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]);
+    expect(done).toEqual([["video"]]);
+
+    // An older share that reached Rust last, its file gone: nothing in it, so the photo still waits, its copy kept.
+    shares.push({ title: "", text: "", files: [] });
+    arrived();
+    await vi.waitFor(() => expect(shares).toHaveLength(0));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]);
+    expect(done).toEqual([["video"], []]);
+  });
+
+  it("lets its copies go once read, the ones too large to paste and an overtaken share's too", async () => {
+    const shares: unknown[] = [{ title: "", text: "", files: [{ token: "video", name: "VID_1.mp4", size: 4, mime: "video/mp4" }] }];
+    const done: unknown[] = [];
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      if (command === "incoming_share_done") return void done.push(args!.tokens);
+      if (command === "read_pasted_bytes") return args!.offset === 0 ? [1, 2, 3] : [];
+      throw new Error(command);
+    });
+    let arrived: () => void = () => {};
+    takeIncomingShares(invoke as never, async (_event, handler) => { arrived = handler; });
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["VID_1.mp4"]));
+    // Not read yet: its copy stays.
+    expect(done).toEqual([]);
+
+    // A later share takes its place before any chat read it: the video's copy goes.
+    shares.push({
+      title: "",
+      text: "",
+      files: [{ token: "photo", name: "IMG_1.jpg", size: 3, mime: "image/jpeg" }, { token: "huge", name: "huge.bin", size: 2 ** 40, mime: null }],
+    });
+    arrived();
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]));
+    expect(done).toEqual([["video"]]);
+
+    // Read by the chat picked: its copies go, the one left out with them, and only once.
+    await shareFiles(incomingShare()!);
+    expect(done).toEqual([["video"], ["photo", "huge"]]);
+
+    // Nothing of a share the page takes (too large to paste): its copy goes at once.
+    shares.push({ title: "", text: "see this", files: [{ token: "movie", name: "movie.mkv", size: 2 ** 40, mime: null }] });
+    arrived();
+    await vi.waitFor(() => expect(incomingShare()?.text).toBe("see this"));
+    expect(done).toEqual([["video"], ["photo", "huge"], ["movie"]]);
+  });
+
   it("is nothing when none waits", async () => {
     const invoke = vi.fn(async () => null);
     takeIncomingShares(invoke as never, async () => undefined);

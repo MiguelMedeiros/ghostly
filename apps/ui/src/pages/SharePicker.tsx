@@ -12,7 +12,7 @@ const WAIT_MS = 5000;
 /**
  * "Share to…": something another app shared into Ghostly waits here for a chat. Picking one opens it with the
  * text in the draft and the files on the attachment sheet, to look over and send there; nothing is sent from
- * here. Groups take text only (files are not part of groups yet), so a share with files lists 1:1 chats.
+ * here. Groups take files as chats do (WISP 503).
  * A chat is never picked for the person, not even when there is only one: any website can post a share.
  */
 export function SharePicker() {
@@ -26,7 +26,7 @@ export function SharePicker() {
   }, []);
 
   const hasFiles = !!share?.files.length;
-  const targets = useChatTargets({ files: hasFiles });
+  const targets = useChatTargets();
   const preview = share ? shareText(share) : "";
 
   const pick = (chat: string, path: string) => {
@@ -47,12 +47,13 @@ export function SharePicker() {
           <div className="rounded-xl bg-surface px-4 py-3 space-y-1" data-testid="share-summary">
             {/* Any website can post to the share target, so the page says where this came from. */}
             <p className="m-0 text-xs font-medium text-text-secondary" data-testid="share-from">{t("pwa.shareFrom")}</p>
+            {/* Text and names from another app read in their own direction, so English keeps its "!" at its end in Arabic. */}
             {hasFiles && (
-              <p className="m-0 text-sm text-text-primary font-medium" data-testid="share-files">
+              <p dir="auto" className="m-0 text-sm text-text-primary font-medium" data-testid="share-files">
                 {share.files.length === 1 ? share.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(share.files.length) })}
               </p>
             )}
-            {preview && <p className="m-0 text-sm text-text-secondary line-clamp-3 break-words whitespace-pre-line" data-testid="share-text">{preview}</p>}
+            {preview && <p dir="auto" className="m-0 text-sm text-text-secondary line-clamp-3 break-words whitespace-pre-line" data-testid="share-text">{preview}</p>}
             <p className="m-0 text-xs text-text-muted">{t("pwa.shareHint")}</p>
           </div>
 

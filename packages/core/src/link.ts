@@ -80,8 +80,20 @@ export const EXPECT_PEER_MS = 30_000;
  * or the session dropped): an app that restarts is back within this, and its dial or offer is seen in seconds.
  */
 export const WATCH_PEER_MS = 2 * 60_000;
+/**
+ * The longest a link reads fast for a data link whose connection went `disconnected` (`setDataLinkStalled`): a little
+ * past the 12 s such a connection is given (`DISCONNECT_GRACE_MS`), by when it is back or the session is gone.
+ */
+export const STALLED_LOOK_MS = 15_000;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
+/**
+ * A group link's peer whose packet advertises and carries no `_tr` on every read for this long publishes none: what it
+ * said before is forgotten (WISP 902 § Transports). Not at the first such packet: an app with no WebRTC (a Linux
+ * Desktop) publishes its `_tr` only once a native endpoint is up, seconds after its first packet of a run, and what it
+ * said in the run before still holds meanwhile. On this side's clock, from the first read that found it so.
+ */
+export const TRANSPORTS_GONE_MS = 2 * 60_000;
 const PUBLISH_RETRY_MS = 4_000;
 /**
  * A packet the relays' request budget held back goes again when the budget frees a request, and at least this often
@@ -139,15 +151,17 @@ export interface LinkSessionEvents {
   onPeerClock?(packetAt: number, readBefore: number, readAt: number): void;
   /** The peer's packet carries a new `_tr` value (a group link's transports, `parsePacketTransports`). */
   onPeerTransports?(value: string): void;
+  /** The peer's packet has said no `_tr` for `TRANSPORTS_GONE_MS`: the peer publishes none (any more). Once per such stretch. */
+  onPeerTransportsGone?(): void;
   onStatus?(status: LinkStatus): void;
   /** A poll started, or finished with the next one due in `nextInMs`. */
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
   /**
    * A publish finished: how long it took, and whether it carried an `_rtc` signal. `error` when it failed; `waiting`
-   * when the relays' request budget held it back (nothing went out, and it goes again once the budget frees a request).
-   * `signalOut` when it is the first to carry the current `_rtc` signal: an offer or an answer went out now.
+   * when the relays' request budget held it back (nothing went out, and it goes again once the budget frees a request,
+   * in about `retryInMs`). `signalOut` when it is the first to carry the current `_rtc` signal: an offer or an answer went out now.
    */
-  onPublish?(result: { ms: number; rtc: boolean; error?: string; waiting?: boolean; signalOut?: boolean }): void;
+  onPublish?(result: { ms: number; rtc: boolean; error?: string; waiting?: boolean; retryInMs?: number; signalOut?: boolean }): void;
   /** The first read of the peer's key is done (with `firstPublish: "after-first-poll"`, what to publish is decided now). */
   onFirstPoll?(): void;
 }
@@ -198,6 +212,9 @@ export class LinkSession {
   /** A group link's `_tr` value this side publishes (`setTransports`), and the last the peer's packet carried. */
   private transports: string | null = null;
   private lastTransportsIn: string | null = null;
+  /** When a read first found the peer's packet advertising with no `_tr` (0: the last packet that said carried one). */
+  private transportsAbsentSince = 0;
+  private transportsGone = false;
 
   private running = false;
   /** Stopped without a last packet (`stop(false)`): nothing more goes out. */
@@ -223,6 +240,8 @@ export class LinkSession {
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private connected = false;
+  /** The open data link's connection is `disconnected`, and read fast until then (`setDataLinkStalled`). */
+  private stalledUntil = 0;
   private readonly firstPublish: "at-start" | "after-first-poll";
   private firstPublishTimer: ReturnType<typeof setTimeout> | null = null;
   private firstPollDone = false;
@@ -382,7 +401,22 @@ export class LinkSession {
   /** The data link carries chat and services while it is up. */
   setDataLinkOpen(open: boolean): void {
     this.connected = open;
+    this.stalledUntil = 0;
     if (!open) this.pollNow();
+  }
+
+  /**
+   * The open data link's connection went `disconnected` (true), or came back: the contact's app may have crashed, and
+   * once it starts again its offer is on Pkarr, which nothing on a dead data link says. Read fast for as long as it
+   * lasts (the connection is given up or back within seconds), not at the connected pace. One read as it went
+   * `disconnected` found only an offer already out: an app back a moment later (a tab opened again by hand) waited for
+   * the connection's grace to run out (web/restart-relink.spec.ts, 20 s on a busy machine). Never longer than
+   * `STALLED_LOOK_MS`, whatever becomes of the connection.
+   */
+  setDataLinkStalled(stalled: boolean): void {
+    if (stalled === Date.now() < this.stalledUntil) return;
+    this.stalledUntil = stalled ? Date.now() + STALLED_LOOK_MS : 0;
+    if (stalled) this.pollNow();
   }
 
   async setCallSignal(signal: string | null): Promise<void> {
@@ -512,7 +546,8 @@ export class LinkSession {
 
   /** How urgently this link looks right now. */
   private pace(): keyof PollIntervals {
-    // Connected peers signal over the data link; no reason to hurry Pkarr.
+    // Connected peers signal over the data link; no reason to hurry Pkarr, unless it stopped answering.
+    if (Date.now() < this.stalledUntil) return "fast";
     if (this.connected) return "connected";
     if (Date.now() < this.fastPollUntil) return "fast";
     if (Date.now() < this.watchUntil) return "active";
@@ -585,7 +620,7 @@ export class LinkSession {
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
       traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
-      this.events.onPublish?.({ ms, rtc: !!rtcSignal, error: error instanceof Error ? error.message : String(error), ...(waiting && { waiting }) });
+      this.events.onPublish?.({ ms, rtc: !!rtcSignal, error: error instanceof Error ? error.message : String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
       throw error;
     }
     const ms = Date.now() - started;
@@ -676,9 +711,21 @@ export class LinkSession {
           services: online ? batch.services : null,
         };
         // Before presence: a dial that presence starts ranks with them.
-        if (batch.transports !== null && batch.transports !== this.lastTransportsIn) {
-          this.lastTransportsIn = batch.transports;
-          this.events.onPeerTransports?.(batch.transports);
+        if (batch.transports !== null) {
+          this.transportsAbsentSince = 0; this.transportsGone = false;
+          if (batch.transports !== this.lastTransportsIn) {
+            this.lastTransportsIn = batch.transports;
+            this.events.onPeerTransports?.(batch.transports);
+          }
+        } else if (batch.services !== null && !this.transportsGone) {
+          // It advertises, and `_tr` is left out for size only after `_svc` is (`buildLinkRecords`): it set none.
+          this.transportsAbsentSince ||= Date.now();
+          if (Date.now() - this.transportsAbsentSince >= TRANSPORTS_GONE_MS) {
+            this.transportsGone = true;
+            // The value it said before, said again later, is news again.
+            this.lastTransportsIn = null;
+            this.events.onPeerTransportsGone?.();
+          }
         }
         this.events.onPresence?.(this.presence);
         if (read && readBefore && batch.packetTimestamp !== wasSeen) this.events.onPeerClock?.(batch.packetTimestamp, readBefore, Date.now());

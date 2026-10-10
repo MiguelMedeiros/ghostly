@@ -64,14 +64,14 @@ export class BitcoinService {
   }
 
   /**
-   * A transaction of the active source paying `target` at least `amount`, none of `claimed`. With a source
-   * that can list what an address received, that is the proof; otherwise the contact's `hint` txid must be
-   * one of the source's own receives of at least the amount.
+   * A transaction of the active source paying `target` at least `amount`, none of `claimed`: what the source
+   * says that address received is the only proof. A contact's txid proves nothing (it can name any receive of
+   * the wallet), so a source that cannot list an address's receives never sees a request paid.
    */
-  async received(target: PaymentTarget, amount: number, claimed: ReadonlySet<string>, hint?: string): Promise<{ txid: string; confirmations: number } | undefined> {
+  async received(target: PaymentTarget, amount: number, claimed: ReadonlySet<string>): Promise<{ txid: string; confirmations: number } | undefined> {
     const provider = this.sources.active;
-    if (!provider || target.method !== "bitcoin" || (await provider.info()).network !== target.network) return undefined;
-    const candidates = provider.received ? await provider.received(target.address) : hint ? (await provider.history(100)).filter((tx) => tx.txid === hint) : [];
+    if (!provider?.received || target.method !== "bitcoin" || (await provider.info()).network !== target.network) return undefined;
+    const candidates = await provider.received(target.address);
     const tx = candidates.find((tx) => tx.amount >= amount && !claimed.has(tx.txid) && /^[0-9a-f]{64}$/.test(tx.txid));
     return tx && { txid: tx.txid, confirmations: tx.confirmations };
   }

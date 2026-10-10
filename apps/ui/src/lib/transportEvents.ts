@@ -337,13 +337,16 @@ export function connectionSummary(link: LinkView | undefined, now: number, conta
   const t = name(transport), chosen = link.transportAutomatic === false || (link.transportAutomatic === undefined && link.preferredTransport !== undefined);
   const cause = link.transportLive?.cause, only = (link.availableTransports ?? []).length === 1;
   const relayed = link.transportRelayed;
+  // One app without WebRTC (Linux Desktop) ranks its own first: the two apps' first choices may differ.
+  const noWebrtc = !ownTransports(link).includes("webrtc/1") || !!link.peerTransports && !link.peerTransports.includes("webrtc/1");
   const [whyShort, why] = only ? [tr("connection.summary.onlyShort"), tr("connection.summary.only", { transport: t })]
     : cause === "contact" ? [contact ? tr("connection.event.contactsChoice", { contact }) : tr("connection.summary.yourContactsChoice"), tr("connection.summary.contactChose", { contact: contact ?? tr("pairing.contact"), transport: t })]
     : chosen && link.preferredTransport === transport ? [tr("connection.event.yourChoice"), tr("connection.summary.youChose", { transport: t })]
     : chosen ? [tr("connection.summary.fallbackShort"), tr("connection.summary.fallback", { preferred: name(link.preferredTransport), transport: t })]
     : cause === "dropped" ? [tr("connection.summary.afterDropShort"), tr("connection.summary.afterDrop", { transport: t })]
     : relayed ? [tr("connection.summary.noDirectShort"), tr("connection.summary.noDirect", { transport: t })]
-    : [tr("connection.event.automatic"), transport === "webrtc/1" ? tr("connection.summary.automaticWebrtc") : tr("connection.summary.automatic", { transport: t })];
+    : [tr("connection.event.automatic"), transport === "webrtc/1" ? tr("connection.summary.automaticWebrtc")
+      : tr(noWebrtc ? "connection.summary.automaticNoWebrtc" : "connection.summary.automatic", { transport: t })];
   const since = link.transportLive?.since;
   const rtt = link.transportRttMs !== undefined ? [tr("connection.ms", { ms: link.transportRttMs })] : [];
   const path = relayed ? [tr("connection.relayed")] : [];

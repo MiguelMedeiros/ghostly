@@ -122,7 +122,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           </span>
         </span>
         <div className="min-w-0 flex-1 ms-1">
-          <h2 data-testid="mini-app-title" className="m-0 text-[15px] font-semibold leading-tight text-text-primary truncate">{title}</h2>
+          <h2 data-testid="mini-app-title" dir="auto" className="m-0 text-[15px] font-semibold leading-tight text-text-primary truncate">{title}</h2>
           <p data-testid="mini-app-with" className={`m-0 text-[12px] leading-tight truncate ${named ? "text-text-secondary" : "text-text-muted italic"}`}>
             <bdi>{t("apps.view.withName", { name })}</bdi>
           </p>

@@ -109,6 +109,21 @@ pub async fn native_private_notification(id: String, body: String) -> Result<boo
     }
 }
 
+/// The chat of notification `id` was read in the app. Android keeps a notification until it is tapped or swiped (and
+/// shows none past 50 an app posted), so it goes now; elsewhere they go by themselves.
+#[tauri::command]
+pub async fn native_clear_notification(id: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::cancel_notification(&id).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = id;
+        Ok(())
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use block2::RcBlock;
@@ -340,5 +355,6 @@ mod tests {
             super::native_private_notification("1".into(), "a message".into()).await,
             Ok(false)
         );
+        assert_eq!(super::native_clear_notification("1".into()).await, Ok(()));
     }
 }

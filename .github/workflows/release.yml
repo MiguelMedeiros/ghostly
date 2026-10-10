@@ -260,8 +260,8 @@ jobs:
   # ============================================
   # Android (the native app, arm64)
   # ============================================
-  # Signed with the upload key when the repository has it (docs/ANDROID.md); without it, a debug APK, which the
-  # release attaches under a -debug name and calls out in its notes.
+  # Signed with the upload key when the repository has it (docs/ANDROID.md); without it, a debug APK, which stays
+  # the run's artifact: the release leaves it out and says so in its notes.
   build-android:
     name: Build Android APK
     uses: ./.github/workflows/android.yml
@@ -287,6 +287,12 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
+      # The tag's commit: github.sha is the dispatching branch's on a dispatch, and the default branch's on a
+      # security autorelease.
+      - name: Commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Log in to the GitHub container registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -308,10 +314,10 @@ jobs:
           file: apps/web/Dockerfile
           push: true
           build-args: |
-            GHOSTLY_BUILD=${{ github.sha }}
+            GHOSTLY_BUILD=${{ steps.commit.outputs.sha }}
+          # Only the version: `latest` moves once the release is published (web-latest.yml).
           tags: |
             ${{ steps.image.outputs.name }}:${{ env.RELEASE_TAG }}
-            ${{ steps.image.outputs.name }}:latest
 
   release:
     needs: [e2e, guard, build-tauri, build-extension, build-android]
@@ -346,8 +352,10 @@ jobs:
           name: extension
           path: artifacts/extension
 
+      # Only an APK signed with the upload key: a debug build takes the e2e launch extras and can be inspected
+      # over USB (docs/ANDROID.md), so it is to try the app and never published.
       - name: Download Android artifact
-        if: needs.build-android.result == 'success'
+        if: needs.build-android.result == 'success' && needs.build-android.outputs.signed == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: android
@@ -366,9 +374,9 @@ jobs:
           # Browser extension (load unpacked, or upload to a store)
           cp artifacts/extension/*.zip release-assets/ 2>/dev/null || true
 
-          # Android: ghostly-<version>-android-arm64.apk, signed with the upload key, or a debug build named
-          # ghostly-<version>-android-arm64-debug.apk when the repository has no upload key
-          cp artifacts/android/ghostly-*-android-arm64*.apk release-assets/ 2>/dev/null || true
+          # Android: ghostly-<version>-android-arm64.apk, signed with the upload key. By its exact name, so a
+          # debug build (-debug.apk) never goes out even if it was downloaded
+          cp artifacts/android/ghostly-*-android-arm64.apk release-assets/ 2>/dev/null || true
 
           # No CLI binaries: the Rust ghostly-cli was removed after 1.0
           # (S17 in docs/SECURITY-REVIEW.md). The supported CLI, packages/cli, goes to npm.
@@ -416,7 +424,7 @@ jobs:
             echo "GPG_PRIVATE_KEY not set, skipping GPG signing"
           fi
 
-      # Said in the notes when the Android APK is a debug build, or missing; the generated notes follow.
+      # Said in the notes when there is no Android APK; the generated notes follow.
       - name: Android note
         id: android-note
         env:
@@ -426,7 +434,7 @@ jobs:
           if [ "$ANDROID_RESULT" != "success" ]; then
             note="**Android:** no APK in this release (its build did not succeed)."
           elif [ "$ANDROID_SIGNED" != "true" ]; then
-            note="**Android:** the APK is a **debug build** (\`-debug.apk\`), signed with the Android debug key, not Ghostly's: to try the app, not for daily use. A later signed APK will not install over it; uninstall it first."
+            note="**Android:** no APK in this release (it was built without Ghostly's upload key, and a debug build is not published)."
           else
             note=""
           fi

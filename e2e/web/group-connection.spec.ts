@@ -88,3 +88,30 @@ test("the group's connection: every member's edge, down when one goes away, gone
     await expect(p.page.getByTestId("group-connection-member")).toHaveCount(1);
   }
 });
+
+test("in Arabic on a wide screen the group's connection panel and its tooltip open inside the window", { tag: ["@feature:groups.connection", "@feature:app.i18n"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  await alice.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+  });
+  await alice.page.reload();
+  await expect(alice.page.locator("html")).toHaveAttribute("dir", "rtl");
+  await alice.page.getByTestId("sidebar-new-more").click();
+  await alice.page.getByTestId("new-group").click();
+  await alice.page.getByTestId("new-group-name").fill("Mesh");
+  await alice.page.getByTestId("new-group-create").click();
+  await alice.page.getByTestId("group-share-done").click();
+
+  // Right to left, the control sits at the header's left: a box held by its right edge grew past the window's left
+  // edge (the panel started at x -123 at 1280 px), cutting its first lines.
+  const inside = (box: { x: number; width: number } | null) => !!box && box.x >= 0 && box.x + box.width <= 1280;
+  await trigger(alice).hover();
+  const tip = alice.page.getByTestId("group-connection-tooltip");
+  await expect(tip).toBeVisible();
+  expect(inside(await tip.boundingBox())).toBe(true);
+  await trigger(alice).click();
+  const panel = alice.page.getByRole("dialog").filter({ has: alice.page.getByTestId("group-connection-state") });
+  await expect(panel).toBeVisible();
+  await expect.poll(async () => inside(await panel.boundingBox())).toBe(true);
+});

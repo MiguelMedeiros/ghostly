@@ -14,10 +14,11 @@ on:
 permissions:
   contents: read
 
-# As in ci.yml: a new push to a pull request cancels the run it supersedes; pushes, the morning scan and manual
-# runs each get a group of their own and are never cancelled.
+# As in ci.yml: a new push to a pull request cancels the run it supersedes; pushes to dev share one group, so a batch
+# the merge train lands (a push per pull request) scans at most twice; other pushes, the morning scan and manual runs
+# each get a group of their own and are never cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'push-dev' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

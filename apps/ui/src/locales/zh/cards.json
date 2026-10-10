@@ -152,5 +152,10 @@
     "updatedLabel": "更新于",
     "used": "已用 {{used}} / {{limit}}",
     "usedLabel": "已用"
+  },
+  "working": {
+    "label": "工作中",
+    "quiet": "工作中？ · 上次更新 {{ago}}",
+    "stale": "已有 {{duration}} 没有更新"
   }
 }

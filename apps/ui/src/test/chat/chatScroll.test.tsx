@@ -1,7 +1,7 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpToLatest } from "../../components/chat/JumpToLatest";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { forgetChatScroll, leftOn, useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
 import { MAX_ROWS, OPEN_ROWS, PAGE_ROWS, revealMessage, useRowWindow } from "../../hooks/useRowWindow";
 import { jumpToMessage } from "../../lib/replies";
@@ -666,6 +666,13 @@ describe("a chat opened again before its rows are there", () => {
   });
 });
 
+/** Rows drawn (a bubble's render) since the count was last reset. */
+let draws = 0;
+const Row = memo(function Row({ id }: { id: string }) {
+  draws++;
+  return <div data-message-id={id}>{id}</div>;
+});
+
 /** A timeline with a window of its rows in the page (useRowWindow), as Chat.tsx and GroupChat.tsx draw one. */
 function WindowTimeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
   const ids = useMemo(() => rows.map(row => row.id), [rows]);
@@ -677,7 +684,7 @@ function WindowTimeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: s
   return (
     <div>
       <div ref={jump.listRef} data-testid="list">
-        <div ref={jump.columnRef}>{rows.slice(win.from, win.to).map(row => <div key={row.id} data-message-id={row.id}>{row.id}</div>)}</div>
+        <div ref={jump.columnRef}>{rows.slice(win.from, win.to).map(row => <Row key={row.id} id={row.id} />)}</div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
     </div>
@@ -792,6 +799,49 @@ describe("a long timeline's window of rows", () => {
     }
     expect(topOf("peer_0")).toBe(was);
     expect(pill()).toHaveAttribute("data-count", String(MAX_ROWS + 60));
+  });
+
+  it("open at its bottom, thousands of messages at its end in one change draw only its last rows, and it stays at the bottom", () => {
+    const { rerender } = renderApp(<WindowTimeline rows={long} />);
+    draws = 0;
+    rerender(<WindowTimeline rows={[...long, ...theirs(1_000, 3_000)]} />);
+    expect(draws).toBeLessThanOrEqual(OPEN_ROWS);
+    expect(inPage()).toBe(OPEN_ROWS);
+    expect(lastInPage()).toBe("peer_3999");
+    expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
+    expect(pill()).toBeNull();
+  });
+
+  it("scrolled up, thousands of messages at its end in one change are counted, not drawn, and the view stays on its row", () => {
+    const { rerender } = renderApp(<WindowTimeline rows={long} />);
+    scrollTo(20 * ROW);
+    const row = atTop();
+    const was = topOf(row);
+    draws = 0;
+    rerender(<WindowTimeline rows={[...long, ...theirs(1_000, 3_000)]} />);
+    expect(draws).toBe(0);
+    expect(lastInPage()).toBe("peer_999");
+    expect(topOf(row)).toBe(was);
+    expect(pill()).toHaveAttribute("data-count", "3000");
+    // The pill: the first new one comes into the page, never the whole batch.
+    fireEvent.click(pill()!);
+    expect(list().querySelector("[data-message-id=peer_1000]")).not.toBeNull();
+    expect(inPage()).toBeLessThanOrEqual(MAX_ROWS);
+  });
+
+  it("left scrolled up and opened from a copy behind, the whole history arriving at once lands on its message, drawing a window", () => {
+    const { unmount } = renderApp(<WindowTimeline rows={long} />);
+    scrollTo(20 * ROW);
+    const row = atTop();
+    const was = topOf(row);
+    unmount();
+    const { rerender } = renderApp(<WindowTimeline rows={long.slice(0, 900)} />);
+    act(() => { fireEvent.scroll(list()); });
+    draws = 0;
+    rerender(<WindowTimeline rows={[...long, ...theirs(1_000, 3_000)]} />);
+    expect(draws).toBeLessThanOrEqual(MAX_ROWS + OPEN_ROWS);
+    expect(inPage()).toBeLessThanOrEqual(MAX_ROWS);
+    expect(topOf(row)).toBe(was);
   });
 
   it("left scrolled up far in the history, it opens on that message again", () => {

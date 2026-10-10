@@ -37,9 +37,10 @@ export function isEmptyShare(share: IncomingShare): boolean {
   return !share.files.length && !share.text.trim() && !share.url.trim() && !share.title.trim();
 }
 
-/** A share arrived: it waits for a chat to be picked. An empty one is dropped. */
+/** A share arrived: it waits for a chat to be picked. An empty one is dropped, and never clears one that waits. */
 export function receiveShare(share: IncomingShare): void {
-  pending = isEmptyShare(share) ? null : share;
+  if (isEmptyShare(share)) return;
+  pending = share;
   emit();
 }
 
