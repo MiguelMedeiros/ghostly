@@ -15,6 +15,7 @@ import {
   RELAY_POLL_INTERVALS,
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
+  DEPARTED_READ_MS,
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
@@ -694,6 +695,42 @@ describe("LinkSession poll pacing", () => {
     a.s.pollNow();
     await settle();
     expect(watched()).toBe(false);
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  it("says its reads of a contact that just went away are its first ones (the relays' budget lets a few go over)", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    b.s.start();
+    a.s.start();
+    await settle();
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { watch?: boolean; departed?: boolean } | undefined;
+    a.s.pollNow();
+    await settle();
+    expect(last()?.departed).toBeUndefined();
+    a.s.watchPeer();
+    vi.setSystemTime(NOW + 1_000);
+    await b.s.stop();
+    a.s.pollNow();
+    await settle();
+    expect(last()).toMatchObject({ watch: true, departed: true });
+    // A packet the contact put just before its goodbye, read after it, advertises: the reads stop watching, yet are still
+    // the first ones (the contact's offer, once it is back, is what they look for).
+    vi.setSystemTime(NOW + 2_000);
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(true);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.watch).toBeUndefined();
+    expect(last()?.departed).toBe(true);
+    // Past its first seconds, a read is the contact's like any other.
+    vi.setSystemTime(NOW + DEPARTED_READ_MS);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.departed).toBeUndefined();
     await a.s.stop(false);
     await b.s.stop(false);
   });
