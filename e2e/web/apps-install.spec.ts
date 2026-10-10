@@ -45,7 +45,6 @@ test("install from a store, open it in a chat, and the contact installs it from 
   await expect(ana.page.getByTestId("apps-add-store")).toContainText(store.storeName);
   await ana.page.getByTestId("apps-add-store-confirm").click();
   const listed = ana.page.getByTestId("app-store").filter({ hasText: store.storeName });
-  await listed.getByRole("button", { name: new RegExp(store.storeName) }).click();
   await listed.getByTestId("app-listing-install").click();
 
   const screen = ana.page.getByTestId("app-install");

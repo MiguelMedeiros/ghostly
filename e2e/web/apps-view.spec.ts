@@ -28,7 +28,6 @@ async function install(peer: Peer, store: TestStore): Promise<void> {
   await peer.page.getByTestId("apps-add-check").click();
   await peer.page.getByTestId("apps-add-store-confirm").click();
   const listed = peer.page.getByTestId("app-store").filter({ hasText: store.storeName });
-  await listed.getByRole("button", { name: new RegExp(store.storeName) }).click();
   await listed.getByTestId("app-listing-install").click();
   await peer.page.getByTestId("app-install").getByTestId("app-install-confirm").click();
   await expect(peer.page.getByTestId("installed-app")).toContainText(store.title);

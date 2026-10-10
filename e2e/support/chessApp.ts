@@ -90,7 +90,7 @@ export class ChessPublisher {
   }
 }
 
-/** Adds the store by its link and opens Chess's listing (the Apps page): the install screen, not yet confirmed. */
+/** Adds the store by its link and presses Install on Chess, which the store shows without being opened (the Apps page): the install screen, not yet confirmed. */
 export async function openStoreInstall(page: Page): Promise<Locator> {
   await page.goto("/#/apps");
   await expect(page.getByTestId("apps-page")).toBeVisible();
@@ -100,7 +100,6 @@ export async function openStoreInstall(page: Page): Promise<Locator> {
   await expect(page.getByTestId("apps-add-store")).toContainText(STORE_NAME);
   await page.getByTestId("apps-add-store-confirm").click();
   const listed = page.getByTestId("app-store").filter({ hasText: STORE_NAME });
-  await listed.getByRole("button", { name: new RegExp(STORE_NAME) }).click();
   await listed.getByTestId("app-listing-install").click();
   const screen = page.getByTestId("app-install");
   await expect(screen.getByTestId("app-store-line")).toHaveText(`In ${STORE_NAME}`);
