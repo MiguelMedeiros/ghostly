@@ -51,6 +51,9 @@ const set = (patch: Partial<DeviceSetView> = {}): DeviceSetView => ({
 
 afterEach(() => { states.clear(); vi.useRealTimers(); });
 
+/** Lets `ms` of the faked clock pass, and what it started settle. */
+const later = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
 describe("Profile, Devices", () => {
   it("lists each device with its kind, its state and its link, and says what the section is for behind the ⓘ", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
@@ -103,6 +106,43 @@ describe("Profile, Devices", () => {
     await user.click(within(tablet).getByTestId("device-menu"));
     expect(screen.queryByTestId("device-check")).toBeNull();
     expect(screen.getByTestId("device-remove-open")).toBeInTheDocument();
+  });
+
+  it("the answer of Check connection goes when that device's link is no longer connected", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    let status: "live" | "connecting" = "live";
+    fakeEngine.on("deviceSet", () => set({ devices: set().devices.map((device) => (device.key === PHONE ? { ...device, status } : device)) }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("devicePing", () => ({ ms: 12 }));
+    renderApp(<DevicesSection />);
+    await later(0);
+    const phone = screen.getAllByTestId("device-row")[1];
+    act(() => within(phone).getByTestId("device-menu").click());
+    act(() => screen.getByTestId("device-check").click());
+    await later(0);
+    expect(within(phone).getByTestId("device-check-result")).toHaveTextContent("Answered in 12 ms");
+    // The link drops: the next read of the set says so, and the old answer no longer stands under it.
+    status = "connecting";
+    await later(3_000);
+    expect(within(phone).getByTestId("device-link-status")).toHaveTextContent("Not connected");
+    expect(within(phone).queryByTestId("device-check-result")).toBeNull();
+  });
+
+  it("the answer of Check connection stays ten seconds under a device whose link holds", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    fakeEngine.on("deviceSet", () => set());
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("devicePing", () => { throw new Error("timeout"); });
+    renderApp(<DevicesSection />);
+    await later(0);
+    const phone = screen.getAllByTestId("device-row")[1];
+    act(() => within(phone).getByTestId("device-menu").click());
+    act(() => screen.getByTestId("device-check").click());
+    await later(9_000);
+    expect(within(phone).getByTestId("device-check-result")).toHaveTextContent("No answer");
+    await later(1_000);
+    expect(within(phone).queryByTestId("device-check-result")).toBeNull();
+    expect(within(phone).getByTestId("device-link-status")).toHaveTextContent("Connected");
   });
 
   it("on a standby device's list nothing acts on another device", async () => {
@@ -262,6 +302,25 @@ describe("the standby screen", () => {
     expect(links[0]).toHaveTextContent("Active");
     expect(screen.getByRole("navigation", { name: "Other profiles" })).toHaveTextContent("Switch to Work");
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
+  });
+
+  it("the answer of Check connection goes when that device's link is no longer connected", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    let status: "live" | "connecting" = "live";
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? status : undefined })) }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    fakeEngine.on("devicePing", () => ({ ms: 12 }));
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    await later(0);
+    const mac = screen.getAllByTestId("device-standby-link")[0];
+    act(() => within(mac).getByTestId("device-standby-check").click());
+    await later(0);
+    expect(within(mac).getByTestId("device-standby-check-result")).toHaveTextContent("Answered in 12 ms");
+    status = "connecting";
+    await later(3_000);
+    expect(mac).toHaveAttribute("data-status", "connecting");
+    expect(within(mac).queryByTestId("device-standby-check-result")).toBeNull();
   });
 
   it("a device that released the profile and has not heard back: the step it waits at, and Use here all the same", async () => {

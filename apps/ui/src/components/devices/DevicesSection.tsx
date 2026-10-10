@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { MAX_DEVICES } from "@ghostly/browser/devices/state";
 import { useI18n } from "../../contexts/I18nContext";
-import { listNames, openJoinAnother, removeErrorKey, useDeviceSet } from "../../lib/devices";
+import { listNames, openJoinAnother, removeErrorKey, useConnectionCheck, useDeviceSet } from "../../lib/devices";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
 import { Menu, MenuItem, MenuSeparator } from "../Menu";
@@ -49,15 +49,8 @@ export function DevicesSection() {
   // A move under way from this device (WISP 06 § Handoff progress, "on both devices"): one started here whose dialog was
   // closed ("You can keep using Ghostly"), or one the other device started with Use here.
   const running = thisActive && !moving && handoff?.role === "giver" && handoff.step !== "failed" ? handoff : null;
-  const [checked, setChecked] = useState<Record<string, string>>({});
-  const check = async (key: string) => {
-    setChecked((was) => ({ ...was, [key]: t("devices.section.checking") }));
-    try {
-      const { ms } = await engine.call("devicePing", { key });
-      setChecked((was) => ({ ...was, [key]: t("devices.section.answered", { ms: Math.max(1, Math.round(ms)) }) }));
-    } catch { setChecked((was) => ({ ...was, [key]: t("devices.section.noAnswer") })); }
-  };
   const devices = view?.devices ?? [];
+  const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
   // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
   const stopped = view?.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
