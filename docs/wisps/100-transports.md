@@ -173,7 +173,7 @@ This is a reviewable algorithm proposal, not an agreed wire standard:
 4. Attempt the selected adapter within a bounded, profile-defined timeout. Bind its authenticated remote endpoint to the participation keys and negotiation transcript before application traffic.
 5. On failure, agree an incremented attempt and the next untried common candidate. Limit retries per attempt; the chat as a whole falls back to layer 0 and retries later (above), rather than failing. Never silently enable a relay, expose an address class or send DHT text to a party whose capability record forbids it (no `dht-text/1`). Changed policy/offer requires fresh agreement.
 
-The adapter contract needs connect/accept, authenticated remote identity binding, send/receive with framing boundaries, backpressure, cancellation, error and close semantics. Support for reliable streams, datagrams and media is declared explicitly; adapters are not assumed interchangeable for every capability.
+The adapter contract needs connect/accept, authenticated remote identity binding, send/receive with framing boundaries, backpressure, cancellation, error and close semantics. Support for reliable streams, datagrams and media is declared explicitly; adapters are not assumed interchangeable for every capability. Today every adapter carries the session as one ordered, reliable stream of frames, and nothing uses a datagram. A proposal for real-time apps ([1200](1200-marketplace.md#messages-that-may-be-lost), not accepted) lists what each one could carry beside it: a second, unordered WebRTC channel, Iroh's QUIC datagrams, HyperDHT's unordered messages, and nothing through HyperDHT's browser relay.
 
 ## Compatibility and security
 
