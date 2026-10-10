@@ -247,6 +247,22 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(within(app).queryByTestId("app-connection-options")).not.toBeInTheDocument();
   });
 
+  it("opened alone twice before it shows (a double click) starts once, and opens again after Close", async () => {
+    view = "full";
+    await Promise.all([open(REF, null), open(REF, null)]);
+    expect(document.querySelectorAll("[data-place=alone]")).toHaveLength(1);
+    expect(started).toHaveLength(1);
+    // Already shown: one more Open changes nothing.
+    await open(REF, null);
+    expect(document.querySelectorAll("[data-place=alone]")).toHaveLength(1);
+    expect(started).toHaveLength(1);
+    within(screen.getByTestId("mini-app")).getByRole("button", { name: "Close" }).click();
+    expect(screen.queryByTestId("mini-app")).not.toBeInTheDocument();
+    await open(REF, null);
+    expect(document.querySelectorAll("[data-place=alone]")).toHaveLength(1);
+    expect(started).toHaveLength(2);
+  });
+
   it("names a Desktop app window after the app and the contact, and the app alone outside a chat", async () => {
     windowIs(false);
     panel();

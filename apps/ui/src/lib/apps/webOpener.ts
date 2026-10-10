@@ -35,6 +35,8 @@ function warnStop(title: string, reason: AppStopReason): void {
 }
 
 export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, nameIn, onStop }: WebOpenerOptions): AppOpener {
+  /** The layer of each app open alone, by app and chat: the same one opened again is shown as it is. */
+  const alone = new Map<string, HTMLElement>();
   return async (ref, linkId, options) => {
     const host = apps();
     if (!host) throw new Error("Apps cannot run in this app");
@@ -80,6 +82,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
 
     // Alone: full screen and modal. The app under it is inert until it goes; Close has the focus, Escape closes, and
     // the focus goes back to what opened it (or that app's Open on the Apps page, when a dialog opened it and went).
+    // Open pressed twice before it shows (a double click) gets here twice: the second finds the first one's layer.
+    const place = `${linkId ?? ""} ${ref}`;
+    if (alone.get(place)?.isConnected) return;
     const before = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     const overlay = document.createElement("div");
     overlay.setAttribute("role", "dialog");
@@ -106,12 +111,14 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     // The app's shell (App.tsx), not the whole page: the lock screen, drawn above the app, must still take a password.
     const under = [...document.querySelectorAll<HTMLElement>(".two-pane, .app-shell")].filter((node) => !node.inert);
     document.body.appendChild(overlay);
+    alone.set(place, overlay);
     for (const node of under) node.inert = true;
     close.focus({ preventScroll: true });
 
     const dismiss = () => {
       for (const node of under) node.inert = false;
       overlay.remove();
+      if (alone.get(place) === overlay) alone.delete(place);
       const row = document.querySelector<HTMLElement>(`[data-testid=installed-app][data-ref="${CSS.escape(ref)}"] [data-testid=installed-app-open]`);
       (before?.isConnected ? before : row)?.focus({ preventScroll: true });
     };
