@@ -1,4 +1,4 @@
-import { appCardId, type AppCard } from "@ghostly/core";
+import { APP_DATA_MAX_BYTES, APP_SEND_LIMIT, appCardId, type AppCard, type AppSendError } from "@ghostly/core";
 import { bool, chatOf, node, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { peerVersion } from "./appEvents";
 import { servedApp, servedApps, type ServedApp } from "./appServe";
@@ -7,8 +7,8 @@ import { isLive } from "./views";
 
 /*
  * A served app in a chat (WISP 1200 § A bot on the other side): `app open` says the app is open on this side and, when
- * the contact's app is not open there yet, sends the app's card, as a person's app does when they open one; `app close`
- * ends it. What is open is the engine's, in memory: only a daemon holds it, and a restarted one opens again.
+ * the contact's app is not open there yet, sends the app's card, as a person's app does when they open one; `app send`
+ * is one frame of the app's own protocol to the contact's app, once both opened it; `app close` ends it. What is open is the engine's, in memory: only a daemon holds it, and a restarted one opens again.
  */
 
 /** The chat and the served app a command names, on an engine that speaks apps/1. */
@@ -50,4 +50,21 @@ export const APP_CHAT_METHODS: Record<string, Method> = {
     await engine(() => node(ctx).appClose({ linkId: chat, ref: app.ref }));
     return { chat, app: app.ref, closed: true };
   },
+
+  async "app.send"(ctx, params) {
+    const { chat, app } = target(ctx, params);
+    if (!("data" in params) || params.data === undefined) throw new CliError("bad_request", "data is required: the app's message, any JSON value");
+    const { error } = await engine(() => node(ctx).appSend({ linkId: chat, ref: app.ref, data: params.data }));
+    if (error) throw new CliError(NOT_SENT[error].code, NOT_SENT[error].message, { reason: error });
+    return { chat, app: app.ref, sent: true };
+  },
+};
+
+/** Why a frame did not go (WISP 1200 § In a chat), in `details.reason`. Nothing is kept to send later. */
+const NOT_SENT: Record<AppSendError, { code: "refused" | "bad_request" | "unavailable"; message: string }> = {
+  "not-open": { code: "refused", message: "The app is not open in this chat on this side: app open it first" },
+  "too-large": { code: "bad_request", message: `The message is over ${APP_DATA_MAX_BYTES} bytes of JSON, the most an app's frame carries` },
+  offline: { code: "unavailable", message: "The chat is not live: an app's frames go on the live session only, and none is kept for later" },
+  "peer-closed": { code: "unavailable", message: "The contact's app is not open in this chat (or their Ghostly runs no apps): wait for app.opened" },
+  "too-fast": { code: "refused", message: `More than ${APP_SEND_LIMIT} frames in a second: slow down and send it again` },
 };

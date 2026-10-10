@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { initApp, publishApp, revokeApp, signStore, verifyApp } from "../apps";
 import { CliError } from "../errors";
 import { here, type Command } from "./shared";
@@ -6,6 +7,13 @@ import { here, type Command } from "./shared";
 function keyFile(value: unknown, usage: string): string {
   if (typeof value !== "string" || !value) throw new CliError("usage", `--key <file> is needed: ghostly ${usage}`);
   return value;
+}
+
+/** `app send`'s message: JSON on the command line, or `-` for stdin. */
+function appData(value: string | undefined): unknown {
+  if (value === undefined) throw new CliError("usage", "The message is needed, as JSON or - for stdin: ghostly app send <chat> <ref|name> <json|->");
+  const text = value.trim() === "-" ? readFileSync(0, "utf8") : value;
+  try { return JSON.parse(text) as unknown; } catch { throw new CliError("usage", "The message is not valid JSON: quote it for the shell, like '{\"k\":\"move\"}', or pass - and write it on stdin"); }
 }
 
 const key = { type: "string", description: "The key file (made, owner-only, when it is missing)" } as const;
@@ -66,6 +74,12 @@ export const commands: Record<string, Command> = {
       digests: options.digest as string[] | undefined, upTo: options["up-to"] as number | undefined,
       reason: options.reason as string | undefined, bundle: options.bundle as string | undefined,
     }),
+  },
+  "app send": {
+    method: "app.send", usage: "app send <chat> <ref|name> <json|->",
+    summary: "Send one message of a served app's own protocol to the contact's app (needs the daemon, and both sides open): any JSON value up to 32 KiB, or - to read it from stdin; live only, never kept for later",
+    args: ["chat", "ref", "data..."],
+    params: (_, a) => ({ chat: a.chat, ref: a.ref, data: appData(a.data) }),
   },
   "app serve": {
     method: "app.serve", usage: "app serve <bundle|url> --grant chat [--grant name] [--url <url>]",

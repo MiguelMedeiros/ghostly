@@ -26,6 +26,7 @@ function fake({ mode = "daemon", apps = true, served = [CHESS] }: { mode?: strin
     appId: ({ linkId, ref }: { linkId: string; ref: string }) => ({ app: `id:${linkId}:${ref.split("/")[1]}` }),
     appOpen: vi.fn(async () => ({ app: "id" })),
     appClose: vi.fn(),
+    appSend: vi.fn(async (): Promise<{ error: string | null }> => ({ error: null })),
     sendMessage: vi.fn(async (): Promise<{ error: string | null; refused?: boolean; messageId?: string }> => ({ error: null, messageId: "me_1" })),
   };
   let frames: (chat: string, frame: never) => void = () => {};
@@ -85,5 +86,31 @@ describe("app close", () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "app.close", { chat: "Alice", ref: "chess" })).toEqual({ chat: "chat-one", app: REF, closed: true });
     expect(node.appClose).toHaveBeenCalledWith({ linkId: "chat-one", ref: REF });
+  });
+});
+
+describe("app send", () => {
+  it("hands the app's message to the engine as it is", async () => {
+    const { ctx, node } = fake();
+    for (const data of [{ p: "chess", v: 2, k: "move", g: "00", n: 0, m: "e2e4" }, 0, null, "", [1, 2]]) {
+      expect(await callApi(ctx, "app.send", { chat: "Alice", ref: "chess", data })).toEqual({ chat: "chat-one", app: REF, sent: true });
+      expect(node.appSend).toHaveBeenLastCalledWith({ linkId: "chat-one", ref: REF, data });
+    }
+  });
+
+  it("says why a frame did not go, by the engine's name for it", async () => {
+    const { ctx, node } = fake();
+    for (const [reason, code] of [["not-open", "refused"], ["too-large", "bad_request"], ["offline", "unavailable"], ["peer-closed", "unavailable"], ["too-fast", "refused"]] as const) {
+      node.appSend.mockResolvedValueOnce({ error: reason });
+      await expect(callApi(ctx, "app.send", { chat: "Alice", ref: REF, data: 1 }), reason).rejects.toMatchObject({ code, details: { reason } });
+    }
+  });
+
+  it("refuses no message, an app not served and a one-shot, before the engine is asked", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "app.send", { chat: "Alice", ref: REF })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(callApi(fake({ served: [] }).ctx, "app.send", { chat: "Alice", ref: REF, data: 1 })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(fake({ mode: "one-shot" }).ctx, "app.send", { chat: "Alice", ref: REF, data: 1 })).rejects.toMatchObject({ code: "unavailable" });
+    expect(node.appSend).not.toHaveBeenCalled();
   });
 });
