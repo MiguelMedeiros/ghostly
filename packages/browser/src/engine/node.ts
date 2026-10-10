@@ -181,7 +181,7 @@ import type { WakeSubscription } from "../shared/types";
 import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, type BackupReminders } from "../shared/backupReminder";
 import type { MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
-import { buttonPress, buttonsState } from "../shared/buttons";
+import { buttonPress, buttonsState, messageButtons } from "../shared/buttons";
 import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
 import { ENGLISH_REMOVAL, removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
@@ -4060,10 +4060,12 @@ export class GhostlyNode implements EngineImplementation {
   async pressButton(params: { linkId: string; messageId: string; buttonId: string }): Promise<{ error: string | null; refused?: boolean; paced?: true; messageId?: string }> {
     const { linkId, messageId, buttonId } = params ?? {};
     if (typeof linkId !== "string" || typeof messageId !== "string" || typeof buttonId !== "string") return { error: "No button to press", refused: true };
-    const history = await db.getMessages(linkId);
-    const message = history.find(m => m.id === messageId);
+    const message = await db.getMessage(linkId, messageId);
     if (!message) return { error: "That message is not in this chat", refused: true };
     if (message.sender === "me") return { error: "Buttons on your own message do nothing", refused: true };
+    // What I answered before closes a question only through a `once` button: any other is read alone, not with its chat.
+    const card = messageButtons(message);
+    const history = card && !card.closed && card.buttons.some(b => b.once) ? await db.getMessages(linkId) : [];
     const state = buttonsState(message, replyRef(message), history);
     const button = state?.card.buttons.find(b => b.id === buttonId);
     if (!state || !button) return { error: "That message has no such button", refused: true };
