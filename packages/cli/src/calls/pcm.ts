@@ -85,6 +85,13 @@ export class PlaybackQueue {
     return ms;
   }
 
+  /** Drops up to that much from the front, in whole frames (audio whose time went by); returns how much, in milliseconds. */
+  skip(ms: number): number {
+    const frames = Math.min(Math.floor(ms / FRAME_MS), Math.floor(this.length / this.frame));
+    if (frames > 0) this.take(frames * this.frame);
+    return Math.max(0, frames) * FRAME_MS;
+  }
+
   private take(bytes: number): Buffer {
     const out = Buffer.allocUnsafe(bytes);
     let filled = 0;
