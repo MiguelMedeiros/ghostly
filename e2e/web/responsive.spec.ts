@@ -100,6 +100,8 @@ async function deckCardProblems(page: Page, root: string): Promise<string[]> {
 }
 
 async function expectTidy(page: Page, root: string, what: string): Promise<void> {
+  // A page of the menu is loaded when first opened (apps/ui/src/Root.tsx): it is measured once it is there.
+  await expect(page.locator(root).first(), `${what} at ${page.viewportSize()?.width}px`).toBeVisible();
   await page.waitForTimeout(250); // Let a panel's fade-in and a late balance settle.
   expect(await layoutProblems(page, root), `${what} at ${page.viewportSize()?.width}px`).toEqual([]);
   expect(await deckCardProblems(page, root), `${what}'s cards at ${page.viewportSize()?.width}px`).toEqual([]);

@@ -196,6 +196,8 @@ export function desktopWindows(app: DesktopApp): DesktopWindows {
  */
 export async function choose(app: DesktopApp, testId: string, value: string): Promise<void> {
   const select = `[data-testid="${testId}"]`;
+  // Its page may still be on its way: a page of the menu is loaded when first opened (apps/ui/src/Root.tsx).
+  await expect.poll(() => app.attribute(select, "aria-expanded"), { message: `${select} is on the page` }).not.toBeNull();
   if ((await app.attribute(select, "aria-expanded")) !== "true") await app.click(select);
   const option = `[data-testid="${testId}-list"] [role="option"][data-value="${value}"]`;
   await expect.poll(() => app.text(option)).not.toBeNull();
