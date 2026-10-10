@@ -1,5 +1,5 @@
 import http from "node:http";
-import { test, expect, desktopWindows, type DesktopApp } from "../support/desktop";
+import { test, expect, desktopWindows } from "../support/desktop";
 import { STORE_URL, testStore } from "../support/appStore";
 
 /*
