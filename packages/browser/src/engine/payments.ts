@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { eachNetwork, perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { assertConfirmedReal, crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
 import { paymentAlias, paymentWireId } from "../shared/paymentIds";
@@ -34,6 +34,9 @@ import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
  * taken back.
  */
 const UNIT = "sat";
+/** A contact's requests in one chat: the new ones taken per minute, and how many may wait to be paid. */
+const REQUESTS_PER_MINUTE = 20;
+const OPEN_REQUESTS = 50;
 
 /**
  * What the desk needs of a link: a chat's or an edge's GhostLink, or a member of a community group reached
@@ -257,6 +260,7 @@ export class PaymentDesk {
       this.payments.delete(payment.id);
       void wrap(paymentStore.delete(payment.id));
     }
+    this.requestsFrom.delete(linkId);
   }
 
   // -- what the user does --------------------------------------------------------
@@ -660,10 +664,27 @@ export class PaymentDesk {
       endpoints: [...(payment.invoice ? [[ENDPOINT.bolt11, payment.invoice] as [string, string]] : []), ...(payment.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(payment.mints)] as [string, string]] : [])] };
   }
 
+  /** New requests taken from each chat's contact lately. */
+  private readonly requestsFrom = new Map<string, RateWindow>();
+
+  /**
+   * Whether this chat has room for one more request of its contact: twenty new ones a minute, and fifty waiting to be
+   * paid at most. One left out is not lost: the contact's app sends its open requests again on every session.
+   */
+  private roomForRequest(linkId: string): boolean {
+    let recent = this.requestsFrom.get(linkId);
+    if (!recent) this.requestsFrom.set(linkId, recent = new RateWindow(REQUESTS_PER_MINUTE, 60_000));
+    if (!recent.take()) return false;
+    let open = 0;
+    for (const p of this.payments.values()) if (p.linkId === linkId && p.kind === "request" && p.direction === "in" && p.state === "pending" && ++open >= OPEN_REQUESTS) return false;
+    return true;
+  }
+
   /** `held`: picked up from the contact's storage while it was away (WISP 404): only what this device allows counts, and only Cashu or Lightning. */
   async onPaymentRequest(linkId: string, request: PaymentRequest, held = false): Promise<void> {
     // Already here from this contact (sent again, or held and live both): once. Another chat's id is not this one.
     if (this.find(linkId, request.id)?.linkId === linkId) return;
+    if (!this.roomForRequest(linkId)) return;
     if (held && (findEndpoint(request.endpoints, ENDPOINT.usdt) || findEndpoint(request.endpoints, ENDPOINT.arkade) || findEndpoint(request.endpoints, ENDPOINT.bark) || findEndpoint(request.endpoints, ENDPOINT.bitcoin) || findEndpoint(request.endpoints, ENDPOINT.fedimint) || findEndpoint(request.endpoints, ENDPOINT.spark))) return;
     if(findEndpoint(request.endpoints,ENDPOINT.usdt))return this.receiveUsdtRequest(linkId,request);
     const amount = parseSats(request.amount.value, request.amount.asset);

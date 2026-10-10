@@ -356,6 +356,38 @@ describe("a contact's request arriving", () => {
     await at("a4", ENDPOINT.arkade, JSON.stringify(ark()));
     expect(desk.payment("a4")).toMatchObject({ target: { method: "arkade" }, invoice: undefined, mints: [] });
   });
+
+  it("a chat keeps fifty of a contact's requests waiting: the next is taken once one of them is paid or closed", async () => {
+    const { desk, host } = setup(Array.from({ length: 50 }, (_, i) => record({ id: `open${i}`, invoice: INVOICE })));
+    await desk.start();
+    await desk.onPaymentRequest("l", lnRequest("r51"));
+    await desk.onPaymentRequest("l", { ...lnRequest("u51"), amount: { value: "1000000", asset: "usdtbase" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]] });
+    expect([desk.payment("r51"), desk.payment("u51")]).toEqual([undefined, undefined]);
+    expect(host.storeMessage).not.toHaveBeenCalled();
+    // Another chat's requests are its own.
+    await desk.onPaymentRequest("l2", lnRequest("other"));
+    expect(desk.payment("other")).toMatchObject({ linkId: "l2", state: "pending" });
+    // The contact sends its open requests again on every session: the one left out comes in once there is room.
+    await desk.onPaymentResult("l", { id: "open0", ok: false, closed: true });
+    await desk.onPaymentRequest("l", lnRequest("r51"));
+    expect(desk.payment("r51")).toMatchObject({ state: "pending", amount: 40 });
+  });
+
+  it("a chat takes twenty new requests a minute: the rest are left out until they are sent again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
+    try {
+      const { desk } = setup();
+      for (let i = 0; i < 25; i++) await desk.onPaymentRequest("l", lnRequest(`r${i}`));
+      expect(rows<StoredPayment>("payments").map((p) => p.id)).toEqual(Array.from({ length: 20 }, (_, i) => `r${i}`));
+      // A copy of one already here is not a new request, and another chat has its own count.
+      await desk.onPaymentRequest("l", lnRequest("r0"));
+      await desk.onPaymentRequest("l2", lnRequest("other"));
+      expect(desk.payment("other")).toBeDefined();
+      vi.setSystemTime(1_000_000 + 60_000);
+      await desk.onPaymentRequest("l", lnRequest("r20"));
+      expect(desk.payment("r20")).toMatchObject({ state: "pending" });
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("ecash arriving", () => {
