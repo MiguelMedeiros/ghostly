@@ -104,6 +104,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     private const val CHANNEL = "messages"
     /** At most this many files from one share, as a paste (clipboard.rs `MAX_PASTED_FILES`). */
     private const val MAX_SHARED_FILES = 32
+    /** At most this many bytes from one share, in all, as a paste brings into the page (pastedFiles.ts `PLATFORM_PASTE_MAX`). */
+    private const val MAX_SHARED_BYTES = 256L * 1024 * 1024
     /**
      * The latest share's number: an older share still copying stops, and is never handed over after a newer one.
      * Starts at the clock, so a share's folder is newer than any a previous run left.
@@ -190,6 +192,9 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * Shares are numbered as they arrive: one that a newer share overtook stops copying and is never handed over, so a
    * big share that ends late cannot replace the one made after it. Older shares' copies go once a newer one is
    * handed over. The page reads the copies by token, as a paste's, then says it is done with them (`shareDone`).
+   * Only what the page takes is copied: each stream in turn while the share stays within [MAX_SHARED_BYTES]
+   * (android.ts `withinPasteTotal`, keep the two alike); one that would go past it is left out, by its size before
+   * copying, or by its bytes when the app gives no size.
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
@@ -203,13 +208,21 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       val own = File(root, generation.toString())
       own.deleteRecursively()
       val files = JSONArray()
+      var left = MAX_SHARED_BYTES
       for ((index, uri) in streams.withIndex()) {
         if (!latest()) break
         try {
+          if ((sizeOf(uri) ?: 0L) > left) continue
           val folder = File(own, index.toString()).apply { mkdirs() }
           val file = File(folder, SharedName.of(displayName(uri), index))
-          val copied = resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyWhile(input, it, latest) } }
-          if (copied != true) continue
+          val copied =
+            resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyAtMost(input, it, left, latest) } }
+              ?: continue
+          if (copied < 0) {
+            folder.deleteRecursively()
+            continue
+          }
+          left -= copied
           files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
         } catch (e: Exception) {
           // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share.
@@ -245,17 +258,6 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve()
   }
 
-  /** Copies `input` whole while `going` holds; false when it stopped first. */
-  private fun copyWhile(input: InputStream, output: OutputStream, going: () -> Boolean): Boolean {
-    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
-    while (true) {
-      if (!going()) return false
-      val read = input.read(buffer)
-      if (read < 0) return true
-      output.write(buffer, 0, read)
-    }
-  }
-
   @Suppress("DEPRECATION")
   private fun streamsOf(intent: Intent): List<Uri> = when (intent.action) {
     Intent.ACTION_SEND_MULTIPLE ->
@@ -276,6 +278,35 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       }
     } catch (e: Exception) {
       null
+    }
+  }
+
+  /** The stream's size as the sharing app gives it; null when it gives none. */
+  private fun sizeOf(uri: Uri): Long? {
+    if (uri.scheme == "file") return uri.path?.let { File(it).length() }
+    return try {
+      activity.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use {
+        if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null
+      }
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  /**
+   * Copies the stream while `going` holds, at most `limit` bytes: how many it copied, or -1 (a part copied) when it
+   * holds more or stopped first.
+   */
+  private fun copyAtMost(input: InputStream, output: OutputStream, limit: Long, going: () -> Boolean): Long {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
+    var copied = 0L
+    while (true) {
+      if (!going()) return -1
+      val read = input.read(buffer)
+      if (read < 0) return copied
+      copied += read
+      if (copied > limit) return -1
+      output.write(buffer, 0, read)
     }
   }
 

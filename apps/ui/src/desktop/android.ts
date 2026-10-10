@@ -1,6 +1,6 @@
 import { RTC_CONFIG } from "@ghostly/core";
 import type { ClipboardFile } from "@ghostly/browser/host";
-import { receiveShare } from "../lib/incomingShare";
+import { isEmptyShare, receiveShare, type IncomingShare } from "../lib/incomingShare";
 import { PLATFORM_PASTE_MAX, readPlatformFiles } from "../lib/pastedFiles";
 
 /*
@@ -102,20 +102,33 @@ export function followSystemBars(invoke: Invoke, root: HTMLElement = document.do
 }
 
 /**
+ * The files of a share the page takes: each in turn while all of them stay within what a paste brings in
+ * (`PLATFORM_PASTE_MAX`); one that would go past it is left out. Kotlin copies a share by the same rule
+ * (GhostlyHostPlugin.kt `shared`): keep the two alike.
+ */
+function withinPasteTotal<T extends { size: number }>(files: T[]): T[] {
+  let left = PLATFORM_PASTE_MAX;
+  return files.filter((file) => {
+    if (file.size > left) return false;
+    left -= file.size;
+    return true;
+  });
+}
+
+/**
  * "Share to Ghostly" from another app: taken when the app starts (a share can be what started it) and whenever Rust
- * says one arrived. Its files are read whole into the page, as a paste's; one too large to paste is left out. The page
- * then shows the Share to… picker, as the web app's share target does. A share taken later wins over one still
- * being read: a big share's files that end late never replace the one made after it. Once read (or left out), the
- * share's copies in the app's cache go (`incoming_share_done`): the page holds what it needs.
+ * says one arrived. The page shows the Share to… picker, as the web app's share target does, from the files' names
+ * and sizes; their bytes are read into the page, as a paste's, only when the chat picked takes them. A share taken
+ * later wins over one that waits. Once read (or none of it taken, or a later share took its place before it was
+ * read), the share's copies in the app's cache go (`incoming_share_done`): the page holds what it needs.
  */
 export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
-  let latest = 0;
+  /** Lets the copies of the share that waits to be read go. */
+  let letGo: (() => void) | null = null;
   const take = async () => {
     const shared = await invoke<Shared | null>("incoming_share_take");
     if (!shared) return;
-    const mine = ++latest;
-    const clips: ClipboardFile[] = shared.files
-      .filter((file) => file.size <= PLATFORM_PASTE_MAX)
+    const clips: ClipboardFile[] = withinPasteTotal(shared.files)
       .map(({ token, ...file }) => ({
         ...file,
         read: async (offset: number, length: number) => {
@@ -124,14 +137,36 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
           return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
         },
       }));
-    let files: File[];
-    try {
-      files = await readPlatformFiles(clips);
-    } finally {
+    const files = clips.map((clip) => ({ name: clip.name ?? "", size: clip.size, type: clip.mime ?? "" }));
+    let held = true;
+    // Every token at once, the ones left out too: the share's copies go together.
+    const done = () => {
+      if (!held) return;
+      held = false;
       void invoke("incoming_share_done", { tokens: shared.files.map((file) => file.token) }).catch(() => {});
+    };
+    const share: IncomingShare = {
+      title: shared.title,
+      text: shared.text,
+      url: "",
+      files,
+      read: async () => {
+        // Being read: a later share no longer lets these go under it; they go when the read ends.
+        if (letGo === done) letGo = null;
+        try {
+          return await readPlatformFiles(clips);
+        } finally {
+          done();
+        }
+      },
+    };
+    if (!clips.length) done();
+    // An empty share is dropped, and never takes the place of the one that waits.
+    if (!isEmptyShare(share)) {
+      letGo?.();
+      letGo = clips.length ? done : null;
     }
-    if (mine !== latest) return;
-    receiveShare({ title: shared.title, text: shared.text, url: "", files });
+    receiveShare(share);
     if (location.hash !== "#/shared") location.hash = "#/shared";
   };
   void listen("incoming-share", () => void take().catch(() => {})).catch(() => {});
