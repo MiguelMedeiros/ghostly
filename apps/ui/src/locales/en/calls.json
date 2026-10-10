@@ -7,6 +7,8 @@
   "cameraOff": "Camera off",
   "connected": "Connected",
   "connecting": "Connecting...",
+  "contactCannot": "Your contact's app cannot take calls",
+  "contactOutdated": "Your contact needs an updated Ghostly for calls",
   "decline": "Decline",
   "devices": {
     "back": "{{name}} is back",
@@ -66,6 +68,7 @@
   },
   "turnCameraOff": "Turn camera off",
   "turnCameraOn": "Turn camera on",
+  "unavailableHere": "Calls are not available in this app",
   "unmute": "Unmute",
   "video": "Video call",
   "wakeGaveUp": "{{name}} did not open Ghostly.",

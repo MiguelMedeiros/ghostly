@@ -139,6 +139,11 @@ const RULES: readonly Rule[] = [
   { match: /^No permitted transport could connect$/, key: "errors.transport.noneConnected", next: "errors.transport.allowAnotherNext", detail: true },
   { match: /^The peer closed this connection\. Check that both transport preferences allow a common transport, then reconnect\.$/, key: "errors.transport.peerClosed", next: "errors.transport.peerClosedNext", detail: true },
   { match: /^Your contact needs an updated app to negotiate a transport change\.$/, key: "errors.transport.cannotSwitch", next: "errors.transport.cannotSwitchNext", detail: true },
+  // Why a chat cannot call right now (packages/core ghostlink.ts `callsUnavailable`): the title of its call buttons.
+  exact("Calls need a live connection", "calls.needLive"),
+  exact("Your contact's app cannot take calls", "calls.contactCannot"),
+  exact("Your contact needs an updated Ghostly for calls", "calls.contactOutdated"),
+  exact("Calls are not available in this app", "calls.unavailableHere"),
   exact("All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
   // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts).
   exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable"),
