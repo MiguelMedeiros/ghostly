@@ -323,7 +323,8 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
   `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment.
-- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only.
+- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A redirect is
+  not followed (the event counts as not taken).
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the

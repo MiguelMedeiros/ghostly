@@ -1,4 +1,6 @@
 import { mkdtempSync, readFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -53,6 +55,26 @@ describe("hooks", () => {
     const env = hookEnv({ PATH: "/bin", GHOSTLY_BACKUP_PASSPHRASE: "correct horse", GHOSTLY_PROFILE: "bot" });
     expect(env).toEqual({ PATH: "/bin", GHOSTLY_PROFILE: "bot" });
   });
+
+  it("a webhook's redirect is not followed: the event goes to the loopback URL given, nowhere else", async () => {
+    const listen = (handler: Parameters<typeof createServer>[1]) => new Promise<Server>((resolve) => { const server = createServer(handler); server.listen(0, "127.0.0.1", () => resolve(server)); });
+    const port = (server: Server) => (server.address() as AddressInfo).port;
+    const elsewhere: string[] = [];
+    const other = await listen((request, response) => { let body = ""; request.on("data", (chunk) => (body += chunk)); request.on("end", () => { elsewhere.push(body); response.end("ok"); }); });
+    let asked = 0;
+    const hook = await listen((request, response) => { asked++; request.resume(); response.writeHead(307, { location: `http://127.0.0.1:${port(other)}/stolen` }).end(); });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const event = received("c1", "m1", "the plan for tonight");
+      eventHandler({ types: [], print: false, write: () => {}, webhook: `http://127.0.0.1:${port(hook)}/hook` })(event);
+      await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`the webhook did not take event ${event.seq}`), { timeout: 8000 });
+      expect(asked).toBeGreaterThan(0);
+      expect(elsewhere).toEqual([]);
+    } finally {
+      stderr.mockRestore();
+      hook.close(); other.close();
+    }
+  }, 10_000);
 });
 
 describe("the allowlist", () => {
