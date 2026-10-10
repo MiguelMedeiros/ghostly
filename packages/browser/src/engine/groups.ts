@@ -1298,8 +1298,9 @@ export class Groups {
         // again (its app invites nobody it still holds as a member). Anyone else's frame would end the leave unsaid.
         if (existing?.left && (existing.left.admin !== frame.admin || existing.contacts?.[existing.left.admin] !== linkId)) return;
         // An invitation waits for my answer: another contact's, under the same id, does not take its place (Accept would
-        // go to that contact). The one who sent it may send it again.
-        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId) return;
+        // go to that contact). The one who sent it may send it again. One to a group I kept (`genesis`) gives way all the
+        // same: only that group's chain is let in on Accept, and its admin must not find the place taken by anyone's.
+        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !existing.invitation.genesis) return;
         if ([...this.stored.values()].filter(x => x.invitation).length >= 32) return;
         // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
         // Past that the inviter is told no, as it would be by a Decline, and may invite again later.
@@ -1386,6 +1387,7 @@ export class Groups {
           try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* nobody to tell */ }
           delete group.invitation.seedB64;
           group.invitation.pieces = [];
+          this.acceptSaid.delete(g);
           await this.store.putGroup(group);
           this.host.emit();
           return;
