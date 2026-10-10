@@ -100,7 +100,7 @@ function Timeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string 
   const jump = useChatScroll({ rows, chat });
   return (
     <div>
-      <div ref={jump.listRef} data-testid="list">
+      <div ref={jump.listRef} data-testid="list" data-message-list>
         <div ref={jump.columnRef}>{rows.map(row => <div key={row.id} data-message-id={row.id}>{row.id}</div>)}</div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
@@ -185,6 +185,61 @@ describe("the chat timeline's scrolling", () => {
     await user.click(pill()!);
     expect(list().scrollTop).toBe(350);
     expect(pill()).toBeNull();
+  });
+
+  it("pressed from the keyboard, the pill leaves the focus on the list, and Tab goes on to the composer", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 3)]} />);
+    pill()!.focus();
+    await user.keyboard("{Enter}");
+    expect(pill()).toBeNull();
+    expect(list()).toHaveFocus();
+    await user.tab();
+    expect(screen.getByTestId("composer")).toHaveFocus();
+    // The list was a stop only while it held that focus.
+    expect(list()).not.toHaveAttribute("tabindex");
+  });
+
+  it("pressed from the keyboard twice (the first new one, then the bottom), the focus stays on the pill and then goes to the list", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 20)]} />);
+    pill()!.focus();
+    await user.keyboard("{Enter}");
+    expect(pill()).toHaveFocus();
+    await user.keyboard(" ");
+    expect(pill()).toBeNull();
+    expect(list()).toHaveFocus();
+  });
+
+  it("pressed with a mouse, the pill moves no focus to the list", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 3)]} />);
+    await user.click(pill()!);
+    expect(pill()).toBeNull();
+    expect(list()).not.toHaveFocus();
+    expect(list()).not.toHaveAttribute("tabindex");
+  });
+
+  it("pressed from the keyboard and then left, the pill going away later moves no focus", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 20)]} />);
+    pill()!.focus();
+    await user.keyboard("{Enter}");
+    expect(pill()).toHaveFocus();
+    // The person's own move: out of the pill, to nothing.
+    act(() => pill()!.blur());
+    await act(() => new Promise(resolve => setTimeout(resolve)));
+    scrollTo(1_200);
+    expect(pill()).toBeNull();
+    expect(list()).not.toHaveFocus();
   });
 
   it("with more new than a screen, the pill stops at the first new one", async () => {
@@ -683,7 +738,7 @@ function WindowTimeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: s
   const jump = useChatScroll({ rows: all, chat, window: win });
   return (
     <div>
-      <div ref={jump.listRef} data-testid="list">
+      <div ref={jump.listRef} data-testid="list" data-message-list>
         <div ref={jump.columnRef}>{rows.slice(win.from, win.to).map(row => <Row key={row.id} id={row.id} />)}</div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
