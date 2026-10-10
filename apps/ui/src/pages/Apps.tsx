@@ -60,8 +60,13 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
 /** How many listings a store's block shows at a time: a page a phone draws in a frame or two. */
 const LISTING_PAGE = 50;
 
-function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError }: {
+/** A store that lists this many apps or fewer shows them without being asked, beside other stores too. */
+const LISTING_FEW = 6;
+
+function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, onError }: {
   store: AppStoreSummary;
+  /** The only store of the page. */
+  alone: boolean;
   installed: readonly InstalledAppView[];
   onInstall: (listing: AppListing) => void;
   onChanged: () => void;
@@ -70,7 +75,10 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
   onError: (e: unknown) => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  // Its apps show from the start when it is the only store or lists a few: nothing told a person on a phone that the
+  // name opens them. Once the person closed or opened it, that stays.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? (store.apps.length > 0 && (alone || store.apps.length <= LISTING_FEW));
   const [busy, setBusy] = useState(false);
   const focusBack = useFocusBack(busy);
   const work = async (call: () => Promise<unknown>, done?: () => void) => {
@@ -99,7 +107,7 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
   const read = store.fetchedAt !== undefined || store.apps.length > 0;
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
   const toggle = () => {
-    setOpen(!open);
+    setChosen(!open);
     setLimit(LISTING_PAGE);
     setAdded(null);
     setFilter("");
@@ -109,7 +117,13 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <button type="button" aria-expanded={open} onClick={toggle} disabled={!read}
           className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          <span dir="auto" className="block text-sm text-text-primary truncate">{store.name ?? store.url}</span>
+          <span className="flex items-center gap-1.5">
+            <span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{store.name ?? store.url}</span>
+            {read && (
+              <svg aria-hidden="true" data-testid="app-store-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                className={`shrink-0 text-text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
+            )}
+          </span>
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             {kind && <span>{kind}</span>}
             {read && <span>{t(store.apps.length === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps.length })}</span>}
@@ -229,7 +243,7 @@ export function Apps() {
       <Section title={t("apps.page.stores")} testId="apps-stores">
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
-            : stores.map((store) => <StoreBlock key={store.key} store={store} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
+            : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
               onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} onInstalled={(app) => setJustInstalled(app.ref)} />}
