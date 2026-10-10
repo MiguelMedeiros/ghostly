@@ -194,7 +194,7 @@ import { settleAhead } from "./arrival";
 import { Groups, meshEdgeIntervals, otherEndSeen } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
-import { Reactions,groupReactionsToResend, latestReaction, noteAfterChange } from "./reactions";
+import { Reactions,groupReactionsToResend, latestReaction, noteAfterChange, noteIfStanding } from "./reactions";
 import { mayPinIn, myPin, pinView, pinnedRow } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
@@ -269,6 +269,8 @@ const CARD_RESTORE_MOST = 50;
 const CARD_RESTORE_MS = 7 * 24 * 60 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
+/** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
+const REACTION_NOTES_KEPT = 8;
 /** A second press of one message's buttons waits this long (WISP 406 · Message Buttons). */
 export const BUTTON_PRESS_MS = 1_000;
 
@@ -1107,6 +1109,8 @@ export class GhostlyNode implements EngineImplementation {
    * again those not confirmed after a while.
    */
   private readonly reactionNotes = new Map<string, ReactionNote>();
+  /** Each chat's notes shown before the one shown now, oldest first, the latest `REACTION_NOTES_KEPT` of this run. */
+  private readonly reactionNotesBefore = new Map<string, ReactionNote[]>();
   private readonly reactionsSent = new Map<string, Map<number, number>>();
   private readonly reactionPace = new Map<string, ReactionWindow>();
   private readonly reactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1128,10 +1132,16 @@ export class GhostlyNode implements EngineImplementation {
     message: (chat, id) => db.getMessage(chat, id),
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
     changed: async (chat, id, note) => {
-      if (note) this.reactionNotes.set(chat, note);
-      else if (this.reactionNotes.get(chat)?.message === id) {
-        // The reaction the chat list shows was taken back: the one before it is shown again, or none.
-        const before = latestReaction(await db.getMessages(chat));
+      const shown = this.reactionNotes.get(chat);
+      if (note) {
+        // The one shown until now is kept, to show again if this one is taken back.
+        if (shown && (shown.message !== note.message || shown.by !== note.by)) {
+          this.reactionNotesBefore.set(chat, [...this.reactionNotesBefore.get(chat) ?? [], shown].slice(-REACTION_NOTES_KEPT));
+        }
+        this.reactionNotes.set(chat, note);
+      } else if (shown?.message === id) {
+        // A reaction to the message the chat list quotes was taken back: the one before it is shown again, or none.
+        const before = await this.reactionNoteNow(chat, shown);
         if (before) this.reactionNotes.set(chat, before);
         else this.reactionNotes.delete(chat);
       }
@@ -1141,6 +1151,20 @@ export class GhostlyNode implements EngineImplementation {
     // Someone reacted to a message of mine: a quiet notice, never a message's sound or an unread count.
     notify: (chat, key) => this.feedback("reaction", `${chat}:${key}`, chat),
   });
+
+  /**
+   * The chat list's reaction once one to its message was taken back: the same one if it still stands, else the latest
+   * shown before it that does, each read from its own row. Only past those is the whole history read for an older one.
+   */
+  private async reactionNoteNow(chat: string, shown: ReactionNote): Promise<ReactionNote | undefined> {
+    const before = this.reactionNotesBefore.get(chat) ?? [];
+    for (let note: ReactionNote | undefined = shown; note; note = before.pop()) {
+      const row = note.message ? await db.getMessage(chat, note.message) : undefined;
+      const standing = row && noteIfStanding(note, row);
+      if (standing) return standing;
+    }
+    return latestReaction(await db.getMessages(chat));
+  }
 
   /** Private groups (WISP 900): sessions, admission on contact chats, and the pairwise edges that carry them. */
   private readonly groups = new Groups({
@@ -2637,6 +2661,7 @@ export class GhostlyNode implements EngineImplementation {
     this.newestAt.delete(linkId);
     this.placedAt.delete(linkId);
     this.reactionNotes.delete(linkId);
+    this.reactionNotesBefore.delete(linkId);
     this.events.onMessages(linkId, []);
   }
 
