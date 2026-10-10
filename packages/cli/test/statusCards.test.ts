@@ -149,6 +149,21 @@ describe("the secret guard on cards", () => {
     expect(node.editMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("reads a card's text as the card carries it: a key with invisible characters in it goes out whole", async () => {
+    const { ctx, node } = fake();
+    // A zero-width space, a soft hyphen, a word joiner, an escape: a card's lines lose them, and the key is one piece again.
+    const broken = (mark: string) => `${nsec.slice(0, 20)}${mark}${nsec.slice(20)}`;
+    for (const mark of ["​", "­", "⁠", "\u001b"]) {
+      expect(checkStatusCard({ kind: "task", id: "t", title: "Deploy", status: "running", step: broken(mark) })).toMatchObject({ card: { step: nsec } });
+      await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Deploy", step: broken(mark) } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
+    }
+    await expect(callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { title: "Deploy", items: [{ state: "done", text: broken("​") }] } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
+    await expect(callApi(ctx, "routine.send", { chat: "Coordinator", card: { name: "Nightly", schedule: "every day 01:00" }, run: { result: "failed", summary: broken("­") } })).rejects.toMatchObject({ code: "confirm", details: { kind: "nsec" } });
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: broken("​") }, force: true })).resolves.toMatchObject({ task: "t1", card: { step: nsec } });
+  });
+
   it("takes --force on every card command", () => {
     for (const [name, argv] of [["task send", ["c", "--title", "t"]], ["task update", ["c", "t1"]], ["routine send", ["c", "--name", "n", "--schedule", "daily"]], ["routine update", ["c", "r1"]], ["usage send", ["c", "--left", "50"]]] as const)
       expect(params(name, [...argv, "--force"])).toMatchObject({ force: true });
