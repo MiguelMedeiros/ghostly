@@ -174,6 +174,20 @@ for (const [what, script] of FATAL) {
   });
 }
 
+test("a lock that is slow, then an app that cannot start: the page says so after the \"open in another tab\" screen", tags, async ({ browser, relay, baseURL }) => {
+  // A busy phone grants the lock late: the entry draws "open in another tab" while it waits, and the app that then
+  // gets the lock fails on its first render. The page was left empty, with the guard gone since that first screen.
+  const slowLock = `const request = LockManager.prototype.request; LockManager.prototype.request = function (...args) { return new Promise((resolve) => setTimeout(resolve, 1500)).then(() => request.apply(this, args)); };`;
+  const { page, context } = await open(browser, relay, baseURL, slowLock + remove("window", "matchMedia"), { userAgent: ANDROID_WEBVIEW });
+  await expect(page.getByText("Ghostly is already open in another tab.")).toBeVisible({ timeout: 20_000 });
+  const fallback = page.getByTestId("boot-fallback");
+  await expect(fallback).toBeVisible({ timeout: 20_000 });
+  await expect(fallback).toHaveAttribute("data-reason", "error");
+  await expect(fallback).toContainText("Ghostly could not start");
+  await expect(page.getByTestId("boot-fallback-details")).toHaveValue(/error: \S/);
+  await context.close();
+});
+
 test("a bundle the browser cannot parse, or that does not load: the page says so", tags, async ({ browser, relay, baseURL }) => {
   for (const broken of ["syntax", "blocked"] as const) {
     const { page, context } = await open(browser, relay, baseURL, "", {

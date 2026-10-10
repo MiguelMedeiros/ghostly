@@ -4,10 +4,12 @@
  * its job is the browsers the bundle cannot run in: an Android System WebView from years ago stops at the bundle's
  * syntax, a browser without an API the app starts with throws before React renders, and both left the page blank.
  *
- * It shows itself when an error arrives before the first render and the page is still empty a moment later, or when
- * the page has loaded and stays empty. It leaves as soon as the app (or its "open in another tab" screen) draws
- * into #root, so a slow start is never covered for long. "Copy details" holds the error, the browser's version and
- * which APIs are there: no address fragment, no storage, nothing of a chat or a key.
+ * It shows itself when an error arrives and the page is empty a moment later, or when the page has loaded and stays
+ * empty. It leaves as soon as the app (or its "open in another tab" screen) draws into #root, so a slow start is
+ * never covered for long, and it keeps listening: a first screen is not the app yet (the "open in another tab"
+ * screen is drawn while the lock is slow, and the app that follows may still fail and leave the page empty). An
+ * error the app stays on screen through is the app's own error screen's, and is forgotten. "Copy details" holds the
+ * error, the browser's version and which APIs are there: no address fragment, no storage, nothing of a chat or a key.
  *
  * A file of its own, not inline: the site's Content-Security-Policy allows scripts from this origin only.
  */
@@ -36,8 +38,7 @@
   var errors = [];
   var reason = "";
   var panel = null;
-  var done = false;
-  var timers = [];
+  var slow = null;
   var poll = null;
   var observer = null;
 
@@ -94,7 +95,7 @@
   /** What "Copy details" holds. */
   function details() {
     var lines = ["Ghostly boot report", "reason: " + (reason || "none"), "build: " + build()];
-    for (var i = 0; i < errors.length && i < 5; i++) lines.push("error: " + errors[i]);
+    for (var i = 0; i < errors.length && i < 5; i++) lines.push("error: " + errors[i].text);
     try { lines.push("page: " + location.origin + location.pathname); } catch (e) { /* no address */ }
     try { lines.push("browser: " + navigator.userAgent); } catch (e) { /* none */ }
     try { lines.push("language: " + navigator.language); } catch (e) { /* none */ }
@@ -129,7 +130,7 @@
   }
 
   function show(why) {
-    if (done || painted()) return;
+    if (painted()) return;
     reason = reason === "error" ? reason : why;
     if (panel) return;
     if (!document.body) return;
@@ -180,37 +181,44 @@
     box.appendChild(area);
     panel.appendChild(box);
     document.body.appendChild(panel);
+    // Without a MutationObserver, and as a second look with one: the app may draw after the guard showed.
+    if (poll === null) poll = setInterval(check, 500);
   }
 
-  function later(fn, ms) { timers.push(setTimeout(fn, ms)); }
-
-  /** The app drew: the guard is over, for good. Errors from here on are the app's own error screen's. */
-  function finish() {
-    if (done) return;
-    done = true;
-    for (var i = 0; i < timers.length; i++) clearTimeout(timers[i]);
+  /** Something drew: the guard steps aside. It is not "taking long" any more; an error that empties the page still counts. */
+  function drew() {
+    if (slow !== null) clearTimeout(slow);
+    slow = null;
     if (poll !== null) clearInterval(poll);
     poll = null;
-    if (observer) observer.disconnect();
-    window.removeEventListener("error", onError, true);
-    window.removeEventListener("unhandledrejection", onRejection);
     if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
     panel = null;
+    reason = "";
   }
 
-  function check() { if (painted()) finish(); }
+  function check() { if (painted()) drew(); }
+
+  function forget(entry) {
+    for (var i = 0; i < errors.length; i++) if (errors[i] === entry) { errors.splice(i, 1); return; }
+  }
 
   function failed(message) {
-    if (done) return;
-    if (painted()) { finish(); return; }
-    errors.push(clean(message));
+    // An object, so that two errors with the same words are two entries.
+    var entry = { text: clean(message) };
+    errors.push(entry);
     if (panel) {
       // Already on screen (a slow start that then failed): the details follow.
       var area = panel.querySelector("textarea");
       if (area) area.value = details();
       return;
     }
-    later(function () { reason = "error"; show("error"); }, AFTER_ERROR_MS);
+    // Looked at a moment later, never at once: the page may be about to draw, or about to be emptied by this error.
+    setTimeout(function () {
+      if (painted()) { forget(entry); drew(); return; }
+      if (panel) return;
+      reason = "error";
+      show("error");
+    }, AFTER_ERROR_MS);
   }
 
   function fileOf(address) {
@@ -244,13 +252,12 @@
   }
 
   function loaded() {
-    // The app may have drawn before the page finished loading: then the guard is already over.
-    if (done) return;
     watch();
-    if (done) return;
-    later(function () { show("timeout"); }, AFTER_LOAD_MS);
-    // Without a MutationObserver, and as a second look with one: the app may draw after the guard showed.
-    poll = setInterval(check, 500);
+    // The app may have drawn before the page finished loading: then nothing is taking long.
+    if (painted()) return;
+    slow = setTimeout(function () { slow = null; show("timeout"); }, AFTER_LOAD_MS);
+    // Without a MutationObserver, and as a second look with one.
+    if (poll === null) poll = setInterval(check, 500);
   }
 
   window.addEventListener("error", onError, true);
