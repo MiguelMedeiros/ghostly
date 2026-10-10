@@ -121,7 +121,7 @@ Main types: `message.received`, `message.sent`, `message.delivery`, `message.edi
 `group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
 (a mention of this profile learned after its `group.message`, once), `group.members`,
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
-`identity.received`, `call.incoming`, `call.outgoing`, `call.connected`, `call.ended`. The full list is in the
+`identity.received`, `call.incoming`, `call.outgoing`, `call.connected`, `call.stalled`, `call.resumed`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
 
 ### Allowlist
@@ -255,6 +255,8 @@ The audio contract, one Unix socket per call:
 - **Barge-in.** `ghostly call flush` drops what is queued, at once.
 - **End.** The program reads EOF when the call ends; `call.ended` says why (`hangup`, `remote-hangup`, `missed`,
   `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
+- **Silence.** `call.stalled` says the contact's packets stopped for 5 s (its side may have died), `call.resumed` that
+  they came back; after 15 s with none the call ends as `failed`.
 - **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg.
 
 **When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log lists the candidates

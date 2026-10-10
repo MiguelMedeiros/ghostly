@@ -40,6 +40,8 @@ export interface CallHost {
    * theirs, so the real race's own refusals, which can come on top, still find the app's budget whole.
    */
   maxRedials?: number;
+  /** STALL_MS and STALL_END_MS (tests shorten them). */
+  stall?: { afterMs: number; endMs: number };
 }
 
 /** The audio contract of one call, as commands and events report it. */
@@ -56,6 +58,10 @@ export const CLEAR_MS = 5_000;
 /** How many times an outgoing call offers again after an answer was refused (`redial`), and the wait before each. */
 export const MAX_REDIALS = 4;
 export const REDIAL_BACKOFF_MS = [150, 300, 600, 600] as const;
+/** A connected call that hears no packet from the contact this long says so (`call.stalled`). */
+export const STALL_MS = 5_000;
+/** A connected call that hears no packet from the contact this long ends as `failed`. */
+export const STALL_END_MS = 15_000;
 /** A connection that fails this soon after its answer went in lost the race `redial` describes, and starts over. */
 export const RACE_FAIL_MS = 2_000;
 
@@ -85,6 +91,11 @@ interface Call {
   startedAt: number;
   connectedAt: number | null;
   timer: ReturnType<typeof setTimeout> | null;
+  /** The connected call's watch on the contact's packets (`watch`). */
+  watcher: ReturnType<typeof setInterval> | null;
+  /** Since when nothing came from the contact, while the call says it stalled (null: it does not); how many times it did. */
+  stalledFrom: number | null;
+  stalls: number;
   ended: boolean;
   /** Why it ended, once it has. */
   reason?: EndReason;
@@ -366,7 +377,8 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, attempt: 0, answered: 0, answeredAt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
+      offering: false, redials: 0, attempt: 0, answered: 0, answeredAt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null,
+      watcher: null, stalledFrom: null, stalls: 0, ended: false,
     };
     this.calls.set(call.id, call);
     return call;
@@ -429,6 +441,39 @@ export class CallManager {
     call.connectedAt = this.now;
     this.disarm(call);
     this.host.emit("call.connected", `call.connected:${call.id}`, { call: call.id, chat: call.chat, direction: call.direction, audio: this.audioInfo(call) });
+    this.watch(call);
+  }
+
+  /**
+   * libjuice says nothing of a contact whose side went away (a crash, a closed lid, a lost network) until its consent
+   * checks fail, about 30 s later: a connected call watches the contact's packets instead. An app sends them all along
+   * (silence while muted, and RTCP), and so does the CLI. Nothing for STALL_MS: `call.stalled`; packets again:
+   * `call.resumed`; nothing for STALL_END_MS: the call ends as `failed`, and the contact's app is told.
+   */
+  private watch(call: Call): void {
+    const { afterMs, endMs } = this.host.stall ?? { afterMs: STALL_MS, endMs: STALL_END_MS };
+    const since = Date.now();
+    call.watcher = setInterval(() => {
+      if (call.ended) return;
+      const heardAt = Math.max(since, call.media?.audio.heardAt ?? 0);
+      const silentMs = Date.now() - heardAt;
+      const fields = { call: call.id, chat: call.chat, direction: call.direction };
+      if (silentMs >= endMs) {
+        process.stderr.write(`ghostly: call ${call.id}: nothing heard from the contact for ${Math.round(silentMs / 1000)} s\n`);
+        void this.end(call, "failed", true);
+      } else if (silentMs >= afterMs && call.stalledFrom === null) {
+        call.stalledFrom = heardAt;
+        call.stalls++;
+        process.stderr.write(`ghostly: call ${call.id}: stalled, nothing heard from the contact for ${silentMs} ms\n`);
+        this.host.emit("call.stalled", `call.stalled:${call.id}:${call.stalls}`, { ...fields, silentMs });
+      } else if (silentMs < afterMs && call.stalledFrom !== null) {
+        const gapMs = heardAt - call.stalledFrom;
+        call.stalledFrom = null;
+        process.stderr.write(`ghostly: call ${call.id}: resumed after ${gapMs} ms\n`);
+        this.host.emit("call.resumed", `call.resumed:${call.id}:${call.stalls}`, { ...fields, silentMs: gapMs });
+      }
+    }, Math.min(1000, afterMs / 5));
+    call.watcher.unref?.();
   }
 
   private async end(call: Call, reason: EndReason, tell: boolean, report = true): Promise<void> {
@@ -436,6 +481,7 @@ export class CallManager {
     call.ended = true;
     call.reason = reason;
     this.disarm(call);
+    if (call.watcher) clearInterval(call.watcher);
     this.calls.delete(call.id);
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
     call.media?.close();
@@ -499,7 +545,7 @@ export class CallManager {
   private view(call: Call): Record<string, unknown> {
     const audio = call.media?.audio;
     return {
-      call: call.id, chat: call.chat, direction: call.direction, state: call.state, video: call.video,
+      call: call.id, chat: call.chat, direction: call.direction, state: call.state, stalled: call.stalledFrom !== null, video: call.video,
       startedAt: call.startedAt, connectedAt: call.connectedAt,
       audio: this.audioInfo(call),
       ...(call.socket ? { stats: { framesIn: audio?.received ?? 0, framesOut: audio?.sent ?? 0, queuedMs: call.queue?.queuedMs ?? 0, programConnected: call.socket.connected, ice: call.media?.ice ?? null } } : {}),
