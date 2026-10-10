@@ -1,3 +1,4 @@
+import { CliError } from "../errors";
 import { type Command, here, showSecret, secret, cursor } from "./shared";
 
 /** Groups: one entry per command, in alphabetical order (test/commands.test.ts checks). */
@@ -41,13 +42,16 @@ export const commands: Record<string, Command> = {
   },
   "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups and invitations", options: showSecret, params: ({ options }) => secret(options) },
   "group picture": {
-    method: "group.picture", usage: "group picture <group> <jpeg> | --clear", summary: "Set or clear the group's picture (admin; a square JPEG)", args: ["group", "path..."],
+    method: "group.picture", usage: "group picture <group> <jpeg> | --clear", summary: "Set or clear the group's picture (admin; a square JPEG)", args: ["group", "path...?"],
     options: { clear: { type: "boolean", description: "Remove the picture" } },
-    params: ({ options }, a) => ({ group: a.group, path: here(a.path), clear: options.clear === true }),
+    params: ({ options }, a) => {
+      if (a.path === undefined && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
+      return { group: a.group, path: here(a.path), clear: options.clear === true };
+    },
   },
   "group react": {
     method: "group.react", usage: "group react <group> <message> <emoji> [--remove]", summary: "React to a group's message with one emoji; --remove takes yours back",
-    args: ["group", "message", "emoji..."], options: { remove: { type: "boolean", description: "Take your reaction back" } },
+    args: ["group", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" } },
     params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: a.emoji, remove: options.remove === true }),
   },
   "group remove": {
