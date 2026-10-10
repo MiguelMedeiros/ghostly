@@ -6497,7 +6497,7 @@ export class GhostlyNode implements EngineImplementation {
       // 1:1 chats only: back after an absence over a relay at once, then to a direct path on the session (WISP 100).
       upgradeSupport: true,
       peerUpgrades: () => !!live.caps?.peer?.capabilities.includes(UPGRADE_CAPABILITY),
-      // 1:1 chats only, behind the apps flag: what this side has open outlives the link, so a restarted one says it again.
+      // 1:1 chats only, where apps are on: what this side has open outlives the link, so a restarted one says it again.
       appsSupport: this.appsOn,
       appsOpen: this.appsOn ? (live.appsOpen ??= new Map()) : undefined,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
