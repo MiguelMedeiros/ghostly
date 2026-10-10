@@ -5,9 +5,12 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { Button } from "../wallet/ui";
 import { AppIcon } from "./AppIcon";
-import { sendAppCard, useInstalledApps } from "../../lib/apps/installed";
+import { refreshInstalledApps, sendAppCard, useInstalledApps } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
+
+/** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
+const opens = (app: InstalledAppView) => app.run.status === "ok" || app.run.status === "needs-files";
 
 /*
  * The composer's + → Apps in a 1:1 chat (WISP 1200 § In a chat): the installed apps, one to open with this contact.
@@ -42,7 +45,11 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
       const failed = await sendAppCard(linkId, app, true);
       if (failed) throw new Error(failed);
       onClose();
-    } catch (e) { setError(appErrorText(e, t)); } finally { setBusy(null); }
+    } catch (e) { setError(appErrorText(e, t)); } finally {
+      setBusy(null);
+      // Opening is what fetched its files: every screen's list says so (or that they are still missing).
+      if (app.run.status === "needs-files") void refreshInstalledApps();
+    }
   };
 
   return (
@@ -61,9 +68,9 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                   <AppIcon size={36} installed={app} />
                   <div className="min-w-0 flex-1">
                     <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
-                    <p dir="auto" className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t("apps.app.stopped")}</p>
+                    <p dir="auto" className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
                   </div>
-                  <Button variant="primary" data-testid="chat-app-open" disabled={app.run.status !== "ok" || busy !== null} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
+                  <Button variant="primary" data-testid="chat-app-open" disabled={!opens(app) || busy !== null} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
                 </div>
               ))}
           <button type="button" data-testid="chat-apps-browse" onClick={() => { onClose(); nav.open("/apps"); }}
