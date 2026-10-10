@@ -80,3 +80,17 @@ test("in Arabic the words on a wallet card keep the app's font, so their letters
   }
   expect(await card.locator(".wallet-deck-card-balance").evaluate((element) => getComputedStyle(element).fontFamily)).toMatch(/mono/i);
 });
+
+test("in Arabic a page's Back arrow points to the start edge, as it does in English", { tag: ["@feature:app.i18n"] }, async ({ peer }) => {
+  const { page } = await peer("ar-back");
+  const arrow = page.getByTestId("page-back").locator("svg");
+  // Tailwind mirrors with the `scale` property: "-1 1" when mirrored, "none" when not.
+  const mirrored = () => arrow.evaluate((element) => getComputedStyle(element).scale.startsWith("-1"));
+  await page.goto("/#/settings");
+  await expect(arrow).toBeVisible();
+  expect(await mirrored()).toBe(false);
+  // Right to left the button is at the right edge: its arrow points there, not into the page.
+  await useLanguage(page, "ar");
+  await expect(arrow).toBeVisible();
+  expect(await mirrored()).toBe(true);
+});
