@@ -33,6 +33,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     setTyping: vi.fn(),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     getMessages: vi.fn(async () => []),
+    getMessage: vi.fn(async () => undefined),
     fileAction: vi.fn(async () => undefined),
     disconnect: vi.fn(),
     connect: vi.fn(async () => undefined),
