@@ -171,7 +171,9 @@ describe("the Fedimint wallet", () => {
     expect(await restored.restoreBackup(file, "correct horse battery")).toEqual({ joined: 2, failed: [] });
     await restored.refresh();
     expect(restored.view.balance, "the federations gave the ecash back").toBe(5_000);
-  });
+    // About ten key derivations of 600,000 rounds each (every join, the export, both passwords, the restore): close to
+    // the default 5 s on a quiet machine's bad day, and past it on a busy one.
+  }, 30_000);
 
   it("describes client operations as history", () => {
     const f = federation.id;
