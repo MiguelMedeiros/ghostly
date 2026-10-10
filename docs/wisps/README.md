@@ -63,7 +63,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 1001 | Storage | [Local File Storage](1001-local-storage.md) | Adapter | Draft | Available |
 | 1002 | Storage | [S3-Compatible Storage](1002-s3-storage.md) | Adapter | Draft | Available |
 | 1100 | Headless | [Headless Runtime and Local Control API](1100-headless.md) | Contract | Draft | Available |
-| 1200 | Apps and plugins | [Apps and Plugins: Packages, Stores and Apps Sent in a Chat](1200-marketplace.md) | Contract | Draft | Planned |
+| 1200 | Apps and plugins | [Apps and Plugins: Packages, Stores and Apps Sent in a Chat](1200-marketplace.md) | Contract | Draft | Available |
 
 <!-- wisp-index:end -->
 

@@ -7,7 +7,7 @@
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [404 store-and-forward](404-store-and-forward.md), [902 group mesh](902-group-mesh.md), [903 group community](903-group-community.md), [1100](1100-headless.md) |
-| Implementation | The `sc` field on every text wire of 400 (`packages/core/src/statusCards.ts`), the engine's messages and edits, `ghostly task send` and `task update` in the headless CLI (`task send|update`, `routine send|update`); the task and routine cards and the Tasks button in web, extension and desktop (`apps/ui/src/components/chat/StatusCard.tsx`, `RoutineCard.tsx`, `TasksButton.tsx`); the Tasks board (`apps/ui/src/pages/Tasks.tsx`, `apps/ui/src/lib/taskBoard.ts`) over the engine's card index (`statusCardIndex`). The `app` kind is read, checked and written as text in `packages/core/src/statusCards.ts` (vectors in `packages/core/test/vectors/app-card.json`), and drawn in a 1:1 chat by the web app behind the apps flag (`apps/ui/src/components/apps/AppCardView.tsx`), with [1200](1200-marketplace.md) for release 1.2. The `usage` kind: `ghostly usage send`, the meter on a chat's row and in its header and the card's line in the chat (`apps/ui/src/components/chat/UsageMeter.tsx`, `apps/ui/src/lib/usage.ts`) |
+| Implementation | The `sc` field on every text wire of 400 (`packages/core/src/statusCards.ts`), the engine's messages and edits, `ghostly task send` and `task update` in the headless CLI (`task send|update`, `routine send|update`); the task and routine cards and the Tasks button in web, extension and desktop (`apps/ui/src/components/chat/StatusCard.tsx`, `RoutineCard.tsx`, `TasksButton.tsx`); the Tasks board (`apps/ui/src/pages/Tasks.tsx`, `apps/ui/src/lib/taskBoard.ts`) over the engine's card index (`statusCardIndex`). The `app` kind is read, checked and written as text in `packages/core/src/statusCards.ts` (vectors in `packages/core/test/vectors/app-card.json`), and drawn in a 1:1 chat by the web app and Desktop from release 1.2 (`apps/ui/src/components/apps/AppCardView.tsx`), with [1200](1200-marketplace.md). The `usage` kind: `ghostly usage send`, the meter on a chat's row and in its header and the card's line in the chat (`apps/ui/src/components/chat/UsageMeter.tsx`, `apps/ui/src/lib/usage.ts`) |
 | Summary | A bot's task or routine shows as a small card with its progress, and stays current as the bot updates it. |
 | Availability | Available |
 | Notes | Task and routine cards are sent by bots through the headless CLI; people never fill one in the app. The app card, which a person's app makes when they share or open a mini-app, is planned for 1.2. Every app, old or new, shows a readable text. |
@@ -26,7 +26,7 @@ A **status card** is a message a bot sends with a small structured payload besid
 
 A third kind is made by a person's app rather than by a bot:
 
-- **app** (revision 2026-10-06, planned with [1200](1200-marketplace.md#apps-sent-in-a-chat)): a mini-app the person shared in the chat, or opened in it, with what a contact needs to install the same app and check it.
+- **app** (revision 2026-10-06, with [1200](1200-marketplace.md#apps-sent-in-a-chat), from release 1.2): a mini-app the person shared in the chat, or opened in it, with what a contact needs to install the same app and check it.
 
 Cards are **display only**. Nothing on a card runs anything, on either side: no buttons that act, no links other than https ones the reader chooses to open. An app card's one control, Install (or Play, once the app is installed), opens the reader's own install screen or the installed app; nothing is fetched to show the card, and nothing installs or runs until the person confirms on that screen ([1200](1200-marketplace.md#apps-sent-in-a-chat)). A third kind, `buttons`, puts answers under a bot's question; it is defined in [406 · Message Buttons](406-message-buttons.md), and a press sends a reply, nothing else.
 
@@ -120,7 +120,7 @@ A routine is something the bot runs. The app keeps no schedule, runs nothing and
 
 ### An app
 
-Revision 2026-10-06, planned with [1200](1200-marketplace.md#apps-sent-in-a-chat) for release 1.2. A mini-app the sender shared, or opened in this chat, as its text and card ride together:
+Revision 2026-10-06, built with [1200](1200-marketplace.md#apps-sent-in-a-chat), from release 1.2. A mini-app the sender shared, or opened in this chat, as its text and card ride together:
 
 ```json
 {"kind":"app","id":"chess.qxpcpfeicwzt193s","ref":"qxpcpfeicwzt193sifp188drnkwkht4qyt11m3brsa6dpqbzoheo/chess",

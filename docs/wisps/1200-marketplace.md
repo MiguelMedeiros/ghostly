@@ -6,10 +6,10 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [04](04-profiles.md), [05](05-backups.md), [06](06-devices.md), [200](200-payments.md), [300](300-peer-proofs.md), [310 did:dht](310-did-dht.md), [307 SSH](307-ssh.md), [400](400-chat.md), [401](401-paired-chat.md), [405 status cards](405-status-cards.md), [406 message buttons](406-message-buttons.md), [500](500-files.md), [501](501-paired-files.md), [700](700-local-services.md), [701](701-http-services.md), [800](800-invite-join.md), [1100](1100-headless.md) |
-| Implementation | Accepted for release 1.2 on 2026-10-06; implementation is starting, behind a feature flag on `dev` until the web chess e2e passes. Nothing of it is in a release |
+| Implementation | Phase 1 is built, from release 1.2. The formats in `packages/core/src` (`appBundle.ts`, `appStatements.ts`, `appStore.ts`, `appUpdates.ts`, `miniApp.ts`, `pairedApps.ts`), with vectors in `packages/core/test/vectors/`. The engine in `packages/browser/src/engine` (`apps.ts`, `appFetch.ts`, `appDefaults.ts`), on when `APPS_ENABLED` is (`packages/browser/src/shared/features.ts`). The Apps page, the install screen, the card and the panel in a chat in `apps/ui/src/pages/Apps.tsx`, `apps/ui/src/components/apps/` and `apps/ui/src/lib/apps/`. The runner on the web (`apps/web/public/app-frame.html`, its header in `apps/web/nginx.conf`) and on Desktop (`apps/desktop/src/app_sandbox.rs`, `app_window.rs`). The publisher tools in the CLI (`packages/cli/src/apps.ts`: `ghostly app init`, `publish`, `verify`, `revoke`, `ghostly store sign`) and the app types in `@ghostlytools/sdk/app`. The official store is [ghostly-store](https://github.com/MiguelMedeiros/ghostly-store) ([APPS.md](../APPS.md)). Phases 2 and 3 are design only |
 | Summary | Install apps and games by others from a store, a pasted Git URL or a chat. Each is checked against its publisher's signature and runs in a sandbox. |
-| Availability | Planned |
-| Notes | Not in the app yet. Phase 1, for release 1.2, is free mini-apps, turn-based and light versus games included, played live in a 1:1 chat, on the web app and Desktop on macOS and Linux; the extension comes later. No payments; an app reaches the internet only with the internet permission, granted at install. |
+| Availability | Available |
+| Notes | From release 1.2: free mini-apps played live in a 1:1 chat, on the web app and Desktop on macOS and Linux. Chess is the first app in the official store. Not on Desktop on Windows, in the Android app or in the extension yet. No payments; an app reaches the internet only with the internet permission, granted at install. |
 
 > This is a review draft. Candidate numbers and new record formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md) and [implementation evidence](IMPLEMENTATION.md).
 
@@ -17,7 +17,7 @@ Number note: the owner accepted the new family 1200-1299, "Apps and plugins", on
 
 ## Purpose
 
-The owner wants a marketplace, and chose its first goods: **apps and plugins for Ghostly**, games among the first. Not services, not physical goods. This document is the design, written before the code, which starts with release 1.2.
+The owner wants a marketplace, and chose its first goods: **apps and plugins for Ghostly**, games among the first. Not services, not physical goods. This document is the design, written before the code. Release 1.2 ships its phase 1; what a later phase adds is marked as such and is not in the app.
 
 It answers, in order: what an app and a plugin are, and which kinds phase 1 carries; the package and its signatures; where an app runs on each client, and its sandbox; how apps are found without a central server; paying, later, without an account; reviews; the threats; the phases.
 
@@ -66,7 +66,7 @@ Taken when the owner accepted this WISP for release 1.2. Where one changes an an
 | Desktop | **In phase 1**: an `app-*` window per app on the `ghostly-app` scheme. If the Desktop spike finds a problem, the problem gets fixed; release 1.2 does not ship web-only |
 | Extension | **Later**, after a test submission passes the Chrome Web Store review. Until then the extension shows no Apps |
 | Discovery in release 1.2 | The default store, a store added by its URL and an app added by its URL or from a card. The crawler and the default index come in release 1.3 (the coordinator's default, not objected) |
-| Rollout | Behind a feature flag on `dev` until the web chess e2e passes |
+| Rollout | Behind a feature flag on `dev` until the web chess e2e passes. Done: the flag (`APPS_ENABLED`) is on from release 1.2, and no earlier version is released with it on |
 | Network access for apps | A permission of phase 1, **`internet`**: an app that declares it, and that the person approves at install, reaches HTTPS and WSS servers of its choosing; an app without it has no network, as before ([Permissions](#permissions)) |
 | Safari and the iPhone's web app | **Not restricted**: Apps work there as everywhere. Their install screen says that, in this browser, an app can contact other servers even without `internet` (`<link rel=preconnect>`, which no policy governs in WebKit; [Threats](#threats)) |
 
@@ -618,7 +618,7 @@ All additive. An older app sees an app card as its text (a link: [405](405-statu
 
 ### Phase 1 (release 1.2): the smallest useful store
 
-**Free mini-apps, turn-based games and light real-time versus games (Tetris, Snake) included, played live in a 1:1 chat, on the web app and Desktop, installed from a pasted URL, a store or a card in a chat. No network access for apps but with the `internet` permission. The default store is a signed file in a repository of its own, signed with the owner's offline key; custom stores are HTTPS URLs. Behind a feature flag on `dev` until the web chess e2e passes.** In pieces that can each be a pull request:
+**Free mini-apps, turn-based games and light real-time versus games (Tetris, Snake) included, played live in a 1:1 chat, on the web app and Desktop, installed from a pasted URL, a store or a card in a chat. No network access for apps but with the `internet` permission. The default store is a signed file in a repository of its own, signed with the owner's offline key; custom stores are HTTPS URLs. Behind a feature flag on `dev` until the web chess e2e passes.** All seven pieces are built, and the flag is on from release 1.2. Release 1.2's official store lists one app, Chess; Tetris and Snake are what the format carries, and come later through the store, with no new release needed. The pieces, each of which was one or more pull requests:
 
 1. **Format and publisher tools.** Bundle, canonical manifest, digest, signatures with their prefixes, revocation, with the [test vectors](#test-vectors), in `packages/core`. `ghostly app publish`, `ghostly app verify`, `ghostly app revoke` and `ghostly store sign` in the CLI.
 2. **The package store.** Verified bundles kept per profile, with `sequence`, permissions and per-app, per-chat storage. Install, update, uninstall with export.
@@ -634,7 +634,7 @@ Phase 1 has no payments, no reviews, no themes, no per-site network permission (
 
 | Phase | What it gives |
 |---|---|
-| 1.2.x, 1.3 | `ghostly app init`, the SDK's single-file template with the commit-reveal helper, and `ghostly catalog submit`. Apps in the extension, after a test submission passes the Chrome Web Store review. A bundle sent as a file over `files/3`. The `store` card. The crawler and the default index (1.3) |
+| 1.2.x, 1.3 | The SDK's commit-reveal helper, and `ghostly catalog submit` (`ghostly app init` and the app types are in release 1.2). Apps in the extension, after a test submission passes the Chrome Web Store review. A bundle sent as a file over `files/3`. The `store` card. The crawler and the default index (1.3) |
 | 2 | Real-time games: the `realtime` permission, the unordered mode on `apps/1` over WebRTC, 64 MiB bundles. Bots on the other side of `apps/1` (`ghostly app serve`, `app.message` events, `ghostly app send`) and the `cards` permission. Themes as typed values. Paid apps on Testnet, then Mainnet when the owner says. Licences, reviews and reports, and an optional indexer service with search. Key rotation with a pinned recovery key. The publisher's Pkarr record. The `network` permission as an exact list of sites. Apps in groups |
 | 3 | Bots for the CLI as signed packages under an operating-system sandbox. A frame in the chat on Desktop once tested. Package sources over peer-to-peer content addressing |
 | Research | A permissioned host for adapter plugins (WebAssembly components get only the capabilities the host gives them, [component model](https://component-model.bytecodealliance.org/)); process isolation for apps; a transparency log for publisher keys; reproducible-build checks by stores |
