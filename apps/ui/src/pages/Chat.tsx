@@ -967,6 +967,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
         softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
+        // The engine's limit is 16 KiB of UTF-8, not characters: "é" counts two, an emoji four.
+        textBytes={paired ? 16_384 : undefined}
         onSendFile={platform ? sendFile : undefined}
         fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? t("chat.filesNeedUpdate") : undefined) : undefined}
         // The + → Payment row still opens on these: its Accept side is where this chat's ways of paying are chosen.

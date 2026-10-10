@@ -31,8 +31,12 @@
         android:networkSecurityConfig="@xml/network_security"
         android:theme="@style/Theme.ghostly"
         tools:replace="android:networkSecurityConfig">
+        <!-- configChanges names every configuration change (font size, display size, bold text, a right-to-left
+             language, Material You's colours...): one left out relaunches the activity, whose new WebView loads the
+             page again while the first one's page still runs and holds the profile, so the app would stay on "Ghostly
+             is already running with this profile". The page lays itself out again on any of them. -->
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontScale|fontWeightAdjustment|assetsPaths"
             android:launchMode="singleTask"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"

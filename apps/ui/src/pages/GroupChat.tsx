@@ -158,9 +158,11 @@ function namelessEvent(event: StoredMessage["event"], text: string, t: Translate
 function eventText(message: StoredMessage, group: GroupView, t: Translate): string {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
   const text = message.text;
+  // My own key is me whatever the roster says: once removed, it no longer lists me, and my lines still read "You …".
+  const me = !!member?.me || (!!message.member && message.member === group.myKey);
   // A member who has left since: the group still knows the name they had (`formerNames`), so their lines are said in
   // the interface's language too. A community knows only the names it heard: for anyone else its stored line stays.
-  const former = !member && !!message.member && FORMER_EVENTS.has(message.event) && (group.profile !== "community" || !!group.formerNames?.[message.member]);
+  const former = !member && !!message.member && FORMER_EVENTS.has(message.event) && (me || group.profile !== "community" || !!group.formerNames?.[message.member]);
   if (!member && !former) {
     if (message.event === "created" && text.startsWith("Group created. ")) return `${t("group.event.created")} ${readNote(group, t)}`;
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
@@ -181,17 +183,17 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
   }
   const name = member ? memberName(member, t) : authorName(group, message.member!, t);
   if (message.event === "joined") return t("group.event.joined", { name });
-  if (message.event === "admin") return member?.me ? t("group.event.adminYou") : t("group.event.admin", { name });
+  if (message.event === "admin") return me ? t("group.event.adminYou") : t("group.event.admin", { name });
   if (message.event === "picture") {
     const removed = text.endsWith("removed the group's picture");
-    if (member?.me) return removed ? t("group.event.pictureRemovedYou") : t("group.event.pictureChangedYou");
+    if (me) return removed ? t("group.event.pictureRemovedYou") : t("group.event.pictureChangedYou");
     return removed ? t("group.event.pictureRemoved", { name }) : t("group.event.pictureChanged", { name });
   }
   const marker = " renamed the group to “";
   const renamed = message.event === "renamed" ? text.indexOf(marker) : -1;
   if (renamed >= 0 && text.endsWith("”")) {
     const group = text.slice(renamed + marker.length, -1);
-    return member?.me ? t("group.event.renamedYou", { group }) : t("group.event.renamed", { name, group });
+    return me ? t("group.event.renamedYou", { group }) : t("group.event.renamed", { name, group });
   }
   return text;
 }
@@ -603,7 +605,7 @@ export function GroupChat() {
 
       {!joiningByLink && forwarding.bar}
       {forwarding.dialog}
-      {!joiningByLink && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
+      {!joiningByLink && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} textBytes={16_384} recipient={group.name} mentions={mentions}
         onTyping={group.profile === "mesh" ? onTyping : undefined}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: messageSnippet(replyingTo, t),
           mine: replyingTo.sender === "me", ...(replyingTo.sender === "peer" && replyingTo.member && { member: replyingTo.member }), onCancel: () => setReplyingTo(null) } : undefined}

@@ -18,7 +18,7 @@ export const apps = {
     open: "Open Ghostly",
     submit: "Submit an app",
   },
-  where: "Apps need Ghostly 1.2 or later: on the web, or the desktop app for macOS and Linux. Not on Windows, the Android app or the browser extension yet.",
+  where: "Apps need Ghostly 1.2 or later: on the web, or the desktop app for macOS and Linux. Not on Windows or the browser extension yet.",
   list: {
     title: "In the store",
     count: (n: number) => (n === 1 ? "1 app" : `${n} apps`),

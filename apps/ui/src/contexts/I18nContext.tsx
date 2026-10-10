@@ -4,6 +4,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 import { useSettings } from "./SettingsContext";
@@ -11,8 +12,8 @@ import type { Language } from "../lib/settings";
 import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
 import { setDefaultProfileName, setRestoredProfileName } from "../lib/profiles";
 
-import { locales as translations } from "../locales";
-import { englishT, translateWith, type Translate } from "../locales/translate";
+import { loadLocale, loadedLocale, translatorFor } from "../locales";
+import { englishT, type Translate } from "../locales/translate";
 
 export type { Translate, TranslationKey } from "../locales/translate";
 
@@ -26,7 +27,16 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const { settings } = useSettings();
-  const language = settings.language;
+  // A language is shown once its dictionary is here (the entry loads the profile's before the first render); one just
+  // chosen waits for its own, with the one shown before kept meanwhile.
+  const chosen = settings.language;
+  const [shown, setShown] = useState<Language>(() => (loadedLocale(chosen) ? chosen : "en"));
+  useEffect(() => {
+    let live = true;
+    void loadLocale(chosen).then(() => { if (live && loadedLocale(chosen)) setShown(chosen); });
+    return () => { live = false; };
+  }, [chosen]);
+  const language = loadedLocale(chosen) ? chosen : shown;
 
   const dir = textDirection(language);
 
@@ -35,7 +45,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     applyDocumentLanguage(language);
   }, [language]);
 
-  const t = useMemo(() => translateWith(translations[language] || translations.en, translations[language] ? language : "en"), [language]);
+  const t = useMemo(() => translatorFor(language), [language]);
   // The first profile's built-in name in this language, for whatever lists profiles (lib/profiles has no translator):
   // set as this renders, so the screens rendered in the new language read it; those keeping a list hear it after.
   setDefaultProfileName(t("profile.defaultName"));

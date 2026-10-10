@@ -15,7 +15,9 @@ Open **https://app.ghostly.tools** in any modern browser.
 
 ## Android
 
-The Android app is the Desktop app built for Android: the same UI and engine, with native Iroh and direct Mainline DHT (no HyperDHT yet). Releases attach `ghostly-<version>-android-arm64.apk`, signed with Ghostly's key; one made without the signing key has no APK. Details: [ANDROID.md](ANDROID.md).
+On an Android phone, Ghostly is the web app: open [app.ghostly.tools](https://app.ghostly.tools) in Chrome, Edge or Brave and install it (⋮, *Install app*), as [above](#web-app-nothing-to-install). It then opens from the home screen in a window of its own.
+
+A native Android app is planned and not released: no release has an APK. Where its work stands, for developers: [ANDROID.md](ANDROID.md).
 
 ## Browser extension (Chrome, Brave, Edge)
 

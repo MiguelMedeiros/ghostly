@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PinnedBar } from "../../components/chat/PinnedBar";
 import { messageSnippet, quoteFor, replyIndex } from "../../lib/replies";
 import type { ChatMessage } from "../../lib/types";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { renderApp } from "../render";
 

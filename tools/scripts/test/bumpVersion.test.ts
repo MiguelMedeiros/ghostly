@@ -152,6 +152,14 @@ describe("bump-version", () => {
       expect(guardProblems(off, "1.2.1", undefined, [])).toEqual([]);
     });
 
+    it("leaves a guard without a flag to the entries' check (the Android app, held for 1.3)", () => {
+      const empty = mkdtempSync(join(tmpdir(), "ghostly-guard-"));
+      dirs.push(empty);
+      const android = [{ from: "1.3.0", release: "1.3", about: "Android app", entry: () => true }];
+      const entry = { name: "android.md", group: "Android", body: "- A fix.", release: "1.3" };
+      for (const version of ["1.2.0", "1.3.0"]) expect(guardProblems(empty, version, android, [entry]), version).toEqual([]);
+    });
+
     it("stops the bump before any file changes", () => {
       const copy = withFlag("true");
       for (const file of ["package.json", "tools/scripts/bump-version.mjs", "tools/scripts/changes.mjs"]) {

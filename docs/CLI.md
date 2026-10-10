@@ -113,7 +113,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell).
-- `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only).
+- `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
+  followed).
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
@@ -121,7 +122,7 @@ Main types: `message.received`, `message.sent`, `message.delivery`, `message.edi
 `group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
 (a mention of this profile learned after its `group.message`, once), `group.members`,
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
-`identity.received`, `call.incoming`, `call.outgoing`, `call.connected`, `call.ended`. The full list is in the
+`identity.received`, `call.incoming`, `call.outgoing`, `call.connected`, `call.stalled`, `call.resumed`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
 
 ### Allowlist
@@ -175,7 +176,7 @@ reactions, typing).
 |---|---|
 | Invites and chats | `invite create\|join`, `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `edit <chat> <message>` (a status updated in place), `message retry\|delete\|details`, `react <chat> <message> <emoji>` (`--remove` takes yours back), `forward <chat> <message>… --to <chat\|group>…` (up to 5; files from the bytes here), `typing <chat> [--kind typing\|recording\|thinking] [--status <text>] [--for s] [--stop]` |
 | Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` |
-| Files and voice | `file send <chat> <path>`, `file send … --voice [ms]` (length and waveform measured from the file), `file send … --reply <message>` (quotes it), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`. `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
+| Files and voice | `file send <chat\|group> <path>` (to a group: up to 100 MiB, fetched by each member's app from a member who has it), `file send … --voice [ms]` (length and waveform measured from the file), `file send … --reply <message>` (quotes it), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`, and so does a group's file that did not come by itself (over 8 MiB). `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
 | Groups | `group create <name>` (a community link) or `--mesh` (private), `group join`, `group send … --mention <member> --reply <message>` (answers with the message id), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `group typing <group>` (private groups: typing, recording, thinking or a status line), `--wait sent` on both (until an edge took it); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|hub\|rename` (`group rename <group> <name…>` keeps the picture) |
 | Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`; Spark on Mainnet with your Breez API key; `--stdin` takes secret fields as `name=value` lines, `api-key=…` too, out of `ps` and the shell's history), `wallet add-mint`, `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history` (`wallet redeem` with no token reads it from stdin), `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
@@ -255,6 +256,8 @@ The audio contract, one Unix socket per call:
 - **Barge-in.** `ghostly call flush` drops what is queued, at once.
 - **End.** The program reads EOF when the call ends; `call.ended` says why (`hangup`, `remote-hangup`, `missed`,
   `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
+- **Silence.** `call.stalled` says the contact's packets stopped for 5 s (its side may have died), `call.resumed` that
+  they came back; after 15 s with none the call ends as `failed`.
 - **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg.
 
 **When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log lists the candidates
