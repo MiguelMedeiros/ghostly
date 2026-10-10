@@ -53,6 +53,12 @@ export function noteAfterChange(current: ReactionNote, message: StoredMessage): 
   return snippet === current.snippet ? undefined : { ...current, snippet };
 }
 
+/** The note as its message's row has it now, when that reaction still stands there (not replaced, not taken back). */
+export function noteIfStanding(current: ReactionNote, message: StoredMessage): ReactionNote | undefined {
+  const r = message.reactions?.[current.by];
+  return r?.e && r.e === current.emoji && r.at === current.at ? note(message, current.by, r.e, r.at) : undefined;
+}
+
 /**
  * My reactions in a private group to say again to an edge that opened, in case it missed them: the newest `limit`,
  * newest first (what the member is likeliest to have missed lands before its pace runs out), of this membership only.
