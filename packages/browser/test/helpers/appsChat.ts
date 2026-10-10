@@ -15,7 +15,7 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 
 export type Call = (method: string, params?: unknown) => Promise<unknown>;
 
-export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contactApps = true, beforeLive }: { apps?: boolean; contactApps?: boolean; beforeLive?: (call: Call, linkId: string, ref: string) => Promise<void> } = {}) {
+export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contactApps = true, beforeLive }: { apps?: boolean | "wire"; contactApps?: boolean; beforeLive?: (call: Call, linkId: string, ref: string) => Promise<void> } = {}) {
   const net = new FakeNativeNet();
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
