@@ -51,6 +51,8 @@ describe("ghostly edit", () => {
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "W".repeat(22), text: "x" })).rejects.toMatchObject({ code: "refused" });
     // The secret guard, as on send.
     await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_w", text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" })).rejects.toMatchObject({ code: "confirm" });
+    // A key with a zero-width space inside it is the same key to whoever takes the space out.
+    await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_w", text: "nsec1qyqszqgpqyqszqgpqyqszqgp\u200bqyqszqgpqyqszqgpqyqszqgpqyqstywftw" })).rejects.toMatchObject({ code: "confirm" });
   });
 
   it("a refused edit reads the one message by its id; only a wire id needs the history", async () => {
