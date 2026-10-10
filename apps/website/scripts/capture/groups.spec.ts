@@ -1,5 +1,5 @@
 // "Bring the whole group": a private group (group-mesh/1) with a picture, made by Boo and joined by
-// three friends through its link, everyone talking, and a request to the group paid by one member. Desktop from Boo's side, then Boo's own profile
+// three friends through its link, everyone talking, a photo one of them sends, and a request to the group paid by one member. Desktop from Boo's side, then Boo's own profile
 // reopened on a phone.
 import { test, expect } from "@playwright/test";
 import { rmSync } from "node:fs";
@@ -51,6 +51,12 @@ test("a private group of four, desktop and phone", async ({ browser, baseURL }) 
     [casper, "finally a group chat with just us in it"],
     [wendy, "I'll bring the board games 🎲"],
     [spooky, "and I bring the ghost stories 👻"],
+  ], everyone);
+
+  // Casper sends the house's photo to the group: each member's app fetches it from a member who has it.
+  await casper.page.getByTestId("file-input").setInputFiles({ name: "lake-house.jpg", mimeType: "image/jpeg", buffer: await sceneImage(casper) });
+  for (const p of everyone) await expect(chat(p).getByTestId("file-bubble").first().locator("img")).toBeVisible({ timeout: 120_000 });
+  await converse([
     [casper, "car leaves at 6. who's riding with me?"],
     [wendy, "me! saving you the front seat, Boo"],
   ], everyone);
