@@ -162,6 +162,28 @@ describe("pressing a contact's buttons", () => {
     const question = await t.peerRow(QUESTION);
     expect(await t.node.pressButton({ linkId: t.id, messageId: question.id, buttonId: "yes" })).toMatchObject({ refused: true, error: "These buttons are closed" });
   });
+
+  it("reads the question alone, the chat only when a once button may have answered it already", async () => {
+    const t = await setup();
+    const open = { kind: "buttons", id: "any-1", buttons: [{ id: "again", label: "Again" }, { id: "back", label: "Back" }] };
+    expect(await t.contact.sendMessage("Any time", Date.now(), WIRE("A"), undefined, undefined, undefined, readStatusCard(open)!)).toBeNull();
+    expect(await t.contact.sendMessage(QUESTION, Date.now(), WIRE("Q"), undefined, undefined, undefined, readStatusCard(ask({ closed: true, chosen: "no" }))!)).toBeNull();
+    const [any, closed] = [await t.peerRow("Any time"), await t.peerRow(QUESTION)];
+    const whole = vi.spyOn(db, "getMessages");
+    const mine = await t.node.sendMessage({ linkId: t.id, text: "Mine?", card: ask() });
+    await vi.waitFor(async () => expect((await t.row(mine.messageId!)).delivery).not.toBe("sending"));
+    whole.mockClear();
+    expect(await t.node.pressButton({ linkId: t.id, messageId: closed.id, buttonId: "yes" })).toMatchObject({ refused: true, error: "These buttons are closed" });
+    expect(await t.node.pressButton({ linkId: t.id, messageId: mine.messageId!, buttonId: "yes" })).toMatchObject({ refused: true });
+    expect(await t.node.pressButton({ linkId: t.id, messageId: "peer_notHere", buttonId: "yes" })).toMatchObject({ refused: true, error: "That message is not in this chat" });
+    expect(await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "nope" })).toMatchObject({ refused: true });
+    expect(whole).not.toHaveBeenCalled();
+    whole.mockRestore();
+    // Buttons with no once among them are pressed as often as I like.
+    expect((await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "again" })).error).toBeNull();
+    await new Promise(resolve => setTimeout(resolve, 1_050));
+    expect((await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "back" })).error).toBeNull();
+  });
 });
 
 describe("the buttons' state and a press, as pure rules", () => {
