@@ -11,6 +11,7 @@ import { GroupAvatar } from "./GroupAvatar";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { GroupLinkAskDialog } from "./GroupLinkAskDialog";
 
 function ShareIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>;
@@ -31,6 +32,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   const [error, setError] = useState<Problem | null>(null);
   const [said, setSaid] = useState<"" | "copied" | "shared">("");
   const [showQr, setShowQr] = useState(large);
+  const [asking, setAsking] = useState<"reset" | "disable" | null>(null);
   const saidTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const shareButton = useRef<HTMLButtonElement>(null);
   useEffect(() => () => clearTimeout(saidTimer.current), []);
@@ -80,10 +82,12 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   // For every member who sees the panel, not the admin alone: a community group's member hands its link out too.
   const qrToggle = <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary">{showQr ? t("group.link.hideQr") : t("group.link.showQr")}</button>;
   const adminControls = group.isAdmin && <div className={`flex flex-wrap gap-1 ${large ? "justify-center" : ""}`}>
-    <button disabled={busy} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id, reset: true }))} data-testid="group-link-reset"
+    <button disabled={busy} onClick={() => setAsking("reset")} data-testid="group-link-reset"
       title={t("group.link.resetHint")} className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40">{t("group.link.reset")}</button>
-    <button disabled={busy} onClick={() => void run(() => engine.call("disableGroupLink", { groupId: group.id }))} data-testid="group-link-disable"
+    <button disabled={busy} onClick={() => setAsking("disable")} data-testid="group-link-disable"
       title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.link.disable")}</button>
+    {asking && <GroupLinkAskDialog kind={asking} onClose={() => setAsking(null)}
+      onConfirm={() => { const reset = asking === "reset"; setAsking(null); void run(() => reset ? engine.call("enableGroupLink", { groupId: group.id, reset: true }) : engine.call("disableGroupLink", { groupId: group.id })); }} />}
   </div>;
   // Large, on a short screen it gives up some of its size (never under 140px) before the dialog has to scroll.
   const qr = <div data-testid="group-link-qr" className={`mx-auto w-fit max-w-full rounded-2xl bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full ${large ? "[&_svg]:w-[clamp(140px,28dvh,248px)]" : "mt-2"}`}>

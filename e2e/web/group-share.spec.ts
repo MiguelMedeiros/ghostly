@@ -67,6 +67,7 @@ test("a new group opens on its link; Copy, Share and the header's Share link; jo
   })).toBe(true);
   // Turned off, the header's Share link turns it on again, as a new link.
   await panel.getByTestId("group-link-disable").click();
+  await alice.page.getByTestId("group-link-ask-confirm").click();
   await expect(panel.getByTestId("group-link")).toHaveAttribute("data-state", "off");
   await alice.page.keyboard.press("Escape");
   await alice.page.getByTestId("group-share").click();

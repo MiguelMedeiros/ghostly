@@ -87,6 +87,7 @@ test("strangers join a group through its link, and a replaced link reaches nobod
   // A new link: the old one reaches nobody. Dave opens the old one and is left waiting.
   await alice.page.getByTestId("group-members").click();
   await alice.page.getByTestId("group-link-reset").click();
+  await alice.page.getByTestId("group-link-ask-confirm").click();
   await expect(field).not.toHaveValue(url);
   await alice.page.keyboard.press("Escape");
   await dave.page.goto(url);
