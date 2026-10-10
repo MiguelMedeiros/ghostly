@@ -7,10 +7,10 @@
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [500](500-files.md), [501](501-paired-files.md), [900](900-group-sessions.md), [902](902-group-mesh.md), [903](903-group-community.md) |
-| Implementation | Not built. This revision is the design that the engine, CLI, UI and e2e increments of release 1.2 implement, one pull request each |
+| Implementation | Built, from release 1.2: the wire in `packages/core/src/groupFiles.ts`, the engine in `packages/browser/src/engine/groupFiles.ts` (#1438), the composer, bubbles and the automatic download setting in the app (#1535), and `ghostly file send <group> <path> [--voice]` in the CLI. Web, extension, Desktop and the CLI |
 | Summary | Send a file or a voice message to a group: everyone sees it at once, and each member's app fetches the bytes from whoever has them. |
-| Availability | Planned |
-| Notes | Not in the app yet. Private groups and communities alike; a file of up to 100 MiB, a voice message up to 15 minutes. Apps from before show a line saying a file was sent and that it needs an update. |
+| Availability | Available |
+| Notes | From release 1.2, in private groups and communities alike: a file of up to 100 MiB, a voice message up to 15 minutes. Apps from before show a line saying a file was sent and that it needs an update. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -125,7 +125,7 @@ A member deleting a file for everyone (an author's "unsend" that holders honour)
 
 ## Conformance
 
-To be written with the implementation: a file and a voice message reaching every member of a group of three (web and CLI), with the author's app closed once a second member holds it; a member away during the announcement getting it later from a member who is not the author; a holder serving a damaged file and the receiver refusing it and fetching from another; a removed member refused, and a member let in later never seeing it; an app without version 6 showing the fallback text; automatic limits and the asked download; serving limits (`busy`).
+Unit and integration tests cover the wire (`packages/core/test/groupFiles.test.ts`), the engine (`packages/browser/test/groupFiles.test.ts`, `groupFilesLeftOver.test.ts`), the CLI (`packages/cli/test/groupFiles.test.ts`) and the app's bubbles and composer (`apps/ui/src/test/groups/groupFiles.test.tsx`); the features are `groups.files*` in `e2e/features.json`. What an independent implementation must show: a file and a voice message reaching every member of a group of three (web and CLI), with the author's app closed once a second member holds it; a member away during the announcement getting it later from a member who is not the author; a holder serving a damaged file and the receiver refusing it and fetching from another; a removed member refused, and a member let in later never seeing it; an app without version 6 showing the fallback text; automatic limits and the asked download; serving limits (`busy`).
 
 ## References
 

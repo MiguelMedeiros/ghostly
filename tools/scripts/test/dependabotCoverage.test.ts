@@ -31,8 +31,38 @@ function watched(text: string): string[] {
   });
 }
 
+/** Every Node image a Dockerfile of the tree builds on, as `<file> node:<major>`. */
+function nodeImages(dir = root, folder = ""): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return MADE.has(entry.name) || entry.name.startsWith(".") ? [] : nodeImages(join(dir, entry.name), `${folder}/${entry.name}`);
+    if (entry.name !== "Dockerfile") return [];
+    return [...readFileSync(join(dir, entry.name), "utf8").matchAll(/^FROM node:(\d+)/gm)].map((from) => `${folder}/Dockerfile node:${from[1]}`);
+  });
+}
+
+/**
+ * Node's long-term lines: the even majors up to 26, and every major from 27 on (one release a year since then, each
+ * long-term). 23 and 25 were supported for eight months.
+ */
+const longTerm = (major: number) => major >= 27 || major % 2 === 0;
+
+/** The block of one npm folder, as written. */
+const npmBlock = (text: string, directory: string) => text.split(/^ {2}- package-ecosystem: /m).find((block) => block.startsWith("npm\n") && block.includes(`\n    directory: ${directory}\n`)) ?? "";
+
 describe("Dependabot's configuration", () => {
-  const config = watched(readFileSync(join(root, ".github/dependabot.yml"), "utf8"));
+  const text = readFileSync(join(root, ".github/dependabot.yml"), "utf8");
+  const config = watched(text);
+
+  // hyperdht has four copies behind three lockfiles and a patch named by version (tools/patches): a group that moved
+  // the root's alone left the sidecar and the relay behind and the patch misnamed. Its update is a pull request of
+  // its own at the root, and no version update at all in the two other folders.
+  it("offers hyperdht alone at the root, never in the weekly group, and nowhere else", () => {
+    const group = npmBlock(text, "/").match(/^ {6}npm:\n((?: {8}.*\n)+)/m)?.[1] ?? "";
+    expect(group).toMatch(/^ {8}patterns: \["\*"\]$/m);
+    expect(group).toMatch(/^ {8}exclude-patterns: \[hyperdht\]$/m);
+    for (const directory of ["/native/transports/hyperdht", "/infra/services/hyperdht-relay"])
+      expect(npmBlock(text, directory)).toMatch(/^ {6}- dependency-name: hyperdht\n {8}update-types: \["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"\]$/m);
+  });
 
   it("reads both forms a block names its folders in", () => {
     const sample = [
@@ -50,6 +80,16 @@ describe("Dependabot's configuration", () => {
 
   it("watches every lockfile and Dockerfile in the repository", () => {
     expect(manifests().filter((m) => !config.includes(m))).toEqual([]);
+  });
+
+  it("leaves a Node image on the major its Dockerfile names", () => {
+    const docker = text.split(/^ {2}- package-ecosystem: /m).find((block) => block.startsWith("docker"))!;
+    expect(docker).toMatch(/^ {4}ignore:\n {6}- dependency-name: node\n {8}update-types: \["version-update:semver-major"\]$/m);
+  });
+
+  it("builds every image on a long-term Node", () => {
+    expect(nodeImages().length).toBeGreaterThan(0);
+    expect(nodeImages().filter((image) => !longTerm(Number(image.split("node:")[1])))).toEqual([]);
   });
 
   it("lists only folders the repository has", () => {

@@ -13,6 +13,7 @@ import {
   PRESENCE_WINDOW,
   presenceSeenAt,
   RELAY_POLL_INTERVALS,
+  STALLED_LOOK_MS,
   WATCH_PEER_MS,
   type LinkSessionEvents,
   type LinkSessionOptions,
@@ -729,6 +730,35 @@ describe("LinkSession poll pacing", () => {
     await settle();
     expect(a.transport.resolve).toHaveBeenCalledTimes(polls + 1);
     expect(lastPoll(a.ev)).toBe(I.fast);
+    await a.s.stop(false);
+  });
+
+  it("reads fast while the data link's connection is disconnected, and never past its bound", async () => {
+    const { a } = pair();
+    a.s.start();
+    await settle();
+    a.s.setDataLinkOpen(true);
+    a.s.pollNow();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.connected);
+    const polls = a.transport.resolve.mock.calls.length;
+    a.s.setDataLinkStalled(true);
+    await settle();
+    expect(a.transport.resolve, "read as it goes disconnected").toHaveBeenCalledTimes(polls + 1);
+    expect(lastPoll(a.ev)).toBe(I.fast);
+    // Back: the connected pace again.
+    a.s.setDataLinkStalled(false);
+    a.s.pollNow();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.connected);
+    // Nobody says what became of the connection: fast for `STALLED_LOOK_MS` only.
+    a.s.setDataLinkStalled(true);
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.fast);
+    vi.setSystemTime(Date.now() + STALLED_LOOK_MS);
+    a.s.pollNow();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.connected);
     await a.s.stop(false);
   });
 

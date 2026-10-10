@@ -204,6 +204,8 @@ export async function choose(app: DesktopApp, testId: string, value: string): Pr
 }
 
 export interface DesktopOptions {
+  /** The binary to open instead of `desktopBinary()`: an older release's, for the compatibility tests. */
+  binary?: string;
   /** `GHOSTLY_PROFILE`: the app's own space in its storage. */
   profile?: string;
   /**
@@ -244,7 +246,7 @@ export const homeEnv = (dir: string): Record<string, string> => {
 /** `tauri-driver`, and the app it opens, until `stop`. */
 export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
   // Before anything is spawned: a missing binary is not something to retry for 30 seconds.
-  const application = desktopBinary();
+  const application = options.binary ?? desktopBinary();
   const port = await freePort();
   const nativePort = await freePort();
   // A session bus of its own unless the test brings one: see `privateBus`.

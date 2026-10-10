@@ -83,6 +83,7 @@ export function guardProblems(root, next, guards = RELEASE_GUARDS, fragments = [
   const problems = [];
   for (const guard of guards) {
     const { file, flag, from } = guard;
+    if (!flag) continue;
     const early = versionBefore(next, from);
     const announced = early ? [] : fragments.filter((f) => f.release && !heldFor(f.release, next) && guard.entry?.(f));
     if (!early && !announced.length) continue;
@@ -171,6 +172,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const problems = guardProblems(ROOT, next);
     for (const problem of problems) console.error(`✗ ${problem}`);
     if (problems.length) process.exit(1);
-    console.log(`✓ ${next}: no flag on before its release (${RELEASE_GUARDS.map((g) => g.flag).join(", ")})`);
+    console.log(`✓ ${next}: no flag on before its release (${RELEASE_GUARDS.flatMap((g) => g.flag ?? []).join(", ")})`);
   } else bump(ROOT, next);
 }

@@ -53,6 +53,8 @@ export class CallAudio {
   /** Frames sent and received, for `call list`. */
   sent = 0;
   received = 0;
+  /** When the last packet, RTP or RTCP, came from the contact (Date.now(); 0: none yet), for the call's watch. */
+  heardAt = 0;
 
   constructor(private readonly options: CallAudioOptions) {
     const now = options.now ?? Date.now;
@@ -95,7 +97,9 @@ export class CallAudio {
 
   /** Handles one packet from the track. Exposed for tests. */
   receive(packet: Buffer): void {
-    if (this.stopped || isRtcp(packet)) return;
+    if (this.stopped) return;
+    this.heardAt = (this.options.now ?? Date.now)();
+    if (isRtcp(packet)) return;
     const rtp = parseRtp(packet);
     if (!rtp || rtp.payloadType !== this.options.payloadType) return;
     for (const item of this.reorder.push(rtp)) {

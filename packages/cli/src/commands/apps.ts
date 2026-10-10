@@ -1,4 +1,4 @@
-import { publishApp, revokeApp, signStore, verifyApp } from "../apps";
+import { initApp, publishApp, revokeApp, signStore, verifyApp } from "../apps";
 import { CliError } from "../errors";
 import type { Command } from "./shared";
 
@@ -15,6 +15,17 @@ const key = { type: "string", description: "The key file (made, owner-only, when
  * per command, in alphabetical order (test/commands.test.ts checks).
  */
 export const commands: Record<string, Command> = {
+  "app init": {
+    method: "app.init", usage: "app init <dir> [--name <name>] [--title <title>] [--force]",
+    summary: "Start an app (WISP 1200): a small working one in <dir>, its ghostly-app.json, an index.html that says hello to the contact and a README, ready for app publish",
+    args: ["dir"],
+    options: {
+      name: { type: "string", description: "The app's name, lowercase letters, digits and hyphens (default: the folder's)" },
+      title: { type: "string", description: "The title people see, up to 40 characters (default: from the name)" },
+      force: { type: "boolean", description: "Replace the three files when they are there" },
+    },
+    run: ({ options }, a) => initApp(a.dir!, { name: options.name as string | undefined, title: options.title as string | undefined, force: options.force === true }),
+  },
   "app publish": {
     method: "app.publish", usage: "app publish <dir> --key <file> [--out <file>]",
     summary: "Bundle and sign an app (WISP 1200): <dir>/ghostly-app.json and every other file in <dir> become one .ghostlyapp, its sequence one more than the bundle at --out (default <dir>/app.ghostlyapp)",

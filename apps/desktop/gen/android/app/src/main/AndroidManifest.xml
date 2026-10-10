@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Android's network callback (GhostlyHostPlugin.kt), which tells Iroh of a new network. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -18,17 +19,24 @@
     <!-- Nothing of the app's goes into Android's backup or phone-to-phone transfer: received files, the device state
          and the profile's database would bring the same profile up on a new phone. A profile moves with Ghostly's
          own encrypted backup or the device handoff. Android 12 and up read dataExtractionRules (and ignore
-         allowBackup for a device transfer), older ones fullBackupContent. -->
+         allowBackup for a device transfer), older ones fullBackupContent.
+         Cleartext (http://, ws://) is the network security config's to allow, and it replaces the one the
+         rustls-platform-verifier .aar brings: res/xml/network_security.xml, one per build type. -->
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security"
         android:theme="@style/Theme.ghostly"
-        android:usesCleartextTraffic="${usesCleartextTraffic}">
+        tools:replace="android:networkSecurityConfig">
+        <!-- configChanges names every configuration change (font size, display size, bold text, a right-to-left
+             language, Material You's colours...): one left out relaunches the activity, whose new WebView loads the
+             page again while the first one's page still runs and holds the profile, so the app would stay on "Ghostly
+             is already running with this profile". The page lays itself out again on any of them. -->
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontScale|fontWeightAdjustment|assetsPaths"
             android:launchMode="singleTask"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"

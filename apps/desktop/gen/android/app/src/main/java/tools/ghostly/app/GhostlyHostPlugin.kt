@@ -206,10 +206,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       for ((index, uri) in streams.withIndex()) {
         if (!latest()) break
         try {
-          val name = displayName(uri)?.replace('/', '_')?.takeIf { it.isNotBlank() && it != "." && it != ".." }
-            ?: "shared-${index + 1}"
           val folder = File(own, index.toString()).apply { mkdirs() }
-          val file = File(folder, name)
+          val file = File(folder, SharedName.of(displayName(uri), index))
           val copied = resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyWhile(input, it, latest) } }
           if (copied != true) continue
           files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))

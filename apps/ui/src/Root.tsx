@@ -1,17 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { NameStep } from "./components/NameStep";
 import { OpenFailureNotice } from "./components/OpenFailureNotice";
 import { App } from "./App";
 import { Home } from "./pages/Home";
-import { Settings } from "./pages/Settings";
-import { Services } from "./pages/Services";
-import { Profile } from "./pages/Profile";
-import { Identities } from "./pages/Identities";
-import { Apps } from "./pages/Apps";
-import { Tasks } from "./pages/Tasks";
-import { Wallet } from "./pages/Wallet";
 import { GroupChat } from "./pages/GroupChat";
 import { SharePicker } from "./pages/SharePicker";
 import { SettingsProvider } from "./contexts/SettingsContext";
@@ -40,6 +33,24 @@ import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
+
+/**
+ * A page of the menu, loaded the first time it is opened: the first screen (the chat list) does not wait for them.
+ * Nothing is drawn in its place for the moment it takes.
+ */
+function menuPage<P extends object>(load: () => Promise<ComponentType<P>>) {
+  const Page = lazy(async () => ({ default: await load() }));
+  return function MenuPage(props: P) {
+    return <Suspense fallback={null}><Page {...props} /></Suspense>;
+  };
+}
+const Settings = menuPage(() => import("./pages/Settings").then((m) => m.Settings));
+const Services = menuPage(() => import("./pages/Services").then((m) => m.Services));
+const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile));
+const Identities = menuPage(() => import("./pages/Identities").then((m) => m.Identities));
+const Apps = menuPage(() => import("./pages/Apps").then((m) => m.Apps));
+const Tasks = menuPage(() => import("./pages/Tasks").then((m) => m.Tasks));
+const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
 
 /**
  * An invite link, or a chat address from before chats were routed by session

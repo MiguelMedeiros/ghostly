@@ -1,5 +1,5 @@
 // "Bring the whole group": a private group (group-mesh/1) with a picture, made by Boo and joined by
-// three friends through its link, everyone talking, and a request to the group paid by one member. Desktop from Boo's side, then Boo's own profile
+// three friends through its link, everyone talking, a photo one of them sends, and a request to the group paid by one member. Desktop from Boo's side, then Boo's own profile
 // reopened on a phone.
 import { test, expect } from "@playwright/test";
 import { rmSync } from "node:fs";
@@ -67,10 +67,12 @@ test("a private group of four, desktop and phone", async ({ browser, baseURL }) 
   await ask.getByTestId("payment-pay").click({ timeout: 90_000 });
   await chat(wendy).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(chat(boo).getByTestId("group-pay-caption").filter({ hasText: "asked the group" })).toContainText("Paid by Wendy", { timeout: 90_000 });
-  await converse([
-    [boo, "thanks Wendy! 🔥"],
-    [spooky, "see you all friday 🌙"],
-  ], everyone);
+  await converse([[boo, "thanks Wendy! 🔥"]], everyone);
+
+  // Casper sends the house's photo to the group, late enough that both shots still show all of it: each member's app fetches it from a member who has it.
+  await casper.page.getByTestId("file-input").setInputFiles({ name: "lake-house.jpg", mimeType: "image/jpeg", buffer: await sceneImage(casper) });
+  for (const p of everyone) await expect(chat(p).getByTestId("file-bubble").first().locator("img")).toBeVisible({ timeout: 120_000 });
+  await converse([[spooky, "see you all friday 🌙"]], everyone);
   await boo.page.waitForTimeout(2000);
   await toBottom(boo);
   await shot(boo, "groups.png");

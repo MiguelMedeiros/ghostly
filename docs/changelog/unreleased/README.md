@@ -15,8 +15,9 @@ section: For users / Chat
 ```
 
 - `section` is a `###` heading of `## Unreleased` (`For users`, `For developers`, `Fixed`, `Security`...), and after
-  ` / ` a bold group under it (`Chat`, `Calls`, `Groups`, `Wallets`, `Identities`, `Everywhere`). A section that does
-  not exist yet is added at the end.
+  ` / ` a bold group under it (`Chat`, `Calls`, `Groups`, `Wallets`, `Identities`, `Everywhere`). A group that does
+  not exist yet is added at the end of its heading. The headings come out in the order Security, For users, Fixed, For
+  developers (another one after them), whatever the files' names.
 - The text is one or more list items, written for the people who read release notes. Plain English, no em dashes.
 - Entries of one section go in the files' name order.
 - `release: <major>.<minor>` (optional, after `section`) holds the entry for that release, for a change that ships
@@ -25,6 +26,9 @@ section: For users / Chat
 - Until 1.2.0, an Apps entry (section `... / Apps`, or text about the apps flag, WISP 1200 or `apps/1`) must say
   `release: 1.2`, and `section` and `release` are the only keys: the check refuses anything else, so a misspelled
   `release` never lets an entry out early.
+- Until 1.3.0, an entry about the native Android app (section `... / Android`, or text that names the Android app or
+  an APK) must say `release: 1.3`: the app is in no release before it. The web app on an Android phone is not the
+  native app; write "on Android" there.
 
 ```markdown
 ---

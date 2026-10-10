@@ -548,6 +548,11 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
   const [confirm, setConfirm] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const side = align === "left" ? "end" : "start";
+  // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
+  // keeps no copy of it, so the hint says what happens instead.
+  const { transfer } = useTransfer(download?.file.id);
+  const deleteHint = transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
+    : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
 
   return (
     <div ref={ref} className="relative self-center shrink-0">
@@ -605,7 +610,7 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
       {onDelete && (
         <Menu open={confirm} onClose={() => setConfirm(false)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} label={t("chat.deleteMessage")}>
           <div className="px-3 py-2 md:w-[210px]">
-            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{t("chat.deleteMessageHint")}</p>
+            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -723,6 +728,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
   const rowRef = useRef<HTMLDivElement>(null);
   const openDetails = () => setDetails(true);
+  // A double click on a control in the message (a file's Accept, Pause or Save, a player's Play, a link) is that
+  // control's: two quick clicks on a button do not open the details too.
+  const detailsOnDoubleClick = (e: React.MouseEvent) => {
+    const control = (e.target as Element).closest("button, a, input, [role=button]");
+    if (!control || !e.currentTarget.contains(control)) openDetails();
+  };
   // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
   const copyable = message.file || message.paymentId || pressed || showsCard(message.card) ? "" : message.text.trim();
   // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
@@ -798,7 +809,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // A click anywhere on the row (a player's button included) chooses it or not; nothing inside it runs.
     onClickCapture: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); selection.onToggle?.(); },
   } : {
-    ref: rowRef, onDoubleClick: openDetails, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
+    ref: rowRef, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
     // The second click of a double click would select a word of the message under the details.
     onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
   };
