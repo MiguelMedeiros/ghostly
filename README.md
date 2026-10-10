@@ -35,7 +35,7 @@ https://github.com/user-attachments/assets/7f9e11de-4c65-44e9-9763-885664de0d64
 - <img src="docs/assets/icons/chat.svg" width="20" align="absmiddle" alt=""> **[Chat](docs/CHAT.md)**: one invite, as a code, link or QR. Replies, edits, reactions, forwards, voice messages.
 - <img src="docs/assets/icons/calls.svg" width="20" align="absmiddle" alt=""> **[Calls](docs/CHAT.md#calls-and-shared-services)**: voice and video, peer to peer. Pick your mic, camera and speaker.
 - <img src="docs/assets/icons/files.svg" width="20" align="absmiddle" alt=""> **[Files](docs/CHAT.md#files)**: any size, resumable, checked by digest. Videos and audio play in the chat.
-- <img src="docs/assets/icons/groups.svg" width="20" align="absmiddle" alt=""> **[Groups](docs/CHAT.md#groups)**: private groups of up to 32, communities of up to 256, joined by a link.
+- <img src="docs/assets/icons/groups.svg" width="20" align="absmiddle" alt=""> **[Groups](docs/CHAT.md#groups)**: private groups of up to 32, communities of up to 256, joined by a link. Files and voice messages too.
 - <img src="docs/assets/icons/wallets.svg" width="20" align="absmiddle" alt=""> **[Wallets](docs/WALLETS.md)**: Cashu, Lightning, Ark, Spark, Fedimint, on-chain and USDT. Pay in a chat. Mainnet is experimental.
 - <img src="docs/assets/icons/identities.svg" width="20" align="absmiddle" alt=""> **[Identities](docs/IDENTITIES.md)**: prove your Nostr, Pubky, domain, PGP, SSH, Bitcoin address or DID. Your contact's app checks it.
 - <img src="docs/assets/icons/shared-apps.svg" width="20" align="absmiddle" alt=""> **[Shared services](docs/CHAT.md#calls-and-shared-services)**: share a web app on your `localhost` with a contact, over the chat's live connection.
