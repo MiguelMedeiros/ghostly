@@ -155,8 +155,13 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(await t.b.link.sendMessage("seen before", Date.now(), undefined, undefined, undefined, 4)).toBeNull();
     const first = await t.row(t.b, m => m.text === "first"), again = await t.row(t.b, m => m.text === "seen before");
     expect(again.forwarded).toBe(4);
+    // The messages chosen are read by their ids: the chat they come from is not read whole, however long it is.
+    const whole = vi.spyOn(db, "getMessages");
     const { results } = await t.node.forwardMessages({ linkId: t.b.id, messageIds: [again.id, first.id], to: [t.a.id] });
+    expect(whole.mock.calls.filter(([chat]) => chat === t.b.id)).toEqual([]);
+    whole.mockRestore();
     expect(results[0]).toMatchObject({ error: null, messageIds: [expect.any(String), expect.any(String)] });
+    await expect(t.node.forwardMessages({ linkId: t.b.id, messageIds: [first.id, "peer_notHere"], to: [t.a.id] })).rejects.toThrow("That message is not in this chat");
     await vi.waitFor(() => expect(t.a.got).toHaveLength(2));
     expect(t.a.got.map(m => [m.text, m.forwarded])).toEqual([["first", 1], ["seen before", 5]]);
     expect(forwardedMany(t.a.got[1]!.forwarded)).toBe(true);
