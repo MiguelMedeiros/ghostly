@@ -15,6 +15,7 @@ What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.m
 - Your own TURN server (Settings → Network) for networks that let no direct path through, for chats and calls, Linux Desktop calls included. Backups leave its credential out.
 - Your own Iroh relays in the same place, used by the web app, the extension and Desktop alike, so a browser and a Desktop on a self-hosted relay find each other.
 - Private groups of up to 32 (through hubs past 16) and communities of up to 256, joined by a link.
+- Files, pictures, videos and voice messages in groups, up to 100 MiB a file: everyone sees them at once, and each member's app fetches them from a member who has them. Voice messages and files up to 8 MiB download by themselves; larger ones on **Download** (Settings → Data & storage → Download automatically in groups).
 
 More: [Chat](CHAT.md).
 

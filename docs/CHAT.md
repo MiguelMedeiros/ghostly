@@ -151,6 +151,7 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 - **Audio files** (#379): an MP3, M4A/AAC, Ogg/Opus, WebM, WAV or FLAC sent as a file plays in its bubble, with a seek bar, Save and the 1×, 1.5×, 2× pill of voice messages. It keeps playing when scrolled away. MIDI, AIFF and WMA stay files.
 - **On Desktop** (#381, #405), every stored video and audio file plays and seeks from the file on disk, read in ranges, so size is no limit. Videos go full screen on every system; on Linux, where WebKitGTK has no element full screen, the bubble's own **Full screen** button fills the window.
 - Older contacts: files/2, up to 100 MiB ([WISP 500](wisps/500-files.md)).
+- In a group, a file is announced to everyone and fetched from a member who has it: [Groups](#files-and-voice-messages-in-a-group).
 
 ## Calls and shared services
 
@@ -192,3 +193,15 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 - Typing, recording and thinking show in private groups (#442, [Header](#header)). A message that mentions you wakes your closed web app, if you turned on Wake me while closed (#448, [WEB.md](WEB.md#install-it)).
 - A member's name stays while their connection is down; only the member changes or removes it (#533).
 - In a community, the admin's changes are final: a member's longer branch cannot undo them (#300).
+
+### Files and voice messages in a group
+
+From 1.2, in private groups and communities ([WISP 503 Group Files](wisps/503-group-files.md), #1438, #1535, `packages/browser/src/engine/groupFiles.ts`):
+
+- The composer takes files, pictures, videos and voice messages as a chat's does (+ → Document, Media, Camera, paste, drop, the microphone), a reply included. Up to 100 MiB a file, a voice message up to 15 minutes.
+- Everyone sees the bubble at once, under the sender's name. The bytes do not go through the group: each member's app fetches them from a member who has the file, over a link between the two, and checks them against the sender's digest. Whoever stored the file serves it, so a member who was away gets it from anyone who is there, not only from the sender.
+- Voice messages, and files up to 8 MiB, download by themselves until what came that way from a group adds up to 256 MiB on the device. Larger ones show their size and **Download**. Settings → Data & storage → **Download automatically in groups** is Off, Wi-Fi only (where the browser can tell) or Always (the default), per device; nothing about it is sent to the group.
+- A file that cannot come yet says why: "Asking a member who has it…", "Nobody you are connected to has this file yet" (it comes by itself when one is online), "Busy, trying again soon", or "Arrived damaged" with **Ask again**. One that stops mid-way goes on from what already came.
+- Forward and Share to list groups for files too.
+- An app from before 1.2 shows a line that names the file and says to update. Hubs carry the announcement, never the bytes.
+- No calls in groups.
