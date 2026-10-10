@@ -74,15 +74,20 @@ export function satsToBtc(sats: number): string {
   return String(Math.floor(sats / 100_000_000)) + (fraction ? `.${fraction}` : "");
 }
 
+/** `encodeURIComponent` that never throws: half of a character pair (a label cut at its limit, or sent that way) is left out. */
+function encoded(text: string): string {
+  return encodeURIComponent(text.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, (found) => (found.length === 2 ? found : "")));
+}
+
 /** A `bitcoin:` link from read fields only: what a card hands to a wallet (QR, Open in wallet). */
 export function bip21Uri(address: string, fields: { amountSat?: number; label?: string; message?: string; lightning?: string; ark?: string; unsupported?: [string, string][] }): string {
   const params: string[] = [];
   if (fields.ark) params.push(`ark=${fields.ark}`);
   if (fields.amountSat !== undefined) params.push(`amount=${satsToBtc(fields.amountSat)}`);
   // What made the card refuse to pay (an unreadable amount, an unknown `req-`) goes along, so a wallet refuses too.
-  for (const [name, value] of fields.unsupported ?? []) params.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
-  if (fields.label) params.push(`label=${encodeURIComponent(fields.label)}`);
-  if (fields.message) params.push(`message=${encodeURIComponent(fields.message)}`);
+  for (const [name, value] of fields.unsupported ?? []) params.push(`${encoded(name)}=${encoded(value)}`);
+  if (fields.label) params.push(`label=${encoded(fields.label)}`);
+  if (fields.message) params.push(`message=${encoded(fields.message)}`);
   if (fields.lightning) params.push(`lightning=${fields.lightning}`);
   return `bitcoin:${address}${params.length ? `?${params.join("&")}` : ""}`;
 }

@@ -147,6 +147,16 @@ describe("BIP 21 links", () => {
     expect(uriOf(`bitcoin:?ark=${ark}&amount=0.00005&amount=1&lightning=${INVOICE}`)).toBe(`bitcoin:?ark=${ark}&amount=0.00005`);
   });
 
+  it("reads a link whose label or message ends in half a character: it is left out of what a wallet gets", () => {
+    const uriOf = (text: string) => (findMoney(text) as { request: { uri?: string } }).request.uri;
+    // The label is cut at 140: here the cut falls inside an emoji.
+    expect(uriOf(`bitcoin:${BC1Q}?amount=0.001&label=${"a".repeat(139)}%F0%9F%98%80`)).toBe(`bitcoin:${BC1Q}?amount=0.001&label=${"a".repeat(139)}`);
+    expect(uriOf(`bitcoin:${BC1Q}?message=${"b".repeat(139)}\u{1F600}&label=ok%20\u{1F600}`)).toBe(`bitcoin:${BC1Q}?label=ok%20%F0%9F%98%80&message=${"b".repeat(139)}`);
+    // Half a pair written as it is, in a field and in what keeps the link from being paid.
+    expect(uriOf(`bitcoin:${BC1Q}?label=x\uD83Dy&req-new=\uDE00z`)).toBe(`bitcoin:${BC1Q}?req-new=z&label=xy`);
+    expect(previewText(`bitcoin:${BC1Q}?label=${"a".repeat(139)}%F0%9F%98%80`)).toBeTruthy();
+  });
+
   it("is not fooled by a link with a bad address", () => {
     expect(findMoney(`bitcoin:${corrupt(BC1Q)}?amount=1 and some words to make it long`)).toBeNull();
   });
