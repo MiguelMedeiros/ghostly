@@ -1,6 +1,6 @@
 # Features
 
-What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.md), [Wallets](WALLETS.md), [Identities](IDENTITIES.md), [Several devices](DEVICES.md), [Transports](TRANSPORTS.md). How it fits together: [Architecture](ARCHITECTURE.md).
+What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.md), [Wallets](WALLETS.md), [Identities](IDENTITIES.md), [Several devices](DEVICES.md), [Transports](TRANSPORTS.md), [Apps](APPS.md). How it fits together: [Architecture](ARCHITECTURE.md).
 
 ## Chat
 
@@ -51,6 +51,16 @@ More: [Identities](IDENTITIES.md).
 - **Android:** the Desktop app built for Android (Tauri), arm64, with native Iroh and Mainline DHT. Releases attach the APK ([ANDROID.md](ANDROID.md)).
 
 More: [On the web](WEB.md#install-it).
+
+## Apps
+
+- Mini-apps and games, installed from the official store, from another store you add by its link, from an app's link or from a contact's card. Chess is the first.
+- Each app is checked against its publisher's signature before it installs, and runs in a sandbox apart from your chats, keys and wallets. It reaches the internet only with the permission you grant at install.
+- Open an app in a 1:1 chat to play with that contact, live, while you are both online. Each side keeps the game.
+- An app from a store updates to the version that store lists; a version its publisher revoked or a store removed is stopped.
+- On the web app and on Desktop for macOS and Linux. Not yet on Desktop on Windows, in the Android app or in the extension.
+
+More: [Apps and the official store](APPS.md).
 
 ## Shared services
 
