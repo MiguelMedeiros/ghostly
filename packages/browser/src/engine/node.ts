@@ -3046,7 +3046,9 @@ export class GhostlyNode implements EngineImplementation {
     const edited = withEdit(message, { seq, at: Date.now(), text, preview, card, pending: true });
     await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview, card: edited.card }));
     await this.messagesChanged(linkId, [message.id]);
-    void this.editsFor(linkId).flush().catch(() => {});
+    const edits = this.editsFor(linkId);
+    edits.edited(message.id);
+    void edits.flush().catch(() => {});
     return { error: null, messageId: message.id };
   }
 
@@ -3147,7 +3149,7 @@ export class GhostlyNode implements EngineImplementation {
         const next = withEdit(current, { seq, at, text: current.text, preview: current.preview, card: current.card, pending: true });
         return { edit: { ...next.edit!, restore: true }, ...done };
       });
-      if (patched?.edit?.pending) changed.push(message.id);
+      if (patched?.edit?.pending) { changed.push(message.id); this.editsFor(linkId).edited(message.id); }
     }
     if (changed.length) await this.messagesChanged(linkId, changed);
   }
@@ -3158,6 +3160,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!queue) {
       queue = new EditQueue({
         read: () => db.getMessages(linkId),
+        row: id => db.getMessage(linkId, id),
         ready: () => {
           const live = this.links.get(linkId), link = live?.link;
           return !!link && (link.supportsEdits || (link.textDelivery === "dht" && this.takesDhtEdits(live)));
