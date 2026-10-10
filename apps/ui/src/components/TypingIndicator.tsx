@@ -85,7 +85,8 @@ export function ChatSubtitle({ peerKey, keyLabel }: { peerKey?: string; keyLabel
   return (
     <p className={`m-0 truncate text-xs max-md:text-[10px] whitespace-nowrap ${activity ? "" : "text-text-muted font-mono"}`} data-testid="chat-subtitle"
       role="status" aria-live="polite">
-      {activity ? <TypingText testId="chat-typing" activity={activity} /> : keyLabel}
+      {/* No wider than the line: a long status ends in an ellipsis at what follows it (a bot's usage meter). */}
+      {activity ? <TypingText testId="chat-typing" activity={activity} className="max-w-full" /> : keyLabel}
     </p>
   );
 }
