@@ -434,7 +434,7 @@ export interface NodeOptions {
   reactions?: boolean;
   /**
    * Mini-apps in 1:1 chats (`apps/1`, WISP 1200 § In a chat): offered on paired sessions, and the `app*` calls. Default:
-   * `APPS_ENABLED` (off until the feature ships). A host that runs no mini-app (the CLI, the extension, the Android app) pins it to false
+   * `APPS_ENABLED` (on from release 1.2). A host that runs no mini-app (the CLI, the extension, the Android app) pins it to false
    * whatever the flag says, and its app calls are refused as "not on this client"; tests turn it on.
    */
   apps?: boolean;

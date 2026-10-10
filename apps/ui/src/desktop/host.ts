@@ -292,8 +292,8 @@ export async function desktopUnderTest(): Promise<boolean> {
 /**
  * Mini-apps (WISP 1200) on this app: on Desktop they run in windows of their own on Rust's `ghostly-app` scheme, which
  * serves the runner with its policy (apps/desktop/src/app_sandbox.rs): one address, the policy chosen by what the
- * person granted. The engine has them in the e2e suite's build only (VITE_APPS_TEST, fixed when the build is made),
- * reading its test store. Desktop on Windows and the Android app have none yet (`appsPlatform` false), whatever the
+ * person granted. The engine has them by the build's flag (`APPS_ENABLED`); the e2e suite's build (VITE_APPS_TEST,
+ * fixed when the build is made) has them whatever the flag, and reads its test store. Desktop on Windows and the Android app have none yet (`appsPlatform` false), whatever the
  * build: no runner, and the engine told so, so no `apps/1` is offered to contacts.
  */
 export function desktopApps(runsApps: boolean) {

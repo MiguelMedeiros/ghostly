@@ -32,8 +32,8 @@ export const CHANGES = "docs/changelog/unreleased";
 /**
  * Flags that hold part of the next release back, one per flag. A version before `from` must not ship the flag on
  * (tools/scripts/bump-version.mjs refuses the bump), and while the repository is at a version before `from`, an entry
- * about it (`entry`) says `release: <release>` or later, so a patch never announces it. The flag flips only on the
- * release/<from> branch, before that release's bump (docs/RELEASING.md).
+ * about it (`entry`) says `release: <release>` or later, so a patch never announces it. The flag flips at that
+ * release's cut, before its bump (docs/RELEASING.md).
  */
 export const RELEASE_GUARDS = [
   {
