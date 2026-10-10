@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { PinView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../../contexts/I18nContext";
 import { revealMessage } from "../../hooks/useRowWindow";
@@ -11,12 +11,23 @@ const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-10 max-md:h-10
 /**
  * The bar under a chat's header while a message is pinned (WISP 400 § Pinned message): a line of it, found in this
  * chat by the id both sides know it by; a click scrolls to it and marks it, as a quote's tap does. ✕ unpins, where
- * this side may (`onUnpin`).
+ * this side may (`onUnpin`). Unpinned from the keyboard, the bar goes with the focus on its ✕: the focus then goes to
+ * `returnFocus` (the chat's ⋮), unless the person moved it elsewhere meanwhile. Before, it fell to the page.
  */
-export function PinnedBar({ pin, index, onUnpin }: { pin?: PinView; index: ReplyIndex; onUnpin?: () => void }) {
+export function PinnedBar({ pin, index, onUnpin, returnFocus }: { pin?: PinView; index: ReplyIndex; onUnpin?: () => void; returnFocus?: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
   const [info, setInfo] = useState(false);
   const infoId = useId();
+  /** The ✕ that was pressed with the focus on it, until the bar it is in goes or shows another pin. */
+  const pressed = useRef<HTMLElement | null>(null);
+  const pinned = pin?.id;
+  useLayoutEffect(() => {
+    const was = pressed.current;
+    pressed.current = null;
+    if (pinned || !was) return;
+    const at = document.activeElement;
+    if (!at || at === document.body) returnFocus?.current?.focus({ preventScroll: true });
+  }, [pinned, returnFocus]);
   if (!pin?.id) return null;
   const original = index.byRef.get(pin.id) ?? (pin.messageId ? index.byId.get(pin.messageId) : undefined);
   const open = () => { if (original && !jumpToMessage(original.id) && revealMessage(original.id)) jumpToMessage(original.id); };
@@ -36,7 +47,7 @@ export function PinnedBar({ pin, index, onUnpin }: { pin?: PinView; index: Reply
           className={`${button} aria-expanded:text-accent`}>
           <svg {...icon}><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
         </button>
-        {onUnpin && <button type="button" data-testid="pinned-unpin" onClick={onUnpin} aria-label={t("chat.pinned.unpin")} title={t("chat.pinned.unpin")} className={button}>
+        {onUnpin && <button type="button" data-testid="pinned-unpin" onClick={(e) => { pressed.current = document.activeElement === e.currentTarget ? e.currentTarget : null; onUnpin(); }} aria-label={t("chat.pinned.unpin")} title={t("chat.pinned.unpin")} className={button}>
           <svg {...icon}><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>}
       </div>

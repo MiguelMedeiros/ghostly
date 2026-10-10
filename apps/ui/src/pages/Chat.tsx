@@ -838,7 +838,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
-      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} />
+      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
 
