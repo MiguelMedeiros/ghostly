@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, RACE_DIRECT_MS, UNPROVEN_AUTH_MS } from "../src/ghostlink";
+import { CROSSED_WAIT_MS, GhostLink, RACE_DIRECT_MS, UNPROVEN_AUTH_MS } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { DiscoveryBudgetError, type PkarrTransport } from "../src/transport";
@@ -609,7 +609,7 @@ describe("back from the background (a phone that slept), the contact's chat not 
    * `times`: the app sleeps and wakes this many times, the same link throughout (the lab: only the first was fast).
    * The numbers are the last return's.
    */
-  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, times = 1 }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; times?: number }) {
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1 }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number }) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     const made = invitationWhere("inviter");
     const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
@@ -628,8 +628,16 @@ describe("back from the background (a phone that slept), the contact's chat not 
       const inner = phone.link as unknown as { livenessTimer: ReturnType<typeof setInterval> | null };
       if (frozen && inner.livenessTimer) { clearInterval(inner.livenessTimer); inner.livenessTimer = null; }
       await run(awayMs);
+      const state = () => (cli.link as unknown as { dataLink: { state: string } }).dataLink.state;
+      if (duringAttemptMs) {
+        await until(() => state() === "idle", 4 * 60_000);
+        await until(() => state() === "offering", 4 * 60_000);
+        await run(duringAttemptMs);
+        expect(state(), "the CLI's offer stands at the wake").toBe("offering");
+        // The wake's read of the CLI's record brings that offer before the app's own has gathered.
+        rtc.srflxAfterMs = 450;
+      }
       if (afterAttempt) {
-        const state = () => (cli.link as unknown as { dataLink: { state: string } }).dataLink.state;
         await until(() => state() === "offering", 4 * 60_000);
         await until(() => state() === "idle", 4 * 60_000);
         await run(1_400);
@@ -668,5 +676,33 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
     // A knock costs the relays nothing: the reads and publishes of a return, no more (4 to 8 here).
     expect(requestsToLive).toBeLessThanOrEqual(10);
+  }, 240_000);
+
+  it.each([
+    { duringAttemptMs: 20_000, crossed: false },
+    { duringAttemptMs: 30_000, crossed: false },
+    { duringAttemptMs: 47_400, crossed: false },
+    // The CLI's own dial of the relayed Iroh is under way (`RACE_RELAYED_MS`, to an app asleep): the knock crosses it,
+    // and waits for it there (WISP 100, "Crossed dials": `CROSSED_WAIT_MS` at most).
+    { duringAttemptMs: 40_000, crossed: true },
+  ])("the higher key wakes while the contact's offer stands (out $duringAttemptMs ms): it answers it, and knocks too", async ({ duringAttemptMs, crossed }) => {
+    // Two web pages, one stopped for 4 minutes (e2e): the contact, with the lower key, dials for the whole absence, and
+    // its offer is read 70 ms after the wake, while the app's own still gathers. The answer took that offer's place
+    // with the dial that made it still under way (it waited 2 s more for candidates of a connection already closed),
+    // and no knock went: live at the contact's next read (every 8 s).
+    const knocks: string[] = [];
+    const traceFile = process.env.RESTART_TRACE;
+    setLinkTraceSink(line => {
+      if (traceFile) appendFileSync(traceFile, line + "\n");
+      const step = JSON.parse(line) as { step: string; transport?: string }; if (step.step === "knock") knocks.push(step.transport ?? "");
+    });
+    const { liveMs, firstOn, directMs } = await sleepAndWake({ higher: true, awayMs: 4 * 60_000, frozen: true, duringAttemptMs });
+    setLinkTraceSink(null);
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ duringAttemptMs, crossed, liveMs, firstOn, directMs, knocks }) + "\n");
+    // Before: 7.6, 5.6 and 4.2 s over WebRTC, no knock (3.6 s crossed). After: 1.0 s over the knocked relay (4.0 s crossed).
+    expect(knocks).toEqual(["iroh/1"]);
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(crossed ? 2_000 + CROSSED_WAIT_MS : 2_000);
+    expect(firstOn).toBe("iroh/1");
+    expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
   }, 240_000);
 });
