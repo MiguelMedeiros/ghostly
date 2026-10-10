@@ -115,8 +115,11 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     await start();
   };
 
+  // One answer: both buttons are off from the press until the engine has answered (a double click sends it once).
   const confirm = async (match: boolean) => {
-    try { setView(await engine.call("deviceEnrollConfirm", { match })); } catch (cause) { fail(problemLine(cause, t)); }
+    if (busy) return;
+    setBusy(true);
+    try { setView(await engine.call("deviceEnrollConfirm", { match })); } catch (cause) { fail(problemLine(cause, t)); } finally { setBusy(false); }
   };
 
   const startAgain = () => { setView(null); void start(); };
@@ -169,8 +172,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{t("devices.add.found", { device: view.device })}</p>
         <Digits digits={view.digits} testId="device-add-digits" />
         <div className="grid grid-cols-2 gap-3">
-          <button type="button" data-testid="device-add-no-match" onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</button>
-          <button type="button" data-testid="device-add-match" onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</button>
+          <button type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</button>
+          <button type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</button>
         </div>
       </>}
       {view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused && <Notice tone="warning" testId="device-add-refused">{t("devices.add.refused")}</Notice>}
