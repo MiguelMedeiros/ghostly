@@ -144,6 +144,9 @@ describe("the header's meter", () => {
     expect(pill).toHaveAttribute("data-level", "ok");
     // With when it resets, the time of day within a day.
     expect(pill.textContent).toMatch(/^62%·\d{2}:\d{2}/);
+    // A phone's header has no room for the time beside the contact's status: it is the meter and the percent there.
+    expect(within(pill).getByTestId("chat-usage-resets")).toHaveClass("max-md:hidden");
+    expect(pill).toHaveAccessibleName(/^Claude: 62% left, resets \d{2}:\d{2}/);
     await rendered.user.click(screen.getByTestId("chat-usage-open"));
     const panel = screen.getByTestId("chat-usage-panel");
     expect(panel).toHaveAttribute("data-layout", "popover");

@@ -115,6 +115,34 @@ test("a bot's usage shows on its chat's row and in the header, and follows its r
       await theme(page, scheme);
       await shot(page, `phone-375-chat-${scheme}`);
     }
+
+    // A phone's header keeps the meter to the gauge and the percent, so the bot's status has the rest of the line: all
+    // of it, or cut with an ellipsis where the meter starts, never under it.
+    const status = "Lendo e pensando bem…";
+    const said = page.getByTestId("chat-typing-status");
+    for (const width of [375, 320]) {
+      await page.setViewportSize({ width, height: 760 });
+      await bots[0].run("typing", one, "--kind", "thinking", "--status", status, "--for", "30");
+      await expect(said).toHaveText(status, { timeout: 30_000 });
+      await expect(page.getByTestId("chat-usage")).toHaveText(/^\d+%$/, { useInnerText: true });
+      await expect(page.getByTestId("chat-usage-resets")).toBeHidden();
+      const fit = await page.evaluate(() => {
+        const text = document.querySelector<HTMLElement>("[data-testid=chat-typing-status]")!, meter = document.querySelector<HTMLElement>("[data-testid=chat-usage]")!;
+        const a = text.getBoundingClientRect(), b = meter.getBoundingClientRect();
+        return { textEnd: a.right, textWidth: a.width, meterStart: b.left, meterEnd: b.right, screenEnd: window.innerWidth,
+          cut: text.scrollWidth > text.clientWidth, ellipsis: getComputedStyle(text).textOverflow };
+      });
+      expect(fit.textEnd, `the status ends before the meter at ${width}`).toBeLessThanOrEqual(fit.meterStart);
+      expect(fit.meterEnd, `the meter is whole at ${width}`).toBeLessThanOrEqual(fit.screenEnd);
+      expect(fit.textWidth, `the status shows at ${width}`).toBeGreaterThan(12);
+      if (fit.cut) expect(fit.ellipsis).toBe("ellipsis");
+      for (const scheme of ["light", "dark"] as const) {
+        await theme(page, scheme);
+        await shot(page, `phone-${width}-status-${scheme}`);
+      }
+    }
+    await bots[0].run("typing", one, "--stop");
+    await page.setViewportSize({ width: 375, height: 760 });
     await page.getByTestId("chat-back").click();
     await expect(row("Hermes Two").getByTestId("chat-row-usage")).toBeVisible();
     for (const scheme of ["light", "dark"] as const) {

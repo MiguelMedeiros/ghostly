@@ -51,6 +51,9 @@ describe("the contact typing", () => {
     act(() => engine.update({ links: [typingLink(true, { peerTypingKind: "thinking", peerTypingStatus: "Transcribing your audio…" })] }));
     expect(screen.getByTestId("chat-typing")).toHaveTextContent("Transcribing your audio…");
     expect(screen.getByTestId("chat-typing")).not.toHaveTextContent("thinking…");
+    // No wider than its line, so a long status ends in an ellipsis where the usage meter starts.
+    expect(screen.getByTestId("chat-typing")).toHaveClass("max-w-full", "min-w-0");
+    expect(screen.getByTestId("chat-typing-status")).toHaveClass("truncate");
     // The status is the contact's text: isolated, and never read as markup or a link.
     const status = screen.getByTestId("chat-typing-status");
     expect(status.tagName).toBe("BDI");
