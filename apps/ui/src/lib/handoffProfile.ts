@@ -108,33 +108,33 @@ async function copyFile(from: FileBytes, fromId: string, to: FileBytes, file: Ha
   await copyFrom({ size, read: (offset, length) => from.read(fromId, offset, length) }, to, file);
 }
 
+/** Copies `from` under `file.id`, hashing the bytes as they go by: the copy is kept only when it is the file. */
 async function copyFrom(from: FileSource, to: FileBytes, file: HandoffFile): Promise<void> {
   if (from.size !== file.size) throw new Error("The file is not the size it should be");
   await to.remove(file.id).catch(() => {});
+  const hash = sha256.create();
   for (let done = 0; done < from.size;) {
     const part = await from.read(done, Math.min(FILE_BYTES_STEP, from.size - done));
     if (!part.length) throw new Error("The file is shorter than it says");
     await to.append(file.id, done, part);
+    hash.update(part);
     done += part.length;
   }
   await to.close(file.id);
-  if ((await to.digest(file.id)) !== file.sha256) { await to.remove(file.id).catch(() => {}); throw new Error("The copy is not the file"); }
+  if (digestText(hash.digest()) !== file.sha256 || (await to.size(file.id)) !== file.size) { await to.remove(file.id).catch(() => {}); throw new Error("The copy is not the file"); }
 }
 
 /**
- * Copies a file of the frozen copy this page holds (the profile it runs, its database shut) from where the profile keeps
- * it: a file up to `SMALL_FILE_BYTES` is a Blob on its record (a move restores it so), a larger one is in file storage.
+ * Copies a file of the frozen copy this page holds (the profile it runs, its database shut, `db` opened as stored) from
+ * where the profile keeps it: a file up to `SMALL_FILE_BYTES` is a Blob on its record (a move restores it so), a larger
+ * one is in file storage.
  */
-async function copyHeldFile(id: string, to: FileBytes, file: HandoffFile): Promise<void> {
-  const database = databaseName();
-  const db = await openAsStored(database);
-  try {
-    const tx = db.transaction(["files", "fileState"], "readonly");
-    const [row, state] = await Promise.all([wrap(tx.objectStore("files").get(id)), wrap(tx.objectStore("fileState").get(id))]) as [StoredFile | undefined, Partial<StoredFile> | undefined];
-    const source = row ? await fileSource({ ...row, ...state } as StoredFile, database, false, async () => db) : null;
-    if (!source) throw new Error("The file is not on this device");
-    await copyFrom(source, to, file);
-  } finally { db.close(); }
+async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: HandoffFile): Promise<void> {
+  const tx = db.transaction(["files", "fileState"], "readonly");
+  const [row, state] = await Promise.all([wrap(tx.objectStore("files").get(id)), wrap(tx.objectStore("fileState").get(id))]) as [StoredFile | undefined, Partial<StoredFile> | undefined];
+  const source = row ? await fileSource({ ...row, ...state } as StoredFile, db.name, false, async () => db) : null;
+  if (!source) throw new Error("The file is not on this device");
+  await copyFrom(source, to, file);
 }
 
 function dropDatabase(name: string): Promise<void> {
@@ -222,10 +222,17 @@ class Staging implements HandoffStaging {
     await (await spaceFiles(this.database)).remove(id).catch(() => {});
   }
 
-  /** From this device's frozen copy: the profile this page runs, whose database stays shut. */
-  async copyHeld(fromId: string, file: HandoffFile): Promise<void> {
-    await copyHeldFile(fromId, await spaceFiles(this.database), file);
-    this.note(file);
+  /** From this device's frozen copy: the profile this page runs, whose database stays shut (opened once, read only). */
+  async copyHeld(copies: { fromId: string; file: HandoffFile }[]): Promise<void> {
+    if (!copies.length) return;
+    const to = await spaceFiles(this.database);
+    const db = await openAsStored(databaseName());
+    try {
+      for (const { fromId, file } of copies) {
+        try { await copyHeldFile(db, fromId, to, file); } catch { continue; }
+        this.note(file);
+      }
+    } finally { db.close(); }
   }
 
   async copyStaged(fromId: string, file: HandoffFile): Promise<void> {
