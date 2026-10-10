@@ -24,6 +24,12 @@ const cardKey = (message: StoredMessage) => message.card && `${message.card.kind
 
 export interface EditQueueDeps {
   read(): Promise<StoredMessage[]>;
+  /**
+   * One row by its id (`db.getMessage`). With it the queue reads the chat's whole history once (and once per new
+   * session) to learn which rows have an edit on its way, and from then on those rows alone: an edit costs what it
+   * does in a short chat, however long this one is.
+   */
+  row?(id: string): Promise<StoredMessage | undefined>;
   /** Says one edit of this message: an error when it could not go now (it is tried again later). */
   send(edit: WireEdit, message: StoredMessage): string | null | Promise<string | null>;
   /** The chat can carry edits now: live with edit/1 on both sides, or the DHT floor to a contact that takes them. */
@@ -45,6 +51,11 @@ export class EditQueue {
   private sent = new Map<string, { seq: number; at: number; attempts: number; receiptMs: number }>();
   /** When a card that goes again last went (`CARD_RESTORE_GAP_MS`). */
   private restoredAt = -Infinity;
+  /** The rows known to have an edit on its way, each with when it was last told (`edited`), by `tick`. */
+  private readonly known = new Map<string, number>();
+  private tick = 0;
+  /** The chat's history was read for the rows with an edit on its way: `known` has them all, until the next session. */
+  private learnt = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private flushing: Promise<void> | null = null;
   private again = false;
@@ -78,11 +89,41 @@ export class EditQueue {
    */
   reopened(): void {
     this.sent.clear();
+    this.learnt = false;
+  }
+
+  /** This row has an edit to send (it was just written so): the next look reads it. */
+  edited(id: string): void {
+    this.known.set(id, ++this.tick);
+  }
+
+  /**
+   * My rows with an edit on its way, by time. `all`: the chat's whole history, when it was read for them (no `row` to
+   * read one by, or nothing learnt yet in this session). Otherwise the known rows are read alone, and one that waits
+   * no more is forgotten, unless it was told again while it was read.
+   */
+  private async pending(): Promise<{ rows: StoredMessage[]; all?: StoredMessage[] }> {
+    const waits = (m: StoredMessage) => m.sender === "me" && !!m.edit?.pending;
+    const row = this.deps.row;
+    if (!row || !this.learnt) {
+      const all = await this.deps.read(), rows = all.filter(waits);
+      for (const m of rows) if (!this.known.has(m.id)) this.known.set(m.id, this.tick);
+      this.learnt = true;
+      return { rows, all };
+    }
+    const asOf = this.tick, ids = [...this.known.keys()];
+    const read = await Promise.all(ids.map(id => row(id)));
+    const rows: StoredMessage[] = [];
+    read.forEach((m, i) => {
+      if (m && waits(m)) rows.push(m);
+      else if ((this.known.get(ids[i]) ?? 0) <= asOf) this.known.delete(ids[i]);
+    });
+    return { rows: rows.sort((a, b) => a.timestamp - b.timestamp) };
   }
 
   /** The contact confirmed edit `seq` of my message with this wire id. */
   async received(wireId: string, seq: number): Promise<void> {
-    const row = (await this.deps.read()).find(m => m.sender === "me" && m.wireId === wireId);
+    const row = (await this.pending()).rows.find(m => m.wireId === wireId);
     if (!row?.edit?.pending || row.edit.seq > seq) return;
     this.sent.delete(row.id);
     await this.deps.settle(row.id, row.edit.seq);
@@ -90,7 +131,7 @@ export class EditQueue {
 
   /** The contact confirmed, on the DHT floor, the edit that went there under this id (`dhtEditId`). */
   async receivedOnDht(id: string): Promise<void> {
-    const row = (await this.deps.read()).find(m => m.sender === "me" && m.edit?.pending && m.wireId && dhtEditId(m.wireId, m.edit.seq) === id);
+    const row = (await this.pending()).rows.find(m => m.wireId && dhtEditId(m.wireId, m.edit!.seq) === id);
     if (!row) return;
     this.sent.delete(row.id);
     await this.deps.settle(row.id, row.edit!.seq);
@@ -107,13 +148,12 @@ export class EditQueue {
     const now = this.now();
     // Edits not said yet first, oldest first; then those said without a confirmation: a resend never holds a new edit back.
     const said = (m: StoredMessage) => this.sent.get(m.id)?.seq === m.edit!.seq ? 1 : 0;
-    const rows = await this.deps.read();
-    // The newest message of mine of each card: a card going again from an older one would show an older version.
+    const { rows, all } = await this.pending();
+    const due = rows.filter(m => m.wireId).sort((a, b) => said(a) - said(b) || a.edit!.at - b.edit!.at);
+    // The newest message of mine of each card: a card going again from an older one would show an older version. Only
+    // a card going again asks, so only then is the history read for it.
     const newest = new Map<string, number>();
-    for (const m of rows) { const key = m.sender === "me" && cardKey(m); if (key && m.timestamp > (newest.get(key) ?? -Infinity)) newest.set(key, m.timestamp); }
-    const due = rows
-      .filter(m => m.sender === "me" && m.edit?.pending && m.wireId)
-      .sort((a, b) => said(a) - said(b) || a.edit!.at - b.edit!.at);
+    if (due.some(m => m.edit!.restore)) for (const m of all ?? await this.deps.read()) { const key = m.sender === "me" && cardKey(m); if (key && m.timestamp > (newest.get(key) ?? -Infinity)) newest.set(key, m.timestamp); }
     const gap = this.deps.restoreGapMs ?? CARD_RESTORE_GAP_MS;
     let next = Infinity;
     for (const message of due) {
