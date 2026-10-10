@@ -9,7 +9,7 @@
 | Implementation | `group-community/1`: core protocol in [`groupCommunity.ts`](../../packages/core/src/groupCommunity.ts) and [`communityRendezvous.ts`](../../packages/core/src/communityRendezvous.ts); engine in [`community.ts`](../../packages/browser/src/engine/community.ts), payments in [`communityPay.ts`](../../packages/browser/src/engine/communityPay.ts); UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test |
 | Summary | A group whose link is the way in: anyone who opens it joins, any member lets them in while the admin is away, up to 256 members. |
 | Availability | Available |
-| Notes | Text, a picture and payments, sealed to the two members and carried by the hubs. Online members elect a few hubs that relay; whoever was away is caught up by whoever is there. The cap is what a headless load test measured. |
+| Notes | Text, a picture, files and voice messages fetched between two members, and payments, sealed to the two members and carried by the hubs. Online members elect a few hubs that relay; whoever was away is caught up by whoever is there. The cap is what a headless load test measured. |
 
 > This Draft documents the second distribution profile of [900](900-group-sessions.md) as implemented. Numbers and wire formats are not registered standards.
 
@@ -355,7 +355,7 @@ On public relays each trip through Pkarr (a packet published, then seen by the o
 
 ## Open decisions
 
-Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; media (files: [503](503-group-files.md), proposed); native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
+Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; calls (files and voice messages are [503](503-group-files.md)); native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
 
 ## Revision log
 
