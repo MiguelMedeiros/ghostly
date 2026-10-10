@@ -1,8 +1,10 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assembleChangelog, heldFor, parseFragment, readFragments, releaseChangelog, splitFragments, strayFragments, versionBefore } from "../changes.mjs";
+import { RELEASE_GUARDS, assembleChangelog, heldFor, parseFragment, readFragments, releaseChangelog, splitFragments, strayFragments, versionBefore } from "../changes.mjs";
+
+const root = resolve(import.meta.dirname, "../../..");
 
 const CHANGELOG = `# Changelog
 
@@ -140,6 +142,47 @@ Ghostly next.
     // From 1.2.0 on, Apps ship: an entry about them goes out with the next release like any other.
     expect(entry("For developers / Apps", "- A store.", "1.2.0")).toEqual([]);
     expect(entry("For users / Chat", "- Shared apps open faster.", "1.1.6")).toEqual([]);
+  });
+
+  // The owner's decision (2026-10-10): the native Android app is in no release before 1.3.0.
+  describe("an entry about the native Android app", () => {
+    const entry = (section: string, body: string, version?: string, release?: string) =>
+      parseFragment("docs/changelog/unreleased/x.md", `---\nsection: ${section}\n${release ? `release: ${release}\n` : ""}---\n${body}\n`, version).problems;
+    const hold = /an Android app entry says "release: 1\.3" \(it is in no release before 1\.3\.0\)/;
+
+    it("is held for 1.3 while the repository is before it", () => {
+      expect(entry("Fixed / Android", "- A photo stays private.", "1.1.7")).toEqual([expect.stringMatching(hold)]);
+      expect(entry("Fixed / Android", "- A photo stays private.", "1.2.3")).toEqual([expect.stringMatching(hold)]);
+      expect(entry("Fixed / Identities", "- The Android app no longer offers Bluesky.", "1.2.0")).toEqual([expect.stringMatching(hold)]);
+      expect(entry("For developers", "- The native Android app's e2e lane.", "1.2.0")).toEqual([expect.stringMatching(hold)]);
+      expect(entry("For developers / CI", "- A release attaches no debug APK.", "1.2.0")).toEqual([expect.stringMatching(hold)]);
+      expect(entry("Fixed / Android", "- A photo stays private.", "1.2.0", "1.2")).toEqual([expect.stringMatching(hold)]);
+      expect(entry("Fixed / Android", "- A photo stays private.", "1.2.0", "1.3")).toEqual([]);
+      expect(entry("Fixed / Android", "- A photo stays private.", "1.2.0", "2.0")).toEqual([]);
+      // From 1.3.0 on, an entry about it goes out with the next release like any other.
+      expect(entry("Fixed / Android", "- A photo stays private.", "1.3.0")).toEqual([]);
+      // The web app on an Android phone is not the native app.
+      expect(entry("Fixed / Chat", "- On Android, the message box sits on the keyboard.", "1.2.0")).toEqual([]);
+      expect(entry("For users / Everywhere", "- Install it as an app on a computer, Android or iPhone.", "1.2.0")).toEqual([]);
+    });
+
+    it("follows the release workflow's ANDROID_FROM", () => {
+      const workflow = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
+      const guard = RELEASE_GUARDS.find((g: { about: string }) => g.about === "Android app");
+      expect(guard.from).toBe(workflow.match(/^ {2}ANDROID_FROM: "(\d+\.\d+\.\d+)"$/m)?.[1]);
+      expect(`${guard.release}.0`).toBe(guard.from);
+    });
+
+    it("is in none of the repository's notes for 1.2", () => {
+      const fragments = readFragments(root);
+      expect(fragments.flatMap((f: { problems: string[] }) => f.problems)).toEqual([]);
+      for (const version of ["1.1.8", "1.2.0", "1.2.1"]) {
+        const { released, held } = splitFragments(fragments, version);
+        expect(held.filter((f: { release: string }) => f.release === "1.3").length, version).toBeGreaterThan(0);
+        const notes = released.map((f: { name: string; group?: string; body: string }) => `${f.name} [${f.group ?? ""}] ${f.body}`);
+        expect(notes.filter((note: string) => /\[Android\]|Android app|\bAPK\b|uninstall it before/i.test(note)), version).toEqual([]);
+      }
+    });
   });
 
   it("keeps a new Unreleased heading, with its note, above the release", () => {
