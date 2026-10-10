@@ -51,7 +51,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
 import { handOverCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
-import { callLineId } from "../lib/callLines";
+import { callLineId, callsBlockedText } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -261,7 +261,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
-  const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? t("calls.needLive") : deliveryPeer.callsUnavailable) : null;
+  const callsBlocked = paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.

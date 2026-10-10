@@ -7,6 +7,8 @@
   "cameraOff": "Cámara apagada",
   "connected": "Conectado",
   "connecting": "Conectando...",
+  "contactCannot": "La app de tu contacto no puede recibir llamadas",
+  "contactOutdated": "Tu contacto necesita actualizar Ghostly para las llamadas",
   "decline": "Rechazar",
   "devices": {
     "back": "{{name}} ha vuelto",
@@ -66,6 +68,7 @@
   },
   "turnCameraOff": "Apagar cámara",
   "turnCameraOn": "Encender cámara",
+  "unavailableHere": "Las llamadas no están disponibles en esta app",
   "unmute": "Activar sonido",
   "video": "Videollamada",
   "wakeGaveUp": "{{name}} no abrió Ghostly.",
