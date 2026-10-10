@@ -88,6 +88,31 @@ it("a call naming no network acts on Mainnet; nothing is made, added, parked or 
   expect((node as unknown as Record<string, unknown>).walletSetMode, "the old switch is gone").toBeUndefined();
 });
 
+it("each network's Cashu history and fees paid are its own, however many movements the other network has", async () => {
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+  const mainnetMint = "https://mint.example.com";
+  node["settings"].mints = [mainnetMint, TEST_MINT];
+  const t0 = Date.now() - 1_000_000;
+  const tx = (id: string, timestamp: number, mint: string, fee = 0) => ({ id, timestamp, mint, kind: "ecash-in" as const, amount: 1, fee });
+  await transact([STORES.walletTx], (s) => {
+    s[STORES.walletTx].clear();
+    s[STORES.walletTx].put(tx("main-in", t0, mainnetMint));
+    s[STORES.walletTx].put({ ...tx("main-out", t0 + 1, mainnetMint, 21), kind: "ecash-out" });
+    s[STORES.walletTx].put(tx("test-old", t0 + 2, TEST_MINT));
+    // A contact's 100 payments of 1 test sat, each redeemed, all newer than the Mainnet movements.
+    for (let i = 0; i < 100; i++) s[STORES.walletTx].put(tx(`test-${i}`, t0 + 10 + i, TEST_MINT, i === 99 ? 3 : 0));
+  });
+  await node["refreshWallet"]();
+  const { mainnet, testnet } = node["walletView"].networks!;
+  expect(mainnet.history.map((t) => t.id), "the real-money wallet keeps its movements").toEqual(["main-out", "main-in"]);
+  expect(mainnet.feesPaid).toBe(21);
+  expect(testnet.history).toHaveLength(100);
+  expect(testnet.history[0].id, "newest first").toBe("test-99");
+  expect(testnet.history.map((t) => t.id), "the 101st is past what is shown").not.toContain("test-old");
+  expect(testnet.feesPaid).toBe(3);
+  expect([...node["walletFeedbackIds"]], "both networks' movements are seen for feedback").toEqual(expect.arrayContaining(["main-in", "main-out", "test-99"]));
+});
+
 it("a gate's switch ends the wait for a wallet of the other mode, and what arrives late is closed", async () => {
   const gate = new ModeGate();
   const late = deferred<{ dispose: () => void }>();
