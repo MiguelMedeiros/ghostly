@@ -225,6 +225,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop/call-devices.spec.ts` | Linux: the microphone, camera and speaker chosen in Settings (PulseAudio null sources and sinks stand in for named devices) are the ones a call uses, the call's menu switches them live, an unplugged microphone falls back and is offered back, and Settings meters the microphone and plays the test tone through Rust. Skips without PulseAudio |
 | `desktop/video-stream.spec.ts` | a 100 MB video plays and seeks from the stored file in WebKitGTK (HTTP on 127.0.0.1) and WebView2 (`http://ghostly-file.localhost/<token>`), each answer a range of at most 4 MiB; video full screen. Run by `desktop-media.yml` |
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
+| `desktop/compat-v115.spec.ts` | the current Desktop with a real v1.1.5 Desktop (the release's own Linux package): a chat from either side's invite, texts both ways over the DHT, then live on Iroh or HyperDHT with texts both ways, each shown once. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v11.spec.ts` | the current app (mini-apps on) with a real v1.1.4, which has no apps/1: an app card reaches it as its text with the bundle URL a link, the chat goes on both ways, and + → Apps says the contact's app can't run apps. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v115.spec.ts` | the current app with a real v1.1.5: a chat from either side's invite, texts delivered both ways; in a private group the 1.1.5 member back after its app was closed catches up from a current member, and a current member from the 1.1.5 one. See [Compatibility with older releases](#compatibility-with-older-releases) |
@@ -399,6 +400,9 @@ last release with no mini-apps, gets an app card as its text and never offers `a
 `compat/v11.spec.ts` checks that, and what + → Apps says about such a contact. A contact on v1.1.5, the last release,
 pairs from either side's invite with texts delivered both ways, and in a private group each side catches the other up
 (WISP 902): `compat/v115.spec.ts`. `compat/release.ts` opens a peer on a v1.1.x build.
+The Desktop side, the Rust host and its native transports, which no web build runs: `desktop/compat-v115.spec.ts`
+pairs the current Desktop with a real v1.1.5 Desktop from either side's invite, over the DHT and then live on Iroh or
+HyperDHT. It runs with the other Desktop specs (`npm run test:e2e:desktop`, Linux x64).
 
 ```bash
 npm run test:e2e:compat                                        # builds v0.4.0, v1.1.4 and v1.1.5 the first time (a few minutes)
@@ -410,6 +414,11 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 E2E_COMPAT_115
   `web/dist` or, after the 2026-09-30 layout, `apps/web/dist`) in `~/.cache/ghostly/compat/<tag>/dist`
   (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it, `--force` rebuilds. `--serve <port>`
   serves it with a small static server: the export keeps no `node_modules`.
+- **The old Desktop.** A release attaches its Desktop build, so nothing is built: `tools/scripts/fetch-compat-desktop.mjs`
+  downloads the release's `Ghostly_<version>_amd64.deb`, checks it against the release's `SHA256SUMS.txt`, unpacks it
+  with `dpkg-deb -x` into `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints
+  `usr/bin/ghostly`; the spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
+  system libraries as the current Desktop (WebKitGTK 4.1, GStreamer).
 - **The config.** `playwright.compat.config.ts` starts four servers (the current build, with mini-apps on as in the
   main suite, v0.4.0, v1.1.4 and v1.1.5) and hands the old ones' addresses to the specs as `config.metadata.compatURL`
   and `releases` (by version). The apps meet on the test's Pkarr relay, as everywhere.
