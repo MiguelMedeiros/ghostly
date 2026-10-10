@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
 import { GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { Reactions, latestReaction } from "../src/engine/reactions";
+import { Reactions, latestReaction, noteIfStanding } from "../src/engine/reactions";
 import type { AttentionEvent } from "../src/shared/rpc";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet } from "./helpers/fakeNative";
@@ -177,6 +177,33 @@ describe("reacting over the live link", () => {
     t.contact.sendReaction({ id: lunch.wireId!, e: "", n: 40 });
     await vi.waitFor(() => expect(t.receipts).toContain(40));
     await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+  });
+
+  it("the reaction shown again after one is taken back is found by its row, the chat read whole only past those this run showed", async () => {
+    const t = await setup({ onMessageChanges: () => {} });
+    await t.agreed();
+    for (const text of ["breakfast?", "lunch?", "dinner?"]) await t.node.sendMessage({ linkId: t.id, text });
+    const [breakfast, lunch, dinner] = [await t.row("breakfast?"), await t.row("lunch?"), await t.row("dinner?")];
+    const says = async (to: StoredMessage, e: string, n: number) => {
+      t.contact.sendReaction({ id: to.wireId!, e, n });
+      await vi.waitFor(() => expect(t.receipts).toContain(n));
+    };
+    await says(breakfast, "😂", 10);
+    await says(lunch, "👍", 20);
+    await says(dinner, "🙏", 30);
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "🙏", snippet: "dinner?" }));
+    const whole = vi.spyOn(db, "getMessages");
+    const reads = () => whole.mock.calls.filter(([chat]) => chat === t.id).length;
+    // One that is not the one shown is taken back, then the one shown: the one before both is shown again.
+    await says(lunch, "", 40);
+    await says(dinner, "", 50);
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "😂", snippet: "breakfast?" }));
+    expect(reads()).toBe(0);
+    // Past what this run showed, the history says whether an older one is left.
+    await says(breakfast, "", 60);
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    expect(reads()).toBe(1);
+    whole.mockRestore();
   });
 
   it("a reaction to a message not here yet waits for it", async () => {
@@ -354,6 +381,17 @@ describe("the reactions store", () => {
       await reactions.stored(rows[i]);
     }
     expect(rows.filter(r => r.reactions).length).toBe(7 * 32);
+  });
+
+  it("tells whether a reaction shown before still stands on its row, with the row's text as it is now", () => {
+    const message = row({ id: "k:0:1", member: "k", text: "edited since", reactions: { a: { e: "👍", n: 2, at: 50 }, b: { e: "", n: 3, at: 60 } } });
+    const shown = { by: "a", emoji: "👍", at: 50, snippet: "as written", mine: false, message: "k:0:1" };
+    expect(noteIfStanding(shown, message)).toEqual({ ...shown, snippet: "edited since" });
+    // Replaced by another emoji, said again later, taken back, or never there.
+    expect(noteIfStanding({ ...shown, emoji: "😂" }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, at: 40 }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, by: "b", emoji: "", at: 60 }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, by: "c" }, message)).toBeUndefined();
   });
 
   it("numbers mine past what waits to be confirmed, even when the clock goes back", async () => {
