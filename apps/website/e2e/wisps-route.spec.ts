@@ -27,7 +27,9 @@ test("the layers stack the families, the core at the top", async ({ page }) => {
   await expect(layers.last().locator(".wmap-layer-label")).toHaveText("Programs");
   // Each family is one full-width band with its tiles side by side.
   const bands = page.locator(".wmap-family");
-  await expect(bands).toHaveCount(11);
+  await expect(bands).toHaveCount(12);
+  // Apps is the last family, drawn since release 1.2 has it.
+  await expect(layers.last().locator(".wmap-family[data-group='apps'] .wmap-tile[href='/wisps/1200-marketplace']")).toBeVisible();
   const stack = await page.locator(".wmap-bands").first().boundingBox();
   const band = await bands.first().boundingBox();
   expect(Math.abs(band!.width - stack!.width)).toBeLessThan(1);
