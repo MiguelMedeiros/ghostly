@@ -1,4 +1,5 @@
 import type { Translate } from "../locales/translate";
+import { errorText } from "./errorText";
 import type { CallEventType } from "./types";
 
 /**
@@ -9,6 +10,16 @@ import type { CallEventType } from "./types";
 export function callLineId(type: CallEventType, call?: number): string {
   if (call !== undefined) return `system_call_${type}_${call}`;
   return `system_call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Why a paired chat cannot call right now (the title of its call buttons), in the person's language, or null when it
+ * can. The engine says it in English (`GhostLink.callsUnavailable`), and nothing before it knows the chat: no live
+ * connection yet. A reason `errorText` does not know stays as it came (the Desktop app naming what to install).
+ */
+export function callsBlockedText(t: Translate, reason: string | null | undefined): string | null {
+  if (reason === undefined) return t("calls.needLive");
+  return reason === null ? null : errorText(reason, t);
 }
 
 /**

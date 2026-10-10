@@ -7,6 +7,8 @@
   "cameraOff": "カメラオフ",
   "connected": "接続済み",
   "connecting": "接続中...",
+  "contactCannot": "相手のアプリは通話を受けられません",
+  "contactOutdated": "通話には相手が Ghostly を更新する必要があります",
   "decline": "拒否",
   "devices": {
     "back": "{{name}} が戻りました",
@@ -66,6 +68,7 @@
   },
   "turnCameraOff": "カメラをオフ",
   "turnCameraOn": "カメラをオン",
+  "unavailableHere": "このアプリでは通話を利用できません",
   "unmute": "ミュート解除",
   "video": "ビデオ通話",
   "wakeGaveUp": "{{name}} は Ghostly を開きませんでした。",
