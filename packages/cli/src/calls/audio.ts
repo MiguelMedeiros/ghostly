@@ -4,6 +4,13 @@ import { isRtcp, parseRtp, ReorderBuffer, RtpWriter } from "./rtp";
 /** The longest stall of the sender whose frames are still sent after it (see `catchUp`). */
 export const MAX_CATCH_UP_MS = 1000;
 
+/**
+ * Silence is encoded until its packet came out the same this many frames in a row (half a second): by then the
+ * encoder gives that packet for as long as the silence lasts, and each encode (libopus in WebAssembly, 0.5 to 1 ms at
+ * 48 kHz, 50 times a second) only finds it again. See `settle`.
+ */
+export const SETTLED_FRAMES = 25;
+
 /** An Opus encoder or decoder at one rate, mono (opusscript's shape). */
 export interface OpusCodec {
   encode(pcm: Buffer, frameSize: number): Buffer;
@@ -55,6 +62,10 @@ export class CallAudio {
   private kept = 0;
   private owedUntil = 0;
   private talking = false;
+  /** The last silent frame's packet, how many silent frames in a row gave it, and that packet once it is kept (see `settle`). */
+  private lastQuiet: Buffer | null = null;
+  private same = 0;
+  private quiet: Buffer | null = null;
   private stopped = false;
   /** Frames sent and received, for `call list`. */
   sent = 0;
@@ -92,14 +103,32 @@ export class CallAudio {
   tick(): void {
     if (this.stopped) return;
     const { frame, silent } = this.queue.next();
+    // Silence the program writes itself (a muted microphone) is the same silence to the encoder.
+    const still = silent || frame.equals(this.silence);
     let payload: Buffer;
-    try { payload = this.options.encoder.encode(frame, this.samples); } catch { return; }
+    if (still && this.quiet) payload = this.quiet;
+    else {
+      try { payload = this.options.encoder.encode(frame, this.samples); } catch { return; }
+      this.settle(still, payload);
+    }
     // A talkspurt starts at the first sound after silence (RFC 3551 § 4.1).
     const marker = !silent && !this.talking;
     this.talking = !silent;
     this.options.track.send(this.writer.packet(payload, marker));
     this.sent++;
     this.ahead = this.queue.queuedMs;
+  }
+
+  /**
+   * Keeps the packet silence encodes to once the encoder gave it SETTLED_FRAMES times in a row: it is sent again for
+   * the silent frames that follow, without the encoder, until the program's audio is back.
+   */
+  private settle(still: boolean, payload: Buffer): void {
+    if (!still) { this.lastQuiet = null; this.quiet = null; this.same = 0; return; }
+    if (this.lastQuiet?.equals(payload)) { if (++this.same >= SETTLED_FRAMES) this.quiet = this.lastQuiet; return; }
+    // A copy: the encoder gives a view of its own memory.
+    this.lastQuiet = Buffer.from(payload);
+    this.same = 1;
   }
 
   /** Handles one packet from the track. Exposed for tests. */

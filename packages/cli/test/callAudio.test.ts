@@ -189,6 +189,53 @@ describe("a call's audio through Opus", () => {
     });
   }
 
+  for (const rate of [48000, 16000] as const) {
+    it(`does not encode silence again once its packet stopped changing, at ${rate} Hz: the contact still gets one every 20 ms`, async () => {
+      const stack = await loadCallStack();
+      if (typeof stack === "string") throw new Error(stack);
+      const real = stack.opus(rate), decoder = stack.opus(rate);
+      let encodes = 0;
+      const packets: RtpPacket[] = [];
+      const audio = new CallAudio({
+        rate, payloadType: 111, ssrc: 1, track: { send: (p) => packets.push(parseRtp(p)!), onPacket: () => {} },
+        encoder: { encode: (pcm, size) => { encodes++; return real.encode(pcm, size); }, decode: (packet) => real.decode(packet), delete: () => real.delete?.() },
+        decoder: stack.opus(rate), onFrame: () => {},
+      });
+      const ticks = (count: number) => { const from = encodes; for (let i = 0; i < count; i++) audio.tick(); return encodes - from; };
+      audio.queue.push(tone(440, rate, 1000));
+      expect(ticks(50)).toBe(50);
+      // The program has nothing to say for three seconds: the encoder runs until its packet settled, within a second.
+      expect(ticks(150)).toBeLessThanOrEqual(50);
+      // Silence the program writes itself (a microphone that is muted) is the same silence.
+      audio.queue.push(Buffer.alloc(frameBytes(rate) * 100));
+      expect(ticks(100)).toBe(0);
+      // Its audio again: every frame of it is encoded, and silence after it settles anew.
+      audio.queue.push(tone(660, rate, 1000));
+      expect(ticks(50)).toBe(50);
+      const again = ticks(150);
+      expect(again).toBeGreaterThan(0);
+      expect(again).toBeLessThanOrEqual(50);
+
+      // What the contact got: a packet per frame, numbered and timed in step, a talkspurt marked where the program's
+      // audio starts after the queue's own silence, as before.
+      expect(packets.length).toBe(500);
+      for (let i = 1; i < packets.length; i++) {
+        expect(sequenceDelta(packets[i].sequence, packets[i - 1].sequence)).toBe(1);
+        expect((packets[i].timestamp - packets[i - 1].timestamp) >>> 0).toBe(TICKS_PER_FRAME);
+      }
+      expect(packets.flatMap((p, i) => (p.marker ? [i] : []))).toEqual([0, 200]);
+      // And what it hears: the tone, silence all through the three seconds and the two that follow, the next tone, silence.
+      const heard = packets.map((p) => Buffer.from(decoder.decode(p.payload)));
+      expect(dominantHz(Buffer.concat(heard.slice(10, 50)), rate)).toBeCloseTo(440, -1);
+      expect(level(Buffer.concat(heard.slice(60, 300)))).toBeLessThan(0.01);
+      expect(dominantHz(Buffer.concat(heard.slice(310, 350)), rate)).toBeCloseTo(660, -1);
+      expect(level(Buffer.concat(heard.slice(310, 350)))).toBeGreaterThan(0.1);
+      expect(level(Buffer.concat(heard.slice(360)))).toBeLessThan(0.01);
+      audio.stop();
+      decoder.delete?.();
+    });
+  }
+
   it("catches up after the daemon stalls, so a program writing at real time is not heard later and later", async () => {
     vi.useFakeTimers();
     try {
