@@ -435,9 +435,12 @@ export interface NodeOptions {
   /**
    * Mini-apps in 1:1 chats (`apps/1`, WISP 1200 § In a chat): offered on paired sessions, and the `app*` calls. Default:
    * `APPS_ENABLED` (off until the feature ships). A host that runs no mini-app (the CLI, the extension, the Android app) pins it to false
-   * whatever the flag says, and its app calls are refused as "not on this client"; tests turn it on.
+   * whatever the flag says, and its app calls are refused as "not on this client"; tests turn it on. `"wire"` is a host
+   * that runs no mini-app and speaks an app's messages itself (a bot, WISP 1200 § A bot on the other side): `apps/1` is
+   * offered and the chat calls (`appId`, `appOpen`, `appClose`, `appSend`) answer, whatever the flag says, with no store:
+   * no installed app, no store read, no update check and no app storage, and those calls are refused as with false.
    */
-  apps?: boolean;
+  apps?: boolean | "wire";
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -1583,7 +1586,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
     // Mini-apps (WISP 1200): the default stores preloaded, and the update check, which asks nothing with no app installed.
-    if (this.appsOn) void this.appStore.start().catch(() => {});
+    if (this.appsOn && !this.appsWireOnly) void this.appStore.start().catch(() => {});
     // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
     // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
     if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
@@ -2050,7 +2053,7 @@ export class GhostlyNode implements EngineImplementation {
   private appShelf?: Apps;
   /** The installed apps and stores, refused while the apps feature is off. */
   private get appStore(): Apps {
-    if (!this.appsOn) throw this.appsOff();
+    if (!this.appsOn || this.appsWireOnly) throw this.appsOff();
     return this.appShelf ??= new Apps({
       fetch: boundedAppFetch({ fetcher: this.options.appFetch, online: () => this.networkOn }),
       isChat: (scope) => { const stored = this.links.get(scope)?.stored; return !!stored && !stored.group && !!stored.profile && !!stored.pairedPeerKey; },
@@ -4320,11 +4323,17 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Mini-apps are on in this build (`APPS_ENABLED`) or for this engine (`apps`). */
-  private get appsOn(): boolean { return this.options.apps ?? APPS_ENABLED; }
+  private get appsOn(): boolean { return !!(this.options.apps ?? APPS_ENABLED); }
+  /** `apps/1` only (`apps: "wire"`): this host runs no mini-app and keeps no store, so nothing is installed here to check. */
+  private get appsWireOnly(): boolean { return this.options.apps === "wire"; }
 
-  /** Why an app call is refused: this client runs no mini-app (`apps: false`), or the build has them off. */
+  /** Why an app call is refused: this client runs no mini-app (`apps: false`, or `"wire"` for the store's), or the build has them off. */
   private appsOff(): Error {
-    return new Error(this.options.apps === false ? "Apps do not run on this client" : "Apps are unavailable in this release");
+    return new Error(this.options.apps === false || this.appsWireOnly ? "Apps do not run on this client" : "Apps are unavailable in this release");
+  }
+  /** Before an app's frames go to a contact: a version removed or revoked here says nothing more (WISP 1200 § Takedowns). */
+  private async appChatRunnable(ref: string): Promise<void> {
+    if (!this.appsWireOnly) await this.appStore.chatRunnable({ ref });
   }
 
   /** A paired 1:1 chat and the chat app id of `ref` in it, from the two pinned participation keys (WISP 1200 § In a chat). */
@@ -4350,8 +4359,7 @@ export class GhostlyNode implements EngineImplementation {
   async appOpen({ linkId, ref, version }: { linkId: string; ref: string; version: string }): Promise<{ app: string }> {
     const { live, app } = this.appChat(linkId, ref);
     if (!isAppVersion(version)) throw new Error("Not an app version");
-    // A version removed or revoked since it started says nothing more to the contact (WISP 1200 § Takedowns).
-    await this.appStore.chatRunnable({ ref });
+    await this.appChatRunnable(ref);
     const open = live.appsOpen ??= new Map();
     if (live.link) live.link.openApp(app, version);
     else open.set(app, version);
@@ -4369,7 +4377,7 @@ export class GhostlyNode implements EngineImplementation {
   async appSend({ linkId, ref, data }: { linkId: string; ref: string; data: unknown }): Promise<{ error: AppSendError | null }> {
     const { live, app } = this.appChat(linkId, ref);
     if (!live.appsOpen?.has(app)) return { error: "not-open" };
-    await this.appStore.chatRunnable({ ref });
+    await this.appChatRunnable(ref);
     return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
   }
 
