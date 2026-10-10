@@ -306,6 +306,7 @@ export class Apps {
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
   private views: Promise<AppStoreView[]> | null = null;
+  private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
   /**
    * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest>`): the same
    * index listing the same is not peeked again at every check.
@@ -336,6 +337,7 @@ export class Apps {
     if (this.sweep) clearTimeout(this.sweep);
     this.sweep = null;
     this.staged.clear();
+    this.held.clear();
   }
 
   private schedule(ms: number, atStart = false): void {
@@ -368,8 +370,18 @@ export class Apps {
   private async installed(): Promise<InstalledApp[]> {
     return wrap((await store(STORES.apps, "readonly")).getAll());
   }
-  private async app(ref: string): Promise<InstalledApp | undefined> {
-    return wrap((await store(STORES.apps, "readonly")).get(ref));
+  /**
+   * An installed app's record, read once and again after it is written here (the only writer, as for `heldViews`). An
+   * app's every storage call, file read and chat frame asks for it. A reference not installed is not kept.
+   */
+  private app(ref: string): Promise<InstalledApp | undefined> {
+    const kept = this.held.get(ref);
+    if (kept) return kept;
+    const read: Promise<InstalledApp | undefined> = store(STORES.apps, "readonly").then((s) => wrap<InstalledApp | undefined>(s.get(ref)));
+    this.held.set(ref, read);
+    const drop = () => { if (this.held.get(ref) === read) this.held.delete(ref); };
+    read.then((app) => { if (!app) drop(); }, drop);
+    return read;
   }
   private async installedOrFail(ref: unknown): Promise<InstalledApp> {
     if (!isAppRef(ref)) fail("bad-ref", "Not an app reference");
@@ -401,7 +413,7 @@ export class Apps {
     if (app) await this.stillRunnable(app);
   }
   private async putApp(app: InstalledApp): Promise<void> {
-    await wrap((await store(STORES.apps, "readwrite")).put(app));
+    try { await wrap((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
   }
   /**
    * Writes an app's record back only while that install is still there (the same `installedAt`), read and written in
@@ -416,7 +428,7 @@ export class Apps {
       tx.objectStore(STORES.apps).put(app);
       put = true;
     };
-    await done(tx);
+    try { await done(tx); } finally { this.held.delete(app.ref); }
     return put;
   }
   private async storeRecord(key: string): Promise<AddedAppStore | undefined> {
@@ -1148,7 +1160,7 @@ export class Apps {
     const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage], "readwrite");
     tx.objectStore(STORES.apps).delete(app.ref);
     tx.objectStore(STORES.appStorage).delete(rowsOf(app.ref));
-    await done(tx);
+    try { await done(tx); } finally { this.held.delete(app.ref); }
     for (const key of [...this.usage.keys()]) if (key.startsWith(`${app.ref}\0`)) this.usage.delete(key);
     await this.removeBundle(app.bytes, app.digest);
     if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);
