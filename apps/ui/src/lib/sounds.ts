@@ -1,5 +1,6 @@
 import { followSpeaker } from "./mediaDevices";
 import { loadSettings } from "./settings";
+import { SoundGate, type SoundKind } from "./soundGate";
 
 /**
  * Original ElevenLabs effects are bundled locally. Synthesis is only a fallback
@@ -136,6 +137,8 @@ let unlocked = false;
 /** Calls ringing (`startRinging`): the output stays open between their rings. */
 let ringing = 0;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
+/** One sound at a time (soundGate.ts): what comes together is one sound, and nothing sounds over a ringing call. */
+const gate = new SoundGate();
 
 /**
  * How long the sounds' audio output stays open after the last sound. A running AudioContext keeps the system's output
@@ -228,14 +231,27 @@ export function installAudioGestures(): () => void {
   };
 }
 
-export function playSound(name: SoundName): () => void {
+/**
+ * Plays a sound, if the gate lets it (soundGate.ts). `kind` overrides what its name makes it: a Settings ▶ is a
+ * "preview", whatever it previews.
+ */
+export function playSound(name: SoundName, { kind }: { kind?: SoundKind } = {}): () => void {
   if (!loadSettings().notifications.soundEnabled || !context || !unlocked) return () => {};
   const ctx=context, started=Date.now();
   let cancelled=false;
-  const sources: (AudioBufferSourceNode | OscillatorNode)[]=[];
+  const sources: (AudioBufferSourceNode | OscillatorNode)[]=[], gains: GainNode[]=[];
   let expiry: ReturnType<typeof setTimeout> | undefined;
-  const stop=()=>{cancelled=true;clearTimeout(expiry);for(const source of sources){try{source.stop();}catch{/* already ended */}}if(playing.delete(stop))idleLater();};
+  // Stopped early (another sound takes its place, mute, the end of a ring): faded out over a few milliseconds, not cut,
+  // which would click.
+  const stop=()=>{
+    cancelled=true;clearTimeout(expiry);gate.stopped(stop);
+    const at=ctx.currentTime;
+    for(const gain of gains){try{gain.gain.cancelScheduledValues?.(at);gain.gain.setTargetAtTime?.(0,at,0.005);}catch{/* already ended */}}
+    for(const source of sources){try{source.stop(at+0.03);}catch{/* already ended */}}
+    if(playing.delete(stop))idleLater();
+  };
   const ended=()=>{if(playing.delete(stop))idleLater();};
+  if(!gate.admit(name,stop,{now:started,ringing:ringing>0,kind})) return ()=>{};
   playing.add(stop);
   void (async()=>{
     let buffer: AudioBuffer | undefined;
@@ -246,7 +262,7 @@ export function playSound(name: SoundName): () => void {
     if(buffer){
       const source=ctx.createBufferSource(),gain=ctx.createGain();
       source.buffer=buffer;gain.gain.value=0.2;
-      source.connect(gain).connect(ctx.destination);sources.push(source);source.start(start);
+      source.connect(gain).connect(ctx.destination);sources.push(source);gains.push(gain);source.start(start);
       expiry=setTimeout(ended,buffer.duration*1000+100);
     }else{
       for(const note of SOUNDS[name] as Note[]){
@@ -255,7 +271,7 @@ export function playSound(name: SoundName): () => void {
         gain.gain.setValueAtTime(0.0001,start+note.at);
         gain.gain.exponentialRampToValueAtTime(note.gain??0.1,start+note.at+0.015);
         gain.gain.exponentialRampToValueAtTime(0.0001,start+note.at+note.duration);
-        oscillator.connect(gain).connect(ctx.destination);sources.push(oscillator);
+        oscillator.connect(gain).connect(ctx.destination);sources.push(oscillator);gains.push(gain);
         oscillator.start(start+note.at);oscillator.stop(start+note.at+note.duration+0.02);
       }
       expiry=setTimeout(ended,2000);

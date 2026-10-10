@@ -9,7 +9,8 @@ import { shell, APP_URL } from "@/content/shell";
 /** The home page's download section: it puts the reader's own system first, then every other one and the extension. */
 const DOWNLOAD_HREF = "/#download";
 
-export function Nav() {
+/** `apps`: whether the released Ghostly has Apps, so the Apps page exists (lib/appsGate.ts). */
+export function Nav({ apps = false }: { apps?: boolean }) {
   const t = shell.nav;
   const pathname = usePathname() ?? "/";
   const [scrolled, setScrolled] = useState(false);
@@ -110,6 +111,7 @@ export function Nav() {
     { href: "/cli", label: t.cli, match: /^\/cli/ },
     { href: "/developers/agents", label: t.agents, match: /^\/developers\/agents/ },
   ];
+  if (apps) links.splice(1, 0, { href: "/apps", label: t.apps, match: /^\/apps/ });
 
   return (
     <header className="nav" data-scrolled={scrolled}>

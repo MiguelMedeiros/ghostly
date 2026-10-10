@@ -751,11 +751,13 @@ body {
   z-index: 1;
 }
 /* Idle loops rest while their act, scene or section is off screen (data-inview from the
-   sections that know it, data-offscreen from components/site/IdleLoops.tsx for everything). */
+   sections that know it, data-offscreen from components/site/IdleLoops.tsx for everything).
+   Important: each loop's own `animation:` shorthand sets its play state back to running, and
+   `.particles span` outranks `[data-offscreen] *` while `.stage-bob` and `.dht-node` come later. */
 [data-inview="false"] :is(.stage-bob, .dht-node, .ghost-eyes--blink, .ghost-mouth-talk, .act-caret, .particles span, .bg-grid, .ghost--float, .text-gradient-animated, .zzz span),
 [data-offscreen],
 [data-offscreen] * {
-  animation-play-state: paused;
+  animation-play-state: paused !important;
 }
 .act-caret {
   animation: caret 1s steps(1) infinite;
@@ -1165,6 +1167,10 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 }
 .footer-bottom a {
   color: var(--muted);
+  /* Links inside a sentence ("... with Pkarr · BEP44") are told apart by more than colour (WCAG 1.4.1). */
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
 }
 .footer-bottom a:hover {
   color: var(--cyan);

@@ -9,7 +9,7 @@
 | Implementation | `group-community/1`: core protocol in [`groupCommunity.ts`](../../packages/core/src/groupCommunity.ts) and [`communityRendezvous.ts`](../../packages/core/src/communityRendezvous.ts); engine in [`community.ts`](../../packages/browser/src/engine/community.ts), payments in [`communityPay.ts`](../../packages/browser/src/engine/communityPay.ts); UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test |
 | Summary | A group whose link is the way in: anyone who opens it joins, any member lets them in while the admin is away, up to 256 members. |
 | Availability | Available |
-| Notes | Text, a picture and payments, sealed to the two members and carried by the hubs. Online members elect a few hubs that relay; whoever was away is caught up by whoever is there. The cap is what a headless load test measured. |
+| Notes | Text, a picture, files and voice messages fetched between two members, and payments, sealed to the two members and carried by the hubs. Online members elect a few hubs that relay; whoever was away is caught up by whoever is there. The cap is what a headless load test measured. |
 
 > This Draft documents the second distribution profile of [900](900-group-sessions.md) as implemented. Numbers and wire formats are not registered standards.
 
@@ -230,6 +230,8 @@ The joiner does what it does in the mesh: a member key, knocks, an entry session
 
 The joiner checks the whole chain from its genesis, including that the genesis produces `g`, that the entry key the link named is the chain's current one (a replaced or turned-off link admits nobody), and that an `add` names it. Who sent the welcome does not matter: the entry session is pinned to the entry key, which only members hold, and the chain rules already require the `add` to be signed by a member. A member of the roster who knocks again (its welcome was lost) is sent a welcome again, with nothing committed; knocks from members count only when they are still being refreshed well after their admission.
 
+**A full community** (revision 2026-10-08). While the roster holds 256 members, the door answers a knock all the same, at its turn as for an admission: it opens the entry session, and in place of `group-invite` sends `{ "t": "group-full", "v": 2, "g", "n", "max" }`, `n` the members the roster has and `max` the most it holds. It closes its side a few seconds later and tells the same joiner again at most every five minutes while the community stays full. The joiner shows that the community is full (`n` of `max`) in place of the hint that the link may have been replaced, and goes on knocking at its slow pace: once someone leaves, the next answer is an ordinary `group-invite`. An app from before ignores the frame and waits as it did. Before, the door skipped knocks while the roster was full, and the joiner was told, after two minutes, to ask for a new link that would not have helped.
+
 **Opening the link again** (revision 2026-10-02). An app that holds the group never takes what it holds for the answer. Removed (or its admission lost), it knocks with the member key it had, is let in again by an `add` like anyone who presents the link, and keeps its history; it reads nothing from between. Believing it is a member, it knocks with its key all the same, for three minutes at most: a welcome that names the admission it already holds says it is still in, and nothing changes; one that names a newer admission means it had been removed and was let in again, and is taken as a joiner's. Alone in the group it does not knock. Before, an app that believed it was a member did nothing on opening the link, so someone removed while away could not come back without first deleting the group.
 
 ## Leaving and removal
@@ -273,7 +275,7 @@ The payer's app pays or asks, reviews and approves exactly as in a chat; the pay
 
 ### A request to the whole group
 
-Not one `pay-req` per member: one **application frame** to everyone, `{ "x": { "t": "pay-req", "id", "ts", "v", "u", "memo"?, "e": [<one endpoint>], "pm": [...] } }`, sealed to the epoch like text (every member is asked to pay it, so every member may read it). The rules of `group-mesh/1` hold unchanged: **one rail** (Cashu or Lightning), **first valid payment wins** (each payer pays with a pair payload to the payee; the payee checks each token before redeeming it and refuses later ones unredeemed), and **everyone's copy closes**: when it settles, the payee sends `{ "x": { "t": "pay-res", "id": <request id>, "ok": true } }` to everyone. A request and a result are believed only from the member who made the request (the receiving app files them under that member).
+Not one `pay-req` per member: one **application frame** to everyone, `{ "x": { "t": "pay-req", "id", "ts", "v", "u", "memo"?, "e": [<one endpoint>], "n"?, "pm": [...] } }`, sealed to the epoch like text (every member is asked to pay it, so every member may read it). `n` is the request's network as on a data link ([200](200-payments.md)): a Testnet request is never taken for a Mainnet one. The rules of `group-mesh/1` hold unchanged: **one rail** (Cashu or Lightning), **first valid payment wins** (each payer pays with a pair payload to the payee; the payee checks each token before redeeming it and refuses later ones unredeemed), and **everyone's copy closes**: when it settles, the payee sends `{ "x": { "t": "pay-res", "id": <request id>, "ok": true } }` to everyone. A request and a result are believed only from the member who made the request (the receiving app files them under that member).
 
 ### The note
 
@@ -353,7 +355,7 @@ On public relays each trip through Pkarr (a packet published, then seen by the o
 
 ## Open decisions
 
-Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; media (files: [503](503-group-files.md), proposed); native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
+Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; calls (files and voice messages are [503](503-group-files.md)); native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
 
 ## Revision log
 

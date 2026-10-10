@@ -15,6 +15,7 @@ import { NetworkSettings } from "../components/NetworkSettings";
 import { ForkRows } from "../components/devices/Forks";
 import { DomainProofSettings } from "../components/DomainProofSettings";
 import { MediaSettings } from "../components/MediaSettings";
+import { GroupDownloadsRow } from "../components/settings/GroupDownloads";
 import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
 import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
@@ -34,6 +35,7 @@ import { focusToRetype } from "../lib/focus";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
+import { useAppsAvailable } from "../lib/apps/flag";
 import { lockPasswordMin, useDeviceSet } from "../lib/devices";
 import { useEngineState } from "../lib/identities";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -66,7 +68,7 @@ import { SettingsIndex, SettingsMenu, SettingsSearch } from "../components/setti
 type PasswordField = "current" | "new" | "confirm";
 
 /** What "Clear all data" erases, as its confirmation lists it (lib/clearData.ts). */
-const CLEAR_ITEMS = ["chats", "groups", "apps", "profile", "identities", "settings", "storage"] as const;
+const CLEAR_ITEMS = ["chats", "groups", "services", "profile", "identities", "settings", "storage"] as const;
 
 /** Which sections are drawn: on a phone the one its address names (none on the menu), on a wider screen all of them. */
 interface SectionView { phone: boolean; section: SettingsSection | null }
@@ -222,6 +224,8 @@ export function Settings() {
   const desktopUsed = desktopStorage && storageBreakdown(desktopStorage);
   const [protecting, setProtecting] = useState(false);
   const [confirmClearData, setConfirmClearData] = useState(false);
+  // Installed mini-apps and their data go too; the line shows only where Apps does.
+  const appsOn = useAppsAvailable();
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
   const [chatCount, setChatCount] = useState(0);
   const [noticePermission, setNoticePermission] = useState<NoticePermission>("default");
@@ -380,7 +384,7 @@ export function Settings() {
   const lockOn = lockEnabled && hasPassword;
   const systemOn = settings.notifications.systemEnabled && noticePermission === "granted";
   const systemSettings = noticeSettings();
-  const deniedHint = { macos: "settings.noticesDeniedMac", windows: "settings.noticesDeniedWindows", system: "settings.noticesDeniedSystem",
+  const deniedHint = { macos: "settings.noticesDeniedMac", windows: "settings.noticesDeniedWindows", android: "settings.noticesDeniedSystem", system: "settings.noticesDeniedSystem",
     extension: "settings.noticesDeniedExtension", web: "settings.noticesDenied" } as const;
   const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
   /** One of the password fields, wired to its error: `aria-invalid`, `aria-describedby`, and the line under it. */
@@ -562,7 +566,7 @@ export function Settings() {
           const name = t(`settings.cues.${category}` as const), off = !settings.notifications.soundEnabled;
           return (
             <Row key={category} label={name} hint={t(`settings.cues.${category}Hint` as const)} testId={`settings-cues-${category}-row`}>
-              <button type="button" data-testid={`settings-cues-${category}-preview`} disabled={off} onClick={() => playSound(CATEGORY_PREVIEW[category])}
+              <button type="button" data-testid={`settings-cues-${category}-preview`} disabled={off} onClick={() => playSound(CATEGORY_PREVIEW[category], { kind: "preview" })}
                 aria-label={t("settings.cues.preview", { name })} title={t("settings.cues.preview", { name })}
                 className="grid place-items-center w-8 h-8 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" /></svg>
@@ -679,6 +683,7 @@ export function Settings() {
           </Row>
         )}
         <ForkRows forks={devices?.forks} />
+        <GroupDownloadsRow />
         <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
           {confirmDeleteChats ? <>
             <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
@@ -697,6 +702,7 @@ export function Settings() {
               <p className="font-semibold text-text-primary">{t("settings.clearAllDataConfirm")}</p>
               <ul className="list-disc ps-5 space-y-0.5 text-text-secondary">
                 {CLEAR_ITEMS.map((item) => <li key={item} data-item={item}>{t(`settings.clearAllDataItems.${item}`)}</li>)}
+                {appsOn && <li data-item="appsData">{t("settings.clearAllDataItems.appsData")}</li>}
               </ul>
               <p className="text-xs text-text-muted">{t("settings.clearAllDataKeeps")}</p>
               <ButtonGroup>

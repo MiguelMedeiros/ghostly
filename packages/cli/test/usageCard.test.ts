@@ -21,6 +21,7 @@ function fake() {
       groups: [], settings: {}, transport: {},
     }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
+    getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async () => []),
     sendMessage: vi.fn(async ({ linkId, text, card: raw }: { linkId: string; text: string; card?: unknown }) => {
       const c = card(raw) as StatusCard;

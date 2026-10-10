@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { ChatAppPanel } from "../../components/apps/ChatAppPanel";
 import { takedownText, type AppOpener } from "../../lib/apps/open";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { chatApp } from "../../lib/apps/running";
 import { forgetInstalledApps } from "../../lib/apps/installed";
@@ -50,7 +50,7 @@ beforeEach(() => {
   run = { status: "ok" };
   forgetInstalledApps();
   fakeEngine.on("appList", () => [installed()]);
-  open = webOpener({ apps: () => host, closeLabel: () => "Close", stoppedLabel: (title, takedown) => takedownText(title, takedown, translateWith(locales.en, "en")) });
+  open = webOpener({ apps: () => host, nameIn: () => undefined, closeLabel: () => "Close", stoppedLabel: (title, takedown) => takedownText(title, takedown, translateWith(locales.en, "en")) });
 });
 afterEach(() => {
   document.querySelectorAll("[data-place=alone]").forEach((node) => node.remove());

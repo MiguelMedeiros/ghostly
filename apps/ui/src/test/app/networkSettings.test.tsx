@@ -1,5 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import { NetworkSettings } from "../../components/NetworkSettings";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
@@ -58,6 +59,48 @@ describe("Settings, Network: Iroh relays", () => {
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { irohRelays: ["https://relay.example.com/"] } });
   });
+
+  it("says only why a plain http:// relay elsewhere than this machine is refused, not \"Something went wrong\" first", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    // As the engine refuses it (packages/browser/src/engine/node.ts).
+    engine.on("updateSettings", ({ settings }) => {
+      const problem = (settings as { irohRelays?: string[] }).irohRelays?.map(irohRelayProblem).find(Boolean);
+      if (problem) throw new Error(problem);
+    });
+    const field = screen.getByTestId("network-iroh-relays");
+    await user.clear(field);
+    await user.type(field, "http://relay.example.org/");
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error").textContent).toBe("Use an https:// relay address: http://relay.example.org/");
+  });
+
+  it("says a relay that is not an address in the app's language, with what was typed", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    engine.on("updateSettings", ({ settings }) => {
+      const problem = (settings as { irohRelays?: string[] }).irohRelays?.map(irohRelayProblem).find(Boolean);
+      if (problem) throw new Error(problem);
+    });
+    const field = screen.getByTestId("network-iroh-relays");
+    await user.clear(field);
+    await user.type(field, "relay.example.org");
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error").textContent).toBe("Não é um endereço de relay: relay.example.org");
+  });
+});
+
+describe("Settings, Network: push relay", () => {
+  const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS };
+
+  it("refuses a plain http:// push relay before saving, in the app's language, with what was typed", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    await user.type(screen.getByTestId("network-push-relay"), "http://push.example.org/");
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error").textContent).toBe("Use https:// no endereço do relay: http://push.example.org/");
+    expect(engine.callsTo("updateSettings")).toEqual([]);
+  });
 });
 
 describe("Settings, Network: Iroh relays on the Desktop", () => {
@@ -73,6 +116,20 @@ describe("Settings, Network: Iroh relays on the Desktop", () => {
     await user.type(within(row).getByTestId("network-iroh-relays"), "http://127.0.0.1:3340/");
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { irohRelays: ["http://127.0.0.1:3340/"] } });
+  });
+});
+
+describe("Settings, Network: HyperDHT relay", () => {
+  it("is offered in a browser, and not on the Desktop, which runs HyperDHT itself and ignores it", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-hyperdht-relay")).toBeInTheDocument();
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, hyperdhtRelay: "wss://relay.example.org" } }));
+    expect(screen.queryByTestId("network-hyperdht-relay")).toBeNull();
+    expect(screen.queryByText("HyperDHT relay")).toBeNull();
+    // Saving the rest leaves the relay as it is (a web app standing by for this profile may still use it).
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).not.toHaveProperty("settings.hyperdhtRelay");
   });
 });
 

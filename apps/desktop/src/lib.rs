@@ -1,6 +1,10 @@
 //! The Ghostly app: the same body for Desktop (`main.rs` calls [`run`]) and for mobile, where Tauri's
 //! generated project loads this crate as a library and enters at [`run`].
 
+// The Android host: the opener, clipboard, share sheet, notifications and save picker through Android (its Kotlin
+// plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(desktop)]
 mod app_sandbox;
 #[cfg(desktop)]
@@ -8,6 +12,10 @@ mod app_window;
 mod bitcoind_rpc;
 mod clipboard;
 mod commands;
+// The e2e build pastes from a stand-in, never from the clipboard.
+#[cfg(target_os = "linux")]
+#[cfg_attr(feature = "e2e-driver", allow(dead_code))]
+mod copied_files;
 mod crypto;
 mod device_state;
 mod diagnostics;
@@ -37,6 +45,8 @@ mod oidc;
 mod paired_transport;
 mod pkarr_client;
 mod pkarr_network;
+#[cfg(any(target_os = "linux", test))]
+mod proxy_env;
 mod pubky_session;
 mod push_send;
 mod records;
@@ -98,6 +108,8 @@ macro_rules! commands {
             app_sandbox::app_close,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            clipboard::incoming_share_done,
+            clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
@@ -131,6 +143,8 @@ macro_rules! commands {
             commands::resolve_records,
             commands::service_respond,
             commands::set_pkarr_relays,
+            commands::system_bars,
+            commands::test_network,
             commands::turn_put,
             commands::turn_read,
             commands::turn_warm,
@@ -178,6 +192,7 @@ macro_rules! commands {
             native_call::native_microphone_meter,
             native_call::native_microphone_meter_close,
             native_call::native_speaker_test,
+            notifications::native_clear_notification,
             notifications::native_notification_permission,
             notifications::native_private_notification,
             notifications::open_notification_settings,
@@ -214,6 +229,10 @@ fn paste_source() -> clipboard::PasteSource {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before the WebView and any other thread: a proxy in the environment is never handed this machine's own
+    // requests (the stored files the page plays from 127.0.0.1).
+    #[cfg(target_os = "linux")]
+    proxy_env::exempt_loopback();
     // First of all, before anything here can make an HTTPS request (logcat shows it: RustStdoutStderr).
     #[cfg(target_os = "android")]
     if let Err(error) = android_tls() {
@@ -266,6 +285,12 @@ pub fn run() {
         .on_menu_event(|app, event| {
             app_window::on_menu_event(app, event.id().as_ref());
         });
+
+    // Android's own host, before the app's setup: what started the app (a share, a sign-in's link) comes with it.
+    #[cfg(target_os = "android")]
+    let builder = builder
+        .plugin(android::init())
+        .manage(android::Incoming::default());
 
     builder
         .plugin(tauri_plugin_process::init())
@@ -348,10 +373,14 @@ fn android_tls() -> Result<(), String> {
     let android = ndk_context::android_context();
     // SAFETY: the pointers are the process's JavaVM and the application context, which tao keeps as a global
     // reference for the life of the process.
-    let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) }.map_err(|e| e.to_string())?;
-    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-    let context = unsafe { jni::objects::JObject::from_raw(android.context().cast()) };
-    rustls_platform_verifier::android::init_with_env(&mut env, context).map_err(|e| e.to_string())
+    let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) };
+    // For the scope: a thread this attaches is detached again, and one the JVM attached (Android's main thread) is
+    // left as it was.
+    vm.attach_current_thread_for_scope(|env| {
+        let context = unsafe { jni::objects::JObject::from_raw(env, android.context().cast()) };
+        rustls_platform_verifier::android::init_with_env(env, context)
+    })
+    .map_err(|e: jni::errors::Error| e.to_string())
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.

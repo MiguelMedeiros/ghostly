@@ -95,16 +95,24 @@ const RUNNER: &str = r#"<!doctype html>
     const kind = message.event === "chat.message" ? "message" : message.event === "chat.peer" ? "peer" : null;
     if (kind) for (const listener of Array.from(listeners[kind])) { try { listener(message.data); } catch (error) { setTimeout(() => { throw error; }); } }
   } });
-  // What a request may carry, as the broker reads it: plain JSON, no deeper than 64.
+  // What a request may carry, as the broker reads it: plain JSON, no deeper than 64. An `undefined` member or item
+  // goes, as JSON.stringify writes it (left out, or null in an array), the way the web broker reads it (jsonValueOf).
   const isJson = (value, depth) => {
     if (depth > 64) return false;
     if (value === null || typeof value === "boolean" || typeof value === "string") return true;
     if (typeof value === "number") return Number.isFinite(value);
-    if (Array.isArray(value)) return value.every((item) => isJson(item, depth + 1));
+    const inside = (item) => item === undefined || isJson(item, depth + 1);
+    if (Array.isArray(value)) return value.every(inside);
     if (typeof value !== "object") return false;
     const proto = Object.getPrototypeOf(value);
-    return (proto === Object.prototype || proto === null) && Object.values(value).every((item) => isJson(item, depth + 1));
+    return (proto === Object.prototype || proto === null) && Object.values(value).every(inside);
   };
+  // What a failed call rejects with: one of the broker's codes (MINI_APP_ERROR_CODES, packages/core/src/miniApp.ts),
+  // or "failed" for anything else, this runner's own failures included. Read without the prototypes the app may change.
+  const CODES = ["bad-key", "bad-path", "bad-request", "failed", "full", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped", "too-fast", "too-large", "unknown-type"];
+  const known = Object.create(null);
+  for (let i = 0; i < CODES.length; i++) known[CODES[i]] = true;
+  const refusal = (code) => new Error(typeof code === "string" && known[code] === true ? code : "failed");
   const bytesOf = (text) => {
     const raw = atob(text);
     const out = new Uint8Array(raw.length);
@@ -113,13 +121,13 @@ const RUNNER: &str = r#"<!doctype html>
   };
   let nextId = 1;
   const send = (type, args) => {
-    if (!isJson(args, 0)) return Promise.reject(new TypeError("Not a JSON value"));
+    if (!isJson(args, 0)) return Promise.reject(refusal("bad-request"));
     const id = nextId++;
     return broker({ id, type, args }).then((answer) => {
-      if (!answer || typeof answer !== "object" || answer.id !== id) throw new Error("refused");
-      if (answer.ok !== true) throw new Error(typeof answer.error === "string" ? answer.error : "refused");
+      if (!answer || typeof answer !== "object" || answer.id !== id) throw refusal("failed");
+      if (answer.ok !== true) throw refusal(answer.error);
       return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;
-    }, (error) => { throw new Error(typeof error === "string" ? error : "refused"); });
+    }, (error) => { throw refusal(error); });
   };
   const call = (type) => (...args) => send(type, args);
   Object.defineProperty(window, "ghostly", { enumerable: true, value: Object.freeze({
@@ -509,6 +517,8 @@ fn window_builder<'a, R: Runtime>(
                 });
             tauri::webview::NewWindowResponse::Deny
         })
+        // Never a file saved by the window itself.
+        .on_download(|_, event| crate::viewer::may_download(&event))
         .inner_size(width, height);
     #[cfg(any(test, feature = "e2e-driver"))]
     if guard.proxy {
@@ -1599,6 +1609,64 @@ mod tests {
         assert!(receiver < write && api < write);
     }
 
+    /// The quoted strings in `text`, in order.
+    fn quoted(text: &str) -> Vec<&str> {
+        text.split('"').skip(1).step_by(2).collect()
+    }
+
+    /// The list that starts at `marker` (`const CODES = [` in a runner, `MINI_APP_ERROR_CODES = [` in the SDK).
+    fn code_list<'a>(source: &'a str, marker: &str) -> Vec<&'a str> {
+        let start = source.find(marker).unwrap_or_else(|| panic!("no {marker}")) + marker.len();
+        let end = start + source[start..].find(']').unwrap();
+        quoted(&source[start..end])
+    }
+
+    /// A failed `ghostly.*` call rejects with one of the SDK's codes (`MINI_APP_ERROR_CODES` in
+    /// packages/core/src/miniApp.ts, `@ghostlytools/sdk/app`): both runners keep that very list, and every code
+    /// `admit` refuses with is in it. Its other words ("Not started", "No answer") reach the app as `failed`.
+    #[test]
+    fn every_refusal_is_one_of_the_sdks_codes() {
+        let sdk = code_list(
+            include_str!("../../../packages/core/src/miniApp.ts"),
+            "export const MINI_APP_ERROR_CODES = [",
+        );
+        assert!(
+            sdk.contains(&"failed") && sdk.contains(&"bad-request"),
+            "{sdk:?}"
+        );
+        let web = include_str!("../../web/public/app-frame.html");
+        assert_eq!(code_list(RUNNER, "const CODES = ["), sdk, "desktop runner");
+        assert_eq!(code_list(web, "const CODES = ["), sdk, "web runner");
+        for runner in [RUNNER, web] {
+            assert!(!runner.contains("Not a JSON value"));
+            assert!(runner.contains(r#"refusal("bad-request")"#));
+        }
+
+        let source = include_str!("app_sandbox.rs");
+        let admit = &source[source.find("pub fn admit(").unwrap()
+            ..source.find("pub async fn app_broker").unwrap()];
+        let mut codes = Vec::new();
+        for marker in [r#"Err(""#, r#"ok_or(""#] {
+            for piece in admit.split(marker).skip(1) {
+                let literal = &piece[..piece.find('"').unwrap()];
+                if !literal.is_empty()
+                    && literal.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+                {
+                    codes.push(literal);
+                }
+            }
+        }
+        for code in ["too-fast", "too-large", "bad-request"] {
+            assert!(codes.contains(&code), "{codes:?}");
+        }
+        for code in codes {
+            assert!(
+                sdk.contains(&code),
+                "admit refuses with {code}, which MINI_APP_ERROR_CODES does not name"
+            );
+        }
+    }
+
     /// The runner offers the web runner's `ghostly.*`, and nothing more: the same names and calls.
     #[test]
     fn the_runner_offers_the_web_api() {
@@ -1810,5 +1878,27 @@ mod tests {
             "an unknown view is refused"
         );
         assert!(WINDOWS_REFUSAL.contains("Windows"));
+    }
+}
+
+/// The real window on WebKitGTK, with every layer off (the runner's CSP alone stops a download there): what
+/// an app's page can leave on disk.
+#[cfg(all(test, target_os = "linux"))]
+mod download_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs a display and a process of its own (test_support::saved_by_a_window)"]
+    fn a_download_the_page_starts_saves_no_file() {
+        // covers: apps.desktop-sandbox
+        let saved = crate::test_support::saved_by_a_window(
+            SCHEME,
+            |app| app.manage(AppSandboxState::default()),
+            |app| {
+                let guard = Guard::parse("control").unwrap();
+                open_guarded(app, "chess".into(), String::new(), guard, false).unwrap();
+            },
+        );
+        assert_eq!(saved, Vec::<String>::new());
     }
 }

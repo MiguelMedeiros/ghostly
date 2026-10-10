@@ -10,7 +10,7 @@ import { renderApp } from "../render";
 import { proofView } from "./views";
 import { choose, optionsOf } from "../select";
 
-// covers: proofs.picker, proofs.domain.dns, proofs.ssh, proofs.oidc, proofs.did, proofs.atproto
+// covers: proofs.picker, proofs.domain.dns, proofs.ssh, proofs.oidc, proofs.did, proofs.atproto, app.android.refusals
 
 
 const provider = (id: string) => IDENTITY_PROVIDERS.find((p) => p.id === id)!;
@@ -173,6 +173,23 @@ describe("AddIdentityDialog", () => {
       await user.click(start);
       expect(engine.callsTo("beginIdentityProof")).toEqual([{ provider: "domain", subject: "example.com", validityDays: 30 }]);
       expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Ghostly is offline");
+    });
+
+    it.each([
+      ["Sign-in timed out. Try again.", "O login expirou", "Comece de novo e volte ao Ghostly assim que entrar."],
+      ["No app on this phone opens this link", "Nenhum app deste telefone consegue abrir isto", "Instale um app para isso, ou copie o link e abra em outro lugar."],
+    ])("a sign-in that did not come back (%s) shows the app's notice in the person's language", async (reason, title, next) => {
+      const { user, engine } = renderApp(<AddIdentityDialog onClose={() => {}} />, { language: "pt" });
+      engine.on("beginIdentityProof", () => { throw new Error(reason); });
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      expect(await screen.findByTestId("add-identity-error-title")).toHaveTextContent(title);
+      expect(screen.getByTestId("add-identity-error-next")).toHaveTextContent(next);
+      if (reason.startsWith("No app")) {
+        await user.click(screen.getByTestId("add-identity-error-info"));
+        expect(screen.getByTestId("add-identity-error-details")).toHaveTextContent(reason);
+      }
     });
 
     it("asks for an in-app signer's fields instead of a subject, secrets as password inputs", async () => {

@@ -608,11 +608,14 @@ export class PaymentDesk {
     return { askId };
   }
 
-  /** The ask a request answers, only if this side made it: same chat, way of paying and amount, still fresh. */
-  private answering(linkId: string, request: PaymentRequest, method: AskMethod, amount: number): string | undefined {
+  /**
+   * The ask a request answers, only if this side made it: same chat, way of paying and amount, still fresh, and the
+   * network the request is of (what it says, else what it carries), never only what it says.
+   */
+  private answering(linkId: string, request: PaymentRequest, method: AskMethod, amount: number, network: WalletNetwork): string | undefined {
     const ask = request.ask ? this.asks.get(request.ask) : undefined;
     // An answer on the other network is not what was asked: it is an ordinary request, not paid by the ask's card.
-    if (!ask || ask.linkId !== linkId || ask.method !== method || ask.amount !== amount || ask.expiresAt < Date.now() || (request.network && request.network !== ask.network)) return undefined;
+    if (!ask || ask.linkId !== linkId || ask.method !== method || ask.amount !== amount || ask.expiresAt < Date.now() || network !== ask.network) return undefined;
     this.asks.delete(request.ask!);
     return request.ask;
   }
@@ -700,7 +703,7 @@ export class PaymentDesk {
     await this.save({
       target,
       federations,
-      ask: federations ? this.answering(linkId, request, "fedimint", amount) : target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" || target?.method === "spark" ? this.answering(linkId, request, target.method, amount) : undefined,
+      ask: federations ? this.answering(linkId, request, "fedimint", amount, network) : target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" || target?.method === "spark" ? this.answering(linkId, request, target.method, amount, network) : undefined,
       id: this.keyFor(linkId, request.id),
       linkId,
       kind: "request",
@@ -1017,7 +1020,7 @@ export class PaymentDesk {
     if((request.network&&request.network!==network)||!this.accepts(linkId,'usdt',network))return;
     const amount=Number(request.amount.value);if(!Number.isSafeInteger(amount))return;
     const key=this.keyFor(linkId,request.id);
-    await this.save({id:key,linkId,kind:'request',direction:'in',amount,unit,target,memo:request.memo,state:'pending',createdAt:request.timestamp,ask:this.answering(linkId,request,'usdt',amount),network});
+    await this.save({id:key,linkId,kind:'request',direction:'in',amount,unit,target,memo:request.memo,state:'pending',createdAt:request.timestamp,ask:this.answering(linkId,request,'usdt',amount,network),network});
     await this.host.storeMessage({linkId,id:`peer_${request.timestamp}`,text:`Requested ${formatPaymentAmount(amount,target.decimals)} ${target.asset}`,sender:'peer',timestamp:request.timestamp,via:'datalink',paymentId:key});
   }
   async recordUsdt(review:PaymentReview) {
@@ -1099,6 +1102,8 @@ export class PaymentDesk {
     let txid:string;try {txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if([...this.payments.values()].some(p=>p.txid===txid && (p.linkId!==linkId || (p.kind==="request" ? p.id!==request.id : p.requestId!==request.id))))return;
     if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid) || existing?.state==="settled")return;
+    // One receipt waits per request: the address is what pays it (the indexer finds the money without one), so more under fresh ids add nothing but calls to our server.
+    if(!existing && [...this.payments.values()].some(p=>p.kind==="payment" && p.direction==="in" && p.requestId===request.id && p.state==="pending"))return;
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Ark — checking provider`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileArkReceipts();

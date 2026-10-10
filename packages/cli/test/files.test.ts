@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { mimeOf } from "../src/files";
+import { fitName, mimeOf } from "../src/files";
 import { findMember, pictureFrom } from "../src/groupAdmin";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 // covers: headless.files, headless.group-admin
@@ -33,6 +33,17 @@ describe("the Node file store", () => {
     expect(await store.size("f1")).toBeNull();
     expect(await store.room()).toBeGreaterThan(0);
     await expect(store.size("../escape")).rejects.toThrow(/Invalid file id/);
+  });
+
+  it("fits a name in the 255 bytes a file system takes, keeping its extension", () => {
+    expect(fitName("report.pdf")).toBe("report.pdf");
+    const cjk = fitName(`${"文".repeat(120)}.txt`);
+    expect(Buffer.byteLength(cjk)).toBeLessThanOrEqual(255);
+    expect(cjk).toBe(`${"文".repeat(83)}.txt`);
+    // Emoji are 4 bytes and never cut in half.
+    const emoji = fitName("😀".repeat(100));
+    expect(emoji).toBe("😀".repeat(63));
+    expect(fitName(`${"é".repeat(200)}.tar`)).toBe(`${"é".repeat(125)}.tar`);
   });
 
   it("names types by extension, and never trusts a given one blindly", () => {

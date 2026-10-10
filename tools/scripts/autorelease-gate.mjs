@@ -11,13 +11,14 @@
  * Refuses when the branch:
  * - moved since CI ran, or is not on top of the current main
  * - touches CI, release, the scanner, this gate or the advisory allowlist
- * - adds a dependency (only versions of existing ones may change)
+ * - adds a dependency, or takes an existing one from somewhere else (only versions may change)
  * - changes more than MAX_LINES lines outside lock files
- * - in "deps" mode, touches anything but manifests, lock files and release notes
+ * - in "deps" mode, touches anything but manifests, lock files and release notes, or changes more than versions in them
  * - does not bump the version by exactly one patch, with a changelog entry
  * - comes less than MIN_HOURS after the previous automatic release
  * - did not pass the Security workflow on the same commit
  */
+import { randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
 
 const MAX_LINES = 600;
@@ -78,15 +79,43 @@ if (MODE === "deps") {
 const lines = compare.files.filter((f) => !LOCKFILES.has(f.filename)).reduce((n, f) => n + f.additions + f.deletions, 0);
 if (lines > MAX_LINES) refuse(`${lines} changed lines outside lock files (max ${MAX_LINES})`);
 
-// Only versions may change in lock files: a new name is a new dependency someone should look at.
-const npmNames = (text) =>
-  new Set(Object.keys(JSON.parse(text).packages ?? {}).filter((p) => p.includes("node_modules/")).map((p) => p.slice(p.lastIndexOf("node_modules/") + 13)));
-const cargoNames = (text) => new Set([...text.matchAll(/^name = "([^"]+)"$/gm)].map((m) => m[1]));
+// Only versions may change in lock files: a new name is a new dependency someone should look at, and so is an existing
+// name that now comes from somewhere else (an npm alias to another package, another registry or a git repository, a
+// workspace link turned into a download, a crate off crates.io). Each name maps to every place it comes from.
+const npmSources = (text) => {
+  const sources = new Map();
+  for (const [path, entry] of Object.entries(JSON.parse(text).packages ?? {})) {
+    if (!path.includes("node_modules/")) continue;
+    const name = path.slice(path.lastIndexOf("node_modules/") + 13);
+    const real = entry.name ?? name;
+    const from = entry.link
+      ? `link:${entry.resolved}`
+      : !entry.resolved
+        ? `${real}, no source`
+        : entry.resolved.startsWith(`https://registry.npmjs.org/${real}/-/`)
+          ? `npm:${real}`
+          : entry.resolved;
+    sources.set(name, (sources.get(name) ?? new Set()).add(from));
+  }
+  return sources;
+};
+const cargoSources = (text) => {
+  const sources = new Map();
+  for (const block of text.split(/^\[\[package\]\]$/m).slice(1)) {
+    const name = block.match(/^name = "([^"]+)"$/m)?.[1];
+    if (!name) continue;
+    sources.set(name, (sources.get(name) ?? new Set()).add(block.match(/^source = "([^"]+)"$/m)?.[1] ?? "workspace"));
+  }
+  return sources;
+};
 for (const lock of files.filter((f) => LOCKFILES.has(f))) {
-  const names = lock === "Cargo.lock" ? cargoNames : npmNames;
-  const before = names(await raw(lock, "main"));
-  const added = [...names(await raw(lock, sha))].filter((n) => !before.has(n));
+  const sources = lock === "Cargo.lock" ? cargoSources : npmSources;
+  const before = sources(await raw(lock, "main"));
+  const after = sources(await raw(lock, sha));
+  const added = [...after.keys()].filter((n) => !before.has(n));
   if (added.length) refuse(`${lock} adds dependencies: ${added.join(", ")}`);
+  const moved = [...after].filter(([name, from]) => [...from].some((s) => !before.get(name).has(s))).map(([name]) => name);
+  if (moved.length) refuse(`${lock} changes where dependencies come from: ${moved.join(", ")}`);
 }
 
 const version = (text) => JSON.parse(text).version;
@@ -94,6 +123,54 @@ const current = version(await raw("package.json", "main"));
 const next = version(await raw("package.json", sha));
 const [major, minor, patch] = current.split(".").map(Number);
 if (next !== `${major}.${minor}.${patch + 1}`) refuse(`version must go from ${current} to ${major}.${minor}.${patch + 1}, found ${next}`);
+
+// In deps mode a file may only change versions: not a package.json's scripts, an extension's permissions, the updater's
+// key, a Cargo build script or a Dockerfile's RUN lines. Each changed file is read on main and on the branch with its
+// versions blanked out (a dependency's range, a crate's version, a base image's tag), and the two must be equal. A
+// dependency spec that is not a plain range (`npm:`, `file:`, a git or GitHub source) stays as written, so changing it
+// counts. Lock files have their own check above; the changelog and the security review are notes.
+if (MODE === "deps") {
+  const RANGE = /^[\w.^~<>=*|+ -]*$/;
+  const blank = (value) =>
+    typeof value === "string" ? (RANGE.test(value) ? "" : value) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blank(v)])) : value;
+  const DEP_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides"];
+  const json = (text) => {
+    const data = JSON.parse(text);
+    delete data.version;
+    for (const field of DEP_FIELDS) if (field in data) data[field] = blank(data[field]);
+    return JSON.stringify(data);
+  };
+  // Cargo.toml: the package's own version, and the versions in dependency tables (`a = "1"`, `version = "1"`).
+  const cargo = (text) => {
+    let section = "";
+    return text
+      .split("\n")
+      .map((line) => {
+        section = line.match(/^\s*\[\[?([^\]]+)\]\]?\s*$/)?.[1] ?? section;
+        if (/dependencies/.test(section)) return line.replace(/\bversion\s*=\s*"[^"]*"/g, 'version = ""').replace(/^(\s*[\w-]+\s*=\s*)"[^"]*"\s*$/, '$1""');
+        if (section === "package" || section === "workspace.package") return line.replace(/^(\s*version\s*=\s*)"[^"]*"/, '$1""');
+        return line;
+      })
+      .join("\n");
+  };
+  // Dockerfile: a base image's tag and digest, never the image or anything else.
+  const docker = (text) => text.replace(/^(FROM\s+(?:--platform=\S+\s+)?[^\s:@]+(?::\d+\/[^\s:@]+)?)(?::[\w.-]+)?(?:@sha256:[0-9a-f]+)?/gim, "$1");
+  const same = {
+    json: (a, b) => json(a) === json(b),
+    cargo: (a, b) => cargo(a) === cargo(b),
+    docker: (a, b) => docker(a) === docker(b),
+    text: (a, b) => a.replaceAll(current, "<version>") === b.replaceAll(next, "<version>"),
+  };
+  for (const file of new Set(files)) {
+    if (LOCKFILES.has(file) || file === "CHANGELOG.md" || file === "docs/SECURITY-REVIEW.md") continue;
+    const kind = file.endsWith(".json") ? "json" : /(^|\/)Cargo\.toml$/.test(file) ? "cargo" : /(^|\/)Dockerfile$/.test(file) ? "docker" : "text";
+    const before = await raw(file, "main").catch((error) => (String(error).includes("HTTP 404") ? null : Promise.reject(error)));
+    if (before === null) refuse(`deps mode, but ${file} is new`);
+    const after = await raw(file, sha).catch((error) => (String(error).includes("HTTP 404") ? null : Promise.reject(error)));
+    if (after === null) refuse(`deps mode, but ${file} is removed`);
+    if (!same[kind](before, after)) refuse(`deps mode, but ${file} changes more than versions`);
+  }
+}
 const changelog = await raw("CHANGELOG.md", sha);
 if (!new RegExp(`^## ${next.replace(/\./g, "\\.")}\\s*$`, "m").test(changelog)) refuse(`CHANGELOG.md has no "## ${next}" section`);
 try {
@@ -123,6 +200,10 @@ const section = changelog.split(/^## /m).find((s) => s.startsWith(`${next}\n`) |
 const notes = section.split("\n").slice(1).join("\n").trim();
 console.log(`✓ ${branch} @ ${sha.slice(0, 7)}: v${next}, ${files.length} files, ${lines} lines outside lock files, mode ${MODE}`);
 if (process.env.GITHUB_OUTPUT) {
+  // The notes come from the branch: a fixed delimiter would let a line of them end the block and set `version` (or
+  // anything else) after the checks above. A random one per run can't be written in advance.
+  const eof = `GHOSTLY_EOF_${randomBytes(16).toString("hex")}`;
+  if (notes.split(/\r?\n/).includes(eof)) refuse("the release notes hold the output delimiter");
   appendFileSync(process.env.GITHUB_OUTPUT, `version=${next}\n`);
-  appendFileSync(process.env.GITHUB_OUTPUT, `notes<<GHOSTLY_EOF\n${notes}\nGHOSTLY_EOF\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `notes<<${eof}\n${notes}\n${eof}\n`);
 }

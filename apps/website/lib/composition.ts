@@ -79,7 +79,7 @@ export const BLOCKS: Block[] = [
 
   // Chat, files & media
   b("chat", "talk", "Chat", ["400-chat"], "One kind of chat: messages with storage receipts and retries, over a live link or through the DHT."),
-  b("paired", "talk", "Chat sessions", ["401-paired-chat", "501-paired-files"], "The live session of every chat: pinned keys, a durable outbox, names and pictures, negotiated files, calls and shared apps."),
+  b("paired", "talk", "Chat sessions", ["401-paired-chat", "501-paired-files"], "The live session of every chat: pinned keys, a durable outbox, names and pictures, negotiated files, calls and shared services."),
   b("compat", "talk", "Compatibility chats", ["402-legacy-chat", "502-legacy-files"], "Chats with Ghostly 0.4 contacts and the older Rust CLI keep their older wire: DHT text and, on a live link, files and calls. Never created for a new chat."),
   b("onechat", "talk", "DHT fallback and upgrade", ["400-chat", "403-dht-text", "100-transports"], "A first pairing with no direct path starts on the DHT, and every chat moves to a live link by itself when one connects."),
   b("callsall", "talk", "Calls in every chat", ["600-media", "401-paired-chat"], "Voice, video and screen sharing in the chat session while it is live, not only with Ghostly 0.4 contacts."),
@@ -124,7 +124,7 @@ export const BLOCKS: Block[] = [
   b("storage", "keep", `Storage: file${D}S3`, ["1000-storage", "1001-local-storage", "1002-s3-storage"], "Where sealed bundles wait: a file you keep or an S3-compatible bucket, which also holds messages for an away contact."),
 
   // Groups
-  b("groups", "groups", "Groups", ["900-group-sessions", "902-group-mesh", "903-group-community"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture and payments between members; no files or calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension and desktop."),
+  b("groups", "groups", "Groups", ["900-group-sessions", "902-group-mesh", "903-group-community", "503-group-files"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture, payments between members, and files and voice messages fetched from a member who has them; no calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension and desktop."),
   b("gossipsub", "groups", "GossipSub", ["901-gossipsub"], "A candidate distribution layer for larger groups, off the DHT."),
   b("mls", "groups", "MLS", [], "Group encryption by the MLS standard, for groups larger than the mesh or members who renew their own keys. Being considered, not planned.", ["adapter-roadmap"], "candidate-mls-group-encryption"),
 
@@ -132,7 +132,7 @@ export const BLOCKS: Block[] = [
   b("sdk", "ecosystem", "@ghostlytools/sdk", [], "Write a wallet source or an identity proof outside the app, test it with the contract suites, and it joins the pickers as a plugin: no registry line. From the repository, not on npm.", ["sdk"], "candidate-sdk-and-manifests"),
   b("headless", "ecosystem", "Headless CLI", ["1100-headless"], "`ghostly`: the app's own engine on Node for bots, driven through a daemon, a local socket and a JSON event stream. Spending real money needs --confirm-real. npm install -g @ghostlytools/cli."),
   b("sandbox", "ecosystem", "Plugin sandbox", [], "A plugin host that gives each plugin only the permissions you grant it. Being considered, not planned.", ["adapter-roadmap"], "candidate-plugin-sandbox"),
-  b("apps", "ecosystem", "Apps & catalogs", ["1200-marketplace"], "Mini-apps and games from stores you add by pasting a URL, or sent to you in a chat. Each is checked against its publisher's signature and runs in a sandbox with no internet access. Planned for 1.2, on the web app and Desktop."),
+  b("apps", "ecosystem", "Apps & catalogs", ["1200-marketplace"], "Mini-apps and games from stores you add by pasting a URL, or sent to you in a chat. Each is checked against its publisher's signature and runs in a sandbox, with internet access only if you grant it. From 1.2, on the web app and Desktop for macOS and Linux."),
   b("os", "ecosystem", "Self-hosted runtime", [], "An always-on personal node, even a Raspberry Pi, running your Ghostly.", ["adapter-roadmap"], "candidate-self-hosted-24h"),
 ];
 

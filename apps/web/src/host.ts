@@ -54,7 +54,7 @@ export const webHost = createInPageHost({
   appNetRunner: "/app-frame-net.html",
   // Iroh through a relay (WISP 102): where WebRTC cannot connect, before the chat drops to the DHT.
   // A new profile gets its default Mainnet wallets, never under test (see defaultWalletsAllowed).
-  // Mini-apps on in the e2e suite's build only (VITE_APPS_TEST, fixed when the build is made; never at runtime).
+  // Mini-apps by the build's flag (APPS_ENABLED); on whatever it says in the e2e suite's build (VITE_APPS_TEST, fixed at build time).
   node: { ...testPace(), ...testReactions(), irohWeb: testIroh(), defaultWallets: defaultWalletsAllowed(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true } : {}) },
 
   /**

@@ -474,12 +474,12 @@ describe("asks to pay without a request", () => {
   it("the payer ties a request to its ask only for the same way of paying, and only while it is fresh", async () => {
     const { desk, sent } = setup();
     await expect(desk.ask({ linkId: "l", amount: 1.5, method: "usdt", timestamp: 1 })).rejects.toThrow("positive amount");
-    const { askId: usdtAsk } = await desk.ask({ linkId: "l", amount: 2_000_000, method: "usdt", timestamp: 1 });
+    const { askId: usdtAsk } = await desk.ask({ linkId: "l", amount: 2_000_000, method: "usdt", timestamp: 1, network: "testnet" });
     expect(sent[0].frame.amount).toEqual({ value: "2000000", asset: "usdtbase" });
     await desk.onPaymentRequest("l", { id: "u1", timestamp: 2, amount: { value: "2000000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: usdtAsk });
     expect(desk.payment("u1")?.ask).toBe(usdtAsk);
 
-    const { askId } = await desk.ask({ linkId: "l", amount: 700, method: "arkade", timestamp: 1 });
+    const { askId } = await desk.ask({ linkId: "l", amount: 700, method: "arkade", timestamp: 1, network: "testnet" });
     await desk.onPaymentRequest("l", { id: "b1", timestamp: 2, amount: { value: "700", asset: "sat" }, endpoints: [[ENDPOINT.bitcoin, JSON.stringify(btc())]], ask: askId });
     expect(desk.payment("b1")?.ask, "an on-chain request does not answer an Ark ask").toBeUndefined();
     const now = Date.now();
@@ -686,6 +686,24 @@ describe("Ark receipts", () => {
     expect(sent).toEqual([{ kind: "res", frame: { id: "r", ok: true } }]);
     await pay("p6", JSON.stringify({ txid: tx("a") }));
     expect(arkWallet.adapter.verifyReceipt, "a settled receipt is not checked again").toHaveBeenCalledOnce();
+  });
+
+  it("one request keeps one pending Ark receipt: more under fresh ids are not stored, said, or checked", async () => {
+    const { desk, arkWallet, state, texts } = setup([record({ id: "r", direction: "out", target: ark("tark1mine") })]);
+    await desk.start();
+    const pay = (id: string, txid: string) => desk.onPayment("l", { id, requestId: "r", timestamp: 1, amount: { value: "100", asset: "sat" }, endpoint: [ENDPOINT.arkade, JSON.stringify({ txid })] });
+    for (const [i, c] of ["a", "b", "c", "d", "e"].entries()) await pay(`p${i}`, tx(c));
+    expect(["p0", "p1", "p2", "p3", "p4"].map((id) => state(id)?.state)).toEqual(["pending", undefined, undefined, undefined, undefined]);
+    expect(texts().filter((t) => t?.includes("on Ark"))).toHaveLength(1);
+    expect(arkWallet.adapter.verifyReceipt).toHaveBeenCalledOnce();
+    arkWallet.adapter.verifyReceipt.mockClear();
+    await desk.reconcileArkReceipts();
+    expect(arkWallet.adapter.verifyReceipt, "a pass asks about the one receipt").toHaveBeenCalledOnce();
+
+    // The address is what pays it: our server seeing the money settles the request and its receipt.
+    arkWallet.adapter.received.mockResolvedValue(tx("f"));
+    await desk.reconcileArkReceipts();
+    expect([state("r")?.state, state("p0")?.state]).toEqual(["settled", "settled"]);
   });
 
   it("requests and receipts of another Ark server or network are left for it", async () => {

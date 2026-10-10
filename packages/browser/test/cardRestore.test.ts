@@ -4,6 +4,7 @@ import { APPS_CAPABILITY, DhtDelivery, GhostLink, STATUS_CARD_CAPABILITY, appCar
   type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
+import { CARD_RESTORE_GAP_MS } from "../src/engine/edits";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet } from "./helpers/fakeNative";
 // covers: chat.status-cards.wire, apps.chat.card
@@ -50,13 +51,16 @@ async function setup({ keys, rows = [], contactApps = true, contactCards = true 
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
   let contactState: PairingState = { status: "connecting" };
   const contactGot: IncomingMessage[] = [], contactEdits: WireEdit[] = [];
+  /** What reached the contact, in order: a message by its text, an edit by its message's wire id; and when. */
+  const contactLog: { what: string; at: number }[] = [];
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     editSupport: true, statusCardSupport: contactCards, buttonsSupport: contactCards, appsSupport: contactCards && contactApps,
-    events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); }, onMessageEdit: edit => { contactEdits.push(edit); return true; } },
+    events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); contactLog.push({ what: `message ${message.text}`, at: Date.now() }); },
+      onMessageEdit: edit => { contactEdits.push(edit); contactLog.push({ what: `edit ${edit.id}`, at: Date.now() }); return true; } },
   });
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
   let stopped = false;
@@ -70,7 +74,7 @@ async function setup({ keys, rows = [], contactApps = true, contactCards = true 
   await vi.waitFor(() => expect([view().pairing?.status, contactState.status]).toEqual(["ready", "ready"]));
   const row = async (messageId: string) => (await db.getMessages(id)).find(m => m.id === messageId)!;
   const peerRow = async (text: string) => { await vi.waitFor(async () => expect((await db.getMessages(id)).find(m => m.text === text && m.sender === "peer")).toBeDefined()); return (await db.getMessages(id)).filter(m => m.text === text && m.sender === "peer").at(-1)!; };
-  return { node, contact, id, contactGot, contactEdits, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
+  return { node, contact, id, contactGot, contactEdits, contactLog, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
 }
 
 /** As the floor left it: delivered as its text, the card due. */
@@ -157,9 +161,10 @@ describe("once live, the card goes again as an edit of the card alone", () => {
   it("is bounded: a card of over 7 days is given up, and only the newest 50 go", async () => {
     const now = Date.now();
     const ids = Array.from({ length: 52 }, (_, i) => `x${String(i).padStart(20, "0")}`);
-    // 52 recent task cards, the oldest two past the 50; one of 8 days.
-    const rows = ids.map((wire, i) => ({ ...floored("Z", taskCard), id: `me_${wire}`, wireId: wire, timestamp: now - 60_000 - i * 1_000 }));
-    rows.push(floored("O", taskCard, { timestamp: now - 8 * 24 * 60 * 60_000 }));
+    // 52 recent task cards, the oldest two past the 50; one of 8 days. Each its own task: one task's versions coalesce.
+    const card = (id: string) => readStatusCard({ ...TASK, id })!;
+    const rows = ids.map((wire, i) => ({ ...floored("Z", card(`task-${i}`)), id: `me_${wire}`, wireId: wire, timestamp: now - 60_000 - i * 1_000 }));
+    rows.push(floored("O", card("old-task"), { timestamp: now - 8 * 24 * 60 * 60_000 }));
     const t = await setup({ rows });
     await vi.waitFor(async () => expect((await db.getMessages(t.id)).filter(m => m.cardRestore === "due")).toHaveLength(0), { timeout: 15_000 });
     const after = await db.getMessages(t.id);
@@ -180,4 +185,57 @@ describe("once live, the card goes again as an edit of the card alone", () => {
       expect((await t.peerRow(text)).edit).toMatchObject({ seq: 1, history: [] });
     }
   }, 30_000);
+});
+
+describe("a reconnect with many cards due does not burst", () => {
+  /** 50 messages of 3 tasks, as a bot that sent each task again while the contact was away: the newest last. */
+  const versions = () => {
+    const now = Date.now();
+    return Array.from({ length: 50 }, (_, i) => {
+      const wire = `v${String(i).padStart(21, "0")}`;
+      const card = readStatusCard({ kind: "task", id: `task-${i % 3}`, title: `Task ${i % 3}`, status: "running", progress: i * 2 })!;
+      return floored("V", card, { id: `me_${wire}`, wireId: wire, timestamp: now - 120_000 + i * 1_000 });
+    });
+  };
+
+  it("only the newest message of each card goes again: 50 versions of 3 cards are 3 edits, each the latest version", async () => {
+    const rows = versions();
+    const t = await setup({ rows });
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(3), { timeout: 20_000 });
+    // Nothing else comes once the three are out.
+    await new Promise(resolve => setTimeout(resolve, CARD_RESTORE_GAP_MS * 2));
+    expect(t.contactEdits).toHaveLength(3);
+    const newest = rows.slice(-3);
+    expect(t.contactEdits.map(e => e.id).sort()).toEqual(newest.map(r => r.wireId).sort());
+    for (const edit of t.contactEdits) expect(edit.sc).toEqual(newest.find(r => r.wireId === edit.id)!.card);
+    // The older versions are given up: no edit, and never due again.
+    const after = await db.getMessages(t.id);
+    for (const old of rows.slice(0, -3)) {
+      expect(after.find(m => m.id === old.id)?.cardRestore).toBe("sent");
+      expect(after.find(m => m.id === old.id)?.edit).toBeUndefined();
+    }
+  }, 40_000);
+
+  /** 3 cards due, and 2 messages that wait for the session. */
+  const mixed = () => {
+    const now = Date.now();
+    const waiting = ["first", "second"].map((text, i): StoredMessage => ({ linkId: "", id: `me_${WIRE(String(i))}`, wireId: WIRE(String(i)), text, sender: "me",
+      timestamp: now - 30_000 + i, via: "datalink", delivery: "sending" }));
+    const cards = ["a", "b", "c"].map((c, i) => floored(c, readStatusCard({ ...TASK, id: `spaced-${c}` })!, { timestamp: now - 60_000 + i }));
+    return [...cards, ...waiting];
+  };
+
+  it("the edits that go again are spaced, one per gap", async () => {
+    const t = await setup({ rows: mixed() });
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(3), { timeout: 20_000 });
+    const edits = t.contactLog.filter(e => e.what.startsWith("edit "));
+    for (let i = 1; i < edits.length; i++) expect(edits[i].at - edits[i - 1].at).toBeGreaterThanOrEqual(CARD_RESTORE_GAP_MS - 50);
+  }, 40_000);
+
+  it("the chat's waiting messages go as before: once each, in their order, the first ahead of every card", async () => {
+    const t = await setup({ rows: mixed() });
+    await vi.waitFor(() => expect(t.contactEdits.length).toBeGreaterThanOrEqual(3), { timeout: 20_000 });
+    await vi.waitFor(() => expect(t.contactGot.map(m => m.text)).toEqual(["first", "second"]));
+    expect(t.contactLog[0].what).toBe("message first");
+  }, 40_000);
 });

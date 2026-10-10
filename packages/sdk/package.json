@@ -1,8 +1,8 @@
 {
   "name": "@ghostlytools/sdk",
-  "version": "1.1.7",
+  "version": "1.2.0",
   "type": "module",
-  "description": "Build a wallet source, an identity proof or a client for Ghostly without reading its internals: the adapter contracts, their fakes and contract test suites, and the plugin registry.",
+  "description": "Build a wallet source, an identity proof, a mini-app or a client for Ghostly without reading its internals: the adapter contracts, their fakes and contract test suites, the plugin registry, and the mini-app API types (Apps run in Ghostly 1.2 and later).",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -15,6 +15,9 @@
     "README.md"
   ],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/types/sdk/src/index.d.ts",
@@ -31,6 +34,10 @@
     "./core": {
       "types": "./dist/types/sdk/src/core.d.ts",
       "default": "./dist/core.js"
+    },
+    "./app": {
+      "types": "./dist/types/sdk/src/app.d.ts",
+      "default": "./dist/app.js"
     },
     "./package.json": "./package.json"
   },
@@ -59,7 +66,7 @@
     "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "typescript": "^5.9.3",
-    "vite": "^8.3.2",
+    "vite": "^8.3.3",
     "vitest": "^5.0.3"
   }
 }

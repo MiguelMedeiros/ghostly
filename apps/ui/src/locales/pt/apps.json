@@ -62,7 +62,8 @@
     "storage": "Este navegador não consegue guardar apps aqui (navegação privada?). Tente uma janela normal.",
     "storageInfo": "O Ghostly guarda os arquivos de cada app neste dispositivo. Janelas privadas, como a Navegação Privada do Safari, não deixam, e um disco cheio também impede. Abra o Ghostly numa janela normal e instale o app lá.",
     "storeKey": "Essa loja é assinada por outra chave.",
-    "tooLarge": "Grande demais."
+    "tooLarge": "Grande demais.",
+    "unlistedVersion": "O link tem uma versão que esta loja ainda não lista."
   },
   "install": {
     "equivocation": "Existem duas versões {{sequence}} diferentes. O Ghostly manteve a que você tem.",
@@ -119,13 +120,16 @@
     "countOne": "1 app",
     "curated": "Curada",
     "empty": "Esta loja não lista apps.",
+    "filter": "Buscar nesta loja",
     "indexed": "Indexada",
     "installed": "Instalado",
+    "noMatch": "Nenhum app desta loja corresponde.",
     "notRead": "Ainda não lida",
     "problem": "A última leitura falhou.",
     "read": "Ler",
     "refresh": "Atualizar",
     "remove": "Remover",
+    "showMore": "Mostrar mais ({{count}})",
     "stale": "Desatualizada desde {{date}}"
   },
   "title": "Apps",

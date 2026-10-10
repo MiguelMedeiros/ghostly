@@ -416,6 +416,27 @@ pub fn under_test() -> bool {
     env::var("GHOSTLY_E2E").as_deref() == Ok("1")
 }
 
+/// What the page's own network may reach, for what Rust's environment cannot set in the WebView.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct TestNetwork {
+    /// The apps' public STUN servers in the page's WebRTC: false with `GHOSTLY_STUN=0` (a debug Android e2e start sets
+    /// it, MainActivity.kt), as the CLI's `GHOSTLY_STUN=0`. The profile's own ICE servers stay either way.
+    pub stun: bool,
+}
+
+/// Asked once by the Android page at start (apps/ui/src/desktop/android.ts `leaveOutPublicStun`). Every platform
+/// answers, so the command list stays one; nothing on Desktop reads it.
+#[tauri::command]
+pub fn test_network() -> TestNetwork {
+    test_network_in(env::var("GHOSTLY_STUN").ok().as_deref())
+}
+
+fn test_network_in(stun: Option<&str>) -> TestNetwork {
+    TestNetwork {
+        stun: stun != Some("0"),
+    }
+}
+
 /// Whether the updater can replace this install in place. It can on macOS and
 /// Windows, and on Linux only for the AppImage: a `.deb` or `.rpm` belongs to
 /// the package manager that put it there, so those are sent to the download
@@ -455,6 +476,32 @@ pub fn webkit_version() -> Option<[u32; 3]> {
     None
 }
 
+/// Android's status and navigation bars take the page's background colour (`#rrggbb`) and the icons that go on it,
+/// so the strips around the page follow the app's Light or Dark (and its colour theme), not the system's. Nothing
+/// elsewhere: Desktop's title bar follows `set_theme`.
+#[tauri::command]
+pub fn system_bars(color: String, dark: bool) -> Result<(), String> {
+    let rgb = hex_color(&color).ok_or("Not a colour")?;
+    #[cfg(target_os = "android")]
+    {
+        crate::android::system_bars(rgb, dark)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (rgb, dark);
+        Ok(())
+    }
+}
+
+/// `#rrggbb` as 0xRRGGBB.
+fn hex_color(color: &str) -> Option<u32> {
+    let hex = color.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(hex, 16).ok()
+}
+
 /// A `lightning:` or `bitcoin:` payment link, handed to whatever wallet the system has for it. Nothing
 /// else: only those two schemes, only the characters a payment URI is made of, and never a file or a
 /// web page.
@@ -491,13 +538,16 @@ pub(crate) fn launch(url: &str) -> Result<(), String> {
     let result = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
         .spawn();
-    // Android and iOS: no opener process; the mobile host opens links through the system (Tauri's opener plugin).
-    #[cfg(mobile)]
+    // Android: no opener process; the app Android has for the URL opens it (`ACTION_VIEW`, android.rs).
+    #[cfg(target_os = "android")]
+    return crate::android::view(url);
+    #[cfg(target_os = "ios")]
     let result: std::io::Result<std::process::Child> = Err(std::io::Error::other(format!(
         "No opener on this platform for {}",
         url.split(':').next().unwrap_or_default()
     )));
     // The opener exits at once; waiting for it keeps no zombie behind until the app quits.
+    #[cfg(not(target_os = "android"))]
     result
         .map(|mut child| drop(std::thread::spawn(move || child.wait())))
         .map_err(|e| e.to_string())
@@ -586,6 +636,37 @@ mod project_link_tests {
         ] {
             assert!(super::open_project_link(url.into()).is_err());
         }
+    }
+
+    #[test]
+    fn the_system_bars_take_only_a_plain_colour() {
+        assert_eq!(super::hex_color("#0b141a"), Some(0x0b141a));
+        assert_eq!(super::hex_color("#FFFFFF"), Some(0xffffff));
+        for color in [
+            "",
+            "#fff",
+            "0b141a",
+            "#0b141a00",
+            "#0b141g",
+            "rgb(0, 0, 0)",
+            "#+b141a",
+        ] {
+            assert_eq!(super::hex_color(color), None, "{color}");
+            assert!(super::system_bars(color.into(), true).is_err(), "{color}");
+        }
+        assert_eq!(super::system_bars("#0b141a".into(), true), Ok(()));
+    }
+
+    #[test]
+    fn the_page_leaves_public_stun_out_only_with_ghostly_stun_0() {
+        assert!(!super::test_network_in(Some("0")).stun);
+        for stun in [None, Some(""), Some("1"), Some("false")] {
+            assert!(super::test_network_in(stun).stun, "{stun:?}");
+        }
+        assert_eq!(
+            serde_json::to_value(super::test_network_in(Some("0"))).unwrap(),
+            serde_json::json!({ "stun": false })
+        );
     }
 
     #[test]

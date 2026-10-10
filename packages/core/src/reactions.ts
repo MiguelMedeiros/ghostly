@@ -35,8 +35,12 @@ export const REACTION_LIMITS = {
   /** Reactions a sender says per window on one chat; the newest of each message waits for room. */
   send: 20,
   windowMs: 10_000,
-  /** A reaction to a message not here yet waits this long for it, at most `buffer` of them per chat. */
-  bufferMs: 60_000,
+  /**
+   * A reaction to a message not here yet waits this long for it, at most `buffer` of them per sender in each chat: a
+   * member back in a busy group hears every member's latest reactions as their edges open, before the catch-up (over a
+   * minute for a full log) brings what they name.
+   */
+  bufferMs: 300_000,
   buffer: 64,
   /** Reactions of this side not confirmed yet, per chat: the oldest is dropped past it. */
   pending: 32,

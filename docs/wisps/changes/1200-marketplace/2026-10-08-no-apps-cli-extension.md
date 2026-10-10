@@ -1,0 +1,1 @@
+The Per client rows for the CLI and the extension now say that their engines offer no `apps/1` and refuse the app calls, even in a build with apps on: neither runs apps, and the bot side of `apps/1` stays phase 2.

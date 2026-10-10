@@ -15,7 +15,8 @@ import { appErrorCode, appErrorText } from "../../lib/apps/errors";
  * own data and nothing else. Every field is the sender's claim: the title and version as the sender's, a generic icon,
  * the publisher's fingerprint from `ref`, "Not checked yet". Nothing is fetched to show it: the bundle is fetched,
  * checked and shown on the install screen only when the person presses "Install and open", and installing opens it in
- * this chat. Once the app is installed here, the card says Open. While the contact is not live it says the app needs
+ * this chat. Once the app is installed here, the card says Open and names the installed app (its checked title, version
+ * and icon), whatever the card calls it. While the contact is not live it says the app needs
  * you both online. A version a store of the person's removed does not open; the warning offers "Run anyway" (WISP 1200
  * § Takedowns), which a revoked one never gets.
  */
@@ -37,10 +38,13 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const [error, setError] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
   const app = installed?.find((a) => a.ref === card.ref);
-  const named = card.version ? `${card.title} ${card.version}` : card.title;
+  // Installed here: the app's own checked title and version, the one Open starts, never the sender's words for it.
+  const title = app ? app.title : card.title;
+  const version = app ? app.version : card.version;
+  const named = version ? `${title} ${version}` : title;
   const who = mine ? (card.opened ? t("apps.card.youOpened") : t("apps.card.youShared"))
     : card.opened ? t("apps.card.opened", { name: contact }) : t("apps.card.shared", { name: contact });
-  const waiting = appsUnavailable(platform?.getPeer(peerKey), card.title, contact, t);
+  const waiting = appsUnavailable(platform?.getPeer(peerKey), title, contact, t);
   const open = (runAnyway = false) => {
     setError(null); setRemoved(false);
     void openApp(card.ref, linkId, { runAnyway }).catch((e: unknown) => { setError(appErrorText(e, t)); setRemoved(appErrorCode(e) === "removed"); });
@@ -50,7 +54,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       <div className="flex items-start gap-3">
         <AppIcon size={40} installed={app} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-text-primary truncate" data-testid="app-card-title">{named}</p>
+          <p dir="auto" className="text-sm font-medium text-text-primary truncate" data-testid="app-card-title">{named}</p>
           <p className="text-xs text-text-secondary truncate">{who}</p>
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             <Fingerprint value={appFingerprint(appRefPublisher(card.ref))} />

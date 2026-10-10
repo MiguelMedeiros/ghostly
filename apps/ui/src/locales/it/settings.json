@@ -13,11 +13,12 @@
   "clearAllDataDescription": "Chat, identità e impostazioni di questo profilo. I wallet restano.",
   "clearAllDataInfo": "Prima di cancellare, Ghostly ritira ciò che può: elementi tenuti per i contatti, il tuo DID, le tue prove di identità e il risveglio. Le prove pubblicate su altri siti restano lì. I wallet non vengono eliminati: spendi o fai il backup dei tuoi sats prima, se vuoi che spariscano anche loro.",
   "clearAllDataItems": {
-    "apps": "App condivise",
+    "appsData": "App installate e i loro dati",
     "chats": "Chat, messaggi e file",
     "groups": "Gruppi",
     "identities": "Prove di identità, il tuo DID e i dati Nostr",
     "profile": "Il tuo nome e la tua foto",
+    "services": "Servizi condivisi",
     "settings": "Impostazioni, schermata di blocco e rete",
     "storage": "Impostazioni S3 e risveglio ad app chiusa"
   },
@@ -56,6 +57,14 @@
   "defaultNicknameHint": "Usato quando avvii una nuova chat",
   "deleteAllChatsConfirm": "Eliminare tutte le {{count}} chat?",
   "deleteAllChatsHint": "Messaggi e file vengono eliminati. Impostazioni e wallet restano.",
+  "groupDownloads": {
+    "always": "Sempre",
+    "hint": "Messaggi vocali e file piccoli",
+    "info": "I messaggi vocali, e i file fino a {{file}}, si scaricano da soli finché quanto arrivato così da un gruppo non raggiunge {{group}} su questo dispositivo. I file più grandi aspettano Scarica. Ogni dispositivo decide per sé; nulla di questo viene inviato al gruppo.",
+    "off": "Disattivato",
+    "title": "Scarica automaticamente nei gruppi",
+    "wifi": "Solo Wi-Fi"
+  },
   "incorrectPassword": "Password errata",
   "language": "Lingua",
   "license": "Licenza",
@@ -141,6 +150,7 @@
     "colour": "colore, accento, tema",
     "deleteChats": "cancella, cronologia",
     "domains": "DNS, DoH",
+    "groupDownloads": "automatico, download automatico, media, Wi-Fi, dati mobili, messaggi vocali, file, gruppi",
     "language": "traduzione, impostazioni internazionali",
     "linkPreviews": "link, URL",
     "lock": "password, PIN, sicurezza",

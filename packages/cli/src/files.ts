@@ -1,5 +1,5 @@
 import { openAsBlob } from "node:fs";
-import { open, rm, stat } from "node:fs/promises";
+import { access, constants, open, rm, stat } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
@@ -114,6 +114,10 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
     const messages = await node(ctx).groupMessages({ groupId: group.id });
     if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this group, or cannot be replied to");
   }
+  // A send the group would refuse anyway (its files of the minute are taken, or this device is not in it) is refused
+  // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
+  const check = await node(ctx).groupFileCheck({ groupId: group.id });
+  if (check.error) throw check.refused ? new CliError("refused", check.error) : groupSendRefused(check.error);
   const { voice, warning } = await voiceOf(params, path, mime);
   const source = await openAsBlob(path, { type: mime });
   const image = voice ? undefined : await readImageMeta(source, mime);
@@ -137,6 +141,22 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   return { group: group.id, messageId: result.messageId ?? null, file: { id: fileId, name: file.name, size, mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
 }
 
+/** Bytes a file system takes in one name: 255 on ext4, btrfs, APFS (NTFS counts 255 UTF-16 units, within this too). */
+const NAME_BYTES = 255;
+
+/**
+ * `name` as an entry of a folder: an app's name may have 200 characters, which in UTF-8 can be 800 bytes. The end of
+ * its stem goes until it fits, its extension stays (as `sanitizeFileName` shortens it), so "文…文.txt" is saved as a text.
+ */
+export function fitName(name: string): string {
+  const fits = (candidate: string) => Buffer.byteLength(candidate) <= NAME_BYTES;
+  if (fits(name)) return name;
+  const extension = /\.[^.\s]{1,15}$/u.exec(name)?.[0] ?? "";
+  const stem = [...name.slice(0, name.length - extension.length)];
+  while (stem.length && !fits(stem.join("").trimEnd() + extension)) stem.pop();
+  return (stem.join("").trimEnd() || "file") + extension;
+}
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -146,6 +166,8 @@ export const FILE_METHODS: Record<string, Method> = {
     let info;
     try { info = await stat(path); } catch { throw new CliError("not_found", `No file ${path}`); }
     if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file`);
+    // A file this user may not read: refused with its path (errors.ts), not the engine's "The blob could not be read" later.
+    await access(path, constants.R_OK);
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
@@ -248,7 +270,7 @@ export const FILE_METHODS: Record<string, Method> = {
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), sanitizeFileName(stored.metadata.name));
+    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), fitName(sanitizeFileName(stored.metadata.name)));
     const flags = bool(params, "force") ? "w" : "wx";
     let out;
     try { out = await open(target, flags, 0o600); } catch (error) {

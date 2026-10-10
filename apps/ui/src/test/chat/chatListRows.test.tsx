@@ -1,11 +1,11 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../../components/Sidebar";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { formatListTime, previewText } from "../../lib/chatList";
-import { locales as translations } from "../../locales";
+import { LOCALES as translations } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { isSessionPinned, saveSession } from "../../lib/storage";
@@ -239,6 +239,24 @@ describe("the chat list's rows (compact, the default)", () => {
     const row = rowOf("Mia");
     expect(within(row).getByTestId("chat-row-pinned")).toHaveAccessibleName("Fixada");
     expect(within(row).getByTestId("chat-row-pin")).toHaveAccessibleName("Desafixar conversa");
+  });
+
+  it("reads again only a chat whose stored session changed, however often it is told sessions changed", () => {
+    saveSession(chat("p", { nick: "Pat", messages: Array.from({ length: 50 }, (_, i) => message({ id: `p${i}`, text: `line ${i}` })) }));
+    saveSession(chat("q", { nick: "Quin", messages: [message({ text: "one" })] }));
+    list();
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      act(() => { for (let i = 0; i < 5; i++) window.dispatchEvent(new Event("session-updated")); });
+      expect(parse.mock.calls.filter(([raw]) => raw === localStorage.getItem("ghostly_p"))).toHaveLength(0);
+      // One that changed is read again, and shown.
+      saveSession(chat("q", { nick: "Quin", messages: [message({ text: "one" }), message({ text: "two" })] }));
+      act(() => { window.dispatchEvent(new Event("session-updated")); });
+      expect(rowOf("Quin")).toHaveTextContent("two");
+      expect(parse.mock.calls.filter(([raw]) => raw === localStorage.getItem("ghostly_p"))).toHaveLength(0);
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it("a group with messages shows when, and its members as the second line", () => {

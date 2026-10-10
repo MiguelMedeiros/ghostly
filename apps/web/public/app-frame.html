@@ -51,6 +51,8 @@
   const rootOf = Object.getOwnPropertyDescriptor(Document.prototype, "documentElement").get;
   const httpEquiv = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "httpEquiv").set;
   const metaContent = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "content").set;
+  const listen = EventTarget.prototype.addEventListener;
+  const stopImmediately = Event.prototype.stopImmediatePropagation;
   // ghostly:hint-guard:start
   // Defence in depth for what no policy governs in WebKit: a <link rel=preconnect> connects from here there, even in
   // a srcdoc frame (measured). No <link>, frame, object or embed of the entry is written, and one the app makes is
@@ -268,6 +270,14 @@
 
   const write = ({ html, scripts }) => {
     document.open();
+    // Every other app frame in the client's page can post to this window (parent.frames[i]), and neither the sandbox
+    // nor a policy governs that, so this end is closed: the app talks to the broker over its port only, and nothing
+    // posted to the window reaches the app. A capture listener on the window runs before any of the app's, `onmessage`
+    // included (a capture listener the app adds runs after this first one); it is added after document.open, which
+    // erases the window's listeners, and out of the app's reach, so no removeEventListener names it.
+    const deaf = (event) => { reflectApply(stopImmediately, event, []); };
+    reflectApply(listen, window, ["message", deaf, true]);
+    reflectApply(listen, window, ["messageerror", deaf, true]);
     if (hintGuard) hintGuard.install();
     reflectApply(documentWrite, document, [html]);
     // The app writes no markup into the page while it is parsed: it would go in past the guard and the broker's
@@ -300,6 +310,13 @@
     lock("script-src 'wasm-unsafe-eval'");
   };
 
+  // What a failed call rejects with: one of the broker's codes (MINI_APP_ERROR_CODES, packages/core/src/miniApp.ts),
+  // or "failed" for anything else, this runner's own failures included. Read without the prototypes the app may change.
+  const CODES = ["bad-key", "bad-path", "bad-request", "failed", "full", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped", "too-fast", "too-large", "unknown-type"];
+  const known = Object.create(null);
+  for (let i = 0; i < CODES.length; i++) known[CODES[i]] = true;
+  const refusal = (code) => new Error(typeof code === "string" && known[code] === true ? code : "failed");
+
   Promise.all([portReady, lockHolds]).then(([port, holds]) => {
     if (!holds) { port.close(); return stop("lock"); }
     let nextId = 1;
@@ -309,7 +326,7 @@
     const send = (type, args) => new Promise((resolve, reject) => {
       const id = nextId++;
       pending.set(id, { resolve, reject });
-      try { port.postMessage({ id, type, args }); } catch (error) { pending.delete(id); reject(new TypeError("Not a JSON value")); }
+      try { port.postMessage({ id, type, args }); } catch (error) { pending.delete(id); reject(refusal("bad-request")); }
     });
     port.onmessage = (event) => {
       const message = event.data;
@@ -319,7 +336,7 @@
         if (!waiting) return;
         pending.delete(message.id);
         if (message.ok === true) waiting.resolve(message.value);
-        else waiting.reject(new Error(typeof message.error === "string" ? message.error : "refused"));
+        else waiting.reject(refusal(message.error));
         return;
       }
       if (message.event === "start" && entry === null && typeof message.data === "string") {

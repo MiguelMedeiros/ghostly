@@ -1,6 +1,6 @@
 # Features
 
-What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.md), [Wallets](WALLETS.md), [Identities](IDENTITIES.md), [Several devices](DEVICES.md), [Transports](TRANSPORTS.md). How it fits together: [Architecture](ARCHITECTURE.md).
+What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.md), [Wallets](WALLETS.md), [Identities](IDENTITIES.md), [Several devices](DEVICES.md), [Transports](TRANSPORTS.md), [Apps](APPS.md). How it fits together: [Architecture](ARCHITECTURE.md).
 
 ## Chat
 
@@ -15,6 +15,7 @@ What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.m
 - Your own TURN server (Settings → Network) for networks that let no direct path through, for chats and calls, Linux Desktop calls included. Backups leave its credential out.
 - Your own Iroh relays in the same place, used by the web app, the extension and Desktop alike, so a browser and a Desktop on a self-hosted relay find each other.
 - Private groups of up to 32 (through hubs past 16) and communities of up to 256, joined by a link.
+- Files, pictures, videos and voice messages in groups, up to 100 MiB a file: everyone sees them at once, and each member's app fetches them from a member who has them. Voice messages and files up to 8 MiB download by themselves; larger ones on **Download** (Settings → Data & storage → Download automatically in groups).
 
 More: [Chat](CHAT.md).
 
@@ -47,11 +48,19 @@ More: [Identities](IDENTITIES.md).
 - Installs as an app: offline start, Share to Ghostly, `web+ghostly:` links, shortcuts and an unread badge.
 - **Wake me while closed**: a contact's message or call, or a mention in a private group, wakes the closed web app with a push that carries no content, sent by the other person's own app.
 
-- **Android:** an APK that opens the web app in a Trusted Web Activity, with its own icon. Releases attach it once its signing key is set up ([ANDROID.md](ANDROID.md)).
-
 More: [On the web](WEB.md#install-it).
 
-## Shared apps
+## Apps
+
+- Mini-apps and games, installed from the official store, from another store you add by its link, from an app's link or from a contact's card. Chess is the first.
+- Each app is checked against its publisher's signature before it installs, and runs in a sandbox apart from your chats, keys and wallets. It reaches the internet only with the permission you grant at install.
+- Open an app in a 1:1 chat to play with that contact, live, while you are both online. Each side keeps the game.
+- An app from a store updates to the version that store lists; a version its publisher revoked or a store removed is stopped.
+- On the web app and on Desktop for macOS and Linux. Not yet on Desktop on Windows or in the extension.
+
+More: [Apps and the official store](APPS.md).
+
+## Shared services
 
 - Share a web app running on your machine (`localhost`) with a contact while you are online, over the chat's live connection. Desktop and the extension can share and open them; the web app cannot. Desktop asks you, in a system dialog, before it reaches a local address.
 

@@ -42,7 +42,10 @@ class Disk {
   bytes: number[] | null;
   failAt = Infinity;
   discarded = false;
-  constructor(keep: boolean) { this.bytes = keep ? [] : null; }
+  /** Every target opened on it, without keeping one alive. */
+  opened: WeakRef<IncomingTarget>[] = [];
+  /** Each write takes this long (ms), as storage slower than the wire does: what arrives queues up behind it. */
+  constructor(keep: boolean, private writeMs = 0) { this.bytes = keep ? [] : null; }
   /** What a restart finds: the durable part, hashed again from the pattern. */
   restart(): void {
     this.length = this.durable;
@@ -51,9 +54,10 @@ class Disk {
     if (this.bytes) this.bytes.length = this.length;
   }
   target(): IncomingTarget {
-    return {
+    const target: IncomingTarget = {
       offset: this.length,
       append: async (chunk) => {
+        if (this.writeMs) await new Promise((resolve) => setTimeout(resolve, this.writeMs));
         if (this.length + chunk.length > this.failAt) throw new Error("disk full");
         this.hash.update(chunk);
         this.length += chunk.length;
@@ -63,6 +67,8 @@ class Disk {
       verify: async (digest) => this.hash.copy().digest("base64url") === digest,
       discard: async () => { this.discarded = true; this.length = this.durable = 0; this.hash = createHash("sha256"); if (this.bytes) this.bytes.length = 0; },
     };
+    this.opened.push(new WeakRef(target));
+    return target;
   }
 }
 
@@ -90,6 +96,8 @@ function wire(options: {
   budget?: number;
   /** With `budget`: the host says when the channel has room, as GhostLink's `filesWritable` does. */
   writable?: boolean;
+  /** Storage that takes this long (ms) for each write. */
+  writeMs?: number;
 } = {}) {
   let open = true;
   const queued = { a: 0, b: 0 };
@@ -144,7 +152,7 @@ function wire(options: {
       decide: (file, again) => side.decide(file, again),
       openTarget: async (record) => {
         let disk = side.disks.get(record.id);
-        if (!disk) { disk = new Disk(!!options.keepBytes); side.disks.set(record.id, disk); }
+        if (!disk) { disk = new Disk(!!options.keepBytes, options.writeMs); side.disks.set(record.id, disk); }
         return disk.target();
       },
       openSource: async (record) => side.sources.get(record.id)!,
@@ -213,6 +221,27 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     const dataBeforeGot = w.a.sent.filter((f, i) => f.t === "pf-data" && i < w.a.sent.length).length;
     expect(firstGot).toBeGreaterThan(-1);
     expect(dataBeforeGot).toBe(Math.ceil(100_000 / FILE_LIMITS.chunkBytes));
+  });
+
+  it("a transfer that ended lets go of where it was written: done, damaged or declined", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("kept-0001", 100_000));
+    // The digest of another size: every byte arrives, and the check fails.
+    send(w, file("damaged-1", 100_000), patternDigest(1000));
+    await until(() => state(w.b, "in", "kept-0001") === "done" && state(w.b, "in", "damaged-1") === "failed");
+    w.b.decide = async () => "ask";
+    send(w, file("nope-0001", 30_000));
+    await until(() => state(w.b, "in", "nope-0001") === "asking");
+    w.b.files.decline("nope-0001");
+    await until(() => state(w.a, "out", "nope-0001") === "declined");
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    for (let i = 0; i < 3; i++) { gc(); await new Promise((r) => setTimeout(r, 10)); }
+    // A host's target holds what writes it (a 256 KiB gather buffer in the apps): kept, every file received kept one.
+    const held = [...w.b.disks].filter(([, disk]) => disk.opened.some((ref) => ref.deref())).map(([id]) => id);
+    expect(w.b.disks.size).toBe(3);
+    expect(held).toEqual([]);
   });
 
   it("an offer carries the message the file answers (r), kept with the record", async () => {
@@ -342,6 +371,27 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.b, "in", "pause-01")).toBe("done");
   });
 
+  it("the sender pauses before the person there answers: it stays paused when they accept, and goes on resume", async () => {
+    const w = wire();
+    w.b.decide = async () => "ask";
+    w.attach();
+    send(w, file("pask-001", 300_000));
+    await until(() => state(w.a, "out", "pask-001") === "asking");
+    w.a.files.pause("out", "pask-001");
+    // The paused offer is answered "still asking": that answer must not undo the pause.
+    await until(() => w.a.sent.filter((f) => f.t === "pf-offer").length >= 2 && w.b.sent.filter((f) => f.t === "pf-wait").length >= 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.a.records.get("out:pask-001")).toMatchObject({ state: "paused", pausedBy: "me" });
+    w.b.files.accept("pask-001");
+    await until(() => state(w.b, "in", "pask-001") === "paused");
+    expect(w.b.records.get("in:pask-001")?.pausedBy).toBe("peer");
+    expect(w.a.records.get("out:pask-001")).toMatchObject({ state: "paused", pausedBy: "me" });
+    expect(w.a.sent.some((f) => f.t === "pf-data")).toBe(false);
+    w.a.files.resume("out", "pask-001");
+    await until(() => state(w.a, "out", "pask-001") === "done");
+    expect(state(w.b, "in", "pask-001")).toBe("done");
+  });
+
   it("after the receiver's restart, its cancel or the sender's drops what it had, though nothing arrived since", async () => {
     const w = wire();
     w.attach();
@@ -381,6 +431,21 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     w.b.files.cancel("in", "cancel-2");
     await until(() => state(w.a, "out", "cancel-2") === "cancelled");
     expect(w.a.records.get("out:cancel-2")?.error).toBe("Cancelled by your contact");
+  });
+
+  it("the sender cancels while the receiver still stores what arrived: nothing is stored after it is dropped", async () => {
+    // Storage slower than the wire: chunks that arrived wait their turn to be written when the cancel comes.
+    const w = wire({ writeMs: 2 });
+    w.attach();
+    send(w, file("cancel-q", 4 * 1024 * 1024));
+    await until(() => (w.b.transferred.get("in:cancel-q") ?? 0) > 100_000);
+    w.a.files.cancel("out", "cancel-q");
+    await until(() => state(w.b, "in", "cancel-q") === "cancelled");
+    const disk = w.b.disks.get("cancel-q")!;
+    expect(disk.discarded).toBe(true);
+    // Time for any write that was under way or queued to land.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(disk.length).toBe(0);
   });
 
   it("a drop mid-way resumes from the receiver's last byte, and nothing is sent twice that arrived", async () => {

@@ -1,19 +1,20 @@
 /**
- * The real Chess (apps/mini/chess) in a store, for the end-to-end games (WISP 1200 § Publishing, § Stores): built from
- * its source, bundled and signed by the headless CLI (`ghostly app publish`, `store sign`, `app revoke`) with keys the
- * CLI makes in the test's own temporary folder (thrown away with it, never a real key), and served at
- * `raw.githubusercontent.com` URLs by `context.route` (serveStore): nothing leaves the machine.
+ * The real Chess in a store, for the end-to-end games (WISP 1200 § Publishing, § Stores): its pinned build
+ * (support/chessFixture.ts, e2e/fixtures/chess: the page and the manifest of Chess 2.3.0, from the bundle its publisher
+ * signed), bundled and signed again by the headless CLI (`ghostly app publish`,
+ * `store sign`, `app revoke`) with keys the CLI makes in the test's own temporary folder (thrown away with it, never a
+ * real key), and served at `raw.githubusercontent.com` URLs by `context.route` (serveStore): nothing leaves the machine.
  *
- * The CLI is the one Playwright's globalSetup built (support/headlessBuild.ts). Chess is built once per worker, into
- * a folder of that worker's own: a build empties its output folder, so two workers never share one.
+ * The CLI is the one Playwright's globalSetup built (support/headlessBuild.ts).
  */
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { BrowserContext, FrameLocator, Page } from "@playwright/test";
+import type { BrowserContext, FrameLocator, Locator, Page } from "@playwright/test";
 import { expect, type Peer, type PeerOptions } from "./fixtures";
 import { serveStore } from "./appStore";
+import { CHESS, type ChessBuild } from "./chessFixture";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const CLI = join(ROOT, "packages/cli/dist/ghostly.mjs");
@@ -21,17 +22,6 @@ const CLI = join(ROOT, "packages/cli/dist/ghostly.mjs");
 export const CHESS_REPO = "https://raw.githubusercontent.com/ghostly-e2e/chess/HEAD/";
 export const CHESS_STORE_URL = "https://raw.githubusercontent.com/ghostly-e2e/store/HEAD/ghostly-store.json";
 export const STORE_NAME = "E2E store";
-
-let built: string | null = null;
-
-/** Chess's one HTML file, built from apps/mini/chess for this worker. */
-function chessEntry(): string {
-  if (built) return built;
-  const out = mkdtempSync(join(tmpdir(), "ghostly-e2e-chess-"));
-  execFileSync("npx", ["vite", "build", "apps/mini/chess", "--outDir", out, "--emptyOutDir", "--logLevel", "error"], { cwd: ROOT, stdio: "ignore" });
-  built = join(out, "index.html");
-  return built;
-}
 
 /** The headless CLI's JSON answer. */
 function ghostly(...args: string[]): Record<string, unknown> {
@@ -52,19 +42,18 @@ export class ChessPublisher {
   constructor() {
     this.dir = mkdtempSync(join(tmpdir(), "ghostly-e2e-publisher-"));
     mkdirSync(join(this.dir, "app"));
-    copyFileSync(chessEntry(), join(this.dir, "app", "index.html"));
   }
 
-  /** `ghostly app publish`: Chess as `version`, at `sequence`, served at `<repo>/<path>`; `view` as its manifest says (absent: in a chat). */
-  publish({ version, sequence, path = "app.ghostlyapp", view }: { version: string; sequence: number; path?: string; view?: "chat" | "full" }): Published {
-    writeFileSync(join(this.dir, "app", "ghostly-app.json"), JSON.stringify({
-      name: "chess", version, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact",
-      description: "Chess for two, move by move, in your chat.", entry: "index.html", permissions: ["chat"],
-      runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", ...(view && { view }),
-    }));
+  /**
+   * `ghostly app publish`: `build` (absent: the Chess of today) under its own manifest, as `version` (absent: its own),
+   * at `sequence`, served at `<repo>/<path>`, which its manifest names as its source; `view` instead of its own (in a chat).
+   */
+  publish({ build = CHESS, version = build.manifest.version, sequence, path = "app.ghostlyapp", view }: { build?: ChessBuild; version?: string; sequence: number; path?: string; view?: "chat" | "full" }): Published {
+    const url = CHESS_REPO + path;
+    copyFileSync(build.entry, join(this.dir, "app", "index.html"));
+    writeFileSync(join(this.dir, "app", "ghostly-app.json"), JSON.stringify({ ...build.manifest, version, sources: [url], ...(view && { view }) }));
     const out = join(this.dir, "bundles", `${sequence}.ghostlyapp`);
     const made = ghostly("app", "publish", join(this.dir, "app"), "--key", join(this.dir, "publisher.key"), "--out", out, "--sequence", String(sequence));
-    const url = CHESS_REPO + path;
     const bytes = new Uint8Array(readFileSync(out));
     this.files.set(url, bytes);
     return { ref: made.ref as string, digest: made.digest as string, sequence, version, url, bytes };
@@ -101,8 +90,8 @@ export class ChessPublisher {
   }
 }
 
-/** Adds the store by its link and installs Chess from its listing (the Apps page). */
-export async function installFromStore(page: Page): Promise<void> {
+/** Adds the store by its link and opens Chess's listing (the Apps page): the install screen, not yet confirmed. */
+export async function openStoreInstall(page: Page): Promise<Locator> {
   await page.goto("/#/apps");
   await expect(page.getByTestId("apps-page")).toBeVisible();
   await page.getByTestId("apps-add").click();
@@ -115,6 +104,12 @@ export async function installFromStore(page: Page): Promise<void> {
   await listed.getByTestId("app-listing-install").click();
   const screen = page.getByTestId("app-install");
   await expect(screen.getByTestId("app-store-line")).toHaveText(`In ${STORE_NAME}`);
+  return screen;
+}
+
+/** Adds the store by its link and installs Chess from its listing (the Apps page). */
+export async function installFromStore(page: Page): Promise<void> {
+  const screen = await openStoreInstall(page);
   await screen.getByTestId("app-install-confirm").click();
   await expect(page.getByTestId("installed-app")).toContainText("Chess");
 }
@@ -125,23 +120,47 @@ export const miniApp = (page: Page) => page.getByTestId("mini-app");
 /** Inside Chess's frame. */
 export const chessFrame = (page: Page): FrameLocator => miniApp(page).frameLocator("iframe");
 
+/** Chess's status line. */
+export const chessStatus = (page: Page): Locator => chessFrame(page).locator(".status");
+
+/** A square of the board; its `data-piece` says what stands on it ("wp", "bn"...; "" when empty). */
+export const square = (page: Page, name: string): Locator => chessFrame(page).locator(`[data-square="${name}"]`);
+
 /** Which colour this side plays, once the toss is done ("w" or "b"). */
 export async function colourOf(page: Page): Promise<"w" | "b"> {
   const side = chessFrame(page).locator(".side");
-  await expect(side).toHaveText(/You play (white|black)/);
+  await expect(side).toHaveText(/^You play (white|black)$/);
   return (await side.textContent())!.includes("white") ? "w" : "b";
+}
+
+/**
+ * A game starts: `inviter` picks a time control on the setup card (absent: unlimited) and invites, `accepter` accepts
+ * the invitation, and the toss gives each a colour. Both have Chess open. Returns [white, black].
+ */
+export async function startGame<T extends { page: Page }>(inviter: T, accepter: T, timeControl = "-"): Promise<[T, T]> {
+  const setup = chessFrame(inviter.page).locator(".setup");
+  await setup.locator(`.preset[data-tc="${timeControl}"]`).click();
+  await setup.locator(".invite-btn").click();
+  await chessFrame(accepter.page).locator(".invitation .accept-invite").click();
+  for (const side of [inviter, accepter]) {
+    await expect(chessFrame(side.page).locator(".setup")).toBeHidden();
+    await expect(chessFrame(side.page).locator(".invitation")).toBeHidden();
+    await expect(chessStatus(side.page)).toHaveText(/^(Your|Their) move$/);
+  }
+  const [first, second] = [await colourOf(inviter.page), await colourOf(accepter.page)];
+  expect(first).not.toBe(second);
+  return first === "w" ? [inviter, accepter] : [accepter, inviter];
 }
 
 /** One move by clicking its two squares, once it is this side's move; then the contact's board shows it. */
 export async function move(mover: Page, watcher: Page, from: string, to: string): Promise<void> {
-  const board = chessFrame(mover);
-  await expect(board.locator(".status")).toHaveText(/^Your move/);
-  await board.locator(`[data-square="${from}"]`).click();
-  await expect(board.locator(`[data-square="${from}"]`)).toHaveClass(/\bselected\b/);
-  await board.locator(`[data-square="${to}"]`).click();
+  await expect(chessStatus(mover)).toHaveText(/^Your move/);
+  await square(mover, from).click();
+  await expect(square(mover, from)).toHaveClass(/\bselected\b/);
+  await square(mover, to).click();
   for (const page of [mover, watcher]) {
-    await expect(chessFrame(page).locator(`[data-square="${to}"]`)).toHaveClass(/\blast\b/);
-    await expect(chessFrame(page).locator(`[data-square="${from}"]`)).toHaveText("");
+    await expect(square(page, to)).toHaveClass(/\blast\b/);
+    await expect(square(page, from)).toHaveAttribute("data-piece", "");
   }
 }
 

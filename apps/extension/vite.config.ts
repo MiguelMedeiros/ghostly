@@ -3,9 +3,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { ghostlyPlatformModules, repositoryRoot, tauriAliases } from "../../packages/browser/vite-plugin";
+import { appsTestGuard } from "../web/appsTestFlag";
 
 export default defineConfig(({ mode }) => ({
-  plugins: [ghostlyPlatformModules(), react(), tailwindcss()],
+  // The extension has no e2e build with mini-apps: it never carries their switch (VITE_APPS_TEST).
+  plugins: [appsTestGuard("extension"), ghostlyPlatformModules(), react(), tailwindcss()],
   base: "",
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },

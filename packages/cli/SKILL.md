@@ -90,7 +90,7 @@ Start the daemon before anything else, and before `listen` above all (see the tr
 ### 4. Meet people: an invite
 
 ```bash
-ghostly invite create --label alice     # {"chat","invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…"}
+ghostly invite create --label alice     # {"chat","invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…","published":true}
 ghostly chat wait alice --until live    # returns once Alice opened the link in the app
 ```
 
@@ -332,7 +332,7 @@ ghostly chat pay-request alice <payment id>        # pay the contact's request
 
 A complete payment bot: the package's `examples/payment-bot.mjs`.
 
-### Voice calls, identities and shared apps
+### Voice calls, identities and shared services
 
 ```bash
 ghostly call auto on --from alice                  # answer alice's calls by themselves (needs the daemon)

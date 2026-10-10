@@ -475,6 +475,19 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const saved = ok(await as(bob, "file", "save", incoming.id, "--dir", bob));
     expect(sha(saved.path as string)).toBe(sha(small));
     error(await as(bob, "file", "save", incoming.id, "--dir", bob), "confirm", 5);
+    // A name of 124 characters but 364 bytes, over what Linux and macOS take in one name (255): saved shortened, a text
+    // still; an explicit path that long is a bad request naming it, not the engine's ENAMETOOLONG.
+    const longName = `${"文".repeat(120)}.txt`;
+    ok(await as(alice, "file", "send", "bob", small, "--name", longName));
+    const longMessage = await listen.waitFor((e) => e.type === "message.received" && (e.message as { file?: { name: string } }).file?.name === longName);
+    const longId = (longMessage.message as { file: { id: string } }).file.id;
+    ok(await as(bob, "file", "wait", longId, "--timeout", "30"));
+    const savedLong = ok(await as(bob, "file", "save", longId, "--dir", bob));
+    const savedName = (savedLong.path as string).slice(bob.length + 1);
+    expect(Buffer.byteLength(savedName)).toBeLessThanOrEqual(255);
+    expect(savedName).toMatch(/^文+\.txt$/);
+    expect(sha(savedLong.path as string)).toBe(sha(small));
+    expect(error(await as(bob, "file", "save", longId, "--path", join(bob, longName)), "bad_request", 1).message).toMatch(/too long for this file system/);
     expect((sent.file as { size: number }).size).toBe(200_000);
     // Sending again or asking again: by the file's id alone, each only on its own side, and not for a file that arrived.
     expect(error(await as(alice, "file", "resend", (sent.file as { id: string }).id), "refused", 1).message).toBe("Nothing to send again: it arrived whole");
@@ -535,6 +548,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(flat.json.warning).toBeUndefined();
     expect(flat.stderr).toMatch(/^ghostly: Sent without a waveform: could not read the sound/m);
     expect(error(await as(alice, "file", "send", "bob", noise, "--voice"), "bad_request", 1).message).toMatch(/give its length as --voice <ms>/);
+    // A file this user may not read: refused, naming it (root reads anything, so only checked as another user).
+    if (process.getuid?.() !== 0) {
+      const locked = join(alice, "locked.bin");
+      writeFileSync(locked, randomBytes(1000), { mode: 0o000 });
+      expect(error(await as(alice, "file", "send", "bob", locked), "refused", 1).message).toBe(`Not allowed to write or read ${locked}`);
+    }
   });
 
   it("prove an SSH key with ssh-keygen and show it to the contact, who checks it", async () => {
@@ -727,7 +746,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const fetched = ok(await as(bob, "file", "save", inGroupFile, "--path", join(bob, "ghost-in-group.png"), "--wait", "--timeout", "120"));
     expect(sha(fetched.path as string)).toBe(sha(picture));
     error(await as(alice, "forward", "bob", "no-such-message", "--to", "bob"), "not_found", 3);
-    error(await as(alice, "forward", "bob", theirs.id), "bad_request", 1);
+    error(await as(alice, "forward", "bob", theirs.id), "usage", 2);
   });
 
   it("talk in a private mesh group: the stream names the sender, and a reply names the id group send gave", async () => {

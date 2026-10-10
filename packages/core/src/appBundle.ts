@@ -56,7 +56,14 @@ const SCREENSHOT_TYPES = /\.(png|jpg|webp)$/;
  */
 export const APP_PERMISSIONS = ["chat", "internet", "name"] as const;
 export type AppPermission = typeof APP_PERMISSIONS[number];
+/**
+ * The clients a writer may name in `runtime.clients` (WISP 1200 · Manifest). A reader also accepts a client name it does
+ * not know (`APP_CLIENT_NAME`), since `runtime` is advisory and a later client (Android, say) must not make every older
+ * reader refuse the bundle.
+ */
 export const APP_CLIENTS = ["web", "desktop", "extension"] as const;
+/** A client name a reader accepts in `runtime.clients`, a later client's included. */
+export const APP_CLIENT_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 /**
  * Where an app shows (WISP 1200 · Manifest, `view`). `chat`, the default when the manifest has none: inside a 1:1 chat
  * only, beside it on a wide screen. `full`: full screen, alone or from a chat, never beside one.
@@ -82,7 +89,8 @@ export interface AppManifest {
   permissions: AppPermission[];
   /** Absent: `chat` (`appViewOf`). */
   view?: AppViewMode;
-  runtime: { host: string; clients: AppClient[] };
+  /** Advisory: a writer names only `APP_CLIENTS`; a reader may hold a later client's name. */
+  runtime: { host: string; clients: string[] };
   license: string;
   sources?: string[];
   proofs?: never[];
@@ -94,8 +102,46 @@ export interface AppManifest {
 
 const REQUIRED = ["ghostlyApp", "publisher", "name", "version", "sequence", "kind", "title", "tagline", "entry", "permissions", "runtime", "license", "files"] as const;
 const OPTIONAL = ["description", "view", "sources", "proofs", "homepage", "support", "releaseNotes"] as const;
-/** Reserved for phase 2 and refused in phase 1. */
+/**
+ * Reserved for phase 2 and refused in phase 1, by a reader too: an app that names a price or a recovery key asks for
+ * something this client cannot honour, so it is not one to ignore.
+ */
 const RESERVED = ["price", "recovery"] as const;
+/**
+ * How `checkAppManifest` treats a key it does not know. A reader (`readAppBundle`, the client) ignores it, at the top of
+ * the manifest and in `runtime`, so a later publisher can add an optional key without every older client refusing the
+ * app; the publisher's signature and the digest still cover the manifest's bytes as they are. A writer
+ * (`buildAppBundle`, the CLI) passes `strict` and refuses it, so a misspelt key is caught before anything is signed.
+ * Required keys, their types and bounds, `price` and `recovery`, and a file's exact `{path, size, sha256}` (which lay
+ * out the bundle's bytes) hold in both.
+ */
+export interface AppManifestOptions { strict?: boolean }
+/**
+ * Keys refused in every mode and at any level, wherever a reader ignores unknown keys: kept and passed on, they would
+ * name an object's prototype the moment anything spreads or assigns a manifest or a listing.
+ */
+export const APP_FORBIDDEN_KEYS: readonly string[] = ["__proto__", "constructor", "prototype"];
+
+/**
+ * The path of an `APP_FORBIDDEN_KEYS` key anywhere in a parsed JSON value (`later.0.__proto__`), the values of ignored
+ * keys included, or undefined: WISP 1200 refuses them at any level. `JSON.parse` makes `__proto__` an own key, so
+ * `Object.keys` sees it. A stack, not recursion: a `listing.json` is read with `JSON.parse` alone, at any depth.
+ */
+export function findAppForbiddenKey(value: unknown): string | undefined {
+  const stack: [unknown, string][] = [[value, ""]];
+  for (let next = stack.pop(); next; next = stack.pop()) {
+    const [v, path] = next;
+    if (typeof v !== "object" || v === null) continue;
+    for (const key of Object.keys(v)) {
+      const at = path ? `${path}.${key}` : key;
+      if (APP_FORBIDDEN_KEYS.includes(key)) return at;
+      stack.push([(v as Record<string, unknown>)[key], at]);
+    }
+  }
+  return undefined;
+}
+/** At most this many clients in `runtime.clients`. */
+const MAX_CLIENTS = 16;
 
 export type AppBundleRefusal =
   | "too-large" | "magic" | "truncated" | "trailing-bytes" | "manifest-too-large"
@@ -167,13 +213,18 @@ export function isAppPath(value: unknown): value is string {
 
 const bad = (field: string, detail = `${field} is not valid`): AppManifestCheck => ({ ok: false, reason: "bad-field", detail });
 
-/** Checks a parsed manifest against every rule and bound of WISP 1200 that the manifest alone decides. */
-export function checkAppManifest(value: unknown): AppManifestCheck {
+/**
+ * Checks a parsed manifest against every rule and bound of WISP 1200 that the manifest alone decides. An unknown key is
+ * ignored unless `strict` (`AppManifestOptions`).
+ */
+export function checkAppManifest(value: unknown, options: AppManifestOptions = {}): AppManifestCheck {
   if (!isObject(value)) return bad("manifest", "The manifest is not an object");
   if (value.ghostlyApp !== undefined && value.ghostlyApp !== 1) return { ok: false, reason: "unsupported-format", detail: "ghostlyApp is not 1" };
+  const forbidden = findAppForbiddenKey(value);
+  if (forbidden !== undefined) return { ok: false, reason: "unknown-key", detail: forbidden };
   for (const key of Object.keys(value)) {
     if ((RESERVED as readonly string[]).includes(key)) return { ok: false, reason: "reserved-key", detail: key };
-    if (!(REQUIRED as readonly string[]).includes(key) && !(OPTIONAL as readonly string[]).includes(key)) return { ok: false, reason: "unknown-key", detail: key };
+    if (options.strict && !(REQUIRED as readonly string[]).includes(key) && !(OPTIONAL as readonly string[]).includes(key)) return { ok: false, reason: "unknown-key", detail: key };
   }
   for (const key of REQUIRED) if (!(key in value)) return { ok: false, reason: "missing-key", detail: key };
   const m = value;
@@ -191,10 +242,16 @@ export function checkAppManifest(value: unknown): AppManifestCheck {
     || !permissions.every((p) => (APP_PERMISSIONS as readonly unknown[]).includes(p))) return bad("permissions");
   if (m.view !== undefined && !(APP_VIEWS as readonly unknown[]).includes(m.view)) return bad("view", `view is "chat" or "full"`);
   const runtime = m.runtime;
-  if (!isObject(runtime) || Object.keys(runtime).length !== 2 || typeof runtime.host !== "string" || !HOST.test(runtime.host)) return bad("runtime");
+  if (!isObject(runtime)) return bad("runtime");
+  for (const key of Object.keys(runtime)) {
+    if (key === "host" || key === "clients") continue;
+    if (options.strict) return { ok: false, reason: "unknown-key", detail: `runtime.${key}` };
+  }
+  if (typeof runtime.host !== "string" || !HOST.test(runtime.host)) return bad("runtime");
+  // Advisory (WISP 1200 · Manifest): a writer names only the clients it knows, a reader accepts a later client's name.
   const clients = runtime.clients;
-  if (!Array.isArray(clients) || clients.length < 1 || new Set(clients).size !== clients.length
-    || !clients.every((c) => (APP_CLIENTS as readonly unknown[]).includes(c))) return bad("runtime");
+  if (!Array.isArray(clients) || clients.length < 1 || clients.length > MAX_CLIENTS || new Set(clients).size !== clients.length
+    || !clients.every((c) => options.strict ? (APP_CLIENTS as readonly unknown[]).includes(c) : typeof c === "string" && APP_CLIENT_NAME.test(c))) return bad("runtime");
   if (!isAppLicense(m.license)) return bad("license");
   if (m.sources !== undefined && (!Array.isArray(m.sources) || m.sources.length > APP_BUNDLE_LIMITS.sources || !m.sources.every(isAppUrl))) return bad("sources");
   if (m.homepage !== undefined && !isAppUrl(m.homepage)) return bad("homepage");
@@ -328,7 +385,7 @@ export async function buildAppBundle(draft: AppManifestDraft, files: { path: str
     publisher: toZ32(signer.publicKey),
     files: sorted.map((f) => ({ path: f.path, size: f.bytes.length, sha256: toBase64Url(sha256(f.bytes)) })),
   } as AppManifest;
-  const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)));
+  const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)), { strict: true });
   if (!checked.ok) throw new Error(`Not a valid manifest (${checked.reason}${checked.detail ? `: ${checked.detail}` : ""})`);
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, manifest, signer);
   const bytes = assembleAppBundle(manifestBytes, canonicalJsonBytes(signature), sorted.map((f) => f.bytes));

@@ -1,23 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android's network callback (GhostlyHostPlugin.kt), which tells Iroh of a new network. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Voice messages and calls in the WebView (asked at the first use); the screen-off call service is A4's. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Android 13 and up: asked when the person turns notifications on in Settings, never at start. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- Nothing of the app's goes into Android's backup or phone-to-phone transfer: received files, the device state
+         and the profile's database would bring the same profile up on a new phone. A profile moves with Ghostly's
+         own encrypted backup or the device handoff. Android 12 and up read dataExtractionRules (and ignore
+         allowBackup for a device transfer), older ones fullBackupContent.
+         Cleartext (http://, ws://) is the network security config's to allow, and it replaces the one the
+         rustls-platform-verifier .aar brings: res/xml/network_security.xml, one per build type. -->
     <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security"
         android:theme="@style/Theme.ghostly"
-        android:usesCleartextTraffic="${usesCleartextTraffic}">
+        tools:replace="android:networkSecurityConfig">
+        <!-- configChanges names every configuration change (font size, display size, bold text, a right-to-left
+             language, Material You's colours...): one left out relaunches the activity, whose new WebView loads the
+             page again while the first one's page still runs and holds the profile, so the app would stay on "Ghostly
+             is already running with this profile". The page lays itself out again on any of them. -->
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontScale|fontWeightAdjustment|assetsPaths"
             android:launchMode="singleTask"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"
@@ -27,6 +46,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+            <!-- A sign-in's answer, from the web app's callback page (app.ghostly.tools/oidc-callback.html): the app's
+                 own scheme. An https App Link would need assetlinks.json on the site. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="ghostly" android:host="oidc" />
+            </intent-filter>
+            <!-- "Share to Ghostly" from other apps: text, links and files, picked into a chat by the page. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 

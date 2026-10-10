@@ -34,6 +34,9 @@ env:
   CARGO_TERM_COLOR: always
   # The tag being released, pushed or handed over by a caller.
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  # The first release that carries the native Android app. An older tag builds no APK and attaches none, whatever
+  # signing secrets the repository has, and its notes do not mention Android. Moving it is the owner's decision.
+  ANDROID_FROM: "1.3.0"
 
 jobs:
   # ============================================
@@ -44,6 +47,35 @@ jobs:
     uses: ./.github/workflows/e2e.yml
     with:
       ref: ${{ inputs.tag || github.ref }}
+
+  # ============================================
+  # No flag is on before the release it ships with (RELEASE_GUARDS in
+  # tools/scripts/changes.mjs): Apps stay off in every 1.1.x tag
+  # ============================================
+  guard:
+    name: Release flags
+    runs-on: ubuntu-24.04
+    outputs:
+      android: ${{ steps.android.outputs.android }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Check the flags for the tag's version
+        run: node tools/scripts/bump-version.mjs --check
+
+      # By the tag's version alone (ANDROID_FROM above), so a signing secret that exists does not decide it.
+      - name: Whether this release carries the Android app
+        id: android
+        run: |
+          version="${RELEASE_TAG#v}"
+          first="$(printf '%s\n' "$ANDROID_FROM" "$version" | sort -V | head -n 1)"
+          if [ "$first" = "$ANDROID_FROM" ]; then android=true; else android=false; fi
+          echo "android=$android" >> "$GITHUB_OUTPUT"
+          echo "$RELEASE_TAG: Android app in this release: $android (from $ANDROID_FROM)"
 
   # ============================================
   # Build Tauri App for all platforms
@@ -143,6 +175,8 @@ jobs:
           # nothing that does not verify against the public key it was built with.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The e2e suite's switch, empty here as in the web image: a release build refuses it anyway (apps/web/appsTestFlag.ts).
+          VITE_APPS_TEST: ""
         with:
           # Updater bundles are made for releases only: an ordinary `tauri build`
           # needs no signing key (apps/desktop/tauri.release.conf.json).
@@ -222,6 +256,9 @@ jobs:
 
       - name: Build
         run: npm run build:extension
+        env:
+          # The e2e suite's switch, empty here as in the web image: a release build refuses it anyway (apps/web/appsTestFlag.ts).
+          VITE_APPS_TEST: ""
 
       - name: Package
         run: |
@@ -236,11 +273,15 @@ jobs:
           path: ghostly-browser-extension-*.zip
 
   # ============================================
-  # Android (the web app in a Trusted Web Activity)
+  # Android (the native app, arm64)
   # ============================================
-  # Signed with the upload key when the repository has it (docs/ANDROID.md); the release takes only a signed APK.
+  # Only from the release that carries it (ANDROID_FROM): an older tag skips the build. Then, signed with the upload
+  # key when the repository has it (docs/ANDROID.md); without it, a debug APK, which stays the run's artifact: the
+  # release leaves it out and says so in its notes.
   build-android:
     name: Build Android APK
+    needs: [guard]
+    if: needs.guard.outputs.android == 'true'
     uses: ./.github/workflows/android.yml
     with:
       ref: ${{ inputs.tag || github.ref }}
@@ -252,7 +293,7 @@ jobs:
   build-web:
     runs-on: ubuntu-24.04
     name: Build web image
-    needs: [e2e]
+    needs: [e2e, guard]
     if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     permissions:
       contents: read
@@ -263,6 +304,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.ref }}
+
+      # The tag's commit: github.sha is the dispatching branch's on a dispatch, and the default branch's on a
+      # security autorelease.
+      - name: Commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to the GitHub container registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -285,19 +332,20 @@ jobs:
           file: apps/web/Dockerfile
           push: true
           build-args: |
-            GHOSTLY_BUILD=${{ github.sha }}
+            GHOSTLY_BUILD=${{ steps.commit.outputs.sha }}
+          # Only the version: `latest` moves once the release is published (web-latest.yml).
           tags: |
             ${{ steps.image.outputs.name }}:${{ env.RELEASE_TAG }}
-            ${{ steps.image.outputs.name }}:latest
 
   release:
-    needs: [e2e, build-tauri, build-extension, build-android]
+    needs: [e2e, guard, build-tauri, build-extension, build-android]
     runs-on: ubuntu-24.04
     # The Android build is waited for but does not hold the release back: a release (a security one included)
-    # goes out without the APK rather than not at all.
+    # goes out without the APK rather than not at all. Before ANDROID_FROM it is skipped.
     if: >-
       !cancelled()
-      && needs.e2e.result == 'success' && needs.build-tauri.result == 'success' && needs.build-extension.result == 'success'
+      && needs.e2e.result == 'success' && needs.guard.result == 'success'
+      && needs.build-tauri.result == 'success' && needs.build-extension.result == 'success'
       && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
     permissions:
       contents: write
@@ -322,8 +370,10 @@ jobs:
           name: extension
           path: artifacts/extension
 
+      # Only an APK signed with the upload key: a debug build takes the e2e launch extras and can be inspected
+      # over USB (docs/ANDROID.md), so it is to try the app and never published.
       - name: Download Android artifact
-        if: needs.build-android.result == 'success' && needs.build-android.outputs.signed == 'true'
+        if: needs.guard.outputs.android == 'true' && needs.build-android.result == 'success' && needs.build-android.outputs.signed == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: android
@@ -342,8 +392,9 @@ jobs:
           # Browser extension (load unpacked, or upload to a store)
           cp artifacts/extension/*.zip release-assets/ 2>/dev/null || true
 
-          # Android: the APK signed with the upload key only, never a debug build
-          cp artifacts/android/ghostly-*-android.apk release-assets/ 2>/dev/null || true
+          # Android: ghostly-<version>-android-arm64.apk, signed with the upload key. By its exact name, so a
+          # debug build (-debug.apk) never goes out even if it was downloaded
+          cp artifacts/android/ghostly-*-android-arm64.apk release-assets/ 2>/dev/null || true
 
           # No CLI binaries: the Rust ghostly-cli was removed after 1.0
           # (S17 in docs/SECURITY-REVIEW.md). The supported CLI, packages/cli, goes to npm.
@@ -391,12 +442,38 @@ jobs:
             echo "GPG_PRIVATE_KEY not set, skipping GPG signing"
           fi
 
+      # Said in the notes when a release that carries the Android app has no APK; one from before ANDROID_FROM
+      # says nothing of Android. The generated notes follow.
+      - name: Android note
+        id: android-note
+        env:
+          ANDROID_IN_RELEASE: ${{ needs.guard.outputs.android }}
+          ANDROID_RESULT: ${{ needs.build-android.result }}
+          ANDROID_SIGNED: ${{ needs.build-android.outputs.signed }}
+        run: |
+          if [ "$ANDROID_IN_RELEASE" != "true" ]; then
+            note=""
+          elif [ "$ANDROID_RESULT" != "success" ]; then
+            note="**Android:** no APK in this release (its build did not succeed)."
+          elif [ "$ANDROID_SIGNED" != "true" ]; then
+            note="**Android:** no APK in this release (it was built without Ghostly's upload key, and a debug build is not published)."
+          else
+            note=""
+          fi
+          echo "note=$note" >> "$GITHUB_OUTPUT"
+
+      # The release is named as every one before it: "Ghostly 1.2.3", without the tag's "v".
+      - name: Release title
+        id: title
+        run: echo "title=Ghostly ${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
       - name: Create Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Release ${{ env.RELEASE_TAG }}
+          name: ${{ steps.title.outputs.title }}
           draft: ${{ !inputs.publish }}
+          body: ${{ steps.android-note.outputs.note }}
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: false
@@ -410,8 +487,9 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Release ${{ env.RELEASE_TAG }}
+          name: ${{ steps.title.outputs.title }}
           draft: ${{ !inputs.publish }}
+          body: ${{ steps.android-note.outputs.note }}
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: false

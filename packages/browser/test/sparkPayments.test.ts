@@ -87,7 +87,7 @@ it("the payee's app answers a Spark ask with a Spark request, and the payer ties
   expect((payee.sent[0].frame.endpoints as [string, string][])[0][0]).toBe(ENDPOINT.spark);
 
   const payer = setup();
-  const { askId } = await payer.desk.ask({ linkId: "l", amount: 900, timestamp: 1, method: "spark" });
+  const { askId } = await payer.desk.ask({ linkId: "l", amount: 900, timestamp: 1, method: "spark", network: "testnet" });
   expect(payer.sent[0]).toMatchObject({ kind: "ask", frame: { method: "spark", amount: { value: "900", asset: "sat" } } });
   await payer.desk.onPaymentRequest("l", { id: "answer", timestamp: Date.now(), amount: { value: "900", asset: "sat" }, endpoints: [[ENDPOINT.spark, JSON.stringify(target(invoice(900)))]], ask: askId });
   expect(payer.desk.payment("answer")?.ask).toBe(askId);

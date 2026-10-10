@@ -108,6 +108,22 @@ export const UNIT_PROJECTS = [
     whole: ["apps/mini/chess/package.json", "apps/mini/chess/vitest.config.ts", "apps/mini/chess/vite.config.ts", "tools/vitest.shared.ts"],
     tests: ["apps/mini/chess/test/**"],
   },
+  {
+    // The pinned Chess the e2e runs (e2e/fixtures/chess, from Chess's signed bundle): its test reads the fixture from
+    // disk, which no import graph shows, so a change to it runs it (whole: that one file).
+    name: "chess fixture", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/chessFixture.test.ts"],
+    sources: [],
+    whole: ["e2e/fixtures/chess/**"],
+    tests: [],
+  },
+  {
+    // The Android app's Kotlin: only the APK builds compile it, and they are not part of CI Success. Its test reads
+    // the sources from disk for a comment Kotlin would never close (whole: that one file).
+    name: "android kotlin", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/androidKotlinComments.test.ts"],
+    sources: [],
+    whole: ["apps/desktop/gen/android/**/*.{kt,kts}"],
+    tests: [],
+  },
 ];
 
 /** `npm run lint`'s scope: what eslint is given, and what makes the whole lint run. */
@@ -444,9 +460,9 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
     if (p.startsWith("e2e/")) {
       const reach = /\.[cm]?[jt]sx?$/.test(p) ? [...specsImporting(p, e2eFiles)].filter(isSuiteSpec).sort() : [];
       for (const s of reach) e2e.specs.add(s);
-      if (reach.length) e2e.because.push(`${p}: imported by ${reach.join(", ")}`);
-      else e2e.none.push(p);
-      continue;
+      if (reach.length) { e2e.because.push(`${p}: imported by ${reach.join(", ")}`); continue; }
+      // A file the specs read from disk (e2e/fixtures/chess) reaches them through the paths map, as source does.
+      if (!globs.some((g) => g.re.test(p))) { e2e.none.push(p); continue; }
     }
     const hits = globs.filter((g) => g.re.test(p));
     if (!hits.length) { e2e.unmapped.push(p); continue; }

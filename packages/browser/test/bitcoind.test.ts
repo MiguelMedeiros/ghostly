@@ -106,6 +106,15 @@ describe("Bitcoin Core source", () => {
     expect(node.locked.size).toBe(0);
   });
 
+  it("pays an upper-case bech32 address, the form a bitcoin: link takes in a QR code", async () => {
+    const node = new MockBitcoind(); node.fund(50_000);
+    const provider = await connect(node);
+    const address = fakeAddress().toUpperCase();
+    const prepared = await provider.prepareSend({ address, amount: 10_000, feeCap: 1_000 });
+    expect(prepared).toMatchObject({ address, amount: 10_000 });
+    expect(node.locked.size).toBe(1);
+  });
+
   it("refuses a fee above the cap before signing, and a transaction that does not pay what was asked", async () => {
     const node = new MockBitcoind(); node.fund(50_000);
     const provider = await connect(node);

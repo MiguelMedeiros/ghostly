@@ -1,16 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { NameStep } from "./components/NameStep";
+import { OpenFailureNotice } from "./components/OpenFailureNotice";
 import { App } from "./App";
 import { Home } from "./pages/Home";
-import { Settings } from "./pages/Settings";
-import { Services } from "./pages/Services";
-import { Profile } from "./pages/Profile";
-import { Identities } from "./pages/Identities";
-import { Apps } from "./pages/Apps";
-import { Tasks } from "./pages/Tasks";
-import { Wallet } from "./pages/Wallet";
 import { GroupChat } from "./pages/GroupChat";
 import { SharePicker } from "./pages/SharePicker";
 import { SettingsProvider } from "./contexts/SettingsContext";
@@ -35,9 +29,28 @@ import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNoti
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
-import { errorText } from "./lib/errorText";
+import { problemText, type Problem } from "./lib/problemText";
+import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
+
+/**
+ * A page of the menu, loaded the first time it is opened: the first screen (the chat list) does not wait for them.
+ * Nothing is drawn in its place for the moment it takes.
+ */
+function menuPage<P extends object>(load: () => Promise<ComponentType<P>>) {
+  const Page = lazy(async () => ({ default: await load() }));
+  return function MenuPage(props: P) {
+    return <Suspense fallback={null}><Page {...props} /></Suspense>;
+  };
+}
+const Settings = menuPage(() => import("./pages/Settings").then((m) => m.Settings));
+const Services = menuPage(() => import("./pages/Services").then((m) => m.Services));
+const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile));
+const Identities = menuPage(() => import("./pages/Identities").then((m) => m.Identities));
+const Apps = menuPage(() => import("./pages/Apps").then((m) => m.Apps));
+const Tasks = menuPage(() => import("./pages/Tasks").then((m) => m.Tasks));
+const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
 
 /**
  * An invite link, or a chat address from before chats were routed by session
@@ -126,7 +139,8 @@ function JoinNotice() {
 
 /**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
- * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app.
+ * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
+ * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
  */
 function GroupLinkIntake() {
   const { pathname } = useLocation();
@@ -134,7 +148,7 @@ function GroupLinkIntake() {
   const nav = useAppNavigation();
   const { hasUnlocked } = useLockScreen();
   const [code, setCode] = useState("");
-  const [problem, setProblem] = useState("");
+  const [problem, setProblem] = useState<Problem | null>(null);
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
@@ -147,18 +161,14 @@ function GroupLinkIntake() {
     setCode("");
     engine.call("joinGroupByLink", { link: code })
       .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => setProblem(cause instanceof Error ? errorText(cause, t) : t("group.link.broken")));
+      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, hasUnlocked]);
-  useEffect(() => {
-    if (!problem) return;
-    const timer = setTimeout(() => setProblem(""), 6000);
-    return () => clearTimeout(timer);
-  }, [problem]);
   return problem ? (
-    <div role="alert" data-testid="group-link-invalid" onClick={() => setProblem("")}
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
-      {problem}
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex w-max max-w-[calc(100vw_-_2rem)] items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
+      <Notice problem={problem} testId="group-link-invalid" className="min-w-0 text-sm" />
+      <button type="button" data-testid="group-link-invalid-close" onClick={() => setProblem(null)} aria-label={t("common.close")}
+        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
     </div>
   ) : null;
 }
@@ -235,6 +245,7 @@ export function Root() {
               <ErrorBoundary>
               <ChatLinkIntake />
               <JoinNotice />
+              <OpenFailureNotice />
               <GroupLinkIntake />
               <HomeAnchor />
               {/* A call that rings before the first unlock: shown on the lock screen (WISP 601 § Locked). */}

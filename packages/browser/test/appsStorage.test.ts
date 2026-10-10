@@ -6,7 +6,6 @@ import { APP_SCOPE_ALONE, APP_STORAGE_LIMITS, type Apps } from "../src/engine/ap
 import { db } from "../src/engine/db";
 import { GhostlyNode } from "../src/engine/node";
 import { snapshotDatabase } from "../src/backup/database";
-import { APPS_ENABLED } from "../src/shared/features";
 import { DB_VERSION, PROFILE_STORES, STORES, clearProfileStores, databaseName, openDb, wrap } from "../src/shared/idb";
 import { BUNDLE_URL, FakeNet, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, storageRows, storeFiles, type Built } from "./appsSupport";
 // covers: apps.engine.storage, apps.engine.installed
@@ -117,6 +116,20 @@ describe("storage", () => {
       { ghostlyAppData: 1, app: app.ref, scope: "chat-1", entries: { a: [1, 2] } },
     ]);
   });
+
+  it("exports a key named __proto__ like any other", async () => {
+    const { store, app } = await installed();
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "__proto__", value: { board: "rnbqkbnr", turn: 7 } });
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "score", value: 3 });
+    const [file] = await store.exportData({ ref: app.ref });
+    expect(Object.keys(file.entries).sort()).toEqual(["__proto__", "score"]);
+    expect(Object.getPrototypeOf(file.entries)).toBe(Object.prototype);
+    // The file the uninstall dialog saves is this, as JSON.
+    expect(JSON.parse(JSON.stringify(file))).toEqual({
+      ghostlyAppData: 1, app: app.ref, scope: "chat-1",
+      entries: JSON.parse('{"__proto__":{"board":"rnbqkbnr","turn":7},"score":3}'),
+    });
+  });
 });
 
 describe("uninstall", () => {
@@ -163,6 +176,60 @@ describe("uninstall", () => {
     expect((await storageRows() as { scope: string }[]).map((r) => r.scope)).toEqual(["chat-2"]);
   });
 
+  it("a chat deleted while its app is writing keeps none of that app's rows: a write still waiting is refused", async () => {
+    for (const burst of [5, 20, 50]) {
+      await emptyProfile();
+      const chats = new Set(["chat-1", "chat-2"]);
+      const app = await bundle();
+      net.put(BUNDLE_URL, app.bytes);
+      const store = apps(net, { isChat: (scope) => chats.has(scope) });
+      await store.preview({ url: BUNDLE_URL });
+      await store.install({ digest: app.digest, grant: ["chat"] });
+      const { ref } = app;
+      await store.storageSet({ ref, scope: "chat-1", key: "before", value: 1 });
+      await store.storageSet({ ref, scope: "chat-2", key: "other", value: 2 });
+      const writes = Array.from({ length: burst }, (_, i) => store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: i }).then(() => "ok", (e: Error) => e.message.split(":")[0]));
+      // As the engine's `removeLink`: the chat is no longer one at once, its rows go in the background.
+      await writes[0];
+      chats.delete("chat-1");
+      const deleted = db.deleteLink("chat-1");
+      const results = await Promise.all(writes);
+      await deleted;
+      expect((await storageRows() as { scope: string }[]).map((r) => r.scope), `burst of ${burst}`).toEqual(["chat-2"]);
+      expect(await store.exportData({ ref }), `burst of ${burst}`).toEqual([{ ghostlyAppData: 1, app: ref, scope: "chat-2", entries: { other: 2 } }]);
+      expect(results[0]).toBe("ok");
+      expect(results.at(-1), `burst of ${burst}: the last write waited past the delete`).toBe("bad-scope");
+      expect(new Set(results)).toEqual(new Set(["ok", "bad-scope"]));
+      // The other chat and the app alone still write, and the deleted chat's count starts again if its id ever comes back.
+      await store.storageSet({ ref, scope: "chat-2", key: "after", value: 3 });
+      await store.storageSet({ ref, scope: APP_SCOPE_ALONE, key: "after", value: 4 });
+      chats.add("chat-1");
+      expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual([]);
+      await store.storageSet({ ref, scope: "chat-1", key: "big", value: "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2) });
+    }
+  });
+
+  it("a deleted chat's messages and app rows go by range, one delete per app, not one per row", async () => {
+    const refs = ["ana/chess", "ana/go", "bo/notes"];
+    const tx = (await openDb()).transaction([STORES.messages, STORES.appStorage], "readwrite");
+    for (const linkId of ["chat-1", "chat-2"]) {
+      for (let i = 0; i < 300; i++) tx.objectStore(STORES.messages).put({ linkId, id: `m${i}`, timestamp: i });
+      for (const ref of refs) for (let i = 0; i < 100; i++) tx.objectStore(STORES.appStorage).put({ ref, scope: linkId, key: `k${i}`, value: "1", size: 1 });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    const deletes = vi.spyOn(IDBObjectStore.prototype, "delete");
+    try {
+      await db.deleteLink("chat-1");
+      const on = (name: string) => deletes.mock.contexts.filter((store) => (store as IDBObjectStore).name === name).length;
+      expect(on(STORES.messages)).toBe(1);
+      expect(on(STORES.appStorage)).toBe(refs.length);
+    } finally { deletes.mockRestore(); }
+    expect((await db.getMessages("chat-1"))).toEqual([]);
+    expect((await db.getMessages("chat-2"))).toHaveLength(300);
+    expect(new Set((await storageRows() as { scope: string }[]).map((r) => r.scope))).toEqual(new Set(["chat-2"]));
+    expect(await storageRows()).toHaveLength(300);
+  });
+
   it("Clear all data empties the apps' stores", async () => {
     const { store, app } = await installed();
     await store.storageSet({ ref: app.ref, scope: "chat-1", key: "k", value: 1 });
@@ -175,7 +242,7 @@ describe("uninstall", () => {
 
 describe("the database", () => {
   it("a profile at 13 opens at 14 with its rows kept and the apps' stores added", async () => {
-    expect(DB_VERSION).toBe(14);
+    expect(DB_VERSION).toBeGreaterThanOrEqual(14);
     await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(databaseName()); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
     const thirteen = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(databaseName(), 13);
@@ -189,7 +256,7 @@ describe("the database", () => {
     });
     thirteen.close();
     const opened = await openDb();
-    expect(opened.version).toBe(14);
+    expect(opened.version).toBe(DB_VERSION);
     expect([...opened.objectStoreNames]).toEqual(expect.arrayContaining(["settings", "links", "apps", "appStores", "appStorage"]));
     expect(await wrap(opened.transaction("settings").objectStore("settings").get("settings"))).toEqual({ nick: "Kept" });
     const storage = opened.transaction("appStorage").objectStore("appStorage");
@@ -228,11 +295,11 @@ describe("the engine", () => {
     return peer;
   }
 
-  it("is off in this build: every app call is refused", async () => {
-    expect(APPS_ENABLED).toBe(false);
-    const peer = await node();
-    await expect(Promise.resolve().then(() => peer.appList())).rejects.toThrow("Apps are unavailable in this release");
-    await expect(Promise.resolve().then(() => peer.appStoreAdd({ url: STORE_URL }))).rejects.toThrow("Apps are unavailable in this release");
+  it("is off: every app call is refused", async () => {
+    // Off by the engine's option, so this holds whatever the build's APPS_ENABLED says.
+    const peer = await node({ apps: false });
+    await expect(Promise.resolve().then(() => peer.appList())).rejects.toThrow("Apps do not run on this client");
+    await expect(Promise.resolve().then(() => peer.appStoreAdd({ url: STORE_URL }))).rejects.toThrow("Apps do not run on this client");
     await peer.shutdown({ quiet: true });
     expect(net.fetch).not.toHaveBeenCalled();
   });

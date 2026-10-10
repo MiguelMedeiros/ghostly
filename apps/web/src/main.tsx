@@ -14,14 +14,14 @@ import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab } from "../../ui/src/components/OtherTab";
-import { locales } from "../../ui/src/locales";
-import { translateWith } from "../../ui/src/locales/translate";
+import { loadLocale, translatorFor } from "../../ui/src/locales";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
 import { setAppOpener, takedownText } from "../../ui/src/lib/apps/open";
 import { webOpener } from "../../ui/src/lib/apps/webOpener";
+import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
@@ -45,11 +45,12 @@ gateSounds();
 // is pointed at its state again before anything opens storage. Its language is on <html> before the first paint (the
 // I18nProvider keeps it in step from then on).
 const profile = await openProfile(recoverHandoffPointer);
+// Its words too: only English is in the entry, every other language is loaded when a profile reads in it.
+await loadLocale(loadSettings().language);
 
 /** The profile's language, for what the entry draws before the app (and its providers) can. */
 function profileTranslator() {
-  const language = loadSettings().language;
-  return translateWith(locales[language] || locales.en, locales[language] ? language : "en");
+  return translatorFor(loadSettings().language);
 }
 
 /**
@@ -96,6 +97,7 @@ addEventListener("pagehide", () => webHost.announceDeparture());
 if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
   setAppOpener(webOpener({
     apps: () => servicesPlatform?.apps,
+    nameIn: nameInChat,
     closeLabel: () => profileTranslator()("common.close"),
     stoppedLabel: (title, takedown) => takedownText(title, takedown, profileTranslator()),
   }));

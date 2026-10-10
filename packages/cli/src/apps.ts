@@ -1,17 +1,18 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
   readAppRevocations, readAppStore, seedSigner, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
+import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError } from "./errors";
 
 /*
- * The publisher tools of WISP 1200 (Apps · Publishing): `app publish` bundles and signs a folder, `app verify` checks a
- * bundle as a client would, `store sign` signs a store index. They run here, on files: no profile, no daemon, no
+ * The publisher tools of WISP 1200 (Apps · Publishing): `app init` writes a folder to start from, `app publish` bundles
+ * and signs a folder, `app verify` checks a bundle as a client would, `store sign` signs a store index. They run here, on files: no profile, no daemon, no
  * network but the one read `app verify` makes of a URL.
  *
  * Keys. A publisher key and a store key are Ed25519 keys of their own, never a profile's (WISP 1200 · Publisher
@@ -180,6 +181,59 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
   return { valid: true, ...described(read.bundle, bytes), manifest: read.bundle.manifest };
 }
 
+// ---------- starting an app ----------
+
+/** A folder's name as an app's: lower case, anything else a hyphen (`My App` is `my-app`). */
+const nameFrom = (folder: string) => folder.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+/** An app's name as a title: `my-app` is `My app`. */
+const titleFrom = (name: string) => (name[0]!.toUpperCase() + name.slice(1)).replace(/-/g, " ");
+
+/**
+ * `app init <dir> [--name <name>] [--title <title>] [--force]`: a small working app in `<dir>` (made when missing),
+ * which `app publish <dir>` signs as it is: `ghostly-app.json`, an `index.html` that says hello to the contact, and a
+ * README with the way to a store (./appTemplate.ts). The name is `--name`, else the folder's; the title `--title`, else
+ * the name's. Nothing is written when one of the three files is there, unless `--force`, which replaces those three only.
+ */
+export async function initApp(dirArg: string, what: { name?: string; title?: string; force?: boolean } = {}): Promise<Record<string, unknown>> {
+  const usage = "ghostly app init <dir> [--name <name>] [--title <title>] [--force]";
+  const dir = resolve(dirArg);
+  const name = what.name ?? nameFrom(basename(dir));
+  const title = what.title ?? (name ? titleFrom(name) : "");
+  const page = templatePage({ name, title });
+  // Checked as publish will check it, under a key of zeros and the page's own entry: what is written always publishes.
+  const pageBytes = new TextEncoder().encode(page);
+  const checked = checkAppManifest({
+    ...templateManifest({ name, title }), ghostlyApp: 1, publisher: toZ32(new Uint8Array(32)), sequence: 1,
+    files: [{ path: "index.html", size: pageBytes.length, sha256: toBase64Url(createHash("sha256").update(pageBytes).digest()) }],
+  }, { strict: true });
+  if (!checked.ok) {
+    if (checked.detail === "name is not valid") {
+      throw new CliError("usage", what.name === undefined
+        ? `The folder's name gives no app name (${JSON.stringify(basename(dir))}): give --name, a lowercase letter then up to 31 lowercase letters, digits or hyphens: ${usage}`
+        : `--name is a lowercase letter then up to 31 lowercase letters, digits or hyphens, not ${JSON.stringify(what.name)}`);
+    }
+    if (checked.detail === "title is not valid") throw new CliError("usage", `--title is one line of 1 to ${APP_BUNDLE_LIMITS.title} characters, not ${JSON.stringify(title)}`);
+    throw refused("The template makes no valid manifest", checked);
+  }
+
+  if (existsSync(dir) && !statSync(dir).isDirectory()) throw new CliError("bad_request", `${dir} is a file: name a folder for the app`);
+  const files: [string, string][] = [
+    [APP_SOURCE, `${JSON.stringify(templateManifest({ name, title }), null, 2)}\n`],
+    ["index.html", page],
+    ["README.md", templateReadme({ name, title })],
+  ];
+  const held = files.map(([path]) => path).filter((path) => existsSync(join(dir, path)));
+  if (held.length && !what.force) {
+    throw refused(`${dir} already holds ${held.join(", ")}: nothing was written (--force replaces ${held.length > 1 ? "them" : "it"})`, { reason: "exists" }, { files: held });
+  }
+  mkdirSync(dir, { recursive: true });
+  for (const [path, text] of files) writeWhole(join(dir, path), new TextEncoder().encode(text));
+  return {
+    dir, name, title, files: files.map(([path]) => path), ...(held.length ? { replaced: held } : {}),
+    next: `ghostly app publish ${dirArg} --key <a key file outside ${dirArg}>`,
+  };
+}
+
 // ---------- publishing ----------
 
 /** Every file of the folder, as the bundle names it; dot files and folders are left out and listed. */
@@ -204,8 +258,20 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
     }
   };
   walk(dir);
+  // The manifest lists every path in code-unit order, across folders: `lib-extra.js` before `lib/x.js`, which the walk
+  // reaches first (`-` and `.` sort before `/`).
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { files, skipped };
 }
+
+/**
+ * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted), or a Ghostly
+ * key file's first line. A library that only names the block's header in its code does not match.
+ */
+const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n:,-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+
+/** Whether `path` is `dir` or anything under it. */
+const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return !rel.startsWith("..") && !isAbsolute(rel); };
 
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
@@ -244,6 +310,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const dir = resolve(dirArg);
   if (!statSync(dir).isDirectory()) throw new CliError("bad_request", `${dir} is not a folder`);
   const keyPath = resolve(keyArg);
+  // Every file of the folder is published, and the folder is often the repository the bundle is committed to.
+  if (isInside(dir, keyPath)) {
+    throw refused(`${keyPath} is inside ${dir}, which is published: keep the publisher key outside the app's folder (and its repository)`, { reason: "private-key" });
+  }
   const out = resolve(outArg ?? join(dir, APP_BUNDLE_FILE));
   const sourcePath = join(dir, APP_SOURCE);
   const draft = readSource(sourcePath);
@@ -275,6 +345,9 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const sequence = sequenceArg ?? Math.max(previous ? previous.sequence + 1 : 1, (draft.sequence as number | undefined) ?? 1);
   const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_REVOKE_FILE)]));
   const contents = files.map((f) => ({ path: f.path, bytes: new Uint8Array(readFileSync(f.full)) }));
+  // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
+  const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
+  if (keyFile) throw refused(`${keyFile.path} in ${dir} holds a private key, and a bundle is public: move it out of the app's folder`, { reason: "private-key", detail: keyFile.path });
   const manifest = {
     ...draft,
     ghostlyApp: 1,
@@ -282,7 +355,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     sequence,
     files: contents.map((f) => ({ path: f.path, size: f.bytes.length, sha256: toBase64Url(createHash("sha256").update(f.bytes).digest()) })),
   };
-  const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)));
+  const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)), { strict: true });
   if (!checked.ok) throw refused(`${sourcePath} and the folder's files make no valid manifest`, checked);
 
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, checked.manifest, key.signer);
@@ -392,7 +465,7 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   }
   index.key = key.key;
 
-  const checked = checkAppStoreIndex(index);
+  const checked = checkAppStoreIndex(index, { strict: true });
   if (!checked.ok) throw refused(`${indexPath} is not a valid store index`, checked);
   const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer);
   const read = readAppStore(indexBytes, sigBytes, now, key.key);

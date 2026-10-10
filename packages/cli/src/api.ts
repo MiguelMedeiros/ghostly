@@ -1,5 +1,5 @@
 import { groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
-import type { GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
@@ -47,7 +47,7 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 }
 
 /** Settings a command may change; the rest are the app's to manage. */
-const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
+export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
   relays: "strings", irohRelays: "strings", hyperdhtRelay: "string", readRelays: "boolean",
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
 };
@@ -153,9 +153,14 @@ const METHODS: Record<string, Method> = {
     if (label) await node(ctx).renameLink({ linkId, label });
     // Native listeners start for the chat on screen (or a paired one): a new invite is the chat a bot waits on.
     node(ctx).setActiveLink({ linkId });
-    // Its first records must be out before a one-shot leaves.
-    await waitForState(ctx, (s) => { const stage = s.links.find((l) => l.id === linkId)?.pairingProgress?.stage; return stage && stage !== "publishing" ? true : undefined; }, 20_000, "the invite to be published").catch(() => {});
-    return { chat: linkId, invite: inviteCode, link: inviteLink(inviteCode) };
+    // Its first records must be out before a one-shot leaves. A daemon publishes them later too: it answers at once when
+    // the relays' request budget holds them back (a few invites in a minute), and says when they go.
+    const progressOf = (s: EngineState) => s.links.find((l) => l.id === linkId)?.pairingProgress;
+    const progress = await waitForState(ctx, (s) => { const p = progressOf(s); return p && (p.stage !== "publishing" || (ctx.mode === "daemon" && p.relayWaitUntil)) ? p : undefined; }, 20_000, "the invite to be published")
+      .catch(() => progressOf(state(ctx)));
+    const published = !!progress && progress.stage !== "publishing" && progress.reason !== "publish";
+    const waitUntil = published ? undefined : progress?.relayWaitUntil;
+    return { chat: linkId, invite: inviteCode, link: inviteLink(inviteCode), published, ...(waitUntil !== undefined && { retryInMs: Math.max(0, waitUntil - Date.now()) }) };
   },
   async "invite.join"(ctx, params) {
     let invite = str(params, "invite", true).trim();
@@ -204,7 +209,7 @@ const METHODS: Record<string, Method> = {
     const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
-    let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
+    let message = await node(ctx).getMessage(link.id, result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
     return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
   },
@@ -224,7 +229,7 @@ const METHODS: Record<string, Method> = {
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
     if (result.error) throw editRefused(await node(ctx).getMessages(link.id), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
-    let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === id);
+    let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
     return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed: !!message && !message.edit?.pending };
   },

@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
@@ -22,6 +23,7 @@ function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" }), link("chat-two", { peerNick: "Bob" })], groups: [group], settings: { online: true, nick: "Bot", relays: ["r"], holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "SK" } }, avatar: "data:x" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
+    getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     sendGroupMessage: vi.fn(async () => ({ error: null })),
@@ -146,6 +148,8 @@ describe("chats", () => {
 
     stored[0] = { ...stored[0], delivery: "failed", deliveryError: "Peer is gone" };
     await expect(callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent" })).rejects.toMatchObject({ code: "engine", message: "Peer is gone" });
+    // A send and its wait read the message itself: in a long chat, the whole history costs each of them a read of every row.
+    expect((ctx.runtime.server.node as unknown as { getMessages: ReturnType<typeof vi.fn> }).getMessages).not.toHaveBeenCalled();
   });
 
   it("send's wait sees a delivery that never came as message.delivery, and one that came as the time ran out", async () => {
@@ -272,6 +276,50 @@ describe("chat wait", () => {
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: false });
     set(remembered(session));
     expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: true });
+  });
+});
+
+describe("invite create", () => {
+  /** An engine whose new invite is at `progress`; `then` is the progress a later state brings. */
+  function inviting(mode: "daemon" | "one-shot", progress: Partial<PairingProgress>) {
+    let current = { role: "inviter", since: 0, startedAt: 0, attempt: 1, ...progress } as PairingProgress;
+    const listeners = new Set<(s: EngineState) => void>();
+    const stateOf = () => ({ links: [link("inv1", { pairingProgress: current })], groups: [] }) as unknown as EngineState;
+    const node = { getState: stateOf, createLink: vi.fn(async () => ({ linkId: "inv1", inviteCode: "ghostly1abc" })), setActiveLink: vi.fn() };
+    const ctx = {
+      runtime: { server: { node }, paths: { name: "default" } },
+      hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
+      mode, version: "test",
+    } as unknown as ApiContext;
+    let answer: Record<string, unknown> | undefined;
+    void callApi(ctx, "invite.create", {}).then((a) => { answer = a as Record<string, unknown>; });
+    return { answer: () => answer, then: (next: Partial<PairingProgress>) => { current = { ...current, ...next }; for (const l of listeners) l(stateOf()); } };
+  }
+
+  beforeEach(() => { vi.useFakeTimers({ now: 1_000_000 }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("a daemon answers at once when the relays' request budget holds the invite back, and says when it goes", async () => {
+    const held = inviting("daemon", { stage: "publishing", relayWaitUntil: 1_042_000 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held.answer()).toEqual({ chat: "inv1", invite: "ghostly1abc", link: expect.stringContaining("ghostly1abc"), published: false, retryInMs: 42_000 });
+
+    // Published first: so it says, with no wait.
+    const out = inviting("daemon", { stage: "publishing" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(out.answer()).toBeUndefined();
+    out.then({ stage: "waiting" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(out.answer()).toMatchObject({ published: true });
+    expect(out.answer()).not.toHaveProperty("retryInMs");
+  });
+
+  it("a one-shot still waits for the invite to go out before it leaves, and says when it did not", async () => {
+    const held = inviting("one-shot", { stage: "publishing", relayWaitUntil: 1_042_000 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(held.answer()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(held.answer()).toMatchObject({ published: false, retryInMs: 22_000 });
   });
 });
 

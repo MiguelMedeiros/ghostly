@@ -123,6 +123,16 @@ describe("a stored record", () => {
     expect(parseDeviceRecord(structuredClone(full))).toEqual(full);
   });
 
+  it("reads device names cleaned as display text, whatever a build before this one stored", () => {
+    const stored = record("active", { deviceSet: [{ key: KEY, name: "MacBook" }, null, { key: KEY, name: "\u202EenohP\n\x07" }], unfinishedGrants: [{ key: KEY, name: "Tab\u200Blet\u2066", at: 5 }] });
+    const read = parseDeviceRecord(structuredClone(stored));
+    expect(read.deviceSet).toEqual([{ key: KEY, name: "MacBook" }, null, { key: KEY, name: "enohP" }]);
+    expect(read.unfinishedGrants).toEqual([{ key: KEY, name: "Tablet", at: 5 }]);
+    // Nothing to clean: the record itself.
+    const clean = record("active");
+    expect(parseDeviceRecord(clean)).toBe(clean);
+  });
+
   it.each([
     ["nothing", null],
     ["an array", []],

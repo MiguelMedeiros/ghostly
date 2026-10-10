@@ -161,11 +161,13 @@ export function getBrowserHost(): BrowserHost {
 
 /**
  * One thing a paste brought, held by the platform: a file (its name) or a picture (no name: the page
- * names it). `read` hands its bytes a step at a time.
+ * names it). `read` hands its bytes a step at a time; `done` says the page has what it wants of
+ * it (or gave up), so the platform lets its copy go: nothing is read after it.
  */
 export interface ClipboardFile {
   name: string | null;
   size: number;
   mime: string | null;
   read(offset: number, length: number): Promise<Uint8Array>;
+  done?(): void;
 }

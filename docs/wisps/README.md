@@ -48,7 +48,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 500 | Files | [File Transfer](500-files.md) | Contract | Draft | Available |
 | 501 | Files | [Chat Files](501-paired-files.md) | Profile | Draft | Available |
 | 502 | Files | [Compatibility File Frames](502-legacy-files.md) | Profile | Draft | Available |
-| 503 | Files | [Group Files](503-group-files.md) | Profile | Draft | Planned |
+| 503 | Files | [Group Files](503-group-files.md) | Profile | Draft | Available |
 | 600 | Voice and video | [Voice and Video](600-media.md) | Contract | Draft | Available |
 | 601 | Voice and video | [WebRTC Media](601-webrtc-media.md) | Profile | Draft | Available |
 | 700 | Local services | [Local Services](700-local-services.md) | Contract | Draft | Available |
@@ -63,7 +63,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 1001 | Storage | [Local File Storage](1001-local-storage.md) | Adapter | Draft | Available |
 | 1002 | Storage | [S3-Compatible Storage](1002-s3-storage.md) | Adapter | Draft | Available |
 | 1100 | Headless | [Headless Runtime and Local Control API](1100-headless.md) | Contract | Draft | Available |
-| 1200 | Apps and plugins | [Apps and Plugins: Packages, Stores and Apps Sent in a Chat](1200-marketplace.md) | Contract | Draft | Planned |
+| 1200 | Apps and plugins | [Apps and Plugins: Packages, Stores and Apps Sent in a Chat](1200-marketplace.md) | Contract | Draft | Available |
 
 <!-- wisp-index:end -->
 

@@ -1,0 +1,14 @@
+{
+  "name": "chess",
+  "version": "2.3.0",
+  "from": {
+    "bundle": "https://cdn.jsdelivr.net/gh/MiguelMedeiros/ghostly-chess@c665ab194478145fd9b9a4777e6c0d1893969649/app.ghostlyapp",
+    "ref": "odcgw6wjw8dynqop84r47jbjcdqossbgrfiejd367e14hgxmjcho/chess",
+    "sequence": 4,
+    "digest": "EEnFmP0grTkTe_9qgapQsEEZzWB9FcpoimWkHnfecVs"
+  },
+  "entry": "index.html",
+  "bytes": 260648,
+  "sha256": "b8d7ea8cddd679aa6bc451272f78644d29be0930e48551140a0e26284a41be13",
+  "manifestSha256": "c68a21bfde6226587de605bf86b068add9ac147937ca73229f38f687608bdbac"
+}

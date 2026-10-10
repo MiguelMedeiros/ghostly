@@ -11,11 +11,13 @@ Open **https://app.ghostly.tools** in any modern browser.
   - iPhone and iPad: in Safari, tap Share, then *Add to Home Screen*.
   - What installing adds (offline start, Share to Ghostly, `web+ghostly:` links, shortcuts, the unread badge): [WEB.md](WEB.md#install-it).
 - Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
-- **Self-hosted:** `docker compose -f infra/docker-compose.yml up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
+- **Self-hosted:** `docker compose -f infra/docker-compose.yml up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)). Another web server needs the apps runner's headers, or it gets no Apps: [WEB.md](WEB.md#apps-on-your-own-server).
 
 ## Android
 
-The Android app is the web app in a Trusted Web Activity: a small APK with its own icon that opens app.ghostly.tools full screen, with the web app's limits (no native Iroh, no direct HyperDHT). Releases attach it once its signing key is set up; until then, CI builds a debug APK to try it, never to publish. Details: [ANDROID.md](ANDROID.md). Installing the web app from Chrome, above, gives the same app today.
+On an Android phone, Ghostly is the web app: open [app.ghostly.tools](https://app.ghostly.tools) in Chrome, Edge or Brave and install it (⋮, *Install app*), as [above](#web-app-nothing-to-install). It then opens from the home screen in a window of its own.
+
+A native Android app is planned and not released: no release has an APK. Where its work stands, for developers: [ANDROID.md](ANDROID.md).
 
 ## Browser extension (Chrome, Brave, Edge)
 
@@ -23,7 +25,7 @@ The Android app is the web app in a Trusted Web Activity: a small APK with its o
 
 **From the release zip** (the newest version, or a browser without store access):
 
-1. Download [ghostly-browser-extension-1.1.7.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.1.7/ghostly-browser-extension-1.1.7.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
+1. Download [ghostly-browser-extension-1.2.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.2.0/ghostly-browser-extension-1.2.0.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
@@ -35,12 +37,12 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 
 | Platform | File |
 |---|---|
-| macOS, Apple silicon | [Ghostly_1.1.7_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.1.7/Ghostly_1.1.7_aarch64.dmg) |
-| macOS, Intel | [Ghostly_1.1.7_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.1.7/Ghostly_1.1.7_x64.dmg) |
-| Windows x64, installer | [Ghostly_1.1.7_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.1.7/Ghostly_1.1.7_x64-setup.exe) |
-| Windows x64, MSI | [Ghostly_1.1.7_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.1.7/Ghostly_1.1.7_x64_en-US.msi) |
-| Linux x64, AppImage | [Ghostly_1.1.7_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.1.7/Ghostly_1.1.7_amd64.AppImage) |
-| Linux x64, Debian/Ubuntu | [Ghostly_1.1.7_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.1.7/Ghostly_1.1.7_amd64.deb) |
+| macOS, Apple silicon | [Ghostly_1.2.0_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.2.0/Ghostly_1.2.0_aarch64.dmg) |
+| macOS, Intel | [Ghostly_1.2.0_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.2.0/Ghostly_1.2.0_x64.dmg) |
+| Windows x64, installer | [Ghostly_1.2.0_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.2.0/Ghostly_1.2.0_x64-setup.exe) |
+| Windows x64, MSI | [Ghostly_1.2.0_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.2.0/Ghostly_1.2.0_x64_en-US.msi) |
+| Linux x64, AppImage | [Ghostly_1.2.0_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.2.0/Ghostly_1.2.0_amd64.AppImage) |
+| Linux x64, Debian/Ubuntu | [Ghostly_1.2.0_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.2.0/Ghostly_1.2.0_amd64.deb) |
 
 - **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings, Updates** allows it, and nothing installs without your OK.
 - **Linux has no WebRTC in its WebView** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT, and calls run in the app itself, with GStreamer: the `.deb` and `.rpm` depend on its base and good plugins, and the AppImage carries them. If a plugin is missing, the call buttons name the package to install. Screen sharing is not available on Linux yet.

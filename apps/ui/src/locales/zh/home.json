@@ -6,7 +6,6 @@
     "encrypted": "端到端加密",
     "onDevice": "消息保存在你自己的设备上"
   },
-  "linkFailed": "无法打开链接。",
   "unpublishedVersion": "本地版本 — 查看已发布版本",
   "viewRelease": "查看此版本",
   "welcome": "欢迎使用 Ghostly"

@@ -4,7 +4,7 @@ import type { DeviceFrame } from "./deviceLink";
 import type { EnrollSlot } from "./enroll";
 import { verify } from "./identity";
 import type { Signer } from "./signer";
-import { signTurnPacket, TOMBSTONE_TURN, TURN_MAX, TURN_NO_ACTIVE, TURN_REV_LIMIT, TURN_SLOTS, turnName, type TurnKeys, type TurnSigner, type TurnSlot } from "./turnRecord";
+import { signTurnPacket, TOMBSTONE_TURN, TURN_MAX, TURN_NAME_BYTES, TURN_NO_ACTIVE, TURN_REV_LIMIT, TURN_SLOTS, turnName, type TurnKeys, type TurnSigner, type TurnSlot } from "./turnRecord";
 
 /*
  * Removing a device (WISP 06 § Removing a device): the tombstone that closes the old turn address, and the one signed
@@ -63,9 +63,14 @@ export function encodeSetSlots(set: readonly EnrollSlot[]): ([string, string] | 
 
 /** The bytes the remover signs: the old turn address, then the frame's fields, the tombstone by its digest. */
 export function setUpdateMessage(oldAddress: Uint8Array, update: Omit<SetUpdate, "by" | "rec">): Uint8Array {
+  return signedBytes(oldAddress, update, encodeSetSlots(update.set));
+}
+
+/** `slots`: the set as the frame carries it. A reader hands over the frame's own, a name cleaned for display is not what was signed. */
+function signedBytes(oldAddress: Uint8Array, update: Omit<SetUpdate, "by" | "rec" | "set">, slots: ([string, string] | null)[]): Uint8Array {
   if (oldAddress.length !== 32) throw new Error("A turn address is 32 bytes");
   if (update.d.length !== 32) throw new Error("The device-set secret is 32 bytes");
-  return utf8Encode(JSON.stringify(["ghostly-set-update", toBase64Url(oldAddress), toBase64Url(update.d), encodeSetSlots(update.set), update.turn, update.rev, toBase64Url(sha256(update.tomb))]));
+  return utf8Encode(JSON.stringify(["ghostly-set-update", toBase64Url(oldAddress), toBase64Url(update.d), slots, update.turn, update.rev, toBase64Url(sha256(update.tomb))]));
 }
 
 /** The signed frame. `oldAddress`: the turn address the tombstone closes. */
@@ -80,11 +85,14 @@ export async function setUpdateFrame(oldAddress: Uint8Array, update: Omit<SetUpd
   };
 }
 
+/** A `set-update` as it reads: its names cleaned for display (`set`), the set its signature covers as the frame wrote it (`signed`). */
+export type ReadSetUpdate = SetUpdate & { signature: Uint8Array; signed: ([string, string] | null)[] };
+
 /**
  * A `set-update` as it reads, with its signature, or null when it is not well formed. Its signature is not checked
  * here: that needs the old turn address (`verifySetUpdate`).
  */
-export function readSetUpdate(frame: DeviceFrame): (SetUpdate & { signature: Uint8Array }) | null {
+export function readSetUpdate(frame: DeviceFrame): ReadSetUpdate | null {
   if (frame.t !== SET_UPDATE || typeof frame.d !== "string" || !KEY.test(frame.d) || typeof frame.by !== "string" || !KEY.test(frame.by)) return null;
   if (typeof frame.s !== "string" || !SIGNATURE.test(frame.s) || typeof frame.tomb !== "string" || !TOMB.test(frame.tomb)) return null;
   if (!Array.isArray(frame.set) || frame.set.length > TURN_SLOTS) return null;
@@ -92,24 +100,27 @@ export function readSetUpdate(frame: DeviceFrame): (SetUpdate & { signature: Uin
   if (!Number.isInteger(frame.turn) || (frame.turn as number) < 0 || (frame.turn as number) > TURN_MAX) return null;
   if (!Number.isInteger(frame.rev) || (frame.rev as number) < 0 || (frame.rev as number) >= TURN_REV_LIMIT) return null;
   const set: EnrollSlot[] = [];
+  const signed: ([string, string] | null)[] = [];
   for (const slot of frame.set as unknown[]) {
-    if (slot === null) { set.push(null); continue; }
+    if (slot === null) { set.push(null); signed.push(null); continue; }
     if (!Array.isArray(slot) || slot.length !== 2 || typeof slot[0] !== "string" || !KEY.test(slot[0]) || typeof slot[1] !== "string" || slot[1].length > 64) return null;
-    // A name the signature covers is read as written: one cut here would no longer be what was signed.
-    if (turnName(slot[1]) !== slot[1]) return null;
-    set.push({ key: fromBase64Url(slot[0]), name: slot[1] });
+    // A name the signature covers is checked as written (one cut here would no longer be what was signed) and shown
+    // cleaned: a build that does not clean names may have signed it.
+    if (utf8Encode(slot[1]).length > TURN_NAME_BYTES || slot[1].includes("\0")) return null;
+    signed.push([slot[0], slot[1]]);
+    set.push({ key: fromBase64Url(slot[0]), name: turnName(slot[1]) });
   }
   const keys = set.flatMap((slot) => (slot ? [toBase64Url(slot.key)] : []));
   if (!keys.length || new Set(keys).size !== keys.length) return null;
   return {
-    d: fromBase64Url(frame.d), set, turn: frame.turn as number, rev: frame.rev as number, tomb: fromBase64Url(frame.tomb), by: fromBase64Url(frame.by), signature: fromBase64Url(frame.s),
+    d: fromBase64Url(frame.d), set, signed, turn: frame.turn as number, rev: frame.rev as number, tomb: fromBase64Url(frame.tomb), by: fromBase64Url(frame.by), signature: fromBase64Url(frame.s),
     ...(typeof frame.rec === "string" ? { rec: fromBase64Url(frame.rec) } : {}),
   };
 }
 
 /** Whether `by` signed this update for the turn address `oldAddress`. */
-export function verifySetUpdate(update: SetUpdate & { signature: Uint8Array }, oldAddress: Uint8Array): boolean {
-  try { return verify(update.signature, setUpdateMessage(oldAddress, update), update.by); } catch { return false; }
+export function verifySetUpdate(update: SetUpdate & { signature: Uint8Array; signed?: ([string, string] | null)[] }, oldAddress: Uint8Array): boolean {
+  try { return verify(update.signature, signedBytes(oldAddress, update, update.signed ?? encodeSetSlots(update.set)), update.by); } catch { return false; }
 }
 
 export const setAckFrame = (): DeviceFrame => ({ t: SET_ACK });

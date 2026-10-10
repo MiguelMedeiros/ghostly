@@ -52,6 +52,20 @@ const PARTS: Record<string, TranslationKey> = {
 };
 const readParts = (parts: string, t: Translate) => parts.split(", ").map((part) => (PARTS[part] ? t(PARTS[part]) : part)).join(", ");
 
+/** A copy the app could not save where the person chose (Android's document picker, apps/desktop android.rs). */
+export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable file path)$/;
+/**
+ * The same on Desktop (apps/desktop file_store.rs): the system's own English ("Permission denied (os error 13)", "No
+ * space left on device (os error 28)"), or a place without a file name. Not a rule of its own: an io error is a save's
+ * only where a save threw it (problemText.ts saveProblemLine).
+ */
+export const DESKTOP_SAVE_REFUSED = /^(?:.+ \(os error \d+\)|The chosen place has no file name)$/;
+
+/** No room left in the storage that holds items for an away contact (WISP 404, engine/hold.ts): it sends once some are picked up. */
+const HOLD_FULL_ITEMS = /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/;
+const HOLD_FULL_BYTES = /^Items waiting for this contact would exceed (?<max>\d+) MB\. Wait until some are picked up\.$/;
+export const holdFull = (cause: unknown) => [HOLD_FULL_ITEMS, HOLD_FULL_BYTES].some((full) => full.test(rawError(cause)));
+
 const NETWORK = "(?<network>Mainnet|Testnet)";
 const HOST = "(?<host>[^\\s:/]+(?::\\d+)?)";
 
@@ -66,6 +80,15 @@ const RULES: readonly Rule[] = [
   exact("Could not open the service", "errors.extension.openService"),
   exact("Could not open a tab", "errors.extension.openTab"),
   exact("Not a payment link", "errors.extension.notPaymentLink"),
+  // The OIDC wait, the web popup's (proofs/oidc/popup.ts) and the app's (apps/desktop/src/oidc.rs).
+  exact("Sign-in timed out. Try again.", "errors.extension.signInTimedOut", "errors.extension.signInTimedOutNext"),
+
+  // The app's opener, its file saving and its Android host (apps/desktop: commands.rs, android.rs,
+  // GhostlyHostPlugin.kt). Their reasons stay English, behind the ⓘ.
+  { match: /^No app on this phone opens this link$/, key: "errors.host.noApp", next: "errors.host.noAppNext", detail: true },
+  { match: /^Not a (?:web|Ghostly project) link$/, key: "errors.host.openFailed", next: "errors.host.openFailedNext", detail: true },
+  { match: SAVE_REFUSED, key: "errors.host.saveFailed", next: "errors.host.saveFailedNext", detail: true },
+  { match: /^(?:The Android host is not ready|Not from Android's main thread)$/, key: "errors.app.stillStarting", detail: true },
 
   // The page's way to the peer and its services (packages/browser/src/platform).
   exact("Ghostly is starting…", "errors.app.starting"),
@@ -83,16 +106,57 @@ const RULES: readonly Rule[] = [
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },
+  // A sent file the contact's app refused (packages/core chatFiles.ts `refusalText`): it can be sent again.
+  { match: /^Not enough space on your contact's device \((?<free>.+) free\)$/, key: "errors.files.noRoom", next: "errors.files.refused.noRoomFree" },
+  exact("Not enough space on your contact's device", "errors.files.noRoom", "errors.files.refused.makeRoom"),
+  exact("Your contact has too many files waiting. Try again later.", "errors.files.refused.tooMany", "errors.files.refused.tryLater"),
+  exact("The file arrived damaged and was deleted. Send it again.", "errors.files.refused.damaged", "errors.files.refused.sendAgain"),
+  exact("Not accepted in time", "errors.files.refused.expired", "errors.files.refused.sendAgain"),
+  exact("Your contact could not take this file", "errors.files.refused.other", "errors.files.refused.sendAgain"),
   { match: /^That file is too large for your contact's app \(max (?<max>.+)\)\. Larger files need an updated Ghostly on their side\.$/, key: "errors.files.tooLargeForContact", next: "errors.files.tooLargeForContactNext" },
   { match: /^That file is too large \(max (?<size>.+)\)\.$/, key: "chat.fileTooLarge" },
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
+  // A paste the app's clipboard commands refused (apps/desktop/src/clipboard.rs). The system's reason stays English, behind the ⓘ.
+  exact("That picture is too large to paste", "errors.files.pasteTooLarge"),
+  exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
+  exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
+  exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
+  { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
+  { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
+  { match: HOLD_FULL_BYTES, key: "errors.hold.fullBytes", next: "errors.hold.fullNext" },
+  // A held message sent again with no storage to hold it, or a contact that stopped allowing it (engine/node.ts, hold.ts).
+  exact("Held messages need S3 storage (Profile → Backups) and a contact that allows them.", "errors.hold.needsStorage", "errors.hold.needsStorageNext"),
 
   // A chat's native transport (packages/browser/src/engine/node.ts): its listener lent to another chat, or not started.
   exact("Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "errors.transport.listenerGiven"),
   exact("Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "errors.transport.listenerReleased"),
   exact("Native adapter could not start. Reopen this chat to retry.", "errors.transport.adapterFailed"),
+  // A chat's dial (packages/core ghostlink.ts), the connection panel's line: no transport in common, or none that
+  // connected, or a contact whose app cannot switch. The engine's sentence stays behind the ⓘ.
+  { match: /^No transport both apps allow is available yet$/, key: "errors.transport.noneInCommon", next: "errors.transport.allowAnotherNext", detail: true },
+  { match: /^No permitted transport could connect$/, key: "errors.transport.noneConnected", next: "errors.transport.allowAnotherNext", detail: true },
+  { match: /^The peer closed this connection\. Check that both transport preferences allow a common transport, then reconnect\.$/, key: "errors.transport.peerClosed", next: "errors.transport.peerClosedNext", detail: true },
+  { match: /^Your contact needs an updated app to negotiate a transport change\.$/, key: "errors.transport.cannotSwitch", next: "errors.transport.cannotSwitchNext", detail: true },
+  exact("All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
+  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts).
+  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable"),
+  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent"),
+  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed"),
+  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused"),
+  exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
+  // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
+  // ghostlink.ts `confirmPair`).
+  { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },
+  exact("The connection closed. Compare again after reconnecting.", "errors.verify.closed", "errors.verify.closedNext"),
+
+  // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
+  { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
+  { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
+  { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
+  exact("Someone else joined with this invite first. Ask your contact for a new one.", "pairing.reason.taken"),
+  exact("Chat has been burned", "chat.compat.burned"),
 
   // Cashu and Lightning in the wallet (packages/browser/src/engine/wallet.ts).
   exact("That is not a valid mint URL", "errors.cashu.badMintUrl"),
@@ -130,6 +194,7 @@ const RULES: readonly Rule[] = [
   { match: /^(?<method>Cashu|Lightning) is not allowed by both of you here$/, key: "errors.pay.notBoth" },
   exact("Your contact allowed neither Cashu nor Lightning in this chat", "errors.pay.contactAllowsNeither"),
   exact("Your contact took no Cashu or Lightning last time. Try again once the chat is live", "errors.pay.contactTookNone", "errors.pay.contactTookNoneNext"),
+  exact("Your contact is offline. Nothing was sent: pay once the chat is live.", "errors.pay.contactAway", "errors.pay.contactAwayNext"),
   exact("Cashu and Lightning are off in this chat", "errors.pay.bothOff"),
   exact("A request to the group is paid in Cashu or over Lightning", "errors.pay.groupRails"),
   exact("Unknown payment request", "errors.pay.unknownRequest"),
@@ -203,6 +268,8 @@ const RULES: readonly Rule[] = [
   exact("USDT RPC rejected the operation", "errors.rails.usdtRejected"),
   exact("Token or gas balance changed. Create a new review", "errors.rails.usdtBalanceChanged"),
   exact("Account nonce changed. Create a new review", "errors.rails.usdtNonceChanged"),
+  exact("No signed transaction was submitted. Create a new review.", "errors.rails.usdtNotSubmitted", "errors.rails.usdtNotSubmittedNext"),
+  exact("Transaction reverted. Tokens were not sent; gas was spent.", "errors.rails.usdtReverted", "errors.rails.usdtRevertedNext"),
   { match: /^Not enough confirmed sats: (?<available>\d+) available, (?<needed>\d+) needed with the fee$/, key: "errors.rails.bitcoinNotEnough", next: "errors.rails.bitcoinNotEnoughNext", params: ({ available, needed }, t) => ({ available: sats(available, t), needed: sats(needed, t) }) },
   { match: /^The fee \((?<fee>\d+) sats\) is above your limit of (?<max>\d+)$/, key: "errors.rails.bitcoinFeeAboveLimit", params: ({ fee, max }, t) => ({ fee: sats(fee, t), max: sats(max, t) }) },
   { match: /^The node refused the transaction: (?<reason>[\s\S]+)$/, key: "errors.rails.nodeRefusedTx", reason: "next" },
@@ -217,6 +284,8 @@ const RULES: readonly Rule[] = [
   exact("Nothing was spent", "errors.rails.nothingSpent"),
   exact("Interrupted before it reached your contact: the sats came back", "errors.rails.interruptedBack"),
   exact("Canceled before it was funded", "errors.rails.canceledUnfunded"),
+  // A Cashu payment whose swap the mint proved never happened (paymentAdapters/cashu.ts NEVER_REACHED_MINT).
+  exact("The payment never reached the mint: nothing was sent, and the sats are back in your wallet. You can pay again.", "errors.rails.cashuNeverReached", "errors.rails.cashuNeverReachedNext"),
   exact("Only whole amounts in sats are supported", "errors.pay.wholeSats"),
   exact("Unknown payment", "errors.pay.unknownPayment"),
   exact("The mint did not confirm the ecash", "errors.pay.mintDidNotConfirm"),
@@ -272,6 +341,8 @@ const RULES: readonly Rule[] = [
   exact("This is not a link to a group", "errors.group.notALink"),
   exact("You are already joining this group", "errors.group.alreadyJoining"),
   exact("This group is joined with its current link", "errors.group.currentLink"),
+  // A group's link pasted or opened while Ghostly is set offline (engine/node.ts joinGroupByLink).
+  exact("Go online to join a group", "errors.group.offline", "errors.group.offlineNext"),
   exact("Only the admin can change the members of this group", "errors.group.adminMembers"),
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
@@ -286,6 +357,33 @@ const RULES: readonly Rule[] = [
   exact("Share the group's link with them: anyone who opens it joins", "errors.group.shareLinkInstead"),
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
+  // Files in groups (packages/browser/src/engine/groupFiles.ts, node.ts `sendGroupFile`, platform/services.ts).
+  // The wait is a minute (a minute's pace) or the minutes left of the longer window (`mayAnnounce`).
+  { match: /^You sent many files to this group just now\. Wait a minute\.$/, key: "errors.group.filesPaced", next: "errors.group.filesPacedNext" },
+  { match: /^You sent many files to this group just now\. Wait (?<minutes>\d+) minutes\.$/, key: "errors.group.filesPaced", next: "errors.group.filesPacedNextMinutes" },
+  exact("Not enough space on this device for this file", "errors.group.fileNoRoom", "errors.group.fileNoRoomNext"),
+  exact("An empty file cannot go to a group", "errors.group.fileEmpty"),
+  exact("This app takes no group files", "errors.group.filesUnsupported", "errors.group.filesUnsupportedNext"),
+  { match: /^A group takes files of up to (?<size>[\d.]+ [KMGT]?B)$/, key: "errors.group.fileTooLarge" },
+
+  // Held items for an away contact (packages/browser/src/engine/hold.ts, WISP 404): a message's line, and the chat's hold
+  // line and dialog. What the storage or the network answered goes behind the ⓘ: it is English, and often a status code.
+  // No storage, a contact that stopped allowing it and no room left are above, with the files' (`HOLD_FULL_ITEMS`).
+  exact("Held messages need S3 storage (Profile → Backups) and a pinned contact.", "errors.hold.needPinned", "errors.hold.needStorageNext"),
+  { match: /^An item held for an away contact is at most (?<mb>\d+) MB\.$/, key: "errors.hold.tooLarge" },
+  exact("The message is gone", "errors.hold.messageGone"),
+  exact("The file is gone", "errors.hold.fileGone"),
+  exact("The payment request is gone", "errors.hold.requestGone"),
+  { match: /^Could not store the item: [\s\S]+$/, key: "errors.hold.storeFailed", next: "errors.hold.storeFailedNext", detail: true },
+  { match: /^Stored, but could not tell the contact where: [\s\S]+$/, key: "errors.hold.pointerFailed", next: "errors.hold.retryNext", detail: true },
+  exact("Held for its whole lifetime without being picked up. Retry to hold it again.", "errors.hold.expired", "errors.hold.retryNext"),
+  exact("Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", "errors.hold.contactRefused", "errors.hold.contactRefusedNext"),
+  { match: /^Could not read the contact's pointer: [\s\S]+$/, key: "errors.hold.readFailed", next: "errors.hold.retryingNext", detail: true },
+  exact("The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", "errors.hold.addressExpired", "errors.hold.addressExpiredNext"),
+  { match: /^Refused what the contact's storage offered: [\s\S]+$/, key: "errors.hold.refusedOffer", detail: true },
+  { match: /^Could not pick up held items: [\s\S]+$/, key: "errors.hold.pickUpFailed", next: "errors.hold.retryingNext", detail: true },
+  { match: /^Refused a held item from the contact: [\s\S]+$/, key: "errors.hold.refusedItem", detail: true },
+  { match: /^Picked up, but could not acknowledge: [\s\S]+$/, key: "errors.hold.ackFailed", detail: true },
 
   // Making a wallet, connecting its source and reading it (engine/node.ts, paymentAdapters/**): why a kind could not be made or offered, and what a card says while it connects.
   { match: /^(?:You already have a|There is already a) (?<network>Mainnet|Testnet) (?<kind>Cashu|Lightning|Ark|Bark|Spark|Bitcoin|Fedimint|USDT) wallet$/, key: "errors.wallet.alreadyHave" },
@@ -352,6 +450,10 @@ const RULES: readonly Rule[] = [
   { match: /^https:\/\/\S+ names no Ghostly proof$/, key: "errors.proof.fileNoProof", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
   { match: /^Enter at least one relay address \((?:https|wss):\/\/…\)$/, key: "errors.relays.atLeastOne" },
+  // An Iroh, push or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts, nostr/relay.ts):
+  // the address typed stays in the line, which has no ⓘ.
+  { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
+  { match: /^Not a relay address: (?<address>\S+)$/, key: "errors.relays.notAddress" },
   exact("Choose a picture", "errors.picture.choose"),
   exact("That picture is too large (max 20 MB)", "errors.picture.tooLarge"),
   exact("This picture cannot be read here. Try a JPEG or PNG.", "errors.picture.unreadableTryJpeg"),
@@ -396,6 +498,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   paymentTakenBack: "errors.engine.paymentTakenBack",
   parkedSigned: "errors.engine.parkedSigned",
   ecashAlreadySpent: "errors.engine.ecashAlreadySpent",
+  ecashOtherUnit: "errors.engine.ecashOtherUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",

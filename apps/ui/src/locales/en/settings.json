@@ -13,11 +13,12 @@
   "clearAllDataDescription": "Chats, identities and settings of this profile. Wallets stay.",
   "clearAllDataInfo": "Before erasing, Ghostly takes back what it can: items held for contacts, your DID, your identity proofs and wake-ups. Proofs you posted on other sites stay there. Wallets are not deleted: spend or back up your sats first if you want them gone too.",
   "clearAllDataItems": {
-    "apps": "Shared apps",
+    "appsData": "Installed apps and their data",
     "chats": "Chats, messages and files",
     "groups": "Groups",
     "identities": "Identity proofs, your DID and Nostr data",
     "profile": "Your name and picture",
+    "services": "Shared services",
     "settings": "Settings, lock screen and network",
     "storage": "S3 storage settings and wake-ups"
   },
@@ -56,6 +57,14 @@
   "defaultNicknameHint": "Used when you start a new chat",
   "deleteAllChatsConfirm": "Delete all {{count}} chats?",
   "deleteAllChatsHint": "Messages and files go. Settings and wallets stay.",
+  "groupDownloads": {
+    "always": "Always",
+    "hint": "Voice messages and small files",
+    "info": "Voice messages, and files up to {{file}}, download by themselves until what came that way from a group adds up to {{group}} on this device. Larger files wait for Download. Each device decides for itself; nothing about it is sent to the group.",
+    "off": "Off",
+    "title": "Download automatically in groups",
+    "wifi": "Wi-Fi only"
+  },
   "incorrectPassword": "Incorrect password",
   "language": "Language",
   "license": "License",
@@ -141,6 +150,7 @@
     "colour": "colour, accent, theme",
     "deleteChats": "erase, history",
     "domains": "DNS, DoH",
+    "groupDownloads": "automatic, auto-download, media, Wi-Fi, mobile data, voice messages, files, groups",
     "language": "translation, locale",
     "linkPreviews": "links, URL",
     "lock": "password, PIN, security",

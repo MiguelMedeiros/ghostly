@@ -187,6 +187,35 @@ describe("requests", () => {
     expect(host.calls.length).toBe(before);
   });
 
+  it("refuses a huge or binary request without writing it as JSON first", () => {
+    // A structured clone carries what JSON.stringify takes seconds to write (a 16 MiB Uint8Array took 1.6 s on the
+    // page's thread): it is refused from a count that stops at 64 KiB, and binary data from its type alone.
+    const { broker, posted, run } = setup();
+    run();
+    // Counted by hand: a spy would keep (and print) what it was called with.
+    const stringify = JSON.stringify;
+    let written = 0;
+    JSON.stringify = ((...args: Parameters<typeof stringify>) => { written++; return stringify(...args); }) as typeof stringify;
+    const wide: Record<string, number> = {};
+    for (let i = 0; i < 20_000; i++) wide[`k${i}`] = i;
+    const requests: [unknown[], Record<string, unknown>, string][] = [
+      [[new Uint8Array(16 * 1024 * 1024)], {}, "bad-request"],
+      [[new Float64Array(8)], {}, "bad-request"],
+      [[new ArrayBuffer(16 * 1024 * 1024)], {}, "bad-request"],
+      [[], { extra: new DataView(new ArrayBuffer(1024 * 1024)) }, "bad-request"],
+      [[new Array(1_000_000)], {}, "too-large"],
+      [["x".repeat(64 * 1024 * 1024)], {}, "too-large"],
+      [[wide], {}, "too-large"],
+    ];
+    try {
+      requests.forEach(([args, extra], i) => broker.message({ id: 100 + i, type: "storage.get", args, ...extra }));
+    } finally {
+      JSON.stringify = stringify;
+    }
+    expect(written).toBe(0);
+    expect(posted.slice(-requests.length).map((p) => p.message)).toEqual(requests.map(([, , error], i) => ({ id: 100 + i, ok: false, error })));
+  });
+
   it("answers at most 50 requests a second, malformed ones counted", async () => {
     const { broker, host, run, posted, clock } = setup();
     run();
@@ -267,6 +296,27 @@ describe("chat", () => {
     for (const bad of [new Date(), new Map(), Number.NaN]) expect(await ask("storage.set", ["k", { bad }])).toMatchObject({ ok: false, error: "bad-request" });
   });
 
+  it("keeps a member named __proto__ as JSON.stringify does, at the top and nested", async () => {
+    // A key typed by a person ("__proto__" in a shared dictionary) set the copy's prototype: storage.set was refused as
+    // too-large, and chat.send and a flat storage.set lost the member without a word.
+    const { host, run, ask } = setup();
+    run();
+    await vi.waitFor(() => expect(host.calls).toContainEqual({ op: "chat.open", ref: REF, linkId: LINK }));
+    peerOpen(host);
+    const nested = JSON.parse('{"words":{"__proto__":{"n":1},"cat":{"n":2}}}') as unknown;
+    const flat = JSON.parse('{"__proto__":5,"b":1}') as unknown;
+    expect(await ask("storage.set", ["dict", nested])).toMatchObject({ ok: true });
+    expect(await ask("storage.set", ["flat", flat])).toMatchObject({ ok: true });
+    expect(await ask("chat.send", [nested])).toMatchObject({ ok: true });
+    const stored = host.stored.get(`${REF} ${LINK}`)!;
+    expect(JSON.stringify(stored.get("dict"))).toBe(JSON.stringify(nested));
+    expect(JSON.stringify(stored.get("flat"))).toBe(JSON.stringify(flat));
+    expect(JSON.stringify(host.sent[host.sent.length - 1]!.data)).toBe(JSON.stringify(nested));
+    // Plain JSON still, with no prototype of the app's anywhere in it.
+    expect(isJsonValue(stored.get("dict"))).toBe(true);
+    expect(Object.getPrototypeOf((stored.get("dict") as { words: object }).words)).toBe(Object.prototype);
+  });
+
   it("refuses chat without the permission, and alone", async () => {
     for (const launch of [{ permissions: [] }, { chat: null }]) {
       const { host, run, ask } = setup(launch);
@@ -323,6 +373,8 @@ it("isJsonValue takes plain JSON only", () => {
 
 it("jsonValueOf writes a value as JSON.stringify does, or refuses it", () => {
   expect(jsonValueOf({ a: 1, b: undefined, c: [undefined, { d: undefined }] })).toEqual({ a: 1, c: [null, {}] });
+  const proto = JSON.parse('{"__proto__":{"x":1},"y":[{"__proto__":2}]}') as unknown;
+  expect(JSON.stringify(jsonValueOf(proto))).toBe(JSON.stringify(proto));
   for (const bad of [Number.POSITIVE_INFINITY, () => 1, new Date(), new Map(), Symbol("x"), 1n, { a: new Uint8Array(1) }]) expect(typeof jsonValueOf(bad)).toBe("symbol");
   let deep: unknown = 1;
   for (let i = 0; i < 100; i++) deep = [deep];

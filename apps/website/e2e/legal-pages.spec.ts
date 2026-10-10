@@ -41,3 +41,24 @@ test("the site sets no cookie and asks no analytics or font service", async ({ p
   const base = new URL(page.url()).host;
   expect([...hosts].filter((h) => h !== base)).toEqual([]);
 });
+
+// The footer's loops (its rising ghosts and its ghost's SMIL hem) rest while the reader is far above it, as on every
+// page with Shell (components/site/IdleLoops.tsx), and run again once it is in view.
+for (const path of ["/terms", "/privacy"]) {
+  test(`${path} rests the footer's loops while the footer is off screen`, async ({ page }) => {
+    await page.goto(path);
+    const footer = page.locator("footer");
+    const loops = footer.locator(".particles, svg.ghost:not(svg svg)");
+    expect(await loops.count()).toBeGreaterThan(0);
+    const resting = () =>
+      footer.evaluate((el) =>
+        [...el.querySelectorAll(".particles, svg.ghost:not(svg svg)")].every(
+          (loop) => loop.hasAttribute("data-offscreen") && (!(loop instanceof SVGSVGElement) || loop.animationsPaused()),
+        ),
+      );
+    await expect.poll(resting).toBe(true);
+    await footer.scrollIntoViewIfNeeded();
+    await expect(loops.first()).not.toHaveAttribute("data-offscreen");
+    await expect.poll(resting).toBe(false);
+  });
+}

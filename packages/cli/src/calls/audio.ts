@@ -1,6 +1,9 @@
 import { FRAME_MS, frameBytes, frameSamples, PlaybackQueue, type CallRate } from "./pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter } from "./rtp";
 
+/** The longest stall of the sender whose frames are still sent after it (see `schedule`). */
+export const MAX_CATCH_UP_MS = 1000;
+
 /** An Opus encoder or decoder at one rate, mono (opusscript's shape). */
 export interface OpusCodec {
   encode(pcm: Buffer, frameSize: number): Buffer;
@@ -50,6 +53,8 @@ export class CallAudio {
   /** Frames sent and received, for `call list`. */
   sent = 0;
   received = 0;
+  /** When the last packet, RTP or RTCP, came from the contact (Date.now(); 0: none yet), for the call's watch. */
+  heardAt = 0;
 
   constructor(private readonly options: CallAudioOptions) {
     const now = options.now ?? Date.now;
@@ -92,7 +97,9 @@ export class CallAudio {
 
   /** Handles one packet from the track. Exposed for tests. */
   receive(packet: Buffer): void {
-    if (this.stopped || isRtcp(packet)) return;
+    if (this.stopped) return;
+    this.heardAt = (this.options.now ?? Date.now)();
+    if (isRtcp(packet)) return;
     const rtp = parseRtp(packet);
     if (!rtp || rtp.payloadType !== this.options.payloadType) return;
     for (const item of this.reorder.push(rtp)) {
@@ -121,9 +128,12 @@ export class CallAudio {
     const due = this.startedAt + (this.ticks + 1) * FRAME_MS;
     this.timer = setTimeout(() => {
       if (this.stopped) return;
-      // After a stall (a busy event loop), frames are not sent in a burst to catch up: the clock starts again.
+      // After a stall (a busy event loop: a journal fsync, a Pkarr publish), the frames that were due go out one per
+      // turn of the loop until the clock is met: what the program wrote meanwhile is read between them, and a program
+      // writing at real time stays as close as before (restarting the clock left the stall in the queue for good).
+      // The contact's jitter buffer takes the short burst. A longer stall is not replayed: the clock starts again.
       const late = now() - due;
-      if (late > 5 * FRAME_MS) { this.startedAt = now(); this.ticks = 0; } else this.ticks++;
+      if (late > MAX_CATCH_UP_MS) { this.startedAt = now(); this.ticks = 0; } else this.ticks++;
       this.tick();
       this.schedule();
     }, Math.max(0, due - now()));

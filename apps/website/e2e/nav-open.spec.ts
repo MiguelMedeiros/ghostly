@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { APPS_RELEASE, versionAtLeast } from "../lib/appsGate";
+import { VERSION } from "../lib/release";
 
 /**
  * The nav (components/site/Nav.tsx): its pages, AI agents among them, and the Open app split button. The main part
@@ -6,10 +8,17 @@ import { expect, test } from "@playwright/test";
  * The chevron is disabled until the page hydrates, so each test waits for it to be enabled before using it.
  */
 
+/**
+ * Apps sits second once the release the build was made for has them (lib/appsGate.ts): a test build reads VERSION, or
+ * GHOSTLY_SITE_RELEASE beside GHOSTLY_STORE_FIXTURE, and the prerendered pages keep what the build saw.
+ */
+const PAGES = ["How it works", "Developers", "Protocol", "Roadmap", "CLI", "AI agents"];
+if (versionAtLeast((process.env.GHOSTLY_STORE_FIXTURE && process.env.GHOSTLY_SITE_RELEASE) || VERSION, APPS_RELEASE)) PAGES.splice(1, 0, "Apps");
+
 test("the nav lists AI agents after the CLI and marks it on its page", async ({ page }) => {
   await page.goto("/developers/agents");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link")).toHaveText(["How it works", "Developers", "Protocol", "Roadmap", "CLI", "AI agents"]);
+  await expect(nav.getByRole("link")).toHaveText(PAGES);
   await expect(nav.getByRole("link", { name: "AI agents" })).toHaveAttribute("aria-current", "page");
   await expect(nav.getByRole("link", { name: "Developers" })).not.toHaveAttribute("aria-current", "page");
 });

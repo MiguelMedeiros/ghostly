@@ -13,11 +13,12 @@
   "clearAllDataDescription": "此个人资料的聊天、身份和设置。钱包保留。",
   "clearAllDataInfo": "清除前，Ghostly 会尽量撤回：为联系人保存的项目、你的 DID、你的身份证明和唤醒推送。你在其他网站发布的证明仍会留在那里。钱包不会被删除：如果也想移除，请先花掉或备份你的 sats。",
   "clearAllDataItems": {
-    "apps": "共享的应用",
+    "appsData": "已安装的应用及其数据",
     "chats": "聊天、消息和文件",
     "groups": "群组",
     "identities": "身份证明、你的 DID 和 Nostr 数据",
     "profile": "你的名字和头像",
+    "services": "共享服务",
     "settings": "设置、锁屏和网络",
     "storage": "S3 存储设置和关闭时唤醒"
   },
@@ -56,6 +57,14 @@
   "defaultNicknameHint": "开始新聊天时使用",
   "deleteAllChatsConfirm": "删除全部 {{count}} 个聊天?",
   "deleteAllChatsHint": "消息和文件会被删除。设置和钱包保留。",
+  "groupDownloads": {
+    "always": "始终",
+    "hint": "语音消息和小文件",
+    "info": "语音消息和不超过 {{file}} 的文件会自动下载，直到此设备上从某个群组自动下载的内容达到 {{group}}。更大的文件等待你点按“下载”。每台设备自行决定，不会向群组发送任何信息。",
+    "off": "关闭",
+    "title": "在群组中自动下载",
+    "wifi": "仅 Wi-Fi"
+  },
   "incorrectPassword": "密码错误",
   "language": "语言",
   "license": "许可证",
@@ -141,6 +150,7 @@
     "colour": "颜色、强调色、主题",
     "deleteChats": "删除、历史记录",
     "domains": "DNS、DoH",
+    "groupDownloads": "自动, 自动下载, 媒体, Wi-Fi, 移动数据, 语音消息, 文件, 群组",
     "language": "翻译、区域",
     "linkPreviews": "链接、URL",
     "lock": "密码、PIN、安全",

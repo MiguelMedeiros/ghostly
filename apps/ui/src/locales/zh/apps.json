@@ -62,7 +62,8 @@
     "storage": "此浏览器无法在这里保存应用（无痕浏览？）。请试试普通窗口。",
     "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。请在普通窗口中打开 Ghostly，并在那里安装应用。",
     "storeKey": "该商店由另一把密钥签名。",
-    "tooLarge": "太大了。"
+    "tooLarge": "太大了。",
+    "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
   },
   "install": {
     "equivocation": "存在两个不同的版本 {{sequence}}。Ghostly 保留了你已有的那个。",
@@ -119,13 +120,16 @@
     "countOne": "1 个应用",
     "curated": "精选",
     "empty": "这个商店没有列出应用。",
+    "filter": "搜索此商店",
     "indexed": "索引",
     "installed": "已安装",
+    "noMatch": "此商店中没有匹配的应用。",
     "notRead": "尚未读取",
     "problem": "上次读取失败。",
     "read": "读取",
     "refresh": "刷新",
     "remove": "移除",
+    "showMore": "显示更多 ({{count}})",
     "stale": "自 {{date}} 起已过期"
   },
   "title": "应用",

@@ -4,9 +4,10 @@ on:
   push:
     # dev: where features land (main holds what is released; see .github/CONTRIBUTING.md).
     # claude/security-auto-*: the security routine's fixes; see security-autorelease.yml.
-    branches: [main, master, dev, "claude/security-auto-**"]
+    # epic/*: a large feature's integration branch; its slices merge there before one umbrella PR into dev.
+    branches: [main, master, dev, "claude/security-auto-**", "epic/**"]
   pull_request:
-    branches: [main, master, dev]
+    branches: [main, master, dev, "epic/**"]
     # ready_for_review: a draft runs the fast tier only (see `changes`); leaving draft runs everything.
     # Whether the pull request is a draft is read from the API when `changes` runs, never from the event: a push and
     # `gh pr ready` a second apart start two runs, the later one cancels the other, and the survivor may be the push's
@@ -23,11 +24,14 @@ permissions:
 
 # A new push to a pull request cancels the run it supersedes. A merge queue entry groups by its ref
 # (gh-readonly-queue/dev/pr-<n>-<base sha>), which no other entry shares, so entries never cancel each other: a queue
-# that drops an entry builds the ones behind it again on new refs. Anything else (pushes to dev and main, which gate
-# merges and the security autorelease) gets a group of its own: sharing one by ref would still cancel a queued run
-# whenever a third arrives, even without cancel-in-progress.
+# that drops an entry builds the ones behind it again on new refs. Pushes to dev share one group without
+# cancel-in-progress: the merge train lands a green batch as one squash merge per pull request, a push each, seconds
+# apart, and each would run all of CI. GitHub keeps the run in progress and the newest waiting one, and cancels the
+# waiting ones in between (commits the batch already tested; the tip always gets its run). Anything else (pushes to
+# main, epics and the security routine's branches, which gate merges and the security autorelease) gets a group of its
+# own: sharing one by ref would cancel a queued run whenever a third arrives, even without cancel-in-progress.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'push-dev' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -599,6 +603,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.website == 'true'
     runs-on: ubuntu-24.04
+    # The /apps pages read the committed test store, not GitHub (scripts/sync-store.mjs).
+    env:
+      GHOSTLY_STORE_FIXTURE: "1"
     defaults:
       run:
         working-directory: apps/website
@@ -632,6 +639,10 @@ jobs:
       - name: App deck copies match the app
         run: node scripts/sync-app-deck.mjs --check
 
+      # The /apps pages check the store with core's own readers, copied (scripts/sync-store-core.mjs).
+      - name: Store reader copies match core
+        run: node scripts/sync-store-core.mjs --check
+
       - name: ESLint
         run: npm run lint
 
@@ -651,6 +662,9 @@ jobs:
     if: needs.changes.outputs.website_e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # The /apps pages read the committed test store, not GitHub (scripts/sync-store.mjs).
+    env:
+      GHOSTLY_STORE_FIXTURE: "1"
     strategy:
       fail-fast: false
       matrix:

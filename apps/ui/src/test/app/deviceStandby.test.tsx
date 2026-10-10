@@ -9,7 +9,7 @@ import { Root } from "../../Root";
 import { DeviceStandby } from "../../components/DeviceStandby";
 import { desktopDeviceMirror } from "../../desktop/deviceMirror";
 import { createProfile, lastRouteOf, switchProfile } from "../../lib/profiles";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 

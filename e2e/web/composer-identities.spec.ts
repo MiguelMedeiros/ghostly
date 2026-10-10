@@ -119,10 +119,12 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await expect(cardOf(theirs)).toBeFocused();
   await expect.poll(() => moved(theirs)).not.toBe("none");
   await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
-  // Bob hears the card come in, then its check once his app verified it, each once; Alice turned cards over and moved
-  // along the deck without a sound (Interface sounds are off by default).
+  // Bob hears the card come in, once, and its check once his app verified it, unless that came within a second of the
+  // card: sounds never overlap (apps/ui/src/lib/soundGate.ts), and the card's was first. Alice turned cards over and
+  // moved along the deck without a sound (Interface sounds are off by default).
   await expect.poll(() => heard(bob, NOTE.shared)).toBe(1);
-  await expect.poll(() => heard(bob, NOTE.checked)).toBe(1);
+  expect(await heard(bob, NOTE.checked)).toBeLessThanOrEqual(1);
+  const identitySounds = await heard(bob, NOTE.shared, NOTE.checked);
   expect(await heard(alice, NOTE.shared, NOTE.checked)).toBe(0);
   for (const p of [alice, bob]) expect(await heard(p, ...INTERFACE_NOTES)).toBe(0);
   // Bob's card is a button: it opens Alice's identities on that card.
@@ -139,7 +141,7 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await expect(faceOf(theirs)).toHaveAttribute("data-status", "verified");
   await expect(faceOf(theirs).getByTestId("identity-proof-subject")).toContainText("npub1");
   // Nor are their sounds.
-  expect(await heard(bob, NOTE.shared, NOTE.checked)).toBe(2);
+  expect(await heard(bob, NOTE.shared, NOTE.checked)).toBe(identitySounds);
   // Alice's card is a button too: it opens the composer's picker on that card, where hers are shared.
   await cardOf(mine).click();
   await expect(picker).toBeVisible();

@@ -7,7 +7,7 @@
 > - Web app and extension: Iroh relay-only, on by default through n0's relays (#225); HyperDHT only through a HyperDHT relay the person sets (#231). A web chat reaches a Desktop over relayed Iroh (#270).
 > - First contact: native descriptors travel in the layer-0 capability record, so two Desktop apps go live on Iroh or HyperDHT with no WebRTC first (#209, #229, #235, #244).
 > - Desktop reads the Mainline DHT directly (#289).
-> - Files, payments and shared apps run on every transport; calls signal on the session and carry media on a WebRTC connection of their own (#207).
+> - Files, payments and shared services run on every transport; calls signal on the session and carry media on a WebRTC connection of their own (#207).
 >
 > The sections below describe the 2026-09-20 increment; where they say otherwise, this note wins.
 
@@ -24,7 +24,7 @@ Each adapter gets a separate random, persistent seed per conversation, distinct 
 ## Real transport bindings
 
 - **Iroh 1.2.0:** native Rust endpoint, ALPN `ghostly/paired-chat/1`, one bidirectional QUIC application stream. The adapter obtains both actual endpoint IDs and a 32-byte TLS exporter using label `EXPORTER-Ghostly-paired-chat-v1` and the ALPN bytes as context. Endpoint IDs are sorted in the transcript. The exporter differs on reconnect and agrees on both sides of one connection. [Upstream Connection API](https://docs.rs/iroh/1.2.0/iroh/endpoint/struct.Connection.html).
-- **HyperDHT 6.34.0:** native UDP discovery/hole punching and NoiseSecretStream. The adapter obtains the stream's actual local/remote public keys and its 64-byte `handshakeHash`; it does not accept a hash supplied by an application message. [Upstream HyperDHT API](https://github.com/holepunchto/hyperdht#serveronconnection-socket).
+- **HyperDHT 6.34.1:** native UDP discovery/hole punching and NoiseSecretStream. The adapter obtains the stream's actual local/remote public keys and its 64-byte `handshakeHash`; it does not accept a hash supplied by an application message. [Upstream HyperDHT API](https://github.com/holepunchto/hyperdht#serveronconnection-socket).
 - Existing WebRTC continues to bind the actual DTLS fingerprints. Native adapters do not fabricate DTLS fingerprints or reuse them as native channel bindings.
 
 For native sessions the canonical signed transcript uses `[transportId, sortedEndpointIds, connectionContextHex]` in the binding slot, and the actual selected transport in the selection tuple. Both ordered offers, fresh nonces, rendezvous keys and `chat/1` remain signed. Participation pins are checked before application messages. A proof from another channel, endpoint, transport or rendezvous does not verify.
@@ -85,4 +85,4 @@ Manual validation in two separate Tauri bundles used the public default infrastr
 
 ## Deliberate limits
 
-This increment exposed only paired text chat on these adapters; files, payments, shared apps and call signals followed (note above). External proofs and groups are not part of this profile. Existing legacy features remain separate. Bootstrap credentials are still retained; signed discovery and pinned participation prevent invite reuse from impersonating the paired participant but do not prevent DHT suppression or erase old records. Receipts mean remote local persistence; device loss and deleted history limit deduplication. No distributed exactly-once, global revocation, erasure, independent crypto audit or uninterrupted hot migration is claimed.
+This increment exposed only paired text chat on these adapters; files, payments, shared services and call signals followed (note above). External proofs and groups are not part of this profile. Existing legacy features remain separate. Bootstrap credentials are still retained; signed discovery and pinned participation prevent invite reuse from impersonating the paired participant but do not prevent DHT suppression or erase old records. Receipts mean remote local persistence; device loss and deleted history limit deduplication. No distributed exactly-once, global revocation, erasure, independent crypto audit or uninterrupted hot migration is claimed.

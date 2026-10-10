@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-system-bars"
+description = "Enables the system_bars command without any pre-configured scope."
+commands.allow = ["system_bars"]
+
+[[permission]]
+identifier = "deny-system-bars"
+description = "Denies the system_bars command without any pre-configured scope."
+commands.deny = ["system_bars"]

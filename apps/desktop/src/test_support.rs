@@ -275,3 +275,97 @@ pub fn pkarr_client(relay: &Relay) -> pkarr::Client {
     builder.relays(&[relay.url.as_str()]).unwrap();
     builder.build().unwrap()
 }
+
+/// A page that starts two downloads with no click: links with `download` to data it made, clicked from
+/// script. It asks for `/done` once both were started.
+#[cfg(target_os = "linux")]
+const DOWNLOADING_PAGE: &str = r#"<!doctype html><meta charset=utf-8><title>Atlas</title><script>
+["ghostly-probe.txt", "ghostly-probe.desktop"].forEach((name, i) => setTimeout(() => {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob(["probe"], { type: "application/octet-stream" }));
+  link.download = name;
+  document.documentElement.append(link);
+  link.click();
+}, i * 400));
+setTimeout(() => { fetch("/done"); }, 800);
+</script>"#;
+
+/// The files the downloading page left on disk from a window `open` makes on `scheme`, in the real app on
+/// WebKitGTK (the mock runtime has no downloads). The home folder, and with it Downloads, is a scratch one.
+/// GTK belongs to one thread and the folders are read once, so a test that calls this needs a display and a
+/// process of its own: `xvfb-run -a cargo test --manifest-path apps/desktop/Cargo.toml -- --ignored --exact <test>`.
+#[cfg(target_os = "linux")]
+pub fn saved_by_a_window(
+    scheme: &'static str,
+    state: impl FnOnce(tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry>,
+    open: impl FnOnce(&tauri::AppHandle),
+) -> Vec<String> {
+    let home = std::env::temp_dir().join(format!("ghostly-downloads-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".config")).unwrap();
+    std::fs::create_dir_all(home.join("Downloads")).unwrap();
+    std::fs::write(
+        home.join(".config/user-dirs.dirs"),
+        "XDG_DOWNLOAD_DIR=\"$HOME/Downloads\"\n",
+    )
+    .unwrap();
+    std::env::set_var("HOME", &home);
+    for (name, folder) in [
+        ("XDG_CONFIG_HOME", ".config"),
+        ("XDG_DATA_HOME", ".local/share"),
+        ("XDG_CACHE_HOME", ".cache"),
+    ] {
+        std::env::set_var(name, home.join(folder));
+    }
+
+    let asked = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = asked.clone();
+    let builder = tauri::Builder::default()
+        .any_thread()
+        .register_uri_scheme_protocol(scheme, move |_, request| {
+            seen.lock().unwrap().push(request.uri().path().to_string());
+            tauri::http::Response::builder()
+                .header("content-type", "text/html; charset=utf-8")
+                .body(DOWNLOADING_PAGE.as_bytes().to_vec())
+                .unwrap()
+        });
+    let app = state(builder)
+        .build(tauri::generate_context!(test = true))
+        .expect("app");
+    open(app.handle());
+
+    // Long enough after the last one was started for a file of five bytes to be written.
+    let handle = app.handle().clone();
+    let watched = asked.clone();
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let done = || watched.lock().unwrap().iter().any(|path| path == "/done");
+        while !done() && started.elapsed() < std::time::Duration::from_secs(60) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        handle.exit(0);
+    });
+    app.run_return(|_, _| {});
+
+    let asked = asked.lock().unwrap().clone();
+    assert!(
+        asked.iter().any(|path| path == "/done"),
+        "the page never ran: {asked:?}"
+    );
+    let mut saved = Vec::new();
+    let mut folders = vec![home.clone()];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if entry.path().is_dir() {
+                folders.push(entry.path());
+            } else if name.contains("ghostly-probe") {
+                saved.push(name);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&home);
+    saved.sort();
+    saved
+}

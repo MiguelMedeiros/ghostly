@@ -63,8 +63,8 @@ export function WhyButton({ open, onToggle, controls, testId, danger = false }: 
   );
 }
 
-/** The reason under a status, once its ⓘ is open. */
-export function WhyText({ id, testId, children }: { id: string; testId: string; children: ReactNode }) {
-  return <p id={id} data-testid={testId} className="m-0 mt-1 px-1 text-[11.5px] leading-snug text-text-primary/80 wrap-break-word">{children}</p>;
+/** The reason under a status, once its ⓘ is open. `english`: an error's own words, laid out and read as English. */
+export function WhyText({ id, testId, english = false, children }: { id: string; testId: string; english?: boolean; children: ReactNode }) {
+  return <p id={id} data-testid={testId} {...(english && { dir: "ltr", lang: "en" })} className="m-0 mt-1 px-1 text-[11.5px] leading-snug text-text-primary/80 wrap-break-word">{children}</p>;
 }
 

@@ -1,4 +1,4 @@
-import groovy.json.JsonSlurper
+import java.security.MessageDigest
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -19,16 +19,27 @@ android {
     compileSdk = 37
     namespace = "tools.ghostly.app"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "tools.ghostly.app"
         minSdk = 26
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    // A release build is signed with the upload key when ANDROID_KEYSTORE names a keystore file (CI's android.yml
+    // sets it from the repository's secrets; docs/ANDROID.md); without it, the release APK comes out unsigned.
+    val uploadKeystore = providers.environmentVariable("ANDROID_KEYSTORE").orNull?.takeIf { it.isNotEmpty() }
+    signingConfigs {
+        if (uploadKeystore != null) {
+            create("upload") {
+                storeFile = file(uploadKeystore)
+                storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+                keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+                keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
@@ -40,6 +51,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfigs.findByName("upload")?.let { signingConfig = it }
             optimization {
                enable = true
             }
@@ -70,25 +82,54 @@ rust {
     rootDirRel = "../../../"
 }
 
-// HTTPS from Rust checks certificates with Android's own verifier (rustls-platform-verifier). Its Kotlin half ships
-// inside the crate as a Maven folder, found through `cargo metadata` (the crate's own instructions); the app takes
-// the .aar in it as a file.
-val rustlsPlatformVerifierMaven: String = run {
-    val metadata = providers.exec {
-        workingDir = file("../../..")
-        commandLine(
-            "cargo", "metadata", "--format-version", "1",
-            "--filter-platform", "aarch64-linux-android", "--manifest-path", "Cargo.toml",
-        )
-    }.standardOutput.asText.get()
-    @Suppress("UNCHECKED_CAST")
-    val packages = (JsonSlurper().parseText(metadata) as Map<String, Any>)["packages"] as List<Map<String, Any>>
-    val manifest = packages.first { it["name"] == "rustls-platform-verifier-android" }["manifest_path"] as String
-    File(File(manifest).parentFile, "maven").path
+// HTTPS from Rust checks certificates with Android's own verifier (rustls-platform-verifier). Its Kotlin half is an
+// .aar in a Maven repository the crate's authors serve from a git branch (the crate's own instructions), at the
+// version Cargo.lock gives the `rustls-platform-verifier-android` crate. Cargo.lock's checksum does not cover that
+// file and a branch can change, so its SHA-256 is pinned here and checked before anything is built: a new version of
+// the crate needs the new .aar read and its hash put here.
+val rustlsPlatformVerifierSha256 = "aa021794230fbc2f0be355999e2cf67398dd563de066a2e17001ffbd0b69101b" // 0.2.0
+val rustlsPlatformVerifierVersion: String = run {
+    val lines = providers.fileContents(layout.projectDirectory.file("../../../../../Cargo.lock")).asText.get().lines()
+    val name = lines.indexOfFirst { it.trim() == "name = \"rustls-platform-verifier-android\"" }
+    check(name >= 0) { "rustls-platform-verifier-android is not in Cargo.lock" }
+    lines.drop(name + 1).first { it.startsWith("version = ") }.substringAfter('"').substringBefore('"')
+}
+val rustlsPlatformVerifierAar = "org.rustls:rustls-platform-verifier:$rustlsPlatformVerifierVersion@aar"
+
+repositories {
+    // Only this module comes from there, and from nowhere else.
+    exclusiveContent {
+        forRepository {
+            maven {
+                url = uri("https://github.com/rustls/rustls-platform-verifier/raw/maven-archive/android-release-support/maven/")
+            }
+        }
+        filter { includeModule("org.rustls", "rustls-platform-verifier") }
+    }
 }
 
+// The same file the app links: Gradle keeps one copy of a module's artifact.
+val rustlsPlatformVerifierPinned = configurations.detachedConfiguration(dependencies.create(rustlsPlatformVerifierAar))
+val verifyRustlsPlatformVerifier = tasks.register("verifyRustlsPlatformVerifier") {
+    val aar = files(rustlsPlatformVerifierPinned)
+    val expected = rustlsPlatformVerifierSha256
+    inputs.files(aar)
+    inputs.property("sha256", expected)
+    doLast {
+        val file = aar.singleFile
+        val actual = MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+        if (actual != expected) {
+            throw GradleException(
+                "${file.name} has SHA-256 $actual, and app/build.gradle.kts pins $expected: " +
+                    "read the new .aar before its hash goes there."
+            )
+        }
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(verifyRustlsPlatformVerifier) }
+
 dependencies {
-    implementation(fileTree(rustlsPlatformVerifierMaven) { include("**/*.aar") })
+    implementation(rustlsPlatformVerifierAar)
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")

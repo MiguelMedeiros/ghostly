@@ -230,7 +230,7 @@ describe("adding a device", () => {
   it("the joiner calls itself as the person named it, cut to 16 bytes at a whole character", async () => {
     const a = inviter(), b = joiner({ name: "Miguel's phone 📱📱" });
     await toDigits(a, b);
-    expect(a.current()).toMatchObject({ device: "Miguel's phone " });
+    expect(a.current()).toMatchObject({ device: "Miguel's phone" });
   });
 });
 

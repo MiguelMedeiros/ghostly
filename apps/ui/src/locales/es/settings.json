@@ -13,11 +13,12 @@
   "clearAllDataDescription": "Chats, identidades y ajustes de este perfil. Las billeteras se quedan.",
   "clearAllDataInfo": "Antes de borrar, Ghostly retira lo que puede: elementos guardados para contactos, tu DID, tus pruebas de identidad y el despertar. Las pruebas que publicaste en otros sitios siguen allí. Las billeteras no se borran: gasta o respalda tus sats antes si también quieres que desaparezcan.",
   "clearAllDataItems": {
-    "apps": "Apps compartidas",
+    "appsData": "Apps instaladas y sus datos",
     "chats": "Chats, mensajes y archivos",
     "groups": "Grupos",
     "identities": "Pruebas de identidad, tu DID y datos de Nostr",
     "profile": "Tu nombre y tu foto",
+    "services": "Servicios compartidos",
     "settings": "Ajustes, pantalla de bloqueo y red",
     "storage": "Ajustes de S3 y despertar con la app cerrada"
   },
@@ -56,6 +57,14 @@
   "defaultNicknameHint": "Se usa al iniciar un chat nuevo",
   "deleteAllChatsConfirm": "¿Eliminar los {{count}} chats?",
   "deleteAllChatsHint": "Se borran mensajes y archivos. Ajustes y billeteras se quedan.",
+  "groupDownloads": {
+    "always": "Siempre",
+    "hint": "Mensajes de voz y archivos pequeños",
+    "info": "Los mensajes de voz, y los archivos de hasta {{file}}, se descargan solos hasta que lo que llegó así de un grupo sume {{group}} en este dispositivo. Los archivos más grandes esperan a Descargar. Cada dispositivo decide por sí mismo; nada de esto se envía al grupo.",
+    "off": "Desactivado",
+    "title": "Descargar automáticamente en grupos",
+    "wifi": "Solo con Wi-Fi"
+  },
   "incorrectPassword": "Contraseña incorrecta",
   "language": "Idioma",
   "license": "Licencia",
@@ -141,6 +150,7 @@
     "colour": "color, acento, tema",
     "deleteChats": "borrar, historial",
     "domains": "DNS, DoH",
+    "groupDownloads": "automático, descarga automática, multimedia, Wi-Fi, datos móviles, mensajes de voz, archivos, grupos",
     "language": "traducción, configuración regional",
     "linkPreviews": "enlaces, URL",
     "lock": "contraseña, PIN, seguridad",

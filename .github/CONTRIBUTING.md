@@ -55,7 +55,7 @@ Releases: [docs/RELEASING.md](../docs/RELEASING.md).
 | `npm run test:ui` | only the UI's component tests ([apps/ui/src/test/README.md](../apps/ui/src/test/README.md)) |
 | `npm run test:map` | every feature in `e2e/features.json` has a test, and the file is sorted (`-- --fix` sorts it) |
 | `npm run locales:sort` | sorts the keys of every locale file |
-| `node tools/scripts/changes.mjs` | checks the changelog entries in `docs/changelog/unreleased/` (`--preview` prints the release notes they make) |
+| `node tools/scripts/changes.mjs` | checks the changelog entries in `docs/changelog/unreleased/` (`--preview [<version>]` prints the release notes they make) |
 | `npm run test:e2e` | end-to-end: real browsers, the web app and the extension ([e2e/README.md](../e2e/README.md)) |
 | `npm run e2e:full` | end-to-end with the gated suites, on a local Docker stack of regtest services |
 | `npm run build && npm run check:desktop-bundle` | Desktop got its Desktop wiring, not a browser stand-in (seconds, runs anywhere) |
@@ -111,7 +111,7 @@ This is the maintainer's flow. Outside pull requests are closed: [open an issue]
    npm run test:affected -- --port 50310   # unit, lint, typecheck, Rust, and the e2e tagged with the features you touched
    ```
 4. Open the pull request against `dev`. A draft early is fine: on every push it runs CI's fast tier (lint, types, the unit tests the change reaches; see [docs/TESTING.md](../docs/TESTING.md#what-ci-runs)). Mark it ready when it is done, which runs everything.
-5. **CI Success** is the one required check on `dev`, and the branch must be up to date with `dev` to merge. When `dev` moves, rebase and push again. Pull requests are squash-merged; with auto-merge on (`gh pr merge --squash --auto`), a green, up-to-date branch merges by itself.
+5. **CI Success** is the one required check on `dev`. Pull requests land through the [merge train](../docs/TESTING.md#the-merge-queue): once a pull request is reviewed and green, the reviewer adds the label `queue`, and the train merges it with the others in line, in the order they were queued, as one squashed commit each. Don't arm auto-merge or merge by hand, and don't rebase just to catch up with `dev`. If the train takes it out of line (`queue:conflict`, `queue:failed`, or a push after it was queued), fix it (a conflict: rebase onto `dev`, or merge `dev` in), and add `queue` again once it is reviewed and green.
 
 CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop checks on every pull request ([What CI runs](../docs/TESTING.md#what-ci-runs)). The app's e2e suites run before every release and nightly, not on pull requests, so run the specs your change touches yourself (`npm run test:affected -- --port <n>` picks them). Run the whole suites only to reproduce a CI failure.
 

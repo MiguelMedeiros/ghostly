@@ -59,8 +59,7 @@ test("the Desktop's WKWebView keeps a non-extractable Ed25519 device signing key
   expect(await inApp(desktop, DEVICE_KEY_SCRIPTS.stored(PROFILE))).toEqual({ kind: "webcrypto", hasSeed: false, isCryptoKey: true, extractable: false, exported: [], wrapped: false });
 
   // The page reloads: the key is read from storage and signs.
-  await desktop.app.execute(`location.reload();`);
-  await expect.poll(async () => { try { return await desktop!.app.execute<string>(`return document.readyState;`); } catch { return "reloading"; } }, { timeout: 30_000 }).toBe("complete");
+  await desktop.app.reload();
   const reloaded = (await inApp<DeviceKeyAnswer | null>(desktop, DEVICE_KEY_SCRIPTS.use(PROFILE, false)))!;
   expect(reloaded).toMatchObject({ kind: "webcrypto", publicKey: made.publicKey });
   expect(verified(reloaded)).toBe(true);

@@ -196,11 +196,19 @@ export class DhtDelivery {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** The first control envelope of a start that waits (`firstControlAfterMs`). */
   private controlTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A new capability revision to name once the publication spacing allows (`announce`). */
+  private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
   /** The sequence of the last envelope of the contact that was past its expiry (traced once). */
   private expiredSeen = 0;
   private controlDue = 0;
+  /**
+   * This side's envelope in the invite's mailbox is sealed with the invite key alone (published before the pin). Once the
+   * contact is pinned, one sealed to it replaces it as soon as the publication spacing allows (`resealDue`): another
+   * holder of the invite reads there that it was taken (`sealedToAnother`), instead of pinning this side on it.
+   */
+  private unsealedOut: boolean;
   /** Until when the relays' request budget holds publications back: what is due then goes at once. */
   private budgetUntil = 0;
   private errors: Partial<Record<"publish" | "read", string>> = {};
@@ -254,6 +262,7 @@ export class DhtDelivery {
     // holding the invite could forge: it is dropped, not honoured.
     const { peerRejected: _peerRejected, ...state } = structuredClone(options.state ?? emptyDhtDeliveryState()) as DhtDeliveryState & { peerRejected?: boolean };
     this.state = state; this.mode = options.mode;
+    this.unsealedOut = state.sequence > 0 && !options.credentials.peerKey;
     this.from = identityFromSeedB64(options.params.seedB64).pubKeyZ32; this.to = options.params.peerPubKeyZ32;
     this.participation = identityFromSeedB64(options.credentials.seedB64);
     const secret = fromBase64Url(options.params.encKeyB64);
@@ -265,7 +274,7 @@ export class DhtDelivery {
   }
   get view(): DhtDeliveryView {
     return { mode: this.mode, peerMode: this.state.peerMode, authenticated: !!this.options.credentials.peerKey,
-      error: Object.values(this.errors).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES,
+      error: [this.errors.read, this.errors.publish].filter(Boolean).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES,
       ...(this.lastPublished && { lastPublished: this.lastPublished }), ...(this.foreignKeySeenAt && { foreignKeySeenAt: this.foreignKeySeenAt }),
       ...(this.state.inviteTaken && { inviteTaken: true }) };
   }
@@ -347,7 +356,8 @@ export class DhtDelivery {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     if (this.controlTimer) clearTimeout(this.controlTimer);
-    this.timer = this.controlTimer = null;
+    if (this.announceTimer) clearTimeout(this.announceTimer);
+    this.timer = this.controlTimer = this.announceTimer = null;
     await this.chain;
   }
   async setMode(mode: DeliveryMode): Promise<void> {
@@ -525,6 +535,14 @@ export class DhtDelivery {
       // Every publication spends a relay request: none when the last envelope named this revision already.
       const rev = this.options.capsRev?.();
       if (rev === undefined || rev === this.namedRev) return;
+      // An envelope went out a moment ago (a first contact's, as the link's transports are still coming up): this one
+      // waits out the publication spacing and names the newest revision then, or none if the chat went live meanwhile
+      // (a live session carries the news itself).
+      const wait = this.lastPublish + 4_000 - Date.now();
+      if (wait > 0) {
+        this.announceTimer ??= setTimeout(() => { this.announceTimer = null; if (!this.live) void this.announce(); }, wait);
+        return;
+      }
       try { await this.publish(true); } catch { /* The next envelope names it. */ }
     });
   }
@@ -583,7 +601,8 @@ export class DhtDelivery {
     // A receipt forces an envelope of its own only while the contact still asks for it, and with a text's backoff: the
     // envelope stays in the mailbox until the next one, and every publication spends a request on each relay.
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
-    if (!force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && this.controlDue > now) return;
+    const reseal = this.resealDue;
+    if (!force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal && this.controlDue > now) return;
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
@@ -593,7 +612,8 @@ export class DhtDelivery {
     // to say those were taken (the engine announces the rest then).
     this.reactionsDue = !reactions && !!this.options.reactions?.().length;
     // In the pinned mailbox once the contact said it reads there; until then where an older app looks.
-    const identity = (this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
+    // The one that replaces an unsealed envelope goes where that lies.
+    const identity = (!reseal && this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
     // Persist sequence and attempt count first. A crash cannot reuse them or
     // reset the retransmission budget/absolute message deadline.
     await this.persist({ ...this.state, sequence: body[1], pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + backoff(pending.attempts) } : this.state.pending,
@@ -609,8 +629,11 @@ export class DhtDelivery {
       throw error;
     }
     this.namedRev = body[8] ?? undefined;
+    if (identity === this.identity) this.unsealedOut = !this.options.credentials.peerKey;
     delete this.errors.publish; this.changed();
   }
+  /** The contact is pinned and this side's envelope in the invite's mailbox is still unsealed (`unsealedOut`). */
+  private get resealDue(): boolean { return this.unsealedOut && !!this.options.credentials.peerKey; }
   /**
    * The relays' request budget held the envelope back: nothing went out, so it was no attempt (a text keeps its eight),
    * and what it carried (a text, a receipt, a new mode) goes the moment the budget frees a request: the text and the
@@ -811,20 +834,27 @@ export class DhtDelivery {
       this.urgent = false; if (signal) this.signalReads--;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
       // One that started before the network came back failed for want of it (`networkBack`): the read after it says.
+      // An inviter's first envelope, before anyone is pinned, goes before the read: the joiner dials only once it read it, and
+      // the read (2 s on the DHT for a key nobody wrote yet) can add nothing to it. Every other envelope follows the read,
+      // which may pin the contact (the envelope is sealed to it) or take a text (it carries the receipt).
+      if (!this.options.credentials.peerKey && !this.options.credentials.expectedPeerKey && !this.state.sequence) await this.publishOnTick();
       const readAt = Date.now();
       try { await this.read(background, signal); if (!this.running) return; delete this.errors.read; }
       catch (error) { if (!isDiscoveryBudgetError(error) && readAt >= this.networkBackAt) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       // The contact says it left DHT only: nothing waits on its mailbox any more.
       if (this.state.peerMode !== "dht") this.signalReads = 0;
-      const publishAt = Date.now();
-      try { await this.publish(); }
-      catch (error) { if (!isDiscoveryBudgetError(error) && publishAt >= this.networkBackAt) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      await this.publishOnTick();
       this.changed();
     });
     } finally { this.ticking = false; }
     if (!this.running) return;
     if (this.tickAgain) { void this.tick(); return; }
     this.schedule();
+  }
+  private async publishOnTick(): Promise<void> {
+    const publishAt = Date.now();
+    try { await this.publish(); }
+    catch (error) { if (!isDiscoveryBudgetError(error) && publishAt >= this.networkBackAt) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
   }
   /** How long until the next read of the contact's mailbox (WISP 403, poll pace). */
   get pollMs(): number {
@@ -842,7 +872,9 @@ export class DhtDelivery {
     // A publication the budget held back goes when the budget frees a request, if that comes before the next read.
     const held = this.budgetUntil - Date.now();
     // Reactions to carry, or to say taken, go once the publication spacing allows, not at the next read.
-    const due = this.reactionsDue ? Math.max(0, this.lastPublish + 4_000 - Date.now()) : Infinity;
+    // So does the envelope sealed to a contact just pinned (`resealDue`), live too, where the next read is minutes away;
+    // after a failed one, at the chat's pace, and never before the budget frees a request.
+    const due = this.reactionsDue || (this.resealDue && !this.errors.publish) ? Math.max(0, this.lastPublish + 4_000 - Date.now(), held) : Infinity;
     this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due));
   }
 }

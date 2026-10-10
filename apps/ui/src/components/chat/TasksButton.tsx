@@ -307,21 +307,32 @@ function TasksPanel({ entries, nameOf, faceOf, anchorRef, onClose, onJump }: {
  * beside it, so a bot is known at a glance. The panel is then one section per sender (a bot each, in a
  * group like "Sala de Máquinas"), those with the most tasks going first, each saying how many it has going.
  */
-export function TasksButton({ rows, nameOf, faceOf }: {
+export function TasksButton({ rows, nameOf, faceOf, open: openGiven, onOpenChange }: {
   rows: readonly CardRow[]; nameOf?: (author: string) => string; faceOf?: (author: string) => MemberFaceOf | undefined;
+  /** The panel's state kept by the header, when something else there opens it too (the working line); else its own. */
+  open?: boolean; onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [openOwn, setOpenOwn] = useState(false);
+  const open = openGiven ?? openOwn, setOpen = onOpenChange ?? setOpenOwn;
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const entries = useMemo(() => cardEntries(rows), [rows]);
+  // What opened the panel, when it is not the button: the header's other control that opens it (the working line), in
+  // focus as it opens. Read before the panel takes the focus (its own effect, after this one).
+  const opener = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const at = open ? document.activeElement : null;
+    opener.current = at instanceof HTMLElement && at.matches("[aria-haspopup=dialog]") ? at : null;
+  }, [open]);
   if (!entries.length) return null;
   const active = activeTaskCount(entries);
   const close = () => {
-    // Back to the button, unless a tap outside put the focus somewhere else.
+    // Back to what opened it (the button, when that is gone), unless a tap outside put the focus somewhere else.
     const at = document.activeElement;
+    const back = opener.current?.isConnected ? opener.current : button.current;
     setOpen(false);
-    if (!at || at === document.body || at.closest("[data-testid=chat-tasks-panel]")) button.current?.focus({ preventScroll: true });
+    if (!at || at === document.body || at.closest("[data-testid=chat-tasks-panel]")) back?.focus({ preventScroll: true });
   };
   const jump = ({ messageId }: CardEntry) => {
     setOpen(false);

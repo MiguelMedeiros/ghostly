@@ -3,7 +3,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { describe, expect, it } from "vitest";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_PREFIXES, appDigest, buildAppBundle, canonicalJsonBytes, fromBase64Url, isAppLicense, isAppPath,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_PREFIXES, appDigest, buildAppBundle, canonicalJsonBytes, checkAppManifest, fromBase64Url, isAppLicense, isAppPath,
   isAppUrl, readAppBundle, toBase64Url, utf8Encode, type AppBundleRefusal, type AppManifest,
 } from "../src/index";
 import {
@@ -117,7 +117,27 @@ async function build(): Promise<Vectors> {
 
   // Keys.
   no("format version 2", "unsupported-format", "A later format raises ghostlyApp", await hand({ ghostlyApp: 2 }));
-  no("an unknown key", "unknown-key", "`category` is a store's field, not a manifest's", await hand({ category: "games" }));
+  // A key this format does not define is a later format's optional field: a reader ignores it, and the signature still
+  // covers it (a writer refuses it: buildAppBundle and `ghostly app publish` are strict).
+  addValid("a key from a later format, ignored by the reader", await hand({ category: "games", later: { anything: [1, "two"] } }));
+  addValid("a later key in runtime, ignored by the reader", await hand({ runtime: { clients: ["web"], host: ">=1.2", later: "tv" } }));
+  addValid("a later client name in runtime, ignored by the reader", await hand({ runtime: { clients: ["web", "android"], host: ">=1.2" } }));
+  no("a client name that is not a name", "bad-field", "runtime is advisory, but a client is a lowercase name of at most 32 characters", await hand({ runtime: { clients: ["Web TV"], host: ">=1.2" } }));
+  no("17 clients", "bad-field", "At most 16 clients", await hand({ runtime: { clients: Array.from({ length: 17 }, (_, i) => `client-${i}`), host: ">=1.2" } }));
+  // Kept by a reader that ignores them, these would name an object's prototype when spread: refused in every mode.
+  no("a __proto__ key", "unknown-key", "Never a manifest's key, in any format", await hand(JSON.parse("{\"__proto__\":{\"polluted\":true}}") as Record<string, unknown>));
+  no("a constructor key in runtime", "unknown-key", "Never a key, in runtime either", await hand({ runtime: { clients: ["web"], host: ">=1.2", constructor: 1 } }));
+  no("a __proto__ key two levels inside a later key", "unknown-key", "At any level, in a value the reader ignores too", await hand({ later: { a: JSON.parse("{\"__proto__\":{\"polluted\":true}}") as unknown } }));
+  no("a constructor key two levels inside a later key", "unknown-key", "At any level, in a value the reader ignores too", await hand({ later: { a: { constructor: 1 } } }));
+  const later = await hand({ later: "a" });
+  const laterAt = new TextDecoder().decode(later).indexOf("\"later\":\"a\"") + "\"later\":\"".length;
+  const laterChanged = new Uint8Array(later);
+  laterChanged[laterAt] = 0x62;
+  no("a later key changed after signing", "bad-signature", "An ignored key is still covered by the signature", laterChanged);
+  no("a later key beside a missing required one", "missing-key", "Ignoring a later key never excuses a required one", await handBundle({ ...(({ title: _t, ...rest }) => rest)(DRAFT), later: 1 }, [ENTRY]));
+  no("a later key beside a field out of bounds", "bad-field", "Required keys keep their bounds", await hand({ later: 1, title: "" }));
+  no("a later key in a file entry", "bad-field", "A file is exactly {path, size, sha256}: they lay out the bundle's bytes", await hand({ files: [{ path: ENTRY.path, size: ENTRY.bytes.length, sha256: toBase64Url(sha256(ENTRY.bytes)), mode: 1 }] }, [ENTRY]));
+  no("a runtime that is not an object", "bad-field", "{host, clients}", await hand({ runtime: ">=1.2" }));
   no("a price", "reserved-key", "`price` is phase 2", await hand({ price: { amount: 1000, unit: "sat", seller: "https://example.org" } }));
   no("a recovery key", "reserved-key", "`recovery` is reserved", await hand({ recovery: appKey("recovery") }));
   const { title: _title, ...untitled } = DRAFT;
@@ -241,10 +261,42 @@ describe("building a bundle", () => {
     expect(read.ok && new TextDecoder().decode(read.bundle.files.get("data/b.json"))).toBe("2");
   });
 
-  it("refuses to build what a client would refuse", async () => {
+  it("refuses to build what a client would refuse, and a key this format does not define", async () => {
     await expect(buildAppBundle({ ...DRAFT, title: "" }, [ENTRY], publisher)).rejects.toThrow(/bad-field/);
+    // A reader ignores an unknown key; the builder is strict, so a misspelt optional key never ships signed.
+    await expect(buildAppBundle({ ...DRAFT, homePage: "https://example.org" } as typeof DRAFT, [ENTRY], publisher)).rejects.toThrow(/unknown-key: homePage/);
+    await expect(buildAppBundle({ ...DRAFT, runtime: { ...DRAFT.runtime, later: 1 } } as typeof DRAFT, [ENTRY], publisher)).rejects.toThrow(/unknown-key: runtime\.later/);
+    await expect(buildAppBundle({ ...DRAFT, runtime: { ...DRAFT.runtime, clients: ["web", "android"] } }, [ENTRY], publisher)).rejects.toThrow(/bad-field/);
+    await expect(buildAppBundle({ ...DRAFT, price: 1 } as typeof DRAFT, [ENTRY], publisher)).rejects.toThrow(/reserved-key/);
     await expect(buildAppBundle(DRAFT, [file("main.html", "x")], publisher)).rejects.toThrow(/bad-entry/);
     await expect(buildAppBundle(DRAFT, [ENTRY, file("data/big.bin", fill(APP_BUNDLE_LIMITS.bundleBytes))], publisher)).rejects.toThrow(/too-large/);
+  });
+
+  it("checks a manifest's keys: a later one ignored by a reader, refused when strict; reserved ones and required types in both", async () => {
+    const { manifest } = await buildAppBundle(DRAFT, [ENTRY], publisher);
+    const plain = JSON.parse(JSON.stringify(manifest)) as Record<string, unknown>;
+    const reason = (r: ReturnType<typeof checkAppManifest>) => (r.ok ? "accepted" : r.reason);
+    expect(reason(checkAppManifest({ ...plain, later: true }))).toBe("accepted");
+    expect(reason(checkAppManifest({ ...plain, later: true }, { strict: true }))).toBe("unknown-key");
+    expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, later: 1 } }))).toBe("accepted");
+    expect(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, later: 1 } }, { strict: true })).toEqual({ ok: false, reason: "unknown-key", detail: "runtime.later" });
+    // runtime is advisory: a reader takes a later client's name, a writer only the clients it knows.
+    expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, clients: ["web", "android"] } }))).toBe("accepted");
+    expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, clients: ["web", "android"] } }, { strict: true }))).toBe("bad-field");
+    for (const strict of [false, true]) {
+      expect(reason(checkAppManifest(JSON.parse(JSON.stringify({ ...plain, __placeholder: 1 }).replace("__placeholder", "__proto__")), { strict })), "__proto__").toBe("unknown-key");
+      expect(reason(checkAppManifest({ ...plain, prototype: 1 }, { strict })), "prototype").toBe("unknown-key");
+      expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, constructor: 1 } }, { strict })), "constructor in runtime").toBe("unknown-key");
+      expect(checkAppManifest({ ...plain, later: [{ a: JSON.parse("{\"__proto__\":1}") as unknown }] }, { strict }), "__proto__ inside a later key").toEqual({ ok: false, reason: "unknown-key", detail: "later.0.a.__proto__" });
+      expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, later: { a: { prototype: 1 } } } }, { strict })), "prototype inside a later runtime key").toBe("unknown-key");
+      expect(reason(checkAppManifest({ ...plain, runtime: { ...manifest.runtime, clients: ["web", "web"] } }, { strict })), "a client twice").toBe("bad-field");
+      expect(reason(checkAppManifest({ ...plain, recovery: appKey("recovery") }, { strict })), "reserved").toBe("reserved-key");
+      expect(reason(checkAppManifest({ ...plain, later: 1, sequence: "2" }, { strict })), "a known key's type").toBe(strict ? "unknown-key" : "bad-field");
+      expect(reason(checkAppManifest({ ...plain, later: 1, ghostlyApp: 2 }, { strict })), "the format version").toBe("unsupported-format");
+      const { license: _l, ...unlicensed } = plain;
+      expect(reason(checkAppManifest({ ...unlicensed, later: 1 }, { strict })), "a required key").toBe(strict ? "unknown-key" : "missing-key");
+      expect(reason(checkAppManifest({ ...plain, runtime: { host: ">=1.2", later: ["web"] } }, { strict })), "runtime without clients").toBe(strict ? "unknown-key" : "bad-field");
+    }
   });
 
   it("gives a version the same digest however it is fetched", async () => {

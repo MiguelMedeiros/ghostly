@@ -12,8 +12,9 @@ import { useCardIndex } from "./useTaskBoard";
 export function useUsageByPeer(): ReadonlyMap<string, UsageEntry> {
   const index = useCardIndex();
   const state = useEngineState();
+  // From the index alone: every engine state brings the chats as a new list, and the index holds every card there is.
+  const byChat = useMemo(() => usageByChat(index), [index]);
   return useMemo(() => {
-    const byChat = usageByChat(index);
     const byPeer = new Map<string, UsageEntry>();
     if (!byChat.size) return byPeer;
     for (const link of state?.links ?? []) {
@@ -21,7 +22,7 @@ export function useUsageByPeer(): ReadonlyMap<string, UsageEntry> {
       if (entry && link.peerPubKeyZ32) byPeer.set(link.peerPubKeyZ32, entry);
     }
     return byPeer;
-  }, [index, state?.links]);
+  }, [byChat, state?.links]);
 }
 
 /** One contact's usage card, or none. */

@@ -1,8 +1,8 @@
 name: Android native
 
 # The native Android app: apps/desktop built with Tauri 2 mobile (apps/desktop/gen/android, docs/ANDROID.md, "Native
-# app"). Debug APKs only, signed with the Android debug key: to try the app and never to publish. The TWA lane
-# (android.yml) stays as it is until the native app replaces it.
+# app"). Debug APKs only, signed with the Android debug key: to try the app and never to publish. The release APK is
+# android.yml's.
 # - apk: arm64-v8a (phones, and an arm64 emulator on a Mac) and x86_64 (the emulator here), one artifact each.
 # - emulator: the x86_64 APK on an Android emulator (KVM): it launches, the UI renders, the engine starts, and the
 #   probe measures what the native app depends on (tools/scripts/android-smoke.mjs). Results are an artifact.

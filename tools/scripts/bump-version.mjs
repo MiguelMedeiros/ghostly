@@ -9,14 +9,24 @@
  * - both crates and Cargo.lock
  * - the website's release constant (download links are built from it)
  * - the download tables in docs/INSTALLATION.md
- * - CHANGELOG.md: the files in docs/changelog/unreleased/ go into "## Unreleased" (and are deleted), which becomes "## <version>"
+ * - CHANGELOG.md: the files in docs/changelog/unreleased/ go into "## Unreleased" (and are deleted), which becomes
+ *   "## <version>" under a new, empty "## Unreleased". A file with `release: <major.minor>` newer than the version
+ *   (`release: 1.2` in a 1.1.x bump) stays for that release.
+ *
+ * It refuses a version that must not ship a feature flag that is on (RELEASE_GUARDS in changes.mjs): Apps
+ * (APPS_ENABLED) ship from 1.2.0, so a 1.1.x bump stops while the flag is true. And the other way: a bump to 1.2.0 or
+ * later stops while the flag is still false and Apps entries held for 1.2 would go out. The flag is on from the 1.2
+ * cut (docs/RELEASING.md), so a 1.1.x patch is cut from `main`.
+ *
+ *   node tools/scripts/bump-version.mjs --check [<version>]   only the flag check, for the package.json version by
+ *                                                             default (the release workflow runs it on the tag)
  *
  * A package with a version of its own (apps/website/, native/transports/hyperdht, infra/services/*, packages/sdk/examples/*) is not a workspace.
  * See docs/RELEASING.md for the rest of a release.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { CHANGES, assembleChangelog, readFragments } from "./changes.mjs";
+import { CHANGES, RELEASE_GUARDS, heldFor, readFragments, releaseChangelog, repositoryVersion, splitFragments, versionBefore } from "./changes.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,8 +57,73 @@ export function versionedJson(root = ROOT) {
   ];
 }
 
+export { RELEASE_GUARDS };
+
+/** A flag's value in its file: "true", "false", or why it cannot be read (one `export const <flag> = ...;` line). */
+function flagValue(root, file, flag) {
+  let text;
+  try {
+    text = readFileSync(join(root, file), "utf8");
+  } catch {
+    return { problem: `${file}: missing, so ${flag} cannot be checked` };
+  }
+  // Whole lines only, so a comment that quotes the declaration is not read as the flag.
+  const values = [...text.matchAll(new RegExp(`^export const ${flag}\\b[^=\\n]*=\\s*(true|false)\\s*;`, "gm"))].map((m) => m[1]);
+  if (values.length !== 1) {
+    return { problem: `${file}: ${values.length ? `${values.length} lines` : "no line"} "export const ${flag} = true|false;", so it cannot be checked` };
+  }
+  return { value: values[0] };
+}
+
+/**
+ * Why a bump to `next` must stop, one line per guard (none: it may go on). Before a guard's `from`, its flag must be
+ * false. From `from` on, with `fragments` given, the entries held for its release go out, so the flag must be true.
+ */
+export function guardProblems(root, next, guards = RELEASE_GUARDS, fragments = []) {
+  const problems = [];
+  for (const guard of guards) {
+    const { file, flag, from } = guard;
+    if (!flag) continue;
+    const early = versionBefore(next, from);
+    const announced = early ? [] : fragments.filter((f) => f.release && !heldFor(f.release, next) && guard.entry?.(f));
+    if (!early && !announced.length) continue;
+    const { value, problem } = flagValue(root, file, flag);
+    if (problem) problems.push(`${problem} for ${next}`);
+    else if (early && value === "true") problems.push(`${file}: ${flag} is true, and it ships from ${from} only. Set it back to false for ${next}.`);
+    else if (!early && value === "false") {
+      problems.push(
+        `${file}: ${flag} is false, but ${next} would announce ${announced.map((f) => f.name).join(", ")}. ` +
+          `Flip it first, or move these entries to a later release.`,
+      );
+    }
+  }
+  return problems;
+}
+
 function bump(root, next) {
   const previous = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+
+  // Everything that can refuse the bump runs before the first file changes, so a refusal leaves no half-bumped tree:
+  // the flags, the entries, and the new changelog.
+  const fragments = readFragments(root);
+  const guarded = guardProblems(root, next, RELEASE_GUARDS, fragments);
+  if (guarded.length) {
+    for (const problem of guarded) console.error(`✗ ${problem}`);
+    process.exit(1);
+  }
+  const broken = fragments.flatMap((f) => f.problems);
+  if (broken.length) {
+    console.error(`✗ ${CHANGES}/: ${broken.join("; ")}`);
+    process.exit(1);
+  }
+  const { released, held } = splitFragments(fragments, next);
+  let changelog;
+  try {
+    changelog = releaseChangelog(readFileSync(join(root, "CHANGELOG.md"), "utf8"), released, next);
+  } catch (error) {
+    console.error(`✗ CHANGELOG.md: ${error.message}`);
+    process.exit(1);
+  }
 
   function edit(file, replace) {
     const path = join(root, file);
@@ -76,15 +151,10 @@ function bump(root, next) {
       .replace(/Ghostly_\d+\.\d+\.\d+_/g, `Ghostly_${next}_`)
       .replace(/ghostly-browser-extension-\d+\.\d+\.\d+\.zip/g, `ghostly-browser-extension-${next}.zip`),
   );
-  const fragments = readFragments(root);
-  const broken = fragments.flatMap((f) => f.problems);
-  if (broken.length) {
-    console.error(`✗ ${CHANGES}/: ${broken.join("; ")}`);
-    process.exit(1);
-  }
-  edit("CHANGELOG.md", (text) => assembleChangelog(text, fragments).replace(/^## Unreleased$/m, `## ${next}`));
-  for (const { name } of fragments) rmSync(join(root, name));
-  if (fragments.length) console.log(`✓ ${CHANGES}/: ${fragments.length} entries moved into CHANGELOG.md`);
+  edit("CHANGELOG.md", () => changelog);
+  for (const { name } of released) rmSync(join(root, name));
+  if (released.length) console.log(`✓ ${CHANGES}/: ${released.length} entries moved into CHANGELOG.md`);
+  if (held.length) console.log(`✓ ${CHANGES}/: ${held.length} held for a later release (${held.map((f) => `${f.name}: ${f.release}`).join(", ")})`);
 
   execFileSync("npm", ["install", "--package-lock-only", "--ignore-scripts"], { cwd: root, stdio: "inherit" });
   console.log(`✓ package-lock.json\n\n${previous} → ${next}. Next: docs/RELEASING.md`);
@@ -92,10 +162,16 @@ function bump(root, next) {
 
 // Run as a script, not imported (a path through a symlink, like macOS's /var, counts too).
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const next = process.argv[2];
+  const check = process.argv[2] === "--check";
+  const next = check ? (process.argv[3] ?? repositoryVersion(ROOT)) : process.argv[2];
   if (!/^\d+\.\d+\.\d+$/.test(next ?? "")) {
-    console.error("usage: node tools/scripts/bump-version.mjs <major.minor.patch>");
+    console.error("usage: node tools/scripts/bump-version.mjs <major.minor.patch> | --check [<major.minor.patch>]");
     process.exit(1);
   }
-  bump(ROOT, next);
+  if (check) {
+    const problems = guardProblems(ROOT, next);
+    for (const problem of problems) console.error(`✗ ${problem}`);
+    if (problems.length) process.exit(1);
+    console.log(`✓ ${next}: no flag on before its release (${RELEASE_GUARDS.flatMap((g) => g.flag ?? []).join(", ")})`);
+  } else bump(ROOT, next);
 }

@@ -18,10 +18,14 @@ const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 /** Zero-width non-joiner and zero-width joiner. */
 const KEEP = /[\u200c\u200d]/;
 
+/** `text` without its invisible and direction-changing characters, at any length: for display text with a cut of its own. */
+export function stripHidden(text: string): string {
+  return text.replace(HIDDEN, (char) => (KEEP.test(char) ? char : ""));
+}
+
 /** Undefined when nothing visible is left, so callers can fall back. */
 export function sanitizeDisplayText(text: string, max: number): string | undefined {
-  const visible = text.replace(HIDDEN, (char) => (KEEP.test(char) ? char : ""));
-  const clean = [...visible].slice(0, max).join("").trim();
+  const clean = [...stripHidden(text)].slice(0, max).join("").trim();
   return clean || undefined;
 }
 

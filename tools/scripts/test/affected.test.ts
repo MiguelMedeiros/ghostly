@@ -351,6 +351,13 @@ describe("e2e files", () => {
     expect(p.typecheck.find((t) => t.name === "e2e")!.mode).toBe("run");
   });
 
+  it("a file the specs read from disk runs them through the paths map; one with no entry runs nothing", () => {
+    const withFixture = { ...inventory, paths: { ...inventory.paths, "e2e/fixtures/wallet/**": ["payments.cashu.*"] } };
+    const p = plan({ changed: changed("e2e/fixtures/wallet/mint.json"), inventory: withFixture, e2eFiles });
+    expect(p.e2e).toMatchObject({ mode: "select", taggedSpecs: ["e2e/web/wallet-cashu.spec.ts"], none: [] });
+    expect(plan({ changed: changed("e2e/fixtures/other/data.json"), inventory: withFixture, e2eFiles }).e2e).toMatchObject({ mode: "skip", none: ["e2e/fixtures/other/data.json"] });
+  });
+
   it("the matrix's specs (a config of their own) are never picked", () => {
     expect(plan({ changed: changed("apps/ui/src/components/PaymentComposer.tsx"), inventory, e2eFiles }).e2e.taggedSpecs).not.toContain("e2e/matrix/matrix.spec.ts");
     expect(plan({ changed: changed("e2e/matrix/matrix.spec.ts"), inventory, e2eFiles }).e2e).toMatchObject({ mode: "skip", none: ["e2e/matrix/matrix.spec.ts"] });
@@ -366,6 +373,14 @@ describe("e2e files", () => {
 });
 
 describe("the rest", () => {
+  it("the Android app's Kotlin runs the check of its comments, and nothing else does", () => {
+    const mode = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles }).unit)["android kotlin"].mode;
+    expect(mode("apps/desktop/gen/android/app/src/main/java/tools/ghostly/app/CameraCapture.kt")).toBe("whole");
+    expect(mode("apps/desktop/gen/android/build.gradle.kts")).toBe("whole");
+    expect(mode("apps/desktop/gen/android/app/src/main/AndroidManifest.xml")).toBe("skip");
+    expect(mode("apps/desktop/src/lib.rs")).toBe("skip");
+  });
+
   it("Rust runs for the Desktop crates, and Cargo.lock runs it", () => {
     const r = (...files: string[]) => Object.fromEntries(plan({ changed: changed(...files), inventory, e2eFiles }).rust.map((x) => [x.name, x.mode]));
     expect(r("apps/desktop/src/lib.rs")).toEqual({ desktop: "run" });

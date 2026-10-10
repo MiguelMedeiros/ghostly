@@ -9,6 +9,7 @@ import { setStorageProfile } from "../../../ui/src/lib/storage";
 import { extensionHost } from "../host";
 import { loadSettings } from "../../../ui/src/lib/settings";
 import { applyDocumentLanguage } from "../../../ui/src/lib/documentLanguage";
+import { loadLocale } from "../../../ui/src/locales";
 import { databaseFor, followProfileSwitch, openPageProfile } from "../profile";
 
 // Ghostly Browser renders the Desktop UI as is. What differs is below it: the
@@ -28,8 +29,9 @@ applyDocumentLanguage(loadSettings().language);
 
 // The device state, before the page touches the profile (WISP 06 § The gate): the peer reads it too, in its own
 // document, before it starts. On a device that is not the active one the page shows the standby screen and keeps
-// no session in step with a peer that does not run.
-void openDeviceGate().then((gate) => {
+// no session in step with a peer that does not run. The profile's words are loaded meanwhile: only English is in the
+// entry, every other language is loaded when a profile reads in it.
+void Promise.all([openDeviceGate(), loadLocale(loadSettings().language)]).then(([gate]) => {
   if (gate.full) startSessionSync();
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

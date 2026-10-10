@@ -1,4 +1,5 @@
 import {invoke} from "@tauri-apps/api/core";
+import {androidApp} from "./touchOnly";
 /** "misplaced": the Desktop app runs from a temporary folder, where macOS gives it no notifications. */
 export type NoticePermission = NotificationPermission | "unavailable" | "misplaced";
 interface ExtensionNotifications {
@@ -20,9 +21,13 @@ const extension=()=> {
 };
 const native=()=>"__TAURI_INTERNALS__" in window;
 const platform=()=>(navigator as Navigator&{userAgentData?:{platform?:string}}).userAgentData?.platform||navigator.platform||navigator.userAgent;
-/** The system settings where the Desktop app's notifications are allowed again, when the app can open them. */
-export function noticeSettings():"macos"|"windows"|undefined{
+/**
+ * The system settings where the native app's notifications are allowed again, when the app can open them: the Android
+ * app opens its own page in Android's settings (its `navigator.platform` reads as Linux, hence the agent first).
+ */
+export function noticeSettings():"macos"|"windows"|"android"|undefined{
   if(!native()) return undefined;
+  if(/Android/i.test(navigator.userAgent)) return "android";
   return /Mac/i.test(platform())?"macos":/Win/i.test(platform())?"windows":undefined;
 }
 /**
@@ -30,7 +35,7 @@ export function noticeSettings():"macos"|"windows"|undefined{
  * settings (a pane of their own on macOS and Windows), the extension's own switch (Chrome asks again for an optional
  * permission it was refused), or the browser's or device's settings for a web page.
  */
-export function noticePlace():"macos"|"windows"|"system"|"extension"|"web"{
+export function noticePlace():"macos"|"windows"|"android"|"system"|"extension"|"web"{
   if(native()) return noticeSettings()??"system";
   return extension()?"extension":"web";
 }
@@ -40,9 +45,22 @@ export async function openNoticeSettings():Promise<void>{
 
 /*
  * A click on a notification opens its chat. Which chat is known only here, by the notification's id: the
- * notification itself carries no chat data.
+ * notification itself carries no chat data, its id neither. The page's id for one (the engine's names its chat:
+ * `message:group:<groupId>:…`) stays here, and the system gets a random one for it, which other apps can read (an
+ * Android notification's tag, which every notification listener sees; macOS's identifier; the extension's id).
  */
 const chats=new Map<string,string>();
+const notices=new Map<string,string>();
+/** The system's id for the page's `id`: random, and the same for the same `id`, so it still replaces its notification. */
+function noticeId(id:string):string{
+  let notice=notices.get(id);
+  if(!notice){
+    notice=crypto.randomUUID();
+    notices.set(id,notice);
+    if(notices.size>64) notices.delete(notices.keys().next().value as string);
+  }
+  return notice;
+}
 const openers=new Set<(chat:string)=>void>();
 let listening=false;
 /** Opens the chat of a notification shown from this page; false when it was not. */
@@ -114,10 +132,39 @@ export async function requestNotifications():Promise<NoticePermission>{
     return typeof Notification==="undefined"?"unavailable":await Notification.requestPermission();
   }catch{return "unavailable";}
 }
-/** `chat`: the chat a click opens (a session id, or `group:<id>`); it stays in this page. */
-export async function showPrivateNotification(id:string,body:string,chat?:string):Promise<void>{
+/*
+ * In the Android app a chat has one notification: its next message replaces it (with no new heads-up,
+ * GhostlyHostPlugin.kt `setOnlyAlertOnce`), and reading the chat takes it away. Android keeps an app's notifications
+ * until they are tapped or swiped, and shows none past 50. Its tag is random, kept here: it never names the chat.
+ */
+const chatTags=new Map<string,string>();
+function chatTag(chat:string):string{
+  let tag=chatTags.get(chat);
+  if(!tag){
+    tag=crypto.randomUUID();
+    chatTags.set(chat,tag);
+    if(chatTags.size>64) chatTags.delete(chatTags.keys().next().value as string);
+  }
+  return tag;
+}
+/** The chat was read in the app: its notification goes, in the Android app (elsewhere they close by themselves). */
+export function clearChatNotification(chat:string):void{
+  const tag=chatTags.get(chat);
+  if(!tag) return;
+  chatTags.delete(chat);
+  chats.delete(tag);
+  void invoke("native_clear_notification",{id:tag}).catch(()=>{/* gone already, or an older app */});
+}
+/**
+ * `chat`: the chat a click opens (a session id, or `group:<id>`); it and `event`, the page's id for the notification,
+ * stay in this page. `perChat`: a chat's messages, one notification for the chat in the Android app.
+ */
+export async function showPrivateNotification(event:string,body:string,chat?:string,perChat=false):Promise<void>{
   if(await notificationPermission()!=="granted") return;
+  const id=chat && perChat && androidApp()?chatTag(chat):noticeId(event);
   if(chat){
+    // Newest last, so a chat's notification, posted again, is not the first to be forgotten.
+    chats.delete(id);
     chats.set(id,chat);
     // The newest few: an old notification still opens the app, only not a chat.
     if(chats.size>64) chats.delete(chats.keys().next().value as string);

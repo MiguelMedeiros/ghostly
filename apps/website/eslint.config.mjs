@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // The app's own deck, copied as it is (scripts/sync-app-deck.mjs): the app's lint checks it.
     "components/app/**",
+    // Core's store readers, copied as they are (scripts/sync-store-core.mjs): core's lint checks them.
+    "lib/store-core/**",
   ]),
   {
     rules: {

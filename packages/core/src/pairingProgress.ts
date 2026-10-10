@@ -45,7 +45,7 @@ export interface PairingProgress {
   startedAt: number;
   /** Connection attempts so far, from 1. A failed attempt is followed by the next one. */
   attempt: number;
-  /** A short technical note (an error message), when there is one. */
+  /** A short technical note (an error message, or a code), when there is one: the UI shows it behind an ⓘ, untranslated. */
   detail?: string;
   /** When `stage` is `failed` or `on-dht`: why, and whether the engine tries again on its own. */
   reason?: PairingFailureReason | PairingOnDhtReason;
@@ -54,6 +54,11 @@ export interface PairingProgress {
   peerSeen?: boolean;
   /** `connecting` and `live`: the transport coming up, or in use. */
   transport?: PairedTransport;
+  /**
+   * `publishing`: the relays' request budget (`REQUESTS_PER_MINUTE`) holds this side's first packet back; it goes out
+   * once the budget frees a request, about then (ms since the epoch).
+   */
+  relayWaitUntil?: number;
 }
 
 const FIRST_STAGE: Record<PairingRole, PairingStage> = { inviter: "publishing", joiner: "resolving" };
@@ -89,6 +94,13 @@ export class PairingTracker {
     if (stage === "publishing" || (stage === "failed" && reason === "publish")) this.set(this.idle());
   }
 
+  /** This side's first packet waits for the relays' request budget, which frees one at `until`: said, still `publishing`. */
+  heldBack(until: number): void {
+    if (this.progress.stage !== "publishing") return;
+    this.progress = { ...this.progress, relayWaitUntil: until };
+    this.changed(this.progress);
+  }
+
   /** The contact's packet was seen: they are on the network. */
   sawPeer(): void {
     if (this.peerSeen) return;
@@ -113,7 +125,8 @@ export class PairingTracker {
     // on the DHT; not pinned yet, the first contact goes on (on the DHT too) and so do the attempts.
     if (reason === "timeout" || reason === "transport") {
       if (this.dhtPinned) this.set("on-dht", { reason: "transport", retryable: true, ...(detail ? { detail } : {}) });
-      else this.set(this.idle(), { detail: detail ?? (reason === "timeout" ? "The offer was not answered in time; trying again." : "No connection came up; trying again.") });
+      // Why, as its code when the attempt brought no error of its own: the UI's words say the stage, never this English.
+      else this.set(this.idle(), { detail: detail ?? reason });
       return;
     }
     this.set("failed", { reason, retryable, ...(detail ? { detail } : {}) });

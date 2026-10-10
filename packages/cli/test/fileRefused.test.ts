@@ -26,6 +26,7 @@ describe("file send refused by the engine", () => {
     const node = {
       getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
       getMessages: vi.fn(async () => []),
+      getMessage: vi.fn(async () => undefined),
       sendFile: vi.fn(async () => { throw new Error("This chat stopped: your contact's key changed."); }),
     };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
