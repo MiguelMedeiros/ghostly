@@ -737,7 +737,7 @@ export class GhostlyNode implements EngineImplementation {
     flush: () => this.flushState(),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
-      void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state);
+      void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state, !seen);
     },
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3386,12 +3386,31 @@ export class GhostlyNode implements EngineImplementation {
     return Promise.resolve();
   }
 
-  /** A file transfer ended: when, on the message that carries the file. */
-  private async noteFileEnd(linkId: string, fileId: string, error?: string): Promise<void> {
-    const message = (await db.getMessages(linkId)).find(m => m.file?.id === fileId);
+  /**
+   * The message that carries a file, read by its id: a file of mine is `me_<its time>`, a received one is named by its
+   * wire id (files/3, a held file) or by its sender's time (files/2). The chat's history is read only when none of
+   * those rows carries it, so a file costs the same in a long chat as in a short one.
+   */
+  private async fileMessage(linkId: string, fileId: string): Promise<StoredMessage | undefined> {
+    const stored = await fileStore.get(fileId).catch(() => undefined);
+    const at = stored?.metadata?.timestamp, wireId = stored?.wireId;
+    const ids = !stored ? [] : fileId.startsWith(`${linkId}-out-`) ? [`me_${at}`] : [`peer_${wireId}`, `peer_${at}`, `peer_${at}_${wireId}`];
+    for (const id of ids) {
+      const message = await db.getMessage(linkId, id);
+      if (message?.file?.id === fileId) return message;
+    }
+    return (await db.getMessages(linkId)).find(m => m.file?.id === fileId);
+  }
+
+  /**
+   * A file transfer ended: when, on the message that carries the file. `again`: it ended in an earlier run and is shown
+   * again as the chat connects, so what its message says of its end stays (only a receipt it never got is given).
+   */
+  private async noteFileEnd(linkId: string, fileId: string, error?: string, again = false): Promise<void> {
+    const message = await this.fileMessage(linkId, fileId);
     if (!message) return;
     const now = Date.now();
-    await this.noteDetails(linkId, message.id, details => error
+    if (!again) await this.noteDetails(linkId, message.id, details => error
       ? (message.sender === "me" && details.sends?.length ? { ...details, sends: details.sends.map((s, i) => i === details.sends!.length - 1 ? { ...s, result: "failed", error } : s) } : details)
       : { ...details, completedAt: now, ...(message.sender === "me" && { receiptAt: now }) });
     // The contact's last acknowledgement comes once the file is stored there (files/2 after it is written, files/3 once
@@ -3540,7 +3559,7 @@ export class GhostlyNode implements EngineImplementation {
     void (async () => {
       // Sent again: the reply its message carries goes with it again, and so does its hop count.
       if (!reply || !forwarded) {
-        const message = (await db.getMessages(live.stored.id)).find(m => m.id === `me_${timestamp}`);
+        const message = await db.getMessage(live.stored.id, `me_${timestamp}`);
         reply ??= message && GhostlyNode.wireReply(message);
         forwarded ??= message?.forwarded;
       }
