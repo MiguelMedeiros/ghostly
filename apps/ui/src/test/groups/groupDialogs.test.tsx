@@ -325,6 +325,44 @@ describe("GroupLinkPanel", () => {
     expect(engine.callsTo("enableGroupLink")).toEqual([]);
   });
 
+  it("keeps the keyboard focus in the panel when the link is turned off, then on", async () => {
+    const view = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
+    const { user, engine } = view;
+    engine.on("enableGroupLink", () => ({ link: entryLink })).on("disableGroupLink", () => undefined);
+    await user.click(screen.getByTestId("group-link-disable"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    // The engine's news: the group has no link, so the panel swaps and the button pressed is gone.
+    view.rerender(<GroupLinkPanel group={admin()} />);
+    expect(screen.getByTestId("group-link-enable")).toHaveFocus();
+    await user.click(screen.getByTestId("group-link-enable"));
+    view.rerender(<GroupLinkPanel group={admin({ entryLink })} />);
+    expect(screen.getByTestId("group-link-share")).toHaveFocus();
+  });
+
+  it("does not take the focus when the link goes off without a press here, or when the engine refused", async () => {
+    const view = renderApp(<><input data-testid="elsewhere" /><GroupLinkPanel group={admin({ entryLink })} /></>);
+    const { user, engine } = view;
+    const elsewhere = screen.getByTestId("elsewhere");
+    const rerender = (group: GroupView) => view.rerender(<><input data-testid="elsewhere" /><GroupLinkPanel group={group} /></>);
+    engine.on("disableGroupLink", () => { throw new Error("Only the admin can do that"); });
+    await user.click(screen.getByTestId("group-link-disable"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await user.click(elsewhere);
+    // Turned off from another of my devices, later.
+    rerender(admin());
+    expect(elsewhere).toHaveFocus();
+    rerender(admin({ entryLink }));
+    expect(elsewhere).toHaveFocus();
+    // Turned off here, and the focus moved on before the panel swapped: it stays where it went.
+    engine.on("disableGroupLink", () => undefined);
+    await user.click(screen.getByTestId("group-link-disable"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    await user.click(elsewhere);
+    rerender(admin());
+    expect(elsewhere).toHaveFocus();
+  });
+
   it("shows and hides the QR", async () => {
     const { user } = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
     const toggle = screen.getByRole("button", { name: "Show QR" });

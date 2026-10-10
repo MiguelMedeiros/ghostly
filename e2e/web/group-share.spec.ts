@@ -69,6 +69,8 @@ test("a new group opens on its link; Copy, Share and the header's Share link; jo
   await panel.getByTestId("group-link-disable").click();
   await alice.page.getByTestId("group-link-ask-confirm").click();
   await expect(panel.getByTestId("group-link")).toHaveAttribute("data-state", "off");
+  // The button pressed went with the link: the focus is on the one in its place, not lost.
+  await expect(panel.getByTestId("group-link-enable")).toBeFocused();
   await alice.page.keyboard.press("Escape");
   await alice.page.getByTestId("group-share").click();
   const fresh = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
