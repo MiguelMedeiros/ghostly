@@ -92,11 +92,12 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   </button>;
   // For every member who sees the panel, not the admin alone: a community group's member hands its link out too.
   const qrToggle = <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary">{showQr ? t("group.link.hideQr") : t("group.link.showQr")}</button>;
-  const adminControls = group.isAdmin && <div className={`flex flex-wrap gap-1 ${large ? "justify-center" : ""}`}>
+  // On a phone the two that end the shared link are a thumb's height, on a row of their own: not one mis-tap from Show QR.
+  const adminControls = group.isAdmin && <div className={`flex flex-wrap gap-1 max-md:basis-full max-md:gap-2 ${large ? "justify-center" : ""}`}>
     <button disabled={busy} onClick={() => setAsking("reset")} data-testid="group-link-reset"
-      title={t("group.link.resetHint")} className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40">{t("group.link.reset")}</button>
+      title={t("group.link.resetHint")} className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
     <button disabled={busy} onClick={() => setAsking("disable")} data-testid="group-link-disable"
-      title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.link.disable")}</button>
+      title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.disable")}</button>
     {asking && <GroupLinkAskDialog kind={asking} onClose={() => setAsking(null)}
       onConfirm={() => { const reset = asking === "reset"; setAsking(null); void run(() => reset ? engine.call("enableGroupLink", { groupId: group.id, reset: true }) : engine.call("disableGroupLink", { groupId: group.id }), !reset); }} />}
   </div>;
