@@ -105,6 +105,9 @@ describe("a payment never crosses networks", () => {
     const { askId } = await desk.ask({ linkId: "l", amount: 50, method: "arkade", timestamp: 1, network: "testnet" });
     await desk.onPaymentRequest("l", { id: "wrong-net", timestamp: 2, amount: { value: "50", asset: "sat" }, endpoints: [[ENDPOINT.arkade, JSON.stringify(arkTarget("bitcoin", "ark1fresh"))]], ask: askId, network: "mainnet" });
     expect(desk.payment("wrong-net")?.ask).toBeUndefined();
+    // Saying no network does not make a Mainnet answer one: what it carries says which it is.
+    await desk.onPaymentRequest("l", { id: "unsaid-net", timestamp: 2, amount: { value: "50", asset: "sat" }, endpoints: [[ENDPOINT.arkade, JSON.stringify(arkTarget("bitcoin", "ark1other"))]], ask: askId });
+    expect(desk.payment("unsaid-net")).toMatchObject({ network: "mainnet", ask: undefined });
     await desk.onPaymentRequest("l", { id: "right-net", timestamp: 3, amount: { value: "50", asset: "sat" }, endpoints: [[ENDPOINT.arkade, JSON.stringify(arkTarget("mutinynet"))]], ask: askId, network: "testnet" });
     expect(desk.payment("right-net")?.ask).toBe(askId);
   });

@@ -5,7 +5,7 @@ import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import type { TranslationKey } from "../contexts/I18nContext";
-import { DEVICE_INVITE_LIFETIME_S, inviteLink, inviteQrSegments, readInviteCode } from "@ghostly/core";
+import { DEVICE_INVITE_LIFETIME_S, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
 import { handOverUnlock } from "./lockHandover";
 import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
@@ -244,14 +244,10 @@ export const LINK_PROFILE_MAX = 32;
 
 /** A profile name as a link carries it: no `#`, at most `LINK_PROFILE_MAX` characters, escaped. Empty for none. */
 /**
- * A profile's name as a link may carry it, made and read alike: no `#`, no control character, no invisible mark that
- * reorders or hides text (bidirectional overrides, zero-width marks), at most `LINK_PROFILE_MAX` characters.
+ * A profile's name as a link may carry it, made and read alike: no `#`, and cleaned as any display text another party
+ * chooses (`sanitizeDisplayText`: no control, invisible or direction-changing character), at most `LINK_PROFILE_MAX` characters.
  */
-const cleanProfileName = (name: string): string =>
-  Array.from(name.trim()).filter((ch) => {
-    const code = ch.codePointAt(0)!;
-    return ch !== "#" && code >= 32 && !(code >= 0x7f && code <= 0x9f) && !(code >= 0x200b && code <= 0x200f) && !(code >= 0x202a && code <= 0x202e) && !(code >= 0x2066 && code <= 0x2069);
-  }).slice(0, LINK_PROFILE_MAX).join("").trim();
+const cleanProfileName = (name: string): string => sanitizeDisplayText(name.replace(/#/g, ""), LINK_PROFILE_MAX) ?? "";
 
 const linkProfile = (profile: string | undefined): string => {
   const clean = cleanProfileName(profile ?? "");

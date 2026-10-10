@@ -1176,7 +1176,15 @@ export class Apps {
       const old = await wrap<AppStorageRow | undefined>(rows.get([app.ref, where, name]));
       const next = used - (old?.size ?? 0) + size;
       if (next > APP_STORAGE_LIMITS.scopeBytes) fail("full", "This app's storage in this chat is full (5 MiB)");
-      await wrap((await store(STORES.appStorage, "readwrite")).put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow));
+      const writing = await store(STORES.appStorage, "readwrite");
+      // The chat may have been deleted while this write waited its turn and read. Asked again here, with nothing awaited
+      // before the put: a chat still one now is deleted by a later transaction, which takes this row; one already gone
+      // gets no row, since nothing would ever remove it.
+      if (where !== APP_SCOPE_ALONE && !this.host.isChat(where)) {
+        this.usage.delete(`${app.ref}\0${where}`);
+        fail("bad-scope", "Not a chat of this profile");
+      }
+      await wrap(writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }

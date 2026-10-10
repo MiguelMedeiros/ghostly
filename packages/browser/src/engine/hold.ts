@@ -1,4 +1,4 @@
-import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_DATED_BACK_MS, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
+import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_DATED_BACK_MS, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, sanitizeFileName, sanitizeMime, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
@@ -454,12 +454,14 @@ export class HoldEngine {
         }
         else if (header.kind === "file") {
           const meta = header.meta as { name: string; size: number; mime: string; voice?: unknown; video?: unknown; image?: unknown; r?: unknown; fw?: unknown };
-          const voice = parseVoiceMeta(meta.voice, meta.mime);
-          const video = parseVideoMeta(meta.video, meta.mime);
-          const image = parseImageMeta(meta.image, meta.mime);
+          // The name and the media type are the contact's words: cleaned as for a file that arrives live.
+          const name = sanitizeFileName(meta.name), mime = sanitizeMime(meta.mime);
+          const voice = parseVoiceMeta(meta.voice, mime);
+          const video = parseVideoMeta(meta.video, mime);
+          const image = parseImageMeta(meta.image, mime);
           const reply = readReply(meta.r, pairedReplyAuthor);
           const forwarded = readForwarded(meta.fw);
-          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts, ...(voice && { voice }), ...(video && { video }), ...(image && { image }), ...(reply && { reply }), ...(forwarded && { forwarded }) }, body, hex(fromBase64Url(header.digest)), held);
+          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name, size: meta.size, mime, timestamp: header.ts, ...(voice && { voice }), ...(video && { video }), ...(image && { image }), ...(reply && { reply }), ...(forwarded && { forwarded }) }, body, hex(fromBase64Url(header.digest)), held);
           if (refused) throw new HoldRefusedError("limits", refused);
         } else if (header.kind === "pay-req") {
           let parsed: unknown;

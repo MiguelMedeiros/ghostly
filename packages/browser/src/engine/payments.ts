@@ -608,11 +608,14 @@ export class PaymentDesk {
     return { askId };
   }
 
-  /** The ask a request answers, only if this side made it: same chat, way of paying and amount, still fresh. */
-  private answering(linkId: string, request: PaymentRequest, method: AskMethod, amount: number): string | undefined {
+  /**
+   * The ask a request answers, only if this side made it: same chat, way of paying and amount, still fresh, and the
+   * network the request is of (what it says, else what it carries), never only what it says.
+   */
+  private answering(linkId: string, request: PaymentRequest, method: AskMethod, amount: number, network: WalletNetwork): string | undefined {
     const ask = request.ask ? this.asks.get(request.ask) : undefined;
     // An answer on the other network is not what was asked: it is an ordinary request, not paid by the ask's card.
-    if (!ask || ask.linkId !== linkId || ask.method !== method || ask.amount !== amount || ask.expiresAt < Date.now() || (request.network && request.network !== ask.network)) return undefined;
+    if (!ask || ask.linkId !== linkId || ask.method !== method || ask.amount !== amount || ask.expiresAt < Date.now() || network !== ask.network) return undefined;
     this.asks.delete(request.ask!);
     return request.ask;
   }
@@ -700,7 +703,7 @@ export class PaymentDesk {
     await this.save({
       target,
       federations,
-      ask: federations ? this.answering(linkId, request, "fedimint", amount) : target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" || target?.method === "spark" ? this.answering(linkId, request, target.method, amount) : undefined,
+      ask: federations ? this.answering(linkId, request, "fedimint", amount, network) : target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" || target?.method === "spark" ? this.answering(linkId, request, target.method, amount, network) : undefined,
       id: this.keyFor(linkId, request.id),
       linkId,
       kind: "request",
@@ -1017,7 +1020,7 @@ export class PaymentDesk {
     if((request.network&&request.network!==network)||!this.accepts(linkId,'usdt',network))return;
     const amount=Number(request.amount.value);if(!Number.isSafeInteger(amount))return;
     const key=this.keyFor(linkId,request.id);
-    await this.save({id:key,linkId,kind:'request',direction:'in',amount,unit,target,memo:request.memo,state:'pending',createdAt:request.timestamp,ask:this.answering(linkId,request,'usdt',amount),network});
+    await this.save({id:key,linkId,kind:'request',direction:'in',amount,unit,target,memo:request.memo,state:'pending',createdAt:request.timestamp,ask:this.answering(linkId,request,'usdt',amount,network),network});
     await this.host.storeMessage({linkId,id:`peer_${request.timestamp}`,text:`Requested ${formatPaymentAmount(amount,target.decimals)} ${target.asset}`,sender:'peer',timestamp:request.timestamp,via:'datalink',paymentId:key});
   }
   async recordUsdt(review:PaymentReview) {

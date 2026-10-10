@@ -99,8 +99,8 @@ export class CommunityPay {
     const linkId = pairLinkId(groupId, sender);
     // As a data link does: only while this device takes some way of paying from them.
     if (!new PairLink(this, this.host, groupId, sender).supportsPayments) return;
-    if (frame.t === "pay-req") await this.host.onPaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, ask: frame.a });
-    else if (frame.t === "pay-ask") await this.host.onPaymentAsk(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, method: frame.m, memo: frame.memo });
+    if (frame.t === "pay-req") await this.host.onPaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, ask: frame.a, network: frame.n });
+    else if (frame.t === "pay-ask") await this.host.onPaymentAsk(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, method: frame.m, memo: frame.memo, network: frame.n });
     else if (frame.t === "pay") await this.host.onPayment(linkId, { id: frame.id, timestamp: frame.ts, requestId: frame.rid, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoint: frame.e });
     else if (frame.t === "pay-res") await this.host.onPaymentResult(linkId, { id: frame.id, ok: frame.ok, credited: frame.v, error: frame.err, ...(frame.c ? { closed: true } : {}) });
   }
@@ -118,7 +118,7 @@ export class CommunityPay {
     const { pm: _, ...rest } = raw;
     const frame = control(rest), linkId = pairLinkId(groupId, sender);
     if (!frame) return;
-    if (frame.t === "pay-req") await this.host.onPaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e });
+    if (frame.t === "pay-req") await this.host.onPaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, network: frame.n });
     else if (frame.t === "pay-res" && frame.ok) await this.host.onPaymentResult(linkId, { id: frame.id, ok: true });
   }
 
@@ -177,11 +177,11 @@ class PairLink implements PaymentLink {
   }
   async sendPaymentRequest(r: PaymentRequest): Promise<void> {
     await this.requirePaymentSupport();
-    await this.send({ t: "pay-req", id: r.id, ts: r.timestamp, v: r.amount.value, u: r.amount.asset, memo: r.memo, e: r.endpoints, a: r.ask });
+    await this.send({ t: "pay-req", id: r.id, ts: r.timestamp, v: r.amount.value, u: r.amount.asset, memo: r.memo, e: r.endpoints, a: r.ask, n: r.network });
   }
   async sendPaymentAsk(a: PaymentAsk): Promise<void> {
     await this.requirePaymentSupport();
-    await this.send({ t: "pay-ask", id: a.id, ts: a.timestamp, v: a.amount.value, u: a.amount.asset, m: a.method, memo: a.memo });
+    await this.send({ t: "pay-ask", id: a.id, ts: a.timestamp, v: a.amount.value, u: a.amount.asset, m: a.method, memo: a.memo, n: a.network });
   }
   async sendPayment(p: Payment): Promise<void> {
     await this.requirePaymentSupport();
@@ -212,7 +212,7 @@ class GroupLink implements PaymentLink {
   }
   async sendPaymentRequest(r: PaymentRequest): Promise<void> {
     await this.requirePaymentSupport();
-    const frame = JSON.parse(encodeControl({ t: "pay-req", id: r.id, ts: r.timestamp, v: r.amount.value, u: r.amount.asset, memo: r.memo, e: r.endpoints })) as Record<string, unknown>;
+    const frame = JSON.parse(encodeControl({ t: "pay-req", id: r.id, ts: r.timestamp, v: r.amount.value, u: r.amount.asset, memo: r.memo, e: r.endpoints, n: r.network })) as Record<string, unknown>;
     await this.host.sendApp(this.groupId, { ...frame, pm: this.pay.mine() });
   }
   async sendPaymentAsk(): Promise<void> { throw new Error("Choose one member to pay"); }

@@ -176,6 +176,39 @@ describe("uninstall", () => {
     expect((await storageRows() as { scope: string }[]).map((r) => r.scope)).toEqual(["chat-2"]);
   });
 
+  it("a chat deleted while its app is writing keeps none of that app's rows: a write still waiting is refused", async () => {
+    for (const burst of [5, 20, 50]) {
+      await emptyProfile();
+      const chats = new Set(["chat-1", "chat-2"]);
+      const app = await bundle();
+      net.put(BUNDLE_URL, app.bytes);
+      const store = apps(net, { isChat: (scope) => chats.has(scope) });
+      await store.preview({ url: BUNDLE_URL });
+      await store.install({ digest: app.digest, grant: ["chat"] });
+      const { ref } = app;
+      await store.storageSet({ ref, scope: "chat-1", key: "before", value: 1 });
+      await store.storageSet({ ref, scope: "chat-2", key: "other", value: 2 });
+      const writes = Array.from({ length: burst }, (_, i) => store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: i }).then(() => "ok", (e: Error) => e.message.split(":")[0]));
+      // As the engine's `removeLink`: the chat is no longer one at once, its rows go in the background.
+      await writes[0];
+      chats.delete("chat-1");
+      const deleted = db.deleteLink("chat-1");
+      const results = await Promise.all(writes);
+      await deleted;
+      expect((await storageRows() as { scope: string }[]).map((r) => r.scope), `burst of ${burst}`).toEqual(["chat-2"]);
+      expect(await store.exportData({ ref }), `burst of ${burst}`).toEqual([{ ghostlyAppData: 1, app: ref, scope: "chat-2", entries: { other: 2 } }]);
+      expect(results[0]).toBe("ok");
+      expect(results.at(-1), `burst of ${burst}: the last write waited past the delete`).toBe("bad-scope");
+      expect(new Set(results)).toEqual(new Set(["ok", "bad-scope"]));
+      // The other chat and the app alone still write, and the deleted chat's count starts again if its id ever comes back.
+      await store.storageSet({ ref, scope: "chat-2", key: "after", value: 3 });
+      await store.storageSet({ ref, scope: APP_SCOPE_ALONE, key: "after", value: 4 });
+      chats.add("chat-1");
+      expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual([]);
+      await store.storageSet({ ref, scope: "chat-1", key: "big", value: "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2) });
+    }
+  });
+
   it("a deleted chat's messages and app rows go by range, one delete per app, not one per row", async () => {
     const refs = ["ana/chess", "ana/go", "bo/notes"];
     const tx = (await openDb()).transaction([STORES.messages, STORES.appStorage], "readwrite");

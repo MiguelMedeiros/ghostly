@@ -459,10 +459,14 @@ export interface GhostLinkEvents {
   /**
    * A session was refused because the other end authenticated with another participation key than the one pinned.
    * A device's one-time enrollment link (WISP 06 § Adding a device) tells the person that a second device tried its code.
+   * Also once for each further key that signs a signal in the other end's packet: every holder of the code writes that
+   * one packet, so a second key there is a second device, whether or not a key was pinned yet.
    */
   onPeerKeyRefused?(): void;
 }
 
+/** How many keys' signals a one-time enrollment link remembers: past these, further keys are not counted. */
+const SIGNAL_SIGNERS_MAX = 16;
 const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"];
 
 /** For each way of paying, the networks (real money, test coins) this side has a wallet on. */
@@ -831,6 +835,30 @@ export class GhostLink {
   private lostUntil = 0;
   /** Counts the signals a signer was asked to sign: only the latest one goes out. */
   private signalTurn = 0;
+  /** Puts this side's packet out again as it is: another writer of its key may have replaced it. */
+  republish(): void {
+    if (!this.stopped) this.session.republish();
+  }
+  /** The keys that signed a signal in the other end's packet, on a link that tells of refused keys (`onPeerKeyRefused`). */
+  private signalSigners = new Set<string>();
+  /**
+   * A one-time enrollment link (WISP 06 § Adding a device: one session per invite): every device that reads the code
+   * writes the same packet, each signing its signals with its own device signing key, and the later one replaces the
+   * earlier. A validly signed signal by a key other than the one pinned, or than the first one seen there, is a second
+   * device on the code: said once per key, before a pin as after it.
+   */
+  private noteSignalSigner(signal: string): void {
+    const events = this.options.events, credentials = this.options.pairing?.credentials;
+    if (!events?.onPeerKeyRefused || !credentials?.signer || !this.options.params.profile || this.signalSigners.size >= SIGNAL_SIGNERS_MAX) return;
+    if (!verifyPairedSignal(signal, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, undefined, true)) return;
+    const key = (JSON.parse(signal) as { auth: { key: string } }).auth.key;
+    if (this.signalSigners.has(key)) return;
+    this.signalSigners.add(key);
+    if (this.signalSigners.size > 1 || (credentials.peerKey && key !== credentials.peerKey)) {
+      traceLink(this.myPubKeyZ32, "signal-second-key", { keys: this.signalSigners.size });
+      events.onPeerKeyRefused();
+    }
+  }
   /** A signal ready to go: on the live session during a switch to WebRTC, in this side's packet otherwise. */
   private signalOut(signed: string | null, report: (error: unknown) => void): void {
     // During migration the authenticated channel already reaches the peer.
@@ -1222,6 +1250,7 @@ export class GhostLink {
     const firstContact = !!this.options.ownRecords || (!!this.options.pairing && !this.options.pairing.credentials.peerKey);
     const sight = seen && seen.after === null && !firstContact ? undefined : seen;
     const options = this.options, credentials = options.pairing?.credentials;
+    this.noteSignalSigner(signal);
     const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
       this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
     if (verified && this.predatesLastSession(verified, sight)) return;

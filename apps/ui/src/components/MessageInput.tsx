@@ -109,6 +109,11 @@ interface MessageInputProps {
   edit?: { key: string; text: string; snippet: string; onSave: (text: string, extra?: { preview?: LinkPreview; mentions?: GroupMention[] }) => Promise<string | null>; onClose: () => void };
   /** ↑ in an empty field: edit my last message, as in Slack and Telegram. */
   onEditLast?: () => void;
+  /**
+   * False while the chat is kept loaded behind another page (a call under way, an app running in it): a paste made
+   * with no field focused is then for the chat on screen, never for this one.
+   */
+  onScreen?: boolean;
 }
 
 /** A message sent from the field, waiting for the one before it to go. */
@@ -147,6 +152,7 @@ export function MessageInput({
   reply,
   edit,
   onEditLast,
+  onScreen = true,
 }: MessageInputProps) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -520,9 +526,10 @@ export function MessageInput({
     return onShareChange(take);
   }, [draftId, canAttach, fileUnavailable]);
 
-  // A paste where no field has the focus (the chat's messages clicked last) still brings its files here.
+  // A paste where no field has the focus (the chat's messages clicked last) still brings its files here: to the chat
+  // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them.
   useEffect(() => {
-    if (!hearsFiles) return;
+    if (!hearsFiles || !onScreen) return;
     const paste = (e: globalThis.ClipboardEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       if (e.defaultPrevented || target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
@@ -530,7 +537,7 @@ export function MessageInput({
     };
     document.addEventListener("paste", paste);
     return () => document.removeEventListener("paste", paste);
-  }, [hearsFiles]);
+  }, [hearsFiles, onScreen]);
 
   // Files dragged over the chat (its column, where the page marks one): a veil says they can be dropped.
   useEffect(() => {
