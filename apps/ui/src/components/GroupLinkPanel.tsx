@@ -34,9 +34,20 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   const [showQr, setShowQr] = useState(large);
   const [asking, setAsking] = useState<"reset" | "disable" | null>(null);
   const saidTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const shareButton = useRef<HTMLButtonElement>(null);
+  const shareButton = useRef<HTMLButtonElement>(null), enableButton = useRef<HTMLButtonElement>(null);
   useEffect(() => () => clearTimeout(saidTimer.current), []);
   const url = groupLinkUrl(group);
+  // Turning the link off or on swaps the panel and takes the button pressed with it: the focus follows to the one in
+  // its place (Turn on the link, or Share), unless it went somewhere else meanwhile.
+  const follow = useRef(false);
+  const on = !!url;
+  useEffect(() => {
+    if (!follow.current) return;
+    follow.current = false;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected && !(active instanceof HTMLDialogElement)) return;
+    (on ? shareButton : enableButton).current?.focus();
+  }, [on]);
   const community = group.profile === "community";
   const cap = community ? COMMUNITY_LIMITS.members : MAX_GROUP_MEMBERS;
   const full = group.members.length >= cap;
@@ -44,9 +55,9 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     setSaid(what); clearTimeout(saidTimer.current);
     saidTimer.current = setTimeout(() => setSaid(""), 2500);
   };
-  const run = async (action: () => Promise<unknown>) => {
-    setBusy(true); setError(null);
-    try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); } finally { setBusy(false); }
+  const run = async (action: () => Promise<unknown>, swaps = false) => {
+    setBusy(true); setError(null); follow.current = swaps;
+    try { await action(); } catch (e) { follow.current = false; setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); } finally { setBusy(false); }
   };
   const copy = async () => {
     setError(null);
@@ -64,7 +75,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   if (!url) return <div className={large ? "text-center" : "mt-4"} data-testid="group-link" data-state="off">
     {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>}
     <p className="mt-1 text-sm text-text-muted">{t("group.link.off")}</p>
-    <button disabled={busy || full} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id }))} data-testid="group-link-enable"
+    <button ref={enableButton} disabled={busy || full} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id }), true)} data-testid="group-link-enable"
       className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
@@ -87,7 +98,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     <button disabled={busy} onClick={() => setAsking("disable")} data-testid="group-link-disable"
       title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.link.disable")}</button>
     {asking && <GroupLinkAskDialog kind={asking} onClose={() => setAsking(null)}
-      onConfirm={() => { const reset = asking === "reset"; setAsking(null); void run(() => reset ? engine.call("enableGroupLink", { groupId: group.id, reset: true }) : engine.call("disableGroupLink", { groupId: group.id })); }} />}
+      onConfirm={() => { const reset = asking === "reset"; setAsking(null); void run(() => reset ? engine.call("enableGroupLink", { groupId: group.id, reset: true }) : engine.call("disableGroupLink", { groupId: group.id }), !reset); }} />}
   </div>;
   // Large, on a short screen it gives up some of its size (never under 140px) before the dialog has to scroll.
   const qr = <div data-testid="group-link-qr" className={`mx-auto w-fit max-w-full rounded-2xl bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full ${large ? "[&_svg]:w-[clamp(140px,28dvh,248px)]" : "mt-2"}`}>
