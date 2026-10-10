@@ -262,9 +262,9 @@ export const db = {
   /** The group and its history. */
   async deleteGroup(groupId: string): Promise<void> {
     await wrap((await store(STORES.groups, "readwrite")).delete(groupId));
-    const messages = await store(STORES.messages, "readwrite");
-    const keys = await wrap(messages.index("byLink").getAllKeys(`group:${groupId}`));
-    await Promise.all(keys.map((key) => wrap(messages.delete(key))));
+    // By key range, as a chat's (`deleteLink`): one request, not one per message of a long group.
+    const link = `group:${groupId}`;
+    await wrap((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([link], [link, []])));
   },
 
   async getServices(): Promise<StoredService[]> {
