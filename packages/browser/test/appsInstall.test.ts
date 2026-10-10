@@ -159,6 +159,23 @@ describe("updates", () => {
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
   });
 
+  it("an app uninstalled while an update that adds a permission downloads leaves no files behind", async () => {
+    const { store, v1 } = await installed();
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    // The person uninstalls it while the check fetches the update.
+    const answer = net.fetch.getMockImplementation()!;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === PINNED_URL) await store.uninstall({ ref: v1.ref });
+      return answer(input, init);
+    });
+    expect(await store.checkUpdates()).toEqual([]);
+    expect(await appRows()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+  });
+
   it("a newer version found at the app's own source, peeked first", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
