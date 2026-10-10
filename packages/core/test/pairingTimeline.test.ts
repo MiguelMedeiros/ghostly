@@ -167,7 +167,7 @@ describe("a first pairing, at desktop pace", () => {
     await run(PAIRING_ATTEMPT_MS + 500);
     // Not a failure (WISP 400): back between attempts, saying why.
     expect(inviter.progress.find(p => p.stage === "failed")).toBeUndefined();
-    expect(inviter.progress.find(p => p.detail?.includes("not answered"))).toMatchObject({ attempt: 1, stage: "waiting" });
+    expect(inviter.progress.find(p => p.detail === "timeout")).toMatchObject({ attempt: 1, stage: "waiting" });
     expect(inviter.progress.at(-1)).toMatchObject({ stage: "knocking", attempt: 2 });
     // The joiner is back: the second attempt goes through.
     const joinerAgain = open(made.joiner, pkarr);
