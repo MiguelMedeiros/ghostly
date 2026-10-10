@@ -47,7 +47,7 @@ funded is reported and shot as the app shows it.
 | `calls.spec.ts` | `call`, `call-mobile` | "Be a little closer": an audio call (a legacy chat, the only kind that rings) |
 | `sats.spec.ts` | `sats`, `sats-mobile` | "A little thank-you": eight Testnet wallets made (USDT made, the rest funded), 2,100 sats received in the chat, a request paid over Ark, the payment deck open |
 | `services.spec.ts` | `services-chat`, `services-mobile` | "Made here. Open there.": a photo gallery on Boo's computer shared with Casper in the extension; the phone's Services tab says what sharing needs |
-| `groups.spec.ts` | `groups`, `groups-mobile` | "Bring the whole group": a private group with a picture and four members, joined by its link, with a photo sent to the group |
+| `groups.spec.ts` | `groups`, `groups-mobile` | "Bring the whole group": a private group with a picture and four members, joined by its link, a request to the group paid by one member, and a photo sent to the group last so both shots show all of it |
 | `identities.spec.ts` | `identities-chat`, `identities-chat-mobile` | "Prove who you are": SSH, OpenPGP, Bitcoin (signet) and Nostr proofs, verified on the contact's side |
 | `profiles.spec.ts` | `profiles` | "Your space": the Profile page with three profiles and backups |
 | `readme.spec.ts` | `x-readme-desktop`, `x-readme-phone` (scratch only) | The README's hero, in Dark: Boo's chat with Casper (a voice message, a photo) on a computer and a phone, with nothing reaching the Internet. Then `node apps/website/scripts/capture/readme-hero.mjs <scratch folder>` writes `docs/assets/readme/hero.webp` |

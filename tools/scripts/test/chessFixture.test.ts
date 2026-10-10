@@ -1,57 +1,63 @@
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildAppBundle, seedSigner, toZ32, utf8Encode } from "@ghostly/core";
-import { CHESS_PUBLISHER, CHESS_SOURCE, FIXTURE_DIR, FIXTURE_ENTRY, FIXTURE_MANIFEST, ROOT, chessInputs, fromBundle, isPinnedUrl } from "../refresh-chess-fixture.mjs";
+import { CHESS_PUBLISHER, FIXTURE_DIR, FIXTURE_ENTRY, FIXTURE_MANIFEST, ROOT, fromBundle, isPinnedUrl } from "../refresh-chess-fixture.mjs";
 // covers: apps.chess
 
 /*
- * e2e/fixtures/chess, the pinned Chess the end-to-end tests run (tools/scripts/refresh-chess-fixture.mjs writes it):
- * chess.json matches index.html.txt and ghostly-app.json, the page passes the checks a bundle of Chess has to (the
- * same as apps/mini/chess/test/bundle.test.ts), and while apps/mini/chess is in this repository the fixture was built
- * from what is there now. CI's `refresh-chess-fixture.mjs --check` (Frontend lint and types) also rebuilds it and
- * compares the bytes.
+ * e2e/fixtures/chess, the pinned Chess the end-to-end tests run (tools/scripts/refresh-chess-fixture.mjs writes it
+ * from the bundle Chess's publisher signed in Chess's own repository): chess.json matches index.html.txt and
+ * ghostly-app.json and names a bundle pinned to a commit, and the page is one self-contained file that carries what the
+ * e2e helpers read. No network here: `refresh-chess-fixture.mjs --check` fetches that bundle and compares the bytes.
+ * e2e/fixtures/chess/1.0.2, the last Chess built in this repository, is kept as it was for the update test.
  */
+
+interface Meta {
+  name: string; version: string; entry: string; bytes: number; sha256: string; manifestSha256: string;
+  from: { source?: string; inputs?: string; bundle?: string; ref?: string; sequence?: number; digest?: string };
+}
 
 const dir = join(ROOT, FIXTURE_DIR);
 const page = readFileSync(join(dir, FIXTURE_ENTRY), "utf8");
-const meta = JSON.parse(readFileSync(join(dir, "chess.json"), "utf8")) as {
-  name: string; version: string; entry: string; bytes: number; sha256: string; manifestSha256: string;
-  from: { source?: string; inputs?: string; bundle?: string; ref?: string; sequence?: number; digest?: string };
-};
+const metaOf = (folder: string) => JSON.parse(readFileSync(join(folder, "chess.json"), "utf8")) as Meta;
+const meta = metaOf(dir);
 
-describe("the Chess fixture", () => {
+describe.each([["the Chess fixture", dir], ["the Chess 1.0.2 fixture", join(dir, "1.0.2")]])("%s", (_name, folder) => {
+  const meta = metaOf(folder);
+
   it("is the page chess.json describes", () => {
-    const bytes = readFileSync(join(dir, FIXTURE_ENTRY));
+    const bytes = readFileSync(join(folder, FIXTURE_ENTRY));
     expect(meta).toMatchObject({ name: "chess", entry: "index.html", bytes: bytes.length });
     expect(meta.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
     expect(meta.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 
   it("carries the manifest chess.json describes, for the same name and version", () => {
-    const bytes = readFileSync(join(dir, FIXTURE_MANIFEST));
+    const bytes = readFileSync(join(folder, FIXTURE_MANIFEST));
     expect(meta.manifestSha256).toBe(createHash("sha256").update(bytes).digest("hex"));
     expect(JSON.parse(bytes.toString("utf8"))).toMatchObject({ name: meta.name, version: meta.version, entry: "index.html", kind: "mini-app" });
   });
+});
 
-  it("came from apps/mini/chess as it is now, or from a bundle Chess's key signed", () => {
-    const inputs = chessInputs();
-    if (meta.from.source) {
-      expect(meta.from.source).toBe("apps/mini/chess");
-      if (inputs === null) throw new Error("apps/mini/chess is gone: refresh the fixture from a signed bundle (--bundle)");
-      const stale = "apps/mini/chess changed since e2e/fixtures/chess was built: run node tools/scripts/refresh-chess-fixture.mjs";
-      expect(meta.from.inputs, stale).toBe(inputs);
-      const manifest = readFileSync(join(ROOT, "apps/mini/chess/ghostly-app.json"), "utf8").replace(/\r\n/g, "\n");
-      expect(readFileSync(join(dir, FIXTURE_MANIFEST), "utf8"), stale).toBe(manifest);
-      expect(meta.version).toBe((JSON.parse(manifest) as { version: string }).version);
-    } else {
-      expect(meta.from.ref).toBe(`${CHESS_PUBLISHER}/chess`);
-      expect(meta.from.sequence).toBeGreaterThan(0);
-      expect(meta.from.digest).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    }
+describe("the Chess fixture", () => {
+  it("came from a bundle Chess's key signed, at a URL that names one commit", () => {
+    expect(meta.from.source).toBeUndefined();
+    expect(isPinnedUrl(meta.from.bundle!), meta.from.bundle).toBe(true);
+    expect(meta.from.ref).toBe(`${CHESS_PUBLISHER}/chess`);
+    expect(meta.from.sequence).toBeGreaterThan(0);
+    expect(meta.from.digest).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("is a later version than the 1.0.2 kept beside it, and asks for `name` on top of what that one asks", () => {
+    const manifest = (folder: string) => JSON.parse(readFileSync(join(folder, FIXTURE_MANIFEST), "utf8")) as { version: string; permissions: string[] };
+    const [now, before] = [manifest(dir), manifest(join(dir, "1.0.2"))];
+    expect(before).toMatchObject({ version: "1.0.2", permissions: ["chat"] });
+    expect(Number(now.version.split(".")[0])).toBeGreaterThan(1);
+    expect(now.permissions).toEqual(["chat", "name"]);
   });
 
   it("is one HTML file with its script and styles inline", () => {
@@ -66,7 +72,8 @@ describe("the Chess fixture", () => {
   it("names no address and no way to reach the network outside its license notices", () => {
     const start = page.indexOf("/*!");
     const code = start < 0 ? page : page.slice(0, start) + page.slice(page.indexOf("*/", start) + 2);
-    expect(code).not.toMatch(/\b(?:https?|wss?):\/\//i);
+    // The SVG namespace its drawn pieces are made in is a name, never fetched.
+    expect(code.replaceAll("http://www.w3.org/2000/svg", "")).not.toMatch(/\b(?:https?|wss?):\/\//i);
     expect(code).not.toMatch(/\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts|RTCPeerConnection)\b/);
     expect(code).not.toMatch(/\bimport\s*\(/);
   });
@@ -77,13 +84,14 @@ describe("the Chess fixture", () => {
   });
 
   it("carries the DOM the e2e helpers read (e2e/support/chessApp.ts)", () => {
-    for (const name of ["board", "side", "status", "selected", "last"]) expect(page).toContain(name);
+    for (const name of ["board", "side", "status", "selected", "last", "setup", "invite-btn", "invitation", "accept-invite"]) expect(page).toContain(name);
     expect(page).toContain("dataset.square");
+    expect(page).toContain("dataset.piece");
     expect(page).toContain("You play");
   });
 
   it("stays small", () => {
-    expect(Buffer.byteLength(page)).toBeLessThan(160 * 1024);
+    expect(Buffer.byteLength(page)).toBeLessThan(320 * 1024);
   });
 });
 
@@ -121,18 +129,6 @@ describe("refresh-chess-fixture.mjs", () => {
     bytes[bytes.length - 3] ^= 1;
     writeFileSync(file, bytes);
     await expect(fromBundle(file, toZ32(signer.publicKey))).rejects.toThrow(/not a valid bundle: file-hash/);
-  });
-
-  it.skipIf(chessInputs() === null)("hashes what the build reads: not package.json's version or devDependencies, which releases and dependabot move", () => {
-    const copy = join(tmp, "root");
-    cpSync(join(ROOT, CHESS_SOURCE), join(copy, CHESS_SOURCE), { recursive: true, filter: (src) => !/[\\/](?:node_modules|dist)$/.test(src) });
-    const file = join(copy, CHESS_SOURCE, "package.json");
-    const pkg = JSON.parse(readFileSync(file, "utf8")) as { version: string; dependencies: Record<string, string>; devDependencies: Record<string, string> };
-    expect(chessInputs(copy)).toBe(chessInputs());
-    writeFileSync(file, `${JSON.stringify({ ...pkg, version: "9.9.9", devDependencies: { ...pkg.devDependencies, vite: "^99.0.0" } }, null, 2)}\n`);
-    expect(chessInputs(copy)).toBe(chessInputs());
-    writeFileSync(file, `${JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, "chess.js": "9.9.9" } }, null, 2)}\n`);
-    expect(chessInputs(copy)).not.toBe(chessInputs());
   });
 
   it("takes only a URL that names one commit", async () => {

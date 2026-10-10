@@ -51,12 +51,6 @@ test("a private group of four, desktop and phone", async ({ browser, baseURL }) 
     [casper, "finally a group chat with just us in it"],
     [wendy, "I'll bring the board games 🎲"],
     [spooky, "and I bring the ghost stories 👻"],
-  ], everyone);
-
-  // Casper sends the house's photo to the group: each member's app fetches it from a member who has it.
-  await casper.page.getByTestId("file-input").setInputFiles({ name: "lake-house.jpg", mimeType: "image/jpeg", buffer: await sceneImage(casper) });
-  for (const p of everyone) await expect(chat(p).getByTestId("file-bubble").first().locator("img")).toBeVisible({ timeout: 120_000 });
-  await converse([
     [casper, "car leaves at 6. who's riding with me?"],
     [wendy, "me! saving you the front seat, Boo"],
   ], everyone);
@@ -73,10 +67,12 @@ test("a private group of four, desktop and phone", async ({ browser, baseURL }) 
   await ask.getByTestId("payment-pay").click({ timeout: 90_000 });
   await chat(wendy).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(chat(boo).getByTestId("group-pay-caption").filter({ hasText: "asked the group" })).toContainText("Paid by Wendy", { timeout: 90_000 });
-  await converse([
-    [boo, "thanks Wendy! 🔥"],
-    [spooky, "see you all friday 🌙"],
-  ], everyone);
+  await converse([[boo, "thanks Wendy! 🔥"]], everyone);
+
+  // Casper sends the house's photo to the group, late enough that both shots still show all of it: each member's app fetches it from a member who has it.
+  await casper.page.getByTestId("file-input").setInputFiles({ name: "lake-house.jpg", mimeType: "image/jpeg", buffer: await sceneImage(casper) });
+  for (const p of everyone) await expect(chat(p).getByTestId("file-bubble").first().locator("img")).toBeVisible({ timeout: 120_000 });
+  await converse([[spooky, "see you all friday 🌙"]], everyone);
   await boo.page.waitForTimeout(2000);
   await toBottom(boo);
   await shot(boo, "groups.png");
