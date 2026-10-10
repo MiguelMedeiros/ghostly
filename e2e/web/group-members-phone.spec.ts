@@ -39,4 +39,14 @@ test("on a phone the admin's members list shows each member's name", { tag: ["@f
   // The buttons are under it, inside the dialog, and still in reach.
   const [nameBox, removeBox, dialogBox] = await Promise.all([name.boundingBox(), row.getByTestId("group-remove-member").boundingBox(), admin.page.getByTestId("group-members-dialog").boundingBox()]);
   expect(removeBox!.y).toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height - 1);
-  expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);});
+  expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+
+  // New link and Turn off end the shared link: a thumb's height each, on a row of their own under Share, Copy and Show QR.
+  const link = admin.page.getByTestId("group-members-dialog").getByTestId("group-link");
+  const [resetBox, disableBox, ...above] = await Promise.all(["group-link-reset", "group-link-disable", "group-link-share", "group-link-copy", "group-link-qr-toggle"].map(id => link.getByTestId(id).boundingBox()));
+  for (const box of [resetBox, disableBox]) {
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    for (const other of above) expect(box!.y).toBeGreaterThanOrEqual(other!.y + other!.height);
+  }
+  expect(disableBox!.x - (resetBox!.x + resetBox!.width)).toBeGreaterThanOrEqual(8);
+});
