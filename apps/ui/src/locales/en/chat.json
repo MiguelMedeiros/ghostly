@@ -25,8 +25,10 @@
   },
   "connecting": "connecting",
   "createdHere": "You created this chat",
+  "deleteArrivingFileHint": "Deleted only here. The file stops arriving; your contact sees it cancelled.",
   "deleteMessage": "Delete message",
   "deleteMessageHint": "Deleted only here. Your contact keeps their copy.",
+  "deleteSendingFileHint": "Deleted only here. Sending stops; your contact won't get the file.",
   "delivery": {
     "delivered": "Delivered",
     "failed": "Not sent",
