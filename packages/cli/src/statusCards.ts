@@ -1,4 +1,4 @@
-import { STATUS_CARD_LIMITS, checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
+import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
@@ -91,13 +91,17 @@ function cardTexts(value: unknown, out: string[] = []): string[] {
 /**
  * The secret guard `send` has (docs/CLI.md § Safety): a card whose text looks like a seed, a private key or a Cashu
  * token goes only with `--force`. `fields` are what this command gives (an update's own, not the card it merges over).
+ * A card's text is read as given and as the card carries it (`cardLine`): a line loses its invisible characters on the
+ * way, so a key one of them broke in two is whole again on the card. The fallback text goes as it is, as `send`'s.
  */
 function guardSecrets(fields: unknown, params: Params, verb: string): void {
   if (bool(params, "force")) return;
-  for (const text of cardTexts([fields, params.run, params.text])) {
+  const check = (text: string) => {
     const secret = findSecret(text);
     if (secret) throw new CliError("confirm", `The card's text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} it with --force if you mean to`, { kind: secret.kind });
-  }
+  };
+  for (const text of cardTexts([fields, params.run])) { check(text); check(cardLine(text, Infinity) ?? ""); }
+  if (typeof params.text === "string") check(params.text);
 }
 
 /** The latest message of mine in this chat or group with a card of this kind and id: the one an update edits. */
