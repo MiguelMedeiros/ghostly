@@ -62,6 +62,7 @@ describe("the group header's Share link", () => {
     await user.click(screen.getByTestId("group-share"));
     const dialog = await screen.findByTestId("group-share-dialog");
     await user.click(within(dialog).getByTestId("group-link-disable"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
     expect(await screen.findByTestId("group-link-enable")).toBeInTheDocument();
     expect(screen.getByTestId("group-share-dialog")).toHaveTextContent("The link is off");
     await user.click(screen.getByTestId("group-share-done"));

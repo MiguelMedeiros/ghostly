@@ -76,6 +76,7 @@ test("a new group opens on its link; Copy, Share and the header's Share link; jo
   expect(second).not.toBe(url);
   // Turned off in the dialog itself, the dialog stays and says so; turned on there, it shows the next link.
   await share.getByTestId("group-link-disable").click();
+  await alice.page.getByTestId("group-link-ask-confirm").click();
   await expect(share.getByTestId("group-link")).toHaveAttribute("data-state", "off");
   await expect(share).toContainText("The link is off");
   await share.getByTestId("group-link-enable").click();
