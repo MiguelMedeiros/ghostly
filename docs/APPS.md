@@ -6,8 +6,8 @@ store Ghostly preloads, and how an app gets into it.
 
 ## Using apps
 
-- **Where:** the web app and Ghostly Desktop on macOS and Linux. Not yet on Desktop on Windows, in the Android app or
-  in the browser extension, and the CLI runs none (it has the publisher's tools). A web app you host without the Docker
+- **Where:** the web app and Ghostly Desktop on macOS and Linux. Not yet on Desktop on Windows or in the browser
+  extension, and the CLI runs none (it has the publisher's tools). A web app you host without the Docker
   image needs the runner's two locations ([On the web](WEB.md)).
 - **Get one:** the **Apps** page lists your stores, starting with the official one. **Add** takes the link of an app or
   of another store. An app a contact shared or opened in a chat arrives as a card with **Install**.

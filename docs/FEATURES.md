@@ -58,7 +58,7 @@ More: [On the web](WEB.md#install-it).
 - Each app is checked against its publisher's signature before it installs, and runs in a sandbox apart from your chats, keys and wallets. It reaches the internet only with the permission you grant at install.
 - Open an app in a 1:1 chat to play with that contact, live, while you are both online. Each side keeps the game.
 - An app from a store updates to the version that store lists; a version its publisher revoked or a store removed is stopped.
-- On the web app and on Desktop for macOS and Linux. Not yet on Desktop on Windows, in the Android app or in the extension.
+- On the web app and on Desktop for macOS and Linux. Not yet on Desktop on Windows or in the extension.
 
 More: [Apps and the official store](APPS.md).
 
