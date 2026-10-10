@@ -121,6 +121,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
    */
   const win = useRef(rowWindow);
   win.current = rowWindow;
+  // Rows coming at the end past the most rows replace the oldest at the bottom, and stay below the window up from it.
+  const [restsAtBottom] = useState(() => () => atBottom.current && !jumping.current);
+  rowWindow?.watch(restsAtBottom);
   const detached = () => !!win.current?.detached;
 
   const distance = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -260,6 +263,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       return;
     }
     if (pending.current?.anchor && rowById(el, pending.current.anchor.id)) { restore(pending.current); return; }
+    // Its message came with more than the most rows at once, and only the last ones are in the page: the rows around it
+    // come in with the next commit, and it goes back on it then.
+    if (pending.current?.anchor) win.current?.reveal(pending.current.anchor.id, false);
     // Only what comes after the newest row seen is new. Older history coming in above (a group's newest page first, then
     // the rest) or a late catch-up put in its place among the rows seen (a group syncing after a reconnect) is not.
     let newestSeen = rows.length - 1;
@@ -284,9 +290,6 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       }
     }
     settle();
-    // Resting at the bottom, the rows that came while the chat stayed open would pile up in the page for as long as it
-    // stays open: past the most rows, the oldest go (all above the view, which stays at the bottom).
-    if (atBottom.current && !following.current && !jumping.current && !hidden(el) && distance(el) <= NEAR_BOTTOM_PX) win.current?.trim();
   }, [rows, listEl, chat, settle, clear]);
 
   useEffect(() => {

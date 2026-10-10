@@ -113,6 +113,28 @@ describe("the backup codec", () => {
     expect(fromBase64Url(toBase64Url(new Uint8Array([251, 255])))).toEqual(new Uint8Array([251, 255]));
     expect(toBase64Url(new Uint8Array([251, 255]))).toBe("-_8");
   });
+
+  it("encodes pictures and bytes without btoa, to the same base64url text as before", async () => {
+    const btoa = vi.spyOn(globalThis, "btoa");
+    for (let length = 0; length < 70; length++) {
+      const bytes = Uint8Array.from({ length }, (_, i) => (i * 151 + length) % 256);
+      expect(toBase64Url(bytes), `${length} bytes`).toBe(Buffer.from(bytes).toString("base64url"));
+    }
+    const picture = Uint8Array.from({ length: 300_001 }, (_, i) => (i * 7919) % 256);
+    const text = await encode({ picture: new Blob([picture], { type: "image/png" }), bytes: picture.subarray(1) });
+    expect(btoa.mock.calls.length, "a 16 MiB picture costs over a second of the page's thread in btoa").toBe(0);
+    expect(JSON.parse(text)).toEqual({ picture: { $ghostly: "blob", type: "image/png", value: Buffer.from(picture).toString("base64url") }, bytes: { $ghostly: "bytes", value: Buffer.from(picture.subarray(1)).toString("base64url") } });
+    const back = decode(text) as { picture: Blob; bytes: Uint8Array };
+    expect(new Uint8Array(await back.picture.arrayBuffer())).toEqual(picture);
+    expect(back.bytes).toEqual(picture.subarray(1));
+  });
+
+  it("an older backup's bytes and pictures restore byte for byte", async () => {
+    const back = decode('{"b":{"$ghostly":"bytes","value":"-_8AAQ"},"p":{"$ghostly":"blob","type":"image/jpeg","value":"_9j_4A"}}') as { b: Uint8Array; p: Blob };
+    expect(back.b).toEqual(new Uint8Array([251, 255, 0, 1]));
+    expect(back.p.type).toBe("image/jpeg");
+    expect(new Uint8Array(await back.p.arrayBuffer())).toEqual(new Uint8Array([255, 216, 255, 224]));
+  });
 });
 
 describe("backup names", () => {

@@ -83,6 +83,15 @@ describe("a video in the chat", () => {
     expect(screen.queryByTestId("video-player")).toBeNull();
   });
 
+  it("is named for a screen reader in the app's language, with its length or its size", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    const view = renderApp(<VideoBubble file={video()} sender="peer" peerName="Ana" />, { language: "pt" });
+    expect(screen.getByRole("group", { name: "Vídeo, 0:12" })).toBeInTheDocument();
+    view.unmount();
+    renderApp(<VideoBubble file={video({ video: undefined })} sender="peer" peerName="Ana" />, { language: "pt" });
+    expect(screen.getByRole("group", { name: "Vídeo, 35.0 MB" })).toBeInTheDocument();
+  });
+
   it("plays in place when tapped, from its bytes, with the browser's controls", async () => {
     show(video());
     fireEvent.click(screen.getByTestId("video-play"));
@@ -178,6 +187,16 @@ describe("a video in the chat", () => {
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, "clip.webm"));
   });
 
+  it("a Download the system refuses (Desktop) says so in the language, not in the system's English", async () => {
+    canPlay = (type) => (type === "video/webm" ? "" : "maybe");
+    vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("Permission denied (os error 13)"));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<VideoBubble file={video({ name: "clip.webm", mime: "video/webm" })} sender="peer" peerName="Ana" />, { language: "pt" });
+    fireEvent.click(screen.getByTestId("video-download"));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    expect(screen.getAllByRole("alert")[1]).toHaveTextContent(/^Não foi possível salvar o arquivo ali\. Tente de novo e escolha outra pasta\.$/);
+  });
+
   it("a type never served as itself (Matroska) is not handed to the player", () => {
     show(video({ name: "film.mkv", mime: "video/x-matroska" }));
     expect(screen.getByTestId("video-bubble")).toHaveAttribute("data-playable", "false");
@@ -220,6 +239,20 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-player").getAttribute("src")).toBe("ghostly-file://localhost/token-2");
     cleanup();
     expect(release).toHaveBeenCalledTimes(2);
+  });
+
+  it("gone while its stream is being opened (the chat closed), it lets go of the stream once it comes", async () => {
+    getFile.mockResolvedValue(null);
+    const release = vi.fn();
+    let answer: (source: { url: string; release: () => void }) => void = () => {};
+    vi.spyOn(servicesPlatform!, "streamFile").mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const view = show(video({ size: 700 * MB }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    view.unmount();
+    answer({ url: "ghostly-file://localhost/token-late", release });
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it("a streamed one stops being served when another video starts", async () => {

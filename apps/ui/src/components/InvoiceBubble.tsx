@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
@@ -15,6 +15,7 @@ import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
 import { OpenInWallet } from "./OpenInWallet";
 import { rawError } from "../lib/errorText";
+import { qrFits } from "../lib/qrFits";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 
@@ -53,12 +54,14 @@ function useCopy(value: string) {
   };
 }
 
-function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
+function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId }: {
   label: string;
   /** Which money: the network's tag beside the label. */
   tag?: React.ReactNode;
   amount: number | null;
   unit: string;
+  /** Said instead of the amount: ecash of a unit this wallet does not take, whose amount is in that unit's cents. */
+  otherUnit?: string;
   lines: (string | undefined)[];
   qr: string;
   children: React.ReactNode;
@@ -66,11 +69,15 @@ function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
 }) {
   const { t } = useI18n();
   const [showQr, setShowQr] = useState(true);
+  // A token of many proofs, or a long invoice, holds more than one QR code: said in words, the card and its actions stay.
+  const fits = useMemo(() => qrFits(qr), [qr]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId}>
       <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{label}{tag}</p>
       <p className="m-0 mt-0.5 leading-tight">
-        {amount === null ? (
+        {otherUnit ? (
+          <span className="text-[15px] font-semibold" data-testid="money-other-unit">{otherUnit}</span>
+        ) : amount === null ? (
           <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>
         ) : (
           <>
@@ -83,7 +90,8 @@ function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
       {lines.filter(Boolean).map((line) => (
         <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
-      {showQr && (
+      {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
+      {fits && showQr && (
         <button
           onClick={() => setShowQr(false)}
           className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none"
@@ -94,7 +102,7 @@ function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
       )}
       <div className="flex flex-wrap gap-1.5 mt-2">
         {children}
-        {!showQr && (
+        {fits && !showQr && (
           <button className={quiet} onClick={() => setShowQr(true)}>QR</button>
         )}
       </div>
@@ -129,7 +137,8 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   const [paid, setPaid] = useState(() => isSettled(id));
   // Handed to the mint, which has not settled it yet: paying again could pay twice.
   const [pending, setPending] = useState(false);
-  const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
+  // The invoice quoted rides with its quote: Paid is only ever kept for the invoice that was paid.
+  const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number; id: string } | null>(null);
   /** Real money: Pay opens the second step, and only it pays. */
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -156,7 +165,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
     }
   };
 
-  const pay = (payable: { quote: string; mint: string }, confirmedReal: boolean) =>
+  const pay = (payable: { quote: string; mint: string; id: string }, confirmedReal: boolean) =>
     run(async () => {
       try {
         if (!(await wallet!.payQuote(payable.quote, payable.mint, undefined, confirmedReal))) {
@@ -170,8 +179,8 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
         // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.
         if (!/already paid/i.test(rawError(e))) throw e;
       }
-      markSettled(id);
-      setPaid(true);
+      markSettled(payable.id);
+      if (payable.id === id) setPaid(true);
     });
 
   return (
@@ -202,7 +211,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
         <>
           {wallet && !mine && !off && !expired && !noWallet && invoice.amountSat !== null && <LightningPayWith payer={lightningPayer} unit={satsIn(t, network)} disabled={busy} testId="invoice-lightning-card" />}
           {wallet && !mine && !off && !expired && !noWallet && invoice.amountSat !== null && (
-            <button className={button} disabled={busy} data-testid="invoice-pay" onClick={() => run(async () => setQuote(await wallet.quoteInvoice(invoice.invoice)))}>
+            <button className={button} disabled={busy} data-testid="invoice-pay" onClick={() => run(async () => setQuote({ ...(await wallet.quoteInvoice(invoice.invoice)), id }))}>
               {busy ? t("payments.invoice.checking") : t("payments.invoice.pay")}
             </button>
           )}
@@ -281,6 +290,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
         label={t("payments.invoice.ecashRequest")}
         amount={inspection.amount}
         unit={inspection.unit}
+        otherUnit={inspection.unit === "sat" ? undefined : t("payments.invoice.otherUnitRequest", { unit: inspection.unit })}
         lines={[inspection.description, inspection.mints.length > 0 ? t("payments.invoice.mints", { mints: inspection.mints.map(host).join(", ") }) : undefined]}
         qr={value}
       >
@@ -289,13 +299,16 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
     );
   }
 
+  // Only sat ecash is redeemed here: a token of another unit is said as one, whatever its mint.
+  const otherUnit = inspection.unit !== "sat";
   return (
     <Card
       testId="cashu-token-bubble"
       label={t("payments.invoice.ecashToken")}
       amount={inspection.amount}
       unit={inspection.unit}
-      lines={[inspection.memo, t("payments.invoice.mint", { mint: host(inspection.mint) }), !inspection.accepted && !mine ? t("payments.invoice.mintNotAdded") : undefined]}
+      otherUnit={otherUnit ? t("payments.invoice.otherUnitToken", { unit: inspection.unit }) : undefined}
+      lines={[inspection.memo, t("payments.invoice.mint", { mint: host(inspection.mint) }), !inspection.accepted && !mine ? t(otherUnit ? "payments.invoice.onlySat" : "payments.invoice.mintNotAdded") : undefined]}
       qr={value}
     >
       {redeemed ? (
@@ -330,6 +343,15 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
   );
 }
 
+/** What a card pays: an edit to the message that changes it gives a new card, so nothing started for the old money carries over. */
+function whatItPays(money: MoneyInText): string {
+  if (money.type === "lightning") return money.invoice.invoice;
+  if (money.type === "lnurl") return money.destination.text;
+  if (money.type === "cashu") return money.value;
+  const { rest: _rest, ...what } = money;
+  return JSON.stringify(what, (_, value) => typeof value === "bigint" ? String(value) : value);
+}
+
 /** Brand names stay as they are; on-chain Bitcoin is said in the app's language. */
 const METHOD_NAME = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", usdt: "USDT" } as const;
 
@@ -343,8 +365,10 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
   return (
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
-      {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
-        : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} />} />}
+      <Fragment key={whatItPays(money)}>
+        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
+          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} />} />}
+      </Fragment>
       {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
     </>
   );

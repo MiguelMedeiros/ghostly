@@ -32,6 +32,28 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Native adapter could not start. Reopen this chat to retry.", "packages/browser/src/engine/node.ts"],
+  ["At most 64 items can wait for this contact. Wait until some are picked up.", `${BROWSER}/engine/hold.ts`, " items can wait for this contact. Wait until some are picked up."],
+  ["Items waiting for this contact would exceed 64 MB. Wait until some are picked up.", `${BROWSER}/engine/hold.ts`, "Items waiting for this contact would exceed ${"],
+  ["Message exceeds 16384 UTF-8 bytes.", "packages/browser/src/engine/node.ts", "Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes."],
+  ["Message exceeds 4096 UTF-8 bytes.", "packages/browser/src/engine/groupEdits.ts", "Message exceeds ${GROUP_EDIT_TEXT_BYTES} UTF-8 bytes."],
+  ["This message was edited 100 times, the most one takes.", "packages/browser/src/engine/node.ts", "This message was edited ${most} times, the most one takes."],
+  ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
+  ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
+  ["Someone else joined with this invite first. Ask your contact for a new one.", "packages/core/src/ghostlink.ts"],
+  ["Chat has been burned", "packages/browser/src/platform/useChat.ts"],
+  ["No transport both apps allow is available yet", `${CORE}/ghostlink.ts`],
+  ["No permitted transport could connect", `${CORE}/ghostlink.ts`],
+  ["The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect.", `${CORE}/ghostlink.ts`],
+  ["Your contact needs an updated app to negotiate a transport change.", `${CORE}/ghostlink.ts`],
+  ["All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "packages/browser/src/engine/node.ts"],
+  ["Could not reach the HyperDHT relay", `${BROWSER}/platform/hyperdhtRelay.ts`],
+  ["The HyperDHT relay did not answer", `${BROWSER}/platform/hyperdhtRelay.ts`],
+  ["The HyperDHT relay closed the connection", `${BROWSER}/platform/hyperdhtRelay.ts`],
+  ["The HyperDHT relay did not let this chat listen", `${BROWSER}/platform/hyperdhtRelay.ts`],
+  ["Iroh endpoint is stopped", `${BROWSER}/platform/irohWeb.ts`],
+  ["The connection changed. Compare the current code again.", "packages/core/src/pairedSession.ts"],
+  ["Compare the current code again.", "packages/core/src/ghostlink.ts"],
+  ["The connection closed. Compare again after reconnecting.", "packages/core/src/pairedSession.ts"],
   ["The Ghostly peer is unavailable. Reopen the extension to retry.", "apps/extension/src/host.ts"],
   ["Switching profiles…", "apps/extension/src/host.ts"],
   ["Ghostly needs the sign-in permission for this.", "apps/extension/src/oidc.ts"],
@@ -62,8 +84,15 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
+  ["Held messages need S3 storage (Profile → Backups) and a contact that allows them.", `${BROWSER}/engine/node.ts`],
   ["Not enough space on your contact's device for this file (2.0 MB free).", `${BROWSER}/platform/services.ts`, "Not enough space on your contact's device for this file ("],
   ["That file is too large for your contact's app (max 64 MB). Larger files need an updated Ghostly on their side.", `${BROWSER}/platform/services.ts`, ". Larger files need an updated Ghostly on their side."],
+  ["Not enough space on your contact's device (1.1 MB free)", `${CORE}/chatFiles.ts`, "Not enough space on your contact's device ("],
+  ["Not enough space on your contact's device", `${CORE}/chatFiles.ts`],
+  ["Your contact has too many files waiting. Try again later.", `${CORE}/chatFiles.ts`],
+  ["The file arrived damaged and was deleted. Send it again.", `${CORE}/chatFiles.ts`],
+  ["Not accepted in time", `${CORE}/chatFiles.ts`],
+  ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
   ["That is not a valid mint URL", CODES],
   ["Mints must use https", CODES],
@@ -98,6 +127,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Lightning is not allowed by both of you here", `${BROWSER}/engine/payments.ts`, " is not allowed by both of you here"],
   ["Your contact allowed neither Cashu nor Lightning in this chat", `${BROWSER}/engine/payments.ts`],
   ["Your contact took no Cashu or Lightning last time. Try again once the chat is live", `${BROWSER}/engine/payments.ts`],
+  ["Your contact is offline. Nothing was sent: pay once the chat is live.", CODES],
   ["Cashu and Lightning are off in this chat", `${BROWSER}/engine/payments.ts`],
   ["A request to the group is paid in Cashu or over Lightning", `${BROWSER}/engine/payments.ts`],
   ["Unknown payment request", `${BROWSER}/engine/payments.ts`],
@@ -154,6 +184,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This is not a link to a group", `${BROWSER}/engine/groups.ts`],
   ["You are already joining this group", `${BROWSER}/engine/groups.ts`],
   ["This group is joined with its current link", `${BROWSER}/engine/groups.ts`],
+  ["Go online to join a group", `${BROWSER}/engine/node.ts`],
   ["Only the admin can change the members of this group", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
@@ -168,6 +199,12 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Share the group's link with them: anyone who opens it joins", `${BROWSER}/engine/groups.ts`],
   ["At most 4 members can be pinned as hubs", `${CORE}/groupSession.ts`, " members can be pinned as hubs"],
   ["A community group chooses its hubs by itself", `${BROWSER}/engine/groups.ts`],
+  ["You sent many files to this group just now. Wait a minute.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
+  ["You sent many files to this group just now. Wait 7 minutes.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
+  ["Not enough space on this device for this file", `${BROWSER}/engine/groupFiles.ts`],
+  ["An empty file cannot go to a group", `${BROWSER}/platform/services.ts`],
+  ["This app takes no group files", `${BROWSER}/engine/groups.ts`],
+  ["A group takes files of up to 100.0 MB", `${BROWSER}/engine/node.ts`, "A group takes files of up to "],
   ["No route to the recipient within the fee limit", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
   ["Not enough outbound liquidity in the node's channels", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
   ["The node gave up finding a route", `${BROWSER}/engine/paymentAdapters/providers/lnd.ts`],
@@ -276,6 +313,12 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This picture cannot be read here", "apps/ui/src/lib/avatarImage.ts"],
   ["This picture could not be made small enough", "apps/ui/src/lib/avatarImage.ts"],
   ["That is too large to paste. Send it with + → Document.", "apps/ui/src/lib/pastedFiles.ts"],
+  // A paste the app's clipboard commands refused (Desktop).
+  ["That picture is too large to paste", "apps/desktop/src/clipboard.rs"],
+  ["The clipboard's picture is damaged", "apps/desktop/src/clipboard.rs"],
+  ["Clipboard unavailable", "apps/desktop/src/clipboard.rs"],
+  ["That paste is gone. Paste it again.", "apps/desktop/src/clipboard.rs"],
+  ["Could not read the file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the file: {e}"],
   ["This browser cannot wake Ghostly while it is closed.", "apps/ui/src/lib/wakePush.ts"],
   ["Your signer holds a different key than this identity. Nothing was published.", "apps/ui/src/lib/nostr.ts"],
   ["This device cannot decode the recording", "apps/ui/src/lib/voiceMp3.ts"],
@@ -326,6 +369,22 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
   ["Not a relay address: ftp//x", `${BROWSER}/nostr/relay.ts`, "Not a relay address: ${value.slice(0, 40)}"],
+  // Held items for an away contact (WISP 404): a message's line, and the chat's hold line and dialog.
+  ["An item held for an away contact is at most 8 MB.", `${BROWSER}/engine/hold.ts`, "An item held for an away contact is at most "],
+  ["Held messages need S3 storage (Profile → Backups) and a pinned contact.", `${BROWSER}/engine/hold.ts`],
+  ["The message is gone", `${BROWSER}/engine/hold.ts`],
+  ["The file is gone", `${BROWSER}/engine/hold.ts`],
+  ["The payment request is gone", `${BROWSER}/engine/hold.ts`],
+  ["Could not store the item: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not store the item: "],
+  ["Stored, but could not tell the contact where: Failed to fetch", `${BROWSER}/engine/hold.ts`, "Stored, but could not tell the contact where: "],
+  ["Held for its whole lifetime without being picked up. Retry to hold it again.", `${BROWSER}/engine/hold.ts`],
+  ["Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", `${BROWSER}/engine/hold.ts`],
+  ["Could not read the contact's pointer: Failed to fetch", `${BROWSER}/engine/hold.ts`, "Could not read the contact's pointer: "],
+  ["The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", `${BROWSER}/engine/hold.ts`],
+  ["Refused what the contact's storage offered: The manifest is malformed", `${BROWSER}/engine/hold.ts`, "Refused what the contact's storage offered: "],
+  ["Could not pick up held items: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not pick up held items: "],
+  ["Refused a held item from the contact: The held item is larger than allowed", `${BROWSER}/engine/hold.ts`, "Refused a held item from the contact: "],
+  ["Picked up, but could not acknowledge: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Picked up, but could not acknowledge: "],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -353,6 +412,15 @@ describe("errors in the app's language", () => {
     expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK. O servidor Esplora em esplora.example não respondeu em 10 s");
   });
 
+  it("a paste the app's clipboard refused says what to do next, in the language", () => {
+    const pt = translators.pt;
+    expect(errorText("That picture is too large to paste", pt)).toBe("Isso é grande demais para colar. Envie com + → Documento.");
+    expect(errorText("That paste is gone. Paste it again.", pt)).toBe("Essa colagem expirou. Cole de novo.");
+    expect(errorText("Clipboard unavailable", pt)).toBe("Não foi possível ler a área de transferência. Anexe com +.");
+    expect(errorText("Could not read the file: Permission denied (os error 13)", pt)).toBe("Não foi possível ler o arquivo colado. Anexe com +.");
+    expect(knownErrorParts("Could not read the file: Permission denied (os error 13)", pt)?.detail).toBe("Could not read the file: Permission denied (os error 13)");
+  });
+
   it("each rule has a sample, so none stops matching unseen", () => {
     const covered = new Set(SAMPLES.map(([text]) => matched(text)));
     expect(ERROR_RULES.filter((rule) => !covered.has(rule)).map((rule) => String(rule.match))).toEqual([]);
@@ -365,6 +433,7 @@ describe("errors in the app's language", () => {
       .toBe("O pagamento Lightning não foi concluído. Os sats voltaram, menos 2 sats que ficaram com o mint.");
     expect(errorText("Refused: Already paid by another member of the group. 1200 sats came back; the mint kept 2 as its fee.", pt))
       .toBe("O pagamento foi recusado. Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2.");
+    expect(errorText("You sent many files to this group just now. Wait 7 minutes.", pt)).toBe("Você enviou muitos arquivos a este grupo agora há pouco. Espere 7 minutos e envie de novo.");
     expect(errorText("Both peers need on-chain Bitcoin on a connected data link", pt)).toBe("Você e seu contato precisam de Bitcoin on-chain, com a conversa ao vivo");
     expect(errorText("This pays with real money: confirm it with Send real money first. Nothing was sent.", pt)).toContain("Enviar dinheiro real");
   });

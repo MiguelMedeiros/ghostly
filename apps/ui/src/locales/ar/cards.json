@@ -152,5 +152,10 @@
     "updatedLabel": "آخر تحديث",
     "used": "{{used}} من {{limit}} مستخدمة",
     "usedLabel": "المستخدم"
+  },
+  "working": {
+    "label": "يعمل الآن",
+    "quiet": "يعمل الآن؟ · آخر تحديث {{ago}}",
+    "stale": "لا تحديث منذ {{duration}}"
   }
 }

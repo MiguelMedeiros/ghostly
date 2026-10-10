@@ -506,4 +506,90 @@ describe("with the apps flag on", () => {
     await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
   });
+
+  it("the focus goes back to Add when Add closes, and to the new app's Open after Install from a pasted link", async () => {
+    let apps: InstalledAppView[] = [];
+    fakeEngine.on("appList", () => apps).on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appPreview", () => preview()).on("appInstall", () => { apps = [installed()]; return installed(); });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const add = await screen.findByTestId("apps-add");
+    add.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("apps-add-url")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("apps-add-dialog")).not.toBeInTheDocument();
+    expect(add).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await user.type(screen.getByTestId("apps-add-url"), `${URL_}{Enter}`);
+    await user.click(await screen.findByTestId("app-install-confirm"));
+    await waitFor(() => expect(screen.getByTestId("installed-app-open")).toHaveFocus());
+  });
+
+  it("gives each text a publisher or a store wrote its own direction, so in a right-to-left app an English title is cut at its end", async () => {
+    const title = "Chess Tournament Organizer for Friends!";
+    const unread = "https://raw.githubusercontent.com/g/unread/HEAD/ghostly-store.json";
+    fakeEngine.on("appList", () => [installed({ title, description: "Chess for two." })])
+      .on("appStoreList", () => [
+        { key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+          name: "Ghostly", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+          apps: [{ ref: `${KEY}/other`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Snake", tagline: "Eat, grow." }], removed: [] },
+        { key: "u", fingerprint: "qrst uvwx yz12 3456", url: unread, preloaded: true, sequence: 0, expired: false, apps: [], removed: [] },
+      ]).on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByText(title)).toHaveAttribute("dir", "auto");
+    expect(within(row).getByTestId("installed-app-hint")).toHaveAttribute("dir", "auto");
+    expect(screen.getByText(unread)).toHaveAttribute("dir", "auto");
+    expect(screen.getByText("Ghostly")).toHaveAttribute("dir", "auto");
+    await user.click(screen.getByText("Ghostly"));
+    expect(screen.getByText("Snake")).toHaveAttribute("dir", "auto");
+    expect(screen.getByText("Eat, grow.")).toHaveAttribute("dir", "auto");
+    await user.click(within(row).getByRole("button", { name: `${title}: details` }));
+    const details = screen.getByTestId("app-details");
+    expect(within(details).getByRole("heading", { name: title })).toHaveAttribute("dir", "auto");
+    expect(within(details).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
+    expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
+  });
+
+  it("a store at the format's limit of 4096 listings opens with its first 50, Show more for the next, and a search over them all", async () => {
+    const apps = Array.from({ length: 4096 }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` }));
+    fakeEngine.on("appList", () => [installed({ ref: `${KEY}/app4000` })]).on("appCheckUpdates", () => [])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+        name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps,
+        removed: [{ ref: `${KEY}/app4001`, digest: DIGEST, reason: "Malware", at: 1 }] }]);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByText("Big"));
+    const listing = screen.getByTestId("app-store-listing");
+    expect(within(listing).getAllByTestId("app-listing")).toHaveLength(50);
+    await user.click(screen.getByTestId("app-store-more"));
+    expect(within(listing).getAllByTestId("app-listing")).toHaveLength(100);
+    expect(screen.getByTestId("app-store-more")).toHaveTextContent("Show more (3996)");
+
+    await user.type(screen.getByTestId("app-store-filter"), "App 400");
+    const rows = within(listing).getAllByTestId("app-listing");
+    expect(rows.map((r) => r.getAttribute("data-ref"))).toEqual([400, ...Array.from({ length: 10 }, (_, i) => 4000 + i)].map((i) => `${KEY}/app${i}`));
+    expect(screen.queryByTestId("app-store-more")).not.toBeInTheDocument();
+    // An installed listing and a removed one still say so.
+    expect(rows[1]).toHaveTextContent("Installed");
+    expect(rows[2]).toHaveTextContent("Malware");
+    expect(within(rows[2]).queryByTestId("app-listing-install")).not.toBeInTheDocument();
+    await user.clear(screen.getByTestId("app-store-filter"));
+    await user.type(screen.getByTestId("app-store-filter"), "nothing like it");
+    expect(within(listing).queryByTestId("app-listing")).not.toBeInTheDocument();
+    expect(listing).toHaveTextContent("No app in this store matches.");
+
+    // Closed and opened again: the first page, not every listing shown before.
+    await user.clear(screen.getByTestId("app-store-filter"));
+    await user.click(screen.getByText("Big"));
+    await user.click(screen.getByText("Big"));
+    expect(within(screen.getByTestId("app-store-listing")).getAllByTestId("app-listing")).toHaveLength(50);
+  });
+
+  it("gives the card's title its own direction", async () => {
+    fakeEngine.on("appList", () => []);
+    renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    expect(await screen.findByTestId("app-card-title")).toHaveAttribute("dir", "auto");
+  });
 });
+

@@ -114,6 +114,10 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
     const messages = await node(ctx).groupMessages({ groupId: group.id });
     if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this group, or cannot be replied to");
   }
+  // A send the group would refuse anyway (its files of the minute are taken, or this device is not in it) is refused
+  // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
+  const check = await node(ctx).groupFileCheck({ groupId: group.id });
+  if (check.error) throw check.refused ? new CliError("refused", check.error) : groupSendRefused(check.error);
   const { voice, warning } = await voiceOf(params, path, mime);
   const source = await openAsBlob(path, { type: mime });
   const image = voice ? undefined : await readImageMeta(source, mime);
