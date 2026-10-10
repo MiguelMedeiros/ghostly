@@ -1573,7 +1573,8 @@ describe("a green CI run planned for other files", () => {
     expect(ciState(await gh.ciJobs("abc", counts))).toBe("failure");
     expect(seen).toEqual(["success", "failure"]);
     expect(ciState(await gh.ciJobs("abc", () => false))).toBe("none");
-    expect(sent.filter((p) => p.includes("/jobs")).slice(1, 3)).toEqual(["/actions/runs/5002/jobs?filter=latest&per_page=100&page=1", "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1"]);
+    // Each run's jobs are read once for the three questions.
+    expect(sent.filter((p) => p.includes("/jobs"))).toEqual(["/actions/runs/5002/jobs?filter=latest&per_page=100&page=1", "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1"]);
   });
 });
 
@@ -1731,6 +1732,55 @@ describe("GitHub over REST", () => {
     ];
     const noActions = restLayer("t", "o/r", { fetchImpl: async (url: string) => (url.includes("/actions/") ? reply(403, { message: "no" }) : reply(200, { check_runs: checks })), wait: async () => {} });
     expect((await noActions.draftJobs("abc")).map((c: { id: number }) => c.id)).toEqual([7]);
+  });
+
+  it("reads CI's runs on a commit and each run's jobs once per run of the train, and the runs again only to cancel", async () => {
+    const sent: string[] = [];
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "completed", ...extra });
+    const answers: Record<string, object> = {
+      // 52: the full run leaving draft started; 51: the draft's run.
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(51), wf(52, { status: "in_progress" })] },
+      "/actions/runs/52/jobs?filter=latest&per_page=100&page=1": { jobs: [{ id: 9, name: "CI Success", status: "queued", conclusion: null }] },
+      "/actions/runs/51/jobs?filter=latest&per_page=100&page=1": { jobs: [{ id: 5, name: "CI Success (draft)", status: "completed", conclusion: "success" }] },
+    };
+    const fetchImpl = async (url: string, init: { method: string }) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(`${init.method} ${path}`);
+      return init.method === "POST" ? reply(202, {}) : reply(200, answers[path] ?? {});
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    // What one run of the train asks about a pull request on the fast tier.
+    expect(ciState(await gh.ciJobs("abc"))).toBe("pending");
+    expect(draftState(await gh.draftJobs("abc"))).toBe("success");
+    expect(sent).toEqual([
+      "GET /actions/workflows/ci.yml/runs?head_sha=abc&per_page=100",
+      "GET /actions/runs/52/jobs?filter=latest&per_page=100&page=1",
+      "GET /actions/runs/51/jobs?filter=latest&per_page=100&page=1",
+    ]);
+    // The same commit asked again in the same run (a base's commit, by two failed batches): nothing more is read.
+    expect(ciState(await gh.ciJobs("abc"))).toBe("pending");
+    expect(sent).toHaveLength(3);
+    // Boarding: the cancel reads the runs afresh, since a full run may have started since.
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [52] });
+    expect(sent.slice(3)).toEqual(["GET /actions/workflows/ci.yml/runs?head_sha=abc&per_page=100", "POST /actions/runs/52/cancel"]);
+    // The next run of the train has its own layer, and reads again.
+    const next = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(ciState(await next.ciJobs("abc"))).toBe("pending");
+    expect(sent).toHaveLength(7);
+  });
+
+  it("asks again in the same run for runs or jobs whose read failed", async () => {
+    let down = true;
+    const wf = { id: 41, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } };
+    const fetchImpl = async (url: string) => {
+      if (down) return reply(404, { message: "Not Found" });
+      return url.includes("/jobs") ? reply(200, { jobs: [{ id: 7, name: "CI Success", status: "completed", conclusion: "success" }] }) : reply(200, { workflow_runs: [wf] });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    await expect(gh.ciJobs("abc")).rejects.toThrow(/GET CI runs of abc: HTTP 404/);
+    await expect(gh.draftJobs("abc")).rejects.toThrow(/GET CI runs of abc: HTTP 404/);
+    down = false;
+    expect(ciState(await gh.ciJobs("abc"))).toBe("success");
   });
 
   it("cancels only CI's pull request runs still going on the commit", async () => {

@@ -904,6 +904,22 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     }
     return out;
   };
+  // CI's runs on a commit and each run's jobs are read once per layer, so once per run of the train: `ciJobs` and
+  // `draftJobs` ask about the same commit, and both read the newest run's jobs. A read that failed is asked again.
+  const once = (memo, key, read) => {
+    if (!memo.has(key)) memo.set(key, read().catch((e) => (memo.delete(key), Promise.reject(e))));
+    return memo.get(key);
+  };
+  const runsRead = new Map();
+  const jobsRead = new Map();
+  /** The answer to the list of CI's runs on a commit: the runs, or a 403 (a token that may not read Actions). */
+  const ciRunsOn = (sha) =>
+    once(runsRead, sha, async () => {
+      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+      if (!r.ok && r.status !== 403) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
+      return r;
+    });
+  const runJobs = (id) => once(jobsRead, id, () => all(`/actions/runs/${id}/jobs?filter=latest`));
   const pull = (p) => ({
     number: p.number,
     title: p.title,
@@ -944,15 +960,14 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      * runs are not asked: they mix every run on the commit.
      */
     ciJobs: async (sha, counts = () => true) => {
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+      const r = await ciRunsOn(sha);
       if (r.status === 403) {
         if (!warnedChecks) warn(`This token may not read Actions (${r.data?.message ?? "HTTP 403"}), so CI is read from check runs, which any workflow of the repository can post. Give the queue app "Actions: read".`);
         warnedChecks = true;
         return (await all(`/commits/${sha}/check-runs?filter=latest`)).filter((c) => c.app?.slug === "github-actions");
       }
-      if (!r.ok) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).slice(0, CI_RUNS_READ)) {
-        const jobs = await all(`/actions/runs/${run.id}/jobs?filter=latest`);
+        const jobs = await runJobs(run.id);
         if (await counts(jobs)) return jobs;
       }
       return [];
@@ -976,18 +991,18 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      * same commit), from its three newest runs; check runs when the token may not read Actions, as `ciJobs`.
      */
     draftJobs: async (sha) => {
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+      const r = await ciRunsOn(sha);
       if (r.status === 403) return (await all(`/commits/${sha}/check-runs?filter=latest`)).filter((c) => c.app?.slug === "github-actions" && c.name === DRAFT_GATE);
-      if (!r.ok) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).slice(0, 3)) {
-        const gates = (await all(`/actions/runs/${run.id}/jobs?filter=latest`)).filter((j) => j.name === DRAFT_GATE);
+        const gates = (await runJobs(run.id)).filter((j) => j.name === DRAFT_GATE);
         if (gates.length) return gates;
       }
       return [];
     },
     /**
      * Cancels CI's pull request runs still going on a commit: { cancelled: [run ids] }, or { denied } when the token may
-     * not (no "Actions: write"); after a denial nothing more is asked.
+     * not (no "Actions: write"); after a denial nothing more is asked. The runs are read afresh, not from what `ciJobs`
+     * read earlier in the run: a pull request that left draft since then has a full run that list does not hold.
      */
     cancelCi: async (sha) => {
       if (cancelDenied) return { cancelled: [], denied: cancelDenied };
