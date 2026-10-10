@@ -143,6 +143,34 @@ async function pair(rate: CallRate) {
   return { a: make("a", "b", stack), b: make("b", "a", stack), heard };
 }
 
+/**
+ * An event loop turned by hand, in libuv's order: the timers that are due when the turn starts, then what came in
+ * meanwhile (the program's writes, read from its socket), then the immediates. A timer set during a turn waits for
+ * the next one, as a 0 ms timer does in Node.
+ */
+function handLoop() {
+  let time = 1_000_000;
+  let timers: { at: number; run: () => void }[] = [];
+  let immediates: (() => void)[] = [];
+  vi.stubGlobal("setTimeout", (run: () => void, ms = 0) => { const timer = { at: time + Math.max(1, ms), run }; timers.push(timer); return timer; });
+  vi.stubGlobal("clearTimeout", (timer: unknown) => { timers = timers.filter((t) => t !== timer); });
+  vi.stubGlobal("setImmediate", (run: () => void) => { immediates.push(run); });
+  vi.spyOn(Date, "now").mockImplementation(() => time);
+  return {
+    turn(ms: number, read: () => void): void {
+      time += ms;
+      const due = timers.filter((t) => t.at <= time).sort((x, y) => x.at - y.at);
+      timers = timers.filter((t) => t.at > time);
+      for (const timer of due) timer.run();
+      read();
+      const check = immediates;
+      immediates = [];
+      for (const run of check) run();
+    },
+    restore(): void { vi.unstubAllGlobals(); vi.restoreAllMocks(); },
+  };
+}
+
 describe("a call's audio through Opus", () => {
   for (const rate of [48000, 16000] as const) {
     it(`carries a tone at ${rate} Hz in 20 ms frames, and silence when nothing is queued`, async () => {
@@ -188,6 +216,59 @@ describe("a call's audio through Opus", () => {
       a.stop(); b.stop();
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("keeps up while the daemon's loop turns slower than a frame, as it does while a large file goes out", async () => {
+    const { a, b } = await pair(48000);
+    const loop = handLoop();
+    try {
+      const frame = tone(440, 48000, 20);
+      // A program writing 20 ms every 20 ms: a turn of the loop reads what it wrote since the last one.
+      const turns = (count: number, ms: number) => { for (let i = 0; i < count; i++) loop.turn(ms, () => { for (let w = 0; w < ms / 20; w++) a.queue.push(frame); }); };
+      a.start();
+      turns(50, 20);
+      const sent = a.sent;
+      turns(200, 40);
+      expect(a.sent - sent).toBeGreaterThanOrEqual(398);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(40);
+      turns(50, 20);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(20);
+    } finally {
+      a.stop(); b.stop();
+      loop.restore();
+    }
+  });
+
+  it("is back at real time after a stall too long to catch up, and keeps a clip that was written ahead", async () => {
+    const { a, b } = await pair(48000);
+    const loop = handLoop();
+    try {
+      const frame = tone(440, 48000, 20);
+      const turns = (count: number, ms: number) => { for (let i = 0; i < count; i++) loop.turn(ms, () => { for (let w = 0; w < ms / 20; w++) a.queue.push(frame); }); };
+      a.start();
+      turns(50, 20);
+      const sent = a.sent;
+      turns(1, 2000);
+      // Not replayed as two seconds of audio at once, and not left in the queue either.
+      expect(a.sent - sent).toBeLessThanOrEqual(2);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(20);
+      // A longer one does not fit the program's socket: the rest of what it wrote comes on the next turn.
+      loop.turn(3000, () => { for (let w = 0; w < 50; w++) a.queue.push(frame); });
+      loop.turn(20, () => { for (let w = 0; w < 101; w++) a.queue.push(frame); });
+      turns(50, 20);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(40);
+
+      // A clip written ahead (speech from a TTS) is not what the stall left behind: all of it is still played.
+      a.queue.flush();
+      a.queue.push(tone(440, 48000, 5000));
+      for (let i = 0; i < 10; i++) loop.turn(20, () => {});
+      const queued = a.queue.queuedMs;
+      loop.turn(2000, () => {});
+      expect(a.queue.queuedMs).toBe(queued - 20);
+    } finally {
+      a.stop(); b.stop();
+      loop.restore();
     }
   });
 
