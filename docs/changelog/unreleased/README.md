@@ -15,8 +15,9 @@ section: For users / Chat
 ```
 
 - `section` is a `###` heading of `## Unreleased` (`For users`, `For developers`, `Fixed`, `Security`...), and after
-  ` / ` a bold group under it (`Chat`, `Calls`, `Groups`, `Wallets`, `Identities`, `Everywhere`). A section that does
-  not exist yet is added at the end.
+  ` / ` a bold group under it (`Chat`, `Calls`, `Groups`, `Wallets`, `Identities`, `Everywhere`). A group that does
+  not exist yet is added at the end of its heading. The headings come out in the order Security, For users, Fixed, For
+  developers (another one after them), whatever the files' names.
 - The text is one or more list items, written for the people who read release notes. Plain English, no em dashes.
 - Entries of one section go in the files' name order.
 - `release: <major>.<minor>` (optional, after `section`) holds the entry for that release, for a change that ships

@@ -11,9 +11,10 @@
  *   ---
  *   - Forward a message to up to five chats and groups at once.
  *
- * `section` names a "### " heading of "## Unreleased", and after " / " a **bold** group under it. One that does not
- * exist yet is added at the end. The body is one or more Markdown list items, added at the end of that section, in
- * the files' name order.
+ * `section` names a "### " heading of "## Unreleased", and after " / " a **bold** group under it. A group that does
+ * not exist yet is added at the end of its heading, and a heading in its place in the order Security, For users, Fixed,
+ * For developers (another one after them). The body is one or more Markdown list items, added at the end of that
+ * section, in the files' name order.
  *
  * An optional `release: <major>.<minor>` holds an entry for that release: a bump to an older version (a 1.1.x patch
  * for `release: 1.2`) leaves the file where it is, and the first bump to 1.2.0 or later takes it.
@@ -156,6 +157,13 @@ export function strayFragments(root = ROOT) {
   return names.filter((name) => name.endsWith(".md") && name !== "README.md").sort().map((name) => `changes/${name}`);
 }
 
+/**
+ * The order of a release's "### " headings: what people came for first. A heading that is not here goes after them.
+ * Without it the order was the files' name order, so holding one entry back could put "Fixed" above "For users".
+ */
+const HEADINGS = ["Security", "For users", "Fixed", "For developers"];
+const headingRank = (heading) => (HEADINGS.includes(heading) ? HEADINGS.indexOf(heading) : HEADINGS.length);
+
 /** CHANGELOG.md with every fragment's items at the end of its section of "## Unreleased". */
 export function assembleChangelog(changelog, fragments) {
   const lines = changelog.split("\n");
@@ -179,8 +187,15 @@ export function assembleChangelog(changelog, fragments) {
   for (const { heading, group, body } of fragments) {
     let h = section.findIndex((line) => line === `### ${heading}`);
     if (h < 0) {
-      section.push("", `### ${heading}`);
-      h = section.length - 1;
+      // Before the first heading that comes later in the order, or at the end.
+      const later = section.findIndex((line) => isHeading(line) && headingRank(line.slice(4)) > headingRank(heading));
+      if (later < 0) {
+        section.push("", `### ${heading}`);
+        h = section.length - 1;
+      } else {
+        section.splice(later, 0, `### ${heading}`, "");
+        h = later;
+      }
     }
     let at;
     if (group) {
