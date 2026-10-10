@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { INVITE_TAKEN } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { engine } from "@ghostly/browser/platform/engine";
 import { ChatConnection } from "../../components/ChatConnection";
@@ -138,11 +139,14 @@ describe("the inviter's scene", () => {
     expect(screen.getByTestId("pairing-announcement")).toHaveTextContent("Your contact has not opened the invite yet");
   });
 
-  it("an invite the relays refuse is a slow publish with the relay's error, not a failure", () => {
-    const { engine } = renderApp(<Pairing inviter />);
+  it("an invite the relays refuse is a slow publish with the relay's error behind an ⓘ, not a failure", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
     show({ ...published, createdAt: Date.now() - 9_000, discoveryError: "Could not publish discovery: 429" }, engine);
     expect(label()).toBe("Putting your invite on the network…");
     expect(screen.getByTestId("pairing-slow")).toHaveTextContent("Still publishing your invite.");
+    // The relay's English is no line of the scene: it is behind the ⓘ, as every error's detail is.
+    expect(within(scene()!).queryByText(/Could not publish discovery/)).toBeNull();
+    await user.click(screen.getByTestId("pairing-detail-info"));
     expect(screen.getByTestId("pairing-detail")).toHaveTextContent("Could not publish discovery: 429");
     // The scene has no failure; the connection icon's panel says the relay's error, as it always did.
     expect(within(scene()!).queryByRole("alert")).toBeNull();
@@ -312,13 +316,15 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     expect(screen.getByTestId("pairing-slow")).toHaveTextContent("Your contact's app has not answered yet");
   });
 
-  it("a retryable failure: its reason in words, the detail, and Retry that asks the engine to connect", async () => {
+  it("a retryable failure: its reason in words, the detail behind an ⓘ, and Retry that asks the engine to connect", async () => {
     const { engine, user } = renderApp(<Pairing inviter />);
     engine.on("connect", () => undefined);
     show(report({ stage: "failed", reason: "timeout", retryable: true, detail: "no answer after 30 s" }), engine);
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Your contact's app did not answer in time.");
-    expect(alert).toHaveTextContent("no answer after 30 s");
+    expect(alert).not.toHaveTextContent("no answer after 30 s");
+    await user.click(within(alert).getByTestId("pairing-detail-info"));
+    expect(within(alert).getByTestId("pairing-detail")).toHaveTextContent("no answer after 30 s");
     expect(screen.getByTestId("connection-options")).toHaveAccessibleName("Connection options: Pairing · Could not connect");
     expect(screen.getByTestId("connection-options")).toHaveAttribute("data-state", "failure");
     expect(screen.getByTestId("connection-tooltip")).toHaveTextContent("Your contact's app did not answer in time.");
@@ -351,11 +357,41 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     expect(screen.queryByTestId("pairing-retry")).toBeNull();
   });
 
-  it("an unknown reason reads as something went wrong, with the engine's detail", () => {
-    const { engine } = renderApp(<Pairing inviter />);
+  it("an unknown reason reads as something went wrong, with the engine's detail behind an ⓘ", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
     show(report({ stage: "failed", reason: "gremlins" as PairingProgress["reason"], retryable: true, detail: "E_GREMLIN" }), engine);
     expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong while connecting.");
-    expect(screen.getByRole("alert")).toHaveTextContent("E_GREMLIN");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("E_GREMLIN");
+    await user.click(screen.getByTestId("pairing-detail-info"));
+    expect(screen.getByTestId("pairing-detail")).toHaveTextContent("E_GREMLIN");
+  });
+
+  it("an invite someone else took is said once, in the app's language: not again in the engine's English", async () => {
+    const { engine, user } = renderApp(<Pairing inviter={false} />, { language: "pt" });
+    show(report({ stage: "failed", reason: "taken", retryable: false, detail: INVITE_TAKEN }), engine);
+    const alert = within(scene()!).getByRole("alert");
+    expect(alert).toHaveTextContent("Outra pessoa entrou com este convite antes.");
+    expect(alert).not.toHaveTextContent("Someone else joined");
+    expect(within(alert).queryByTestId("pairing-detail-info")).toBeNull();
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("connection-details-summary"));
+    expect(screen.getByTestId("connection-pairing-details")).not.toHaveTextContent("Someone else joined");
+  });
+
+  it("a slow stage's dial error is behind an ⓘ, not a line in English", async () => {
+    const { engine, user } = renderApp(<Pairing inviter={false} />, { language: "pt" });
+    show(report({ stage: "knocking", since: Date.now() - 60_000, detail: "Timed out connecting to the peer" }), engine);
+    expect(screen.getByTestId("pairing-slow")).toBeInTheDocument();
+    expect(scene()).not.toHaveTextContent("Timed out connecting");
+    await user.click(screen.getByTestId("pairing-detail-info"));
+    expect(screen.getByTestId("pairing-detail")).toHaveTextContent("Timed out connecting to the peer");
+    // The connection panel's Details: the same, behind its own ⓘ.
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("connection-details-summary"));
+    const details = screen.getByTestId("connection-pairing-details");
+    expect(details).not.toHaveTextContent("Timed out connecting");
+    await user.click(within(details).getByTestId("connection-pairing-detail-info"));
+    expect(within(details).getByTestId("connection-pairing-detail")).toHaveTextContent("Timed out connecting to the peer");
   });
 });
 
