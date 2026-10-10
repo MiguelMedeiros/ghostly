@@ -546,7 +546,7 @@ export function GroupChat() {
       </div>
 
       {!joiningByLink && <ChatSearchBar search={search} />}
-      {!joiningByLink && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} />}
+      {!joiningByLink && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
 
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
