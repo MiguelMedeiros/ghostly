@@ -71,5 +71,6 @@
   "skinTone": "Skin tone",
   "takePhoto": "Take photo",
   "tooLong": "That is too long to send ({{count}} characters, the limit is {{max}}).",
+  "tooLongBytes": "That is too long to send ({{bytes}} bytes, the limit is {{max}}). Shorten it, or send it as a file.",
   "tooLongDht": "Too long for the DHT. It fits once you're connected peer to peer."
 }
