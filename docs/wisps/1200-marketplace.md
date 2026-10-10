@@ -432,12 +432,12 @@ Three ways to an app, all equal and all checked the same way: **paste** a URL (i
 
 A publisher needs four steps, about as many as Umbrel's template repository, two YAML files and a pull request:
 
-1. `ghostly app init` makes a project from the SDK's template (single-file build, the broker's typings, the commit-reveal helper).
-2. Build it with the template's command.
+1. `ghostly app init <dir>` writes a small working app: `ghostly-app.json`, one `index.html` typed against the broker's typings, and a README with the steps below.
+2. Write the app. One that grows past a single page is built into one self-contained HTML file with the publisher's own tools.
 3. `ghostly app publish` makes the publisher key on first run (kept by the CLI, with a reminder to back it up), raises `sequence`, bundles, signs, writes the GitHub SSH proof into `proofs` (once publisher proofs exist, after phase 1), and writes **`app.ghostlyapp` at the repository root** (or on a `ghostly` branch). Committing the built bundle is required: a page cannot read GitHub release assets (no CORS).
 4. Optional: `ghostly catalog submit <store repository>` writes the listing and opens the pull request to a store.
 
-In release 1.2 the CLI has `ghostly app publish`, `ghostly app verify` (checks a bundle as a client would), `ghostly app revoke` (signs a `ghostly-revoke/1` statement with the app's publisher key and adds it to `ghostly-revoke.json` beside the bundle, [Revocation](#publisher-keys-no-rotation-in-phase-1)) and `ghostly store sign` (signs a store index with the store key). The broker's typings ship as `@ghostlytools/sdk/app`: the `window.ghostly` API, the messages, the refusal codes, the limits and the manifest's type, with nothing imported at run time, so an app bundles only the constants it uses. `ghostly app init`, the SDK's template with the commit-reveal helper, and `ghostly catalog submit` come later; until then a publisher builds the single-file app with its own tools and writes the listing by hand.
+In release 1.2 the CLI has `ghostly app init` (writes the starting folder, and nothing over a file that is there unless `--force`), `ghostly app publish`, `ghostly app verify` (checks a bundle as a client would), `ghostly app revoke` (signs a `ghostly-revoke/1` statement with the app's publisher key and adds it to `ghostly-revoke.json` beside the bundle, [Revocation](#publisher-keys-no-rotation-in-phase-1)) and `ghostly store sign` (signs a store index with the store key). The broker's typings ship as `@ghostlytools/sdk/app`: the `window.ghostly` API, the messages, the refusal codes, the limits and the manifest's type, with nothing imported at run time, so an app bundles only the constants it uses. A single-file build in the template, the SDK's commit-reveal helper and `ghostly catalog submit` come later; until then a publisher builds a larger app with its own tools and writes the listing by hand.
 
 ### Paste a URL
 
