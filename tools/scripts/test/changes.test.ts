@@ -77,14 +77,14 @@ Ghostly next.
 
 - Groups of 32.
 
+### Fixed
+
+- A crash.
+
 ### For developers
 
 - The CLI.
 - A flag.
-
-### Fixed
-
-- A crash.
 
 ## 0.4.0
 
@@ -92,6 +92,17 @@ Ghostly next.
 
 - Old things.
 `);
+  });
+
+  it("puts the headings in one order whatever the files' names: Security, For users, Fixed, For developers, then the others", () => {
+    const empty = "# Changelog\n\n## Unreleased\n\nGhostly next.\n\n## 0.4.0\n\n- Old.\n";
+    const headings = (fragments: unknown[]) => assembleChangelog(empty, fragments).split("\n").filter((line: string) => line.startsWith("### "));
+    const order = ["### Security", "### For users", "### Fixed", "### For developers", "### Thanks"];
+    // In name order the first file is a fix, as when the entry that used to come first is held for a later release.
+    expect(headings([fragment("Fixed / Chat", "- A."), fragment("Thanks", "- T."), fragment("For developers", "- B."), fragment("For users / Chat", "- C."), fragment("Security", "- D.")])).toEqual(order);
+    expect(headings([fragment("Thanks", "- T."), fragment("For developers", "- B."), fragment("Fixed", "- A.")])).toEqual(order.slice(2));
+    const out = assembleChangelog(empty, [fragment("Fixed / Chat", "- A."), fragment("For users / Chat", "- C."), fragment("Fixed / Chat", "- A2.")]);
+    expect(out).toBe("# Changelog\n\n## Unreleased\n\nGhostly next.\n\n### For users\n\n**Chat**\n\n- C.\n\n### Fixed\n\n**Chat**\n\n- A.\n- A2.\n\n## 0.4.0\n\n- Old.\n");
   });
 
   it("changes nothing without fragments", () => {
