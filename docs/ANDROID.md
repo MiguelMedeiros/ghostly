@@ -2,11 +2,13 @@
 
 The Android app is the Desktop app (`apps/desktop`) built with [Tauri 2](https://v2.tauri.app/) for Android: the same UI and engine as Desktop, with native Iroh and direct Mainline DHT reads in Rust. Package id `tools.ghostly.app`, Android 8.0 (API 26) and up, arm64 phones (`arm64-v8a`).
 
+**It is in progress and not released.** No release before 1.3.0 has it: the `Release` workflow builds and attaches an APK only for a tag from `ANDROID_FROM` on (`.github/workflows/release.yml`, `1.3.0` today), by the tag's version alone, whatever signing secrets the repository has, and an older release's notes say nothing of it. Moving that version is the owner's decision. Until then, Ghostly on an Android phone is [the web app](WEB.md), installed from the browser; to try this app, build it or take a CI run's debug APK ([What CI does](#what-ci-does)).
+
 It is not the whole Desktop yet. Left out on Android, and why (`#[cfg(desktop)]`, refusing stubs in `apps/desktop/src/mobile.rs`): HyperDHT (a Node program; native HyperDHT through Bare is its own piece of work), the updater and the clipboard crate (no Android support; Android's own clipboard is read through the Android host), keep awake, and the windows of shared and installed apps (a mobile app has one window). What Desktop does with the system's processes and windows, Android does through [the Android host](#the-android-host-a1). What is still open is listed at the end ([Still open](#still-open-by-pull-request)).
 
 ## Install it
 
-Each release attaches the APK: `ghostly-<version>-android-arm64.apk`, signed with Ghostly's upload key, and listed in `SHA256SUMS.txt` like the other downloads. Check it, then install it:
+Once it is released, each release attaches the APK: `ghostly-<version>-android-arm64.apk`, signed with Ghostly's upload key, and listed in `SHA256SUMS.txt` like the other downloads. Check it, then install it:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS.txt
@@ -15,7 +17,7 @@ adb install -r ghostly-<version>-android-arm64.apk   # over USB, with USB debugg
 
 Or copy the APK to the phone, open it in Files, and allow "Install unknown apps" for Files when asked. Each release installs over the last (the version code is `major * 1000000 + minor * 1000 + patch`), and Android refuses an update signed with another key.
 
-A release made while the repository has no upload key has no APK, and its release notes say so. That run still builds a **debug** APK, `ghostly-<version>-android-arm64-debug.apk`, and keeps it as the run's `android` artifact: to try the app, never published. It is signed with the Android debug key of that one CI run, so nothing signed with another key installs over it: uninstall it (which removes its data) before installing the signed APK. A debug build can also be inspected over USB (`chrome://inspect`) and takes the test launch options [below](#build-it-locally), so it is not for daily use.
+A release from 1.3.0 on made while the repository has no upload key has no APK, and its release notes say so. That run still builds a **debug** APK, `ghostly-<version>-android-arm64-debug.apk`, and keeps it as the run's `android` artifact: to try the app, never published. It is signed with the Android debug key of that one CI run, so nothing signed with another key installs over it: uninstall it (which removes its data) before installing the signed APK. A debug build can also be inspected over USB (`chrome://inspect`) and takes the test launch options [below](#build-it-locally), so it is not for daily use.
 
 The app keeps its own data; the web app's (the PWA installed from Chrome) stays in Chrome. To move a profile, use [Several devices](DEVICES.md).
 
@@ -81,7 +83,7 @@ Releases are signed with an upload key that only Miguel holds, offline. It never
 
 3. Run Actions > Android > Run workflow. The summary should say "Release build, signed with the upload key", with the certificate's SHA-256 fingerprint: it should match `keytool -list -v -keystore ghostly-upload.keystore -alias upload | grep SHA256`.
 
-From then on every release attaches the signed APK. CI writes the keystore to the runner's temporary folder for the build only and deletes it after; pull requests never see the secrets.
+From then on every release from `ANDROID_FROM` on attaches the signed APK. CI writes the keystore to the runner's temporary folder for the build only and deletes it after; pull requests never see the secrets.
 
 If the app is ever on Google Play with Play App Signing, this key becomes the upload key and Google signs what phones install.
 
