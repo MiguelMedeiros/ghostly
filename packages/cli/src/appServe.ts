@@ -46,6 +46,13 @@ function writeServed(dir: string, apps: ServedApp[]): void {
   renameSync(file + ".tmp", file);
 }
 
+/** A served app by its reference or, when only one has it, its name. */
+export function servedApp(apps: readonly ServedApp[], ref: string): ServedApp {
+  const matches = apps.filter((a) => a.ref === ref || a.ref.split("/")[1] === ref);
+  if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${JSON.stringify(ref)} names more than one served app: give its whole reference` : `No served app ${JSON.stringify(ref)}: app serve its bundle first`);
+  return matches[0];
+}
+
 /** Whether this engine offers apps/1 now: it read the list when it started, so the first app served waits for a restart. */
 const offered = (ctx: ApiContext, apps: ServedApp[]) => ({ offered: ctx.runtime.apps, ...(apps.length > 0 && !ctx.runtime.apps && { restart: true }) });
 
@@ -91,10 +98,9 @@ export const APP_SERVE_METHODS: Record<string, Method> = {
   async "app.unserve"(ctx, params) {
     const ref = str(params, "ref", true);
     const apps = servedApps(ctx.runtime.paths.dir);
-    const matches = apps.filter((a) => a.ref === ref || a.ref.split("/")[1] === ref);
-    if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${JSON.stringify(ref)} names more than one served app: give its whole reference` : `No served app ${JSON.stringify(ref)}`);
-    const next = apps.filter((a) => a !== matches[0]);
+    const app = servedApp(apps, ref);
+    const next = apps.filter((a) => a !== app);
     writeServed(ctx.runtime.paths.dir, next);
-    return { unserved: matches[0].ref, apps: next.length, ...offered(ctx, next) };
+    return { unserved: app.ref, apps: next.length, ...offered(ctx, next) };
   },
 };
