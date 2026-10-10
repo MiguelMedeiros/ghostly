@@ -1,6 +1,6 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import { getUnreadCount, listSessions } from "./storage";
+import { getUnreadCount, listSessions, type SessionCache } from "./storage";
 import { groupReadAt, groupUnreadAt } from "./groups";
 import { MUTE_EVENT, groupChat, mutedFor } from "./chatMute";
 import type { ChatSession } from "./types";
@@ -101,9 +101,11 @@ const REFRESH_MS = 3000;
 export function useAppBadge(): void {
   const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
   const groups = state?.groups;
+  // Only a chat whose stored text changed is parsed again, as the chat list reads them: the badge never changes one.
+  const [cache] = useState<SessionCache>(() => new Map());
   useEffect(() => {
     if (!canBadge()) return;
-    const update = () => showAppBadge(badgeCount(listSessions(), groups ?? []));
+    const update = () => showAppBadge(badgeCount(listSessions(cache), groups ?? []));
     update();
     const timer = setInterval(update, REFRESH_MS);
     window.addEventListener("session-updated", update);
@@ -115,5 +117,5 @@ export function useAppBadge(): void {
       window.removeEventListener(MUTE_EVENT, update);
       window.removeEventListener("storage", update);
     };
-  }, [groups]);
+  }, [groups, cache]);
 }

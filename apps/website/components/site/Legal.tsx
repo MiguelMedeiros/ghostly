@@ -1,10 +1,14 @@
 import { Nav } from "@/components/site/Nav";
 import { SiteFooter } from "@/components/site/Footer";
 import { GhostPet } from "@/components/site/GhostPet";
+import { IdleLoops } from "@/components/site/IdleLoops";
 import { REPO_URL } from "@/content/shell";
 import { appsReleased } from "@/lib/appsGate";
 
-/** The layout of the two legal pages, /privacy and /terms: a title, the date, a lead, then short sections. */
+/**
+ * The layout of the two legal pages, /privacy and /terms: a title, the date, a lead, then short sections. Like Shell, it
+ * rests the footer's loops while they are off screen (IdleLoops).
+ */
 export async function LegalPage({
   title,
   updated,
@@ -32,6 +36,7 @@ export async function LegalPage({
       </main>
       <SiteFooter apps={apps} />
       <GhostPet />
+      <IdleLoops />
     </>
   );
 }

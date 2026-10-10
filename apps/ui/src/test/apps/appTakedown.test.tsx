@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { ChatAppPanel } from "../../components/apps/ChatAppPanel";
 import { takedownText, type AppOpener } from "../../lib/apps/open";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { chatApp } from "../../lib/apps/running";
 import { forgetInstalledApps } from "../../lib/apps/installed";

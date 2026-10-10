@@ -351,6 +351,8 @@ export class Outbox {
   }
 
   private async requeueUnconfirmed(): Promise<void> {
+    // Nothing awaits a receipt: the chat's history is not read (a stop reads none for a chat that sent nothing).
+    if (!this.receipts.size) return;
     const messages = await this.store.read();
     for (const id of [...this.receipts.keys()]) {
       if (messages.find(m => m.id === id)?.via === "pkarr") {

@@ -461,6 +461,42 @@ describe("capability record: publishing and reading", () => {
     await aSide.stop(); await bSide.stop();
   });
 
+  it("reads the contact's record as soon as it is asked for, not after this side's own record's put ends", async () => {
+    // Bug hunt dht-direct-pairing: on the Mainline DHT a put takes 1.15-2.3 s; a read of the contact's record (another
+    // key) queued behind it held the first dial back by a put or two on each side. Here a put takes 2.2 s, a read 0.3 s.
+    vi.useFakeTimers();
+    const { link, a, b } = pair();
+    const packets = new Map<string, SignedPacket>(), reads: number[] = [];
+    const transport = {
+      publish: vi.fn(async (identity: { pubKeyZ32: string }, records: GhostRecord[]) => {
+        await new Promise(r => setTimeout(r, 2_200));
+        packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: 0n, records });
+      }),
+      resolve: vi.fn(async (key: string) => { reads.push(Date.now()); await new Promise(r => setTimeout(r, 300)); return packets.get(key) ?? null; }),
+      describe: () => ({ protocol: "memory", relays: [] }),
+    };
+    // The inviter's record is out already (it went as the invite was made).
+    const inviter = new CapsKeys(link.mine, a.seedB64);
+    packets.set(inviter.identity.pubKeyZ32, packetOf(inviter, inviter.seal(content({ name: "Ada" }), 1).records));
+    // The joiner starts with nobody pinned: its record goes out at once.
+    const credentials: PairingCredentials = { seedB64: b.seedB64 }, changed = vi.fn();
+    let saved: CapsState = emptyCapsState();
+    const caps = new CapsExchange({ params: link.invite, credentials, transport, local: () => content({ name: "Bob" }), save: async s => { saved = s; }, changed });
+    const t0 = Date.now();
+    caps.start(); await vi.advanceTimersByTimeAsync(100);
+    expect(transport.publish).toHaveBeenCalledTimes(1);
+    // It pins the inviter, whose envelope names revision 1 of its record, and seals its own anew for it.
+    credentials.peerKey = a.pubKeyZ32;
+    void caps.update(); caps.peerRev(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(reads.map(t => t - t0), "the read starts at the ask").toEqual([100]);
+    expect(changed, "the inviter's record is known 0.3 s later").toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(transport.publish, "the reseal for the pin still goes out").toHaveBeenCalledTimes(2);
+    expect(saved, "both saves kept: the contact's record and this side's publication").toMatchObject({ rev: 1, sealedFor: a.pubKeyZ32, publishedAt: expect.any(Number), peer: { rev: 1, name: "Ada" } });
+    await caps.stop();
+  });
+
   it("merges reads asked for close together", async () => {
     vi.useFakeTimers();
     const { link, a, b } = pair(), { transport } = exchange();

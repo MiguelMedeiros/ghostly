@@ -38,6 +38,8 @@ That sets the version in the root `package.json` and every workspace's (the root
 
 An entry with `release: <major>.<minor>` in its front matter is held for that release: a bump to an older version leaves it in `docs/changelog/unreleased/`, so a patch never announces what it does not ship. The Apps entries say `release: 1.2`, and a 1.1.x patch cut from `dev` leaves them there ([the folder's README](changelog/unreleased/README.md)). Until 1.2.0, `node tools/scripts/changes.mjs` (CI) refuses an Apps entry without it (a `For developers / Apps` section, or text about the apps flag, WISP 1200 or `apps/1`), and any front matter key other than `section` and `release`.
 
+The native Android app is in no release before 1.3.0 (the owner's decision, 2026-10-10), so an entry about it says `release: 1.3`: a `... / Android` section, or text that names the Android app or an APK. The same check refuses one without it until 1.3.0, and the `Release` workflow builds and attaches no APK for a tag before its `ANDROID_FROM`, which the check follows ([ANDROID.md](ANDROID.md)). A line about the web app on an Android phone is not held.
+
 The bump also refuses a version that must not ship a flag that is on (`RELEASE_GUARDS` in `tools/scripts/changes.mjs`). Apps (`APPS_ENABLED` in `packages/browser/src/shared/features.ts`) ship from 1.2.0: while the flag is `true`, a bump to any version before 1.2.0 stops before it changes a file. The other way too: a bump to 1.2.0 or later stops while the flag is still `false` and the Apps entries held for 1.2 would go out. Any refusal (a flag, a broken entry, no `## Unreleased` heading) comes before the first file changes.
 
 The flag stays `false` on `dev` and flips only on the `release/1.2.0` branch, so every 1.1.x patch keeps Apps hidden. There, flip it and bump to 1.2.0 in the same pull request, the flip first: `tools/scripts/test/bumpVersion.test.ts` checks the flag against the repository's own version, so it is red at 1.1.x with the flag on and green at 1.2.0. The same pull request drops the `expect(APPS_ENABLED).toBe(false)` checks in `packages/browser/test/appsEngine.test.ts` and `packages/browser/test/appsStorage.test.ts`. The `Release` workflow runs `node tools/scripts/bump-version.mjs --check` on the tag too, so a tag older than 1.2.0 with the flag on is never built into a release.
@@ -65,7 +67,7 @@ The `Release` workflow (`.github/workflows/release.yml`) runs the `E2E` workflow
 
 - the desktop apps (macOS arm64 and x64, Windows, Linux);
 - the extension zip;
-- the web image (`ghcr.io/miguelmedeiros/ghostly-web`, tagged with the version and `latest`);
+- the web image (`ghcr.io/miguelmedeiros/ghostly-web`, tagged with the version; `latest` moves only once the release is published, step 4.7);
 - a **draft** release with `SHA256SUMS.txt`, its GPG signature and `latest.json`.
 
 `latest.json` is the whole of what the app's updater reads. Writing it needs `TAURI_SIGNING_PRIVATE_KEY` and its password, and the job fails rather than publish a version nobody can update to.
@@ -97,6 +99,8 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
    The same workflow publishes the SDK as `@ghostlytools/sdk` (with the mini-app types at `@ghostlytools/sdk/app`), under the same rules. `verify-sdk` runs `npm run test:sdk-example` on the tag with no token and keeps the tarball it checked; `publish-sdk` publishes that very file with `--ignore-scripts`, with no checkout or install. It runs only while the repository variable `SDK_NPM_PUBLISH` is `true`; until then it writes "not published" in the run's summary. The SDK is not on npm yet, and `/app` is for Apps, which run from release 1.2: its first publish is the owner's (the steps below, for `@ghostlytools/sdk`, then set the variable).
 
    Only the two publish jobs can ask for an OIDC token, and both run in the GitHub environment `npm`. The checks that install a package from npm run in jobs without a token.
+
+7. Publishing it also starts `Web image latest` (`.github/workflows/web-latest.yml`), which points the web image's `latest` (what `infra/docker-compose.yml` pulls by default) at the release's image. It moves only to GitHub's Latest release and never back: a release with a newer one published leaves it where it is, and the run's summary says why. A draft, or a tag built again, never touches it. If the release was published before the Release workflow's web image was pushed, run it again: `gh workflow run web-latest.yml -f tag=v1.0.0`. A security autorelease dispatches it itself.
 
 ### npm trusted publishing
 

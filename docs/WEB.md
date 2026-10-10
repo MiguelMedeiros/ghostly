@@ -10,7 +10,7 @@ From the root of a clone:
 docker compose -f infra/docker-compose.yml up --build -d
 ```
 
-Then open <http://localhost:8080>. `docker compose -f infra/docker-compose.yml down` stops it. Releases also publish the image (`ghcr.io/miguelmedeiros/ghostly-web`): `docker compose -f infra/docker-compose.yml pull`, then `up -d`, runs it without building.
+Then open <http://localhost:8080>. `docker compose -f infra/docker-compose.yml down` stops it. Releases also publish the image (`ghcr.io/miguelmedeiros/ghostly-web`; `latest` is the newest published release, and each version has its own tag for `GHOSTLY_WEB_TAG`): `docker compose -f infra/docker-compose.yml pull`, then `up -d`, runs it without building.
 
 Compose reads its settings (`GHOSTLY_WEB_BIND`, `GHOSTLY_WEB_TAG`) from `infra/.env`, the compose file's folder, not from the root. To keep a `.env` at the root, name it: `docker compose -f infra/docker-compose.yml --env-file .env up --build -d`. The project is still called `ghostly`, so the container is `ghostly-web-1` as before. GIF search uses GifCities (Internet Archive) without an API key.
 
@@ -61,7 +61,7 @@ A host (`packages/browser/src/host.ts`) is the small part that differs: how a pa
 
 Below 768px the app shows one screen at a time, like a messenger: the chat list, then the conversation with a back arrow, and a bottom bar for Chats, Wallets, Identities, Services and Settings. Emoji, GIFs and payments open as bottom sheets, calls take the whole screen, and the layout follows the visible viewport so the message input stays above the keyboard.
 
-It installs to the home screen and runs in a window of its own: see [Install it](#install-it). On Android there is also a native app ([ANDROID.md](ANDROID.md)). The same profile can move between a phone and a computer: [Several devices](DEVICES.md).
+It installs to the home screen and runs in a window of its own: see [Install it](#install-it). On an Android phone this is Ghostly today: a native Android app is planned and not released ([ANDROID.md](ANDROID.md)). The same profile can move between a phone and a computer: [Several devices](DEVICES.md).
 
 Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the call's Share screen button does not show there. Elsewhere it is in every connected call, voice or video (there is no button for it in the chat header).
 

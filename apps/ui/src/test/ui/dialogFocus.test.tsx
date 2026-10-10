@@ -73,4 +73,24 @@ describe("a modal made of plain elements", () => {
     expect(screen.queryByRole("dialog", { name: "Inner" })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Outer" })).toBeInTheDocument();
   });
+
+  it("gives the focus back to what opened it on Escape, also when a field in it takes the focus as it opens", async () => {
+    function Field({ onClose }: { onClose: () => void }) {
+      const ref = useRef<HTMLDivElement>(null);
+      useDialogFocus(ref, onClose);
+      return <div ref={ref} tabIndex={-1} role="dialog" aria-label="Field"><input aria-label="Link" autoFocus /></div>;
+    }
+    function Opener() {
+      const [open, setOpen] = useState(false);
+      return <><button type="button" onClick={() => setOpen(true)}>Add</button>{open && <Field onClose={() => setOpen(false)} />}</>;
+    }
+    const user = userEvent.setup();
+    render(<Opener />);
+    screen.getByRole("button", { name: "Add" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("textbox", { name: "Link" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Field" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add" })).toHaveFocus();
+  });
 });

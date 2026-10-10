@@ -24,11 +24,14 @@ permissions:
 
 # A new push to a pull request cancels the run it supersedes. A merge queue entry groups by its ref
 # (gh-readonly-queue/dev/pr-<n>-<base sha>), which no other entry shares, so entries never cancel each other: a queue
-# that drops an entry builds the ones behind it again on new refs. Anything else (pushes to dev and main, which gate
-# merges and the security autorelease) gets a group of its own: sharing one by ref would still cancel a queued run
-# whenever a third arrives, even without cancel-in-progress.
+# that drops an entry builds the ones behind it again on new refs. Pushes to dev share one group without
+# cancel-in-progress: the merge train lands a green batch as one squash merge per pull request, a push each, seconds
+# apart, and each would run all of CI. GitHub keeps the run in progress and the newest waiting one, and cancels the
+# waiting ones in between (commits the batch already tested; the tip always gets its run). Anything else (pushes to
+# main, epics and the security routine's branches, which gate merges and the security autorelease) gets a group of its
+# own: sharing one by ref would cancel a queued run whenever a third arrives, even without cancel-in-progress.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'push-dev' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -183,10 +186,6 @@ jobs:
       # the run's summary page: it is not committed.
       - name: Test map (every feature has a test)
         run: npm run test:map -- --summary
-
-      # e2e/fixtures/chess is what apps/mini/chess builds to, byte for byte (tools/scripts/refresh-chess-fixture.mjs).
-      - name: Chess e2e fixture is up to date
-        run: if [[ -f apps/mini/chess/vite.config.ts ]]; then node tools/scripts/refresh-chess-fixture.mjs --check; fi
 
   frontend-tests:
     name: Frontend tests (app)

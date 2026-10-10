@@ -746,7 +746,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const fetched = ok(await as(bob, "file", "save", inGroupFile, "--path", join(bob, "ghost-in-group.png"), "--wait", "--timeout", "120"));
     expect(sha(fetched.path as string)).toBe(sha(picture));
     error(await as(alice, "forward", "bob", "no-such-message", "--to", "bob"), "not_found", 3);
-    error(await as(alice, "forward", "bob", theirs.id), "bad_request", 1);
+    error(await as(alice, "forward", "bob", theirs.id), "usage", 2);
   });
 
   it("talk in a private mesh group: the stream names the sender, and a reply names the id group send gave", async () => {

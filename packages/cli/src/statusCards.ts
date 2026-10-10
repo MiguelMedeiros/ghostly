@@ -151,7 +151,7 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   const result = await node(ctx).sendMessage({ linkId: target.linkId, text, card });
   if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
   if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
-  let message = (await node(ctx).getMessages(target.linkId)).find((m) => m.id === result.messageId);
+  let message = await node(ctx).getMessage(target.linkId, result.messageId);
   if (wait !== "none") message = await waitForMessage(ctx, target.linkId, result.messageId, wait, ms);
   return answer(target, kind, id, result.messageId, { card, delivery: message?.delivery ?? null });
 }
@@ -207,7 +207,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
     pace.last = Date.now();
     await editCard(ctx, target, message.id, card, text);
   }
-  let edited = target.group ? (await node(ctx).groupMessages({ groupId: target.id })).find((m) => m.id === message.id) : (await node(ctx).getMessages(target.linkId)).find((m) => m.id === message.id);
+  let edited = target.group ? (await node(ctx).groupMessages({ groupId: target.id })).find((m) => m.id === message.id) : await node(ctx).getMessage(target.linkId, message.id);
   if (wait === "confirmed" && edited?.edit?.pending) edited = await waitForEdit(ctx, target.linkId, message.id, ms);
   const edges = wait === "sent" && edited?.edit ? await waitForGroupFrame(ctx, target.id, message.id, edited.edit.seq, ms) : undefined;
   return answer(target, kind, id, message.id, {

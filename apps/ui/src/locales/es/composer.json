@@ -48,6 +48,7 @@
   "noEmoji": "No se encontraron emoji",
   "noGifs": "No se encontraron GIF",
   "overSoft": "Supera los {{bytes}} bytes que lleva la DHT: se envía cuando haya conexión directa",
+  "pasteReading": "Leyendo lo que pegaste…",
   "payment": "Pago",
   "placeholder": "Mensaje…",
   "previewLoading": "Cargando vista previa de {{host}}…",
@@ -70,5 +71,6 @@
   "skinTone": "Tono de piel",
   "takePhoto": "Hacer foto",
   "tooLong": "Es demasiado largo para enviarlo ({{count}} caracteres, el límite es {{max}}).",
+  "tooLongBytes": "Es demasiado largo para enviarlo ({{bytes}} bytes, el límite es {{max}}). Acórtalo o envíalo como archivo.",
   "tooLongDht": "Demasiado largo para la DHT. Cabe cuando estéis conectados directamente."
 }
