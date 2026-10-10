@@ -6,13 +6,15 @@ import { traceLink } from "./linkTrace";
 import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean }
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean }
 const asker = (options: PkarrRequestOptions, write: boolean): Asker =>
-  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write });
+  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write, departed: !!options.departed && !write });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
 /** A 1:1 chat's offer or answer, or its read for the answer to its offer: it may use the allowance (`SIGNALING_ALLOWANCE_SHARE`). */
 const isChatSignal = (who: Asker): boolean => who.signal && isChat(who);
+/** A 1:1 chat's read of a contact that just went away: a few may use the chat's allowance (`DEPARTED_READS`). */
+const isDepartedRead = (who: Asker): boolean => who.departed && isChat(who);
 /** A group's edge looking fast for a signal (`GROUP_BURST_MS`). */
 const isGroupUrgentRead = (who: Asker): boolean => who.group && who.urgent && !who.write && !who.background;
 /**
@@ -93,6 +95,17 @@ export const CHAT_RESERVE = 10;
  */
 export const SIGNALING_ALLOWANCE_SHARE = 1 / 5;
 /**
+ * A 1:1 chat's reads of a contact that went away from a live session, in their first seconds (`departed`,
+ * `DEPARTED_READ_MS` in link.ts), may go over a relay's minute within the chat's allowance (`SIGNALING_ALLOWANCE_SHARE`):
+ * at most this many of each contact's in a minute, every relay together, leaving the last of the allowance to an offer or
+ * answer. Their fast poll reads every 2 s, on the relays in turn: 6 cover 12 s from the goodbye, by when an app that
+ * restarts has its offer out (2.5 to 10 s in the lab of #1441), and add at most 3 to a relay's minute. They wait for no
+ * write the minute refused: that write cannot go before the minute frees anyway. A daemon restarted 20 s after its last
+ * restart found its contact's minute spent on both relays: every read of it was held back, the offer it published as it
+ * came up was never read, and the chat came back only through the race's DHT dial, 8 s on (2026-10-07).
+ */
+export const DEPARTED_READS = 6;
+/**
  * A group edge's requests for a member that may be back may go over a relay's minute by this fraction of it (4 on a
  * relay of 30, 8 on one of 60, none on relay.pkarr.org's 5): its reads of a member that went away and its packet
  * written meanwhile, which that member reads first when it is back (`watch`), its offer or answer, and its reads for
@@ -165,7 +178,7 @@ export const FRESH_READ_MS = 500;
 const CATCH_UP_MIN_MS = 1_000;
 const CATCH_UP_RETRY_MS = 5_000;
 /** A catch-up put waits behind every link's request: a background write. */
-const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false };
+const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false, departed: false };
 /** Keys whose last relay is remembered for their next read (`resolve`): a profile's links and lookups, with room. */
 const READ_TURNS_KEPT = 512;
 /** A relay that fails at the network level is left alone for this long. */
@@ -275,6 +288,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentWatch = new Map<string, number[]>();
   /** Groups' reads past the limit on each relay in the last `GROUP_OVER_PACE_MS` (`GROUP_SIGNALING_ALLOWANCE_SHARE`). */
   private readonly spentGroupOver = new Map<string, number[]>();
+  /** Per contact, its departed reads past the limit in the last minute, every relay together (`DEPARTED_READS`). */
+  private readonly departedOver = new Map<string, number[]>();
   /**
    * Per key a group reads (not in the background), when a read of it last went out and when it last asked: whose turn
    * it is under the watch share (`WATCH_SHARE`) and while the groups' reads are rationed (`GROUP_RATION_WINDOW_MS`).
@@ -870,6 +885,7 @@ export class RelayTransport implements PkarrTransport {
     }
     if (writer) this.writeWaiting.delete(`${writer} ${relay}`);
     if (isGroupSignal(who) && !who.write && this.spent.get(relay)!.length >= this.limitOf(relay)) this.spentGroupOver.get(relay)!.push(now);
+    if (isDepartedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay)) this.departedOverAdd(key, now);
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
     if (isGroupUrgentRead(who)) this.spentGroupUrgent.get(relay)!.push(now);
@@ -887,7 +903,8 @@ export class RelayTransport implements PkarrTransport {
    *
    * Who goes first: a chat's refused write holds back everything but chat writes; a group's refused write holds back
    * group reads and background requests, never a chat's. Background requests yield to a link that signals. A chat's
-   * signaling goes over the limit by its allowance (`SIGNALING_ALLOWANCE_SHARE`).
+   * signaling goes over the limit by its allowance (`SIGNALING_ALLOWANCE_SHARE`), and so do a few of its reads of a
+   * contact that just went away (`DEPARTED_READS`).
    */
   private heldFor(relay: string, who: Asker, now = Date.now(), key?: string): number {
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
@@ -899,7 +916,9 @@ export class RelayTransport implements PkarrTransport {
     const limit = this.limitOf(relay);
     // A chat's signaling may go over the minute by its allowance; its reads leave the last of it to a write.
     // A group edge's, for a member that may be back, by a smaller one, its reads one at a time past the limit.
-    const share = isChatSignal(who) ? SIGNALING_ALLOWANCE_SHARE : isGroupSignal(who) ? GROUP_SIGNALING_ALLOWANCE_SHARE : 0;
+    // A chat's read of a contact that just went away, past the limit: within the chat's allowance, a few per contact.
+    const departed = isDepartedRead(who) && key !== undefined && recent.length >= limit && this.departedReads(key, now) < DEPARTED_READS;
+    const share = isChatSignal(who) || departed ? SIGNALING_ALLOWANCE_SHARE : isGroupSignal(who) ? GROUP_SIGNALING_ALLOWANCE_SHARE : 0;
     const allowance = share ? Math.max(0, Math.floor(limit * share) - (who.write ? 0 : 1)) : 0;
     let wait = over(recent, limit + allowance);
     const groupOver = (this.spentGroupOver.get(relay) ?? []).filter((at) => now - at < GROUP_OVER_PACE_MS);
@@ -946,7 +965,8 @@ export class RelayTransport implements PkarrTransport {
       const at = this.writeWaiting.get(`${lane} ${relay}`);
       return at !== undefined && now - at < WRITE_FIRST_MS ? at + WRITE_FIRST_MS - now : 0;
     };
-    if (writer !== "chat") wait = Math.max(wait, waiting("chat"));
+    // A departed read past the limit takes no request a waiting write could have either (it is no signal).
+    if (writer !== "chat" && !departed) wait = Math.max(wait, waiting("chat"));
     // A read past the limit within the groups' allowance takes no request a waiting write could have (it is no signal).
     if ((writer === null && who.group && !pastLimit) || who.background) wait = Math.max(wait, waiting("group"));
     return Math.max(wait, 0);
@@ -973,6 +993,19 @@ export class RelayTransport implements PkarrTransport {
       if (turn.servedAt < mine) ahead++;
     }
     return ahead;
+  }
+
+  /** This contact's departed reads past the limit in the last minute (`DEPARTED_READS`). */
+  private departedReads(key: string, now: number): number {
+    const reads = (this.departedOver.get(key) ?? []).filter((at) => now - at < 60_000);
+    if (reads.length) this.departedOver.set(key, reads); else this.departedOver.delete(key);
+    return reads.length;
+  }
+
+  /** One more, the contacts with none in the last minute dropped. */
+  private departedOverAdd(key: string, now: number): void {
+    for (const [other, reads] of this.departedOver) if (now - reads[reads.length - 1] >= 60_000) this.departedOver.delete(other);
+    this.departedOver.set(key, [...(this.departedOver.get(key) ?? []), now]);
   }
 
   private chatNeed(key: string): { urgentAt: number; refused: Map<string, number> } {
