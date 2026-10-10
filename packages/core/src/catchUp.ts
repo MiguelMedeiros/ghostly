@@ -8,15 +8,19 @@ export const CATCH_UP_SLICE = 16;
 /** Between two slices, when the member's app cannot say it handled one (`handled` resolves `false`). */
 export const CATCH_UP_PAUSE_MS = 500;
 
+/** What `CatchUpHooks.handled` says: handled, cannot tell (`false`), or not handled yet within its wait (`"late"`). */
+export type CatchUpHandled = boolean | "late";
+
 export interface CatchUpHooks<F> {
   /** One frame to the member: `false` when its edge did not take it, which ends the answer. */
   send(to: string, frame: F): boolean | void;
   /**
    * Resolves once the member's app handled every frame sent to it so far (it answers a ping in the order frames come),
-   * or `false` when it cannot tell: the answer then waits `CATCH_UP_PAUSE_MS` between slices. Absent: an answer goes
-   * all at once, as before 2026-10-07.
+   * or `false` when it cannot tell: the answer then waits `CATCH_UP_PAUSE_MS` between slices. `"late"`: the member's app
+   * answers pings but has not handled them yet (a phone with a long history), and the answer asks again rather than
+   * sending more. Absent: an answer goes all at once, as before 2026-10-07.
    */
-  handled?(to: string): Promise<boolean>;
+  handled?(to: string): Promise<CatchUpHandled>;
   /** Whether the group still answers: an answer stops when it no longer does. */
   active(): boolean;
 }
@@ -44,10 +48,11 @@ export class CatchUpAnswers<F> {
     if (!handled) { for (const frame of frames) this.hooks.send(to, frame); return; }
     const going = this.going.get(to);
     if (going) { going.splice(0, going.length, ...frames); return; }
-    const rest = [...frames], told: Promise<boolean>[] = [];
+    const rest = [...frames], told: Promise<CatchUpHandled>[] = [];
+    const ask = () => handled(to).catch(() => false as const);
     const next = () => {
       if (!this.sendSlice(to, rest)) return false;
-      if (rest.length) told.push(handled(to).catch(() => false));
+      if (rest.length) told.push(ask());
       return true;
     };
     if (!next() || !next() || !rest.length) return;
@@ -55,7 +60,11 @@ export class CatchUpAnswers<F> {
     void (async () => {
       try {
         while (rest.length) {
-          if (!await told.shift()!) await new Promise(resolve => setTimeout(resolve, CATCH_UP_PAUSE_MS));
+          let answer = await told.shift()!;
+          // Late, from an app that answers pings: still handling, so nothing more goes until it has (a pause there let
+          // a member at 600 ms a frame hold 134 waiting, past the 64 an app before 2026-10-07 takes).
+          while (answer === "late" && this.hooks.active()) answer = await ask();
+          if (!answer) await new Promise(resolve => setTimeout(resolve, CATCH_UP_PAUSE_MS));
           if (!this.hooks.active() || !next()) break;
         }
       } finally { this.going.delete(to); }

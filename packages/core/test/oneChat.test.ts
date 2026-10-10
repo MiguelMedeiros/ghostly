@@ -3,6 +3,7 @@ import { randomBytes, toBase64Url } from "../src/bytes";
 import { createIdentity } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { INVITE_TAKEN } from "../src/ghostlink";
+import { DiscoveryBudgetError } from "../src/transport";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, rtc, useFakeWorld, yieldToLoop, type Opened } from "./support/pairingWorld";
 
 // covers: chat.one-chat, chat.dht.fallback, chat.paired.reconnect, core.peer-keys
@@ -92,6 +93,26 @@ describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
     expect(texts(joiner)).toEqual(["and back", "now live"]);
     expect(texts(inviter)).toEqual(["hello over the DHT"]);
   }, 120_000);
+
+  it("an inviter whose first packet the relays' request budget holds back says until when, and goes on once it is out", async () => {
+    let heldUntil = Date.now() + 40_000;
+    class HeldPkarr extends MemoryPkarr {
+      transport() {
+        const inner = super.transport();
+        return { ...inner, publish: async (...args: Parameters<typeof inner.publish>) => {
+          if (Date.now() < heldUntil) throw new DiscoveryBudgetError(heldUntil - Date.now());
+          return inner.publish(...args);
+        } };
+      }
+    }
+    const made = invitation(), inviter = open(made.inviter, new HeldPkarr(DESKTOP_NETWORK));
+    await run(1_000);
+    expect(inviter.link.pairingProgress).toMatchObject({ stage: "publishing", relayWaitUntil: expect.any(Number) });
+    expect(inviter.link.pairingProgress!.relayWaitUntil! - heldUntil).toBeLessThanOrEqual(1_000);
+    heldUntil = 0;
+    expect(await until(() => inviter.link.pairingProgress?.stage === "waiting", 60_000)).toBeLessThan(Infinity);
+    expect(inviter.link.pairingProgress).not.toHaveProperty("relayWaitUntil");
+  });
 
   it("says on each side why it is not live: what the dialling side tried, and the offer the other side answered", async () => {
     rtc.blocked = true;
@@ -246,10 +267,11 @@ describe("one chat: first contact on two paths, one key", () => {
       await run(10_000);
       // The joiner the invite was sent to comes later, with the inviter's key from the invite (as a ghostly1 join does).
       const second = open(made.joiner, pkarr, { dht: true, credentials: { seedB64: made.joiner.seedB64, expectedPeerKey: createIdentityKey(made.inviter.seedB64) } });
-      // It reads the inviter's envelope sealed to the first joiner once the inviter publishes one (its control
-      // envelope, every 4 minutes): about 4 to 5 minutes, instead of "on the DHT, retrying" and "sent" forever.
+      // The inviter's envelope in the invite mailbox is sealed to the first joiner from the moment it pinned it: the
+      // second reads that on its first look, not its first unsealed envelope (which it would pin, and "send" to).
       const took = await until(() => !!second.dhtView?.inviteTaken, 8 * 60_000);
-      expect(took, "the second joiner learns the invite was taken").toBeLessThan(6 * 60_000);
+      expect(took, "the second joiner learns the invite was taken within the first contact").toBeLessThan(30_000);
+      expect(second.credentials.peerKey, "it never took the inviter's envelope as its own").toBeUndefined();
       expect(second.link.pairingProgress).toMatchObject({ stage: "failed", reason: "taken", retryable: false, detail: INVITE_TAKEN });
       expect(second.link.validateText("hello?", Date.now(), "AAAAAAAAAAAAAAAAAAAAAA"), "nothing is sent that nobody reads").toBe(INVITE_TAKEN);
       await run(60_000);

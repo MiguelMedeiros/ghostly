@@ -75,15 +75,57 @@ describe("the pill", () => {
     expect(screen.getByTestId("pill-stale")).toHaveAccessibleName("Claude: 3% left (not updated lately)");
     expect(screen.getByTestId("pill-ok").className).not.toMatch(/amber|danger/);
   });
+});
 
-  it("sits on a chat's row beside the unread count", () => {
-    const props = { chatId: "chat-1", density: "compact", active: false, label: "Hermes", named: true, keyLabel: "abc…xyz", peerPubKey: "peer", time: "12:00",
-      unread: 2, pinned: false, syncing: false, creator: false, onOpen: () => {}, onTogglePin: () => {}, onDelete: () => {}, deleteLabel: "Delete" } as ChatRowProps;
-    renderApp(<ChatRow {...props} usage={entry({ left: 12 })} />);
+describe("the pill's place on a chat's row", () => {
+  const props = (over: Partial<ChatRowProps> = {}) => ({ chatId: "chat-1", density: "compact", active: false, label: "Hermes", named: true, keyLabel: "abcdef...uvwxyz", peerPubKey: "peer", time: "12:00",
+    unread: 2, pinned: false, syncing: false, creator: false, onOpen: () => {}, onTogglePin: () => {}, onDelete: () => {}, deleteLabel: "Delete", ...over }) as ChatRowProps;
+  /** The last line's end: what follows the preview. */
+  const trailing = () => screen.getByTestId("chat-row-preview").nextElementSibling;
+
+  it("comfortable: right after the key on the key's line, which keeps the key's height; the count stays on the last line", () => {
+    renderApp(<ChatRow {...props({ density: "comfortable" })} usage={entry({ left: 12 })} />);
     const pill = screen.getByTestId("chat-row-usage");
     expect(pill).toHaveAttribute("data-level", "low");
     expect(pill).toHaveAttribute("data-left", "12");
-    expect(screen.getByTestId("chat-row-unread")).toHaveTextContent("2");
+    const key = screen.getByTestId("chat-row-key");
+    expect(key).toHaveTextContent(/^abcdef\.\.\.uvwxyz$/);
+    // The working mark's place (kept empty: no task is running) comes between them, on every row with a meter.
+    expect(key.nextElementSibling).toBe(screen.getByTestId("chat-row-working-gap"));
+    expect(key.nextElementSibling!.nextElementSibling).toBe(pill);
+    // One line of the key's height that never wraps: the meter, a little taller, is centred over it and adds nothing.
+    expect(key.parentElement!.className).toMatch(/(^| )h-4( |$)/);
+    expect(key.parentElement!.className).toContain("whitespace-nowrap");
+    expect(key.className).toContain("shrink-0");
+    expect(trailing()).not.toContainElement(pill);
+    expect(trailing()).toContainElement(screen.getByTestId("chat-row-unread"));
+  });
+
+  it("comfortable: the same place with no unread count, when the last line ends with nothing", () => {
+    renderApp(<ChatRow {...props({ density: "comfortable", unread: 0 })} usage={entry()} />);
+    expect(screen.getByTestId("chat-row-key").nextElementSibling!.nextElementSibling).toBe(screen.getByTestId("chat-row-usage"));
+    expect(trailing()).toBeNull();
+  });
+
+  it.each([2, 0])("compact (no key line): starts a column of one width on the last line, the count (%i unread) at its end", (unread) => {
+    renderApp(<ChatRow {...props({ unread })} usage={entry({ left: 12 })} />);
+    const pill = screen.getByTestId("chat-row-usage");
+    expect(screen.queryByTestId("chat-row-key")).not.toBeInTheDocument();
+    const column = pill.parentElement!;
+    expect(trailing()).toContainElement(column);
+    expect(column.className).toContain("min-w-[105px]");
+    expect(column.className).toContain("justify-between");
+    expect(column.firstElementChild).toBe(pill);
+    expect(column.childElementCount).toBe(unread ? 2 : 1);
+    if (unread) expect(column.lastElementChild).toBe(screen.getByTestId("chat-row-unread"));
+  });
+
+  it.each(["compact", "comfortable"] as const)("a %s row with no usage card has no meter and keeps no room for one", (density) => {
+    renderApp(<ChatRow {...props({ density })} />);
+    expect(screen.queryByTestId("chat-row-usage")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-row-unread").parentElement).toBe(trailing());
+    expect(trailing()!.className).not.toContain("min-w-");
+    if (density === "comfortable") expect(screen.getByTestId("chat-row-key").nextElementSibling).toBeNull();
   });
 });
 

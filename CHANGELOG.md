@@ -4,6 +4,28 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.1.7
+
+Ghostly 1.1.7 is a security release: seven fixes in groups, wallets and new chats, on top of 1.1.6. Update when you can.
+
+### Security
+
+**Groups**
+
+- Opening a group link can no longer remove a private group, or its history, from your device (GHSA-79gm-j485-mjg9).
+- In a large private group, a member who left and was invited back could be taken out again by any other member resending the old leave; now only a leave made after the member came back counts.
+
+**Wallets**
+
+- A message with a Lightning invoice that your contact edits while you review it now starts a new card: the review you began is dropped, and only the invoice you paid is marked Paid (GHSA-wgj9-m8m3-83rx).
+- A Lightning payment through the Cashu mints now pays only the invoice and amount you reviewed. A mint quote for another amount, another invoice or a higher fee is refused with nothing spent (GHSA-999w-x56g-vwpq).
+- With a Bitcoin Core wallet, an on-chain request now shows as paid only when bitcoin arrives on the address it gave. A transaction your contact names no longer counts (GHSA-m7x9-79g6-pvrp).
+- A Cashu payment your contact refused, whose ecash could not be taken back yet, now keeps its request from being paid a second time until the ecash is back (GHSA-vc58-rcp4-xfcv).
+
+**Chat**
+
+- When two devices opened the same new 1:1 invite at about the same time, the inviter's new chat could stop with "Saved contact key mismatch" until the app restarted. It now goes on with the contact that got there first (GHSA-67w2-23j7-94jr).
+
 ## 1.1.6
 
 Ghostly 1.1.6 says what went wrong in a few words of your language, with the technical part behind an ⓘ, everywhere in the app. Groups no longer drop a member who comes back to a busy chat, Linux Desktops and DHT-only chats go live sooner, and a bot can show how much of its quota is left.

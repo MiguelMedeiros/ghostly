@@ -262,7 +262,7 @@ Web ↔ extension and native ↔ extension exchanges were observed, including cl
 
 ## Native paired-chat adapters (2026-09-20)
 
-[Implemented profile](TRANSPORT-INCREMENT.md): Iroh 1.2.0 via Rust QUIC/TLS exporter and HyperDHT 6.34.0 via packaged native UDP/Noise runtime. Both reuse the shared participation/session authentication and durable chat engine. Web/extension advertise only their available WebRTC adapter. Real local transport integration tests and two Tauri app exchanges validated switching without changing conversation IDs, pins or history. No independent application implementation, external proof or group support is implied. The baseline tables above remain historical.
+[Implemented profile](TRANSPORT-INCREMENT.md): Iroh 1.2.0 via Rust QUIC/TLS exporter and HyperDHT 6.34.1 via packaged native UDP/Noise runtime. Both reuse the shared participation/session authentication and durable chat engine. Web/extension advertise only their available WebRTC adapter. Real local transport integration tests and two Tauri app exchanges validated switching without changing conversation IDs, pins or history. No independent application implementation, external proof or group support is implied. The baseline tables above remain historical.
 
 ## Optional Nostr proof increment (2026-09-20, history)
 

@@ -1,6 +1,6 @@
 [package]
 name = "ghostly"
-version = "1.1.6"
+version = "1.1.7"
 edition = "2021"
 
 # The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
@@ -58,11 +58,13 @@ arboard = { version = "3.6.1", default-features = false, features = ["image-data
 
 # Android: HTTPS from Rust (reqwest, so the Pkarr relays, link previews and push) checks certificates with Android's
 # own verifier, which needs the JVM and the app's context before the first request (src/lib.rs `android_tls`). Its
-# Kotlin half comes from the crate's Maven folder (gen/android/app/build.gradle.kts).
+# Kotlin half is an .aar from the crate's Maven repository, at the version Cargo.lock gives the
+# `rustls-platform-verifier-android` crate and pinned by hash (gen/android/app/build.gradle.kts). tauri and wry keep
+# jni 0.21 for themselves; nothing here hands them a jni type.
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
+jni = "0.22"
 ndk-context = "0.1"
-rustls-platform-verifier = "0.6"
+rustls-platform-verifier = "0.7.1"
 # The Android host (src/android.rs) never waits on its Kotlin half from Android's main thread: gettid against getpid.
 libc = "0.2"
 

@@ -317,13 +317,16 @@ const digestOf = (content: CapsContent) => toBase64Url(sha256(utf8Encode(JSON.st
 
 /**
  * Publishes this side's record (at first start, at every change, hourly) and reads the contact's (at
- * pairing, when an envelope names a newer revision, when the chat drops to the DHT). Every read and
- * publish goes through one queue; reads close together are merged.
+ * pairing, when an envelope names a newer revision, when the chat drops to the DHT). Publications go one
+ * at a time, and reads one at a time beside them (a read never waits for a put); reads close together are merged.
  */
 export class CapsExchange {
   private state: CapsState;
   private readonly keys: CapsKeys;
+  /** Publications, one at a time; reads of the contact's record (another key) have their own, so neither waits for the other. */
   private chain: Promise<unknown> = Promise.resolve();
+  private readChain: Promise<unknown> = Promise.resolve();
+  private saveChain: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private lastRead = 0;
@@ -360,10 +363,13 @@ export class CapsExchange {
   get droppedFields(): readonly ("name" | "extensions")[] { return this.dropped; }
   get address(): string { return this.keys.identity.pubKeyZ32; }
 
-  private serialize<T>(run: () => Promise<T>): Promise<T> {
-    const next = this.chain.then(run); this.chain = next.catch(() => {}); return next;
+  private serialize<T>(run: () => Promise<T>, chain: "chain" | "readChain" | "saveChain" = "chain"): Promise<T> {
+    const next = this[chain].then(run); this[chain] = next.catch(() => {}); return next;
   }
-  private async persist(next: CapsState): Promise<void> { await this.options.save(structuredClone(next)); this.state = next; }
+  /** Saves are one at a time, each over the state as it is then: a read and a publication change different fields. */
+  private persist(patch: Partial<CapsState>): Promise<void> {
+    return this.serialize(async () => { const next = { ...this.state, ...patch }; await this.options.save(structuredClone(next)); this.state = next; }, "saveChain");
+  }
 
   start(): void {
     if (this.running || this.ended) return;
@@ -382,7 +388,8 @@ export class CapsExchange {
     if (this.readTimer) clearTimeout(this.readTimer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.timer = this.readTimer = this.retryTimer = null;
-    await this.chain.catch(() => {});
+    await Promise.all([this.chain, this.readChain]);
+    await this.saveChain;
   }
 
   /**
@@ -410,14 +417,14 @@ export class CapsExchange {
         this.dropped = dropped;
         // The revision is saved before it is published, so a crash never reuses it for other content; until it is
         // out, it has no `publishedAt`, so a publication that fails (or a crash) does not lose it until the hourly one.
-        await this.persist({ ...this.state, rev, digest, sealedFor: peerKey, publishedAt: undefined });
+        await this.persist({ rev, digest, sealedFor: peerKey, publishedAt: undefined });
         try { await this.options.transport.publish(this.keys.identity, records, changed || unpublished ? undefined : { background: true }); }
         catch (error) {
           // Held back by the relays' request budget: again when the budget frees a request; any other failure, in a minute.
           this.schedule(isDiscoveryBudgetError(error) ? budgetRetryMs(error, 1_000, 60_000) : 60_000);
           throw error;
         }
-        await this.persist({ ...this.state, publishedAt: now });
+        await this.persist({ publishedAt: now });
         this.lastOut = content;
         if (changed || unpublished) this.options.published?.(rev);
         // This side can dial it now: a contact's record that listed it with no descriptor is worth a few reads again.
@@ -465,12 +472,12 @@ export class CapsExchange {
         return this.state.peer;
       }
       if (this.state.peer && record.rev === this.state.peer.rev && record.author === this.state.peer.author) return this.state.peer;
-      await this.persist({ ...this.state, peer: record });
+      await this.persist({ peer: record });
       // A new revision: what it still lacks (a transport without its descriptor) is worth a few reads again.
       this.retries = 0;
       this.options.changed?.(record);
       return record;
-    });
+    }, "readChain");
     return read.finally(() => this.readAgainIfBehind());
   }
 

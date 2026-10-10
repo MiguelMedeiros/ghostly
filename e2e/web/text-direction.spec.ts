@@ -20,6 +20,13 @@ async function useLanguage(page: Page, language: string): Promise<void> {
 }
 
 const direction = (locator: Locator) => locator.evaluate((element) => getComputedStyle(element).direction);
+/** Space between a message's text and its time, whichever side the time is on. */
+const timeGap = (body: Locator) => body.evaluate((element) => {
+  const range = document.createRange();
+  range.selectNodeContents(element.querySelector('[data-testid="message-text"]')!);
+  const text = range.getBoundingClientRect(), time = element.querySelector(".msg-meta")!.getBoundingClientRect();
+  return Math.round(text.left >= time.right ? text.left - time.right : time.left - text.right);
+});
 
 test("on a phone: an English message reads left to right in the Arabic app, an Arabic one right to left in the English app", { tag: ["@feature:app.i18n", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice", { mobile: true, viewport: PHONE }), peer("bob", { mobile: true, viewport: PHONE })]);
@@ -37,6 +44,8 @@ test("on a phone: an English message reads left to right in the Arabic app, an A
   expect(await direction(chat(bob).getByTestId("message-body").filter({ hasText: `hello from ${bob.name}` }))).toBe("ltr");
   // One line: the time beside the text, not under it.
   expect((await arabic.boundingBox())!.height).toBeLessThan(40);
+  // With room between them: its gap went to the bubble's far side, the time touching the last letter.
+  expect(await timeGap(arabic)).toBeGreaterThanOrEqual(6);
 
   // Bob writes English: left to right in Alice's Arabic app.
   await say(bob, "It goes on and on.");
@@ -44,6 +53,7 @@ test("on a phone: an English message reads left to right in the Arabic app, an A
   await expect(english).toBeVisible();
   expect(await direction(english)).toBe("ltr");
   expect((await english.boundingBox())!.height).toBeLessThan(40);
+  expect(await timeGap(english)).toBeGreaterThanOrEqual(6);
 
   // The chat list's last line too.
   await alice.page.getByTestId("chat-back").click();
