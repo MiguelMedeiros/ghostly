@@ -6,7 +6,7 @@
  * none of these (a mint's own words, a provider's) stays as it is.
  *
  * `{name}` in a template is a value: a host or domain (no spaces), a network ("Mainnet" or "Testnet"), a chain's name,
- * or an amount (digits, with the separators of whatever locale wrote it).
+ * an ecash unit ("usd"), or an amount (digits, with the separators of whatever locale wrote it).
  */
 export const ENGINE_ERRORS = {
   // Reaching a mint, a server, the network.
@@ -26,6 +26,7 @@ export const ENGINE_ERRORS = {
   notEnoughSats: "Not enough sats in your wallet",
   noSharedMint: "You share no mint with this contact",
   ecashAlreadySpent: "This ecash was already spent somewhere else",
+  ecashOtherUnit: "This ecash is in {unit}: only sat ecash can be redeemed here",
   reviewedEcashSpent: "The ecash for this payment was already spent somewhere else. Nothing was sent, and your balance now shows what the mint still holds.",
   reviewedSatsGone: "The sats this payment was reviewed with went to another payment. Nothing was sent: review it again.",
   // Lightning.
@@ -53,6 +54,8 @@ export const ENGINE_ERRORS = {
   couldNotVerify: "Could not verify this payment yet. No second payment was sent.",
   paymentTakenBack: "This payment was taken back. The sats are in your wallet.",
   parkedSigned: "Needs your decision: this payment was signed before this copy of your profile took over. It is never sent again from here. Check it before you pay again.",
+  // Paying in a chat.
+  contactAway: "Your contact is offline. Nothing was sent: pay once the chat is live.",
   // Real money and test coins.
   realMoneyUnconfirmed: "This pays with real money: confirm it with Send real money first. Nothing was sent.",
   mainnetPaymentOnTestnet: "This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.",
@@ -98,7 +101,7 @@ export const engineError = (code: EngineErrorCode, values?: EngineErrorValues): 
 
 /** What each kind of value looks like in a text: never a space in a host, a network by its name, an amount as digits. */
 const VALUE: Record<string, string> = {
-  host: "(\\S+)", domain: "(\\S+)", chain: "(\\S+)", network: "(Mainnet|Testnet)",
+  host: "(\\S+)", domain: "(\\S+)", chain: "(\\S+)", unit: "(\\S+)", network: "(Mainnet|Testnet)",
   amount: "(\\d[\\d.,\\u00a0\\u202f' ]*?)", fee: "(\\d[\\d.,\\u00a0\\u202f' ]*?)", min: "(\\d[\\d.,\\u00a0\\u202f' ]*?)", max: "(\\d[\\d.,\\u00a0\\u202f' ]*?)",
 };
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

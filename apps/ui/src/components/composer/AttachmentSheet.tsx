@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, type ClipboardEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { formatFileSize } from "../../lib/format";
-import { pastedFiles } from "../../lib/pastedFiles";
 import { DocumentGlyph } from "./icons";
 import { useComposition } from "../../hooks/useComposition";
 
@@ -22,9 +21,14 @@ function usePictures(files: File[]): (string | undefined)[] {
  * Files pasted or dropped into a chat, before they go: the picture (or the name and size of a
  * file), a caption, Send and Cancel. Another paste adds to them; each can be taken out.
  */
-export function AttachmentSheet({ files, onAdd, onRemove, onSend, onCancel }: {
+export function AttachmentSheet({ files, alert, status, onPaste, onRemove, onSend, onCancel }: {
   files: File[];
-  onAdd: (files: File[]) => void;
+  /** What the composer has to say meanwhile (a paste that could not be read): here, where it is seen and announced. */
+  alert?: ReactNode;
+  /** What the composer is doing meanwhile (another paste being read). */
+  status?: ReactNode;
+  /** A paste anywhere on the sheet, the caption included: true when it was taken as files (text stays the caption's). */
+  onPaste: (data: DataTransfer | null) => boolean;
   onRemove: (index: number) => void;
   /** The caption, trimmed ("" for none). */
   onSend: (caption: string) => void;
@@ -44,10 +48,7 @@ export function AttachmentSheet({ files, onAdd, onRemove, onSend, onCancel }: {
 
   const send = () => onSend(caption.trim());
   const paste = (e: ClipboardEvent) => {
-    const more = pastedFiles(e.clipboardData);
-    if (!more) return;
-    e.preventDefault();
-    onAdd(more);
+    if (onPaste(e.clipboardData)) e.preventDefault();
   };
   const picture = (i: number) => broken.has(files[i]) ? undefined : pictures[i];
   const lost = (file: File) => setBroken((was) => new Set(was).add(file));
@@ -88,6 +89,8 @@ export function AttachmentSheet({ files, onAdd, onRemove, onSend, onCancel }: {
           </ul>
         )}
         <div className="p-3 flex flex-col gap-3 shrink-0">
+          {status}
+          {alert && <div role="alert" className="animate-fade-in">{alert}</div>}
           <input ref={captionRef} type="text" value={caption} onChange={(e) => setCaption(e.target.value)} data-testid="attachment-caption"
             {...composition.inputProps} onKeyDown={(e) => { if (composition.composing(e)) return; if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
             placeholder={t("composer.caption")} aria-label={t("composer.caption")} maxLength={4000}

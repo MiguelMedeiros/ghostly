@@ -1,6 +1,7 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 import { useUsageByPeer } from "../hooks/useUsage";
+import { useWorkingByPeer } from "../hooks/useWorking";
 import { ChatRow, GroupRow } from "./ChatRow";
 import { formatListTime } from "../lib/chatList";
 import { foldText } from "../lib/chatSearch";
@@ -33,6 +34,7 @@ import {
   markSessionAsRead,
   ensureSession,
   getInviteCode,
+  type SessionCache,
 } from "../lib/storage";
 import { createPairedChat } from "../lib/pairedChat";
 import { chatPath } from "../lib/url";
@@ -47,6 +49,12 @@ import { openJoinProfile } from "../lib/devices";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
+
+/**
+ * The sessions as the list last read them: it reads them all on every `session-updated` and every 3 s, and a long chat's
+ * session is parsed again only when what is stored for it changed. The list never changes one in place.
+ */
+const listCache: SessionCache = new Map();
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 600;
@@ -86,6 +94,8 @@ export function Sidebar() {
   const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
   // A bot's usage card (WISP 405 § Usage) per contact: the meter on its row.
   const usageByPeer = useUsageByPeer();
+  // Each contact's running tasks (WISP 405 § Showing a card): the working mark on its row.
+  const workingByPeer = useWorkingByPeer();
   const groups = engineState?.groups ?? [];
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -133,7 +143,7 @@ export function Sidebar() {
   const { syncingSessions } = useBackgroundPoller(activeSessionId);
 
   const refreshSessions = useCallback(() => {
-    const updated = listSessions();
+    const updated = listSessions(listCache);
 
     setSessions(updated);
     // A chat deleted elsewhere takes its pending "Delete?" with it.
@@ -336,6 +346,7 @@ export function Sidebar() {
               onDelete={(e) => handleDelete(session.id, e)}
               deleteLabel={t("sidebar.deleteChat")}
               usage={usageByPeer.get(session.peerPubKeyB64)}
+              working={workingByPeer.get(session.peerPubKeyB64)}
               reorder={pinnedIds.length > 1 && pinnedIds.includes(session.id)
                 ? { props: reorder.rowProps(session.id), dragging: reorder.dragging === session.id, drop: reorder.drop?.id === session.id ? reorder.drop.edge : undefined }
                 : undefined}

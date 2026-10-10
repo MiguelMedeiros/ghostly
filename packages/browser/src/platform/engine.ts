@@ -9,6 +9,13 @@ import type { DeviceGateView } from "../devices/gate";
 type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
 
 /**
+ * How long what changed in a chat waits for what changes next before the listeners hear of it: the engine sends one
+ * change per stored row, and a group catching up stores hundreds in a row; each told on its own makes the page draw the
+ * whole history again for each.
+ */
+export const MESSAGE_CHANGES_TICK_MS = 50;
+
+/**
  * This page's connection to the Ghostly peer, wherever the host keeps it. The
  * peer owns the network; pages only ask it to do things.
  */
@@ -36,6 +43,9 @@ class EngineClient {
   private readonly callListeners = new Set<(linkId: string, signal: string) => void>();
   private readonly appListeners = new Set<(linkId: string, event: AppFrameEvent) => void>();
   private readonly appsCheckedListeners = new Set<() => void>();
+  /** The chats whose messages changed since their listeners last heard, told together when the tick ends. */
+  private readonly changed = new Set<string>();
+  private changesTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * The latest call offer per link, until something answers or ends it: a chat that is not open
    * when the call comes in is loaded because of it, and then reads the offer it would have missed.
@@ -147,16 +157,19 @@ class EngineClient {
         for (const listener of this.stateListeners) listener();
         break;
       case "messages":
+        // The whole history holds what changed before it: told now, and not again when the tick ends.
+        this.changed.delete(message.linkId);
         this.messages.set(message.linkId, message.messages);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
         break;
       case "message-changes": {
         // Only what changed, in a history the peer sent whole first: listeners still get the whole list, as it is now.
+        // The list here is current at once; its listeners hear once per tick, of every change in it together.
         const history = this.messages.get(message.linkId);
         if (!history) break;
-        const messages = applyMessageChanges(history, message);
-        this.messages.set(message.linkId, messages);
-        for (const listener of this.messageListeners) listener(message.linkId, messages);
+        this.messages.set(message.linkId, applyMessageChanges(history, message));
+        this.changed.add(message.linkId);
+        this.changesTimer ??= setTimeout(() => this.tellChanges(), MESSAGE_CHANGES_TICK_MS);
         break;
       }
       case "call-signal": {
@@ -180,6 +193,17 @@ class EngineClient {
         else pending?.resolve(message.result);
         break;
       }
+    }
+  }
+
+  private tellChanges(): void {
+    this.changesTimer = null;
+    const changed = [...this.changed];
+    this.changed.clear();
+    for (const linkId of changed) {
+      const messages = this.messages.get(linkId);
+      if (!messages) continue;
+      for (const listener of this.messageListeners) listener(linkId, messages);
     }
   }
 }

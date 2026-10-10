@@ -106,6 +106,15 @@ describe("Bitcoin Core source", () => {
     expect(node.locked.size).toBe(0);
   });
 
+  it("pays an upper-case bech32 address, the form a bitcoin: link takes in a QR code", async () => {
+    const node = new MockBitcoind(); node.fund(50_000);
+    const provider = await connect(node);
+    const address = fakeAddress().toUpperCase();
+    const prepared = await provider.prepareSend({ address, amount: 10_000, feeCap: 1_000 });
+    expect(prepared).toMatchObject({ address, amount: 10_000 });
+    expect(node.locked.size).toBe(1);
+  });
+
   it("refuses a fee above the cap before signing, and a transaction that does not pay what was asked", async () => {
     const node = new MockBitcoind(); node.fund(50_000);
     const provider = await connect(node);
@@ -215,6 +224,18 @@ describe("Bitcoin Core source", () => {
     expect(history[0]).toMatchObject({ txid: prepared.txid, amount: -10_000, fee: prepared.fee, confirmations: 0, timestamp: 1_700_000_000_000 });
     expect(history[1]).toMatchObject({ amount: 50_000, confirmations: 1 });
     expect(await provider.history(1)).toHaveLength(1);
+  });
+
+  it("lists what one address received: not the wallet's receives on its other addresses, nor what it sent", async () => {
+    const node = new MockBitcoind(); node.fund(50_000);
+    const provider = await connect(node);
+    const address = await provider.receiveAddress();
+    expect(await provider.received(address), "an older receive elsewhere in the wallet").toEqual([]);
+    const prepared = await provider.prepareSend({ address: fakeAddress(), amount: 10_000, feeCap: 1_000 });
+    await provider.broadcast(prepared);
+    const paid = node.fund(2_000, address);
+    expect(await provider.received(address)).toEqual([{ txid: paid, amount: 2_000, confirmations: 1 }]);
+    expect(await provider.received(fakeAddress())).toEqual([]);
   });
 });
 

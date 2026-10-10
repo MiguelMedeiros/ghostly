@@ -26,13 +26,14 @@ function scriptedHost() {
 
 await import("../src/platform/engine");
 let engine: typeof import("../src/platform/engine").engine;
+let MESSAGE_CHANGES_TICK_MS: number;
 let hostModule: typeof import("../src/host");
 let scripted: ReturnType<typeof scriptedHost>;
 
 beforeEach(async () => {
   vi.resetModules();
   hostModule = await import("../src/host");
-  ({ engine } = await import("../src/platform/engine"));
+  ({ engine, MESSAGE_CHANGES_TICK_MS } = await import("../src/platform/engine"));
   scripted = scriptedHost();
   hostModule.setBrowserHost(scripted.host);
 }, 60_000);
@@ -174,12 +175,61 @@ describe("what the peer tells the page", () => {
     deliver({ kind: "message-changes", linkId: "l1", messages: [at("d", 4), { ...at("a", 1), text: "edited" }, at("a2", 1)], deleted: ["b"] });
     expect(engine.messages.get("l1")!.map((m) => [m.id, m.text])).toEqual([["a", "edited"], ["a2", "a2"], ["c", "c"], ["d", "d"]]);
     expect(engine.messages.get("l1")).not.toBe(before);
+    await new Promise((resolve) => setTimeout(resolve, MESSAGE_CHANGES_TICK_MS));
     expect(listener).toHaveBeenLastCalledWith("l1", engine.messages.get("l1"));
     // A chat whose messages it was never sent: nothing to make them on, nothing to tell.
     listener.mockClear();
     deliver({ kind: "message-changes", linkId: "l2", messages: [at("x", 1)], deleted: [] });
+    await new Promise((resolve) => setTimeout(resolve, MESSAGE_CHANGES_TICK_MS));
     expect(engine.messages.has("l2")).toBe(false);
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("tells listeners once of a catch-up the peer sends one row at a time, each chat with its whole list", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    const listener = vi.fn();
+    engine.onMessages(listener);
+    const at = (linkId: string, id: string, timestamp: number) => ({ id, linkId, text: id, sender: "peer", timestamp, via: "datalink" }) as const;
+    const deliver = scripted.connections[0].deliver;
+    deliver({ kind: "messages", linkId: "group:g", messages: [at("group:g", "old", 0)] });
+    deliver({ kind: "messages", linkId: "l1", messages: [] });
+    listener.mockClear();
+    // Each in its own task, as the port or the in-page peer hands them over.
+    for (let i = 1; i <= 256; i++) {
+      deliver({ kind: "message-changes", linkId: "group:g", messages: [at("group:g", `m${i}`, i)], deleted: [] });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    deliver({ kind: "message-changes", linkId: "l1", messages: [at("l1", "hi", 1)], deleted: [] });
+    deliver({ kind: "message-changes", linkId: "group:g", messages: [], deleted: ["old"] });
+    // The page reads each list as it is at once; nothing has drawn it yet.
+    expect(engine.messages.get("group:g")).toHaveLength(256);
+    expect(listener).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(MESSAGE_CHANGES_TICK_MS);
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenCalledWith("group:g", engine.messages.get("group:g"));
+    expect(listener).toHaveBeenCalledWith("l1", engine.messages.get("l1"));
+    expect(engine.messages.get("group:g")!.map((m) => m.id)).toEqual(Array.from({ length: 256 }, (_, i) => `m${i + 1}`));
+    await vi.advanceTimersByTimeAsync(MESSAGE_CHANGES_TICK_MS * 4);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("tells a whole history at once, and not again for the changes it already holds", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    const listener = vi.fn();
+    engine.onMessages(listener);
+    const at = (id: string, timestamp: number) => ({ id, linkId: "l1", text: id, sender: "peer", timestamp, via: "datalink" }) as const;
+    const deliver = scripted.connections[0].deliver;
+    deliver({ kind: "messages", linkId: "l1", messages: [] });
+    deliver({ kind: "message-changes", linkId: "l1", messages: [at("a", 1)], deleted: [] });
+    const whole = [at("a", 1), at("b", 2)];
+    deliver({ kind: "messages", linkId: "l1", messages: whole });
+    expect(listener).toHaveBeenLastCalledWith("l1", whole);
+    expect(listener).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(MESSAGE_CHANGES_TICK_MS);
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 
   it("passes attention events through to listeners", async () => {

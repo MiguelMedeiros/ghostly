@@ -22,7 +22,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareText, takeShareFor } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
 import { useComposition } from "../hooks/useComposition";
@@ -165,6 +165,9 @@ export function MessageInput({
   const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string } | null>(null);
   /** Files pasted or dropped here, waiting on the sheet for Send. */
   const [attached, setAttached] = useState<File[] | null>(null);
+  /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
+  const [reading, setReading] = useState(false);
+  const readingRef = useRef(false);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -448,9 +451,21 @@ export function MessageInput({
     const files = pastedFiles(data);
     if (files) return offerFiles(files);
     if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
-    const reading = platformPastedFiles();
-    if (!reading) return false;
-    reading.then((found) => { if (found.length) offerRef.current(found); }, (error: unknown) => showToast(problemLine(error, t)));
+    // Ctrl+V again while the first is read would read the same clipboard beside it: every file twice on the sheet.
+    if (readingRef.current) return true;
+    const read = platformPastedFiles();
+    if (!read) return false;
+    readingRef.current = true;
+    setReading(true);
+    // With what it brought, in one go: the line gives way to the sheet, or to the reason there is none.
+    const ended = () => { readingRef.current = false; setReading(false); };
+    // Copied files the platform could not read either are said, not dropped in silence; an empty clipboard stays quiet.
+    const named = pasteNamesFiles(data);
+    read.then((found) => {
+      ended();
+      if (found.length) offerRef.current(found);
+      else if (named) showToast(t("errors.files.pasteUnreadable"));
+    }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
@@ -584,38 +599,52 @@ export function MessageInput({
   const remaining = maxBytes ? maxBytes - bytes : maxLength - text.length;
   const overSoft = !!softBytes && bytes > softBytes;
 
+  // With the sheet open the composer is behind its veil, outside the dialog: what it has to say is said on the sheet.
+  const sheetOpen = !!attached && !locked;
+  const toastBox = toast && (
+    <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="text-danger shrink-0 mt-0.5"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      <span className="text-[13px] text-text-primary leading-snug flex-1">
+        {toast}
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          setToast(null);
+          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        }}
+        aria-label={t("common.close")}
+        className="text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none shrink-0"
+      >
+        &times;
+      </button>
+    </div>
+  );
+  const readingLine = reading && !locked && (
+    <p role="status" data-testid="paste-reading" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
+      <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+      {t("composer.pasteReading")}
+    </p>
+  );
+
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
-      {toast && (
-        <div role="alert" className="absolute bottom-full left-4 right-4 mb-2 z-50 animate-fade-in">
-          <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="text-danger shrink-0 mt-0.5"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            <span className="text-[13px] text-text-primary leading-snug flex-1">
-              {toast}
-            </span>
-            <button
-              onClick={() => {
-                setToast(null);
-                if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-              }}
-              aria-label={t("common.close")}
-              className="text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none shrink-0"
-            >
-              &times;
-            </button>
-          </div>
+      {(toastBox || readingLine) && !sheetOpen && (
+        <div className="absolute bottom-full left-4 right-4 mb-2 z-50 flex flex-col gap-2">
+          {readingLine && <div className="self-start bg-panel-header border border-border rounded-lg px-3 py-2 shadow-lg">{readingLine}</div>}
+          {toastBox && <div role="alert" className="animate-fade-in">{toastBox}</div>}
         </div>
       )}
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
@@ -754,9 +783,8 @@ export function MessageInput({
             else void handleSubmit(true);
           }} />
       )}
-      {attached && !locked && (
-        <AttachmentSheet files={attached}
-          onAdd={(more) => setAttached((was) => [...(was ?? []), ...more])}
+      {sheetOpen && (
+        <AttachmentSheet files={attached} alert={toastBox} status={readingLine} onPaste={takePaste}
           onRemove={(index) => setAttached((was) => was && was.length > 1 ? was.filter((_, i) => i !== index) : null)}
           onCancel={() => setAttached(null)}
           onSend={(caption) => void sendAttached(caption)} />
