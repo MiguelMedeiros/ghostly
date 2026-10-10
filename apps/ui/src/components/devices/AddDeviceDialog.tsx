@@ -40,6 +40,10 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<EnrollView | null>(null);
   const ended = useRef(true);
+  /** Try again was pressed: the enrollment that ended is off the dialog until a new code is made, whatever the engine still answers. */
+  const dismissed = useRef(false);
+  /** What the code step draws in: it takes the focus when Try again goes away under it. */
+  const body = useRef<HTMLDivElement>(null);
   /** The password typed before it had to be made longer: what proves the verifier may be replaced. */
   const previous = useRef<string | undefined>(undefined);
 
@@ -58,7 +62,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   useEffect(() => {
     if (step !== "enroll") return;
     const timer = setInterval(() => void engine.call("deviceEnrollView").then((next) => {
-      if (!next) return;
+      if (!next || dismissed.current) return;
       ended.current = next.step === "done" || next.step === "failed";
       setView(next);
     }, () => {}), 500);
@@ -78,7 +82,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     setError(null); setBusy(true);
     try {
       const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined) });
-      ended.current = false;
+      ended.current = false; dismissed.current = false;
       setView(first); setStep("enroll");
     } catch (cause) {
       const key = enrollErrorKey(cause);
@@ -119,7 +123,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     try { setView(await engine.call("deviceEnrollConfirm", { match })); } catch (cause) { fail(problemLine(cause, t)); }
   };
 
-  const startAgain = () => { setView(null); void start(); };
+  // The button pressed is gone while the new code is made: the focus goes to what replaces it, not to the page.
+  const startAgain = () => { dismissed.current = true; setView(null); body.current?.focus(); void start(); };
 
   if (step !== "enroll") {
     // One line asks for it; why it is needed is behind ⓘ.
@@ -154,6 +159,9 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   return (
     <DeviceDialog title={t("devices.add.title")} onClose={onClose} testId="device-add">
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
+      <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
+      {/* Try again, until the engine answers: a new code, or why there is none. */}
+      {!view && busy && <Status testId="device-add-preparing" step="preparing">{t("devices.join.preparing")}</Status>}
       {view?.role === "inviter" && view.step === "waiting" && <>
         <InfoLine info={t("devices.add.scanInfo")}>{t("devices.add.scan")}</InfoLine>
         {/* The code's link on the web app, in the QR code and in Copy and Share: a phone's own camera, or a tap on the
@@ -185,6 +193,9 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         <button type="button" data-testid="device-add-again" onClick={startAgain} className={primaryButton}>{t("devices.add.tryAgain")}</button>
       </>}
       {error && <p data-testid="device-add-error" className="text-danger">{error.text}</p>}
+      {/* The engine refused the new code and keeps no enrollment: the way on is here, not through the password again. */}
+      {!view && !busy && <button type="button" data-testid="device-add-again" onClick={startAgain} className={primaryButton}>{t("devices.add.tryAgain")}</button>}
+      </div>
     </DeviceDialog>
   );
 }
