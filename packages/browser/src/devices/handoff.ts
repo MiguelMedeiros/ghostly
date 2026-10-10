@@ -144,8 +144,8 @@ export interface HandoffStaging {
   finish(file: HandoffFile): Promise<void>;
   /** A file that failed its check. */
   discard(id: string): Promise<void>;
-  /** A file the frozen copy of this device holds, copied in under `file.id`. */
-  copyHeld(fromId: string, file: HandoffFile): Promise<void>;
+  /** Files the frozen copy of this device holds, each copied in under its `file.id`; one it cannot copy is left out. */
+  copyHeld(copies: { fromId: string; file: HandoffFile }[]): Promise<void>;
   /** A file already staged under another id, copied under `file.id` (two records of one file). */
   copyStaged(fromId: string, file: HandoffFile): Promise<void>;
   /** The rest of the profile written into the staged database and keys; each file's record points at its bytes. */
@@ -1396,12 +1396,11 @@ export class HandoffTaker {
     // What the frozen copy holds is copied in here, not sent.
     const record = await this.ports.records.read();
     const staged = new Map((await this.staging!.held()).map((file) => [file.id, file]));
+    const copies: { fromId: string; file: HandoffFile }[] = [];
     for (const held of record?.heldFiles ?? []) {
-      for (const id of ids[held.sha256] ?? []) {
-        if (staged.has(id)) continue;
-        try { await this.staging!.copyHeld(held.id, { id, size: held.size, sha256: held.sha256 }); } catch { /* sent again below on a later pass */ }
-      }
+      for (const id of ids[held.sha256] ?? []) if (!staged.has(id)) copies.push({ fromId: held.id, file: { id, size: held.size, sha256: held.sha256 } });
     }
+    if (copies.length) try { await this.staging!.copyHeld(copies); } catch { /* sent again below on a later pass */ }
     for (const [partName, size, digest] of parts) {
       const known = this.incoming.get(partName);
       if (known && known.size === size && known.sha256 === digest && !known.done) continue;

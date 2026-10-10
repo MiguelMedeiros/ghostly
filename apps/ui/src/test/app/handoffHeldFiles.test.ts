@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { Blob as NodeBlob } from "node:buffer";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { digestText, registerFileBytes, resetFileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
@@ -18,6 +18,7 @@ import { handoffProfileHost } from "../../lib/handoffProfile";
 /** File storage as the origin-private file system keeps it: one folder per profile space. */
 function folders() {
   const files = new Map<string, Uint8Array>();
+  const calls = { read: 0, digest: 0 };
   const view = (space: string): FileBytes => ({
     kind: "opfs",
     append: async (id: string, offset: number, bytes: Uint8Array) => {
@@ -32,15 +33,16 @@ function folders() {
     size: async (id: string) => files.get(`${space}/${id}`)?.length ?? null,
     read: async (id: string, offset: number, length: number) => {
       const held = files.get(`${space}/${id}`);
+      calls.read++;
       if (!held) throw new DOMException("No such file", "NotFoundError");
       return held.slice(offset, offset + length);
     },
-    digest: async (id: string) => digestText(sha256(files.get(`${space}/${id}`) ?? new Uint8Array())),
+    digest: async (id: string) => (calls.digest++, digestText(sha256(files.get(`${space}/${id}`) ?? new Uint8Array()))),
     remove: async (id: string) => { files.delete(`${space}/${id}`); },
     removeWhere: async () => {},
     forSpace: (other: string) => view(other),
   } as unknown as FileBytes);
-  return { store: view("ghostly"), files };
+  return { store: view("ghostly"), files, calls };
 }
 
 /** The frozen copy's peer database: its file records as the app stores them (Node's Blob: fake-indexeddb clones it whole, happy-dom's it does not). */
@@ -82,7 +84,7 @@ describe("a taker copies the files its frozen copy holds into its staging", () =
     const staging = await handoffProfileHost("1.1.2", "web").staging.open();
     const file = { id: "chat1-out-photo", size: bytes.length, sha256: digest };
 
-    await staging.copyHeld("chat1-out-photo", file);
+    await staging.copyHeld([{ fromId: "chat1-out-photo", file }]);
 
     expect(await staging.held()).toEqual([file]);
     expect(storage.files.get(`${staging.database}/chat1-out-photo`)).toEqual(bytes);
@@ -96,16 +98,63 @@ describe("a taker copies the files its frozen copy holds into its staging", () =
     const staging = await handoffProfileHost("1.1.2", "web").staging.open();
     const file = { id: "chat1-in-video", size: bytes.length, sha256: digest };
 
-    await staging.copyHeld("chat1-in-video", file);
+    await staging.copyHeld([{ fromId: "chat1-in-video", file }]);
 
     expect(await staging.held()).toEqual([file]);
     expect(storage.files.get(`${staging.database}/chat1-in-video`)).toEqual(bytes);
   });
 
-  it("a file the frozen copy does not hold is not noted as staged", async () => {
-    await frozenCopy([]);
+  it("a file the frozen copy does not hold is left out, and the ones after it are still copied", async () => {
+    const bytes = Uint8Array.from({ length: 900 }, (_, i) => (i * 5) % 239);
+    const digest = digestText(sha256(bytes));
+    await storage.store.append("chat1-in-clip", 0, bytes);
+    await frozenCopy([{ id: "chat1-in-clip", linkId: "chat1", direction: "in", bytes: "opfs", digest, createdAt: 1, metadata: { name: "clip.mp4", size: bytes.length, mime: "video/mp4", timestamp: 1 } }]);
     const staging = await handoffProfileHost("1.1.2", "web").staging.open();
-    await expect(staging.copyHeld("gone", { id: "gone", size: 3, sha256: digestText(sha256(new Uint8Array(3))) })).rejects.toThrow();
+    const file = { id: "chat1-in-clip", size: bytes.length, sha256: digest };
+
+    await staging.copyHeld([{ fromId: "gone", file: { id: "gone", size: 3, sha256: digestText(sha256(new Uint8Array(3))) } }, { fromId: "chat1-in-clip", file }]);
+
+    expect(await staging.held()).toEqual([file]);
+  });
+
+  it("a copy that is not the file it should be is removed, not noted as staged", async () => {
+    const bytes = Uint8Array.from({ length: 900 }, (_, i) => (i * 5) % 239);
+    await storage.store.append("chat1-in-clip", 0, bytes);
+    await frozenCopy([{ id: "chat1-in-clip", linkId: "chat1", direction: "in", bytes: "opfs", createdAt: 1, metadata: { name: "clip.mp4", size: bytes.length, mime: "video/mp4", timestamp: 1 } }]);
+    const staging = await handoffProfileHost("1.1.2", "web").staging.open();
+
+    await staging.copyHeld([{ fromId: "chat1-in-clip", file: { id: "chat1-in-clip", size: bytes.length, sha256: digestText(sha256(new Uint8Array(900))) } }]);
+
     expect(await staging.held()).toEqual([]);
+    expect(storage.files.has(`${staging.database}/chat1-in-clip`)).toBe(false);
+  });
+
+  /*
+   * A move back to a device whose frozen copy holds many files opened that copy's database once for each file (a list
+   * of every database, then an open) and read each copied file twice, the second time whole for its digest: 2,000
+   * lookups took 0.5 s in Chrome against 0.25 s on one connection, before any byte is read twice (bug hunt, 2026-10-09).
+   */
+  it("forty files are copied from one connection to the frozen copy, each read once", async () => {
+    const held = Array.from({ length: 40 }, (_, i) => {
+      const bytes = Uint8Array.from({ length: 500 + i }, (_, at) => (at * 11 + i) % 253);
+      return { id: `chat1-in-${i}`, bytes, digest: digestText(sha256(bytes)), blob: i % 2 === 0 };
+    });
+    for (const file of held) if (!file.blob) await storage.store.append(file.id, 0, file.bytes);
+    await frozenCopy(held.map((file) => ({ id: file.id, linkId: "chat1", direction: "in", ...(file.blob ? { blob: new NodeBlob([file.bytes]) } : { bytes: "opfs" }), digest: file.digest, createdAt: 1, metadata: { name: "photo.jpg", size: file.bytes.length, mime: "image/jpeg", timestamp: 1 } })));
+    const staging = await handoffProfileHost("1.1.2", "web").staging.open();
+    const files = held.map((file) => ({ id: file.id, size: file.bytes.length, sha256: file.digest }));
+    const opened = vi.spyOn(indexedDB, "open"), listed = vi.spyOn(indexedDB, "databases");
+    storage.calls.read = storage.calls.digest = 0;
+
+    try {
+      await staging.copyHeld(files.map((file) => ({ fromId: file.id, file })));
+
+      expect(opened.mock.calls.map(([name]) => name)).toEqual(["ghostly"]);
+      expect(listed).toHaveBeenCalledTimes(1);
+      // The twenty in file storage, one read each: the digest is of the bytes as they are copied.
+      expect(storage.calls).toEqual({ read: 20, digest: 0 });
+    } finally { opened.mockRestore(); listed.mockRestore(); }
+    expect(await staging.held()).toEqual(files);
+    for (const file of held) expect(storage.files.get(`${staging.database}/${file.id}`)).toEqual(file.bytes);
   });
 });
