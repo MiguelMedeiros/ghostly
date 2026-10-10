@@ -58,6 +58,15 @@ describe("opening an app on Desktop", () => {
     expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1", "app-2"]);
   });
 
+  it("closes an app's window when the app is no longer installed, Run anyway or not", async () => {
+    const { calls, open, stops } = setup();
+    await open(REF, LINK);
+    await open(REF, null, { runAnyway: true });
+    stopTakenDown([{ ref: `${REF}-other`, digest: "d", run: { status: "ok" } }]);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1", "app-2"]);
+    expect(stops).toEqual(["stopped", "stopped"]);
+  });
+
   it("names its window after the app and the contact in a chat, and the app alone outside one", async () => {
     const { calls, open } = setup({}, (title, linkId) => (linkId ? `${title} with Ana` : title));
     await open(REF, LINK);

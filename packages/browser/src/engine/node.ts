@@ -2107,7 +2107,12 @@ export class GhostlyNode implements EngineImplementation {
   appInstall(params: { digest: string; grant: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
   appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
-  appUninstall(params: { ref: string }): Promise<void> { return this.appStore.uninstall(params); }
+  /** Uninstalls an app. One running then is closed in every chat (the contact hears `close`), and the pages are told, to stop its frames. */
+  async appUninstall(params: { ref: string }): Promise<void> {
+    await this.appStore.uninstall(params);
+    this.appsCloseOf(params.ref);
+    this.events.onAppsChecked?.();
+  }
   appRunCheck(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.runCheck(params); }
   appFetchFiles(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.fetchFiles(params); }
   appEntry(params: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> { return this.appStore.entry(params); }
@@ -4485,6 +4490,17 @@ export class GhostlyNode implements EngineImplementation {
         if (live.link) live.link.closeApp(app);
         else live.appsOpen?.delete(app);
       }
+    }
+  }
+
+  /** An app that went (uninstalled) is closed in every chat it was open in, as `appClose` does. */
+  private appsCloseOf(ref: string): void {
+    for (const [linkId, live] of this.links) {
+      if (!live.appsOpen?.size) continue;
+      const { app } = this.appChat(linkId, ref);
+      if (!live.appsOpen.has(app)) continue;
+      if (live.link) live.link.closeApp(app);
+      else live.appsOpen.delete(app);
     }
   }
 

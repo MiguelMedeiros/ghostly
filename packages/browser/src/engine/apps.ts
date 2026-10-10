@@ -310,6 +310,8 @@ export class Apps {
   private checking: Promise<AppCheckResult[]> | null = null;
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
+  /** The apps started here (`entry`), for this engine's life: one of them uninstalled since may still have a frame open. */
+  private readonly ran = new Set<string>();
   /**
    * The versions started here (`entry`), by reference: digest to `sequence`, for this engine's life. A frame goes on
    * running the version it started with whatever is installed since, so that version is the one judged when it asks.
@@ -436,11 +438,13 @@ export class Apps {
 
   /**
    * Before an app's frames go to a contact (`appOpen`, `appSend`): refused with `stopped` as its storage is. A reference
-   * not installed here (a bot that speaks an app's messages) is not this store's to refuse. `digest`: the version the
-   * frame runs (`versionRunning`).
+   * not installed here (a bot that speaks an app's messages) is not this store's to refuse, unless it ran here and was
+   * uninstalled since: the person removed it, so a frame of it still open says nothing more (`not-installed`). `digest`:
+   * the version the frame runs (`versionRunning`).
    */
   async chatRunnable({ ref, digest }: { ref: string; digest?: string }): Promise<void> {
     const app = isAppRef(ref) ? await this.app(ref) : undefined;
+    if (!app && this.ran.has(ref)) fail("not-installed", "This app is not installed");
     if (app) await this.stillRunnable(app, digest);
   }
   private async putApp(app: InstalledApp): Promise<void> {
@@ -1163,6 +1167,7 @@ export class Apps {
     if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
     const bundle = await this.verifiedBundle(app);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
+    this.ran.add(app.ref);
     const versions = this.started.get(app.ref) ?? new Map<string, number>();
     this.started.set(app.ref, versions.set(app.digest, app.sequence));
     return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], view: appViewOf(bundle.manifest), entry: utf8Decode(entry) };

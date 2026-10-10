@@ -108,6 +108,20 @@ describe("an app running when its version is taken down", () => {
     expect(screen.queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
   });
 
+  it("uninstalled while it runs, in a chat and alone: it is stopped and its place goes, with no notice", async () => {
+    chatPanel();
+    await act(() => open(REF, "link-1"));
+    await open(REF, null);
+    // The person uninstalled it (on this page or another): the engine says so as it does after a check.
+    fakeEngine.on("appList", () => []);
+    await checked({ status: "ok" });
+    expect(started[0]!.stop).toHaveBeenCalled();
+    expect(started[1]!.stop).toHaveBeenCalled();
+    expect(chatApp("link-1")).toBeUndefined();
+    expect(screen.queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-place=alone]")).toBeNull();
+  });
+
   it("after an update came while it ran: the version it runs is the one judged, not the one installed", async () => {
     chatPanel();
     await act(() => open(REF, "link-1"));

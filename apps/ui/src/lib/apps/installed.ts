@@ -16,7 +16,8 @@ const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
 
 // After any update check (the engine's scheduled one included), once a screen has read the list or an app runs: a
-// version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`).
+// version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`). The engine says
+// the same after an uninstall, to every page: the app's frames stop wherever they run.
 engine.onAppsChecked(() => { if (apps !== null || appsRunning()) void refreshInstalledApps(); });
 
 /** Reads the list again. */
