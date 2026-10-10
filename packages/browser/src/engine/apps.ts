@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, appDigest, appViewOf, appFingerprint, appRef, appStoreDecision, appUpdateDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision, appUpdateDecision,
   canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocations, readAppStore,
   toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
@@ -565,16 +565,16 @@ export class Apps {
 
   /**
    * The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error.
-   * `read` holds the files already read, which are skipped, and gets the ones read now.
+   * `read` holds the files already read, which are skipped, and gets the ones read now. Null when no file answered now.
    */
-  private async readRevocations(ref: string, urls: string[], read = new Set<string>()): Promise<SignedAppRevocation[]> {
-    const out: SignedAppRevocation[] = [];
+  private async readRevocations(ref: string, urls: string[], read = new Set<string>()): Promise<SignedAppRevocation[] | null> {
+    let out: SignedAppRevocation[] | null = null;
     for (const url of new Set(urls.filter(isAppFetchUrl).map((u) => besideUrl(u, "ghostly-revoke.json")))) {
       if (read.has(url)) continue;
       read.add(url);
       try {
         const read = readAppRevocations(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
-        if (read.ok) out.push(...read.revocations.filter((r) => r.statement.app === ref));
+        if (read.ok) (out ??= []).push(...read.revocations.filter((r) => r.statement.app === ref));
       } catch { /* not published there, or not reachable now */ }
     }
     return out;
@@ -933,7 +933,8 @@ export class Apps {
       }
       // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
       const revokeRead = new Set<string>();
-      app = withRevocations(app, await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead));
+      const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
+      app = withRevocations(app, before ?? []);
       for (const [url, want] of candidates) {
         // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
         // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
@@ -985,11 +986,17 @@ export class Apps {
         break;
       }
       // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
-      app = withRevocations(app, await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead));
+      const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
+      // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version. While no
+      // file answers, every kept one stays (it may name a version not found yet): a file that changes does not pile up.
+      const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
+      const versions: AppVersion[] = [app, ...(app.pending ? [versionOf(app.pending.manifest, app.pending.digest)] : [])];
+      const stays = (app.revocations ?? []).filter((r) => !revocations || versions.some((v) => appRevocationFor(v, [r])));
+      const merged = new Map([...stays, ...(revocations ?? [])].map((r) => [canonicalJson(r), r]));
       // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
       const current = await this.app(app.ref);
       if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
-      app = { ...app, checkedAt: this.now() };
+      app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
       if (!(await this.putAppIfInstalled(app, first.installedAt))) {
         if (wrote) await this.removeUnusedBundle(app.ref, wrote.bytes, wrote.digest);
         continue;
