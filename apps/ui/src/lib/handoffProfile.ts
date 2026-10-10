@@ -17,13 +17,22 @@ import { dropWalletStorageOf } from "./profileData";
  * writes into a staging namespace that no profile names yet, and installs it by pointing the profile at it in one
  * write of the registry (`pointProfile`).
  *
- * A staging namespace notes which files it holds whole and checked under a key of its own outside every profile's
- * prefix (`ghostly-staging:<ns>`), so a pull that stopped goes on without sending them again, and nothing of it is
- * ever taken for a profile's own key.
+ * A staging namespace notes which files it holds whole and checked under keys of its own outside every profile's
+ * prefix (`ghostly-staging:<ns>:<file id>`, one per file), so a pull that stopped goes on without sending them again,
+ * and nothing of it is ever taken for a profile's own key. One key per file: a file that begins or finishes writes
+ * its own few bytes. As one list, read and written whole twice per file, the n-th file moved about 400 × n characters
+ * through the page's storage: 0.77 GB for a profile of 2,000 files.
  */
 
 const DIGEST = /^[A-Za-z0-9_-]{43}$/;
 const stagingKey = (ns: string) => `ghostly-staging:${ns}`;
+/** One staged file's note. A namespace and a file id hold no colon, so no key of one namespace begins as another's does. */
+const stagedKey = (ns: string, id: string) => `${stagingKey(ns)}:${id}`;
+const stagedKeys = (ns: string): string[] => {
+  const prefix = stagedKey(ns, "");
+  return Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
+};
+const isStaged = (file: Partial<HandoffFile>): file is Pick<HandoffFile, "size" | "sha256"> => typeof file.sha256 === "string" && Number.isSafeInteger(file.size);
 const spaceOf = (database: string): string => (database === "ghostly" ? "" : database.replace(/^ghostly_/, ""));
 
 /** The peer database opened as it is stored (no version, so nothing migrates); only read-only transactions on it. */
@@ -151,20 +160,41 @@ class Staging implements HandoffStaging {
     this.database = databaseOfSpace(ns);
   }
 
+  /**
+   * The one list an earlier build kept under `ghostly-staging:<ns>` (a pull that stopped before an update): each of its
+   * files gets its own key, once, and the list goes.
+   */
+  private adopt(): void {
+    const key = stagingKey(this.ns);
+    const stored = localStorage.getItem(key);
+    if (stored === null) return;
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(stored); } catch { /* nothing to keep */ }
+    for (const file of Array.isArray(parsed) ? parsed as (HandoffFile | null)[] : []) {
+      if (!file || typeof file.id !== "string" || !isStaged(file) || localStorage.getItem(stagedKey(this.ns, file.id)) !== null) continue;
+      localStorage.setItem(stagedKey(this.ns, file.id), JSON.stringify({ size: file.size, sha256: file.sha256 }));
+    }
+    localStorage.removeItem(key);
+  }
   private list(): HandoffFile[] {
     try {
-      const parsed = JSON.parse(localStorage.getItem(stagingKey(this.ns)) ?? "[]") as HandoffFile[];
-      return Array.isArray(parsed) ? parsed.filter((file) => file && typeof file.id === "string" && typeof file.sha256 === "string" && Number.isSafeInteger(file.size)) : [];
+      this.adopt();
+      const prefix = stagedKey(this.ns, "");
+      return stagedKeys(this.ns).flatMap((key) => {
+        try {
+          const file = JSON.parse(localStorage.getItem(key) ?? "null") as Partial<HandoffFile> | null;
+          return file && isStaged(file) ? [{ id: key.slice(prefix.length), size: file.size, sha256: file.sha256 }] : [];
+        } catch { return []; }
+      });
     } catch { return []; }
   }
-  private save(list: HandoffFile[]): void {
-    localStorage.setItem(stagingKey(this.ns), JSON.stringify(list));
-  }
   private note(file: HandoffFile): void {
-    this.save([...this.list().filter((known) => known.id !== file.id), file]);
+    this.adopt();
+    localStorage.setItem(stagedKey(this.ns, file.id), JSON.stringify({ size: file.size, sha256: file.sha256 }));
   }
   private forget(id: string): void {
-    this.save(this.list().filter((known) => known.id !== id));
+    this.adopt();
+    localStorage.removeItem(stagedKey(this.ns, id));
   }
 
   async held(): Promise<HandoffFile[]> { return this.list(); }
@@ -255,7 +285,7 @@ const staging: HandoffStagingHost = {
     if (await databaseExists(database)) await dropDatabase(database);
     await dropFileSpace(database).catch(() => {});
     dropKeys(ns);
-    try { localStorage.removeItem(stagingKey(ns)); } catch { /* nothing kept */ }
+    try { localStorage.removeItem(stagingKey(ns)); for (const key of stagedKeys(ns)) localStorage.removeItem(key); } catch { /* nothing kept */ }
   },
 };
 
