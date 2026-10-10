@@ -96,6 +96,15 @@ async function startedWith(options: Partial<NodeOptions>, ...rows: StoredLink[])
   const linkOf = (id: string) => links.find((l) => l.options.params.id === id)!;
   return { ...setup, linkOf };
 }
+/**
+ * A group's link toward a member, opened by hand. The group's session never asked for it, so its next tick (the engine
+ * runs one a second) closes it as a link nobody wants: on a busy host that landed in the middle of a test, and a link
+ * closed while its row was being written was never made at all. The session's tick is held from here on.
+ */
+async function openEdge(node: GhostlyNode, state: unknown, member: string): Promise<string> {
+  vi.spyOn(node["groups"], "tick").mockResolvedValue();
+  return node["openEdge"](state as never, member);
+}
 const saved = async (id: string) => (await db.getLinks()).find((l) => l.id === id);
 const bytes = (text: string) => new TextEncoder().encode(text);
 
@@ -997,8 +1006,8 @@ describe("private groups through the engine", () => {
     const { groupId } = await node.createGroup({ name: "  Friends  ", profile: "mesh" });
     const state = (await db.getGroups()).find((g) => g.id === groupId)!.state;
     const member = createIdentity().pubKeyZ32;
-    const edgeId = await node["openEdge"](state as never, member);
-    expect(await node["openEdge"](state as never, member)).toBe(edgeId);
+    const edgeId = await openEdge(node, state,member);
+    expect(await openEdge(node, state,member)).toBe(edgeId);
     expect(node.getState().links).toEqual([]);
     expect(node.exportLinks()).toEqual([]);
     const edge = links.find((l) => l.options.params.id === edgeId)!;
@@ -1022,7 +1031,7 @@ describe("private groups through the engine", () => {
     const { groupId } = await node.createGroup({ name: "Plaza" });
     const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
     const [kept, dropped] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
-    const keptId = await node["openEdge"](state as never, kept), droppedId = await node["openEdge"](state as never, dropped);
+    const keptId = await openEdge(node, state,kept), droppedId = await openEdge(node, state,dropped);
     const edge = (id: string) => links.filter((l) => l.options.params.id === id).at(-1)!;
     expect(edge(keptId).options.resume).toBeUndefined();
     // Both sessions open; one drops while the app runs (the member went away), then the app quits with the other up.
@@ -1057,7 +1066,7 @@ describe("private groups through the engine", () => {
     let { node } = await started();
     const { groupId } = await node.createGroup({ name: "Plaza" });
     const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
-    const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+    const edgeId = await openEdge(node, state,createIdentity().pubKeyZ32);
     const edge = () => links.filter((l) => l.options.params.id === edgeId).at(-1)!;
     const restart = async () => {
       await node.shutdown();
@@ -1102,7 +1111,7 @@ describe("private groups through the engine", () => {
       iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
       const { groupId } = await node.createGroup({ name: "Plaza" });
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
-      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      const edgeId = await openEdge(node, state,createIdentity().pubKeyZ32);
       await vi.waitFor(() => expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBe("Iroh relay unreachable"));
       // The next tick before the wait is over: nothing yet.
       node["retryGroupNative"]();
@@ -1134,7 +1143,7 @@ describe("private groups through the engine", () => {
       expect(node.getState().transport.groupLinks).toBeUndefined();
       const { groupId } = await node.createGroup({ name: "Plaza" });
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
-      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      const edgeId = await openEdge(node, state,createIdentity().pubKeyZ32);
       expect(edgeOf(edgeId).options.packetTransports).toBe(true);
       // Two apps with WebRTC: no endpoint, as before.
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -1161,7 +1170,7 @@ describe("private groups through the engine", () => {
       expect(node.getState().transport.groupLinks).toBeUndefined();
       const { groupId } = await node.createGroup({ name: "Penguins" });
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
-      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      const edgeId = await openEdge(node, state,createIdentity().pubKeyZ32);
       await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(1));
       expect(iroh).toHaveBeenCalled();
     });
@@ -1173,8 +1182,8 @@ describe("private groups through the engine", () => {
       const { node, iroh } = await nativeEngine();
       const { groupId } = await node.createGroup({ name: "Plaza" });
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
-      const blocked = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
-      const fine = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      const blocked = await openEdge(node, state,createIdentity().pubKeyZ32);
+      const fine = await openEdge(node, state,createIdentity().pubKeyZ32);
       await node["nativeQueue"];
       expect(iroh).not.toHaveBeenCalled();
       const first = edgeOf(blocked), other = edgeOf(fine);
@@ -1208,8 +1217,8 @@ describe("private groups through the engine", () => {
       const { node } = await nativeEngine();
       const { groupId } = await node.createGroup({ name: "Plaza" });
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
-      const blocked = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
-      const fine = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      const blocked = await openEdge(node, state,createIdentity().pubKeyZ32);
+      const fine = await openEdge(node, state,createIdentity().pubKeyZ32);
       expect(edgeOf(blocked).options.packetTransportsSaid).toBe(false);
       const first = edgeOf(blocked);
       first.options.events.onDirectEvidence("no-path");
@@ -1237,7 +1246,7 @@ describe("private groups through the engine", () => {
       const { groupId } = await node.createGroup({ name: "Plaza" });
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
       const member = createIdentity().pubKeyZ32;
-      const edgeId = await node["openEdge"](state as never, member);
+      const edgeId = await openEdge(node, state,member);
       // The member's WebRTC failed once: its edge said it had none, and this app keeps that.
       const descriptors = { "iroh/1": { id: "cd".repeat(32), relay: null, addresses: [], relayed: true } };
       edgeOf(edgeId).options.events.onPacketTransports(["iroh/1"], descriptors);
@@ -1278,7 +1287,7 @@ describe("private groups through the engine", () => {
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
       const members = Array.from({ length: 5 }, () => createIdentity().pubKeyZ32);
       const edgeIds: string[] = [];
-      for (const member of members) edgeIds.push(await node["openEdge"](state as never, member));
+      for (const member of members) edgeIds.push(await openEdge(node, state,member));
       // Each member's app said it has no WebRTC.
       for (const id of edgeIds) edgeOf(id).options.events.onPacketTransports(["iroh/1"], {});
       const waiting = () => members.filter((member) => (node["edgeView"](groupId, member) as GroupEdgeView | undefined)?.noSlot);
@@ -1304,7 +1313,7 @@ describe("private groups through the engine", () => {
       // Another group's links take from the same four.
       const other = await node.createGroup({ name: "Other" });
       const state = (await db.getGroups()).find((g) => g.id === other.groupId)!.community;
-      await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      await openEdge(node, state,createIdentity().pubKeyZ32);
       expect(host.peerRoom(groupId)).toBe(GROUP_NATIVE_SLOTS - 1);
       vi.stubGlobal("RTCPeerConnection", class {});
       onTestFinished(() => { vi.unstubAllGlobals(); });
@@ -1323,7 +1332,7 @@ describe("private groups through the engine", () => {
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
       const members = Array.from({ length: 5 }, () => createIdentity().pubKeyZ32);
       const edgeIds: string[] = [];
-      for (const member of members) edgeIds.push(await node["openEdge"](state as never, member));
+      for (const member of members) edgeIds.push(await openEdge(node, state,member));
       await node["nativeQueue"];
       await vi.waitFor(() => expect(edgeIds.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"))).toHaveLength(3));
       // Three of the five got the three slots left (eight in all); the other two wait, and their rows say so.
@@ -1349,7 +1358,7 @@ describe("private groups through the engine", () => {
     const { groupId } = await node.createGroup({ name: "Friends", profile: "mesh" });
     const state = (await db.getGroups()).find((g) => g.id === groupId)!.state;
     const member = createIdentity().pubKeyZ32;
-    const edgeId = await node["openEdge"](state as never, member);
+    const edgeId = await openEdge(node, state,member);
     const edge = links.find((l) => l.options.params.id === edgeId)!;
     const session = node["groups"]["sessions"].get(groupId)!;
     const hooks = session["hooks"], changed = hooks.changed;
