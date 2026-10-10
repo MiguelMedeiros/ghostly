@@ -17,6 +17,9 @@ import { date } from "../../lib/identities";
  * added before the person confirms on the next screen.
  */
 
+/** A link written without its scheme, as a repository is usually said (`github.com/owner/repo`): a host the engine reads, and nothing else. */
+const NO_SCHEME = /^(?:(?:www\.)?github\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net)(?:[/?#]|$)/i;
+
 function hostOf(url: string): string {
   try { return new URL(url).host; } catch { return url; }
 }
@@ -36,8 +39,10 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   const [store, setStore] = useState<AppStorePreview | null>(null);
 
   const check = async () => {
-    const link = url.trim();
-    if (!link) return;
+    const typed = url.trim();
+    if (!typed) return;
+    // The engine takes nothing but `https:` (`appPasteUrl`): any other text goes to it as typed, and it refuses it in the dialog's words.
+    const link = NO_SCHEME.test(typed) ? `https://${typed}` : typed;
     focusBack();
     setBusy(true); setError(null); setStore(null);
     try {
@@ -68,7 +73,8 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="apps-add-dialog"
         className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-safe">
         <h2 id={titleId} className="text-lg font-medium text-text-primary">{t("apps.add.title")}</h2>
-        <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); void check(); }}>
+        {/* noValidate: a link the field's type refuses is answered below in the app's words, not by the browser's own bubble. */}
+        <form className="space-y-2" noValidate onSubmit={(e) => { e.preventDefault(); void check(); }}>
           <label htmlFor={fieldId} className="text-sm text-text-primary">{t("apps.add.label")}</label>
           <input id={fieldId} data-testid="apps-add-url" autoFocus className={input} type="url" inputMode="url" autoComplete="off" spellCheck={false} dir="ltr"
             placeholder="https://github.com/owner/repo" value={url} onChange={(e) => { setUrl(e.target.value); setStore(null); setError(null); }} />
