@@ -9,6 +9,8 @@
  *   by then has most likely not been heard yet. A connection's own sound (connected, back, switched) tells no news, so
  *   anything more important takes its place for as long as it holds the gate: a chat goes live, and its first message
  *   a moment later is still heard.
+ * - Except what follows: a chat's "connected" after its contact's knock is the same pairing's next sound, not another
+ *   notice come together with it. It is heard however quick the pairing was, and fades the knock out if it still sounds.
  * - A call's sounds (ring, ringback, hangup) are never dropped: they stop whatever sounds and hold the gate, and while a
  *   call rings no other sound plays.
  * - The interface's own sounds, played by a person's click (a card sliding or turning over, a spoiler, a delete, "Send
@@ -44,6 +46,12 @@ const PRIORITY: Partial<Record<SoundName, number>> = {
   mention: 3, coin: 3, testcoins: 3, request: 3, paid: 3, confirmed: 3, failed: 3,
 };
 
+/**
+ * The notice a notice follows: it takes its place for as long as that one holds the gate. A contact comes with my
+ * invite (knock) and the chat goes live (connected), under a second later on a quick network.
+ */
+const FOLLOWS: Partial<Record<SoundName, SoundName>> = { connected: "knock" };
+
 export function soundKind(name: SoundName): SoundKind {
   return CALL.has(name) ? "call" : INTERFACE.has(name) ? "interface" : "notice";
 }
@@ -54,7 +62,7 @@ type Stop = () => void;
 
 export class SoundGate {
   /** The notice or call sound that holds the gate, from `at`. */
-  private held: { priority: number; at: number; stop: Stop } | undefined;
+  private held: { name: SoundName; priority: number; at: number; stop: Stop } | undefined;
   /** The interface sound that may still sound. */
   private cue: Stop | undefined;
 
@@ -65,7 +73,7 @@ export class SoundGate {
   admit(name: SoundName, stop: Stop, { now, ringing = false, kind = soundKind(name) }: { now: number; ringing?: boolean; kind?: SoundKind }): boolean {
     if (kind === "call") {
       this.silence();
-      this.held = { priority: Infinity, at: now, stop };
+      this.held = { name, priority: Infinity, at: now, stop };
       return true;
     }
     if (ringing) return false;
@@ -78,9 +86,9 @@ export class SoundGate {
       return true;
     }
     const priority = soundPriority(name);
-    if (held && !(priority > held.priority && (now - held.at < TOGETHER_MS || held.priority === AMBIENT))) return false;
+    if (held && FOLLOWS[name] !== held.name && !(priority > held.priority && (now - held.at < TOGETHER_MS || held.priority === AMBIENT))) return false;
     this.silence();
-    this.held = { priority, at: now, stop };
+    this.held = { name, priority, at: now, stop };
     return true;
   }
 
