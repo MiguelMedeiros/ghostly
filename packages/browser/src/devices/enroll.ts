@@ -280,6 +280,8 @@ export class EnrollInviter extends Enrollment {
   private stopDoneWait: (() => void) | null = null;
   /** A joiner was seen on the link: from then it has as long as a joiner waits for the proof to open a session. */
   private seen = false;
+  /** The person answered the digits: one answer is taken, before the record is read or written for it. */
+  private answered = false;
 
   constructor(private readonly options: InviterOptions) {
     super(options, { role: "inviter", step: "waiting", code: "", expires: 0 });
@@ -352,7 +354,8 @@ export class EnrollInviter extends Enrollment {
    * and nothing was written.
    */
   async confirm(match: boolean): Promise<EnrollView> {
-    if (this.over || this.view.step !== "confirm" || !this.joiner) throw new Error("There are no digits to confirm");
+    if (this.over || this.answered || this.view.step !== "confirm" || !this.joiner) throw new Error("There are no digits to confirm");
+    this.answered = true;
     if (!match) { await this.fail("digits", "digits", this.joiner.name); return this.view; }
     const joiner = this.joiner;
     let slots: EnrollSlot[], ownSlot: number, turn: number, rev: number;

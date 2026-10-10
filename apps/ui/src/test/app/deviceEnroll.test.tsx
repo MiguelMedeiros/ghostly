@@ -136,6 +136,27 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
   }, 20_000);
 
+  it("a double click on They match is one answer: both buttons are off until the engine has answered", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    engine.on("deviceEnrollView", () => ({ role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web" }));
+    // The engine takes its time over the answer (it reads and writes the device record first).
+    let answer!: (view: EnrollView) => void;
+    engine.on("deviceEnrollConfirm", () => new Promise<EnrollView>((resolve) => { answer = resolve; }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await user.dblClick(await screen.findByTestId("device-add-match", {}, { timeout: 3_000 }));
+    expect(screen.getByTestId("device-add-match")).toBeDisabled();
+    expect(screen.getByTestId("device-add-no-match")).toBeDisabled();
+    await user.click(screen.getByTestId("device-add-no-match"));
+    expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
+    answer({ role: "inviter", step: "adding", device: "Phone" });
+    expect(await screen.findByTestId("device-add-adding")).toHaveTextContent("Phone");
+    expect(screen.queryByTestId("device-add-error")).toBeNull();
+  }, 20_000);
+
   it("says a device is connecting once one read the code, and Try again after a failure makes a new code", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
