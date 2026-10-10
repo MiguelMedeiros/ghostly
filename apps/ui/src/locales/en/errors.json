@@ -137,6 +137,7 @@
     "pasteFileUnreadableNext": "Attach it with +.",
     "pasteGone": "That paste is gone",
     "pasteGoneNext": "Paste it again.",
+    "pasteLate": "What you pasted could not be added just now. Paste it again when you are done here.",
     "pasteTooLarge": "That is too large to paste. Send it with + → Document.",
     "pasteUnreadable": "Could not paste those files. Send them with + → Document.",
     "refused": {

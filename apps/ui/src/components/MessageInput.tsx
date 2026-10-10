@@ -470,7 +470,8 @@ export function MessageInput({
     const named = pasteNamesFiles(data);
     read.then((found) => {
       ended();
-      if (found.length) offerRef.current(found);
+      // Read to its end where files cannot go any more (an edit began meanwhile): said, as a paste never read is.
+      if (found.length) { if (!offerRef.current(found)) showToast(t("errors.files.pasteLate")); }
       else if (named) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
     return true;
