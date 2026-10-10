@@ -401,6 +401,28 @@ describe("with the apps flag on", () => {
     expect(tried).toEqual(["app"]);
   });
 
+  it("a link without https:// to a host of the list is read as https://, as a repository is usually written", async () => {
+    const asked: unknown[] = [];
+    fakeEngine.on("appPreview", (params) => { asked.push(params); return preview(); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "github.com/ana/chess");
+    await user.click(screen.getByTestId("apps-add-check"));
+    await waitFor(() => expect(asked).toEqual([{ url: "https://github.com/ana/chess" }]));
+    expect(screen.queryByTestId("apps-add-error")).not.toBeInTheDocument();
+  });
+
+  it("words that are no link get the dialog's own error, not the browser's validation bubble", async () => {
+    const asked: unknown[] = [];
+    const refuse = (params: unknown) => { asked.push(params); throw new Error("host: Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS"); };
+    fakeEngine.on("appPreview", refuse).on("appStorePreview", refuse);
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "not a link");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.");
+    // As typed: only a host of the list gets https:// put before it.
+    expect(asked).toEqual([{ url: "not a link" }]);
+  });
+
   it("a version a store removed stays stopped: Run anyway in its details opens it, Keep it stopped does not", async () => {
     const onOpen = vi.fn();
     const removed = installed({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } });
