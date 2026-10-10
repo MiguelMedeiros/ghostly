@@ -193,9 +193,14 @@ export function desktopWindows(app: DesktopApp): DesktopWindows {
  * Chooses in a `Select` (apps/ui/src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
  * option. It is a combobox with a listbox, not a native `<select>` — its options exist only while it is open, and
  * its value is in `data-value`. e2e/support/select.ts does the same for the browser projects.
+ *
+ * It waits for the select first, as Playwright's locators do there: a menu page (Settings) loads the first time it is
+ * opened and nothing is drawn in its place meanwhile (apps/ui/src/Root.tsx `menuPage`), so right after the click that
+ * opens the page there is no select yet.
  */
 export async function choose(app: DesktopApp, testId: string, value: string): Promise<void> {
   const select = `[data-testid="${testId}"]`;
+  await expect.poll(() => app.attribute(select, "aria-expanded"), { message: `the page shows ${select}` }).not.toBeNull();
   if ((await app.attribute(select, "aria-expanded")) !== "true") await app.click(select);
   const option = `[data-testid="${testId}-list"] [role="option"][data-value="${value}"]`;
   await expect.poll(() => app.text(option)).not.toBeNull();
