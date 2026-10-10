@@ -53,6 +53,14 @@ export class GroupEdits {
   private readonly receivePace = new Map<string, RateWindow>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly flushing = new Map<string, Promise<void>>();
+  /** Per group: my rows known to have an edit to say, each with when it was last told (`edit`), by `tick`. */
+  private readonly known = new Map<string, Map<string, number>>();
+  private tick = 0;
+  /**
+   * The groups whose history was read for the rows with an edit to say: `known` has them all, and from then on those
+   * rows alone are read (`host.message`). An edit costs what it does in a short group, however long this one is.
+   */
+  private readonly learnt = new Set<string>();
   private stopped = false;
 
   constructor(private readonly host: GroupEditsHost) {
@@ -88,6 +96,9 @@ export class GroupEdits {
       const next = withEdit(current, { seq, at, text, card, pending: true });
       return { text: next.text, edit: next.edit, card: next.card, mentions: mentions.length ? mentions : undefined };
     });
+    // Told once the row says so: a look that read it as said meanwhile must not forget it.
+    // Told once the row says so: a look that read it as said meanwhile must not forget it.
+    if (this.host.message) this.told(groupId).set(messageId, ++this.tick);
     await this.host.changed(chat, messageId);
     // One pass: said now when the pace allows (then it is no longer pending), else a timer says it later.
     await this.flush(groupId).catch(() => {});
@@ -108,7 +119,7 @@ export class GroupEdits {
     this.timers.delete(groupId);
     if (this.stopped || !this.host.membership(groupId)) return;
     const chat = chatOf(groupId), now = this.now();
-    const due = (await this.host.messages(chat)).filter(m => m.sender === "me" && m.edit?.pending).sort((a, b) => a.edit!.at - b.edit!.at);
+    const due = (await this.pending(groupId)).sort((a, b) => a.edit!.at - b.edit!.at);
     let pace = this.sendPace.get(groupId);
     if (!pace) this.sendPace.set(groupId, pace = new RateWindow(EDIT_SEND_LIMIT, EDIT_RATE_WINDOW_MS, this.now));
     let retry = Infinity;
@@ -122,6 +133,36 @@ export class GroupEdits {
       await this.settle(chat, message.id, edit.seq);
     }
     if (Number.isFinite(retry) && !this.stopped) this.timers.set(groupId, setTimeout(() => { void this.flush(groupId).catch(() => {}); }, Math.max(50, retry)));
+  }
+
+  /**
+   * My rows of a group with an edit to say. The group's whole history is read for them once (always, with no
+   * `host.message` to read one by); after that the known rows alone, and one that waits no more is forgotten, unless
+   * it was told again while it was read.
+   */
+  private async pending(groupId: string): Promise<StoredMessage[]> {
+    const waits = (m: StoredMessage) => m.sender === "me" && !!m.edit?.pending;
+    const chat = chatOf(groupId), read = this.host.message;
+    if (!read || !this.learnt.has(groupId)) {
+      const rows = (await this.host.messages(chat)).filter(waits);
+      if (!read) return rows;
+      for (const m of rows) if (!this.told(groupId).has(m.id)) this.told(groupId).set(m.id, this.tick);
+      this.learnt.add(groupId);
+      return rows;
+    }
+    const known = this.told(groupId), asOf = this.tick, ids = [...known.keys()];
+    const rows = await Promise.all(ids.map(id => read(chat, id)));
+    return rows.filter((m, i): m is StoredMessage => {
+      if (m && waits(m)) return true;
+      if ((known.get(ids[i]) ?? 0) <= asOf) known.delete(ids[i]);
+      return false;
+    });
+  }
+
+  private told(groupId: string): Map<string, number> {
+    let known = this.known.get(groupId);
+    if (!known) this.known.set(groupId, known = new Map());
+    return known;
   }
 
   private async find(chat: string, id: string): Promise<StoredMessage | undefined> {
@@ -196,6 +237,8 @@ export class GroupEdits {
   forget(groupId: string): void {
     clearTimeout(this.timers.get(groupId));
     this.timers.delete(groupId);
+    this.known.delete(groupId);
+    this.learnt.delete(groupId);
     this.buffer.forget(chatOf(groupId));
   }
 
