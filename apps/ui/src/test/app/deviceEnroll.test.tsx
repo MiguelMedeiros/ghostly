@@ -188,6 +188,57 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(failed).toHaveAttribute("data-reason", "unreached");
     expect(failed).toHaveTextContent("The devices couldn't connect" + "Keep both online and make a new code.");
   }, 20_000);
+
+  it("Try again says the new code is being made, and one the engine refuses keeps Try again under the reason", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    let view: EnrollView | null = { role: "inviter", step: "failed", reason: "unreached" };
+    engine.on("deviceEnrollView", () => view);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
+    // The turn address cannot be read: the engine refuses the new code, and drops the enrollment that ended.
+    let refuse = (_: Error) => {};
+    engine.on("deviceEnrollInvite", () => new Promise<EnrollView>((_, reject) => { refuse = reject; }));
+    await user.click(screen.getByTestId("device-add-again"));
+    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(2));
+    // While it is asked for: a status line in place of the reason and its button, and the focus stays in the dialog.
+    expect(screen.getByTestId("device-add-preparing")).toHaveTextContent("Getting ready…");
+    expect(screen.queryByTestId("device-add-failed")).toBeNull();
+    expect(screen.queryByTestId("device-add-again")).toBeNull();
+    expect(screen.getByTestId("device-add")).toContainElement(document.activeElement as HTMLElement);
+    view = null;
+    refuse(new Error("enroll-unreachable: The active device's turn could not be read"));
+    expect(await screen.findByTestId("device-add-error")).toHaveTextContent("Can't check which device is active. Check your connection.");
+    expect(screen.queryByTestId("device-add-preparing")).toBeNull();
+    // Try again is still there, and asks for a code again: no closing the dialog to type the password once more.
+    engine.on("deviceEnrollInvite", () => waiting);
+    await user.click(screen.getByTestId("device-add-again"));
+    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(3));
+    expect(await screen.findByTestId("device-add-code")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-add-error")).toBeNull();
+  }, 20_000);
+
+  it("Try again refused while offline shows that reason only: the enrollment that ended stays off the dialog", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    // The engine refuses before it replaces the old enrollment: it keeps answering with the one that ended.
+    engine.on("deviceEnrollView", () => ({ role: "inviter", step: "failed", reason: "dropped" }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
+    engine.on("deviceEnrollInvite", () => { throw new Error("enroll-offline: You are offline"); });
+    await user.click(screen.getByTestId("device-add-again"));
+    expect(await screen.findByTestId("device-add-error")).toHaveTextContent("You are offline.");
+    const reads = engine.callsTo("deviceEnrollView").length;
+    await waitFor(() => expect(engine.callsTo("deviceEnrollView").length).toBeGreaterThan(reads + 1), { timeout: 3_000 });
+    expect(screen.queryByTestId("device-add-failed")).toBeNull();
+    expect(screen.getByTestId("device-add-again")).toBeInTheDocument();
+  }, 20_000);
 });
 
 describe("I already use Ghostly", () => {
