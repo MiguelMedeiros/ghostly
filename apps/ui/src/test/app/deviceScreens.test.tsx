@@ -130,6 +130,54 @@ describe("Profile, Devices", () => {
     await waitFor(() => expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]));
   });
 
+  it("a move under way whose dialog was closed: its steps and Cancel stay in the section, and no second Move to is offered", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = null;
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffPush", () => (handoff = { role: "giver", device: "iPhone", key: PHONE, step: "copying", bytes: 120 * 1024 ** 2, total: 480 * 1024 ** 2 }));
+    engine.on("deviceHandoffCancel", () => { handoff = null; });
+    const [, phone] = await screen.findAllByTestId("device-row");
+    expect(screen.queryByTestId("handoff-running")).toBeNull();
+    await user.click(within(phone).getByTestId("device-move"));
+    const dialog = await screen.findByTestId("handoff-move-dialog");
+    expect(await within(dialog).findByTestId("handoff-line", {}, { timeout: 3_000 })).toHaveTextContent("Copying files · 120 MB of 480 MB");
+    // While the dialog shows the move, the section does not show it a second time.
+    expect(screen.queryByTestId("handoff-running")).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    // "You can keep using Ghostly": the move goes on, and the section says where it stands.
+    const running = await screen.findByTestId("handoff-running", {}, { timeout: 3_000 });
+    expect(screen.queryByTestId("handoff-move-dialog")).toBeNull();
+    expect(running).toHaveTextContent("Moving your profile");
+    expect(within(running).getByTestId("handoff-line")).toHaveTextContent("Copying files · 120 MB of 480 MB");
+    // The engine refuses a second move as busy: none is offered while one runs.
+    expect(screen.queryByTestId("device-move")).toBeNull();
+    await user.click(within(running).getByTestId("handoff-cancel"));
+    expect(engine.callsTo("deviceHandoffCancel")).toHaveLength(1);
+    await waitFor(() => expect(screen.queryByTestId("handoff-running")).toBeNull(), { timeout: 3_000 });
+    expect(await screen.findByTestId("device-move")).toHaveTextContent("Move to iPhone");
+    expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]);
+  });
+
+  it("a move the other device started with Use here: the section shows it on the active device too", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "authorizing", bytes: 0, total: 0 }) satisfies HandoffView);
+    const running = await screen.findByTestId("handoff-running");
+    expect(within(running).getByTestId("handoff-line")).toHaveTextContent("Checking the password");
+    expect(within(running).getByTestId("handoff-cancel")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-move")).toBeNull();
+  });
+
+  it("on a standby the section shows no move: its screen does", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, active: device.key === PHONE, self: device.key === TABLET })) }));
+    engine.on("deviceHandoffView", () => ({ role: "taker", device: "iPhone", key: PHONE, step: "copying", bytes: 1, total: 2 }) satisfies HandoffView);
+    await screen.findAllByTestId("device-row");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("handoff-running")).toBeNull();
+  });
+
   it("draws each device's kind from its name", () => {
     expect(["iPhone", "Phone", "Pixel 8", "iPad", "Tablet", "Chrome on Mac", "Firefox", "Mac app", "Desktop", "Linux"].map(deviceLook))
       .toEqual(["phone", "phone", "phone", "tablet", "tablet", "browser", "browser", "computer", "computer", "computer"]);

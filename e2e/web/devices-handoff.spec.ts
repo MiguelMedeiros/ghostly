@@ -117,6 +117,12 @@ test("a push: Move to on the active device, Use here on the other; and a wrong p
   await row.getByTestId("device-move").click();
   await expect(phone.page.getByTestId("handoff-offer")).toBeVisible({ timeout: 60_000 });
   await expect(phone.page.getByTestId("handoff-offer")).toContainText("Move this profile here from");
+  // The dialog closed, the move goes on: Profile, Devices says where it stands, and offers no second Move to.
+  await desktop.page.keyboard.press("Escape");
+  await expect(desktop.page.getByTestId("handoff-move-dialog")).toHaveCount(0);
+  await expect(desktop.page.getByTestId("handoff-running")).toContainText("Moving your profile");
+  await expect(desktop.page.getByTestId("handoff-running").getByTestId("handoff-cancel")).toBeVisible();
+  await expect(desktop.page.getByTestId("device-move")).toHaveCount(0);
   await phone.page.getByTestId("handoff-accept").click();
   await untilShown(phone.page, phone.page.getByTitle("New Chat"), { timeout: 400_000 });
   await untilShown(desktop.page, desktop.page.getByTestId("device-standby").and(desktop.page.locator("[data-state=standby]")));
