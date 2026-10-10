@@ -457,3 +457,47 @@ it("a file said on the floor and cancelled by its sender before it went live say
   await t.restartApp();
   expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Cancelled by the sender" });
 }, 60_000);
+
+/** When the file of this message ended, as its details say it. */
+const completedAt = async (t: Awaited<ReturnType<typeof setup>>, messageId: string) => (await db.getMessage(t.id, messageId))?.details?.completedAt;
+
+it("a file sent and a file received read the message that carries them, not the chat's whole history", async () => {
+  const t = await setup();
+  // As the CLI and the web app host the engine: the pages hear the rows that changed, not the whole history.
+  Object.assign((t.node() as unknown as { events: object }).events, { onMessageChanges: vi.fn() });
+  const history = vi.spyOn(db, "getMessages");
+  cleanup.push(async () => history.mockRestore());
+  const sent = await put(t, "reads-0001", 50_000, 31);
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", direction: "out" }), { timeout: 20_000 });
+  await vi.waitFor(async () => expect(await completedAt(t, "me_31")).toBeTypeOf("number"));
+  expect(await db.getMessage(t.id, "me_31")).toMatchObject({ delivery: "delivered", details: { receiptAt: expect.any(Number) } });
+  t.offer("reads-0002", 50_000);
+  await vi.waitFor(async () => expect(await completedAt(t, "peer_reads-0002")).toBeTypeOf("number"), { timeout: 20_000 });
+  expect(history).not.toHaveBeenCalled();
+}, 60_000);
+
+it("the files that ended in an earlier run are not noted again when the chat connects: no read of the history each, and they keep the time they ended", async () => {
+  const t = await setup();
+  /** The app starts again; how often the chat's whole history was read until its session is open and settled. */
+  const restart = async () => {
+    const history = vi.spyOn(db, "getMessages");
+    try {
+      await t.restartApp();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return history.mock.calls.length;
+    } finally { history.mockRestore(); }
+  };
+  await put(t, "ended-0001", 20_000, 41);
+  await vi.waitFor(async () => expect(await completedAt(t, "me_41")).toBeTypeOf("number"), { timeout: 20_000 });
+  const withOne = await restart();
+  for (const wireId of ["ended-0002", "ended-0003", "ended-0004"]) {
+    t.offer(wireId, 20_000);
+    await vi.waitFor(async () => expect(await completedAt(t, `peer_${wireId}`)).toBeTypeOf("number"), { timeout: 20_000 });
+  }
+  const ids = ["me_41", "peer_ended-0002", "peer_ended-0003", "peer_ended-0004"];
+  await vi.waitFor(async () => expect((await fileStore.listForLink(t.id)).map((f) => f.wire3?.state)).toEqual(["done", "done", "done", "done"]));
+  const ended = await Promise.all(ids.map((id) => completedAt(t, id)));
+  const withFour = await restart();
+  expect(withFour, "three more finished files cost no read of the history").toBe(withOne);
+  expect(await Promise.all(ids.map((id) => completedAt(t, id)))).toEqual(ended);
+}, 120_000);
