@@ -1,5 +1,6 @@
 import { STATUS_CARD_LIMITS, checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
+import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
@@ -79,6 +80,26 @@ function checked(card: Record<string, unknown>): StatusCard {
   return result.card;
 }
 
+/** Every text in a card's fields (title, step, items, runs, links…), as the contact's app may show it. */
+function cardTexts(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) for (const item of value) cardTexts(item, out);
+  else if (isObject(value)) for (const item of Object.values(value)) cardTexts(item, out);
+  return out;
+}
+
+/**
+ * The secret guard `send` has (docs/CLI.md § Safety): a card whose text looks like a seed, a private key or a Cashu
+ * token goes only with `--force`. `fields` are what this command gives (an update's own, not the card it merges over).
+ */
+function guardSecrets(fields: unknown, params: Params, verb: string): void {
+  if (bool(params, "force")) return;
+  for (const text of cardTexts([fields, params.run, params.text])) {
+    const secret = findSecret(text);
+    if (secret) throw new CliError("confirm", `The card's text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} it with --force if you mean to`, { kind: secret.kind });
+  }
+}
+
 /** The latest message of mine in this chat or group with a card of this kind and id: the one an update edits. */
 async function cardMessage(ctx: ApiContext, target: Target, kind: Kind, id: string): Promise<StoredMessage> {
   const messages = target.group ? await node(ctx).groupMessages({ groupId: target.id }) : await node(ctx).getMessages(target.linkId);
@@ -110,6 +131,7 @@ async function parentThere(ctx: ApiContext, target: Target, card: StatusCard): P
 async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Record<string, unknown>> {
   const target = chatOrGroup(ctx, str(params, "chat", true));
   const fields = fieldsOf(params);
+  guardSecrets(fields, params, "send");
   const now = Date.now();
   const id = typeof fields.id === "string" && fields.id ? fields.id : `${kind}-${toBase64Url(randomBytes(6))}`;
   const card = checked(withRun({
@@ -149,6 +171,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   const target = chatOrGroup(ctx, str(params, "chat", true));
   const id = str(params, kind, true);
   const patch = fieldsOf(params);
+  guardSecrets(patch, params, "update");
   const message = await cardMessage(ctx, target, kind, id);
   // A card message takes `STATUS_CARD_LIMITS.edits` updates (WISP 405 · Status Cards); past them, a new card goes on.
   if ((message.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits)

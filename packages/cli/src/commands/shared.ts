@@ -103,6 +103,7 @@ export const cardOptions: Record<string, OptionSpec> = {
   json: { type: "string", description: "The card's fields as JSON: inline, - for stdin, or a file (flags win over it)" },
   link: { type: "list", description: "A link on the card: https://… or label=https://… (up to 4)" },
   text: { type: "string", description: "The text older apps show instead (default: written from the card)" },
+  force: { type: "boolean", description: "Send even if the card's text looks like a seed, a key or ecash" },
 };
 
 /** `--link label=https://…` or a bare link, as a card's links. */
@@ -265,4 +266,5 @@ export const usageOptions: Record<string, OptionSpec> = {
   all: { type: "boolean", description: "Every 1:1 chat with a contact, instead of one chat" },
   json: cardOptions.json,
   text: cardOptions.text,
+  force: cardOptions.force,
 };
