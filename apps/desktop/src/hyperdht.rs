@@ -54,6 +54,9 @@ impl Route {
         for socket in self.sockets {
             let _ = self.events.send(json!({"type":"closed", "id":socket}));
         }
+        // The page does not ask whether its endpoint is still there: it is told, here, whether the runtime died,
+        // dropped the endpoint, or the page itself stopped it (which it then ignores).
+        let _ = self.events.send(json!({"type":"stopped"}));
     }
 }
 
@@ -815,6 +818,7 @@ mod runtime_tests {
             next(&mut page_a).await,
             json!({"type":"closed", "id":connection})
         );
+        assert_eq!(next(&mut page_a).await, json!({"type":"stopped"}));
         let closed = next(&mut page_b).await;
         assert_eq!(
             (&closed["type"], &closed["id"]),
@@ -870,10 +874,18 @@ mod runtime_tests {
             .args(["-9", &first.to_string()])
             .status()
             .unwrap();
-        // Its page learns the connection is gone, and the endpoints are closed.
+        // Its page learns the connection is gone and then, without asking, that its endpoint is; and the
+        // endpoints are closed.
+        let died = std::time::Instant::now();
         assert_eq!(
             next(&mut page).await,
             json!({"type":"closed", "id":connection})
+        );
+        assert_eq!(next(&mut page).await, json!({"type":"stopped"}));
+        assert!(
+            died.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            died.elapsed()
         );
         until("both endpoints closing", || {
             [a.id, b.id]
