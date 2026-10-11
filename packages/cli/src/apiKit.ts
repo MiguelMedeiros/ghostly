@@ -123,7 +123,8 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
  * A chat or a group, where a command takes either: `group:<id>` is a group; anything else a chat first (`findChat`),
  * then a group. A chat found only by the name its contact gave itself never takes what also names a group: a group's
  * own id is that group, and a prefix or the name of a group this profile is in is refused, with both ids. With neither,
- * the error says what `findChat` would.
+ * one `not_found` names both and where to look (a contact's key: no chat with it); a name that matches more than one
+ * chat or group stays that error.
  */
 export function findChatOrGroup(links: readonly LinkView[], groups: readonly GroupView[], ref: string): { link: LinkView } | { group: GroupView } {
   if (ref.startsWith("group:")) return { group: findGroup(groups, ref.slice("group:".length)) };
@@ -132,7 +133,11 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
     chat = chatBy(links, ref);
   } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
-    try { return { group: findGroup(groups, ref) }; } catch (inner) { throw inner instanceof CliError && inner.code !== "not_found" ? inner : error; }
+    try { return { group: findGroup(groups, ref) }; } catch (inner) {
+      if (!(inner instanceof CliError) || inner.code !== "not_found") throw inner;
+      if (CONTACT_KEY.test(ref)) throw error;
+      throw new CliError("not_found", `No chat or group ${JSON.stringify(ref)} (ghostly chat list, ghostly group list)`);
+    }
   }
   if (!chat.theirName) return { link: chat.link };
   const exact = groups.find((group) => group.id === ref);
