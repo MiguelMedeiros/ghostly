@@ -107,6 +107,13 @@ const KINDS: CommunityKind[] = ["create", "add", "leave", "remove", "role", "rot
 /** Kinds whose epoch secret is fresh: they take someone out, or start or re-key the group. */
 const FRESH: ReadonlySet<CommunityKind> = new Set(["create", "leave", "remove", "rotate"]);
 /**
+ * Commits that make the membership history longer and the group no smaller. A committer signs one only while the
+ * history keeps room for everyone else to get out after it: two commits a member (a leave or a remove is one, and a
+ * leaving admin hands the role over first). The history is never compacted, and one that filled with people in it
+ * took no leave, remove or handover any more. Its own rule: a history up to `COMMUNITY_LIMITS.chain` verifies as before.
+ */
+const GROWS: ReadonlySet<CommunityKind> = new Set(["add", "rotate", "link"]);
+/**
  * Kinds only the admin commits. They are final: a branch that drops one never replaces the branch
  * that has it, however long, so no member can undo a removal, a hand-over, a rotation or a link change
  * by outgrowing it with admissions.
@@ -938,6 +945,7 @@ export class CommunitySession {
     const draftBase = { v: 2 as const, g: this.id, e: parent.e + 1, p: parentHash, k: kind, by: this.myKey, ...fields, ts: now };
     const roster = communityRoster(this.roster, draftBase);
     if (!roster) throw new Error("This change is not allowed");
+    if (GROWS.has(kind) && this.state.chain.length + 1 + 2 * (roster.length - 1) > COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
     const draft: Omit<CommunityCommit, "sig" | "c"> = { ...draftBase, m: rosterHash(roster) };
     const untagged = communityUntaggedHash(draft);
     let secret: Uint8Array;
