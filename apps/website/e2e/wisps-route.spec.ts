@@ -90,6 +90,21 @@ test("old links into the full list land on the layers, a draft's page or the roa
   await expect(page).toHaveURL(/\/roadmap#inventory-title$/);
 });
 
+test("a link whose #anchor is not valid percent-encoding still shows the WISPs page", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // "%" alone, a cut escape, and bytes that are no UTF-8: none decodes, and none is an old anchor.
+  for (const hash of ["#%", "#wisp-%E0%A4%A", "#100%-private", "#%FF"]) {
+    await page.goto("about:blank");
+    await page.goto(`/wisps${hash}`);
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator(".wmap-tile").first()).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page).toHaveURL(/\/wisps#/);
+  }
+  expect(errors).toEqual([]);
+});
+
 // Old addresses land on /wisps in one hop.
 for (const [from, to] of [
   ["/developers/catalog", "/wisps"],
