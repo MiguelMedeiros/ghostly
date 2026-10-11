@@ -1,8 +1,7 @@
-import { sha256 } from "@noble/hashes/sha2.js";
 import {
   APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
-  appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocation,
-  readAppStore, readCanonicalJson, toBase64Url, utf8Decode, utf8Encode,
+  appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation,
+  readAppStore, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
@@ -501,7 +500,7 @@ export class Apps {
    */
   private async writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
     const id = bundleId(digest);
-    const expected = toBase64Url(sha256(bytes));
+    const expected = toBase64Url(await sha256Paced(bytes));
     let files: FileBytes | undefined;
     let stored: string | null;
     try {
@@ -568,7 +567,7 @@ export class Apps {
     const reading = (async () => {
       const bytes = await this.readBundleBytes(app.bytes, app.digest);
       if (!bytes) fail("needs-files", "This app's files are not on this device yet");
-      const read = readAppBundle(bytes);
+      const read = await readAppBundleAsync(bytes);
       if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
       if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
       this.verified.set(app.digest, read.bundle);
@@ -584,7 +583,7 @@ export class Apps {
 
   private async fetchBundle(url: string): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
     const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
-    const read = readAppBundle(bytes);
+    const read = await readAppBundleAsync(bytes);
     if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
     return { bundle: read.bundle, bytes };
   }
@@ -598,7 +597,7 @@ export class Apps {
       this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
       this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
     ]);
-    if (held?.index && held.digest !== undefined && toBase64Url(sha256(indexBytes)) === held.digest) {
+    if (held?.index && held.digest !== undefined && toBase64Url(await sha256Paced(indexBytes)) === held.digest) {
       return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
     }
     return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
@@ -626,7 +625,7 @@ export class Apps {
    * engine shares the page's thread, and each entry is a signature check. The same bytes are not checked again.
    */
   private async readRevocationsFile(bytes: Uint8Array): Promise<SignedAppRevocation[] | null> {
-    const id = toBase64Url(sha256(bytes));
+    const id = toBase64Url(await sha256Paced(bytes));
     const known = this.revocationFiles.get(id);
     if (known !== undefined) return known.revocations;
     const read = readCanonicalJson(bytes);
@@ -914,7 +913,7 @@ export class Apps {
     const installed = await this.installedOrFail(ref);
     const pending = installed.pending ?? fail("no-update", "No update waits for this app");
     const bytes = await this.readBundleBytes(pending.bytes, pending.digest);
-    const read = bytes ? readAppBundle(bytes) : null;
+    const read = bytes ? await readAppBundleAsync(bytes) : null;
     if (!read?.ok || read.bundle.digest !== pending.digest) {
       const { pending: _p, ...rest } = installed;
       await this.putApp(rest);
