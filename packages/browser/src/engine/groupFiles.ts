@@ -664,14 +664,16 @@ export class GroupFileDesk {
   }
 
   /**
-   * Transfers served now, all groups together: to whom, what each takes of the day (its size, or what it sent when
-   * that is more), and whether bytes are still to go.
+   * Transfers served now, all groups together: to whom, what each takes of the day (its size, or what it sent when that
+   * is more), and whether bytes are still to go.
    */
   private servingNow(): { peer: string; size: number; sending: boolean }[] {
     const active: { peer: string; size: number; sending: boolean }[] = [];
     for (const edge of this.edgesById.values()) for (const wire of edge.serving.keys()) {
       const record = edge.files.get("out", wire);
-      if (record && !transferEnded(record)) active.push({ peer: edge.peer, size: Math.max(record.file.size, edge.files.sent(wire)), sending: record.confirmed < record.file.size });
+      if (record && !transferEnded(record)) {
+        active.push({ peer: edge.peer, size: Math.max(record.file.size, edge.files.sent(wire)), sending: record.confirmed < record.file.size });
+      }
     }
     return active;
   }
