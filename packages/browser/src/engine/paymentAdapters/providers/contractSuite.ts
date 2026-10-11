@@ -10,7 +10,15 @@ import { isNothingSpentError, providerDescriptorProblems, type ProviderDescripto
  * faucet). See PROVIDERS.md. A provider's own unit tests (mocked transport) go next to these.
  *
  *   describeLightningProvider("NWC", async () => ({ provider, network: "regtest", payIncoming, payable }));
+ *
+ * `timeout` is how long money may take to arrive (default 10 s). A harness that gives it is on a real network,
+ * where a step takes seconds: its tests get three times that (the harness's own step, the provider's calls,
+ * the wait) instead of the runner's default limit, which a busy machine does not meet.
  */
+export interface ContractOptions { timeout?: number }
+const WAIT = 10_000;
+const limit = ({ timeout }: ContractOptions) => (timeout === undefined ? {} : { timeout: 3 * timeout });
+
 export interface LightningHarness {
   provider: LightningProvider;
   network: ProviderNetwork;
@@ -24,8 +32,9 @@ export interface LightningHarness {
   refused?(): Promise<string>;
 }
 
-export function describeLightningProvider(name: string, make: () => Promise<LightningHarness>, { timeout = 10_000 } = {}) {
-  describe(`${name}: the LightningProvider contract`, () => {
+export function describeLightningProvider(name: string, make: () => Promise<LightningHarness>, options: ContractOptions = {}) {
+  const { timeout = WAIT } = options;
+  describe(`${name}: the LightningProvider contract`, limit(options), () => {
     let harness: LightningHarness | undefined;
     const open = async () => (harness = await make());
     afterEach(async () => { await harness?.provider.close(); harness = undefined; });
@@ -92,8 +101,9 @@ export interface OnchainHarness {
   fund?(amount: number): Promise<void>;
 }
 
-export function describeOnchainProvider(name: string, make: () => Promise<OnchainHarness>, { timeout = 10_000 } = {}) {
-  describe(`${name}: the OnchainProvider contract`, () => {
+export function describeOnchainProvider(name: string, make: () => Promise<OnchainHarness>, options: ContractOptions = {}) {
+  const { timeout = WAIT } = options;
+  describe(`${name}: the OnchainProvider contract`, limit(options), () => {
     let harness: OnchainHarness | undefined;
     const open = async () => (harness = await make());
     afterEach(async () => { await harness?.provider.close(); harness = undefined; });
