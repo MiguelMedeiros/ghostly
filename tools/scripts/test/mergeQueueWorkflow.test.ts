@@ -49,6 +49,7 @@ describe("merge-queue.yml wakes the train", () => {
 
   it("not for another label or CI on a push", () => {
     expect(wakes({ event_name: "pull_request_target", event: { label: { name: "kind:bug" } } })).toBe(false);
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queued" } } })).toBe(false);
     expect(wakes(ci("success", "push"))).toBe(false);
   });
 });
