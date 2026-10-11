@@ -955,12 +955,12 @@ export class GhostlyNode implements EngineImplementation {
       await this.messagesChanged(linkId, [messageId]);
       this.emitState();
     },
-    text: async (linkId, messageId) => (await db.getMessages(linkId)).find((m) => m.id === messageId)?.text ?? null,
+    text: async (linkId, messageId) => (await db.getMessage(linkId, messageId))?.text ?? null,
     reply: async (linkId, messageId) => {
-      const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+      const message = await db.getMessage(linkId, messageId);
       return message && GhostlyNode.wireReply(message);
     },
-    forwarded: async (linkId, messageId) => (await db.getMessages(linkId)).find((m) => m.id === messageId)?.forwarded,
+    forwarded: async (linkId, messageId) => (await db.getMessage(linkId, messageId))?.forwarded,
     file: async (fileId) => {
       const stored = await fileStore.get(fileId);
       if (!stored?.metadata) return null;
@@ -3231,7 +3231,7 @@ export class GhostlyNode implements EngineImplementation {
   async retryMessage({ linkId, messageId }: { linkId: string; messageId: string }): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile) throw new Error("Retry is only available for paired chat messages");
-    const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+    const message = await db.getMessage(linkId, messageId);
     if (message?.via === "hold") {
       // Its item again if it is still known; held anew (a fresh sequence, the same message id) if it was dropped.
       if (await this.hold.retry(linkId, messageId)) return;
@@ -3341,7 +3341,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   async messageDetails({ linkId, messageId }: { linkId: string; messageId: string }): Promise<MessageDetailsView | null> {
     if (typeof linkId !== "string" || typeof messageId !== "string") throw new Error("Chat not found");
-    const message = (await db.getMessages(linkId)).find(m => m.id === messageId);
+    const message = await db.getMessage(linkId, messageId);
     if (!message) return null;
     const live = this.links.get(linkId), stored = live?.stored;
     const group = linkId.startsWith("group:") ? (await db.getGroups()).find(g => g.id === linkId.slice("group:".length)) : undefined;
