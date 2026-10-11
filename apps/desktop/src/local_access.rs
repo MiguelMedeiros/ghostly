@@ -61,11 +61,23 @@ pub fn label(origin: &str) -> &str {
     origin.strip_prefix("http://").unwrap_or(origin)
 }
 
-/// The native dialog's title and text.
+/// What the native dialog says: its title, its text and its two buttons.
 #[cfg_attr(feature = "e2e-driver", allow(dead_code))]
-pub fn dialog_text(origin: &str, reason: Reason) -> (String, String) {
+#[derive(Debug, PartialEq, Eq)]
+pub struct DialogWords {
+    pub title: String,
+    pub text: String,
+    pub allow: &'static str,
+    pub deny: &'static str,
+}
+
+/// The native dialog in the profile's language. `lang` is the page's word, one of the app's eight codes (English for
+/// anything else): the page names the language and nothing more, the words are these.
+#[cfg_attr(feature = "e2e-driver", allow(dead_code))]
+pub fn dialog_words(origin: &str, reason: Reason, lang: &str) -> DialogWords {
+    let _ = lang;
     let at = label(origin);
-    match reason {
+    let (title, text) = match reason {
         Reason::Share => (
             format!("Share {at}?"),
             format!(
@@ -81,6 +93,12 @@ pub fn dialog_text(origin: &str, reason: Reason) -> (String, String) {
                  Allow only if you shared this app in Ghostly."
             ),
         ),
+    };
+    DialogWords {
+        title,
+        text,
+        allow: "Allow",
+        deny: "Don't allow",
     }
 }
 
@@ -276,15 +294,83 @@ mod tests {
 
     #[test]
     fn the_dialog_names_the_exact_address() {
-        for reason in [Reason::Share, Reason::FirstUse] {
-            let (title, text) = dialog_text("http://localhost:3400", reason);
-            assert!(title.contains("localhost:3400"), "{title}");
-            assert!(text.contains("localhost:3400"), "{text}");
-            assert!(!format!("{title}{text}").contains('\u{2014}'), "no em dash");
+        for lang in LANGUAGES {
+            for reason in [Reason::Share, Reason::FirstUse] {
+                let DialogWords { title, text, .. } =
+                    dialog_words("http://localhost:3400", reason, lang);
+                assert!(title.contains("localhost:3400"), "{lang}: {title}");
+                assert!(text.contains("localhost:3400"), "{lang}: {text}");
+                assert!(
+                    !format!("{title}{text}").contains('\u{2014}'),
+                    "{lang}: no em dash"
+                );
+            }
+            assert!(dialog_words("https://127.0.0.1:443", Reason::Share, lang)
+                .title
+                .contains("https://127.0.0.1:443"));
         }
-        assert!(dialog_text("https://127.0.0.1:443", Reason::Share)
-            .0
-            .contains("https://127.0.0.1:443"));
+    }
+
+    /// The app's languages (apps/ui/src/lib/settings.ts `Language`).
+    const LANGUAGES: [&str; 8] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
+
+    #[test]
+    fn the_dialog_speaks_each_of_the_apps_languages() {
+        let origin = "http://localhost:3400";
+        for reason in [Reason::Share, Reason::FirstUse] {
+            let english = dialog_words(origin, reason, "en");
+            assert_eq!(english.allow, "Allow");
+            assert_eq!(english.deny, "Don't allow");
+            let mut seen = vec![];
+            for lang in LANGUAGES {
+                let words = dialog_words(origin, reason, lang);
+                // Its own title, text and buttons: nothing left in another language's words.
+                for (was, other) in &seen {
+                    let other: &DialogWords = other;
+                    assert_ne!(words.title, other.title, "{lang} / {was}: title");
+                    assert_ne!(words.text, other.text, "{lang} / {was}: text");
+                    assert_ne!(words.deny, other.deny, "{lang} / {was}: deny");
+                }
+                assert_ne!(words.allow, words.deny, "{lang}");
+                // Two paragraphs, the second the advice, as in English.
+                assert_eq!(words.text.matches("\n\n").count(), 1, "{lang}");
+                assert!(words.text.contains("Ghostly"), "{lang}");
+                seen.push((lang, words));
+            }
+            // The page's `<html lang>` is a tag ("pt-BR", "zh-CN"): its language decides.
+            for (tag, lang) in [
+                ("pt-BR", "pt"),
+                ("zh-CN", "zh"),
+                ("AR", "ar"),
+                ("ja-JP", "ja"),
+            ] {
+                assert_eq!(
+                    dialog_words(origin, reason, tag),
+                    dialog_words(origin, reason, lang),
+                    "{tag}"
+                );
+            }
+            // A language the app does not have, nothing, or a page's own text: English.
+            for unknown in ["de", "", "x-pt", "ptx", "Allow anything"] {
+                assert_eq!(
+                    dialog_words(origin, reason, unknown),
+                    english,
+                    "{unknown:?}"
+                );
+            }
+        }
+        // The two questions differ in every language.
+        for lang in LANGUAGES {
+            let share = dialog_words(origin, Reason::Share, lang);
+            let first = dialog_words(origin, Reason::FirstUse, lang);
+            assert_ne!(share.title, first.title, "{lang}");
+            assert_ne!(share.text, first.text, "{lang}");
+            assert_eq!(
+                (share.allow, share.deny),
+                (first.allow, first.deny),
+                "{lang}"
+            );
+        }
     }
 
     #[tokio::test]

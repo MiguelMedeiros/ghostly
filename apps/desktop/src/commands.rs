@@ -229,6 +229,7 @@ pub async fn local_fetch<R: tauri::Runtime>(
     method: String,
     headers: Vec<(String, String)>,
     body_b64: Option<String>,
+    lang: Option<String>,
 ) -> Result<LocalResponse, String> {
     local_fetch::fetch_shared(
         &access,
@@ -237,24 +238,26 @@ pub async fn local_fetch<R: tauri::Runtime>(
         method,
         headers,
         body_b64,
-        |origin, reason| ask_to_share(app.clone(), origin, reason),
+        |origin, reason| ask_to_share(app.clone(), origin, reason, lang),
     )
     .await
 }
 
 /// The person shares a local app (`origin`, `http://localhost:3400`): Rust asks them in a native
 /// dialog, which the page can neither draw nor answer. True once the address is on the list.
+/// `lang` is the language the page is shown in: the dialog says its own words in it (`dialog_words`).
 #[tauri::command]
 pub async fn local_service_allow<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     access: State<'_, LocalAccess>,
     space: String,
     origin: String,
+    lang: Option<String>,
 ) -> Result<bool, String> {
     let origin = local_access::parse_origin(&origin)?;
     Ok(access
         .ensure(&space, &origin, Reason::Share, |origin, reason| {
-            ask_to_share(app.clone(), origin, reason)
+            ask_to_share(app.clone(), origin, reason, lang)
         })
         .await
         .is_ok())
@@ -276,25 +279,27 @@ async fn ask_to_share<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     origin: String,
     reason: Reason,
+    lang: Option<String>,
 ) -> bool {
     #[cfg(feature = "e2e-driver")]
     {
-        let _ = (app, reason);
+        let _ = (app, reason, lang);
         diagnostics::log(&format!("local access: {origin} allowed (e2e build)"));
         true
     }
     #[cfg(not(feature = "e2e-driver"))]
     {
         use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-        let (title, text) = local_access::dialog_text(&origin, reason);
+        let words =
+            local_access::dialog_words(&origin, reason, lang.as_deref().unwrap_or_default());
         let dialog = app
             .dialog()
-            .message(text)
-            .title(title)
+            .message(words.text)
+            .title(words.title)
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom(
-                "Allow".into(),
-                "Don't allow".into(),
+                words.allow.into(),
+                words.deny.into(),
             ));
         // A dialog of the Ghostly window's own; a mobile app has one window, which the dialog always covers.
         #[cfg(desktop)]
