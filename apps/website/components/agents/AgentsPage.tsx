@@ -4,7 +4,8 @@ import { Shell } from "@/components/site/Shell";
 import { LevelBadge } from "@/components/site/Level";
 import { Reveal } from "@/components/home/Reveal";
 import { CopyButton } from "@/components/cli/CopyButton";
-import { NEXT_VERSION } from "@/lib/status";
+import { SHOTS_VERSION } from "@/lib/release";
+import { CARDS_VERSION } from "@/lib/status";
 import { shotSrcSet } from "@/lib/shots";
 import { CopyPrompt, CopyPromptButton } from "./CopyPrompt";
 import { AgentDemo } from "./AgentDemo";
@@ -69,7 +70,7 @@ export function AgentsPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img className="ag-phone" src={PHONE.src} srcSet={shotSrcSet(PHONE.src, "phone")} sizes={PHONE.sizes} alt="" aria-hidden="true" loading="lazy" decoding="async" width={PHONE.width} height={PHONE.height} />
           </div>
-          <figcaption className="caption">{t.show.caption.replace("{n}", NEXT_VERSION)}</figcaption>
+          <figcaption className="caption">{t.show.caption.replace("{n}", SHOTS_VERSION)}</figcaption>
         </figure>
         <ul className="ag-shows">
           {SHOWS.map((s) => (
@@ -119,7 +120,7 @@ export function AgentsPage() {
           ))}
         </ol>
         <p className="note muted ag-version">
-          {t.connect.note.replace("{n}", NEXT_VERSION)}{" "}
+          {t.connect.note.replace("{n}", CARDS_VERSION)}{" "}
           <IntentLink className="link-arrow" href={LINKS.cards}>
             {t.connect.cards} →
           </IntentLink>{" "}
