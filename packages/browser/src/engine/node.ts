@@ -3619,11 +3619,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void | Promise<void> {
-    // A group's file (WISP 503): asked for (Download), or asked for again; its transfers are the group's to run.
+    // A group's file (WISP 503): asked for (Download), asked for again or gone on with; stopped (Cancel, or Decline
+    // for one not asked for yet) or paused. Its transfers are the group's to run.
     if (typeof linkId === "string" && linkId.startsWith("group:")) {
-      if (action !== "accept" && action !== "request") throw new Error("A group's file is downloaded (accept) or asked for again (request)");
       if (!fileId.startsWith(`group-${linkId.slice("group:".length)}-`)) throw new Error("No such file in this group");
-      return this.groups.downloadFile(fileId);
+      if (action === "accept" || action === "request" || action === "resume") return this.groups.downloadFile(fileId);
+      if (action === "cancel" || action === "decline" || action === "pause") return this.groups.haltFile(fileId, action === "pause");
+      throw new Error("A group's file is not sent again from here");
     }
     const live = this.links.get(linkId);
     if (!live) throw new Error("No such chat");
@@ -5414,6 +5416,8 @@ export class GhostlyNode implements EngineImplementation {
       if (settings[key] !== false) delete this.settings[key];
       else this.settings[key] = false;
       await db.putSettings(this.settings);
+      // Off: what was chosen to fetch by itself and is not here yet stops coming.
+      if (key === "autoDownloads" && settings[key] === false) await this.groups.autoDownloadsOff();
     }
     // Load public profiles: absent means on; turned off, nothing read before is kept.
     if (settings.publicProfiles !== undefined) {

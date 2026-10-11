@@ -51,6 +51,7 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
   relays: "strings", irohRelays: "strings", hyperdhtRelay: "string", readRelays: "boolean",
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
+  autoDownloads: "boolean", serveFiles: "boolean",
 };
 
 // ---------- transports ----------

@@ -736,6 +736,16 @@ export class Groups {
     return this.files.download(fileId);
   }
 
+  /** The person stops a group's file that is coming or would be fetched (Cancel, Decline), or pauses it (`keep`). */
+  haltFile(fileId: string, keep = false): Promise<void> {
+    const groupId = groupOfFile(fileId, [...this.stored.keys(), ...this.communities.ids()]);
+    if (!groupId || !this.files) throw new Error("No such file");
+    return this.files.halt(fileId, keep);
+  }
+
+  /** Automatic downloads were turned off: the groups' files chosen by themselves and not here yet stop coming. */
+  autoDownloadsOff(): Promise<void> { return this.files?.autoDownloadsOff() ?? Promise.resolve(); }
+
   /** An edge's files/3 session opened or closed (WISP 503: the bytes of a group's files go over it). */
   fileSession(groupId: string, peerKey: string, linkId: string, open: boolean): void { this.files?.session(groupId, peerKey, linkId, open); }
   /** A files/3 frame on an edge, from the member it is pinned to. */
