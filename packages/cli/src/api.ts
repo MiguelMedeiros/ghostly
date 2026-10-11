@@ -286,8 +286,13 @@ const METHODS: Record<string, Method> = {
     if (!messageIds.length) throw new CliError("bad_request", "Name the messages to forward (their ids, from history or an event)");
     const to = list(params, "to").map((ref) => chatOrGroup(ctx, ref));
     if (!to.length) throw new CliError("bad_request", "Forward to which chat? Name one or more with --to");
-    const history = from.group ? await node(ctx).groupMessages({ groupId: from.id }) : await node(ctx).getMessages(from.id);
-    const chosen = messageIds.map((id) => history.find((m) => m.id === id) ?? (() => { throw new CliError("not_found", `No message ${id} in this ${from.group ? "group" : "chat"}`); })());
+    // Each by its id here, one row each: never the whole history of the chat or group.
+    const chosen: StoredMessage[] = [];
+    for (const id of messageIds) {
+      const message = await node(ctx).getMessage(from.linkId, id);
+      if (!message) throw new CliError("not_found", `No message ${id} in this ${from.group ? "group" : "chat"}`);
+      chosen.push(message);
+    }
     if (!bool(params, "force")) for (const message of chosen) {
       const secret = message.file ? null : findSecret(message.text);
       if (secret) throw new CliError("confirm", `A message looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
@@ -300,7 +305,7 @@ const METHODS: Record<string, Method> = {
     const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, error: result.error }));
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) { await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms); continue; }
-      const sent = (await node(ctx).getMessages(to[i]!.id)).find((m) => m.id === messageId);
+      const sent = await node(ctx).getMessage(to[i]!.id, messageId);
       if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
       else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
     }
@@ -316,7 +321,7 @@ const METHODS: Record<string, Method> = {
   async "chat.delete"(ctx, params) {
     const link = chatOf(ctx, params);
     const messageId = str(params, "message", true);
-    if (!(await node(ctx).getMessages(link.id)).some((m) => m.id === messageId)) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
     await node(ctx).deleteMessage({ linkId: link.id, messageId });
     return { chat: link.id, deleted: messageId };
   },
