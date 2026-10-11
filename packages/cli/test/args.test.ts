@@ -96,6 +96,23 @@ describe("the argument parser", () => {
     expect(liftGlobals(["--home", "/h", "send", "c", "--", "-dash"])).toEqual(["send", "c", "--home", "/h", "--", "-dash"]);
   });
 
+  it("a global option before the command never lands between an option and its value", () => {
+    // They went just before the first `--`, also when that `--` is an option's value: `--pretty profile set --name --`
+    // read `--name --pretty`, and the name contacts see became "--pretty".
+    const lifted = liftGlobals(["--pretty", "profile", "set", "--name", "--"]);
+    expect(lifted).toEqual(["profile", "set", "--pretty", "--name", "--"]);
+    expect(parseArgs(lifted.slice(2), { name: { type: "string", description: "" } })).toEqual({ positionals: [], options: { pretty: true, name: "--" } });
+    const edit = liftGlobals(["-p", "bot", "edit", "c", "m", "--text", "--"]);
+    expect(parseArgs(edit.slice(1), { text: { type: "string", description: "" } })).toEqual({ positionals: ["c", "m"], options: { profile: "bot", text: "--" } });
+    // Before the first option, and so before the `--` that ends them; an id that starts with a dash stays the id.
+    expect(liftGlobals(["--pretty", "send", "c", "--reply", "m1", "--", "-x"])).toEqual(["send", "c", "--pretty", "--reply", "m1", "--", "-x"]);
+    const show = liftGlobals(["--pretty", "chat", "show", HYPHEN_KEY]);
+    expect(parseArgs(show.slice(2), {}, () => true)).toEqual({ positionals: [HYPHEN_KEY], options: { pretty: true } });
+    // The command stays the first word, also when it is `--version`; a `--` right away still ends the options.
+    expect(liftGlobals(["--pretty", "--version"])).toEqual(["--version", "--pretty"]);
+    expect(liftGlobals(["--pretty", "--", "send"])).toEqual(["--pretty", "--", "send"]);
+  });
+
   it("takes a file by its id alone, or after its chat, for every file command", () => {
     const params = (name: string, values: string[]) => COMMANDS[name].params!({ positionals: values, options: {} }, positionals(COMMANDS[name], values));
     for (const action of ["accept", "decline", "pause", "resume", "cancel", "resend", "request"]) {

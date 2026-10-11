@@ -96,7 +96,9 @@ export function globalOption(arg: string): OptionSpec | undefined {
 
 /**
  * Global options given before the command (`ghostly --profile bot send …`) move after it, where every command's
- * parser reads them. Stops at `--` and at the first word that is not a global option.
+ * parser reads them. Stops at `--` and at the first word that is not a global option. They go before the first word
+ * after the command's that starts with a dash (its first option, or the `--` that ends them), else at the end: never
+ * between an option and its value, which may itself be `--` (`--pretty profile set --name --`).
  */
 export function liftGlobals(argv: readonly string[]): string[] {
   const lifted: string[] = [];
@@ -111,6 +113,7 @@ export function liftGlobals(argv: readonly string[]): string[] {
     i += takesValue ? 2 : 1;
   }
   const rest = argv.slice(i);
-  const end = rest.indexOf("--");
-  return end === -1 ? [...rest, ...lifted] : [...rest.slice(0, end), ...lifted, ...rest.slice(end)];
+  // The first word is the command, also when it is `--version` or `--help`; a `--` there ends the options at once.
+  const dash = rest[0] === "--" ? 0 : rest.findIndex((word, i) => i > 0 && word.startsWith("-"));
+  return dash === -1 ? [...rest, ...lifted] : [...rest.slice(0, dash), ...lifted, ...rest.slice(dash)];
 }
