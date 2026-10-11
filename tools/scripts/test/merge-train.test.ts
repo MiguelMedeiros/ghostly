@@ -203,10 +203,10 @@ function fakeRepo() {
     },
   };
   /** A pull request with `queue`; its head sits on the base's tip unless it is `behind`. */
-  const add = (number: number, { ci = green as object[], draft = false, priority = false, base = "dev", behind = false } = {}) => {
+  const add = (number: number, { ci = green as object[], draft = false, priority = false, priorityOnly = false, base = "dev", behind = false } = {}) => {
     const sha = `h${number}`;
-    pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base });
-    events.set(number, [{ event: "labeled", label: { name: LABEL.queue }, created_at: new Date(Date.UTC(2026, 9, 8, 0, 0, clock++)).toISOString() }]);
+    pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: priorityOnly ? [LABEL.priority] : [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base });
+    events.set(number, [{ event: "labeled", label: { name: priorityOnly ? LABEL.priority : LABEL.queue }, created_at: new Date(Date.UTC(2026, 9, 8, 0, 0, clock++)).toISOString() }]);
     runs.set(sha, ci);
     sitsOn.set(sha, behind ? "old" : tips[base]);
   };
@@ -244,6 +244,8 @@ describe("the line", () => {
     const at = (name: string, created_at: string, event = "labeled") => ({ event, label: { name }, created_at });
     expect(queuedAt([at("queue", "2026-10-08T01:00:00Z"), at("queue", "2026-10-08T01:00:00Z", "unlabeled"), at("queue", "2026-10-08T04:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T04:00:00Z");
     expect(queuedAt([], "2026-10-01T00:00:00Z")).toBe("2026-10-01T00:00:00Z");
+    // queue:priority alone puts a pull request in the line, so the time it was given counts too.
+    expect(queuedAt([at("queue:priority", "2026-10-08T02:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T02:00:00Z");
   });
 
   it("lets only ready, green pull requests board, twelve at most", () => {
@@ -299,6 +301,21 @@ describe("the line", () => {
 });
 
 describe("a run of the train", () => {
+  it("takes a pull request with queue:priority and no queue as in the line, first", async () => {
+    const repo = fakeRepo();
+    for (const n of [31, 32]) repo.add(n);
+    repo.add(33, { priorityOnly: true });
+    const r = await repo.run();
+    expect(repo.members()).toEqual([33, 31, 32]);
+    expect(repo.comments.get(33)![0].body).toMatch(new RegExp(`in batch #${r.inFlight}`));
+
+    // Alone in the line it is still a line: the train has something to run.
+    const lone = fakeRepo();
+    lone.add(41, { priorityOnly: true });
+    await lone.run();
+    expect(lone.landed).toEqual(["#41"]);
+  });
+
   it("boards the twelve oldest green pull requests and tells everyone in line where they are", async () => {
     const repo = fakeRepo();
     const twelve = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
@@ -1598,6 +1615,8 @@ describe("the bases with a train", () => {
     const pulls = [pr("dev", [LABEL.queue]), pr("dev", [LABEL.queue]), pr("epic/apps-1.2", [], batch, "batch/epic/apps-1.2-1"), pr("epic/x"), pr("main", [LABEL.queue]), pr("dev")];
     expect(trainBases(pulls)).toEqual(["dev", "epic/apps-1.2"]);
     expect(trainBases([pr("dev", ["bug"])])).toEqual([]);
+    // queue:priority alone is in the line: the base has a train to run (three green fixes waited 8 h without it).
+    expect(trainBases([pr("dev", [LABEL.priority])])).toEqual(["dev"]);
     // Only bases tick accepts, so a strange epic name never turns the workflow red; a forged batch names no base.
     expect(trainBases([pr("epic/a/b", [LABEL.queue]), pr("epic/z", [], batchBody("epic/z", "a", "b", [], []), "batch/epic/z-1", true)])).toEqual([]);
   });
