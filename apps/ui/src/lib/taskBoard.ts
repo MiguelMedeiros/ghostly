@@ -23,7 +23,7 @@ export interface BoardCopy {
 
 /** A card on the board: the newest message of one card (per chat, author, kind and id). */
 export interface BoardEntry<C extends TaskCard | RoutineCard = TaskCard | RoutineCard> {
-  /** Stable for the card across its updates: its chat, author, kind and id (its sender, kind and id once `mergeCopies` made one of its copies). */
+  /** Stable for the card across its updates: its chat, author, kind and id (after `mergeCopies`: its sender, kind and id). */
   key: string;
   /** The chat's id, or `group:<id>`. */
   linkId: string;
@@ -92,33 +92,45 @@ export function cardSenders(links: readonly SenderLink[], groups: readonly Sende
  * reads, and the board shows a task once. Entries of the same kind and id from the same sender are one: the one that
  * changed last stands for the card, the others are its `copies`. The same sender is the same key (`cardSenders`); a
  * group member who is no contact is matched by the name they state instead, since nothing else of theirs is the same
- * across chats. Two contacts are never one, whatever they are called, and neither are two cards of one chat. `entries`: the latest changed first, as
- * `boardEntries` gives them, and so they stay.
+ * across chats, and only with a card that is not in their group already. Two contacts are never one, whatever they are
+ * called. `entries`: the latest changed first, as `boardEntries` gives them, and so they stay.
  */
 export function mergeCopies<E extends BoardEntry>(entries: readonly E[], senderOf: (entry: Pick<BoardEntry, "linkId" | "author">) => CardSender): E[] {
-  interface Card { top: E; chats: Set<string>; keys: Set<string>; names: Set<string>; loose: boolean; sure?: string; copies: BoardCopy[] }
-  const cards: Card[] = [];
+  interface Card { sure?: string; at: number[]; chats: Set<string>; names: Set<string> }
   const byId = new Map<string, Card[]>();
-  for (const entry of entries) {
-    const sender = senderOf(entry);
-    const id = `${entry.card.kind}\n${entry.card.id}`;
-    const same = byId.get(id) ?? [];
-    const open = same.filter((c) => !c.chats.has(entry.linkId));
-    const card = open.find((c) => c.keys.has(sender.key)) ?? open.find((c) => sender.name !== undefined && c.names.has(sender.name) && (c.loose || !!sender.loose));
-    if (!card) {
-      const made: Card = { top: entry, chats: new Set([entry.linkId]), keys: new Set([sender.key]), names: new Set(sender.name === undefined ? [] : [sender.name]), loose: !!sender.loose, ...(!sender.loose && { sure: sender.key }), copies: [] };
-      cards.push(made);
-      byId.set(id, [...same, made]);
-      continue;
-    }
-    card.chats.add(entry.linkId);
-    card.keys.add(sender.key);
-    if (sender.name !== undefined) card.names.add(sender.name);
-    if (!sender.loose) { card.sure ??= sender.key; card.loose = false; }
-    card.copies.push({ linkId: entry.linkId, messageId: entry.messageId, author: entry.author, at: entry.at });
-  }
-  // A key that stays the same whichever copy changed last: the sender's key as a contact, else the key of the first seen.
-  return cards.map(({ top, copies, sure, keys }) => ({ ...top, key: `${sure ?? [...keys][0]}\n${top.card.kind}\n${top.card.id}`, ...(copies.length > 0 && { copies }) }));
+  const senders = entries.map(senderOf);
+  const idOf = (entry: E) => `${entry.card.kind}\n${entry.card.id}`;
+  const add = (card: Card, i: number) => {
+    card.at.push(i);
+    card.chats.add(entries[i].linkId);
+    const { name } = senders[i];
+    if (name !== undefined) card.names.add(name);
+  };
+  const make = (i: number) => {
+    const card: Card = { ...(!senders[i].loose && { sure: senders[i].key }), at: [], chats: new Set(), names: new Set() };
+    byId.set(idOf(entries[i]), [...(byId.get(idOf(entries[i])) ?? []), card]);
+    return card;
+  };
+  // By key first, so that a name never takes a card away from the sender whose key it has.
+  const byKey = new Map<string, Card>();
+  entries.forEach((entry, i) => {
+    if (senders[i].loose) return;
+    const key = `${senders[i].key}\n${idOf(entry)}`;
+    const card = byKey.get(key) ?? make(i);
+    byKey.set(key, card);
+    add(card, i);
+  });
+  entries.forEach((entry, i) => {
+    const { name, loose } = senders[i];
+    if (!loose) return;
+    const card = (name !== undefined ? byId.get(idOf(entry))?.find((c) => !c.chats.has(entry.linkId) && c.names.has(name)) : undefined) ?? make(i);
+    add(card, i);
+  });
+  return [...byId.values()].flat().map((card) => ({ ...card, at: card.at.sort((a, b) => a - b) })).sort((a, b) => a.at[0] - b.at[0]).map(({ sure, at: [top, ...rest] }) => ({
+    // A key that stays whichever copy changed last: the contact's key, else the first of its members' keys.
+    ...entries[top], key: `${sure ?? [top, ...rest].map((i) => senders[i].key).sort()[0]}\n${idOf(entries[top])}`,
+    ...(rest.length > 0 && { copies: rest.map((i): BoardCopy => ({ linkId: entries[i].linkId, messageId: entries[i].messageId, author: entries[i].author, at: entries[i].at })) }),
+  }));
 }
 
 /** Every place a card lives in: where it changed last, then its other copies. */
@@ -192,9 +204,10 @@ const STATUS_RANK: Record<TaskStatus, number> = { running: 0, blocked: 1, queued
 
 /**
  * The tasks with each one's parts stacked under it: a task that names a parent (`parent`: the id of another task of
- * the same sender in the same chat, in any of the chats both were sent to) goes under that task instead of standing in a column of its own. Parts of a part
- * go under the top task too: one level, however deep the bot nests. A parent that is not there (not sent, deleted, in
- * another chat, from someone else) leaves its parts as tasks of their own, and so does a ring of parents.
+ * the same sender in the same chat, in any of the chats both were sent to) goes under that task instead of standing in
+ * a column of its own. Parts of a part go under the top task too: one level, however deep the bot nests. A parent that
+ * is not there (not sent, deleted, in another chat, from someone else) leaves its parts as tasks of their own, and so
+ * does a ring of parents.
  */
 export function stackTasks(tasks: readonly BoardTask[]): BoardTask[] {
   const scope = (place: BoardCopy, id: string) => `${place.linkId}\n${place.author}\n${id}`;

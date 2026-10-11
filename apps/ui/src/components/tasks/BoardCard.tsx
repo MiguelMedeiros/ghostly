@@ -11,8 +11,9 @@ import { MemberFace, type MemberFaceOf } from "../chat/SenderAvatar";
 /*
  * A task on the Tasks board (WISP 405 · Status Cards § The Tasks board): two lines. Its title on one line (whole in its
  * tooltip, and unfolded while the keys are on it) with how long ago it last changed; then at most three chips: who sent
- * it, where (the chat it changed last in, and "+1" for each other chat it was sent to), and its pull request. A thin bar along its foot is its progress. The rest is behind Details. The card is a
- * button that opens its chat on its message; it changes nothing: the bot that owns a task changes its status.
+ * it, where (the chat it changed last in, and "+1" for each other chat it was sent to), and its pull request. A thin
+ * bar along its foot is its progress. The rest is behind Details. The card is a button that opens its chat on its
+ * message; it changes nothing: the bot that owns a task changes its status.
  */
 
 /** A pull request's checks at a glance: a still mark in the status tones, with its words for a screen reader. */

@@ -6,7 +6,8 @@ import { boardEntries, isActiveTask, mergeCopies } from "../../lib/taskBoard";
 /**
  * The way to the Tasks board, above the chat list (the phone's chat list too): there only while this profile has a
  * bot's card in some chat or group, so a profile without bots never sees an empty place. It says how many tasks are
- * still going, across every chat (a task sent to several chats is one, as on the board). Not a place of the account bar or the phone's tab bar: those hold five at most.
+ * still going, across every chat (a task sent to several chats is one, as on the board). Not a place of the account
+ * bar or the phone's tab bar: those hold five at most.
  */
 export function SidebarTasks({ active, onOpen }: { active: boolean; onOpen: () => void }) {
   const { t } = useI18n();

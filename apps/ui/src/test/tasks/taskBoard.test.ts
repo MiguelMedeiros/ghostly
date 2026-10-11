@@ -77,7 +77,7 @@ describe("a card sent to several chats", () => {
   const senderOf = cardSenders(
     [{ id: "chat-h", peerPubKeyZ32: "hermes-contact", peerNick: "Hermes" }, { id: "chat-phone", peerPubKeyZ32: "hermes-contact-2", peerNick: "Hermes" }],
     [
-      { id: "team", memberLinks: { "chat-h": "hermes-in-team" }, members: [{ key: "hermes-in-team", nick: "Hermes" }, { key: "omarchy-in-team", nick: "Omarchy" }, { key: "twin-in-team", nick: "Omarchy" }] },
+      { id: "team", memberLinks: { "chat-h": "hermes-in-team" }, members: [{ key: "hermes-in-team", nick: "Hermes" }, { key: "omarchy-in-team", nick: "Omarchy" }, { key: "twin-in-team", nick: "Omarchy" }, { key: "hermes-twin", nick: "Hermes" }] },
       { id: "town", memberLinks: {}, members: [{ key: "omarchy-in-town", nick: "Omarchy" }], formerNames: { "gone-in-town": "Omarchy" } },
     ],
   );
@@ -124,6 +124,16 @@ describe("a card sent to several chats", () => {
     expect(merged([row("group:team", task(), { member: "omarchy-in-team" }), row("group:town", task(), { member: "omarchy-in-town" })])).toHaveLength(1);
     // Two members of one group with the same name and the same id stay two cards.
     expect(merged([row("group:team", task(), { member: "omarchy-in-team" }), row("group:team", task(), { member: "twin-in-team" })])).toHaveLength(2);
+    expect(merged([row("group:team", task(), { member: "omarchy-in-team", timestamp: NOW - 5 }), row("group:town", task(), { member: "omarchy-in-town", timestamp: NOW - 9 })])[0].key)
+      .toBe(merged([row("group:team", task(), { member: "omarchy-in-team", timestamp: NOW - 9 }), row("group:town", task(), { member: "omarchy-in-town", timestamp: NOW - 5 })])[0].key);
+    // A member of a group who takes a contact's name and card id never takes the contact's card there: the key comes first.
+    const taken = merged([
+      row("group:team", task({ status: "done" }), { id: "twin", member: "hermes-twin", timestamp: NOW - 1 }),
+      row("chat-h", task(), { id: "in-chat", timestamp: NOW - 3 }),
+      row("group:team", task(), { id: "in-team", member: "hermes-in-team", timestamp: NOW - 2 }),
+    ]);
+    expect(taken.map((e) => [e.messageId, e.copies?.map((c) => c.messageId)])).toEqual([["twin", undefined], ["in-team", ["in-chat"]]]);
+    expect(new Set(taken.map((e) => e.key)).size).toBe(2);
     // A member without a name is nobody else.
     expect(merged([row("group:town", task(), { member: "nobody" }), row("group:team", task(), { member: "omarchy-in-team" })])).toHaveLength(2);
   });
