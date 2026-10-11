@@ -159,6 +159,23 @@ describe("the chat list with folders", () => {
     expect(names(sidebar())).toEqual(["Alice"]);
   });
 
+  it("with folders and no chat at all, shows the folders and not the empty list's ghost", () => {
+    createFolder("Empty");
+    list();
+    expect(within(folder("Empty")).getByTestId("chat-folder-empty")).toBeInTheDocument();
+    expect(screen.queryByText("It's quiet here...")).not.toBeInTheDocument();
+  });
+
+  it("keeps an invitation to a group in sight, in no folder, even folded away with its folder", () => {
+    const { agents } = seed();
+    setFolderFolded(agents.id, true);
+    fakeEngine.update({ groups: [groupView({ id: "g", name: "Machines", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: key("a"), members: 3, accepted: false } })] });
+    list();
+    expect(names(folder("Agents"))).toEqual([]);
+    expect(within(sidebar()).getByTestId("group-accept")).toBeInTheDocument();
+    expect(names(sidebar())).toEqual(["Bob", "Machines", "Carol"]);
+  });
+
   it("shows a search's results as one list, without folders, a folded folder's chats included", async () => {
     const { agents } = seed();
     setFolderFolded(agents.id, true);

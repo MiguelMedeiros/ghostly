@@ -213,7 +213,9 @@ export function Sidebar() {
   const shownFolders = search ? [] : folders;
   const filed = (chat: string) => shownFolders.length > 0 && folderOf(chat) !== undefined;
   // The chats and groups in no folder: all of them while there are no folders, where the list is as it always was.
-  const looseGroups = shownGroups.filter(g => !filed(groupChat(g.id)));
+  // An invitation to a group is answered from its row: it stays in sight, in no folder, whatever folder the group was in.
+  const folderOfGroup = (g: (typeof groups)[number]) => (g.invitation || shownFolders.length === 0 ? undefined : folderOf(groupChat(g.id)));
+  const looseGroups = shownGroups.filter(g => folderOfGroup(g) === undefined);
   const loose = filtered.filter(s => !filed(s.id));
   // The pinned chats are put in order by dragging one among the others; a search shows only some of them, so not then.
   // Those in a folder keep their order from the chat's menu: a drag stays among the rows of one parent.
@@ -339,10 +341,10 @@ export function Sidebar() {
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
         {shownFolders.map(folder => {
-          const itsGroups = shownGroups.filter(g => folderOf(groupChat(g.id)) === folder.id);
+          const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
           const itsChats = filtered.filter(s => folderOf(s.id) === folder.id);
           return (
-            <section key={folder.id} aria-label={folder.name} data-testid="chat-folder-section">
+            <div key={folder.id} role="group" aria-label={folder.name} data-testid="chat-folder-section">
               <ChatFolderHeader folder={folder} sessions={itsChats.filter(s => s.id !== activeSessionId)} groups={itsGroups.filter(g => g.id !== activeGroupId)}
                 onToggle={() => setFolderFolded(folder.id, !folder.folded)} />
               {!folder.folded && <div id={folderChatsId(folder.id)} data-testid="chat-folder-chats">
@@ -350,14 +352,14 @@ export function Sidebar() {
                 {itsChats.map(chatRow)}
                 {itsGroups.length === 0 && itsChats.length === 0 && <p data-testid="chat-folder-empty" className="m-0 px-3 py-3 text-[13px] text-text-muted">{t("sidebar.folder.empty")}</p>}
               </div>}
-            </section>
+            </div>
           );
         })}
         {shownFolders.length > 0 && (looseGroups.length > 0 || loose.length > 0) && (
-          <h2 data-testid="chat-folder-others" className="m-0 flex h-11 items-center border-b border-border/40 px-3 text-[13px] font-semibold text-text-secondary">{t("sidebar.folder.others")}</h2>
+          <p data-testid="chat-folder-others" className="m-0 flex h-11 items-center border-b border-border/40 px-3 text-[13px] font-semibold text-text-secondary">{t("sidebar.folder.others")}</p>
         )}
         {looseGroups.map(groupRow)}
-        {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && (
+        {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && shownFolders.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center">
             <div className="text-text-muted mb-4 animate-ghost-boo">
               <svg className="w-12 h-12 mx-auto" viewBox="0 0 24 24" fill="currentColor">

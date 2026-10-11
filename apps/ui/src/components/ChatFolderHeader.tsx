@@ -38,7 +38,7 @@ export function ChatFolderHeader({ folder, sessions, groups, onToggle }: {
         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${folder.folded ? "-rotate-90 rtl:rotate-90" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
         <span dir="auto" data-testid="chat-folder-name" className="min-w-0 truncate">{folder.name}</span>
       </button>
-      {unread && <span id={badgeId} role="img" aria-label={label || undefined} title={label || undefined} data-testid="chat-folder-unread" data-muted={unread.muted || undefined}
+      {unread && <span id={badgeId} role="img" aria-label={label || undefined} data-testid="chat-folder-unread" data-muted={unread.muted || undefined}
         className={`pointer-events-none absolute end-3 top-1/2 inline-flex h-5 min-w-5 -translate-y-1/2 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none ${unread.muted ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>
         {unread.count > 99 ? "99+" : unread.count}
       </span>}
