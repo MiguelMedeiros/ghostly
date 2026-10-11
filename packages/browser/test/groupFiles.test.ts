@@ -325,6 +325,28 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.got(bob, id, messageId).transfer).toMatchObject({ stage: "asking" });
   });
 
+  it("a holder keeps the records of an edge's last few ended transfers only, however many it offered", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const { messageId } = await t.send(alice, id, pattern(4_096));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    const records = (p: Peer) => [...(p.groups.files as unknown as { edgesById: Map<string, { files: { records(): { state: string }[] } }> }).edgesById.values()].flatMap(e => e.files.records());
+    const offers = () => t.seen.filter(s => s.from === "alice" && s.frame.t === "pf-offer").length;
+    const refusals = () => t.seen.filter(s => s.from === "bob" && s.frame.t === "pf-refuse").length;
+    // Bob asks for the file again and again; his app holds it, so each offer is refused there.
+    for (let i = 0; i < 40; i++) {
+      t.say(bob, alice, id, { t: "group-want", g: id, id: messageId });
+      await t.world.until(() => refusals() === i + 1, 10_000);
+    }
+    expect(offers()).toBe(41);
+    expect(records(alice).length).toBeLessThanOrEqual(8);
+    expect(records(bob).length).toBeLessThanOrEqual(8);
+    expect(serving(alice)).toEqual([]);
+    // The file is still served to whoever asks.
+    t.say(bob, alice, id, { t: "group-want", g: id, id: messageId });
+    await t.world.until(() => offers() === 42, 10_000);
+  });
+
   it("a member let in after the announcement is refused it", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);

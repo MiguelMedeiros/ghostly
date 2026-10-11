@@ -205,12 +205,21 @@ interface Edge {
   servedMoved: Map<string, { confirmed: number; at: number }>;
   /** Transfers this side takes on the edge (the holder's wire id) → the local file. */
   taking: Map<string, string>;
+  /** Transfers that ended on the edge, oldest first: the last `ENDED_KEPT` keep their record, the rest are forgotten. */
+  ended: ["in" | "out", string][];
   /** Message ids to say in the next `group-have`, and when one last went. */
   have: Set<string>;
   haveAt: number;
   /** Message ids its member asked for while this device served all it serves at once: said in a `group-have` once a slot frees. */
   busy: Set<string>;
 }
+
+/**
+ * Ended transfers an edge keeps the record of. A late frame for one of them is still answered as files/3 says (an abort
+ * to an asker going on with a transfer cancelled here); older ones are forgotten, so an edge's records stay few
+ * however many transfers it has seen.
+ */
+const ENDED_KEPT = 8;
 
 /** Why a want waits, as the person reads it (the app shows its own words for each `wait`). */
 const WAITING_NOTES = {
@@ -655,7 +664,7 @@ export class GroupFileDesk {
   private edge(groupId: string, peer: string, linkId: string): Edge {
     const known = this.edgesById.get(linkId);
     if (known) return known;
-    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), have: new Set(), haveAt: 0, busy: new Set() };
+    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(), haveAt: 0, busy: new Set() };
     edge.files = new ChatFiles({
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
@@ -719,7 +728,15 @@ export class GroupFileDesk {
     return { read: (offset, length) => this.deps.store.read(stored, offset, length), digest: async () => kept.meta.d };
   }
 
+  /** A transfer on the edge ended: its record stays among the last `ENDED_KEPT`, and the oldest past that is forgotten. */
+  private transferOver(edge: Edge, record: FileTransferRecord): void {
+    if (edge.ended.some(([direction, id]) => direction === record.direction && id === record.id)) return;
+    edge.ended.push([record.direction, record.id]);
+    while (edge.ended.length > ENDED_KEPT) edge.files.forget(...edge.ended.shift()!);
+  }
+
   private transferChanged(edge: Edge, record: FileTransferRecord, transferred: number): void {
+    if (transferEnded(record)) this.transferOver(edge, record);
     if (record.direction === "out") {
       if (transferEnded(record) && edge.serving.has(record.id)) {
         // What a member took counts toward the day's serving, done or not.
