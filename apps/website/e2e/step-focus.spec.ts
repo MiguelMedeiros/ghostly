@@ -9,11 +9,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const CHAPTERS = ["invite", "dht", "agree", "alive"];
 
-/**
- * How opaque a focused step button is at least, itself and its ancestors together. Not 1: a chapter of four steps
- * ends its last step's beat 0.9% of the chapter into its fade-out, so that step rests at about 0.77.
- */
-const SEEN = 0.7;
+/** A focused step button is fully opaque, itself and its ancestors together: a step at rest is outside its chapter's fades. */
+const SEEN = 1;
 
 /** The step button that has the focus: its chapter, its place, whether it can be seen, and what its chapter shows. */
 const focused = (page: Page) =>
@@ -89,3 +86,26 @@ test("a click on a step button still goes to its step", async ({ page }) => {
   await page.locator("#invite .scene-progress button").nth(2).click();
   await expect.poll(active, { timeout: 8000 }).toBe(2);
 });
+
+for (const id of CHAPTERS) {
+  test(`a click on the last step button of #${id} rests on a fully opaque panel`, async ({ page }) => {
+    await page.goto(`/#${id}`, { waitUntil: "networkidle" });
+    await expect(page.locator(`#${id}:not(.scene--static)`)).toHaveCount(1);
+    const last = (await page.locator(`#${id} .scene-progress button`).count()) - 1;
+    await page.locator(`#${id} .scene-progress button`).nth(last).click();
+    const rests = () =>
+      page.evaluate((id) => {
+        const scene = document.getElementById(id)!;
+        const opacity = (sel: string) => Number(getComputedStyle(scene.querySelector(sel)!).opacity);
+        return {
+          step: [...scene.querySelectorAll(".scene-step")].findIndex((s) => (s as HTMLElement).dataset.active === "true"),
+          copy: opacity(".scene-copy"),
+          picture: opacity(".scene-visual"),
+        };
+      }, id);
+    const there = { step: last, copy: 1, picture: 1 };
+    await expect.poll(rests, { timeout: 8000 }).toEqual(there);
+    await page.waitForTimeout(1000);
+    expect(await rests()).toEqual(there);
+  });
+}

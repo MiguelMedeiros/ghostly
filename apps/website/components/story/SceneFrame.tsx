@@ -44,6 +44,16 @@ const FADE = 0.04;
  * as --scene-arrive).
  */
 const ARRIVE = (FADE + ENTER) / 2;
+/** The settled picture of a chapter's last step rests whole for at least this much of the chapter before the fade-out. */
+const REST = 0.001;
+/**
+ * Where a chapter of n steps starts fading out: FADE before the hand-off, and never before its last step has
+ * settled. With four steps or more that step's beat ends later than EXIT - FADE, and a stop that finishes the beat
+ * would rest on a half-faded panel.
+ */
+function leaveAt(n: number): number {
+  return Math.max(EXIT - FADE, stepAt(n - 1, BEAT.settle, n) + REST);
+}
 
 function hexToRgb(hex: string) {
   const n = parseInt(hex.slice(1), 16);
@@ -112,7 +122,7 @@ export function SceneFrame({
       const at = (f: number) => top + f * travel;
       const seen: [number, number] = [top, top + travel];
       const beats = steps.map((_, i) => ({ from: at(stepAt(i, BEAT.establish, n)), to: at(stepAt(i, BEAT.settle, n)), seen }));
-      return seams ? [{ from: at(0), to: at(FADE), seen }, ...beats, { from: at(EXIT - FADE), to: at(EXIT), seen }] : beats;
+      return seams ? [{ from: at(0), to: at(FADE), seen }, ...beats, { from: at(leaveAt(n)), to: at(EXIT), seen }] : beats;
     },
     [article, n, seams],
   );
@@ -160,7 +170,7 @@ export function SceneFrame({
   // shows only the backdrop and the two ghosts. While it is invisible it takes
   // no clicks.
   const enter = useTransform(p, [0, FADE], [0, 1]);
-  const leave = useTransform(p, [EXIT - FADE, EXIT], [1, 0]);
+  const leave = useTransform(p, [leaveAt(n), EXIT], [1, 0]);
   const furniture = useTransform([enter, leave], ([a, b]) => (seams ? Math.min(a as number, b as number) : 1));
   // The copy rises the last few pixels into place as it fades in, and slips up a little as it leaves.
   const copyY = useTransform([enter, leave], ([a, b]) => (seams ? 12 * (1 - (a as number)) - 8 * (1 - (b as number)) : 0));
