@@ -79,6 +79,8 @@ describe("usage send", () => {
     expect(rows("chat-one")).toHaveLength(1);
     // The account and the window were not said again: gone from the card.
     expect(rows("chat-one")[0].card).toEqual({ kind: "usage", id: "usage", label: "Claude", left: 12, updatedAt: T0 + 600_000 });
+    // The chat's history was read once, for the first report (is a card there?); a later report reads its card's message.
+    expect(node.getMessages).toHaveBeenCalledTimes(1);
   });
 
   it("starts a new message once the card took its edits", async () => {
