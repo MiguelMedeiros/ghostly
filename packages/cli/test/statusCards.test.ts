@@ -1,8 +1,13 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { STATUS_CARD_LIMITS, checkStatusCard, type StatusCard } from "@ghostly/core";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
+import { EventHub } from "../src/events";
+import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
 import { CARD_UPDATE_GAP_MS, flushCardUpdates, mergeCard } from "../src/statusCards";
@@ -39,7 +44,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     groupTaken: vi.fn(() => 1),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
-  return { ctx, node, rows: of };
+  return { ctx, node, rows: of, store };
 }
 
 /** A command line as main.ts reads it: its options and positionals, then the method's parameters. */
@@ -281,6 +286,75 @@ describe("task update", () => {
     vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
     expect(await callApi(ctx, "task.update", { chat: "g1", task: "t1", card: { progress: 60 } })).toMatchObject({ group: "g1", task: "t1", edits: 1 });
     expect(node.editMessage).toHaveBeenCalledWith(expect.objectContaining({ linkId: "group:g1", messageId: "me_1" }));
+  });
+});
+
+describe("a card's update in a long chat", () => {
+  const wholeReads = (node: ReturnType<typeof fake>["node"]) => node.getMessages.mock.calls.length + node.groupMessages.mock.calls.length;
+
+  it("reads the card's own message, never the history, for a card this process sent: a chat's and a group's", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { ctx, node } = fake();
+    for (const chat of ["Coordinator", "g1"]) {
+      await callApi(ctx, "task.send", { chat, card: { id: "t1", title: "Fix" } });
+      await callApi(ctx, "routine.send", { chat, card: { id: "r1", name: "Nightly", schedule: "every day 01:00" } });
+    }
+    expect(wholeReads(node)).toBe(0);
+    for (const chat of ["Coordinator", "g1"]) {
+      vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+      expect(await callApi(ctx, "task.update", { chat, task: "t1", card: { progress: 60 } })).toMatchObject({ task: "t1", queued: false, edits: 1 });
+      expect(await callApi(ctx, "routine.update", { chat, routine: "r1", card: {}, run: { result: "ok" } })).toMatchObject({ routine: "r1", queued: false, edits: 1 });
+    }
+    expect(node.editMessage).toHaveBeenCalledTimes(4);
+    expect(wholeReads(node)).toBe(0);
+  });
+
+  it("looks a card it has not seen yet up in the history once, then no more", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { ctx, node, rows } = fake();
+    // Sent by an earlier run of the daemon: this one never saw it.
+    rows("chat-one").push({ linkId: "chat-one", id: "me_old", text: "fallback", sender: "me", timestamp: Date.now() - 60_000, via: "datalink", delivery: "sent", card: { kind: "task", id: "t1", title: "Fix", status: "running" } });
+    for (let update = 1; update <= 3; update++) {
+      vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+      expect(await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: update } })).toMatchObject({ messageId: "me_old", edits: update });
+    }
+    expect(wholeReads(node)).toBe(1);
+  });
+
+  it("goes to the newest card of an id, also one these commands did not send, and to the one before when that is deleted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-cards-"));
+    await openPersistentIndexedDb(join(dir, "db"));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { ctx, node, rows, store } = fake();
+    // The daemon's own event stream: a message of mine stored by something else (`engine call`) is said there.
+    const hub = new EventHub(join(dir, "events.jsonl"), Date.now, "cards.jsonl");
+    await hub.open();
+    hub.baseline(node.getState(), new Map());
+    (ctx as { hub: EventHub }).hub = hub;
+    const stored = (linkId: string, card: StatusCard) => {
+      const id = store(linkId, "fallback", card);
+      hub.sink.post({ kind: "messages", linkId, messages: rows(linkId) });
+      return id;
+    };
+    const update = async (chat: string) => { vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS); return callApi(ctx, "task.update", { chat, task: "t1", card: { step: "next" } }); };
+    for (const [chat, linkId] of [["Coordinator", "chat-one"], ["g1", "group:g1"]] as const) {
+      const first = (await callApi(ctx, "task.send", { chat, card: { id: "t1", title: "Fix" } }) as { messageId: string }).messageId;
+      expect(await update(chat)).toMatchObject({ messageId: first });
+      vi.setSystemTime(Date.now() + 1);
+      const second = stored(linkId, { kind: "task", id: "t1", title: "Fix again", status: "running" });
+      expect(await update(chat)).toMatchObject({ messageId: second, card: { title: "Fix again" } });
+      expect(wholeReads(node)).toBe(0);
+      // The newest is deleted: the history says the one before stands for the id again.
+      rows(linkId).splice(rows(linkId).findIndex((m) => m.id === second), 1);
+      expect(await update(chat)).toMatchObject({ messageId: first, card: { title: "Fix" } });
+      expect(await update(chat)).toMatchObject({ messageId: first });
+      expect(wholeReads(node)).toBe(1);
+      node.getMessages.mockClear(); node.groupMessages.mockClear();
+    }
+    // Another chat's card of the same id is not this chat's.
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t2", card: {} })).rejects.toMatchObject({ code: "not_found" });
+    stored("group:g1", { kind: "task", id: "t2", title: "Elsewhere", status: "running" });
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t2", card: {} })).rejects.toMatchObject({ code: "not_found" });
   });
 });
 
