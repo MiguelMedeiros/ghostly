@@ -3442,12 +3442,23 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * The message of mine that carries a payment or a request, read by its id: `me_<the time the desk keeps for it>`.
+   * The chat's history is read only when that row does not carry it, so it costs the same in a long chat as in a short one.
+   */
+  private async paymentMessage(linkId: string, paymentId: string): Promise<StoredMessage | undefined> {
+    const at = this.desk.payment(paymentId)?.createdAt;
+    const message = at === undefined ? undefined : await db.getMessage(linkId, `me_${at}`);
+    if (message?.sender === "me" && message.paymentId === paymentId) return message;
+    return (await db.getMessages(linkId)).find(m => m.sender === "me" && m.paymentId === paymentId);
+  }
+
+  /**
    * The contact's app answered for a payment of mine (`pay-res`): its message gets two ticks, as a text gets from its
    * receipt. A payment goes with no delivery state of its own, so its mark read one tick for good. 1:1 chats only: a
    * group's payments live in the group's history, under other ids.
    */
   private async notePaymentReceipt(linkId: string, paymentId: string): Promise<void> {
-    const message = (await db.getMessages(linkId)).find(m => m.sender === "me" && m.paymentId === paymentId);
+    const message = await this.paymentMessage(linkId, paymentId);
     if (!message || message.delivery === "delivered") return;
     const marked = await db.patchMessage(linkId, message.id, m => m.delivery === "delivered" ? null : { delivery: "delivered", deliveryError: undefined });
     if (marked) { await this.messagesChanged(linkId, [message.id]); this.emitState(); }
@@ -4759,7 +4770,7 @@ export class GhostlyNode implements EngineImplementation {
   private async closeRequest(paymentId: string, reason: string): Promise<void> {
     const request = this.desk.payment(paymentId);
     if (!request || !(await this.desk.close(paymentId, reason, "your contact removed the wallet it was paid to"))) return;
-    const message = (await db.getMessages(request.linkId)).find((m) => m.paymentId === paymentId && m.sender === "me");
+    const message = await this.paymentMessage(request.linkId, paymentId);
     if (message) await this.hold.forget(request.linkId, message.id).catch(() => {});
   }
 
