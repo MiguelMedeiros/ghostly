@@ -300,8 +300,8 @@ test("richer task cards: a Review column for an open pull request, its checks, t
     const prOf = (n: number) => ["--pr-url", `https://github.com/MiguelMedeiros/ghostly/pull/${n}`, "--pr-number", String(n)];
 
     // The CLI refuses what a reader would leave out, and a parent that is not there.
-    await expect(bot.run("task", "send", direct, "--title", "x", ...prOf(1), "--pr-state", "approved")).rejects.toThrow(/pr.state is one of/);
-    await expect(bot.run("task", "send", direct, "--title", "x", "--tag", "a", "--tag", "b", "--tag", "c", "--tag", "d")).rejects.toThrow(/tags is a list of at most 3/);
+    await expect(bot.run("task", "send", direct, "--title", "x", ...prOf(1), "--pr-state", "approved")).rejects.toThrow(/--pr-state takes draft, open, merged or closed/);
+    await expect(bot.run("task", "send", direct, "--title", "x", "--tag", "a", "--tag", "b", "--tag", "c", "--tag", "d")).rejects.toThrow(/--tag is given at most 3 times/);
     await expect(bot.run("task", "send", direct, "--title", "x", "--parent", "never-sent")).rejects.toThrow(/never-sent/);
 
     // A task with three parts; tasks whose pull requests stand in different places.

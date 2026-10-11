@@ -91,6 +91,26 @@ describe("the task commands", () => {
     ]);
   });
 
+  it("refuse a flag the card would not take as a usage error (exit 2) that names the flag, not the card's field", () => {
+    const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    const send = (...flags: string[]) => ["g1", "--title", "Build", ...flags];
+    usage("task send", send("--steps", "9/5"), /^--steps takes done\/total with done at most total, like 2\/5, not "9\/5"$/);
+    usage("task update", ["g1", "t", "--steps", "0/0"], /^--steps takes done\/total/);
+    usage("task send", send("--tag", "a", "--tag", "b", "--tag", "c", "--tag", "d"), /^--tag is given at most 3 times, not 4$/);
+    usage("task send", send("--progress", "150"), /^--progress takes a percent from 0 to 100, not 150$/);
+    usage("task update", ["g1", "t", "--pr-state", "weird"], /^--pr-state takes draft, open, merged or closed, not "weird"$/);
+    usage("task update", ["g1", "t", "--pr-checks", "green"], /^--pr-checks takes passing, failing or pending, not "green"$/);
+    usage("task send", send("--pr-url", "http://github.com/o/r/pull/1"), /^--pr-url takes an https link of at most 512 characters, not "http:/);
+    // A new card's pull request goes by its link: the flags that came without it are named.
+    usage("task send", send("--pr-state", "open"), /^--pr-state goes with --pr-url: ghostly task send/);
+    usage("task send", send("--pr-number", "7", "--pr-checks", "passing"), /^--pr-number and --pr-checks go with --pr-url: ghostly task send/);
+    expect(params("task send", send("--pr-state", "open", "--json", '{"pr":{"url":"https://github.com/o/r/pull/1"}}')).card).toMatchObject({ pr: { url: "https://github.com/o/r/pull/1", state: "open" } });
+    // An update's card may have the link already; a whole card in --json stays the card's to check.
+    expect(params("task update", ["g1", "t", "--pr-checks", "failing"]).card).toEqual({ pr: { checks: "failing" } });
+    expect(params("task send", send("--json", '{"pr":{"state":"open"},"tags":["a","b","c","d"]}')).card).toMatchObject({ pr: { state: "open" } });
+    expect(params("task send", send("--steps", "5/5", "--progress", "100", "--tag", "a", "--tag", "b", "--tag", "c")).card).toMatchObject({ done: 5, total: 5, progress: 100, tags: ["a", "b", "c"] });
+  });
+
   it("start the groups' sessions even in a one-shot: the chat they name may be a group", () => {
     expect(chatOnly("task.send", { chat: "Sala" })).toBe(false);
     expect(chatOnly("chat.send", { chat: "Alice" })).toBe(true);
