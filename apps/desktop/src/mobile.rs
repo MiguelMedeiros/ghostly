@@ -87,6 +87,7 @@ pub mod viewer {
         _peer: String,
         _service: String,
         _title: String,
+        _unreachable: Option<String>,
     ) -> Result<(), String> {
         Err(NOT_HERE.into())
     }

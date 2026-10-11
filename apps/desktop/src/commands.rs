@@ -395,8 +395,9 @@ pub fn open_service_window<R: tauri::Runtime>(
     peer: String,
     service: String,
     title: String,
+    unreachable: Option<String>,
 ) -> Result<(), String> {
-    viewer::open(&app, peer, service, title)
+    viewer::open(&app, peer, service, title, unreachable)
 }
 
 #[tauri::command]
