@@ -77,12 +77,14 @@ async function fromCache(key: string, request: Request): Promise<Response> {
 }
 
 /** A build file that was not precached: kept once fetched. Only whole, same-origin answers. */
-async function asset(key: string, request: Request): Promise<Response> {
+async function asset(key: string, request: Request, event: ExtendableEvent): Promise<Response> {
   const cache = await caches.open(CACHE);
   const cached = await cache.match(key);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response.ok && response.status === 200 && response.type === "basic") await cache.put(key, response.clone()).catch(() => {});
+  // Answered at once and stored behind it: `put` settles with the last byte, and these are the wasm modules (2 to
+  // 12 MiB) the page compiles while they arrive.
+  if (response.ok && response.status === 200 && response.type === "basic") event.waitUntil(cache.put(key, response.clone()).catch(() => {}));
   return response;
 }
 
@@ -159,7 +161,7 @@ worker.addEventListener("fetch", (event) => {
   const key = new URL(request.url).pathname;
   if (route === "shell") event.respondWith(fromCache("/", request));
   else if (route === "precache") event.respondWith(fromCache(key, request));
-  else event.respondWith(asset(key, request));
+  else event.respondWith(asset(key, request, event));
 });
 
 // ---------- wake-up push ----------
