@@ -1105,6 +1105,9 @@ export class Apps {
     }
     if (app.store === undefined) urls.push(...(app.manifest.sources ?? []));
     for (const url of new Set(urls.filter(isAppFetchUrl))) {
+      // Peeked first, as the update check does: a URL that holds another version (its publisher moved on, a repository's
+      // HEAD) is not read whole only to be skipped, at every open and every check.
+      try { if (peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }))?.digest !== app.digest) continue; } catch { continue; }
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch { continue; }
       if (fetched.bundle.digest !== app.digest) continue;

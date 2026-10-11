@@ -424,7 +424,7 @@ describe("an app installed from a store updates only to the version that store l
     await store.refreshStores();
     net.requests.length = 0;
     expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
-    expect(net.requests, "the commit-pinned copy first, so HEAD is not read").toEqual([PINNED_URL, moved]);
+    expect(net.requests, "the commit-pinned copy first (peeked, then read whole), so HEAD is not read").toEqual([PINNED_URL, moved, moved]);
   });
 
   it("an update the store lists that adds a permission waits for the person, and stays pinned once accepted", async () => {
@@ -683,7 +683,7 @@ describe("a restored profile (installed list, no bundle)", () => {
     expect(net.requests, "listing and checking ask nothing").toEqual([]);
     const entry = await store.entry({ ref: v1.ref });
     expect(entry.digest).toBe(v1.digest);
-    expect(net.requests).toEqual([BUNDLE_URL]);
+    expect(net.requests, "peeked, then read whole").toEqual([BUNDLE_URL, BUNDLE_URL]);
     expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
   });
 
@@ -695,6 +695,31 @@ describe("a restored profile (installed list, no bundle)", () => {
     net.files.delete(BUNDLE_URL);
     await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
     expect(await bundleIds()).toEqual([]);
+  });
+
+  it("a URL its publisher moved on from costs a peek, never the whole bundle, at each open and each check", async () => {
+    const mirror = "https://raw.githubusercontent.com/ana/chess-mirror/HEAD/app.ghostlyapp";
+    const sources = [BUNDLE_URL, mirror];
+    const v1 = await bundle({ sources });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+    // Both URLs hold the next version now. It adds a permission, so it waits for the person and the installed one keeps needing its files.
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"], sources, data: new Uint8Array(1024 * 1024) });
+    for (const url of sources) net.put(url, v2.bytes);
+    const store = apps(net);
+    net.fetch.mockClear();
+    const whole = () => net.fetch.mock.calls.filter(([url, init]) => sources.includes(String(url)) && !((init?.headers ?? {}) as Record<string, string>).range).length;
+    for (let press = 0; press < 2; press++) await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(whole(), "Open, twice: the first bytes say it is another version").toBe(0);
+    expect((await store.checkUpdates())[0]).toMatchObject({ outcome: "ask", run: { status: "needs-files" } });
+    expect(whole(), "the check reads whole only the update it keeps").toBe(1);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(whole()).toBe(1);
+    expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
   });
 
   it("a store listing of that digest is a source too, and so is installing the same version again", async () => {
