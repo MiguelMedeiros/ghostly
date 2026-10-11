@@ -176,6 +176,20 @@ export function SceneFrame({
     window.scrollTo({ top: top + travel * stepAt(i, 0.2, n), behavior: "smooth" });
   };
 
+  // A step button the keyboard lands on is one the reader sees: the browser brings it on screen at the chapter's
+  // nearest edge, where the panel is still (or already) faded out, so the chapter goes to that step. A pointer's
+  // focus is left to its click, and so is the focus the window hands back when the reader returns to it.
+  const away = useRef(false);
+  const onStepBlur = (e: React.FocusEvent<HTMLButtonElement>) => {
+    away.current = document.activeElement === e.currentTarget;
+  };
+  const onStepFocus = (e: React.FocusEvent<HTMLButtonElement>, i: number) => {
+    const back = away.current;
+    away.current = false;
+    if (back || !e.currentTarget.matches(":focus-visible")) return;
+    if (i !== step || furniture.get() < 1) jump(i);
+  };
+
   const room = ROOMS[chapter];
   const style = { "--chapter-bg": room, "--chapter-rgb": hexToRgb(room) } as React.CSSProperties;
   const anchor = alias ? <span id={alias} className="scene-alias" /> : null;
@@ -252,7 +266,7 @@ export function SceneFrame({
             </ol>
             <div className="scene-progress" role="group" aria-labelledby={`${id}-eyebrow`}>
               {steps.map((s, i) => (
-                <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => jump(i)}>
+                <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => jump(i)} onFocus={(e) => onStepFocus(e, i)} onBlur={onStepBlur}>
                   <span className="sr-only">
                     {i + 1}: {s.title}
                   </span>
