@@ -28,4 +28,10 @@ describe("extra words", { timeout: 60_000 }, () => {
     }
     expect(ok(await ghostly(["--home", dir, "profile", "list"])).profiles).toContainEqual({ name: "other", current: true, running: false });
   });
+
+  it("a global option before the command adds none: `--name --` after it is still the name", async () => {
+    // `--home <dir>` went between `--name` and its `--`: the name was "--home" and <dir> one word too many.
+    const dir = home("globals-first");
+    expect(ok(await ghostly(["--home", dir, "-p", "default", "profile", "set", "--name", "--"])).name).toBe("--");
+  });
 });
