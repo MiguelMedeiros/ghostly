@@ -78,7 +78,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
         if (closed.current) return;
         joined.current = false; busyRef.current = false; setBusy(false);
         const key = enrollErrorKey(cause);
-        setError(key ? said(t(key)) : cause instanceof Error ? problemText(cause, t) : said(t("join.invalid"))); setManual(true);
+        setError(key ? said(t(key)) : cause instanceof Error ? problemText(cause, t) : said(t("devices.fail.failed"))); setManual(true);
       });
       return;
     }
@@ -149,7 +149,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     } catch {
       if (current !== generation.current) return;
       stop();
-      setError({ tone: "error", title: t("join.cameraUnavailable") }); setManual(true);
+      setError({ tone: "error", title: t(onDevice ? "devices.join.cameraUnavailable" : "join.cameraUnavailable") }); setManual(true);
     }
   };
   // Once, on opening, after the dialog is up; `scan` itself stops anything a closed dialog started.
@@ -221,7 +221,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     aria-labelledby="join-title" className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[85dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 flex items-center justify-between">
       <h2 id="join-title" className="font-semibold">{onDevice ? t("devices.join.addThis") : t("join.title")}</h2>
-      <button onClick={close} aria-label={t("join.close")} className="h-10 w-10 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
+      <button onClick={close} aria-label={t(onDevice ? "common.close" : "join.close")} className="h-10 w-10 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
     </div>
     <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} mb-3 aspect-square w-full rounded-xl bg-black object-cover`} />
     {scanning || starting ? <button onClick={stop} className={`${button} mb-3 w-full border border-border`}>{t("common.cancel")}</button> : <>
