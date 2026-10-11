@@ -87,8 +87,26 @@ describe("reading a store's index", () => {
     for (let i = 0; i < 2; i++) {
       verifies.mockClear();
       expect(await store.refreshStores()).toMatchObject([{ sequence: 2, problem: "bad-revocation" }]);
-      expect(verifies, "the forged one, each time").toHaveBeenCalledTimes(1);
+      expect(verifies, "the index and the forged one, each time").toHaveBeenCalledTimes(2);
     }
+  });
+
+  it("an index whose own signature does not verify costs one signature check, whatever it carries", async () => {
+    const good = await storeFiles({ revoked: await revocations(50) });
+    const other = await storeFiles({ name: "Another" });
+    await net.putStore({ indexBytes: good.indexBytes, sigBytes: other.sigBytes });
+    const store = apps(net);
+    verifies.mockClear();
+    await expect(store.previewStore({ url: STORE_URL })).rejects.toThrow(/^bad-signature/);
+    expect(verifies, "the index's own, and no revocation").toHaveBeenCalledTimes(1);
+    // Another key than the one the person saw: no signature is checked at all.
+    verifies.mockClear();
+    await expect(store.addStore({ url: STORE_URL, key: keyOf(signer("someone else")) })).rejects.toThrow(/^store-key/);
+    expect(verifies).not.toHaveBeenCalled();
+    // Nothing of the refused index was taken as checked.
+    await net.putStore(good);
+    await store.previewStore({ url: STORE_URL });
+    expect(verifies, "the index and its 50 revocations").toHaveBeenCalledTimes(51);
   });
 
   it("holds a bounded number of checked revocations, the one read longest ago dropped first", () => {

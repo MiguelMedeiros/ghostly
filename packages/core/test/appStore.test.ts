@@ -125,6 +125,17 @@ async function build(): Promise<Vectors> {
   await no("a removal without a reason", "missing-key", { ...base, removed: [{ ref: REF, digest: v1.digest, at: APPS_NOW }] });
   await no("a revocation that does not verify", "bad-revocation", { ...base, revoked: [{ ...revoked, statement: { ...revoked.statement, reason: "Changed by the store" } }] });
   await no("a revocation signed by the store", "bad-revocation", { ...base, revoked: [await signAppRevocation({ ghostlyRevoke: 1, app: appRef(appKey("store"), "chess"), upTo: 1 }, store).then((r) => ({ ...r, statement: { ...r.statement, app: REF } }))] });
+  // The index's own signature is checked before its revocations' signatures (their shape comes before both), so an
+  // index nobody signed costs its reader one signature check, whatever it carries.
+  const forged = { ...revoked, statement: { ...revoked.statement, reason: "Changed by the store" } };
+  const unsigned = async (name: string, refusal: string, entry: unknown) => {
+    const s = await signed({ ...base, revoked: [entry] });
+    invalid.push({ name, refusal, index: s.index.replace("Vector store", "Vector stork"), sig: s.sig });
+  };
+  await unsigned("a revocation that does not verify, in an index whose signature does not verify", "bad-signature", forged);
+  await unsigned("a revocation of another shape, in an index whose signature does not verify", "bad-revocation", { ...revoked, later: 1 });
+  await no("a revocation that does not verify, in an index signed by another key than the one held", "store-key", { ...base, revoked: [forged] }, { heldKey: appKey("other store") });
+  await no("a revocation that does not verify, in an index whose expires is too far ahead", "bad-revocation", { ...base, revoked: [forged], expires: APPS_NOW + APP_STORE_LIMITS.expiresAheadS + 1 });
   invalid.push({ name: "bytes that are not JSON", refusal: "not-json", index: "ghostly-store", sig: good.sig });
 
   // `strict`: read as a store checks a listing.json it is about to sign (the default), or, false, as a client reads an
