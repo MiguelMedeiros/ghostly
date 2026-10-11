@@ -48,6 +48,24 @@ describe("the keys", () => {
       key({ key: "f", code: "KeyF", ctrlKey: true }),
     ]) expect(appCommandForKey(other)).toBeNull();
   });
+
+  it("go by the key's place only on a layout that types no Latin letter there", () => {
+    // Arabic, Russian, kana: the key where a US keyboard has N or the comma.
+    expect(appCommandForKey(key({ key: "ى", code: "KeyN", ctrlKey: true }))).toBe("new");
+    expect(appCommandForKey(key({ key: "т", code: "KeyN", ctrlKey: true }))).toBe("new");
+    expect(appCommandForKey(key({ key: "б", code: "Comma", ctrlKey: true }))).toBe("settings");
+    expect(appCommandForKey(key({ key: "Dead", code: "KeyN", ctrlKey: true }))).toBe("new");
+    // AZERTY has its comma where a US keyboard has M.
+    expect(appCommandForKey(key({ key: ",", code: "KeyM", ctrlKey: true }))).toBe("settings");
+    expect(appCommandForKey(key({ key: "N", code: "KeyN", ctrlKey: true }))).toBe("new");
+    // Dvorak's B and W, Colemak's K and AZERTY's semicolon sit on those keys: they are Ctrl+B, Ctrl+W, Ctrl+K, Ctrl+;.
+    for (const other of [
+      key({ key: "b", code: "KeyN", ctrlKey: true }),
+      key({ key: "k", code: "KeyN", ctrlKey: true }),
+      key({ key: "w", code: "Comma", ctrlKey: true }),
+      key({ key: ";", code: "Comma", ctrlKey: true }),
+    ]) expect(appCommandForKey(other)).toBeNull();
+  });
 });
 
 describe("the Desktop host", () => {
