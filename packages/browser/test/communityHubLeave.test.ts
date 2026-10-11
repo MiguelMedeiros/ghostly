@@ -76,6 +76,48 @@ describe("members a leave cuts off, asking one hub in the same second", { timeou
 });
 
 /**
+ * Two hubs whose readings of the beacon are apart may each take the door for its own, and both answer one knock: the
+ * joiner gets in through one of them, and the other waited 90 s for it on its entry session, counting as letting
+ * someone in all that time. A hub letting someone in reads its lobby every half minute: twelve CLI daemons on local
+ * relays, the hub that carried five or six members leaving 20 s after the last join, the hub left behind first read its
+ * lobby 23 to 53 s after the leave in 3 runs of 5 (2026-10-11).
+ */
+describe("a hub whose entry session waits for a joiner another hub let in", { timeout: 120_000 }, () => {
+  it("closes it once the roster has the joiner, and reads its lobby soon when that hub leaves", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin"]);
+    const [admin, ...rest] = peers;
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const other = rest.find(p => p.groups.communities.isHub(id))!;
+    expect(admin.groups.communities.isHub(id) && !!other, "the admin and one more hub").toBe(true);
+    // The admin cannot read the beacon, so it writes nothing there: the other hub stops counting it at the door, and
+    // the admin, once what it last read is stale, takes the door for its own.
+    const beacon = beaconKeys(admin.groups.communities.session(id)!.state.rv, id).identity.pubKeyZ32;
+    world.failRead = (peer, key) => peer === admin && key === beacon;
+    world.entryWinner = admin;
+    await world.run(100_000);
+    const frank = world.add("frank");
+    const hosting = (p: Peer) => [...p.links.values()].some(e => e.kind === "host");
+    let both = false;
+    await frank.groups.joinByLink(await admin.groups.enableLink(id));
+    await world.until(() => { both ||= hosting(admin) && hosting(other); return world.member(frank, id); }, 60_000);
+    expect(both, "both hubs answered the knock").toBe(true);
+    // The commit that added the joiner reaches the other hub on its edge: nobody comes to its session any more.
+    await world.run(3_000);
+    expect(hosting(other), "the other hub still waits on its entry session").toBe(false);
+
+    const lobby = lobbyKeys(other.groups.communities.session(id)!.state.rv, id, keyOf(other)).identity.pubKeyZ32;
+    let reads = 0;
+    world.onPkarr = (who, op, key) => { if (who === other && op === "resolve" && key === lobby) reads++; };
+    await admin.groups.leave(id);
+    await world.run(20_000);
+    world.onPkarr = null;
+    // Every 6 s once a hub left, not every half minute as while letting someone in.
+    expect(reads, "readings of its lobby in the 20 s after the leave").toBeGreaterThanOrEqual(2);
+  });
+});
+
+/**
  * A hub whose app is killed says nothing: no leave request, no goodbye. Its members wait for it as for an app that
  * restarts, then ask a hub left. That hub read its lobby every half minute, and the member's side of the new edge looked
  * for it at the background pace, every half minute too: the group was cut in two for 54 s (2026-10-03).
