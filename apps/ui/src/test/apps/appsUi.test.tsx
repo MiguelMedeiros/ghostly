@@ -411,6 +411,28 @@ describe("with the apps flag on", () => {
     expect(screen.queryByTestId("apps-add-error")).not.toBeInTheDocument();
   });
 
+  it("a link with http:// to a host of the list is read as its https:// link; to any other host it goes as typed", async () => {
+    const asked: unknown[] = [];
+    fakeEngine.on("appPreview", (params) => {
+      asked.push(params);
+      if (!(params as { url: string }).url.startsWith("https://")) throw new Error("host: Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
+      return preview();
+    });
+    const first = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await first.user.type(screen.getByTestId("apps-add-url"), "HTTP://GitHub.com/ana/chess");
+    await first.user.click(screen.getByTestId("apps-add-check"));
+    await waitFor(() => expect(asked).toEqual([{ url: "https://GitHub.com/ana/chess" }]));
+    expect(screen.queryByTestId("apps-add-error")).not.toBeInTheDocument();
+    first.unmount();
+
+    asked.length = 0;
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "http://example.com/github.com/app.ghostlyapp");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.");
+    expect(asked).toEqual([{ url: "http://example.com/github.com/app.ghostlyapp" }]);
+  });
+
   it("words that are no link get the dialog's own error, not the browser's validation bubble", async () => {
     const asked: unknown[] = [];
     const refuse = (params: unknown) => { asked.push(params); throw new Error("host: Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS"); };
