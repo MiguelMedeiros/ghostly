@@ -11,7 +11,7 @@
     "content": {
       "everything": "Tout",
       "everythingSize": "Fichiers : {{size}}",
-      "info": "La légère garde les discussions et tous les messages, les contacts, les groupes, les identités, les portefeuilles et les réglages. Elle laisse de côté les fichiers de plus de 1 Mo ; les messages vocaux jusqu'à 4 Mo restent. Après une restauration, chaque fichier laissé de côté s'affiche comme Pas dans cette sauvegarde.",
+      "info": "La légère laisse de côté les fichiers de plus de 1 Mo ; les messages vocaux jusqu'à 4 Mo restent. Après une restauration, chaque fichier manquant s'affiche comme Pas dans cette sauvegarde.",
       "label": "Contenu",
       "leftOut": "Les fichiers de plus de 1 Mo ont été laissés de côté ({{size}}).",
       "light": "Légère",
@@ -21,7 +21,7 @@
     "downloaded": "Téléchargé {{name}} · {{size}}",
     "emptyFile": "Ce fichier est vide. Choisissez un fichier de sauvegarde.",
     "fromFile": "Fichier",
-    "holds": "Contient : les discussions et leurs clés, les messages, les fichiers de toute taille, les portefeuilles, les services partagés et les réglages. Ne contient pas : les clés du stockage S3, l'abonnement aux notifications de cet appareil, les fichiers en cours d'arrivée, ni les données locales des portefeuilles Bark, Spark et Fedimint, qui reviennent avec leur phrase de récupération (la phrase est dans la sauvegarde).",
+    "holds": "Tout sauf les clés S3, l'abonnement aux notifications de cet appareil et les fichiers en cours d'arrivée. Les portefeuilles Bark, Spark et Fedimint reviennent avec leur phrase de récupération, qui y est.",
     "keepOne": "L’original est toujours là ? N’en utilisez qu’un : ils partagent les portefeuilles.",
     "list": "Lister",
     "noneYet": "Aucune pour l’instant.",
@@ -80,7 +80,7 @@
       "copy": "Restaurer comme copie quand même",
       "firstProfile": "Le premier profil ne peut pas être supprimé. Pour le remplacer, effacez ses données dans Réglages.",
       "hint": "Les deux agiraient comme la même personne pour vos contacts. Remplacez l'original, ou n'utilisez pas les deux.",
-      "info": "Une copie restaurée garde les clés de discussion de l'original. Si les deux tournent, ils répondent aux mêmes contacts comme une seule personne et se disputent les mêmes connexions : les messages peuvent arriver dans l'un ou l'autre. Remplacer restaure la copie, bascule dessus, puis propose de supprimer l'original avec les vérifications habituelles : ce qu'il contient, une sauvegarde d'abord, et son nom pour confirmer.",
+      "info": "Si les deux tournent, les messages peuvent arriver dans l'un ou l'autre. Remplacer restaure la copie, bascule dessus, puis propose de supprimer l'original, avec les vérifications habituelles.",
       "replace": "Remplacer l'original",
       "title": "Cette sauvegarde est {{names}}, qui est sur cet appareil"
     },

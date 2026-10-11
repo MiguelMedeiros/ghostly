@@ -136,7 +136,7 @@ test("the resolver that checks domain proofs is the person's choice, says what i
   const row = page.getByTestId("doh-resolver-row");
   await row.getByTestId("row-info").click();
   const learns = row.getByTestId("row-info-text");
-  await expect(learns).toContainText("learns which domain was looked up");
+  await expect(learns).toContainText("never sees your chats");
   await expect(learns).toContainText("Quad9");
   await choose(resolver, "cloudflare");
   await expect(learns).toContainText("Cloudflare");
