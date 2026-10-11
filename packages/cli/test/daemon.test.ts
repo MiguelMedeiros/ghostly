@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import type { Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
-import { createProfile, profilePaths } from "../src/profiles";
+import { createProfile, lockOwner, profilePaths } from "../src/profiles";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.cli
 
@@ -91,6 +91,37 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const started = await ghostly(["--home", held, "daemon", "--detach"], { env });
     expect(error(started, "busy", 1).message).toContain(`in use by process ${process.pid}`);
     expect(started.json.error).toMatchObject({ details: { pid: process.pid } });
+  });
+
+  it("daemon --detach with a timeout shorter than the start says the daemon is still starting, with its pid; 0 or less is a usage error", async () => {
+    const slow = home("detach-timeout");
+    ok(await ghostly(["--home", slow, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    try {
+      for (const timeout of ["0", "-1"]) {
+        for (const command of [["daemon", "--detach"], ["daemon", "stop"], ["daemon", "restart"]]) {
+          expect(error(await ghostly(["--home", slow, ...command, "--timeout", timeout], { env }), "usage", 2).message).toBe("--timeout takes a number of seconds above 0");
+        }
+      }
+      expect(ok(await ghostly(["--home", slow, "daemon", "status"], { env }))).toMatchObject({ running: false });
+      const started = await ghostly(["--home", slow, "daemon", "--detach", "--timeout", "0.01"], { env });
+      const failure = error(started, "timeout", 4);
+      const pid = (started.json.error as { details?: { pid?: number } }).details?.pid;
+      expect(pid).toBeTypeOf("number");
+      expect(failure.message).toBe(`The daemon (process ${pid}) is still starting; ghostly daemon status shows when it is up`);
+      // It was not given up on: it comes up, and it is the one named.
+      const until = Date.now() + 60_000;
+      let status = ok(await ghostly(["--home", slow, "daemon", "status"], { env }));
+      while (!status.running && Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        status = ok(await ghostly(["--home", slow, "daemon", "status"], { env }));
+      }
+      expect(status).toMatchObject({ running: true, pid });
+    } finally {
+      // A daemon started in the background is stopped, once it is up (it may still be starting).
+      const until = Date.now() + 60_000;
+      while (Date.now() < until && !(await ghostly(["--home", slow, "daemon", "status"], { env })).json.running && lockOwner(profilePaths(slow, "default")) !== null) await new Promise((resolve) => setTimeout(resolve, 250));
+      await ghostly(["--home", slow, "daemon", "stop"], { env });
+    }
   });
 
   it("a daemon whose terminal closes (SIGHUP) stops cleanly and frees its profile", async () => {
