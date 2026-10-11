@@ -80,13 +80,30 @@ describe("help", () => {
     }
   });
 
+  it("help help is help's own usage, not an unknown command", async () => {
+    for (const args of [["help", "help"], ["help", "help", "--pretty"]]) {
+      const { code, stdout } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly help \[<command>\.\.\.\]\n\n {2}Help for every command/);
+    }
+  });
+
+  it("version --pretty is indented, as every command's answer is", async () => {
+    for (const args of [["version", "--pretty"], ["--pretty", "version"], ["--version", "--pretty"], ["--pretty", "--version"]]) {
+      const { code, stdout } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(stdout, args.join(" ")).toMatch(/^\{\n {2}"version": "[^"]+"\n\}\n$/);
+    }
+    expect((await ghostly(["version"])).stdout).toMatch(/^\{"version":"[^"]+"\}\n$/);
+  });
+
   it("the version is in the help, and help version answers it", async () => {
     expect((await ghostly(["help"])).stdout).toMatch(/^ {2}version\s.*--version/m);
     const one = await ghostly(["help", "version"]);
     expect(one.code).toBe(0);
     expect(one.stdout).toContain("Usage: ghostly version");
     expect((await ghostly(["version"])).json).toHaveProperty("version");
-    expect((await ghostly(["--pretty", "--version"])).json).toHaveProperty("version");
+    expect(JSON.parse((await ghostly(["--pretty", "--version"])).stdout)).toHaveProperty("version");
   });
 
   it("shows an option only in the form the command takes, its text apart from it however long it is", async () => {

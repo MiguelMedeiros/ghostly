@@ -163,6 +163,13 @@ function help(): string {
   ].join("\n");
 }
 
+/** What `ghostly help help` answers. */
+const HELP_USAGE = [
+  "Usage: ghostly help [<command>...]", "",
+  "  Help for every command, or for one command or a group of them (also ghostly <command> --help)", "",
+  "Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h",
+].join("\n");
+
 /** Every command's help row: usage, summary and, for the table and text commands, their options. */
 function helpRows(): { usage: string; summary: string; options?: Record<string, OptionSpec> }[] {
   return [
@@ -187,6 +194,8 @@ function commandWords(usage: string): string[] {
  * options; for a group (`ghostly help file`), the group's commands.
  */
 export function commandHelp(words: readonly string[]): string {
+  // `help` is no command of the tables: its own usage, rather than "Unknown command: help".
+  if (words[0] === "help") return HELP_USAGE;
   const named = (list: readonly string[]) => helpRows().filter((row) => { const own = commandWords(row.usage); return list.every((word, i) => own[i] === word); });
   // Arguments after the command's words (`ghostly send bob hi --help`) are not part of its name.
   let rows = named(words);
@@ -706,7 +715,12 @@ export async function main(input: string[]): Promise<number> {
   // Global options alone (`ghostly --pretty`, `ghostly -p bot`) name no command: lifted, one of them comes first.
   const helpFor = argv.length === 0 || globalOption(argv[0]) ? [] : helpAsked(argv);
   if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help()) + "\n"); return 0; }
-  if (argv[0] === "--version" || argv[0] === "version") { print({ version: VERSION }); return 0; }
+  if (argv[0] === "--version" || argv[0] === "version") {
+    // Global options come after the command once lifted: `--pretty` indents this answer too.
+    pretty = argv.slice(1).some((word) => word === "--pretty" || word === "--pretty=true");
+    print({ version: VERSION });
+    return 0;
+  }
   const [first, second] = argv;
   const two = second && !second.startsWith("-") ? `${first} ${second}` : "";
   // A command is one its table lists itself: every object has `constructor` and `toString`, which are no commands.
