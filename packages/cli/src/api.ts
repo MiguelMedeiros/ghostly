@@ -233,7 +233,7 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw editRefused(await node(ctx).getMessages(link.id), messageId, "chat", result.error, result.refused);
+    if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
@@ -466,10 +466,11 @@ const METHODS: Record<string, Method> = {
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
-    const before = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId)?.edit?.seq ?? 0;
-    const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
-    if (result.error) throw editRefused(await node(ctx).groupMessages({ groupId: group.id }), messageId, "group", result.error, result.refused);
-    const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
+    const linkId = `group:${group.id}`;
+    const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
+    const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
+    if (result.error) throw editRefused(await messageOf(ctx, linkId, messageId), messageId, "group", result.error, result.refused);
+    const message = await node(ctx).getMessage(linkId, messageId);
     const edits = message?.edit?.seq ?? 0;
     // The text the message already has: no edit was made and nothing went. It answered `sent: true` before, for a
     // message never edited, as if an edit had gone.
@@ -613,12 +614,24 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, command: s
 }
 
 /**
+ * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no row's
+ * key (the id both sides know, `wireId`) reads the whole history. The history is synchronous work on the daemon's one
+ * thread, about 120 ms at 10,000 messages.
+ */
+async function messageOf(ctx: ApiContext, linkId: string, ref: string): Promise<StoredMessage | undefined> {
+  const found = await node(ctx).getMessage(linkId, ref);
+  if (found) return found;
+  const all = linkId.startsWith("group:") ? await node(ctx).groupMessages({ groupId: linkId.slice("group:".length) }) : await node(ctx).getMessages(linkId);
+  return all.find((m) => m.wireId === ref);
+}
+
+/**
  * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), naming the id
  * to give, as `button update` and `task update` do; before, a mistyped or lost id read "Only your own text messages
  * can be edited" (`refused`, exit 1), as if the message were someone else's.
  */
-function editRefused(messages: readonly StoredMessage[], ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
-  if (refused && !messages.some((m) => m.id === ref || m.wireId === ref))
+function editRefused(message: StoredMessage | undefined, ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
+  if (refused && !message)
     return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
   return new CliError(refused ? "refused" : "unavailable", error);
 }
