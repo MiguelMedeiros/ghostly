@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -1339,6 +1339,15 @@ describe("one pull request alone", () => {
     expect(squashMessage({ title: "feat: x", number: 7 }, [])).toEqual({ title: "feat: x (#7)", message: "" });
   });
 
+  it("writes the words that make GitHub skip CI in round brackets, in every message it composes", () => {
+    // In a batch's head commit they stop the batch's CI from ever starting: the train then rebuilds the same batch
+    // every 20 minutes for good. A title edited while queued, or an earlier commit of the pull request, can carry them.
+    for (const words of ["skip ci", "ci skip", "no ci", "skip actions", "actions skip", "Skip CI"]) expect(noSkip(`docs: typo [${words}]`)).toBe(`docs: typo (${words})`);
+    expect(noSkip("fix: [skip] a [ci] label")).toBe("fix: [skip] a [ci] label");
+    const commits = [{ commit: { message: "docs: typo [skip ci]\n\nbody" } }, { commit: { message: "fix: the real change" } }];
+    expect(squashMessage({ title: "fix: x [ci skip]", number: 7 }, commits)).toEqual({ title: "fix: x (ci skip) (#7)", message: "* docs: typo (skip ci)\n* fix: the real change" });
+  });
+
   it("lands a rebased pull request by the same squash merge, at the commit CI passed on", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
@@ -1854,10 +1863,10 @@ describe("building a batch with git", () => {
         for (const part of ["first", "second"]) {
           writeFileSync(join(origin, `${part}-${number}.txt`), "x\n");
           git(["add", `${part}-${number}.txt`]);
-          git(["commit", "-q", "-m", `${part} of ${number}`, "-m", "A body that stays out."]);
+          git(["commit", "-q", "-m", `${part} of ${number}${number === 2 && part === "first" ? " [skip ci]" : ""}`, "-m", "A body that stays out."]);
         }
         git(["update-ref", `refs/pull/${number}/head`, "HEAD"]);
-        return { number, title: `fix: number ${number}`, sha: git(["rev-parse", "HEAD"]) };
+        return { number, title: `fix: number ${number}${number === 2 ? " [no ci]" : ""}`, sha: git(["rev-parse", "HEAD"]) };
       });
       git(["clone", "-q", "origin", "clone"], root);
       const clone = join(root, "clone");
@@ -1874,6 +1883,8 @@ describe("building a batch with git", () => {
       expect(git(["rev-parse", `${built.sha}^`], clone)).toBe(built.commits[1]);
       expect(git(["rev-parse", `${built.commits[1]}^`], clone)).toBe(built.baseSha);
       expect(git(["log", "-1", "--format=%B", built.commits[1]], clone)).toBe("fix: number 1 (#1)\n\n* first of 1\n* second of 1");
+      // The batch's head commit never holds the words that make GitHub start no CI for it.
+      expect(git(["log", "-1", "--format=%B", built.sha], clone)).toBe("fix: number 2 (no ci) (#2)\n\n* first of 2 (skip ci)\n* second of 2");
       expect(batchBody("dev", built.baseSha, built.sha, prs, [], {}, built.commits)).toContain(`{"number":2,"sha":"${prs[1].sha}","commit":"${built.sha}"}`);
       layer.close();
     } finally {
