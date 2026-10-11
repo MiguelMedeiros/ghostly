@@ -1,6 +1,6 @@
 import { Ghost } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
-import { NEXT_VERSION } from "@/lib/status";
+import { SHOTS_VERSION } from "@/lib/release";
 import { shotSrcSet } from "@/lib/shots";
 import { findWisp } from "@/lib/wisps";
 import type { HomeCopy } from "@/content/home";
@@ -66,7 +66,7 @@ export function SpaceSection({ t, w, ids, shotLabel }: { t: HomeCopy["space"]; w
                   <img src={SHOT} srcSet={shotSrcSet(SHOT, "desktop")} sizes={SHOT_SIZES} alt="The Profile page with three profiles, Personal, Work and Club, and backups above them" loading="lazy" width={1280} height={820} />
                 </div>
               </div>
-              <figcaption className="caption">{shotLabel.replace("{n}", NEXT_VERSION)}</figcaption>
+              <figcaption className="caption">{shotLabel.replace("{n}", SHOTS_VERSION)}</figcaption>
             </figure>
 
             <div className="sp-rail">

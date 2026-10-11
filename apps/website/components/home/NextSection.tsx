@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Ghost } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
 import { Reveal } from "./Reveal";
-import { NEXT_VERSION } from "@/lib/status";
+import { SHOTS_VERSION } from "@/lib/release";
 import { shotSrcSet } from "@/lib/shots";
 import type { HomeCopy } from "@/content/home";
 import "@/app/next.css";
@@ -160,7 +160,7 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
   const honesty = (id: string) => {
     const shot = SHOTS[id];
     if (!shot) return t.illustration;
-    return shot.from === "dev" ? t.fromDev.replace("{n}", NEXT_VERSION) : t.fromOld;
+    return shot.from === "dev" ? t.fromDev.replace("{n}", SHOTS_VERSION) : t.fromOld;
   };
 
   // The live line draws once, when the head comes into view.
