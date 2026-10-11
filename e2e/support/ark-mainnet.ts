@@ -1,4 +1,4 @@
-import type { BrowserContext } from "@playwright/test";
+import type { BrowserContext, Route } from "@playwright/test";
 
 /**
  * The Mainnet Ark server's answer to /v1/info, as a test server gives it: Mutinynet's (mutinynet.arkade.sh, a public
@@ -23,15 +23,34 @@ const json = (body: unknown) => ({ status: 200, contentType: "application/json",
  * explorer (mempool.space) is the test's own to route.
  */
 export async function mockMainnetArk(context: BrowserContext, seen?: Set<string>): Promise<void> {
-  await context.route(/^https:\/\/arkade\.computer\//, async (route) => {
-    const url = new URL(route.request().url());
-    seen?.add(`${route.request().method()} ${url.pathname.replace(/[0-9a-f]{16,}/g, ":id")}`);
-    if (url.pathname === "/v1/info") return route.fulfill(json(RECORDED_ARK_INFO));
-    if (url.pathname === "/v1/indexer/vtxos") return route.fulfill(json({ vtxos: [], page: { current: 0, next: 0, total: 0 } }));
-    if (url.pathname === "/v1/indexer/script/subscribe") return route.fulfill(json({ subscriptionId: "e2e-mainnet" }));
-    if (url.pathname.startsWith("/v1/indexer/script/subscription/")) return new Promise<void>(() => {});
-    return route.abort("connectionrefused");
-  });
+  await context.route(/^https:\/\/arkade\.computer\//, (route) => answerArk(route, RECORDED_ARK_INFO, "e2e-mainnet", seen));
+}
+
+/** An Ark server with nothing of this wallet: its info, no coins, a subscription that never says anything. */
+async function answerArk(route: Route, info: object, subscriptionId: string, seen?: Set<string>): Promise<void> {
+  const url = new URL(route.request().url());
+  seen?.add(`${route.request().method()} ${url.pathname.replace(/[0-9a-f]{16,}/g, ":id")}`);
+  if (url.pathname === "/v1/info") return route.fulfill(json(info));
+  if (url.pathname === "/v1/indexer/vtxos") return route.fulfill(json({ vtxos: [], page: { current: 0, next: 0, total: 0 } }));
+  if (url.pathname === "/v1/indexer/script/subscribe") return route.fulfill(json({ subscriptionId }));
+  if (url.pathname.startsWith("/v1/indexer/script/subscription/")) return new Promise<void>(() => {});
+  return route.abort("connectionrefused");
+}
+
+/** Mutinynet's own answer to /v1/info (mutinynet.arkade.sh), recorded: what RECORDED_ARK_INFO was made from. */
+export const RECORDED_MUTINYNET_INFO = {
+  ...RECORDED_ARK_INFO, forfeitAddress: "tb1qz5zgustrxzztljhfr5pm8s4m0a4v0pzqzct90v", checkpointTapscript: "03080040b27520dfcaec558c7e78cf3e38b898ba8a43cfb5727266bae32c5c5b3aeb32c558aa0bac",
+  network: "mutinynet", unilateralExitDelay: "2048", deprecatedSigners: [{ pubkey: "03fa73c6e4876ffb2dfc961d763cca9abc73d4b88efcb8f5e7ff92dc55e9aa553d", cutoffDate: "1782000000" }],
+};
+
+/**
+ * Testnet Ark without Mutinynet: New makes a Testnet Ark wallet there first, and a test about another network (the
+ * local regtest server) must not fail on a public server's slow day. mutinynet.arkade.sh is answered as
+ * `mockMainnetArk` answers arkade.computer, and its explorer (mutinynet.com) as an empty one. Neither is reached.
+ */
+export async function mockMutinynetArk(context: BrowserContext): Promise<void> {
+  await context.route(/^https:\/\/mutinynet\.arkade\.sh\//, (route) => answerArk(route, RECORDED_MUTINYNET_INFO, "e2e-mutinynet"));
+  await context.route(/^https:\/\/mutinynet\.com\//, (route) => route.fulfill(json(/fee/.test(new URL(route.request().url()).pathname) ? { fastestFee: 1, halfHourFee: 1, hourFee: 1, economyFee: 1, minimumFee: 1 } : [])));
 }
 
 /** mempool.space, as an empty explorer that answers at once: no coins at any address, the lowest fees. */
