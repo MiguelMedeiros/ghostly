@@ -84,7 +84,7 @@ describe("a profile that cannot be opened", () => {
     const view = renderGate();
     fail({ reason: "newer", supportedVersion: 11 });
     await view.user.click(screen.getByRole("button", { name: "More info" }));
-    expect(screen.getByTestId("profile-unavailable-text")).toHaveTextContent("This profile's data is at version >11.");
+    expect(screen.getByTestId("profile-unavailable-text")).toHaveTextContent("Its data is version >11;");
   });
 
   it("any other failure: that the data did not open, the reason and what to try, the system's words behind the ⓘ, and Try again", async () => {
@@ -109,7 +109,7 @@ describe("a profile that cannot be opened", () => {
     }
     await view.user.click(screen.getByRole("button", { name: "More info" }));
     const story = screen.getByTestId("profile-unavailable-text");
-    expect(story).toHaveTextContent("Nothing was changed or deleted. While the data is closed, Ghostly connects to nobody and sends nothing for this profile.");
+    expect(story).toHaveTextContent("Nothing was changed or deleted. While closed, this profile connects to nobody and sends nothing.");
     expect(story).toHaveTextContent("What the system said: UnknownError: Internal error opening backing store");
   });
 

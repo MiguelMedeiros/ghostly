@@ -60,7 +60,7 @@
     "rollback": "The link holds an older version.",
     "status": "Nothing found at that link.",
     "storage": "This browser can't keep apps here (private browsing?). Try a normal window.",
-    "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too. Open Ghostly in a normal window and install the app there.",
+    "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too.",
     "storeKey": "That store is signed by a different key.",
     "tooLarge": "Too large.",
     "unlistedVersion": "The link holds a version this store has not listed yet."
@@ -93,10 +93,10 @@
     "same": "Already installed.",
     "sentBy": "Sent by {{name}}",
     "unknownPublisher": "Unknown publisher",
-    "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added can vouch for who made it. Compare the key with the one the maker publishes.",
+    "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added vouches for its maker. Compare this key with the maker's own.",
     "update": "Update",
     "webkit": "In this browser, an app can still contact other servers.",
-    "webkitInfo": "Safari, and every browser on iPhone and iPad, lets an app open connections Ghostly cannot block, even without the internet permission. Those servers learn your IP address. The desktop app blocks them."
+    "webkitInfo": "Safari and every iPhone or iPad browser let apps open connections Ghostly cannot block. Those servers learn your IP address. The desktop app blocks them."
   },
   "page": {
     "add": "Add",

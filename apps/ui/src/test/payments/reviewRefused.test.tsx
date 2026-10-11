@@ -33,7 +33,7 @@ describe("a refused send whose ecash came back", () => {
     expect(info).toHaveAttribute("aria-expanded", "false");
     await user.click(info);
     expect(info).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByTestId("review-returned-text")).toHaveTextContent("Taking ecash back is a swap at the mint, and the mint keeps a small fee for each swap: 2 test sats this time.");
+    expect(screen.getByTestId("review-returned-text")).toHaveTextContent("Taking ecash back is a swap at the mint, which keeps a small fee: 2 test sats this time.");
   });
 
   it("says it in the app's language", () => {

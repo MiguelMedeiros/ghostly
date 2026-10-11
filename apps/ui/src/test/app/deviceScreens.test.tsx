@@ -420,7 +420,7 @@ describe("the standby screen", () => {
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Can't read this device's state");
     expect(screen.getByTestId("device-standby")).toHaveTextContent("Nothing was started.");
     await user.click(screen.getByTestId("device-standby-info"));
-    expect(screen.getByTestId("device-standby-text")).toHaveTextContent("Restart the app or the device, then try again.");
+    expect(screen.getByTestId("device-standby-text")).toHaveTextContent("Restart the app or device, then retry.");
   });
 });
 
@@ -484,7 +484,7 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     expect(line).toHaveTextContent("Restored copy, offline for now");
     expect(line).toHaveTextContent("Checking whether your profile runs on another device.");
     act(() => screen.getByTestId("restore-limited-info").click());
-    expect(screen.getByTestId("restore-limited-text")).toHaveTextContent("this copy goes on standby; if none does, it starts by itself");
+    expect(screen.getByTestId("restore-limited-text")).toHaveTextContent("this copy goes on standby; if not, it starts");
     // A tombstone: only the person starts it as a profile of its own, by typing its name.
     act(() => fakeEngine.setState({ limited: true, restoreCheck: "removed" }));
     expect(screen.getByTestId("restore-limited-banner")).toHaveTextContent("This backup is from before a device was removed.");
