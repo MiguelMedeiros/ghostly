@@ -73,10 +73,11 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47097 | HyperDHT relay for browsers (`infra/services/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
-| 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
 
-The last three are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
-another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults.
+The last two are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
+another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults. The domain-proof
+servers (`support/domain.ts`, DoH and well-known, in the test process) have no port here: each listens on a free one
+the system gives it.
 
 On Linux these ports sit inside the ephemeral range (32768-60999), so an outgoing connection can hold one as its
 local port just when a server wants it ("Port 47300 is already in use"). The `E2E (full)` jobs reserve 47000-47399
@@ -390,7 +391,7 @@ the DHT (docs/TESTING.md has what each transport value settles on).
 The matrix runs every night with the ephemeral environment (`e2e-full.yml`: four shards, the Desktop scenarios in a
 job of their own on ubuntu-22.04, then one report with the matrix in the run's summary), not on pull requests. By
 hand, `gh workflow run e2e-full.yml --ref <branch> -f jobs=desktop` runs only the Desktop job and the report. It serves its own
-build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
+build on port 47300 (`MATRIX_WEB_PORT`).
 
 ## Compatibility with older releases
 
