@@ -5,6 +5,8 @@ import { reloadIntoGate } from "../../lib/devices";
 import { activeProfileId, listProfiles } from "../../lib/profiles";
 import { InfoButton } from "../layout/Section";
 import { SCREEN_BUTTON, SCREEN_QUIET } from "./DeviceDialog";
+import { type Problem, problemText } from "../../lib/problemText";
+import { Notice } from "../ui/Notice";
 
 /*
  * Limited mode (WISP 06 § When a device checks): the active device of a device set could not read which device is
@@ -98,7 +100,11 @@ function RestoreBanner({ check }: { check: "checking" | "removed" }) {
   const [busy, setBusy] = useState(false);
   const id = useId();
   const name = listProfiles().find((profile) => profile.id === activeProfileId())?.name ?? "";
-  const startOwn = () => { setBusy(true); void engine.call("deviceRestoreStartOwn").finally(() => setBusy(false)); };
+  const [error, setError] = useState<Problem | null>(null);
+  const startOwn = () => {
+    setBusy(true); setError(null);
+    void engine.call("deviceRestoreStartOwn").catch((cause: unknown) => setError(problemText(cause, t))).finally(() => setBusy(false));
+  };
   return (
     <div role="status" data-testid="restore-limited-banner" data-check={check} className="shrink-0 border-b border-border bg-surface px-4 py-2 space-y-2">
       <div className="flex items-start gap-2.5">
@@ -117,6 +123,7 @@ function RestoreBanner({ check }: { check: "checking" | "removed" }) {
           <button type="button" data-testid="restore-limited-own" disabled={busy || typed.trim() !== name.trim()} onClick={startOwn} className={SCREEN_QUIET}>{t("devices.restore.tombstoneGo")}</button>
         </div>
       )}
+      {error && <Notice problem={error} testId="restore-limited-error" />}
     </div>
   );
 }

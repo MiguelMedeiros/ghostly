@@ -160,7 +160,13 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
   const { t } = useI18n();
   const device = view.device || t("devices.join.otherDevice");
   const [busy, setBusy] = useState(false);
-  const act = (work: () => Promise<unknown>) => { setBusy(true); void work().finally(() => setBusy(false)); };
+  const [error, setError] = useState<Problem | null>(null);
+  // The engine refuses when the offer is gone or the copy has nowhere to go: said under the buttons, as Use here's dialog does.
+  const act = (work: () => Promise<unknown>) => {
+    setBusy(true); setError(null);
+    void work().catch((cause: unknown) => { const key = handoffErrorKey(cause); setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t)); })
+      .finally(() => setBusy(false));
+  };
   return (
     <div data-testid="handoff-offer" className="space-y-3">
       <div className="space-y-1">
@@ -171,6 +177,7 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
         <button type="button" data-testid="handoff-decline" disabled={busy} onClick={() => act(() => engine.call("deviceHandoffCancel"))} className={`${quietButton} max-sm:order-last`}>{t("devices.handoff.notNow")}</button>
         <button type="button" data-testid="handoff-accept" disabled={busy} onClick={() => act(() => engine.call("deviceHandoffAccept", { later: meteredConnection() ? HANDOFF_LATER_BYTES : 0 }))} className={primaryButton}>{t("devices.handoff.useHere")}</button>
       </div>
+      {error && <Notice problem={error} testId="handoff-offer-error" className="" />}
     </div>
   );
 }
