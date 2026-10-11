@@ -97,7 +97,8 @@ test("a link whose #anchor is not valid percent-encoding still shows the WISPs p
   for (const hash of ["#%", "#wisp-%E0%A4%A", "#100%-private", "#%FF"]) {
     await page.goto("about:blank");
     await page.goto(`/wisps${hash}`);
-    await page.waitForLoadState("networkidle");
+    // The nav's chevron is enabled once the page hydrated, which is when the old anchors are read.
+    await expect(page.getByRole("button", { name: "Ways to open Ghostly" })).toBeEnabled();
     await expect(page.locator(".wmap-tile").first()).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page).toHaveURL(/\/wisps#/);
