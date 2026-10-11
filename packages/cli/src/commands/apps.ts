@@ -16,6 +16,12 @@ const key = { type: "string", description: "The key file (made, owner-only, when
  * command, in alphabetical order (test/commands.test.ts checks).
  */
 export const commands: Record<string, Command> = {
+  "app close": {
+    method: "app.close", usage: "app close <chat> <ref|name>",
+    summary: "Close a served app in a chat: the contact's app hears it ended",
+    args: ["chat", "ref"],
+    params: (_, a) => ({ chat: a.chat, ref: a.ref }),
+  },
   "app init": {
     method: "app.init", usage: "app init <dir> [--name <name>] [--title <title>] [--force]",
     summary: "Start an app (WISP 1200): a small working one in <dir>, its ghostly-app.json, an index.html that says hello to the contact and a README, ready for app publish",
@@ -26,6 +32,13 @@ export const commands: Record<string, Command> = {
       force: { type: "boolean", description: "Replace the three files when they are there" },
     },
     run: ({ options }, a) => initApp(a.dir!, { name: options.name as string | undefined, title: options.title as string | undefined, force: options.force === true }),
+  },
+  "app open": {
+    method: "app.open", usage: "app open <chat> <ref|name> [--no-card]",
+    summary: "Open a served app in a chat, as a bot (needs the daemon): the contact gets the app's card, unless their app is open there already, and the two sides can talk once both opened it",
+    args: ["chat", "ref"],
+    options: { "no-card": { type: "boolean", description: "Send no app card, only say the app is open" } },
+    params: ({ options }, a) => ({ chat: a.chat, ref: a.ref, noCard: options["no-card"] === true }),
   },
   "app publish": {
     method: "app.publish", usage: "app publish <dir> --key <file> [--out <file>]",
