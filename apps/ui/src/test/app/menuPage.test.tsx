@@ -76,6 +76,33 @@ it("Try again asks for the file again and shows the page, with the keyboard focu
   expect(screen.queryByTestId("app-error")).not.toBeInTheDocument();
 });
 
+it("once Try again has failed, Reload is offered, and reloads only into a page the server answers for", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const reload = vi.spyOn(window.location, "reload").mockImplementation(() => {});
+  let reachable = false;
+  const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(() => (reachable ? Promise.resolve(new Response(null, { status: 200 })) : Promise.reject(new TypeError("Failed to fetch"))));
+  // Chromium keeps a failed import for as long as the page lives: asking again fails however good the connection is.
+  const Page = menuPage<object>(() => Promise.reject(new TypeError("Failed to fetch dynamically imported module")));
+  const { user } = renderApp(app(Page));
+
+  const again = await screen.findByRole("button", { name: "Try again" });
+  expect(screen.queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
+  await user.click(again);
+  const button = await screen.findByRole("button", { name: "Reload" });
+
+  // No connection: a reload would leave the browser's own error page, so the app stays.
+  await user.click(button);
+  await waitFor(() => expect(fetched).toHaveBeenCalledWith(location.pathname, { method: "HEAD", cache: "no-store" }));
+  await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
+  expect(reload).not.toHaveBeenCalled();
+  expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+
+  reachable = true;
+  await user.click(button);
+  await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+});
+
 it("the notice speaks the profile's language", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
