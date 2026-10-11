@@ -2,9 +2,10 @@ name: Security autorelease
 
 # The security routine (a scheduled Claude Code agent) pushes its fixes to a
 # `claude/security-auto-*` branch, version already bumped by one patch. Once
-# CI passes on that push, this workflow, which always runs from `main`, checks
-# the branch against tools/scripts/autorelease-gate.mjs, fast-forwards main to it,
-# tags it and publishes the release.
+# CI passes on that push, this workflow checks the branch against main's
+# tools/scripts/autorelease-gate.mjs, fast-forwards main to it, tags it and
+# publishes the release. A `workflow_run` always runs the default branch's copy
+# of this file (`dev`), and with it that branch's release.yml.
 #
 # Repository variable SECURITY_AUTORELEASE: "all" (default: dependency and
 # code fixes), "deps" (dependency updates only; code fixes wait for a person)
@@ -127,7 +128,9 @@ jobs:
           VERSION: ${{ needs.gate.outputs.version }}
         run: gh workflow run npm-publish.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="v$VERSION"
 
-  # The same for web-latest.yml, which moves the web image's `latest` to the release's image.
+  # The same for web-latest.yml, which moves the web image's `latest` to the release's image. No `--ref`: it runs
+  # from the default branch, like this workflow and the release.yml that stopped pushing `latest`, so it is there
+  # even when main does not hold it yet. It reads only the releases and tools/scripts/web-latest.mjs.
   web:
     name: Web image latest
     needs: [gate, notes]
@@ -139,4 +142,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.gate.outputs.version }}
-        run: gh workflow run web-latest.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="v$VERSION"
+        run: gh workflow run web-latest.yml --repo "$GITHUB_REPOSITORY" -f tag="v$VERSION"

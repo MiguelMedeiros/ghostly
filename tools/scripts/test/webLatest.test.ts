@@ -64,4 +64,14 @@ describe("the web image's latest tag", () => {
     expect(workflow).toContain('docker buildx imagetools create --tag "$image:latest" "$image:$TAG"');
     expect(job(".github/workflows/security-autorelease.yml", "web")).toContain("gh workflow run web-latest.yml");
   });
+
+  it("is dispatched from the default branch, which holds the workflow before main does", () => {
+    // security-autorelease.yml runs from the default branch (workflow_run), and so does the release.yml it calls,
+    // which no longer pushes latest: a dispatch at main would find no web-latest.yml until the next release.
+    const dispatch = job(".github/workflows/security-autorelease.yml", "web")
+      .split("\n")
+      .find((line) => line.includes("gh workflow run web-latest.yml"));
+    expect(dispatch).toContain('-f tag="v$VERSION"');
+    expect(dispatch).not.toMatch(/--ref|-r /);
+  });
 });
