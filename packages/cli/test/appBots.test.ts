@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRef, type AppManifest } from "@ghostly/core";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
-// covers: apps.chat.wire, headless.daemon, headless.events
+// covers: headless.apps, apps.chat.wire, headless.daemon, headless.events
 
 /**
  * Two bots that serve the same app, each a `ghostly` daemon on its own profile (WISP 1200 § A bot on the other side):
