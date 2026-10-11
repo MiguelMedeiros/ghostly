@@ -1,6 +1,6 @@
 import {
-  GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
+  GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, PIN_LIMITS, ReactionWindow, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
+  EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -440,6 +440,8 @@ export class Groups {
   private readonly removedAt = new Map<string, number>();
   /** Who is typing in each private group, and this side's word there (WISP 902 · Group Mesh § Typing). */
   private readonly typings: GroupTypings;
+  /** A member's pins taken per window in a private group (group and member key). */
+  private readonly pinPaces = new Map<string, ReactionWindow>();
   /** Edge signaling through members (WISP 902 · Group Mesh § Signaling through members). */
   private readonly signals: MeshSignals;
   /** Files and voice messages in every group, private or community (WISP 503 · Group Files). */
@@ -492,6 +494,14 @@ export class Groups {
     for (const group of this.stored.values()) for (const [, linkId] of this.host.entries(group.id)) {
       if (!group.invitation?.entry || group.invitation.linkId !== linkId) await this.host.closeEdge(linkId);
     }
+  }
+
+  /** The pins taken per window from one member's edge in a private group, as a paired chat's session limits them. */
+  private pinPace(groupId: string, member: string): ReactionWindow {
+    const key = `${groupId}\n${member}`;
+    let pace = this.pinPaces.get(key);
+    if (!pace) this.pinPaces.set(key, pace = new ReactionWindow(PIN_LIMITS.receive, PIN_LIMITS.windowMs));
+    return pace;
   }
 
   /** A group's pin now (WISP 400 § Pinned message), the latest one taken, unpinned or not. */
@@ -980,6 +990,7 @@ export class Groups {
     this.gapsAsked.delete(groupId);
     this.gapsLooked.delete(groupId);
     this.typings.forget(groupId);
+    for (const key of this.pinPaces.keys()) if (key.startsWith(`${groupId}\n`)) this.pinPaces.delete(key);
     this.downSince.delete(groupId);
     this.hereHeard.delete(groupId);
     this.hereActed.delete(groupId);
@@ -1502,6 +1513,9 @@ export class Groups {
     if (t === GROUP_REACTION_FRAME || t === GROUP_REACTED_FRAME) { await this.reaction(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (t === GROUP_TYPING_FRAME) { this.typings.heard(session, peerKey, frame); return; }
     if (t === GROUP_PIN_FRAME) {
+      // Paced per member like its reactions; one no newer than the group's pin changes nothing, so its signature is not checked.
+      const said = this.pinPace(groupId, peerKey).take() ? readPin(frame) : null;
+      if (!said || !pinIsNewer(this.record(groupId)?.pin, said)) return;
       const signed = session.signedPin(frame);
       if (signed && rosterHas(session.roster, peerKey)) await this.host.groupPin?.(groupId, peerKey, signed);
       return;

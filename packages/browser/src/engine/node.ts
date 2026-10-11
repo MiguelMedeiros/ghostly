@@ -4526,6 +4526,8 @@ export class GhostlyNode implements EngineImplementation {
     const view = this.groups.views().find(g => g.id === groupId);
     if (!pin || !view?.myKey || view.status !== "active" || !view.members.some(m => m.key === member)) return;
     if (!mayPin(view.profile, member, view.members.find(m => m.role === "admin")?.key)) return;
+    // One that would not be kept (`setPin`'s rule) reads no row.
+    if (!pinIsNewer(this.groups.pinOf(groupId), pin)) return;
     const kept = await this.pinCame(`group:${groupId}`, member === view.myKey ? "me" : member, pin);
     if (!await this.groups.setPin(groupId, { ...kept, ...(via && { k: via.frame.k, sig: via.frame.sig }) }) || !via) return;
     for (const key of this.memberEdges(groupId).keys()) if (key !== via.from && key !== member) this.sendGroupPinFrame(groupId, key);
