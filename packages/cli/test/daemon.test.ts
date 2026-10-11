@@ -69,6 +69,20 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     expect(listed.stderr).toBe("");
   });
 
+  it("daemon status and daemon stop on a profile that does not exist say so; `default` is not made by asking", async () => {
+    const typo = home("no-such-profile");
+    createProfile(typo, "bot");
+    const message = "No profile nobody: make it with `ghostly profile create nobody`";
+    expect(error(await ghostly(["--home", typo, "-p", "nobody", "daemon", "status"], { env }), "not_found", 3).message).toBe(message);
+    expect(error(await ghostly(["--home", typo, "-p", "nobody", "daemon", "stop"], { env }), "not_found", 3).message).toBe(message);
+    expect(existsSync(profilePaths(typo, "nobody").dir)).toBe(false);
+    // A profile that exists and `default`, which is made on first use, are only not running.
+    expect(ok(await ghostly(["--home", typo, "-p", "bot", "daemon", "status"], { env }))).toMatchObject({ running: false, profile: "bot" });
+    expect(ok(await ghostly(["--home", typo, "-p", "default", "daemon", "status"], { env }))).toMatchObject({ running: false, profile: "default" });
+    expect(error(await ghostly(["--home", typo, "-p", "default", "daemon", "stop"], { env }), "not_found", 3).message).toBe("No daemon runs profile default");
+    expect(existsSync(profilePaths(typo, "default").dir)).toBe(false);
+  });
+
   it("daemon --detach on a profile another process holds says busy and names that process", async () => {
     const held = home("held");
     createProfile(held, "default");
