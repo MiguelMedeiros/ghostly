@@ -294,6 +294,8 @@ interface LiveLink {
   lastSyncAt: number;
   poll: LinkView["poll"];
   files: LinkFiles;
+  /** The files of mine said on the DHT floor and not seen there yet, by floor id; read once in a run (`floorFilesOf`). */
+  floorFiles?: Promise<Map<string, string>>;
   /** The chat's connection story (paired chats), made from `stored.transportLog` on first use. */
   transportLog?: TransportLog;
   /** A group's entry session whose admission is done: it closes once its data link does (`GroupsHost.entryDone`). */
@@ -3692,19 +3694,35 @@ export class GhostlyNode implements EngineImplementation {
     const error = await link.announceFile(offer, message.timestamp, GhostlyNode.wireReply(message), message.forwarded);
     const said = !error && link.dhtPendingId === dhtFileId(offer.wireId);
     if (!said && error !== DHT_FILE_TOO_LARGE) return;
-    await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" || current.fileOnFloor ? null
+    const noted = await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" || current.fileOnFloor ? null
       : { fileOnFloor: said ? "sent" : "unfit", ...(said && { details: withSend(current.details, { at, ...pathSnapshot(live, "pkarr"), result: "sent" }) }) });
+    // Its receipt finds it by its floor id; a list not read yet reads it from the history (`floorFilesOf`).
+    if (said && noted) await live.floorFiles?.then(known => known.set(dhtFileId(offer.wireId), message.id), () => {});
     await this.messagesChanged(linkId, [message.id]);
   }
 
   /** A receipt on the DHT floor that names a waiting file's offer (`dhtFileId`): its bubble is in place on the contact's side. */
   private async fileSeenOnFloor(linkId: string, id: string): Promise<void> {
-    const prefix = `${linkId}-out-`;
-    const message = (await db.getMessages(linkId)).find(m => m.sender === "me" && m.file?.id.startsWith(prefix) && m.fileOnFloor === "sent" && dhtFileId(m.file.id.slice(prefix.length)) === id);
-    if (!message) return;
-    const seen = await db.patchMessage(linkId, message.id, current => current.fileOnFloor !== "sent" ? null
+    const live = this.links.get(linkId);
+    if (!live) return;
+    const said = await this.floorFilesOf(live), messageId = said.get(id);
+    if (!messageId) return;
+    said.delete(id);
+    const seen = await db.patchMessage(linkId, messageId, current => current.fileOnFloor !== "sent" ? null
       : { fileOnFloor: "seen", ...(current.delivery === "waiting" && { deliveryError: "Your contact sees it. The file goes when you are live." }) });
-    if (seen) await this.messagesChanged(linkId, [message.id]);
+    if (seen) await this.messagesChanged(linkId, [messageId]);
+  }
+
+  /**
+   * The files of mine said on the floor and not seen there yet, their message by their floor id (`dhtFileId`). Read from
+   * the chat's history once in a run, then kept as files are said (`sayFileOnFloor`): a receipt that names none of them
+   * costs the same in a long chat as in a short one.
+   */
+  private floorFilesOf(live: LiveLink): Promise<Map<string, string>> {
+    const linkId = live.stored.id, prefix = `${linkId}-out-`;
+    return live.floorFiles ??= db.getMessages(linkId).then(history => new Map(history
+      .filter(m => m.sender === "me" && m.file?.id.startsWith(prefix) && m.fileOnFloor === "sent")
+      .map(m => [dhtFileId(m.file!.id.slice(prefix.length)), m.id])), error => { live.floorFiles = undefined; throw error; });
   }
 
   /**
