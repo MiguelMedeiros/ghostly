@@ -101,6 +101,12 @@ fn packaged<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(PathBuf, Pa
 }
 
 impl HyperState {
+    /// The Ghostly window's page starts (`TransportState::page_started` says when and why): the endpoints the page
+    /// before it held are stopped, as `paired_hyperdht_stop` stops one. One still starting ends as "stopped".
+    pub fn page_started(&self) {
+        self.peers.lock().unwrap().clear();
+    }
+
     /// Starts the runtime. Called with the slot locked, so two endpoints
     /// starting at once never start two.
     fn spawn(&self, program: (PathBuf, PathBuf)) -> Result<Runtime, String> {
@@ -854,6 +860,37 @@ mod runtime_tests {
             "Native endpoint limit reached"
         );
         assert_eq!(spawned(&app), 1);
+    }
+
+    /// A page that starts finds its eight places free: the endpoints the page before it left running are stopped
+    /// in the runtime too, which leaves with the last of them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_page_that_starts_stops_what_the_page_before_it_left_running() {
+        let app = app();
+        let left = futures_util::future::join_all((1..=8).map(|byte| start(&app, byte))).await;
+        assert!(left.iter().all(Result::is_ok));
+        let runtime = pid(&app).await.unwrap();
+        assert_eq!(
+            start(&app, 9).await.err().unwrap(),
+            "Native endpoint limit reached"
+        );
+
+        app.state::<HyperState>().page_started();
+
+        for endpoint in left {
+            assert_eq!(
+                paired_hyperdht_address(app.state(), endpoint.unwrap().id).unwrap_err(),
+                "HyperDHT endpoint closed"
+            );
+        }
+        until("the runtime leaving", || !alive(runtime)).await;
+        assert_eq!(pid(&app).await, None);
+        let again = futures_util::future::join_all((11..=18).map(|byte| start(&app, byte))).await;
+        assert!(
+            again.iter().all(Result::is_ok),
+            "{:?}",
+            again.iter().find(|r| r.is_err())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

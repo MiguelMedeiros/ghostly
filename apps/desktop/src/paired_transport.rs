@@ -82,6 +82,8 @@ async fn tell_address(
 struct Inner {
     peers: HashMap<u64, Peer>,
     sockets: HashMap<u64, (u64, Socket)>,
+    /// Which page of the Ghostly window this is, counted from the app's start (`page_started`).
+    page: u64,
 }
 #[derive(Clone, Default)]
 pub struct TransportState {
@@ -178,15 +180,30 @@ impl TransportState {
     /// starts watching for this app to come back. Bounded by `within`: exiting never waits on a
     /// relay that does not answer.
     pub async fn shutdown(&self, within: Duration) {
-        let peers: Vec<Peer> = {
-            let mut inner = self.inner.lock().unwrap();
-            for (_, (_, socket)) in inner.sockets.drain() {
-                socket.connection.close(0u32.into(), b"app exiting");
-            }
-            inner.peers.drain().map(|(_, peer)| peer).collect()
-        };
+        let peers = self.release(b"app exiting");
         let closing = close_all(peers);
         let _ = tokio::time::timeout(within, closing).await;
+    }
+    /// Every connection closed and every endpoint off the books, now; the endpoints are the caller's to close.
+    fn release(&self, why: &'static [u8]) -> Vec<Peer> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.page += 1;
+        for (_, (_, socket)) in inner.sockets.drain() {
+            socket.connection.close(0u32.into(), why);
+        }
+        inner.peers.drain().map(|(_, peer)| peer).collect()
+    }
+    /// The Ghostly window's page starts: the app opening, the page loaded again (another profile, Clear all data, a
+    /// device that became a standby), or the WebView back after its process died. The page before it held the
+    /// endpoints by ids only it knew, and it may have gone without stopping one (its process died, a stop asked for
+    /// as the page went never arrived, a listener was still starting): nothing here would ever stop them, and with
+    /// eight left behind no chat of the new page gets a listener. So they are off the books before the new page asks,
+    /// each contact hears the close at once, and the endpoints are closed in the background.
+    pub fn page_started(&self) {
+        let peers = self.release(b"page gone");
+        if !peers.is_empty() {
+            tauri::async_runtime::spawn(close_all(peers));
+        }
     }
     /// The network changed (Android's own callback: there Iroh's netwatch may not see it, denied the routing table):
     /// every endpoint looks again at its addresses and paths now. Returns how many were told.
@@ -215,9 +232,13 @@ impl TransportState {
         local_only: bool,
         relays: &[String],
     ) -> Result<Started, String> {
-        if self.inner.lock().unwrap().peers.len() >= 8 {
-            return Err("Native endpoint limit reached".into());
-        }
+        let page = {
+            let inner = self.inner.lock().unwrap();
+            if inner.peers.len() >= 8 {
+                return Err("Native endpoint limit reached".into());
+            }
+            inner.page
+        };
         let endpoint = if relays.is_empty() || local_only {
             wire::endpoint(seed, local_only).await?
         } else {
@@ -247,6 +268,12 @@ impl TransportState {
             }
         });
         let mut inner = self.inner.lock().unwrap();
+        // The page that asked is gone (another one started while this endpoint was binding): nobody holds its id.
+        if inner.page != page {
+            listener.abort();
+            tauri::async_runtime::spawn(async move { endpoint.close().await });
+            return Err("The page that asked for this endpoint is gone".into());
+        }
         if inner.peers.len() >= 8 {
             listener.abort();
             return Err("Native endpoint limit reached".into());
@@ -781,6 +808,39 @@ mod tests {
                 .unwrap(),
             "Native endpoint limit reached"
         );
+    }
+
+    /// A page that starts (loaded again, or back after its process died) finds its eight places free: what the
+    /// page before it left running is stopped, and a contact on the other end hears the close at once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_that_starts_frees_what_the_page_before_it_left_running() {
+        let (page, contact) = (app(), app());
+        let mut left = Vec::new();
+        for seed in 30..38 {
+            left.push(start(&page, seed).await.0);
+        }
+        let (_bob, bob_address, bob_seen) = start(&contact, 40).await;
+        connect(&page, left[0], &bob_address).await.unwrap();
+        let accepted = event(&bob_seen, kind("open")).await["id"].clone();
+        let (events, _) = channel();
+        let ninth = page
+            .state::<TransportState>()
+            .start([41; 32], events, true, &[])
+            .await;
+        assert_eq!(ninth.err().unwrap(), "Native endpoint limit reached");
+
+        page.state::<TransportState>().page_started();
+
+        assert_eq!(event(&bob_seen, kind("closed")).await["id"], accepted);
+        for id in left {
+            assert_eq!(
+                paired_iroh_address(page.state(), id).await.unwrap_err(),
+                "Endpoint closed"
+            );
+        }
+        for seed in 50..58 {
+            start(&page, seed).await;
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
