@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AtprotoHost } from "@ghostly/browser/proofs/atproto/oauth";
 import { androidApp } from "../lib/touchOnly";
+import { signInPageLanguage } from "./oidc";
 
 /**
  * Signing in to an AT Protocol server from the desktop app, the native-client way: the server's page
@@ -12,7 +13,7 @@ import { androidApp } from "../lib/touchOnly";
 export const desktopAtproto: AtprotoHost = {
   platform: "desktop",
   async open() {
-    const port = await invoke<number>("oidc_loopback_start");
+    const port = await invoke<number>("oidc_loopback_start", { lang: signInPageLanguage() });
     const redirectUri = `http://127.0.0.1:${port}/oidc-callback`;
     return {
       redirectUri,
