@@ -4,7 +4,7 @@ import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, findChat, groupOf, list, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, list, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -264,7 +264,7 @@ const METHODS: Record<string, Method> = {
   },
   /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
   async "chat.react"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = notAGroup(ctx, params, () => chatOf(ctx, params), "group react", "<message> <emoji>");
     return { chat: link.id, ...(await react(ctx, link.id, params)) };
   },
   /**
@@ -595,6 +595,21 @@ export function groupSendRefused(error: string): CliError {
   if (/not in this chat|cannot be replied to/.test(error)) return new CliError("not_found", error);
   if (/^You (were removed from|left|are no longer in) this group$|Membership changes are halted/.test(error)) return new CliError("refused", error);
   return new CliError("unavailable", error);
+}
+
+/**
+ * A chat command given a group's id, prefix or name: `not_found` that says it is a group, with the group command that
+ * takes it (`react` on a group, where `group react` is meant). A name no chat and no group has stays the chat's error.
+ */
+function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, command: string, rest: string): T {
+  try { return chat(); } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    const ref = str(params, "chat", true);
+    let group: GroupView;
+    try { group = findGroup(state(ctx).groups, ref); } catch { throw error; }
+    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown} ${rest}`, { group: group.id });
+  }
 }
 
 /**
