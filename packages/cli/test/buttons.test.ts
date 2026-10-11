@@ -188,7 +188,10 @@ describe("button update", () => {
     await callApi(ctx, "chat.send", { chat: "Alice", text: "Ok?", buttons: [{ id: "ok", label: "Ok" }] });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "nope", close: true })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", close: true })).rejects.toMatchObject({ code: "bad_request", message: /no buttons/ });
-    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_2", chosen: "maybe" })).rejects.toMatchObject({ code: "bad_request", message: /chosen/ });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_2", chosen: "maybe" })).rejects.toMatchObject({ code: "bad_request", message: /no button "maybe"; its buttons: ok$/ });
+    // A button the message does not have: the answer lists the ones it has, as a press does.
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Deploy?", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_3", chosen: "maybe" })).rejects.toMatchObject({ code: "bad_request", message: 'That message has no button "maybe"; its buttons: yes, no' });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_2" })).rejects.toMatchObject({ code: "bad_request", message: /Nothing to update/ });
     expect(node.editMessage).not.toHaveBeenCalled();
   });
