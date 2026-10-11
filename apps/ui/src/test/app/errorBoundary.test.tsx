@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { ErrorBoundary } from "../../components/ErrorBoundary";
 import { renderApp } from "../render";
@@ -22,10 +22,27 @@ it("shows a way back instead of a blank page, and starts again from home", async
   const reload = vi.spyOn(window.location, "reload").mockImplementation(() => {});
   const { user } = renderApp(<ErrorBoundary><Broken /></ErrorBoundary>);
 
-  expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong.");
+  expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong");
   expect(logged).toHaveBeenCalledWith("Ghostly UI error", expect.objectContaining({ message: "page exploded" }), expect.any(String));
   await user.click(screen.getByRole("button", { name: "Start again" }));
   // The address that failed (it may hold keys) is not loaded again.
   expect(window.location.hash).toBe("#/");
   expect(reload).toHaveBeenCalledOnce();
+});
+
+it("speaks the profile's language", () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  renderApp(<ErrorBoundary><Broken /></ErrorBoundary>, { language: "pt" });
+
+  expect(screen.getByRole("alert")).toHaveTextContent("Algo deu errado");
+  expect(screen.getByRole("button", { name: "Começar de novo" })).toBeInTheDocument();
+  expect(screen.queryByText(/Something went wrong/)).not.toBeInTheDocument();
+});
+
+it("is English where there is no translator", () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  render(<ErrorBoundary><Broken /></ErrorBoundary>);
+
+  expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong");
+  expect(screen.getByRole("button", { name: "Start again" })).toBeInTheDocument();
 });

@@ -460,6 +460,7 @@
     "notAddress": "这不是中继地址：{{address}}",
     "useHttps": "请使用 https:// 中继地址：{{address}}"
   },
+  "startAgain": "重新开始",
   "transport": {
     "adapterFailed": "无法启动。重新打开此聊天以重试。",
     "allowAnotherNext": "允许另一种传输方式，或打开备用。",

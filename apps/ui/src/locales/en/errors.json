@@ -460,6 +460,7 @@
     "notAddress": "Not a relay address: {{address}}",
     "useHttps": "Use an https:// relay address: {{address}}"
   },
+  "startAgain": "Start again",
   "transport": {
     "adapterFailed": "Couldn't start. Reopen this chat to retry.",
     "allowAnotherNext": "Allow another transport, or turn Fallback on.",
