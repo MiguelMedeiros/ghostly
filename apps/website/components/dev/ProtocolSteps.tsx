@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { IntentLink } from "@/components/site/IntentLink";
 import type { DevCopy } from "@/content/developers";
 import { STEPS, LAND, PORT } from "./protocolTimeline";
 import { StepClock } from "./stepClock";
@@ -177,9 +177,9 @@ export function ProtocolSteps({ t, wisps }: { t: StepsCopy; wisps: Record<string
                 {s.wisps.map((n) => {
                   const w = wisps[n];
                   return w ? (
-                    <Link key={n} href={w.href} className="psx-wisp mono" title={w.name}>
+                    <IntentLink key={n} href={w.href} className="psx-wisp mono" title={w.name}>
                       WISP {w.number}
-                    </Link>
+                    </IntentLink>
                   ) : null;
                 })}
               </p>

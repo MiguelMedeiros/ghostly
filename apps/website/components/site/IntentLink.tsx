@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 /**
- * A link in a long list of pages (the WISP map, the reader's panel): it loads its page when the reader is about to open
+ * A link in a long list of pages (the WISP map, the reader's panel, the developers page): it loads its page when the reader is about to open
  * it (pointer, focus, touch), not as it scrolls into view, so a page with dozens of them does not fetch them all.
  */
 export function IntentLink({ href, onMouseEnter, onFocus, onTouchStart, ...rest }: Omit<ComponentProps<typeof Link>, "href" | "prefetch"> & { href: string }) {
