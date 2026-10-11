@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { NameStep } from "./components/NameStep";
@@ -18,6 +18,7 @@ import { PreUnlockRing } from "./components/PreUnlockRing";
 import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { menuPage } from "./components/MenuPage";
 import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
 import { LimitedStartGate } from "./components/devices/LimitedStart";
@@ -34,16 +35,7 @@ import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
 
-/**
- * A page of the menu, loaded the first time it is opened: the first screen (the chat list) does not wait for them.
- * Nothing is drawn in its place for the moment it takes.
- */
-function menuPage<P extends object>(load: () => Promise<ComponentType<P>>) {
-  const Page = lazy(async () => ({ default: await load() }));
-  return function MenuPage(props: P) {
-    return <Suspense fallback={null}><Page {...props} /></Suspense>;
-  };
-}
+// The pages of the menu, each loaded the first time it is opened (components/MenuPage.tsx).
 const Settings = menuPage(() => import("./pages/Settings").then((m) => m.Settings));
 const Services = menuPage(() => import("./pages/Services").then((m) => m.Services));
 const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile));

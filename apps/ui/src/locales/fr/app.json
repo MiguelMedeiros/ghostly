@@ -1,5 +1,10 @@
 {
   "name": "Ghostly",
+  "pageNotLoaded": {
+    "hint": "Vérifiez votre connexion, puis réessayez. Si cela échoue encore, rechargez Ghostly.",
+    "title": "Cette page ne s'est pas chargée.",
+    "tryAgain": "Réessayer"
+  },
   "profileUnavailable": {
     "detail": "Ce que le système a dit :",
     "info": "Rien n'a été modifié ni supprimé. Tant que les données sont fermées, Ghostly ne se connecte à personne et n'envoie rien pour ce profil. Cette app est Ghostly {{app}} et lit les données de profil jusqu'à la version {{supported}}.",
