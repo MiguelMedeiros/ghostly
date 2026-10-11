@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { generateVapidKeys, type VapidKeys } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { databaseName } from "@ghostly/browser/shared/idb";
@@ -166,17 +166,33 @@ export function useWakeTableSync(text: WakeWords): void {
   const links = state?.links;
   const groups = state?.groups;
   const words = JSON.stringify({ ...text, db: databaseName() });
+  // What the table is made of, as one string. The engine builds `links` and `groups` anew in every state (up to one
+  // every 50 ms while someone types or a file moves), so the arrays themselves say nothing about a change: written on
+  // them, the table was a database transaction per state.
+  const on = !!wake;
+  const held = links && JSON.stringify([
+    links.map((link) => [link.id, link.peerPubKeyZ32, link.wakeToken, !!link.wakeMuted]),
+    (groups ?? []).filter((group) => group.profile === "mesh").map((group) => [group.id, group.wakeTokens, !!group.wakeMuted]),
+  ]);
+  const latest = useRef({ links, groups });
+  latest.current = { links, groups };
   useEffect(() => {
     const push = pushPlatform();
-    if (!push || !links) return;
+    if (!push || !held) return;
     const profile = activeProfileId();
+    let muteEnds: ReturnType<typeof setTimeout> | undefined;
     const write = () => {
+      clearTimeout(muteEnds);
+      const { links, groups } = latest.current;
+      if (!links) return;
       const entries: WakeTableEntry[] = [];
-      if (wake) {
+      let soonest = Infinity;
+      if (on) {
         for (const link of links) {
           const chat = chatOfLink(link.id, links);
           if (!chat) continue;
           const until = mutedUntil(chat);
+          if (typeof until === "number") soonest = Math.min(soonest, until);
           // A muted chat is not woken at all: its contact is told to forget the subscription (the worker checks too).
           if (!!link.wakeMuted !== (until !== undefined)) void engine.call("setWakeMuted", { linkId: link.id, muted: until !== undefined }).catch(() => {});
           if (!link.wakeToken) continue;
@@ -186,22 +202,26 @@ export function useWakeTableSync(text: WakeWords): void {
         for (const group of groups ?? []) {
           if (group.profile !== "mesh") continue;
           const until = mutedUntil(groupChat(group.id));
+          if (typeof until === "number") soonest = Math.min(soonest, until);
           if (!!group.wakeMuted !== (until !== undefined)) void engine.call("setWakeMuted", { linkId: groupChat(group.id), muted: until !== undefined }).catch(() => {});
           for (const token of group.wakeTokens ?? []) entries.push({ token, path: groupPath(group.id), ...(until !== undefined && { mutedUntil: until }) });
         }
       }
       void push.syncTable(profile, entries, JSON.parse(words) as WakeWords).catch(() => {});
+      // A mute that ends by itself: the contact is told to wake this chat again when it does, with no state to wait for.
+      if (soonest !== Infinity) muteEnds = setTimeout(write, Math.min(Math.max(soonest - Date.now(), 0) + 50, 2 ** 31 - 1));
     };
     write();
     window.addEventListener(MUTE_EVENT, write);
     window.addEventListener("storage", write);
     window.addEventListener("session-updated", write);
     return () => {
+      clearTimeout(muteEnds);
       window.removeEventListener(MUTE_EVENT, write);
       window.removeEventListener("storage", write);
       window.removeEventListener("session-updated", write);
     };
-  }, [wake, links, groups, words]);
+  }, [on, held, words]);
 
   // A contact that held the subscription was deleted or muted: a new one (new endpoint, new key pair, new tokens for
   // the others), and the old one ends at the push service, so that contact can no longer wake this app. Not for
