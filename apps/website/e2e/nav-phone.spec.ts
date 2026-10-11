@@ -14,6 +14,26 @@ test("the phone menu has every page and both ways to open Ghostly", async ({ pag
   await expect(sheet).toBeHidden();
 });
 
+// The sheet covers the page, so a tap on any entry closes it. It used to close only when the path changed: the entry
+// of the page already open left it over the whole screen, and on the home page "How it works" scrolled to the story
+// behind it.
+for (const [path, entry, lands] of [
+  ["/", "How it works", /\/#story$/],
+  ["/developers", "Developers", /\/developers$/],
+  ["/wisps", "Protocol", /\/wisps$/],
+] as const) {
+  test(`${path}: a tap on "${entry}" closes the phone menu`, async ({ page }) => {
+    await page.goto(path);
+    // Once React runs (the desktop chevron, hidden here, is disabled until then): before that a tap is the browser's own.
+    await expect(page.locator(".nav-open-more")).toBeEnabled();
+    await page.getByLabel("Menu").click();
+    const sheet = page.locator(".nav-sheet");
+    await sheet.getByRole("link", { name: entry, exact: true }).click();
+    await expect(sheet).toBeHidden();
+    await expect(page).toHaveURL(lands);
+  });
+}
+
 // The desktop nav marks the page that is open; the sheet lists the same pages and used to mark none of them.
 test("the phone menu marks the page that is open", async ({ page }) => {
   await page.goto("/developers");
