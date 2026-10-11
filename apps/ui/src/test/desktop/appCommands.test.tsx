@@ -121,4 +121,47 @@ describe("the app running them", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/wallet");
     expect(tauri.created).not.toHaveBeenCalled();
   });
+
+  describe("under an open modal dialog", () => {
+    let dialog: HTMLElement;
+    afterEach(() => dialog.remove());
+    /** A dialog as the app's own are: a panel that says it is modal, or a `<dialog>` shown as one. */
+    const open = (kind: "panel" | "native") => {
+      if (kind === "panel") {
+        dialog = document.createElement("div");
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        document.body.append(dialog);
+      } else {
+        dialog = document.createElement("dialog");
+        document.body.append(dialog);
+        (dialog as HTMLDialogElement).showModal();
+      }
+    };
+
+    it.each(["panel", "native"] as const)("does nothing (%s): no chat is made and the page stays", async (kind) => {
+      render();
+      open(kind);
+      listenForAppCommands("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15");
+      act(() => {
+        // The keys on Linux and Windows, then the Mac menu's own path.
+        window.dispatchEvent(key({ key: "n", code: "KeyN", ctrlKey: true }));
+        window.dispatchEvent(key({ key: ",", code: "Comma", ctrlKey: true }));
+        sendAppCommand("new");
+        sendAppCommand("settings");
+      });
+      await new Promise((done) => setTimeout(done, 20));
+      expect(screen.getByTestId("where")).toHaveTextContent("/wallet");
+      expect(tauri.created).not.toHaveBeenCalled();
+    });
+
+    it("runs again once the dialog is closed", async () => {
+      render();
+      open("native");
+      act(() => sendAppCommand("settings"));
+      (dialog as HTMLDialogElement).close();
+      act(() => sendAppCommand("settings"));
+      await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/settings"));
+    });
+  });
 });
