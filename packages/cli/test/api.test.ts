@@ -31,6 +31,7 @@ function fake(messages: StoredMessage[] = []) {
     payRequest: vi.fn(async () => undefined),
     storeMessage: vi.fn(),
     updateSettings: vi.fn(async () => undefined),
+    setChatTransport: vi.fn(async () => undefined),
     setTyping: vi.fn(),
     setGroupTyping: vi.fn(),
   };
@@ -370,5 +371,36 @@ describe("settings", () => {
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
     await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
     expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"], readRelays: true } });
+  });
+});
+
+/**
+ * A name is looked up in a table (the settings a command changes, the transports, the methods), and every object has
+ * `constructor`, `toString` and the like: they were found there too. `settings set constructor 5` stored it in the
+ * profile for good, `chat transport bob constructor` handed the engine a function, and the socket's `constructor`
+ * method answered with the daemon's own context, which cannot be written: the caller waited for ever.
+ */
+describe("a name every object has", () => {
+  const NAMES = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
+
+  it("is no setting: refused, and nothing is stored", async () => {
+    const { ctx, node } = fake();
+    for (const name of NAMES) {
+      await expect(callApi(ctx, "settings.set", { [name]: 5 }), name).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining(`${name} is not a setting the CLI changes`) });
+    }
+    expect(node.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("is no transport: refused with the transports, and the engine is not asked", async () => {
+    const { ctx, node } = fake();
+    for (const name of NAMES) {
+      await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: name }), name).rejects.toMatchObject({ code: "bad_request", message: "transport must be one of auto, dht, webrtc, iroh, hyperdht" });
+    }
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+  });
+
+  it("is no method: not found, as any other unknown one", async () => {
+    const { ctx } = fake();
+    for (const name of [...NAMES, "nope"]) await expect(callApi(ctx, name, {}), name).rejects.toMatchObject({ code: "not_found", message: `No method ${name}` });
   });
 });
