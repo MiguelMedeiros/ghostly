@@ -1,5 +1,10 @@
 {
   "name": "Ghostly",
+  "pageNotLoaded": {
+    "hint": "请检查网络连接后重试。如果仍然失败，请重新加载 Ghostly。",
+    "title": "此页面未能加载。",
+    "tryAgain": "重试"
+  },
   "profileUnavailable": {
     "detail": "系统的说明：",
     "info": "没有任何内容被更改或删除。数据未打开期间，Ghostly 不会为此个人资料连接任何人，也不会发送任何内容。此应用是 Ghostly {{app}}，可读取版本 {{supported}} 及以下的个人资料数据。",
