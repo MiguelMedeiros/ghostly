@@ -16,7 +16,26 @@ for (const [path, title] of [
   });
 }
 
-test("the footer links both pages", async ({ page }) => {
+// The two pages build their own shell (components/site/Legal.tsx), so they carry the skip link themselves: the first
+// Tab stop, as on every page with Shell. Without it a keyboard reader went through the whole nav before the text, on
+// the two longest pages the site has.
+for (const path of ["/terms", "/privacy"]) {
+  test(`${path}: the first Tab stop is the link that skips to the text`, async ({ page }) => {
+    await page.goto(path);
+    await page.keyboard.press("Tab");
+    const skip = page.locator(":focus");
+    await expect(skip).toHaveText("Skip to content");
+    await expect(skip).toHaveAttribute("href", "#content");
+    await expect(skip).toBeInViewport({ ratio: 1 });
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`${path}#content$`));
+    // The next Tab goes on from the text, not from the nav above it.
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("main#content"))).toBe(true);
+  });
+}
+
+test("the footer links both pages",async ({ page }) => {
   await page.goto("/privacy");
   const footer = page.locator("footer");
   await expect(footer.getByRole("link", { name: "Privacy", exact: true })).toHaveAttribute("href", "/privacy");
