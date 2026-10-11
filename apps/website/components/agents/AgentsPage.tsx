@@ -5,6 +5,7 @@ import { LevelBadge } from "@/components/site/Level";
 import { Reveal } from "@/components/home/Reveal";
 import { CopyButton } from "@/components/cli/CopyButton";
 import { NEXT_VERSION } from "@/lib/status";
+import { shotSrcSet } from "@/lib/shots";
 import { CopyPrompt, CopyPromptButton } from "./CopyPrompt";
 import { AgentDemo } from "./AgentDemo";
 import { AgentSteps } from "./AgentSteps";
@@ -13,9 +14,13 @@ import { agents, scope, CONNECT, LINKS, PROMPT, SHOWS, STEPS, TURN } from "@/con
 import "@/app/cli.css";
 import "@/app/agents.css";
 
-/** The app's screens (npm run capture, scripts/capture/agents.spec.ts): 1280 × 820 and 390 × 844, shot at 2×. */
-const SHOT = { src: "/screenshots/current/agents.webp", width: 1280, height: 820 };
-const PHONE = { src: "/screenshots/current/agents-mobile.webp", width: 390, height: 844 };
+/**
+ * The app's screens (npm run capture, scripts/capture/agents.spec.ts): 1280 × 820 and 390 × 844, shot at 2×.
+ * `sizes` is the width each is drawn at (agents.css): the window takes 81% of the figure, 980px at most, and the
+ * phone beside it 19%; up to 760px the phone stands alone, 70% of the page and 300px at most.
+ */
+const SHOT = { src: "/screenshots/current/agents.webp", width: 1280, height: 820, sizes: "min(81vw - 57px, 980px)" };
+const PHONE = { src: "/screenshots/current/agents-mobile.webp", width: 390, height: 844, sizes: "(min-width: 761px) min(19vw - 9px, 234px), min(70vw - 22px, 300px)" };
 
 /**
  * /developers/agents: a bot at work in a chat (AgentDemo) beside one button that copies the prompt; then the real app
@@ -59,10 +64,10 @@ export function AgentsPage() {
                 <span />
               </div>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="ag-shot" src={SHOT.src} alt={t.show.shotAlt} loading="lazy" decoding="async" width={SHOT.width} height={SHOT.height} />
+              <img className="ag-shot" src={SHOT.src} srcSet={shotSrcSet(SHOT.src, "desktop")} sizes={SHOT.sizes} alt={t.show.shotAlt} loading="lazy" decoding="async" width={SHOT.width} height={SHOT.height} />
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="ag-phone" src={PHONE.src} alt="" aria-hidden="true" loading="lazy" decoding="async" width={PHONE.width} height={PHONE.height} />
+            <img className="ag-phone" src={PHONE.src} srcSet={shotSrcSet(PHONE.src, "phone")} sizes={PHONE.sizes} alt="" aria-hidden="true" loading="lazy" decoding="async" width={PHONE.width} height={PHONE.height} />
           </div>
           <figcaption className="caption">{t.show.caption.replace("{n}", NEXT_VERSION)}</figcaption>
         </figure>
