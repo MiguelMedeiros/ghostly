@@ -75,6 +75,18 @@ export const buttonOptions: Record<string, OptionSpec> = {
 export const showSecret: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print the group's entry link (anyone who has it can join)" } };
 export const secret = (options: Parsed["options"]) => (options["show-secret"] === true ? { showSecret: true } : {});
 
+/**
+ * `--for` of the typing commands: the seconds it is kept on, 1 to 600, and never with `--stop`. A usage error (exit 2)
+ * that names the flag: before, the API's own check answered ("for must be a number from 1 to 600", exit 1).
+ */
+export function typingFor(options: Parsed["options"]): number | undefined {
+  const seconds = options.for;
+  if (seconds === undefined) return undefined;
+  if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${JSON.stringify(seconds)}`);
+  if (options.stop === true) throw new CliError("usage", "--for keeps it on: not with --stop");
+  return seconds;
+}
+
 /** A history cursor: a timestamp when it is all digits, else a message id. */
 export function cursor(value: unknown): string | number | undefined {
   if (value === undefined) return undefined;
