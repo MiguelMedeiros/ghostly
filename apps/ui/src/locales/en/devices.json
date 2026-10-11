@@ -102,7 +102,7 @@
       "checking": "Checking",
       "connecting": "Connecting to {{device}}",
       "copy": "Copying files",
-      "copying": "Copying files · {{done}} of {{total}}",
+      "copyAmount": "{{done}} of {{total}}",
       "done": "This device is now active.",
       "doneGiver": "{{device}} is now active.",
       "finishing": "Finishing: waiting for the network",
