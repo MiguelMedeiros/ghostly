@@ -24,7 +24,7 @@ describe("the Ark panel's expired coins", () => {
     expect(waiting).toHaveTextContent(/^9,900 test sats expired\. You can recover them once the Ark server has swept their batch\.$/);
     expect(screen.queryByTestId("ark-recover")).not.toBeInTheDocument();
     await userEvent.click(screen.getByTestId("row-info"));
-    expect(screen.getByTestId("row-info-text")).toHaveTextContent("a sweep");
+    expect(screen.getByTestId("row-info-text")).toHaveTextContent("takes their batch back on-chain");
   });
 
   it("swept: Recover", () => {

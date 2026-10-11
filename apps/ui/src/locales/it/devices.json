@@ -49,7 +49,7 @@
     "confirm": "Eliminare questa copia per sempre? Ciò che è solo in essa andrà perso.",
     "discard": "Elimina",
     "hint": "Una copia di questo profilo da prima che un altro dispositivo lo prendesse.",
-    "info": "Quando questo dispositivo ha ripreso il profilo con Usa qui, ha tenuto ciò che conteneva allora. Messaggi e pagamenti presenti solo in quella copia non sono nel tuo profilo. Elimina rimuove la copia da questo dispositivo per sempre.",
+    "info": "Usa qui ha tenuto ciò che questo dispositivo conteneva allora. Messaggi e pagamenti presenti solo in quella copia non sono nel tuo profilo. Elimina la rimuove per sempre.",
     "title": "Solo su questo dispositivo"
   },
   "handoff": {
@@ -129,7 +129,7 @@
     "already": "Uso già Ghostly",
     "another": "Aggiungi questo dispositivo a un altro profilo",
     "anotherButton": "Aggiungi questo dispositivo",
-    "anotherInfo": "Sul dispositivo che usi ora, apri Profilo, Dispositivi, Aggiungi un dispositivo. Inquadra il suo codice con la fotocamera di questo dispositivo, o in Ghostly qui. Poi entrambi i dispositivi mostrano le stesse cifre da controllare.",
+    "anotherInfo": "Sul dispositivo che usi ora, apri Profilo, Dispositivi, Aggiungi un dispositivo. Inquadra il suo codice qui. Poi entrambi i dispositivi mostrano le stesse cifre da controllare.",
     "anotherLead": "Usa questo dispositivo con un profilo di un altro dispositivo",
     "cameraUnavailable": "Fotocamera non disponibile. Incolla il codice dall’altro dispositivo o apri un’immagine.",
     "check": "Controlla che l’altro tuo dispositivo mostri le stesse cifre.",
@@ -177,10 +177,10 @@
     "banner": "Offline finché Ghostly non verifica quale dispositivo è attivo",
     "bannerHint": "I messaggi che scrivi aspettano fino ad allora.",
     "hint": "Controlla la connessione.",
-    "info": "Prima di andare online, Ghostly verifica che nessun altro dispositivo abbia preso questo profilo. Avvia comunque lo apre qui offline: puoi leggere e scrivere, e nulla viene inviato, pagato o ricevuto finché la verifica non funziona. Ghostly riprova ogni 30 secondi.",
+    "info": "Avvia comunque lo apre offline: puoi leggere e scrivere, ma nulla viene inviato, pagato o ricevuto finché la verifica non funziona. Ghostly riprova ogni 30 secondi.",
     "restoreBanner": "Copia ripristinata, offline per ora",
     "restoreBannerHint": "Controllo se il tuo profilo è in uso su un altro dispositivo.",
-    "restoreInfo": "Questo backup è stato fatto prima che il tuo profilo avesse altri dispositivi, e Ghostly non ha potuto verificarli durante il ripristino. Finché non ci riesce, nulla viene inviato, pagato o ricevuto e nessun gruppo viene modificato. Se un altro dispositivo usa il tuo profilo, questa copia va in attesa; altrimenti si avvia da sola. Ghostly riprova ogni 30 secondi.",
+    "restoreInfo": "Finché la verifica non funziona, nulla viene inviato, pagato o ricevuto. Se un altro dispositivo usa il tuo profilo, questa copia va in attesa; altrimenti si avvia da sola.",
     "startAnyway": "Avvia comunque",
     "title": "Impossibile verificare quale dispositivo è attivo",
     "tryAgain": "Riprova"
@@ -253,7 +253,7 @@
     "button": "Nuovo segreto dei dispositivi",
     "done": "Nuovo segreto dei dispositivi creato.",
     "hint": "Un dispositivo che non è in questo elenco non potrà più usare questo profilo.",
-    "info": "Usalo quando un dispositivo potrebbe avere ancora il segreto dei dispositivi di questo profilo, come quello che hai sostituito. Gli altri tuoi dispositivi ricevono il nuovo segreto la prossima volta che aprono Ghostly.",
+    "info": "Usalo quando un dispositivo che hai sostituito potrebbe avere ancora il segreto dei dispositivi. Gli altri ricevono quello nuovo quando aprono Ghostly.",
     "make": "Crea",
     "notNow": "Non ora",
     "offer": "Hai preso il posto di {{device}}. Ha ancora il segreto dei dispositivi di questo profilo.",
@@ -330,7 +330,7 @@
       "retry": "Riprova",
       "title": "Non completato"
     },
-    "unreadableInfo": "Ghostly legge quale dei tuoi dispositivi è attivo prima di avviare qualsiasi cosa. Qui non ha funzionato, quindi nulla è stato avviato, nulla è stato inviato e nulla è stato modificato. Riavvia l'app o il dispositivo, poi riprova."
+    "unreadableInfo": "Prima di avviarsi, Ghostly legge quale dei tuoi dispositivi è attivo. Non ha funzionato, quindi nulla è stato inviato né modificato. Riavvia l'app o il dispositivo, poi riprova."
   },
   "takeover": {
     "checking": "Verifica del dispositivo attivo · circa 30 secondi",

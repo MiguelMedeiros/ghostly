@@ -60,7 +60,7 @@
     "rollback": "这个链接里是较旧的版本。",
     "status": "该链接下没有内容。",
     "storage": "此浏览器无法在这里保存应用（无痕浏览？）。请试试普通窗口。",
-    "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。请在普通窗口中打开 Ghostly，并在那里安装应用。",
+    "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。",
     "storeKey": "该商店由另一把密钥签名。",
     "tooLarge": "太大了。",
     "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
@@ -96,7 +96,7 @@
     "unknownPublisherInfo": "任何人都可以用新密钥签名应用。只有你添加的商店才能担保是谁制作的。请将密钥与作者公布的密钥进行比对。",
     "update": "更新",
     "webkit": "在此浏览器中，应用仍可能连接其他服务器。",
-    "webkitInfo": "Safari 以及 iPhone 和 iPad 上的所有浏览器，都允许应用建立 Ghostly 无法阻止的连接，即使没有互联网权限。这些服务器会知道你的 IP 地址。桌面应用会阻止这些连接。"
+    "webkitInfo": "Safari 以及 iPhone 和 iPad 上的所有浏览器，都允许应用建立 Ghostly 无法阻止的连接。这些服务器会知道你的 IP 地址。桌面应用会阻止这些连接。"
   },
   "page": {
     "add": "添加",

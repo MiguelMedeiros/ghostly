@@ -122,7 +122,7 @@ describe("the standby screen", () => {
     renderApp(<DeviceStandby gate={{ state: "unreadable", detail: "VersionError: The requested version (1) is less than the existing version (2)." }} />);
     await user.click(screen.getByRole("button", { name: "More info" }));
     const text = screen.getByTestId("device-standby-text");
-    expect(text).toHaveTextContent("nothing was started, nothing was sent and nothing was changed");
+    expect(text).toHaveTextContent("nothing was sent or changed");
     expect(text).toHaveTextContent("VersionError: The requested version (1) is less than the existing version (2).");
   });
 

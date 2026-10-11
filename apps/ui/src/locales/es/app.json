@@ -7,9 +7,9 @@
   },
   "profileUnavailable": {
     "detail": "Lo que dijo el sistema:",
-    "info": "No se cambió ni se borró nada. Mientras los datos estén cerrados, Ghostly no se conecta con nadie ni envía nada por este perfil. Esta app es Ghostly {{app}} y lee datos de perfil hasta la versión {{supported}}.",
+    "info": "No se cambió ni se borró nada. Mientras esté cerrado, este perfil no se conecta con nadie ni envía nada. Ghostly {{app}} lee datos de perfil hasta la versión {{supported}}.",
     "newerHint": "Actualiza la app para abrirlo.",
-    "newerInfo": "Los datos de este perfil están en la versión {{stored}}. Esta app, Ghostly {{app}}, lee hasta la versión {{supported}}. Un Ghostly más nuevo abrió el perfil y avanzó sus datos, y uno más antiguo no puede leerlos con seguridad. Por eso no se abre ni se envía nada, y no se cambió ni se borró nada: tus chats, claves y monederos siguen ahí. Actualiza esta app o abre el perfil con la más nueva.",
+    "newerInfo": "Sus datos están en la versión {{stored}}; Ghostly {{app}} lee hasta la {{supported}}. No se abrió, envió ni cambió nada: tus chats, claves y monederos siguen ahí.",
     "newerTitle": "Este perfil se usó por última vez con una versión más nueva de Ghostly.",
     "noUpdate": "Todavía no hay una versión más nueva. Abre este perfil con la app que lo usó por última vez.",
     "reason": {
