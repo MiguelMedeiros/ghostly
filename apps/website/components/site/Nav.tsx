@@ -60,6 +60,14 @@ export function Nav({ apps = false }: { apps?: boolean }) {
     el.querySelector("summary")?.focus();
   };
 
+  // The sheet covers the page, so the focus must not go behind it: when it moves out (Tab past the last entry), the
+  // sheet closes. A blur with nowhere to go (a tap on the sheet's own background, another window) leaves it open.
+  const onMenuBlur = (e: React.FocusEvent<HTMLDetailsElement>) => {
+    const el = menu.current;
+    if (!el?.open || !e.relatedTarget || el.contains(e.relatedTarget)) return;
+    el.open = false;
+  };
+
   const items = () => [...(ways.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
   const focusItem = (index: number) => {
     const all = items();
@@ -162,7 +170,7 @@ export function Nav({ apps = false }: { apps?: boolean }) {
               </div>
             )}
           </div>
-          <details className="nav-menu" ref={menu} onKeyDown={onMenuKeyDown}>
+          <details className="nav-menu" ref={menu} onKeyDown={onMenuKeyDown} onBlur={onMenuBlur}>
             <summary aria-label={t.menu}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
