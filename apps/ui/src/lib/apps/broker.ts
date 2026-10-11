@@ -7,7 +7,7 @@
  * - The frame loads twice: the runner, then the app the runner writes into itself after `writing`. Any other load is a
  *   navigation, and tears the app down.
  * - Requests are `{id, type, args}`, at most 64 KiB as JSON and 50 a second; answers `{id, ok, value | error}`; events
- *   `{event, data}`. An unknown type is refused.
+ *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped.
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
@@ -36,7 +36,8 @@ export interface AppView {
 
 /**
  * Why an app stopped: it asked (`closed`), its frame loaded when it should not have (`navigated`), it broke the
- * protocol before it started (`protocol`), it never started (`timeout`), or the client stopped it (`stopped`).
+ * protocol before it started or sent far past the request rate (`protocol`), it never started (`timeout`), or the
+ * client stopped it (`stopped`).
  */
 export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "stopped";
 
@@ -47,6 +48,12 @@ export const BROKER_REQUESTS: readonly MiniAppRequestType[] = ["context", "file"
 
 /** How long the runner has to say `writing` once it has the port. */
 export const START_TIMEOUT_MS = 15_000;
+
+/**
+ * How many messages in one second stop the app: ten times the rate. Past the rate a request is refused, yet the page
+ * still receives it; only closing the port ends that, and an app this far over is not one that miscounted.
+ */
+export const STOP_REQUESTS_PER_SECOND = 10 * MINI_APP_LIMITS.requestsPerSecond;
 
 /** The deepest JSON a request may carry: a value deeper than this is refused rather than walked. */
 const MAX_DEPTH = 64;
@@ -278,6 +285,8 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
     const at = now();
     recent.push(at);
     while (recent.length && recent[0]! <= at - 1000) recent.shift();
+    // Before anything of the message is read: stopping closes the port, so `recent` never holds more than this.
+    if (recent.length > STOP_REQUESTS_PER_SECOND) return stop("protocol");
 
     const id = data && typeof data === "object" && Number.isSafeInteger((data as { id?: unknown }).id) && (data as { id: number }).id >= 0 ? (data as { id: number }).id : null;
     const fail = (error: MiniAppErrorCode) => { if (id !== null) post({ id, ok: false, error }); };

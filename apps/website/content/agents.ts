@@ -23,8 +23,8 @@ export const STEPS = [
 ] as const;
 
 /** One agent.turn, as docs/CLI.md shows it. */
-export const TURN = `{"seq":41,"id":"agent.turn:message.received:f3gg…:peer_jY7N…","type":"agent.turn",
- "source":"message.received","chat":"f3gg…","messageId":"peer_jY7N…",
+export const TURN = `{"seq":41,"id":"agent.turn:message.received:f3gg…:t_5d0c…","type":"agent.turn",
+ "source":"message.received","chat":"f3gg…","messageId":"t_5d0c…",
  "untrusted":{"text":"hello","name":"Alice","replyTo":{"id":"me_…","snippet":"…"}}}`;
 
 export const LINKS = {

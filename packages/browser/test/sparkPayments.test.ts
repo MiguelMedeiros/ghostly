@@ -119,6 +119,21 @@ it("a receipt alone settles nothing: the request is paid when this wallet shows 
   expect(sent.filter((s) => s.kind === "res").map((s) => s.frame), "the payer is told it is paid").toEqual([{ id: "r1", ok: true }]);
 });
 
+it("one transfer is one received payment: a receipt under a new payment id adds no record, before or after it is paid", async () => {
+  const createdAt = Date.now(), a = invoice();
+  seed("payments", [{ id: "r1", linkId: "l", kind: "request", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt, target: target(a) }]);
+  const payee = { arrived: undefined as string | undefined };
+  const { desk } = setup({ received: async () => payee.arrived });
+  await desk.start();
+  const pay = (id: string) => desk.onPayment("l", { id, requestId: "r1", timestamp: createdAt, amount: { value: "1000", asset: "sat" }, endpoint: [ENDPOINT.spark, JSON.stringify({ id: crypto.randomUUID() })] });
+  await pay("p1"); await pay("p2");
+  payee.arrived = crypto.randomUUID();
+  await desk.reconcileSparkReceipts();
+  await pay("p3");
+  expect(desk.payment("p1")?.state).toBe("settled");
+  expect([desk.payment("p2"), desk.payment("p3")]).toEqual([undefined, undefined]);
+});
+
 it("a request paid while the receipt was lost still settles, from the wallet alone; not while the wallet is closed", async () => {
   seed("payments", [{ id: "r1", linkId: "l", kind: "request", direction: "out", amount: 50, unit: "sat", state: "pending", createdAt: Date.now(), target: target() }]);
   const closed = setup({ ready: false, received: async () => "id-1" });

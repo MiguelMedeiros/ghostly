@@ -67,12 +67,34 @@ export interface LnurlFetchOptions {
   maxBytes?: number;
 }
 
-export const LNURL_LIMITS = { timeoutMs: 15_000, maxBytes: 64 * 1024, maxUrlLength: 2048, maxMetadataLength: 8 * 1024, maxComment: 2000 } as const;
+export const LNURL_LIMITS = { timeoutMs: 15_000, maxBytes: 64 * 1024, maxRedirects: 5, maxUrlLength: 2048, maxMetadataLength: 8 * 1024, maxComment: 2000 } as const;
 
 const ADDRESS = /^([a-z0-9._+-]{1,64})@([a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d{1,5})?)$/i;
 const LNURL_BECH32 = /^lnurl1[02-9ac-hj-np-z]{6,}$/i;
 /** A Lightning address or LNURL inside free text: `lightning:` and `⚡` prefixes are tolerated. */
 export const LIGHTNING_DESTINATION_PATTERN = /(?:lightning:|lnurlp:\/\/|lnurl1|[a-z0-9._+-]{1,64}@[a-z0-9-]+(?:\.[a-z0-9-]+)+)/i;
+
+const REDIRECTS = [301, 302, 303, 307, 308];
+
+/**
+ * A host that is not on the public internet, as far as its name tells: this machine, a single label, `.local` and its
+ * kin, private and reserved IP addresses. (What a public name resolves to is checked where the client resolves names
+ * itself, as Ghostly Desktop does.)
+ */
+function isLocalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  if (!host.includes(".") && !host.includes(":")) return true;
+  if (/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(host)) return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b < 32)
+      || (a === 192 && b === 168) || (a === 100 && b >= 64 && b < 128) || (a === 198 && (b === 18 || b === 19)) || (a === 192 && b === 0);
+  }
+  // Any IPv6 literal but a global unicast one (2000::/3), and none that embeds an IPv4 address.
+  if (host.includes(":")) return !/^[23][0-9a-f]{0,3}:/.test(host) || host.includes(".") || /^2001:0?db8:/.test(host);
+  return false;
+}
 
 const isLoopback = (hostname: string) => ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
 
@@ -158,7 +180,7 @@ async function readBounded(response: Response, maxBytes: number): Promise<string
   return new TextDecoder().decode(all);
 }
 
-/** One GET to an LNURL service: bounded in time and size, no credentials, no referrer, and the answer must be JSON. */
+/** One GET to an LNURL service (and to each checked redirect of it): bounded in time and size, no credentials, no referrer, and the answer must be JSON. */
 export async function fetchLnurlJson(url: string, options: LnurlFetchOptions = {}): Promise<unknown> {
   const target = acceptUrl(url);
   const doFetch = options.fetch ?? globalThis.fetch;
@@ -169,14 +191,34 @@ export async function fetchLnurlJson(url: string, options: LnurlFetchOptions = {
   options.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     let response: Response;
-    try {
-      response = await doFetch(target.href, { signal: controller.signal, headers: { accept: "application/json" }, credentials: "omit", referrerPolicy: "no-referrer", redirect: "follow" });
-    } catch {
-      if (controller.signal.aborted) throw controller.signal.reason instanceof Error ? controller.signal.reason : new Error("The request was cancelled");
-      throw engineError("lnurlUnreachable", { host: target.host });
+    // Redirects are followed here, one by one: each is checked before anything is sent to it.
+    for (let at = target, hops = 0; ; hops++) {
+      try {
+        response = await doFetch(at.href, { signal: controller.signal, headers: { accept: "application/json" }, credentials: "omit", referrerPolicy: "no-referrer", redirect: "manual" });
+      } catch {
+        if (controller.signal.aborted) throw controller.signal.reason instanceof Error ? controller.signal.reason : new Error("The request was cancelled");
+        throw engineError("lnurlUnreachable", { host: target.host });
+      }
+      // A fetcher that followed one after all: where it landed is still checked.
+      if (response.url) acceptUrl(response.url);
+      // A browser's `fetch` does not say where a redirect leads (an opaque answer: no status, no `Location`), so a page
+      // cannot check it: refused here. A host that can read each hop passes its own `fetch` (Ghostly Desktop, from Rust).
+      if (response.type === "opaqueredirect") throw new Error(`${target.host} redirects to another address, which cannot be checked here`);
+      const location = REDIRECTS.includes(response.status) ? response.headers.get("location") : null;
+      if (!location) break;
+      await response.body?.cancel().catch(() => {});
+      if (hops >= LNURL_LIMITS.maxRedirects) throw new Error(`${target.host} redirects too many times`);
+      let next: URL;
+      try { next = new URL(location, at); } catch { throw new Error(`${target.host} redirects to an invalid address`); }
+      next = acceptUrl(next.href);
+      // Another host only over HTTPS and at a public address: never plain HTTP (a hidden service, this machine), this
+      // machine or the local network as a way in from the host that was asked.
+      if (next.host !== at.host) {
+        if (next.protocol !== "https:") throw new Error("Lightning addresses and LNURLs must use HTTPS");
+        if (isLocalHost(next.hostname)) throw new Error(`${target.host} redirects to a local address`);
+      }
+      at = next;
     }
-    // A redirect may not lead somewhere plain HTTP or with credentials.
-    if (response.url) acceptUrl(response.url);
     const text = await readBounded(response, options.maxBytes ?? LNURL_LIMITS.maxBytes);
     let body: unknown;
     try { body = JSON.parse(text); } catch { throw new Error(`${target.host} did not answer with JSON${response.ok ? "" : ` (HTTP ${response.status})`}`); }

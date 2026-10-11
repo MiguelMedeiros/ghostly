@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
-import { callApi, findChat, mentionsFor, redactSettings, type ApiContext } from "../src/api";
+import { callApi, findChat, findGroup, mentionsFor, redactSettings, type ApiContext } from "../src/api";
+import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
 import type { GhostlyEvent } from "../src/events";
 import { chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
@@ -63,6 +64,46 @@ describe("chats", () => {
     expect(() => findChat([mallory], KEY)).toThrow(/No chat/);
     expect(findChat([impostor, alice], "Alice").id).toBe("chatAlice");
     expect(findChat([impostor], "alice").id).toBe("chatImpostor");
+  });
+
+  it("a contact's own name never takes what names a group: the group's id is the group, its name or a prefix is refused", () => {
+    const GROUP = "g".repeat(22);
+    const room = { ...group, id: GROUP, name: "Team Room", status: "active" } as unknown as GroupView;
+    const asName = link("chatMallory", { peerNick: "Team Room" });
+    const asId = link("chatIdName", { peerNick: GROUP });
+    const asPrefix = link("chatPrefixName", { peerNick: "gggg" });
+    const refused = (links: LinkView[], ref: string) => { try { findChatOrGroup(links, [room], ref); } catch (error) { return (error as { toJSON(): unknown }).toJSON(); } };
+    expect(refused([asName], "team room")).toEqual({ code: "bad_request", message: expect.stringMatching(/names a chat .* and a group: use the chat's id or group:<id>/), details: { chat: "chatMallory", groups: [GROUP] } });
+    expect(refused([asPrefix], "gggg")).toMatchObject({ code: "bad_request", details: { chat: "chatPrefixName", groups: [GROUP] } });
+    expect(findChatOrGroup([asId], [room], GROUP)).toEqual({ group: room });
+    // What a command makes of it: never the contact's chat.
+    const ctx = { runtime: { server: { node: { getState: () => ({ links: [asName, asId], groups: [room] }) } } } } as unknown as ApiContext;
+    expect(() => chatOrGroup(ctx, "Team Room")).toThrow(/and a group/);
+    expect(chatOrGroup(ctx, GROUP)).toEqual({ id: GROUP, linkId: `group:${GROUP}`, group: true });
+    expect(chatOrGroup(ctx, `group:${GROUP}`)).toEqual({ id: GROUP, linkId: `group:${GROUP}`, group: true });
+    // The chat is still reached by its id, and by a label this side gave it.
+    expect(chatOrGroup(ctx, "chatMallory")).toEqual({ id: "chatMallory", linkId: "chatMallory", group: false });
+    expect(findChatOrGroup([link("chatMine", { label: "Team Room" }), asName], [room], "Team Room")).toEqual({ link: expect.objectContaining({ id: "chatMine" }) });
+    // A name no group has is the contact's chat as before; so is one only an invitation has.
+    expect(findChatOrGroup([link("chatBob", { peerNick: "Bob" })], [room, { ...room, id: "i".repeat(22), name: "Bob", status: undefined, invitation: {} } as unknown as GroupView], "bob")).toEqual({ link: expect.objectContaining({ id: "chatBob" }) });
+    // Neither a chat nor a group: what a chat would say.
+    expect(() => findChatOrGroup([asName], [room], "zed")).toThrow(/No chat "zed"/);
+    expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
+  });
+
+  it("a group this profile is in wins over an invitation with its name or id prefix", () => {
+    const mine = { ...group, id: "a".repeat(22), name: "Team Room", status: "active" } as unknown as GroupView;
+    const invited = (id: string, name: string) => ({ ...group, id, name, status: undefined, invitation: { linkId: "chatMallory" } }) as unknown as GroupView;
+    const sameName = invited("c".repeat(22), "Team Room"), samePrefix = invited("aaaa" + "c".repeat(18), "Other");
+    expect(findGroup([mine, sameName], "Team Room").id).toBe(mine.id);
+    expect(findGroup([sameName, mine, invited("d".repeat(22), "team room")], "team room").id).toBe(mine.id);
+    expect(findGroup([mine, samePrefix], "aaaa").id).toBe(mine.id);
+    // An invitation is still found: by its id, and by a name or prefix no group of mine has.
+    expect(findGroup([mine, sameName], sameName.id).id).toBe(sameName.id);
+    expect(findGroup([mine, sameName], "cccc").id).toBe(sameName.id);
+    expect(findGroup([mine, samePrefix], "other").id).toBe(samePrefix.id);
+    expect(() => findGroup([sameName, invited("d".repeat(22), "Team Room")], "Team Room")).toThrow(/more than one group/);
+    expect(() => findGroup([mine, { ...mine, id: "b".repeat(22) } as unknown as GroupView], "Team Room")).toThrow(/more than one group/);
   });
 
   it("send refuses a seed or ecash unless forced, and reports the message it kept", async () => {

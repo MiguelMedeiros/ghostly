@@ -488,6 +488,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(savedName).toMatch(/^文+\.txt$/);
     expect(sha(savedLong.path as string)).toBe(sha(small));
     expect(error(await as(bob, "file", "save", longId, "--path", join(bob, longName)), "bad_request", 1).message).toMatch(/too long for this file system/);
+    // A name that starts with a dash is saved with a _ first: in the folder it is a file to every tool, never an option.
+    ok(await as(alice, "file", "send", "bob", small, "--name=-rf"));
+    const dashMessage = await listen.waitFor((e) => e.type === "message.received" && (e.message as { file?: { name: string } }).file?.name === "-rf");
+    const dashId = (dashMessage.message as { file: { id: string } }).file.id;
+    ok(await as(bob, "file", "wait", dashId, "--timeout", "30"));
+    expect(ok(await as(bob, "file", "save", dashId, "--dir", bob)).path).toBe(join(bob, "_-rf"));
     expect((sent.file as { size: number }).size).toBe(200_000);
     // Sending again or asking again: by the file's id alone, each only on its own side, and not for a file that arrived.
     expect(error(await as(alice, "file", "resend", (sent.file as { id: string }).id), "refused", 1).message).toBe("Nothing to send again: it arrived whole");

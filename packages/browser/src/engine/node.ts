@@ -521,6 +521,12 @@ export interface NodeOptions {
    * relay in the settings. Ghostly Desktop posts from Rust; the CLI's `fetch` has no CORS to refuse it.
    */
   pushSend?: (request: PushRequest) => Promise<number>;
+  /**
+   * How a Lightning address or LNURL service is asked (WISP 205 § Transport). Default: `fetch`, which in a page cannot
+   * read where a redirect leads, so a service that redirects is refused there. Ghostly Desktop passes one that asks
+   * from Rust when the service redirects, where every hop is checked before it is followed.
+   */
+  lnurlFetch?: typeof fetch;
 }
 
 export interface NodeEvents {
@@ -860,6 +866,7 @@ export class GhostlyNode implements EngineImplementation {
     descriptors: () => this.providers().lightning,
     host: () => this.providerHost(network),
     hasMints: () => this.networkMints(network).length > 0,
+    fetch: (...request) => (this.options.lnurlFetch ?? globalThis.fetch)(...request),
     events: {
       changed: () => void this.refreshWallet(),
       received: (op) => void this.desk.onLightningPaid(op),
@@ -3457,6 +3464,8 @@ export class GhostlyNode implements EngineImplementation {
       const message = await db.getMessage(linkId, messageId);
       // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
       if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
+      // A contact's receipt still waiting for its money is dropped with its message: its request can take another.
+      if (message?.paymentId && message.sender === "peer") await this.desk.dropReceipt(message.paymentId).catch(() => {});
       // A file whose offer went on the floor, deleted before it went live: the contact's bubble is told on the next session.
       if (message?.sender === "me" && message.file && message.delivery === "waiting" && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen")) {
         const wireId = message.file.id.slice(`${linkId}-out-`.length);

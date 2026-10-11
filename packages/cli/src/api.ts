@@ -14,6 +14,7 @@ import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
+import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
@@ -640,5 +641,5 @@ export async function callApi(ctx: ApiContext, method: string, params: unknown =
   const run = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined;
   if (!run) throw new CliError("not_found", `No method ${method}`);
   if (params === null || typeof params !== "object" || Array.isArray(params)) throw new CliError("bad_request", "params must be an object");
-  return run(ctx, params as Params);
+  return run(ctx, await withStoredIds(ctx, params as Params));
 }

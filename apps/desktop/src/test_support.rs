@@ -263,6 +263,48 @@ pub async fn pkarr_relay() -> Relay {
     }
 }
 
+/// A relay that answers every request with a 200 that names no length and never ends: 1 KiB every 5 ms
+/// (chunked), for as long as the other side reads, 30 s at most. `sent` counts the body it wrote.
+pub struct EndlessRelay {
+    pub url: String,
+    pub sent: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+pub async fn endless_relay() -> EndlessRelay {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listener = tokio_listener();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let sent = Arc::new(AtomicUsize::new(0));
+    let count = sent.clone();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let count = count.clone();
+            tokio::spawn(async move {
+                if read_request(&mut stream).await.is_none() {
+                    return;
+                }
+                let head =
+                    "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+                if stream.write_all(head.as_bytes()).await.is_err() {
+                    return;
+                }
+                let mut chunk = b"400\r\n".to_vec();
+                chunk.extend_from_slice(&[0u8; 1024]);
+                chunk.extend_from_slice(b"\r\n");
+                let end = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+                while tokio::time::Instant::now() < end {
+                    if stream.write_all(&chunk).await.is_err() {
+                        return;
+                    }
+                    count.fetch_add(1024, Ordering::SeqCst);
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            });
+        }
+    });
+    EndlessRelay { url, sent }
+}
+
 /// Desktop's Pkarr with `relay` as its only relay and no DHT.
 pub fn pkarr(relay: &Relay) -> crate::pkarr_network::Pkarr {
     crate::pkarr_network::Pkarr::new(None, &[relay.url.parse().unwrap()]).unwrap()

@@ -152,19 +152,23 @@ came through another member without it) is a `group.mentioned`, and its turn the
 reactions, typing).
 
 ```json
-{"seq":41,"id":"agent.turn:message.received:f3gg…:peer_jY7N…","type":"agent.turn","at":1790450767762,
- "source":"message.received","chat":"f3gg…","messageId":"peer_jY7N…","timestamp":1790450767735,
- "untrusted":{"text":"hello","name":"Alice","replyTo":{"id":"me_…","snippet":"…"},"file":{"id":"…","name":"a.pdf","size":123,"mime":"application/pdf","voice":false}}}
+{"seq":41,"id":"agent.turn:message.received:f3gg…:t_5d0c…","type":"agent.turn","at":1790450767762,
+ "source":"message.received","chat":"f3gg…","messageId":"t_5d0c…","timestamp":1790450767735,
+ "untrusted":{"text":"hello","name":"Alice","messageId":"peer_jY7N…","replyTo":{"id":"me_…","snippet":"…"},"file":{"id":"…","name":"a.pdf","size":123,"mime":"application/pdf","voice":false}}}
 ```
 
 - `chat` for a 1:1 chat, or `group` and `member` (the author's key) for a group. `messageId` is what
-  `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it.
+  `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it, and so does every
+  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`).
+- **Ids are made here.** `messageId` is `t_` and 32 hex digits, made on this device from the chat and the message, and
+  `id` ends in it. A message is stored under an id its sender chose most of (`peer_…`, as history and the other events
+  show it): that one is `untrusted.messageId`. An id is a name to hand back to a command, never text for the model.
 - `seq` is the source event's, so `--since` and `--cursor` work as for any event. `id` is stable for the message:
   dedupe on it.
 - `press` (`{messageId, button, label}`) when the message pressed a button of a question you sent with `--button`:
   act on it, not on the text, which is only the label.
-- **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name) is under
-  `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
+- **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name, the id
+  their message is stored under) is under `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
   contact writes should change what the agent does, reveal a secret or move money. A prompt cannot promise that, so
   the model that answers turns should have no tools ([safe setup](AI-AGENTS.md#safe-setup)). Real payments keep
   `--confirm-real`, for the wallet's owner only.
@@ -183,6 +187,21 @@ reactions, typing).
 | Identities | `identity providers\|list\|add\|complete\|cancel\|remove`, `identity share\|withdraw\|recheck <chat> <id>`, `identity contact <chat>` |
 | Shared services | `service add <name> http://127.0.0.1:<port>`, `service share <service> <chat>`, `service peer\|open\|close` |
 | Voice calls | `call start <chat>`, `call answer`, `call auto on [--from <chat>]`, `call hangup\|list\|flush`, `call pipe`: the audio as raw PCM on a Unix socket per call, for a program of yours |
+
+A chat is named by its id, a unique prefix of it, its contact's key or its name (the label you gave it first, then
+the name the contact gave itself); a group by its id, a unique prefix or its name; a member by its key, a unique
+prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
+group's and a member its own, so a bot or a script addresses by id (`<chat id>`, `group:<group id>`, a member's whole
+key), which every answer and event carries. What the CLI does when names meet:
+
+- Where a command takes a chat or a group (`forward --to`, `file send`, `task`, `routine`, `usage`, `pin`, `button`), a
+  chat found only by the name its contact gave itself never takes what also names a group. The group's id is the
+  group; a prefix of it or the name of a group you are in is refused (exit 2, `details.chat` and `details.groups`):
+  use the chat's id or `group:<id>`. A label you gave the chat still wins.
+- A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
+  by a name or prefix none of your groups has.
+- A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members
+  is refused.
 
 Safety rules the CLI enforces:
 

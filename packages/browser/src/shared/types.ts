@@ -137,6 +137,11 @@ export interface StoredGroup {
     pieces: { t: "group-chain"; g: string; commits: GroupCommit[] }[];
     /** Joining through the group's link: its entry key, the admin's side of `linkId` (an entry session, not a contact chat). */
     entry?: string;
+    /**
+     * Removed and invited again over a contact chat: the hash of the genesis of the chain I held. The id alone names no
+     * group (anyone may sign a genesis under it): only a welcome whose chain starts there joins the history I kept.
+     */
+    genesis?: string;
   };
   /**
    * On the admin's side: contact chats invited and not answered yet, and when. Kept so that an accept after my app

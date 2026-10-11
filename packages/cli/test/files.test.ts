@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { fitName, mimeOf } from "../src/files";
+import { fitName, mimeOf, saveName } from "../src/files";
 import { findMember, pictureFrom } from "../src/groupAdmin";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 // covers: headless.files, headless.group-admin
@@ -46,6 +46,21 @@ describe("the Node file store", () => {
     expect(fitName(`${"é".repeat(200)}.tar`)).toBe(`${"é".repeat(125)}.tar`);
   });
 
+  it("saves a file under a name no tool takes for an option: a leading dash gets a _ first", () => {
+    expect(saveName("report.pdf")).toBe("report.pdf");
+    expect(saveName("a-b--c.txt")).toBe("a-b--c.txt");
+    expect(saveName("-rf")).toBe("_-rf");
+    expect(saveName("-")).toBe("_-");
+    expect(saveName("--checkpoint-action=exec=sh x.sh")).toBe("_--checkpoint-action=exec=sh x.sh");
+    // What `sanitizeFileName` takes off the front (spaces, dots, invisible characters, separators) must not uncover one.
+    for (const name of [" -x", ".-x", ". .-x", "\u200B-x", "/-x", "\\-x", ":-x", "\n-x"]) expect(saveName(name)).toBe("_-x");
+    // The _ counts in the 255 bytes, and the extension stays.
+    const long = saveName(`-${"文".repeat(120)}.txt`);
+    expect(Buffer.byteLength(long)).toBeLessThanOrEqual(255);
+    expect(long).toBe(`_-${"文".repeat(83)}.txt`);
+    expect(saveName(`-${"a".repeat(199)}`)).toBe(`_-${"a".repeat(199)}`);
+  });
+
   it("names types by extension, and never trusts a given one blindly", () => {
     expect(mimeOf("a/photo.JPG")).toBe("image/jpeg");
     expect(mimeOf("voice.webm")).toBe("audio/webm");
@@ -60,6 +75,16 @@ describe("group administration", () => {
     expect(findMember(group, "abce").key).toBe("abce34");
     expect(() => findMember(group, "abc")).toThrow(/more than one/);
     expect(() => findMember(group, "me")).toThrow(/No member/);
+  });
+
+  it("a member's whole key is that member, whatever another member calls itself", () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u", OTHER = "o".repeat(52);
+    const named = { name: "G", members: [{ key: "me", me: true }, { key: KEY, nick: "Bob", me: false }, { key: OTHER, nick: KEY, me: false }] } as unknown as GroupView;
+    expect(findMember(named, KEY).key).toBe(KEY);
+    expect(findMember(named, OTHER).key).toBe(OTHER);
+    // A prefix and a name still stand side by side: two members is an error, never a guess.
+    const prefixed = { name: "G", members: [{ key: "anaq77", nick: "Bo", me: false }, { key: "zzzz11", nick: "Ana", me: false }] } as unknown as GroupView;
+    expect(() => findMember(prefixed, "ana")).toThrow(/more than one/);
   });
 
   it("takes a picture only as a JPEG within the bounds a contact checks", async () => {

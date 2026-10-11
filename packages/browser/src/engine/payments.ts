@@ -1064,6 +1064,16 @@ export class PaymentDesk {
     await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${formatPaymentAmount(review.amount,review.decimals)} ${review.asset}`,sender:'me',timestamp:review.createdAt,via:'datalink',paymentId:review.id});
     if(link.supportsUsdtPayments&&review.state!=='failed')await this.sendTo(link, {id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:unit},endpoint:[ENDPOINT.usdt,JSON.stringify({txid:review.txid})]});
   }
+  /**
+   * One payment pays one request: a receipt for a request that already has one, under another payment id,
+   * is not another payment. Nothing is stored or shown for it; a paid request is answered again.
+   */
+  private repeatedReceipt(link:PaymentLink|null|undefined,request:StoredPayment,id:string):boolean {
+    let repeated=false;
+    for(const p of this.payments.values())if(p.id!==id && p.kind==="payment" && p.direction==="in" && p.requestId===request.id && p.linkId===request.linkId && p.state!=="failed"){repeated=true;break;}
+    if(repeated && request.state==="settled")link?.sendPaymentResult({id:request.id,ok:true});
+    return repeated;
+  }
   private async receiveUsdt(linkId:string,payment:Payment) {
     const request=payment.requestId?this.payments.get(payment.requestId):undefined;
     if(!this.host.getLink(linkId)?.supportsUsdtPayments||request?.target?.method!=='usdt'||request.linkId!==linkId||request.direction!=='out'||request.kind!=='request'||payment.amount.asset!==request.unit||payment.amount.value!==String(request.amount))return;
@@ -1071,6 +1081,7 @@ export class PaymentDesk {
     if(existing && (existing.direction!=='in'||existing.linkId!==linkId||existing.requestId!==request.id))return;
     let txid:string;try{txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid)||existing?.state==='settled')return;
+    if(this.repeatedReceipt(this.host.getLink(linkId),request,payment.id))return;
     // One transaction pays one request, however its hash is spelled.
     txid=txid.toLowerCase();
     if([...this.payments.values()].some(p=>p.txid?.toLowerCase()===txid&&(p.linkId!==linkId||(p.kind==='request'?p.id!==request.id:p.requestId!==request.id))))return;
@@ -1135,8 +1146,7 @@ export class PaymentDesk {
     let txid:string;try {txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if([...this.payments.values()].some(p=>p.txid===txid && (p.linkId!==linkId || (p.kind==="request" ? p.id!==request.id : p.requestId!==request.id))))return;
     if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid) || existing?.state==="settled")return;
-    // One receipt waits per request: the address is what pays it (the indexer finds the money without one), so more under fresh ids add nothing but calls to our server.
-    if(!existing && [...this.payments.values()].some(p=>p.kind==="payment" && p.direction==="in" && p.requestId===request.id && p.state==="pending"))return;
+    if(this.repeatedReceipt(link,request,payment.id))return;
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Ark — checking provider`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileArkReceipts();
@@ -1189,6 +1199,7 @@ export class PaymentDesk {
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
     if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    if(this.repeatedReceipt(link,request,payment.id))return;
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:request.state==="settled"?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Bark${request.state==="settled"?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileBarkReceipts();
@@ -1246,6 +1257,7 @@ export class PaymentDesk {
     if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
     let hint:unknown;try {hint=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if(typeof hint!=="string" || !/^[0-9a-f]{64}$/.test(hint))return;
+    if(this.repeatedReceipt(link,request,payment.id))return;
     const settled=request.state==="settled";
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:settled?request.txid:hint});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on-chain${settled?"":" — waiting for a confirmation"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
@@ -1410,6 +1422,7 @@ export class PaymentDesk {
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
     if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    if(this.repeatedReceipt(link,request,payment.id))return;
     const settled=request.state==="settled";
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Spark${settled?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
@@ -1509,6 +1522,17 @@ export class PaymentDesk {
     const payment = this.payments.get(id);
     if (payment?.kind !== "request" || payment.direction !== "out" || payment.state !== "pending") return;
     await this.save({ ...payment, state: "failed" });
+  }
+
+  /**
+   * A contact's receipt that still waits for its money, dropped by hand (its chat line was deleted here): the
+   * request it answers can take another receipt. Money that does arrive still pays the request.
+   */
+  async dropReceipt(id: string): Promise<void> {
+    const payment = this.payments.get(id), request = payment?.requestId ? this.payments.get(payment.requestId) : undefined;
+    if (payment?.kind !== "payment" || payment.direction !== "in" || payment.state !== "pending" || !payment.target) return;
+    if (request?.kind !== "request" || request.direction !== "out" || request.linkId !== payment.linkId || request.target?.method !== payment.target.method) return;
+    await this.save({ ...payment, state: "failed", error: "Removed here" });
   }
 
   /**
