@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, force, groupWait, cursor, needs, routineFields, routineOptions, runOf, taskFields, taskOptions, usageFields, usageOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, needs, prLinked, quota, routineFields, routineOptions, runOf, taskFields, taskOptions, usageFields, usageOptions, wait } from "./shared";
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -113,7 +113,7 @@ export const commands: Record<string, Command> = {
     summary: "Send a task card (a bot's work: status, progress, its PR) to a chat or group; prints its id and message",
     args: ["chat"],
     options: { id: { type: "string", description: "The task's id, kept across updates (default: made up)" }, ...taskOptions, ...groupWait, wait: wait.wait },
-    params: ({ options }, { chat }) => ({ chat, card: needs(taskFields(options), [["title", "title"]], "task send <chat|group> --title <title>"), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, { chat }) => ({ chat, card: prLinked(needs(taskFields(options), [["title", "title"]], "task send <chat|group> --title <title>"), options, "task send <chat|group> --title <title> --pr-url <url>"), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
   },
   "task update": {
     method: "task.update", usage: "task update <chat|group> <task> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url ...] [--pr-state s] [--pr-checks c] [--tag label]... [--parent task] [--json json|-|file] [--force] [--wait none|confirmed|sent] [--timeout s]",
@@ -140,7 +140,7 @@ export const commands: Record<string, Command> = {
     options: { ...usageOptions, ...groupWait },
     params: ({ options }, { chat }) => {
       if (!chat && options.all !== true) throw new CliError("usage", "Name a chat or group, or give --all: ghostly usage send <chat|--all> --left <percent>");
-      return { chat, all: options.all === true, card: usageFields(options), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout };
+      return { chat, all: options.all === true, card: quota(usageFields(options), "usage send <chat|--all> --left <percent>"), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout };
     },
   },
 };
