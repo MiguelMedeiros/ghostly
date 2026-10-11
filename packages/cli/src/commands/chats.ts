@@ -1,5 +1,7 @@
 import { CliError } from "../errors";
-import { type Command, force, groupWait, cursor, needs, prLinked, quota, routineFields, routineOptions, runOf, taskFields, taskOptions, usageFields, usageOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, needs, prLinked, quota, routineFields, routineOptions, runOf, taskFields, taskOptions, typingFor, usageFields, usageOptions, wait } from "./shared";
+
+const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -14,7 +16,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, button: a.button, wait: options.wait, timeout: options.timeout }),
   },
   "button update": {
-    method: "button.update", usage: "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]",
+    method: "button.update", usage: BUTTON_UPDATE,
     summary: "Show the answer on a message's buttons (--chosen), close them, or change its text (the messageId send --button gave)",
     args: ["chat", "message"],
     options: {
@@ -25,7 +27,10 @@ export const commands: Record<string, Command> = {
       wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" },
       timeout: groupWait.timeout,
     },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, a) => {
+      if (!options.chosen && options.close !== true && !options.text) throw new CliError("usage", `Give --chosen, --close or --text: ghostly ${BUTTON_UPDATE}`);
+      return { chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout };
+    },
   },
   "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now (ends a --hold)", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "chat disconnect": {
@@ -49,7 +54,10 @@ export const commands: Record<string, Command> = {
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
     method: "chat.verify", usage: "chat verify <chat> --code <code>", summary: "Mark a contact verified after comparing codes", args: ["chat"],
-    options: { code: { type: "string", description: "The code the contact reads out" } }, params: ({ options }, { chat }) => ({ chat, code: options.code }),
+    options: { code: { type: "string", description: "The code the contact reads out" } }, params: ({ options }, { chat }) => {
+      if (typeof options.code !== "string" || !options.code.trim()) throw new CliError("usage", "--code is needed: ghostly chat verify <chat> --code <code>");
+      return { chat, code: options.code };
+    },
   },
   "chat wait": {
     method: "chat.wait", usage: "chat wait <chat> [--until live|text|paired] [--timeout s]", summary: "Wait for a chat to reach a state", args: ["chat"],
@@ -136,7 +144,7 @@ export const commands: Record<string, Command> = {
       status: { type: "string", description: "A short line shown instead, e.g. \"Transcribing your audio…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
-    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, kind: options.kind, status: options.status, for: options.for }),
+    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, kind: options.kind, status: options.status, for: typingFor(options) }),
   },
   "usage send": {
     method: "usage.send", usage: "usage send [<chat|group>] [--all] --left <percent> [--window \"5 h\"] [--resets <time>] [--label Claude] [--account <name>] [--also week=80@<time>]... [--used n --limit n] [--id id] [--json json|-|file] [--force] [--wait none|sent] [--timeout s]",
