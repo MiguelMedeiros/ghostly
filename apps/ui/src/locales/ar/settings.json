@@ -67,6 +67,8 @@
   },
   "incorrectPassword": "كلمة المرور غير صحيحة",
   "language": "اللغة",
+  "languageNotLoaded": "تعذّر تحميل {{language}}. تحقق من اتصالك.",
+  "languageRetry": "حاول مجددًا",
   "license": "الترخيص",
   "linkPreviews": "معاينات الروابط",
   "linkPreviewsHint": "أرسل عنوانًا وصورة مع الروابط التي تشاركها",

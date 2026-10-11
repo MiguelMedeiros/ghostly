@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -21,6 +22,10 @@ interface I18nContextValue {
   t: Translate;
   language: Language;
   dir: "ltr" | "rtl";
+  /** The chosen language's file did not arrive: the app stays in `language`, the one shown before. */
+  languageNotLoaded: boolean;
+  /** Asks for the chosen language again. */
+  retryLanguage: () => void;
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);
@@ -31,11 +36,31 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   // chosen waits for its own, with the one shown before kept meanwhile.
   const chosen = settings.language;
   const [shown, setShown] = useState<Language>(() => (loadedLocale(chosen) ? chosen : "en"));
+  // A language's file may not arrive (the network dropped, a deploy replaced the files): it is said (Settings, on the
+  // Language row) and asked for again there, and by itself when the network is back or the window is shown again.
+  const [failed, setFailed] = useState<Language | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retryLanguage = useCallback(() => setAttempt((n) => n + 1), []);
   useEffect(() => {
     let live = true;
-    void loadLocale(chosen).then(() => { if (live && loadedLocale(chosen)) setShown(chosen); });
+    void loadLocale(chosen).then(() => {
+      if (!live) return;
+      if (loadedLocale(chosen)) setShown(chosen);
+      setFailed(loadedLocale(chosen) ? null : chosen);
+    });
     return () => { live = false; };
-  }, [chosen]);
+  }, [chosen, attempt]);
+  const languageNotLoaded = failed === chosen && !loadedLocale(chosen);
+  useEffect(() => {
+    if (!languageNotLoaded) return;
+    const shownAgain = () => { if (document.visibilityState !== "hidden") retryLanguage(); };
+    window.addEventListener("online", retryLanguage);
+    document.addEventListener("visibilitychange", shownAgain);
+    return () => {
+      window.removeEventListener("online", retryLanguage);
+      document.removeEventListener("visibilitychange", shownAgain);
+    };
+  }, [languageNotLoaded, retryLanguage]);
   const language = loadedLocale(chosen) ? chosen : shown;
 
   const dir = textDirection(language);
@@ -54,7 +79,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   useEffect(() => { window.dispatchEvent(new Event("profiles-updated")); }, [t]);
 
   return (
-    <I18nContext.Provider value={{ t, language, dir }}>
+    <I18nContext.Provider value={{ t, language, dir, languageNotLoaded, retryLanguage }}>
       {children}
     </I18nContext.Provider>
   );

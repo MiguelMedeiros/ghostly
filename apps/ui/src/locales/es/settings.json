@@ -67,6 +67,8 @@
   },
   "incorrectPassword": "Contraseña incorrecta",
   "language": "Idioma",
+  "languageNotLoaded": "No se pudo cargar {{language}}. Comprueba tu conexión.",
+  "languageRetry": "Intentar de nuevo",
   "license": "Licencia",
   "linkPreviews": "Vistas previas de enlaces",
   "linkPreviewsHint": "Envía un título y una imagen con los enlaces que compartes",
