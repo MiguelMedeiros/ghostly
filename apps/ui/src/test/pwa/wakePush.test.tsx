@@ -136,6 +136,23 @@ describe("the push worker's table", () => {
     expect(platform.syncTable).toHaveBeenCalledTimes(3);
   });
 
+  it("a mute that ends by itself: the contact is told to wake the chat again, with no new state to wait for", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    session("chatm", "peer-m");
+    setChatMute("chatm", Date.now() + 150);
+    fakeEngine.on("setWakeMuted", () => undefined);
+    fakeEngine.setState(engineState({
+      settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } },
+      links: [linkView({ id: "l-m", peerPubKeyZ32: "peer-m", wakeToken: "tokenmmmmmmmmmmmmmmmmm", wakeMuted: true })],
+    }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("setWakeMuted")).toEqual([]);
+    await waitFor(() => expect(fakeEngine.callsTo("setWakeMuted")).toEqual([{ linkId: "l-m", muted: false }]));
+    expect(platform.syncTable.mock.lastCall![1]).toEqual([{ token: "tokenmmmmmmmmmmmmmmmmm", path: "/chat/chatm" }]);
+  });
+
   it("a contact that held it was deleted or muted: a new subscription with a new key pair, or off without notifications", async () => {
     const old = generateVapidKeys();
     const platform = fakePlatform();
