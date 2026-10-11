@@ -460,6 +460,7 @@
     "notAddress": "Ce n'est pas une adresse de relais : {{address}}",
     "useHttps": "Utilisez une adresse de relais https:// : {{address}}"
   },
+  "startAgain": "Recommencer",
   "transport": {
     "adapterFailed": "Démarrage impossible. Rouvrez cette discussion pour réessayer.",
     "allowAnotherNext": "Autorisez un autre transport ou activez le Secours.",
