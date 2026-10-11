@@ -939,6 +939,27 @@ describe("an away contact", () => {
     expect(hold).toHaveBeenCalledWith(chat.id, { kind: "text", id: "w9", messageId: "me_w9", bytes: 5, timestamp: 4 });
   });
 
+  it("sealing a held text, retrying it and opening its details read that message, not the chat's whole history", async () => {
+    const { node, events: pages, chat, hold } = await away();
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    vi.spyOn(node["hold"], "retry").mockResolvedValue(false);
+    await db.addMessage({ linkId: chat.id, id: "me_w8", wireId: "w8", text: "before", sender: "me", timestamp: 3, via: "datalink", delivery: "delivered" });
+    await db.addMessage({ linkId: chat.id, id: "me_w9", wireId: "w9", text: "later", sender: "me", timestamp: 4, via: "hold", delivery: "failed", forwarded: 2 });
+    const host = node["hold"]["host"] as { text(linkId: string, messageId: string): Promise<string | null>; reply(linkId: string, messageId: string): Promise<unknown>; forwarded(linkId: string, messageId: string): Promise<number | undefined> };
+    const history = vi.spyOn(db, "getMessages");
+    // What the hold asks for when it seals the text: the text, what it answers, how far it was forwarded.
+    expect(await host.text(chat.id, "me_w9")).toBe("later");
+    expect(await host.text(chat.id, "me_gone")).toBeNull();
+    expect(await host.reply(chat.id, "me_w9")).toBeUndefined();
+    expect(await host.forwarded(chat.id, "me_w9")).toBe(2);
+    await node.retryMessage({ linkId: chat.id, messageId: "me_w9" });
+    expect(hold).toHaveBeenCalledWith(chat.id, { kind: "text", id: "w9", messageId: "me_w9", bytes: 5, timestamp: 4 });
+    expect(await node.messageDetails({ linkId: chat.id, messageId: "me_w9" })).toMatchObject({ message: { id: "me_w9", kind: "text", via: "hold" } });
+    expect(await node.messageDetails({ linkId: chat.id, messageId: "me_gone" })).toBeNull();
+    expect(history).not.toHaveBeenCalled();
+  });
+
   it("a file waits in storage for the contact, within the size of one held item; a larger one waits for live", async () => {
     const { node, chat, hold } = await away();
     const big = { id: `${chat.id}-out-big`, name: "big", size: 64 * 1024 * 1024, mime: "" };
