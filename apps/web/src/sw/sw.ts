@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, classify, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -56,8 +56,8 @@ const PUSH_PROFILE = pushScopeProfile(worker.registration.scope);
 
 worker.addEventListener("install", (event) => {
   if (PUSH_PROFILE !== null) return;
-  // `reload`: past the browser's HTTP cache, so the shell is this deploy's and not an older copy.
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(__SW_PRECACHE__.map((path) => new Request(path, { cache: "reload" })))));
+  // The page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(__SW_PRECACHE__.map((path) => new Request(path, { cache: precacheMode(path) })))));
 });
 
 worker.addEventListener("activate", (event) => {
