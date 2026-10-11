@@ -4,7 +4,7 @@ import { base58 } from "@scure/base";
 import { expect, test, type Peer } from "../support/fixtures";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
-import { DOMAIN_SLOTS, startTestDomain, type TestDomain } from "../support/domain";
+import { startTestDomain, type TestDomain } from "../support/domain";
 import { choose } from "../support/select";
 
 /**
@@ -43,8 +43,8 @@ async function startDidProof(peer: Peer, did: string) {
 }
 
 let site: TestDomain;
-test.beforeEach(async ({}, info) => { site = await startTestDomain(info.parallelIndex % DOMAIN_SLOTS); });
-test.afterEach(async () => { await site.close(); });
+test.beforeEach(async () => { site = await startTestDomain(); });
+test.afterEach(async () => { await site?.close(); });
 
 test("a did:key signed outside the app is shown before signing, verified by the one contact it is shared with", { tag: ["@feature:proofs.did", "@feature:proofs.share", "@feature:proofs.picker"] }, async ({ peer }) => {
   const mine = didKey(), other = didKey();
