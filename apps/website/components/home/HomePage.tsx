@@ -53,10 +53,8 @@ export function HomePage({ version }: { version: string }) {
         ]}
       >
         <Hero t={t.hero} />
-        <div id="story">
-          <InviteScene eyebrow={t.invite.eyebrow} label={t.invite.label} steps={t.invite.steps} card={t.invite.card} />
-          <DhtScene eyebrow={t.dht.eyebrow} label={t.dht.label} steps={t.dht.steps} tags={t.dht.tags} />
-        </div>
+        <InviteScene eyebrow={t.invite.eyebrow} label={t.invite.label} steps={t.invite.steps} card={t.invite.card} />
+        <DhtScene eyebrow={t.dht.eyebrow} label={t.dht.label} steps={t.dht.steps} tags={t.dht.tags} />
       </Act>
       <Statement before={t.statement.before} accent={t.statement.accent} after={t.statement.after} />
       <Act

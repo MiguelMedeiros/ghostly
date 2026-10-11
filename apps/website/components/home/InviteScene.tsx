@@ -364,5 +364,5 @@ function Burst({ x, y, from, to, color, t }: { x: number; y: number; from: numbe
 
 export function InviteScene({ eyebrow, label, steps, card }: { eyebrow: string; label: string; steps: SceneStep[]; card: Card }) {
   // Stills: the card held out beside Boo; the token mid-flight toward Casper; the connection drawn.
-  return <SceneFrame id="invite" chapter="invite" eyebrow={eyebrow} label={label} steps={steps} stills={[0.3, 0.535, 0.88]} copyAt="left" visual={<Visual card={card} />} />;
+  return <SceneFrame id="invite" alias="story" chapter="invite" eyebrow={eyebrow} label={label} steps={steps} stills={[0.3, 0.535, 0.88]} copyAt="left" visual={<Visual card={card} />} />;
 }
