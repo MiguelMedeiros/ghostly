@@ -14,6 +14,16 @@ test("the phone menu has every page and both ways to open Ghostly", async ({ pag
   await expect(sheet).toBeHidden();
 });
 
+// "Download the app" used to land on the top of the finale, a screen above the first installer.
+test("375x667: Download the app lands on the installers", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto("/developers");
+  await page.getByLabel("Menu").click();
+  await page.locator(".nav-sheet").getByRole("link", { name: "Download the app" }).click();
+  await expect(page).toHaveURL(/\/#download$/);
+  await expect(page.locator(".fin-dl").first()).toBeInViewport({ ratio: 1 });
+});
+
 // The desktop nav marks the page that is open; the sheet lists the same pages and used to mark none of them.
 test("the phone menu marks the page that is open", async ({ page }) => {
   await page.goto("/developers");
