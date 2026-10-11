@@ -4,6 +4,12 @@
   "copyInvite": "Copier le code d'invitation",
   "deleteAllChats": "Supprimer toutes les discussions",
   "deleteChat": "Supprimer la discussion",
+  "folder": {
+    "empty": "Aucune discussion dans ce dossier pour l'instant",
+    "others": "Autres discussions",
+    "unreadCount": "{{count}} non lus dans {{name}}",
+    "unreadOne": "1 non lu dans {{name}}"
+  },
   "group": {
     "adminAnswered": "L'app de l'admin a répondu…",
     "answerFailed": "Cela n'a pas abouti. Réessayez.",

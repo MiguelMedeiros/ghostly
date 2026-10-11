@@ -4,6 +4,12 @@
   "copyInvite": "نسخ رمز الدعوة",
   "deleteAllChats": "حذف جميع المحادثات",
   "deleteChat": "حذف المحادثة",
+  "folder": {
+    "empty": "لا توجد محادثات في هذا المجلد بعد",
+    "others": "محادثات أخرى",
+    "unreadCount": "{{count}} غير مقروءة في {{name}}",
+    "unreadOne": "1 غير مقروءة في {{name}}"
+  },
   "group": {
     "adminAnswered": "أجاب تطبيق المشرف…",
     "answerFailed": "لم ينجح ذلك. حاول مرة أخرى.",

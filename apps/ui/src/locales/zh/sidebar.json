@@ -4,6 +4,12 @@
   "copyInvite": "复制邀请码",
   "deleteAllChats": "删除所有聊天",
   "deleteChat": "删除聊天",
+  "folder": {
+    "empty": "此文件夹中还没有聊天",
+    "others": "其他聊天",
+    "unreadCount": "{{name}} 中有 {{count}} 条未读",
+    "unreadOne": "{{name}} 中有 1 条未读"
+  },
   "group": {
     "adminAnswered": "管理员的应用已回应…",
     "answerFailed": "没有成功。请重试。",

@@ -727,6 +727,7 @@
     "apps/ui/src/components/CallButtons.tsx": ["calls.*"],
     "apps/ui/src/components/CallOverlay.tsx": ["calls.*"],
     "apps/ui/src/components/ChatConnection.tsx": ["*"],
+    "apps/ui/src/components/ChatFolderHeader.tsx": ["chats.folders"],
     "apps/ui/src/components/ChatHoldDialog.tsx": ["delivery.hold.*"],
     "apps/ui/src/components/ChatMute.tsx": ["chats.mute"],
     "apps/ui/src/components/ChatPaymentAccept.tsx": ["payments.chat.*","payments.*"],

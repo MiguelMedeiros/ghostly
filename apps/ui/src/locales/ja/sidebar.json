@@ -4,6 +4,12 @@
   "copyInvite": "招待コードをコピー",
   "deleteAllChats": "すべてのチャットを削除",
   "deleteChat": "チャットを削除",
+  "folder": {
+    "empty": "このフォルダにはまだチャットがありません",
+    "others": "その他のチャット",
+    "unreadCount": "{{name}} に未読 {{count}} 件",
+    "unreadOne": "{{name}} に未読 1 件"
+  },
   "group": {
     "adminAnswered": "管理者のアプリが応答しました…",
     "answerFailed": "うまくいきませんでした。もう一度お試しください。",

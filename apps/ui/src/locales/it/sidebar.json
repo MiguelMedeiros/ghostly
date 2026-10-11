@@ -4,6 +4,12 @@
   "copyInvite": "Copia codice invito",
   "deleteAllChats": "Elimina tutte le chat",
   "deleteChat": "Elimina chat",
+  "folder": {
+    "empty": "Ancora nessuna chat in questa cartella",
+    "others": "Altre chat",
+    "unreadCount": "{{count}} non letti in {{name}}",
+    "unreadOne": "1 non letto in {{name}}"
+  },
   "group": {
     "adminAnswered": "L'app dell'admin ha risposto…",
     "answerFailed": "Non è andato a buon fine. Riprova.",

@@ -4,6 +4,12 @@
   "copyInvite": "Copy invite code",
   "deleteAllChats": "Delete all chats",
   "deleteChat": "Delete chat",
+  "folder": {
+    "empty": "No chats in this folder yet",
+    "others": "Other chats",
+    "unreadCount": "{{count}} unread in {{name}}",
+    "unreadOne": "1 unread in {{name}}"
+  },
   "group": {
     "adminAnswered": "The admin's app answered…",
     "answerFailed": "That did not go through. Try again.",

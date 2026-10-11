@@ -4,6 +4,12 @@
   "copyInvite": "Copiar código de convite",
   "deleteAllChats": "Excluir todas as conversas",
   "deleteChat": "Excluir conversa",
+  "folder": {
+    "empty": "Nenhuma conversa nesta pasta ainda",
+    "others": "Outras conversas",
+    "unreadCount": "{{count}} não lidas em {{name}}",
+    "unreadOne": "1 não lida em {{name}}"
+  },
   "group": {
     "adminAnswered": "O app do admin respondeu…",
     "answerFailed": "Não deu certo. Tente de novo.",
