@@ -910,7 +910,7 @@
     "apps/ui/src/lib/backupFile.ts": ["backup.*","profiles.delete"],
     "apps/ui/src/lib/bootCheck.ts": ["app.boot"],
     "apps/ui/src/lib/brandMotion.ts": ["app.home"],
-    "apps/ui/src/lib/chatFolders.ts": ["chats.folders"],
+    "apps/ui/src/lib/chatFolders.ts": ["chats.folders","chats.list.pin-order"],
     "apps/ui/src/lib/chatList.ts": ["chats.*","groups.*","settings.chat-list-density","app.attention.unread"],
     "apps/ui/src/lib/chatMute.ts": ["chats.mute","app.attention.*","calls.*"],
     "apps/ui/src/lib/chatPayments.ts": ["payments.chat.*"],
