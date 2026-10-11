@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffFailure, HandoffView } from "@ghostly/browser/devices/handoff";
 import type { TranslationKey } from "../contexts/I18nContext";
 import { WALLET_NAME } from "../components/wallet/names";
 import { englishT, type Translate } from "../locales/translate";
 import { sizeIn } from "./sizeText";
+import { useShownPoll } from "../hooks/useShownPoll";
 
 /* The handoff (WISP 06 § The handoff) as the pages need it: what a failure says, sizes, and the view of the engine's. */
 
@@ -51,17 +51,11 @@ export function dayText(at: number, language: string): string {
 /** A wallet type the engine names, as the cards say it. */
 export const walletNameOf = (type: string | undefined): string => (type && type in WALLET_NAME ? WALLET_NAME[type as keyof typeof WALLET_NAME] : type ?? "");
 
-/** The handoff on this device, read twice a second while `on`. */
-export function useHandoffView(on = true): HandoffView | null {
-  const [view, setView] = useState<HandoffView | null>(null);
-  useEffect(() => {
-    if (!on) return;
-    let live = true;
-    const read = () => void engine.call("deviceHandoffView").then((next) => { if (live) setView(next); }, () => {});
-    read();
-    const timer = setInterval(read, 500);
-    return () => { live = false; clearInterval(timer); };
-  }, [on]);
-  return view;
-}
+/** How often a handoff's progress is read while its screen is in front. */
+const HANDOFF_EVERY_MS = 500;
+const readHandoff = () => engine.call("deviceHandoffView");
 
+/** The handoff on this device, read twice a second while `on` and the page shows (`useShownPoll`). */
+export function useHandoffView(on = true): HandoffView | null {
+  return useShownPoll(readHandoff, HANDOFF_EVERY_MS, on);
+}
