@@ -3,7 +3,7 @@ import path from "node:path";
 import Link from "next/link";
 import GithubSlugger from "github-slugger";
 import { Shell } from "@/components/site/Shell";
-import { IntentLink } from "@/components/site/IntentLink";
+import { IntentLink, PageLink } from "@/components/site/IntentLink";
 import { LevelBadge } from "@/components/site/Level";
 import { reader } from "@/content/reader";
 import { catalog } from "@/content/catalog";
@@ -94,9 +94,9 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
               <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
             </noscript>
             <WispNav groups={groups} current={w?.slug} t={{ all: t.all, expandAll: t.expandAll, collapseAll: t.collapseAll }} />
-            <Link className="reader-glossary reader-roadmap" href={"/roadmap"}>
+            <IntentLink className="reader-glossary reader-roadmap" href="/roadmap">
               {t.roadmap} →
-            </Link>
+            </IntentLink>
           </aside>
 
           <article className="reader-main">
@@ -149,7 +149,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
                     <div>
                       <dt>{t.inApp}</dt>
                       <dd>
-                        <Link href={w.feature.href}>{w.feature.label} →</Link>
+                        <PageLink href={w.feature.href}>{w.feature.label} →</PageLink>
                       </dd>
                     </div>
                   )}

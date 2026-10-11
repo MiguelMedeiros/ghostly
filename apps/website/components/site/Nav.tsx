@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PageLink } from "@/components/site/IntentLink";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "./Brand";
@@ -121,9 +122,9 @@ export function Nav({ apps = false }: { apps?: boolean }) {
         </Link>
         <nav className="nav-links" aria-label="Main">
           {links.map((l) => (
-            <Link key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
+            <PageLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
               {l.label}
-            </Link>
+            </PageLink>
           ))}
         </nav>
         <div className="nav-end">
@@ -169,9 +170,9 @@ export function Nav({ apps = false }: { apps?: boolean }) {
             </summary>
             <div className="nav-sheet">
               {links.map((l) => (
-                <Link key={l.href} href={l.href}>
+                <PageLink key={l.href} href={l.href}>
                   {l.label}
-                </Link>
+                </PageLink>
               ))}
               <span className="nav-sheet-rule" aria-hidden="true" />
               <a className="nav-sheet-way" href={APP_URL}>

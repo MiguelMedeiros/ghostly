@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { PageLink } from "@/components/site/IntentLink";
 import { useEffect, useId, useRef, useState } from "react";
 import { Ghost } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
@@ -212,9 +212,9 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
                 <p className="body">{item.body}</p>
                 {item.extra && <p className="note nx-note">{item.extra}</p>}
                 {"link" in item && item.link && (
-                  <Link className="link-arrow" href={item.link.href}>
+                  <PageLink className="link-arrow" href={item.link.href}>
                     {item.link.label} →
-                  </Link>
+                  </PageLink>
                 )}
               </div>
               <figure className="nx-row-media" data-phone={!!shot?.mobile}>
