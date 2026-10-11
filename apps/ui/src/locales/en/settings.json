@@ -11,7 +11,7 @@
   "clearAllData": "Clear all data",
   "clearAllDataConfirm": "This erases for good:",
   "clearAllDataDescription": "Chats, identities and settings of this profile. Wallets stay.",
-  "clearAllDataInfo": "Before erasing, Ghostly takes back what it can: items held for contacts, your DID, your identity proofs and wake-ups. Proofs you posted on other sites stay there. Wallets are not deleted: spend or back up your sats first if you want them gone too.",
+  "clearAllDataInfo": "First, Ghostly takes back what it can: items held for contacts, your DID, your proofs and wake-ups. Proofs you posted on other sites stay there.",
   "clearAllDataItems": {
     "appsData": "Installed apps and their data",
     "chats": "Chats, messages and files",
@@ -60,7 +60,7 @@
   "groupDownloads": {
     "always": "Always",
     "hint": "Voice messages and small files",
-    "info": "Voice messages, and files up to {{file}}, download by themselves until what came that way from a group adds up to {{group}} on this device. Larger files wait for Download. Each device decides for itself; nothing about it is sent to the group.",
+    "info": "Voice messages and files up to {{file}} download by themselves, up to {{group}} per group on this device. The group is never told.",
     "off": "Off",
     "title": "Download automatically in groups",
     "wifi": "Wi-Fi only"
@@ -72,7 +72,7 @@
   "license": "License",
   "linkPreviews": "Link previews",
   "linkPreviewsHint": "Send a title and picture with the links you share",
-  "linkPreviewsInfo": "This device reads the page and sends the preview with the message, so your contact's app never contacts the site. Off: links go as plain text.",
+  "linkPreviewsInfo": "This device reads the page and sends the preview along, so your contact's app never contacts the site. Off: links go as plain text.",
   "lockNow": "Lock now",
   "lockScreen": "Lock screen",
   "lockScreenDescription": "Asks for a password after inactivity. Does not encrypt stored chats.",
@@ -88,7 +88,7 @@
     "names": "Device names",
     "namesHint": "Allow the microphone and camera to see them",
     "none": "No microphone or camera found",
-    "noneInfo": "This browser shows Ghostly no microphone, camera or speaker here, so there is nothing to choose. A browser shows them only on a secure address (https or localhost).",
+    "noneInfo": "This browser shows Ghostly no microphone, camera or speaker. Browsers show them only on a secure address (https or localhost).",
     "preview": "Preview",
     "previewLabel": "Camera preview",
     "speaker": "Speaker",
@@ -132,12 +132,12 @@
   "profileLinkHint": "Name, picture, backups and other profiles",
   "profilePeek": "Check other profiles",
   "profilePeekHint": "Show when a message waits for another profile",
-  "profilePeekInfo": "Now and then this app reads what your other unlocked profiles' contacts publish for them, over the same relays or DHT those profiles use. It only reads: it never opens a message, and locked profiles are skipped.",
+  "profilePeekInfo": "Now and then, this app reads what contacts of your other unlocked profiles publish, over those profiles' relays or DHT. It never opens a message.",
   "profilePeekNotify": "Notify for other profiles",
   "profilePeekNotifyHint": "A system notice when one gets a message",
   "publicProfiles": "Load public profiles",
   "publicProfilesHint": "Pictures and bios on identity cards. Those servers see your IP.",
-  "publicProfilesInfo": "When a verified Nostr, Pubky or Bluesky identity is on screen, its card reads the picture, name, bio and followers from that network (your Nostr relays, nexus.pubky.app, public.api.bsky.app). Those servers see your IP address and which identity was looked at. Off: cards show only what the proof carries, and what was loaded is deleted.",
+  "publicProfilesInfo": "From your Nostr relays, nexus.pubky.app and public.api.bsky.app, which see which identity you viewed. Off: cards show only the proof; loaded data is deleted.",
   "randomizeName": "Generate random name",
   "reduceMotion": "Reduce motion",
   "reduceMotionHint": "Fewer animations. Your system setting always applies.",
@@ -187,7 +187,7 @@
   "storageInfo": {
     "protected": "Clearing the browser's site data or removing the app still deletes everything. Keep a backup of your profile.",
     "safari": "Safari also deletes a website's data after 7 days without a visit, unless it is on the Home Screen.",
-    "unprotected": "Install Ghostly (add it to the Home Screen), allow notifications, and keep a backup of your profile. Browsers protect apps that are installed and used often."
+    "unprotected": "Install Ghostly (add it to the Home Screen), allow notifications, and keep a backup of your profile. Browsers protect apps installed and used often."
   },
   "storageOf": "{{used}} of {{quota}}",
   "storageParts": {

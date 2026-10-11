@@ -278,8 +278,8 @@ test("a profile with many files and a large one is backed up with its progress a
 
   // What a backup holds, and what it does not, is said behind the ⓘ.
   await backups.getByTestId("row-info").first().click();
-  await expect(backups).toContainText("files of any size");
-  await expect(backups).toContainText("Not in it: S3 storage keys");
+  await expect(backups).toContainText("Everything except S3 keys");
+  await expect(backups).toContainText("return from their recovery phrase");
 
   await backups.getByTestId("backup-open").click();
   await backups.getByTestId("backup-passphrase").fill(PASSPHRASE);
