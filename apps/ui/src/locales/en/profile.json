@@ -11,7 +11,7 @@
     "content": {
       "everything": "Everything",
       "everythingSize": "Files: {{size}}",
-      "info": "Light keeps chats and every message, contacts, groups, identities, wallets and settings. It leaves out the files over 1 MB; voice messages up to 4 MB stay. After a restore, each file left out shows as Not in this backup.",
+      "info": "Light leaves out files over 1 MB; voice messages up to 4 MB stay. After a restore, each missing file says Not in this backup.",
       "label": "Contents",
       "leftOut": "Files over 1 MB were left out ({{size}}).",
       "light": "Light",
@@ -21,7 +21,7 @@
     "downloaded": "Downloaded {{name}} · {{size}}",
     "emptyFile": "This file is empty. Choose a backup file.",
     "fromFile": "File",
-    "holds": "In it: chats and their keys, messages, files of any size, wallets, shared services and settings. Not in it: S3 storage keys, this device's notification subscription, files still arriving, and the local data of Bark, Spark and Fedimint wallets, which come back from their recovery phrase (the phrase is in the backup).",
+    "holds": "Everything except S3 keys, this device's notification subscription and files still arriving. Bark, Spark and Fedimint wallets return from their recovery phrase, which it holds.",
     "keepOne": "Original still here? Keep using just one: they share wallets.",
     "list": "List",
     "noneYet": "None yet.",
@@ -80,7 +80,7 @@
       "copy": "Restore as a copy anyway",
       "firstProfile": "The first profile can't be removed. To replace it, clear its data in Settings.",
       "hint": "Both would act as the same person to your contacts. Replace the original, or don't run both.",
-      "info": "A restored copy keeps the original's chat keys. With both running, they answer the same contacts as one person and compete for the same connections, so messages can land in either. Replace restores the copy, switches to it, then offers to remove the original with the usual checks: what it holds, a backup first, and its name to confirm.",
+      "info": "With both running, messages can land in either. Replacing restores the copy, switches to it, then offers to remove the original, with the usual checks.",
       "replace": "Replace the original",
       "title": "This backup is {{names}}, which is on this device"
     },

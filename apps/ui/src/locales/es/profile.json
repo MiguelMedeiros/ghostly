@@ -11,7 +11,7 @@
     "content": {
       "everything": "Todo",
       "everythingSize": "Archivos: {{size}}",
-      "info": "La ligera guarda los chats y todos los mensajes, contactos, grupos, identidades, monederos y ajustes. Deja fuera los archivos de más de 1 MB; los mensajes de voz de hasta 4 MB se quedan. Tras restaurar, cada archivo dejado fuera aparece como No está en esta copia.",
+      "info": "La ligera deja fuera los archivos de más de 1 MB; los mensajes de voz de hasta 4 MB se quedan. Tras restaurar, cada archivo que falta aparece como No está en esta copia.",
       "label": "Contenido",
       "leftOut": "Los archivos de más de 1 MB se dejaron fuera ({{size}}).",
       "light": "Ligera",
@@ -21,7 +21,7 @@
     "downloaded": "Descargado {{name}} · {{size}}",
     "emptyFile": "Este archivo está vacío. Elige un archivo de copia.",
     "fromFile": "Archivo",
-    "holds": "Incluye: chats y sus claves, mensajes, archivos de cualquier tamaño, monederos, servicios compartidos y ajustes. No incluye: las claves del almacenamiento S3, la suscripción de notificaciones de este dispositivo, archivos que aún están llegando y los datos locales de los monederos Bark, Spark y Fedimint, que vuelven con su frase de recuperación (la frase sí está en la copia).",
+    "holds": "Todo salvo las claves S3, la suscripción de notificaciones de este dispositivo y los archivos que aún llegan. Los monederos Bark, Spark y Fedimint vuelven con su frase de recuperación, que sí está en la copia.",
     "keepOne": "¿Sigue aquí el original? Usa solo uno: comparten monederos.",
     "list": "Listar",
     "noneYet": "Ninguna todavía.",
@@ -80,7 +80,7 @@
       "copy": "Restaurar como copia de todos modos",
       "firstProfile": "El primer perfil no se puede eliminar. Para reemplazarlo, borra sus datos en Ajustes.",
       "hint": "Ambos actuarían como la misma persona para tus contactos. Reemplaza el original o no uses los dos.",
-      "info": "Una copia restaurada conserva las claves de chat del original. Con ambos en marcha, responden a los mismos contactos como una sola persona y compiten por las mismas conexiones, así que los mensajes pueden llegar a cualquiera. Reemplazar restaura la copia, cambia a ella y luego ofrece eliminar el original con las comprobaciones de siempre: lo que guarda, una copia de seguridad antes y su nombre para confirmar.",
+      "info": "Con ambos en marcha, los mensajes pueden llegar a cualquiera. Reemplazar restaura la copia, cambia a ella y luego ofrece eliminar el original, con las comprobaciones de siempre.",
       "replace": "Reemplazar el original",
       "title": "Esta copia es {{names}}, que está en este dispositivo"
     },
