@@ -363,23 +363,34 @@ async function daemonCommand(argv: string[]): Promise<void> {
   }
   if (sub === "stop") {
     knownProfile(g);
+    const stopFor = seconds(parsed, 20);
     const client = await connectDaemon(g.paths.socket);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
-    print({ stopped: true, pid: await stopDaemon(g, client, Number(parsed.options.timeout) || 20) });
+    print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
     return;
   }
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
+    const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
     const client = await connectDaemon(g.paths.socket);
     const before = client ? (await client.call("status").catch(() => null) as { version?: string } | null)?.version ?? null : null;
-    const stopped = client ? await stopDaemon(g, client, Number(parsed.options.timeout) || 20) : null;
-    const started = await startDetached(g, Number(parsed.options.timeout) || 60);
+    const stopped = client ? await stopDaemon(g, client, stopFor) : null;
+    const started = await startDetached(g, startFor);
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
   if (sub) throw new CliError("usage", "ghostly daemon [--detach] | daemon status | daemon stop | daemon restart");
+  const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g); return; }
-  print(await startDetached(g, Number(parsed.options.timeout) || 60));
+  print(await startDetached(g, startFor));
+}
+
+/** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
+function seconds(parsed: Parsed, fallback: number): number {
+  const value = parsed.options.timeout;
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !(value > 0)) throw new CliError("usage", "--timeout takes a number of seconds above 0");
+  return value;
 }
 
 /**
@@ -424,6 +435,10 @@ async function startDetached(g: Globals, seconds: number) {
   }
   if (!client) {
     heldBy(g, child.pid); // another process took the profile between the check and the child's start
+    // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
+    if (child.exitCode === null && child.pid !== undefined && processAlive(child.pid)) {
+      throw new CliError("timeout", `The daemon (process ${child.pid}) is still starting; ghostly daemon status shows when it is up`, { pid: child.pid, log: g.paths.log });
+    }
     throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
   }
   client.close();
