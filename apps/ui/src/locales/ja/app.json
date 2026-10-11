@@ -1,5 +1,10 @@
 {
   "name": "Ghostly",
+  "pageNotLoaded": {
+    "hint": "接続を確認して、もう一度お試しください。それでも失敗する場合は、Ghostly を再読み込みしてください。",
+    "title": "このページを読み込めませんでした。",
+    "tryAgain": "もう一度試す"
+  },
   "profileUnavailable": {
     "detail": "システムからの説明:",
     "info": "何も変更も削除もされていません。データが開けない間、Ghostly はこのプロフィールで誰にも接続せず、何も送信しません。このアプリは Ghostly {{app}} で、バージョン {{supported}} までのプロフィールデータを読めます。",

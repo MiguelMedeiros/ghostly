@@ -759,6 +759,7 @@
     "apps/ui/src/components/MediaSettings.tsx": ["settings.media"],
     "apps/ui/src/components/MentionChip.tsx": ["groups.mentions"],
     "apps/ui/src/components/Menu.tsx": ["*"],
+    "apps/ui/src/components/MenuPage.tsx": ["app.navigation"],
     "apps/ui/src/components/MessageBoundary.tsx": ["chat.rich.*","chat.paired.links"],
     "apps/ui/src/components/MessageBubble.tsx": ["*"],
     "apps/ui/src/components/MessageDetailsPanel.tsx": ["chat.paired.message-details"],
