@@ -60,7 +60,7 @@
     "rollback": "El enlace tiene una versión más antigua.",
     "status": "No hay nada en ese enlace.",
     "storage": "Este navegador no puede guardar apps aquí (¿navegación privada?). Prueba una ventana normal.",
-    "storageInfo": "Ghostly guarda los archivos de cada app en este dispositivo. Las ventanas privadas, como la Navegación privada de Safari, no lo permiten, y un disco lleno también lo impide. Abre Ghostly en una ventana normal e instala la app allí.",
+    "storageInfo": "Ghostly guarda los archivos de cada app en este dispositivo. Las ventanas privadas, como la Navegación privada de Safari, no lo permiten, y un disco lleno también lo impide.",
     "storeKey": "Esa tienda está firmada con otra clave.",
     "tooLarge": "Demasiado grande.",
     "unlistedVersion": "El enlace tiene una versión que esta tienda aún no lista."
@@ -96,7 +96,7 @@
     "unknownPublisherInfo": "Cualquiera puede firmar una app con una clave nueva. Solo una tienda que añadiste puede responder por quién la hizo. Compara la clave con la que publica su autor.",
     "update": "Actualizar",
     "webkit": "En este navegador, una app aún puede contactar con otros servidores.",
-    "webkitInfo": "Safari, y cualquier navegador en iPhone y iPad, deja que una app abra conexiones que Ghostly no puede bloquear, incluso sin el permiso de internet. Esos servidores conocen tu dirección IP. La app de escritorio las bloquea."
+    "webkitInfo": "Safari y cualquier navegador en iPhone o iPad dejan que una app abra conexiones que Ghostly no puede bloquear. Esos servidores conocen tu dirección IP. La app de escritorio las bloquea."
   },
   "page": {
     "add": "Añadir",

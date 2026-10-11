@@ -14,41 +14,35 @@ const WORDS = 25;
 const CHARACTERS: Record<string, number> = { ja: 120, zh: 120 };
 const OTHER_CHARACTERS = 210;
 
-/** The screens whose ⓘ texts are held to the budget: Settings and the sections it is made of. */
-const SETTINGS = [
-  "../../pages/Settings.tsx",
-  "../../components/NetworkSettings.tsx",
-  "../../components/DomainProofSettings.tsx",
-  "../../components/MediaSettings.tsx",
-  "../../components/ProfileBackups.tsx",
-  "../../components/settings/GroupDownloads.tsx",
-  "../../components/DirectBlockedHint.tsx",
-];
-
 /**
  * The keys a source names inside an `info={…}` (the ⓘ of a `Row`, a `Field` or an `InfoLine`), one chosen by a
- * condition included (`t(direct ? "a.b" : "a.c")`), and the keys it reads that end in `.info`.
+ * condition included (`t(direct ? "a.b" : "a.c")`), and the keys it names that end in `Info` or `.info`: the text of
+ * an ⓘ a screen draws itself.
  */
 function infoKeys(source: string): string[] {
   const keys = new Set<string>();
   for (const start of source.matchAll(/\binfo=\{/g)) {
     let end = start.index + start[0].length;
     for (let depth = 1; depth && end < source.length; end++) depth += source[end] === "{" ? 1 : source[end] === "}" ? -1 : 0;
-    for (const key of source.slice(start.index, end).matchAll(/"([a-z]\w*(?:\.\w+)+)"/gi)) keys.add(key[1]);
+    for (const key of source.slice(start.index, end).matchAll(/["']([a-z]\w*(?:\.\w+)+)["']/gi)) keys.add(key[1]);
   }
-  for (const key of source.matchAll(/\bt\(\s*"([\w.]+\.info)"/g)) keys.add(key[1]);
+  for (const key of source.matchAll(/["']([a-z]\w*(?:\.\w+)*(?:Info|\.info))["']/gi)) keys.add(key[1]);
   return [...keys].filter((key) => lookup("en", key) !== undefined);
 }
+
+/** ⓘ texts whose key is put together when it is drawn (`wallet.backupReminder.info.${due.backup}`). */
+const BUILT = ["wallet.backupReminder.info.phrase", "wallet.backupReminder.info.profile"];
 
 const words = (text: string) => text.trim().split(/\s+/).length;
 
 describe("the text behind an ⓘ is short", () => {
   const sources = appSources();
-  const keys = [...new Set(SETTINGS.flatMap((file) => infoKeys(sources[file])))].sort();
+  const keys = [...new Set([...Object.values(sources).flatMap(infoKeys), ...BUILT])].sort();
 
-  it("finds the ⓘ texts of Settings", () => {
-    expect(keys).toEqual(expect.arrayContaining(["connection.directBlocked.info", "network.domainLookupsInfo", "network.irohInfoDirect", "network.relaysInfoWeb", "profile.backups.holds", "pwa.wakeInfo", "settings.clearAllDataInfo"]));
-    expect(keys.length).toBeGreaterThanOrEqual(28);
+  it("finds the ⓘ texts of every screen", () => {
+    expect(keys).toEqual(expect.arrayContaining(["connection.directBlocked.info", "network.domainLookupsInfo", "network.irohInfoDirect", "network.relaysInfoWeb", "profile.backups.holds", "pwa.wakeInfo", "settings.clearAllDataInfo",
+      "apps.install.unknownPublisherInfo", "devices.limited.restoreInfo", "devices.standby.unreadableInfo", "payments.review.returnedInfo", "wallet.ark.sweepingInfo"]));
+    expect(keys.length).toBeGreaterThanOrEqual(60);
   });
 
   it(`in English, ${WORDS} words at most`, () => {

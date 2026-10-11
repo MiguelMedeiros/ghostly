@@ -7,9 +7,9 @@
   },
   "profileUnavailable": {
     "detail": "What the system said:",
-    "info": "Nothing was changed or deleted. While the data is closed, Ghostly connects to nobody and sends nothing for this profile. This app is Ghostly {{app}} and reads profile data up to version {{supported}}.",
+    "info": "Nothing was changed or deleted. While closed, this profile connects to nobody and sends nothing. Ghostly {{app}} reads profile data up to version {{supported}}.",
     "newerHint": "Update the app to open it.",
-    "newerInfo": "This profile's data is at version {{stored}}. This app, Ghostly {{app}}, reads up to version {{supported}}. A newer Ghostly opened the profile and moved its data forward, and an older one cannot read it safely. So nothing is opened and nothing is sent, and nothing was changed or deleted: your chats, keys and wallets are still there. Update this app, or open the profile with the newer one.",
+    "newerInfo": "Its data is version {{stored}}; Ghostly {{app}} reads up to {{supported}}. Nothing was opened, sent or changed: your chats, keys and wallets are still there.",
     "newerTitle": "This profile was last used by a newer version of Ghostly.",
     "noUpdate": "No newer version is out yet. Open this profile with the app that used it last.",
     "reason": {

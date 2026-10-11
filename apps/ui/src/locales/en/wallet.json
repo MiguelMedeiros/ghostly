@@ -15,9 +15,9 @@
     "renewalOpen": "While Ghostly is open",
     "renewalRegtest": "Off on regtest",
     "small": "{{amount}} {{unit}} expired, too few to recover on their own. They are recovered with the next coins that expire.",
-    "smallInfo": "A recovery makes one new coin, and the Ark server makes no coin below its minimum size. These sats are still yours: once more coins expire, Recover takes them all together.",
+    "smallInfo": "A recovery makes one coin, and the Ark server makes none below its minimum size. These sats stay yours.",
     "sweeping": "{{amount}} {{unit}} expired. You can recover them once the Ark server has swept their batch.",
-    "sweepingInfo": "Ark coins live in a batch that expires; Ghostly renews them before that while it is open. Coins that expired are still yours, but first the Ark server takes their batch back on-chain (a sweep). That waits for new Bitcoin blocks, often an hour or more. Until then they cannot be spent or recovered; after it, Recover moves them into a new batch.",
+    "sweepingInfo": "Expired coins stay yours. The Ark server first takes their batch back on-chain, often over an hour. Then Recover moves them into a new batch.",
     "useProvider": "Use this provider"
   },
   "away": {
@@ -55,7 +55,7 @@
     },
     "info": {
       "phrase": "The recovery phrase brings this wallet back on any device. Write it down and keep it offline. Anyone who has it can spend the money.",
-      "profile": "Cashu has no recovery phrase. A profile backup keeps your ecash as it is when you make it, so make a new one after you receive more."
+      "profile": "Cashu has no recovery phrase. A profile backup keeps your ecash as it is then, so make a new one after you receive more."
     },
     "label": "backup needed",
     "later": "Later",
