@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readStatusCard, type RoutineCard, type TaskCard } from "@ghostly/core";
 import type { CardIndexRow } from "@ghostly/browser/shared/types";
-import { BOARD_COLUMNS, RECENT_MS, boardEntries, boardModel, boardMove, boardTags, columnOf, partsDone, progressWords, stackTasks, type BoardEntry, type BoardTask } from "../../lib/taskBoard";
+import { BOARD_COLUMNS, RECENT_MS, boardEntries, boardModel, boardMove, boardTags, cardSenders, columnOf, mergeCopies, partsDone, progressWords, stackTasks, type BoardEntry, type BoardTask } from "../../lib/taskBoard";
 
 // covers: chat.tasks-board
 
@@ -14,7 +14,8 @@ let n = 0;
 const row = (linkId: string, card: TaskCard | RoutineCard, patch: Partial<CardIndexRow> = {}): CardIndexRow => ({ linkId, id: `m${++n}`, card, sender: "peer", timestamp: NOW - 60 * 60_000 + n, ...patch });
 /** Names as `useTaskBoard` would give them. */
 const named = (entries: BoardEntry[], names: Record<string, string> = {}): BoardTask[] => entries.filter((e): e is BoardEntry<TaskCard> => e.card.kind === "task")
-  .map((e) => ({ ...e, botKey: e.author, bot: names[e.author] ?? e.author, chat: names[e.linkId] ?? e.linkId }));
+  .map(({ copies, ...e }) => ({ ...e, botKey: e.author, bot: names[e.author] ?? e.author, chat: names[e.linkId] ?? e.linkId,
+    ...(copies && { copies: copies.map((copy) => ({ ...copy, chat: names[copy.linkId] ?? copy.linkId })) }) }));
 const columns = (tasks: BoardTask[], options: Parameters<typeof boardModel>[1] = {}) =>
   Object.fromEntries(boardModel(tasks, { now: NOW, ...options }).groups.map((g) => [g.id, g.tasks.map((t) => t.card.id)]));
 
@@ -67,6 +68,94 @@ describe("the cards of every chat", () => {
     ]);
     expect(entries.map((e) => e.card.id)).toEqual(["edited", "first", "last"]);
     expect(entries[0].at).toBe(NOW - 1_000);
+  });
+});
+
+describe("a card sent to several chats", () => {
+  // Hermes is a contact (chat-h) and a member of the team's group, under the key it made for that group; the group
+  // knows which chat is which member. Omarchy is in the group and in a community, and a contact in neither.
+  const senderOf = cardSenders(
+    [{ id: "chat-h", peerPubKeyZ32: "hermes-contact", peerNick: "Hermes" }, { id: "chat-phone", peerPubKeyZ32: "hermes-contact-2", peerNick: "Hermes" }],
+    [
+      { id: "team", memberLinks: { "chat-h": "hermes-in-team" }, members: [{ key: "hermes-in-team", nick: "Hermes" }, { key: "omarchy-in-team", nick: "Omarchy" }, { key: "twin-in-team", nick: "Omarchy" }] },
+      { id: "town", memberLinks: {}, members: [{ key: "omarchy-in-town", nick: "Omarchy" }], formerNames: { "gone-in-town": "Omarchy" } },
+    ],
+  );
+  const merged = (rows: CardIndexRow[]) => mergeCopies(boardEntries(rows), senderOf);
+
+  it("the sender is the contact, in their chat and as a member of a group; a member who is no contact has only a name", () => {
+    expect(senderOf({ linkId: "chat-h", author: "peer" })).toEqual({ key: "hermes-contact", name: "Hermes" });
+    expect(senderOf({ linkId: "group:team", author: "hermes-in-team" })).toEqual({ key: "hermes-contact", name: "Hermes" });
+    expect(senderOf({ linkId: "group:team", author: "omarchy-in-team" })).toEqual({ key: "omarchy-in-team", name: "Omarchy", loose: true });
+    expect(senderOf({ linkId: "group:town", author: "gone-in-town" })).toEqual({ key: "gone-in-town", name: "Omarchy", loose: true });
+    expect(senderOf({ linkId: "group:town", author: "nobody" })).toEqual({ key: "nobody", loose: true });
+    expect(senderOf({ linkId: "group:team", author: "me" })).toEqual({ key: "me" });
+    expect(senderOf({ linkId: "chat-h", author: "me" })).toEqual({ key: "me" });
+  });
+
+  it("is one task: the copy that changed last stands for it, the others are the places it lives in", () => {
+    const rows = [
+      row("chat-h", task({ status: "running" }), { id: "in-chat", timestamp: NOW - 9000, editedAt: NOW - 500 }),
+      row("group:team", task({ status: "blocked" }), { id: "in-team", member: "hermes-in-team", timestamp: NOW - 8000, editedAt: NOW - 100 }),
+      row("chat-h", task({ id: "other" }), { id: "other", timestamp: NOW - 7000 }),
+    ];
+    const tasks = merged(rows);
+    expect(tasks.map((e) => [e.card.id, e.linkId, e.messageId, e.card.kind === "task" && e.card.status, e.copies?.map((c) => [c.linkId, c.messageId, c.author])])).toEqual([
+      ["relay", "group:team", "in-team", "blocked", [["chat-h", "in-chat", "peer"]]],
+      ["other", "chat-h", "other", "running", undefined],
+    ]);
+    // The board counts tasks, not messages.
+    const board = boardModel(named(tasks), { now: NOW });
+    expect(board).toMatchObject({ total: 2, active: 2, shown: 2 });
+    expect(Object.fromEntries(board.groups.map((g) => [g.id, g.tasks.length]))).toMatchObject({ running: 1, blocked: 1 });
+    // An update in the chat makes that copy the one shown; the task keeps its key, so the board keeps its card.
+    const after = merged([{ ...rows[0], card: task({ status: "done" }), editedAt: NOW - 50 }, rows[1], rows[2]]);
+    expect(after.map((e) => [e.card.id, e.linkId, e.card.kind === "task" && e.card.status])).toEqual([["relay", "chat-h", "done"], ["other", "chat-h", "running"]]);
+    expect(after[0].key).toBe(tasks[0].key);
+  });
+
+  it("my own card in two chats is one, and so is a routine's", () => {
+    expect(merged([row("chat-h", task(), { sender: "me" }), row("group:team", task(), { sender: "me" })])).toHaveLength(1);
+    expect(merged([row("chat-h", routine()), row("group:team", routine(), { member: "hermes-in-team" }), row("chat-h", task({ id: "nightly" }))]).map((e) => [e.card.kind, e.copies?.length])).toEqual([["task", undefined], ["routine", 1]]);
+  });
+
+  it("a member who is no contact is matched by the name they state, in another chat only", () => {
+    // Omarchy in the group and in the community: two keys, one name.
+    expect(merged([row("group:team", task(), { member: "omarchy-in-team" }), row("group:town", task(), { member: "omarchy-in-town" })])).toHaveLength(1);
+    // Two members of one group with the same name and the same id stay two cards.
+    expect(merged([row("group:team", task(), { member: "omarchy-in-team" }), row("group:team", task(), { member: "twin-in-team" })])).toHaveLength(2);
+    // A member without a name is nobody else.
+    expect(merged([row("group:town", task(), { member: "nobody" }), row("group:team", task(), { member: "omarchy-in-team" })])).toHaveLength(2);
+  });
+
+  it("two senders are two tasks: another contact with the same name, another member, another id", () => {
+    expect(merged([row("chat-h", task()), row("chat-phone", task())])).toHaveLength(2);
+    expect(merged([row("chat-h", task()), row("group:team", task(), { member: "omarchy-in-team" })])).toHaveLength(2);
+    expect(merged([row("chat-h", task()), row("group:team", task({ id: "other" }), { member: "hermes-in-team" })])).toHaveLength(2);
+  });
+
+  it("grouped by chat it is in the column of each chat, and opens there; grouped by bot it is in one", () => {
+    const tasks = named(merged([
+      row("chat-h", task(), { id: "in-chat", timestamp: NOW - 9000 }),
+      row("group:team", task(), { id: "in-team", member: "hermes-in-team", timestamp: NOW - 8000 }),
+    ]), { "chat-h": "Hermes", "group:team": "Sala de Máquinas" }).map((t) => ({ ...t, botKey: "hermes-contact", bot: "Hermes" }));
+    const byChat = boardModel(tasks, { now: NOW, grouping: "chat" });
+    expect(byChat.groups.map((g) => [g.label, g.tasks.map((t) => [t.card.id, t.messageId])]).sort()).toEqual([["Hermes", [["relay", "in-chat"]]], ["Sala de Máquinas", [["relay", "in-team"]]]]);
+    expect(byChat).toMatchObject({ total: 1, shown: 1 });
+    expect(boardModel(tasks, { now: NOW, grouping: "bot" }).groups.map((g) => [g.label, g.tasks.length])).toEqual([["Hermes", 1]]);
+    // The filter finds it by any of its chats.
+    expect(boardModel(tasks, { now: NOW, filter: "hermes" }).shown).toBe(1);
+    expect(boardModel(tasks, { now: NOW, filter: "maquinas" }).shown).toBe(1);
+  });
+
+  it("its parts stack under it though each changed last in another chat", () => {
+    const tasks = named(merged([
+      row("chat-h", task({ id: "epic" }), { timestamp: NOW - 9000, editedAt: NOW - 10 }),
+      row("group:team", task({ id: "epic" }), { member: "hermes-in-team", timestamp: NOW - 9000 }),
+      row("chat-h", task({ id: "part", parent: "epic" }), { timestamp: NOW - 8000 }),
+      row("group:team", task({ id: "part", parent: "epic" }), { member: "hermes-in-team", timestamp: NOW - 8000, editedAt: NOW - 20 }),
+    ]));
+    expect(stackTasks(tasks).map((t) => [t.card.id, t.linkId, t.parts?.map((p) => [p.card.id, p.linkId])])).toEqual([["epic", "chat-h", [["part", "group:team"]]]]);
   });
 });
 

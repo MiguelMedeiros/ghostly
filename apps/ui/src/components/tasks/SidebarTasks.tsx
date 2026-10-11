@@ -1,20 +1,21 @@
 import { useMemo } from "react";
 import { useI18n } from "../../contexts/I18nContext";
-import { useCardIndex } from "../../hooks/useTaskBoard";
-import { boardEntries, isActiveTask } from "../../lib/taskBoard";
+import { useCardIndex, useCardSenders } from "../../hooks/useTaskBoard";
+import { boardEntries, isActiveTask, mergeCopies } from "../../lib/taskBoard";
 
 /**
  * The way to the Tasks board, above the chat list (the phone's chat list too): there only while this profile has a
  * bot's card in some chat or group, so a profile without bots never sees an empty place. It says how many tasks are
- * still going, across every chat. Not a place of the account bar or the phone's tab bar: those hold five at most.
+ * still going, across every chat (a task sent to several chats is one, as on the board). Not a place of the account bar or the phone's tab bar: those hold five at most.
  */
 export function SidebarTasks({ active, onOpen }: { active: boolean; onOpen: () => void }) {
   const { t } = useI18n();
   const index = useCardIndex();
+  const senderOf = useCardSenders();
   const going = useMemo(() => {
-    const entries = boardEntries(index);
+    const entries = mergeCopies(boardEntries(index), senderOf);
     return { cards: entries.length, active: entries.filter((e) => e.card.kind === "task" && isActiveTask(e.card)).length };
-  }, [index]);
+  }, [index, senderOf]);
   if (!going.cards) return null;
   const label = going.active ? t("cards.panel.buttonCount", { count: going.active }) : t("cards.panel.button");
   return (

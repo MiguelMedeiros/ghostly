@@ -9,7 +9,7 @@ import { authorName, groupPath, memberPhoto } from "../lib/groups";
 import { contactTag } from "../lib/publicKeyLabel";
 import { sameValue } from "../lib/sameValue";
 import { listSessions } from "../lib/storage";
-import { boardEntries, isActiveTask, type BoardEntry, type BoardRoutine, type BoardTask } from "../lib/taskBoard";
+import { boardEntries, cardSenders, isActiveTask, mergeCopies, type BoardCopy, type BoardEntry, type BoardRoutine, type BoardTask, type CardSender } from "../lib/taskBoard";
 import type { ChatSession } from "../lib/types";
 import { chatPath } from "../lib/url";
 
@@ -163,6 +163,12 @@ function boardChats(): BoardChats {
   return chats;
 }
 
+/** Who sent a card, across the profile's chats and groups (`cardSenders`): the same function until a chat or a name changes. */
+export function useCardSenders(): (entry: Pick<BoardEntry, "linkId" | "author">) => CardSender {
+  const { links, groups } = useSyncExternalStore(subscribeEngine, boardChats);
+  return useMemo(() => cardSenders(links, groups), [links, groups]);
+}
+
 const readSessions = (): BoardSession[] => listSessions().map((s) => ({ id: s.id, peerPubKeyB64: s.peerPubKeyB64, label: s.label, nick: s.nick }));
 
 /** The app's sessions (1:1 chats, kept by the page) as the board shows them, read again when one changes. */
@@ -190,7 +196,9 @@ export interface TaskBoardData {
 
 /**
  * The board's cards with names: each card's chat as the chat list names it, and its sender as that chat does (the
- * contact in a 1:1 chat, the member in a group). A card whose chat or group is gone from this profile is left out.
+ * contact in a 1:1 chat, the member in a group; a member who is a contact of mine as their own chat names them). A
+ * card sent to several chats is one entry (`mergeCopies`). A card whose chat or group is gone from this profile is
+ * left out.
  */
 export function useTaskBoard(): TaskBoardData {
   const { t } = useI18n();
@@ -214,22 +222,27 @@ export function useTaskBoard(): TaskBoardData {
       peerOf.set(link.id, { session, key: session.peerPubKeyB64, name, picture: shown?.photo ?? link.peerAvatar });
     }
     const known = new Set([...peerOf.keys(), ...groupOf.keys()]);
+    const senderOf = cardSenders(links, groups);
+    const peerOfKey = new Map([...peerOf.values()].map((peer) => [peer.key, peer]));
     const faceOfKey = (peerKey: string | undefined) => { const link = peerKey ? links.find((l) => l.peerPubKeyZ32 === peerKey) : undefined; return link && face(link); };
-    const who = (entry: Pick<BoardEntry, "linkId" | "author">): { botKey: string; bot: string; chat: string } => {
+    const who = (entry: BoardCopy): { botKey: string; bot: string; chat: string } => {
       const group = groupOf.get(entry.linkId);
       if (group) {
         const chat = group.name || t("group.chat.unnamed");
         if (entry.author === "me") return { botKey: "me", bot: t("cards.board.me"), chat };
-        return { botKey: entry.author, bot: authorName(group, entry.author, t), chat };
+        // A member who is a contact of mine is that contact, here and in their own chat: one bot, under one name.
+        const sender = senderOf(entry);
+        return { botKey: sender.key, bot: peerOfKey.get(sender.key)?.name ?? authorName(group, entry.author, t), chat };
       }
       const peer = peerOf.get(entry.linkId)!;
       return entry.author === "me" ? { botKey: "me", bot: t("cards.board.me"), chat: peer.name } : { botKey: peer.key, bot: peer.name, chat: peer.name };
     };
-    const entries = boardEntries(index, known);
+    const entries = mergeCopies(boardEntries(index, known), senderOf);
     const tasks: BoardTask[] = [], routines: BoardRoutine[] = [];
-    for (const entry of entries) {
-      if (entry.card.kind === "task") tasks.push({ ...(entry as BoardEntry<TaskCard>), ...who(entry) });
-      else routines.push({ ...(entry as BoardEntry<RoutineCard>), ...who(entry) });
+    for (const { copies, ...entry } of entries) {
+      const named = { ...who(entry), ...(copies && { copies: copies.map((copy) => ({ ...copy, chat: who(copy).chat })) }) };
+      if (entry.card.kind === "task") tasks.push({ ...(entry as Omit<BoardEntry<TaskCard>, "copies">), ...named });
+      else routines.push({ ...(entry as Omit<BoardEntry<RoutineCard>, "copies">), ...named });
     }
     return {
       tasks, routines,

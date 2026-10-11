@@ -1,5 +1,5 @@
 import { ACTIVE_TASK_STATUSES, taskProgress, type RoutineCard, type TaskCard, type TaskStatus } from "@ghostly/core";
-import type { CardIndexRow } from "@ghostly/browser/shared/types";
+import type { CardIndexRow, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import type { Translate } from "../contexts/I18nContext";
 import { foldText } from "./chatSearch";
 
@@ -10,9 +10,20 @@ import { foldText } from "./chatSearch";
  * never from the chats' histories; `useTaskBoard` gives them names and faces.
  */
 
+/** A place a card lives in: the chat or group it was sent to, its message there, and who sent it as that chat says. */
+export interface BoardCopy {
+  /** The chat's id, or `group:<id>`. */
+  linkId: string;
+  messageId: string;
+  /** Who sent it: `me`, `peer` (a 1:1 chat's contact), or a group member's key. */
+  author: string;
+  /** When it last changed there: its last edit, else when it was sent. */
+  at: number;
+}
+
 /** A card on the board: the newest message of one card (per chat, author, kind and id). */
 export interface BoardEntry<C extends TaskCard | RoutineCard = TaskCard | RoutineCard> {
-  /** Stable for the card across its updates: its chat, author, kind and id. */
+  /** Stable for the card across its updates: its chat, author, kind and id (its sender, kind and id once `mergeCopies` made one of its copies). */
   key: string;
   /** The chat's id, or `group:<id>`. */
   linkId: string;
@@ -22,6 +33,8 @@ export interface BoardEntry<C extends TaskCard | RoutineCard = TaskCard | Routin
   author: string;
   /** When it last changed: its last edit, else when it was sent. */
   at: number;
+  /** The other chats the same sender sent this card to (`mergeCopies`), the latest changed first; absent when there is none. */
+  copies?: BoardCopy[];
 }
 
 const authorOf = (row: Pick<CardIndexRow, "sender" | "member">) => row.member ?? row.sender;
@@ -45,6 +58,71 @@ export function boardEntries(rows: readonly CardIndexRow[], chats?: ReadonlySet<
   }
   return [...latest.values()].map(({ sent: _sent, ...entry }) => entry).sort((a, b) => b.at - a.at || (a.key < b.key ? -1 : 1));
 }
+
+/**
+ * Who sent a card, across chats: `key` is the contact's key wherever the sender is a contact of mine (in their chat, or
+ * as a member of a private group whose chat with me the group knows), `me` for my own. A group member who is no
+ * contact has only their key of that group, which is another in each group by design (WISP 900): `loose`, with the
+ * `name` they state, the one thing they have in common with themselves elsewhere.
+ */
+export interface CardSender { key: string; name?: string; loose?: true }
+
+type SenderLink = Pick<LinkView, "id" | "peerPubKeyZ32" | "peerNick">;
+type SenderGroup = Pick<GroupView, "id" | "memberLinks" | "formerNames"> & { members: readonly Pick<GroupMemberView, "key" | "nick">[] };
+
+/** Who sent a card of a chat or a group (`CardSender`), from the chats and groups the profile has. */
+export function cardSenders(links: readonly SenderLink[], groups: readonly SenderGroup[]): (entry: Pick<BoardEntry, "linkId" | "author">) => CardSender {
+  const linkOf = new Map(links.map((link) => [link.id, link]));
+  const groupOf = new Map(groups.map((group) => [`group:${group.id}`, group]));
+  const contact = (link: SenderLink): CardSender => ({ key: link.peerPubKeyZ32, ...(link.peerNick && { name: link.peerNick }) });
+  return ({ linkId, author }) => {
+    if (author === "me") return { key: "me" };
+    const group = groupOf.get(linkId);
+    if (!group) { const link = linkOf.get(linkId); return link ? contact(link) : { key: `${linkId}\n${author}` }; }
+    const chat = Object.keys(group.memberLinks).find((id) => group.memberLinks[id] === author);
+    const link = chat ? linkOf.get(chat) : undefined;
+    if (link) return contact(link);
+    const name = group.members.find((member) => member.key === author)?.nick || group.formerNames?.[author];
+    return { key: author, ...(name && { name }), loose: true };
+  };
+}
+
+/**
+ * One entry per card, however many chats it was sent to: a bot sends the same card (one id) to each place its person
+ * reads, and the board shows a task once. Entries of the same kind and id from the same sender are one: the one that
+ * changed last stands for the card, the others are its `copies`. The same sender is the same key (`cardSenders`); a
+ * group member who is no contact is matched by the name they state instead, since nothing else of theirs is the same
+ * across chats. Two contacts are never one, whatever they are called, and neither are two cards of one chat. `entries`: the latest changed first, as
+ * `boardEntries` gives them, and so they stay.
+ */
+export function mergeCopies<E extends BoardEntry>(entries: readonly E[], senderOf: (entry: Pick<BoardEntry, "linkId" | "author">) => CardSender): E[] {
+  interface Card { top: E; chats: Set<string>; keys: Set<string>; names: Set<string>; loose: boolean; sure?: string; copies: BoardCopy[] }
+  const cards: Card[] = [];
+  const byId = new Map<string, Card[]>();
+  for (const entry of entries) {
+    const sender = senderOf(entry);
+    const id = `${entry.card.kind}\n${entry.card.id}`;
+    const same = byId.get(id) ?? [];
+    const open = same.filter((c) => !c.chats.has(entry.linkId));
+    const card = open.find((c) => c.keys.has(sender.key)) ?? open.find((c) => sender.name !== undefined && c.names.has(sender.name) && (c.loose || !!sender.loose));
+    if (!card) {
+      const made: Card = { top: entry, chats: new Set([entry.linkId]), keys: new Set([sender.key]), names: new Set(sender.name === undefined ? [] : [sender.name]), loose: !!sender.loose, ...(!sender.loose && { sure: sender.key }), copies: [] };
+      cards.push(made);
+      byId.set(id, [...same, made]);
+      continue;
+    }
+    card.chats.add(entry.linkId);
+    card.keys.add(sender.key);
+    if (sender.name !== undefined) card.names.add(sender.name);
+    if (!sender.loose) { card.sure ??= sender.key; card.loose = false; }
+    card.copies.push({ linkId: entry.linkId, messageId: entry.messageId, author: entry.author, at: entry.at });
+  }
+  // A key that stays the same whichever copy changed last: the sender's key as a contact, else the key of the first seen.
+  return cards.map(({ top, copies, sure, keys }) => ({ ...top, key: `${sure ?? [...keys][0]}\n${top.card.kind}\n${top.card.id}`, ...(copies.length > 0 && { copies }) }));
+}
+
+/** Every place a card lives in: where it changed last, then its other copies. */
+export const placesOf = (entry: BoardEntry): BoardCopy[] => [entry, ...(entry.copies ?? [])];
 
 /**
  * The board's columns, in order. Failed and cancelled tasks share the last one: both are over without being done.
@@ -76,10 +154,15 @@ export interface BoardTask extends BoardEntry<TaskCard> {
   botKey: string;
   bot: string;
   chat: string;
+  /** The other chats it was sent to, by name. */
+  copies?: (BoardCopy & { chat: string })[];
   /** The tasks that name this one as their parent, stacked under it (`stackTasks`), going first. */
   parts?: BoardTask[];
 }
-export interface BoardRoutine extends BoardEntry<RoutineCard> { botKey: string; bot: string; chat: string }
+export interface BoardRoutine extends BoardEntry<RoutineCard> { botKey: string; bot: string; chat: string; copies?: (BoardCopy & { chat: string })[] }
+
+/** The chats a task or a routine lives in, by name, each once: where it changed last first. */
+export const chatNames = (entry: Pick<BoardTask, "chat" | "copies">): string[] => [...new Set([entry.chat, ...(entry.copies ?? []).map((copy) => copy.chat)])];
 
 export const isActiveTask = (card: TaskCard) => ACTIVE_TASK_STATUSES.includes(card.status);
 
@@ -100,7 +183,7 @@ export interface BoardGroup {
 /** What the text filter reads of a task, folded as the app's searches fold (case and accents). */
 function haystack(task: BoardTask, statusWord: (status: TaskStatus) => string): string {
   const { card } = task;
-  return foldText([card.title, task.bot, task.chat, card.step, card.branch, statusWord(card.status), card.id, ...(card.tags ?? []),
+  return foldText([card.title, task.bot, ...chatNames(task), card.step, card.branch, statusWord(card.status), card.id, ...(card.tags ?? []),
     ...(card.pr?.number !== undefined ? [`#${card.pr.number}`, `pr ${card.pr.number}`] : [])].filter(Boolean).join("\n"));
 }
 
@@ -109,18 +192,24 @@ const STATUS_RANK: Record<TaskStatus, number> = { running: 0, blocked: 1, queued
 
 /**
  * The tasks with each one's parts stacked under it: a task that names a parent (`parent`: the id of another task of
- * the same sender in the same chat) goes under that task instead of standing in a column of its own. Parts of a part
+ * the same sender in the same chat, in any of the chats both were sent to) goes under that task instead of standing in a column of its own. Parts of a part
  * go under the top task too: one level, however deep the bot nests. A parent that is not there (not sent, deleted, in
  * another chat, from someone else) leaves its parts as tasks of their own, and so does a ring of parents.
  */
 export function stackTasks(tasks: readonly BoardTask[]): BoardTask[] {
-  const scope = (task: BoardTask, id: string) => `${task.linkId}\n${task.author}\n${id}`;
-  const byId = new Map(tasks.map((task) => [scope(task, task.card.id), task]));
+  const scope = (place: BoardCopy, id: string) => `${place.linkId}\n${place.author}\n${id}`;
+  const byId = new Map(tasks.flatMap((task) => placesOf(task).map((place): [string, BoardTask] => [scope(place, task.card.id), task])));
+  const parentOf = (task: BoardTask) => {
+    const id = task.card.parent;
+    if (!id) return undefined;
+    for (const place of placesOf(task)) { const up = byId.get(scope(place, id)); if (up) return up; }
+    return undefined;
+  };
   /** The top task above this one, or undefined when it has none (no parent, a missing one, a ring). */
   const top = (task: BoardTask): BoardTask | undefined => {
     const seen = new Set([task]);
     let at = task, up: BoardTask | undefined;
-    while (at.card.parent && (up = byId.get(scope(at, at.card.parent)))) {
+    while ((up = parentOf(at))) {
       if (seen.has(up)) return undefined;
       seen.add(up);
       at = up;
@@ -182,7 +271,8 @@ export interface BoardModel {
  * The board, column by column. By status: the five columns, always (and Review among them once a task says where its
  * pull request stands), each with its tasks most recently changed first. A task's parts are stacked under it, not in
  * columns of their own; the filters keep a task when it or one of its parts matches.
- * By bot or by chat: a column per bot or chat that has a task, those with more going first, their tasks going first.
+ * By bot or by chat: a column per bot or chat that has a task, those with more going first, their tasks going first;
+ * by chat, a task sent to several chats is in the column of each, and opens there.
  * A finished task (done, failed, cancelled) last changed more than a day ago is counted in `old` and left out,
  * unless `older` asks for them.
  */
@@ -205,11 +295,15 @@ export function boardModel(tasks: readonly BoardTask[], { grouping = "status", f
       .map((column) => group(column, kept.filter((task) => columnOf(task.card) === column).sort((a, b) => b.at - a.at)));
   } else {
     const by = new Map<string, { label: string; list: BoardTask[] }>();
-    for (const task of kept) {
-      const id = grouping === "bot" ? task.botKey : task.linkId;
-      const at = by.get(id) ?? { label: grouping === "bot" ? task.bot : task.chat, list: [] };
+    const put = (id: string, label: string, task: BoardTask) => {
+      const at = by.get(id) ?? { label, list: [] };
       at.list.push(task);
       by.set(id, at);
+    };
+    for (const task of kept) {
+      if (grouping === "bot") { put(task.botKey, task.bot, task); continue; }
+      put(task.linkId, task.chat, task);
+      for (const { linkId, messageId, author, chat } of task.copies ?? []) put(linkId, chat, { ...task, linkId, messageId, author, chat });
     }
     groups = [...by].map(([id, { label, list }]) => group(id, list.sort((a, b) => STATUS_RANK[a.card.status] - STATUS_RANK[b.card.status] || b.at - a.at), label))
       // A bot or chat with only old finished tasks keeps its column (its "Show older" is there), after the others.
@@ -235,7 +329,9 @@ export function progressText(t: Translate, task: Pick<BoardTask, "card">): strin
 /** What a screen reader says of a card: its title, status, progress, sender and chat, pull request, and age. */
 export function boardCardLabel(t: Translate, task: BoardTask, age: string): string {
   const { card } = task;
-  const from = task.botKey === "me" || task.bot === task.chat ? t("cards.board.card.in", { chat: task.chat }) : t("cards.board.card.from", { bot: task.bot, chat: task.chat });
+  // A bot's own chat has the bot's name: said once, as on the card's chips.
+  const names = chatNames(task), others = task.botKey === "me" ? names : names.filter((name) => name !== task.bot);
+  const from = others.length && task.botKey !== "me" ? t("cards.board.card.from", { bot: task.bot, chat: others.join(", ") }) : t("cards.board.card.in", { chat: (others.length ? others : names).join(", ") });
   const parts = partsDone(task);
   return [card.title, t(`cards.task.status.${card.status}`), progressText(t, task), parts && t("cards.board.card.parts", parts), from,
     card.pr && (card.pr.number !== undefined ? t("cards.task.pr", { number: card.pr.number }) : t("cards.task.prNoNumber")),
