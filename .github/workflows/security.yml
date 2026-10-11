@@ -34,7 +34,8 @@ jobs:
         with:
           node-version: "22"
 
-      # package-lock.json, apps/website/package-lock.json and Cargo.lock against osv.dev.
+      # Every lockfile that ships (LOCKFILES in the script: the root's, the site's, the HyperDHT sidecar's and
+      # relay's, Iroh for browsers') against osv.dev.
       # Accepted advisories live in .github/security-allowlist.json, each with an expiry.
       - name: Scan lock files
         run: node tools/scripts/security-scan.mjs

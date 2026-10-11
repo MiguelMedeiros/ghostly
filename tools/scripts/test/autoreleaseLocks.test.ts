@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { LOCKFILES as SCANNED } from "../security-scan.mjs";
 import { bump, runGate } from "./autoreleaseGate.ts";
 
 const registry = (name: string, version: string) => ({ version, resolved: `https://registry.npmjs.org/${name}/-/${name.split("/").pop()}-${version}.tgz`, integrity: "sha512-x" });
@@ -118,7 +118,8 @@ describe("the security autorelease gate's lock file check", () => {
   // every lock file in the repository, and every one the vulnerability scan reads, has to be one the gate knows.
   it("knows every lock file the repository ships from and the scan reads", () => {
     const tracked = execFileSync("git", ["ls-files", "--", "*package-lock.json", "*Cargo.lock"], { cwd: root, encoding: "utf8" }).split("\n").filter((file) => file && !file.startsWith("e2e/"));
-    const scanned = [...readFileSync(resolve(root, "tools/scripts/security-scan.mjs"), "utf8").matchAll(/"([^"\s]*(?:package-lock\.json|Cargo\.lock))"/g)].map((match) => match[1]);
+    // The scan's own list: a lock file it names as not shipped (NOT_SHIPPED) is not one it reads.
+    const scanned: string[] = SCANNED.map((lock: { file: string }) => lock.file);
     expect(tracked).toEqual(expect.arrayContaining(["package-lock.json", "Cargo.lock", SIDECAR, RELAY, IROH_WEB]));
     expect(scanned).toEqual(expect.arrayContaining(["package-lock.json", "Cargo.lock"]));
     for (const lock of new Set([...tracked, ...scanned])) {
