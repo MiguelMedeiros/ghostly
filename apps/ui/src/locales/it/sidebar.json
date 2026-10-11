@@ -5,8 +5,19 @@
   "deleteAllChats": "Elimina tutte le chat",
   "deleteChat": "Elimina chat",
   "folder": {
+    "create": "Crea",
+    "delete": "Elimina cartella",
+    "deleteBody": "Le sue chat non vengono eliminate. Tornano nell'elenco, senza cartella.",
+    "deleteTitle": "Eliminare la cartella “{{name}}”?",
     "empty": "Ancora nessuna chat in questa cartella",
+    "move": "Sposta in una cartella…",
+    "nameLabel": "Nome della cartella",
+    "new": "Nuova cartella…",
+    "newTitle": "Nuova cartella",
+    "none": "Nessuna cartella",
+    "options": "Opzioni della cartella {{name}}",
     "others": "Altre chat",
+    "rename": "Rinomina cartella",
     "unreadCount": "{{count}} non letti in {{name}}",
     "unreadOne": "1 non letto in {{name}}"
   },
@@ -28,6 +39,8 @@
   "newMenu": {
     "chat": "Chat",
     "chatHint": "Una persona, con un invito",
+    "folder": "Cartella",
+    "folderHint": "Una sezione del tuo elenco di chat",
     "group": "Gruppo",
     "groupHint": "Un link che chiunque può aprire",
     "label": "Crea un gruppo o una chat"

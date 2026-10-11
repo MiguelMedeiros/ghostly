@@ -5,8 +5,19 @@
   "deleteAllChats": "删除所有聊天",
   "deleteChat": "删除聊天",
   "folder": {
+    "create": "创建",
+    "delete": "删除文件夹",
+    "deleteBody": "其中的聊天不会被删除，它们会回到列表中，不属于任何文件夹。",
+    "deleteTitle": "删除文件夹“{{name}}”？",
     "empty": "此文件夹中还没有聊天",
+    "move": "移到文件夹…",
+    "nameLabel": "文件夹名称",
+    "new": "新建文件夹…",
+    "newTitle": "新建文件夹",
+    "none": "不放入文件夹",
+    "options": "文件夹“{{name}}”的选项",
     "others": "其他聊天",
+    "rename": "重命名文件夹",
     "unreadCount": "{{name}} 中有 {{count}} 条未读",
     "unreadOne": "{{name}} 中有 1 条未读"
   },
@@ -28,6 +39,8 @@
   "newMenu": {
     "chat": "聊天",
     "chatHint": "一个人，通过邀请",
+    "folder": "文件夹",
+    "folderHint": "聊天列表中的一个分区",
     "group": "群组",
     "groupHint": "任何人都能打开的链接",
     "label": "创建群组或聊天"
