@@ -4,7 +4,7 @@ import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { ChatRow, GroupRow } from "./ChatRow";
 import { ChatFolderHeader } from "./ChatFolderHeader";
-import { folderChatsId, setFolderFolded, useChatFolders } from "../lib/chatFolders";
+import { folderChatsId, movePinnedBeside, setFolderFolded, useChatFolders } from "../lib/chatFolders";
 import { groupChat } from "../lib/chatMute";
 import { formatListTime } from "../lib/chatList";
 import { foldText } from "../lib/chatSearch";
@@ -31,7 +31,6 @@ import {
   listSessions,
   isSessionPinned,
   setSessionPinned,
-  movePinnedTo,
   deleteSession,
   getUnreadCount,
   markSessionAsRead,
@@ -218,9 +217,9 @@ export function Sidebar() {
   const looseGroups = shownGroups.filter(g => folderOfGroup(g) === undefined);
   const loose = filtered.filter(s => !filed(s.id));
   // The pinned chats are put in order by dragging one among the others; a search shows only some of them, so not then.
-  // Those in a folder keep their order from the chat's menu: a drag stays among the rows of one parent.
+  // Those in a folder are put in order from the chat's menu: a drag stays among the rows of one parent.
   const pinnedIds = pinnedRows(search ? [] : loose);
-  const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedTo });
+  const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedBeside });
 
   const groupRow = (group: (typeof groups)[number]) => (
     <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }} />

@@ -1,5 +1,5 @@
 import { useEffect, useReducer } from "react";
-import { getPrefix } from "./storage";
+import { getPrefix, movePinnedTo, pinnedOrder, type PinnedPlace } from "./storage";
 
 /*
  * Folders in the chat list: a person's own sections ("Agents", "Personal") that chats and groups are put in. A chat
@@ -142,6 +142,38 @@ export function setChatFolder(chat: string, folder: string | undefined): void {
   if (folder && stored.folders.some(f => f.id === folder)) chats[chat] = folder;
   else delete chats[chat];
   write({ ...stored, chats });
+}
+
+/*
+ * Pinned chats are put in order among the pinned chats shown with them: those of the same folder, or those in no
+ * folder. The stored order stays one list of every pinned chat (lib/storage.ts); a move goes to the place, in that
+ * list, of the chat it lands on, so the pinned chats of other folders keep their order among themselves too.
+ */
+
+/** The pinned chats shown with `chat` (itself included), top first: those in its folder, or in none as it is. */
+export function pinnedBeside(chat: string): string[] {
+  const { chats } = read();
+  return pinnedOrder().filter(id => chats[id] === chats[chat]);
+}
+
+/** A pinned chat's place among the pinned chats shown with it, or undefined for a chat that is not pinned. */
+export function pinnedPlaceBeside(chat: string): PinnedPlace | undefined {
+  const beside = pinnedBeside(chat);
+  const index = beside.indexOf(chat);
+  return index < 0 ? undefined : { index, count: beside.length };
+}
+
+/**
+ * Moves a pinned chat to `index` among the pinned chats shown with it (0 is the top; past either end is that end).
+ * Its new place among them, or undefined when it is not pinned or already there.
+ */
+export function movePinnedBeside(chat: string, index: number): PinnedPlace | undefined {
+  const beside = pinnedBeside(chat);
+  const from = beside.indexOf(chat);
+  const to = Math.max(0, Math.min(beside.length - 1, Math.trunc(index)));
+  if (from < 0 || from === to) return undefined;
+  // In the whole order, the chat it lands on is where it goes: after it on the way down, before it on the way up.
+  return movePinnedTo(chat, pinnedOrder().indexOf(beside[to])) && { index: to, count: beside.length };
 }
 
 /** The folders and each chat's place, kept current: redrawn when they change here or in another page of the app. */
