@@ -3,6 +3,9 @@ import { DeleteChatDialog } from "./DeleteChatDialog";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { ChatRow, GroupRow } from "./ChatRow";
+import { ChatFolderHeader } from "./ChatFolderHeader";
+import { folderChatsId, setFolderFolded, useChatFolders } from "../lib/chatFolders";
+import { groupChat } from "../lib/chatMute";
 import { formatListTime } from "../lib/chatList";
 import { foldText } from "../lib/chatSearch";
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
@@ -205,9 +208,67 @@ export function Sidebar() {
     return s.messages.some((m) => found(m.text, query));
   });
   const shownGroups = groupsFound(groups, search);
+  // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
+  const { folders, folderOf } = useChatFolders();
+  const shownFolders = search ? [] : folders;
+  const filed = (chat: string) => shownFolders.length > 0 && folderOf(chat) !== undefined;
+  // The chats and groups in no folder: all of them while there are no folders, where the list is as it always was.
+  // An invitation to a group is answered from its row: it stays in sight, in no folder, whatever folder the group was in.
+  const folderOfGroup = (g: (typeof groups)[number]) => (g.invitation || shownFolders.length === 0 ? undefined : folderOf(groupChat(g.id)));
+  const looseGroups = shownGroups.filter(g => folderOfGroup(g) === undefined);
+  const loose = filtered.filter(s => !filed(s.id));
   // The pinned chats are put in order by dragging one among the others; a search shows only some of them, so not then.
-  const pinnedIds = pinnedRows(search ? [] : filtered);
+  // Those in a folder keep their order from the chat's menu: a drag stays among the rows of one parent.
+  const pinnedIds = pinnedRows(search ? [] : loose);
   const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedTo });
+
+  const groupRow = (group: (typeof groups)[number]) => (
+    <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }} />
+  );
+  const chatRow = (session: ChatSession) => {
+    const lastMsg = session.messages[session.messages.length - 1];
+    const path = chatPath(session.id);
+    const isActive = activeSessionId === session.id;
+
+    const face = faceOf(session.peerPubKeyB64);
+    const shown = shownContactName({ nickname: session.label, face, nick: session.nick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) });
+    const peerKey = publicKeyLabel(session.peerPubKeyB64);
+    const isAnonymous = shown.from === "key";
+    const peerLabel = shown.name;
+    const unread = isActive ? 0 : getUnreadCount(session);
+    const isCreator = !!getInviteCode(session.id);
+
+    return (
+      <ChatRow
+        key={session.id}
+        chatId={session.id}
+        density={density}
+        active={isActive}
+        label={peerLabel}
+        face={face}
+        named={!isAnonymous}
+        keyLabel={peerKey}
+        peerPubKey={session.peerPubKeyB64}
+        lastMessage={lastMsg}
+        note={(session.lastReaction?.at ?? 0) > Math.max(lastMsg?.timestamp ?? 0, session.identitySharedAt ?? 0) ? reactionNoteText(session.lastReaction!, peerLabel, t)
+          : (session.identitySharedAt ?? 0) > (lastMsg?.timestamp ?? 0) ? t("sidebar.sharedIdentity") : undefined}
+        time={formatListTime(session.lastSyncAt ?? session.createdAt, undefined, language, t)}
+        unread={unread}
+        pinned={isSessionPinned(session.id)}
+        syncing={syncingSessions.has(session.id)}
+        creator={isCreator}
+        onOpen={() => { markSessionAsRead(session.id); nav.conversation(path); setConfirmDeleteId(null); }}
+        onTogglePin={() => setSessionPinned(session.id, !isSessionPinned(session.id))}
+        onDelete={(e) => handleDelete(session.id, e)}
+        deleteLabel={t("sidebar.deleteChat")}
+        usage={usageByPeer.get(session.peerPubKeyB64)}
+        working={workingByPeer.get(session.peerPubKeyB64)}
+        reorder={pinnedIds.length > 1 && pinnedIds.includes(session.id)
+          ? { props: reorder.rowProps(session.id), dragging: reorder.dragging === session.id, drop: reorder.drop?.id === session.id ? reorder.drop.edge : undefined }
+          : undefined}
+      />
+    );
+  };
 
   return (
     <div
@@ -279,10 +340,26 @@ export function Sidebar() {
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
-        {shownGroups.map(group => (
-          <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }} />
-        ))}
-        {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && (
+        {shownFolders.map(folder => {
+          const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
+          const itsChats = filtered.filter(s => folderOf(s.id) === folder.id);
+          return (
+            <div key={folder.id} role="group" aria-label={folder.name} data-testid="chat-folder-section">
+              <ChatFolderHeader folder={folder} sessions={itsChats.filter(s => s.id !== activeSessionId)} groups={itsGroups.filter(g => g.id !== activeGroupId)}
+                onToggle={() => setFolderFolded(folder.id, !folder.folded)} />
+              {!folder.folded && <div id={folderChatsId(folder.id)} data-testid="chat-folder-chats">
+                {itsGroups.map(groupRow)}
+                {itsChats.map(chatRow)}
+                {itsGroups.length === 0 && itsChats.length === 0 && <p data-testid="chat-folder-empty" className="m-0 px-3 py-3 text-[13px] text-text-muted">{t("sidebar.folder.empty")}</p>}
+              </div>}
+            </div>
+          );
+        })}
+        {shownFolders.length > 0 && (looseGroups.length > 0 || loose.length > 0) && (
+          <p data-testid="chat-folder-others" className="m-0 flex h-11 items-center border-b border-border/40 px-3 text-[13px] font-semibold text-text-secondary">{t("sidebar.folder.others")}</p>
+        )}
+        {looseGroups.map(groupRow)}
+        {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && shownFolders.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center">
             <div className="text-text-muted mb-4 animate-ghost-boo">
               <svg className="w-12 h-12 mx-auto" viewBox="0 0 24 24" fill="currentColor">
@@ -309,50 +386,7 @@ export function Sidebar() {
           </div>
         )}
 
-        {filtered.map((session) => {
-          const lastMsg = session.messages[session.messages.length - 1];
-          const path = chatPath(session.id);
-          const isActive = activeSessionId === session.id;
-
-          const face = faceOf(session.peerPubKeyB64);
-          const shown = shownContactName({ nickname: session.label, face, nick: session.nick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) });
-          const peerKey = publicKeyLabel(session.peerPubKeyB64);
-          const isAnonymous = shown.from === "key";
-          const peerLabel = shown.name;
-          const unread = isActive ? 0 : getUnreadCount(session);
-          const isCreator = !!getInviteCode(session.id);
-
-          return (
-            <ChatRow
-              key={session.id}
-              chatId={session.id}
-              density={density}
-              active={isActive}
-              label={peerLabel}
-              face={face}
-              named={!isAnonymous}
-              keyLabel={peerKey}
-              peerPubKey={session.peerPubKeyB64}
-              lastMessage={lastMsg}
-              note={(session.lastReaction?.at ?? 0) > Math.max(lastMsg?.timestamp ?? 0, session.identitySharedAt ?? 0) ? reactionNoteText(session.lastReaction!, peerLabel, t)
-                : (session.identitySharedAt ?? 0) > (lastMsg?.timestamp ?? 0) ? t("sidebar.sharedIdentity") : undefined}
-              time={formatListTime(session.lastSyncAt ?? session.createdAt, undefined, language, t)}
-              unread={unread}
-              pinned={isSessionPinned(session.id)}
-              syncing={syncingSessions.has(session.id)}
-              creator={isCreator}
-              onOpen={() => { markSessionAsRead(session.id); nav.conversation(path); setConfirmDeleteId(null); }}
-              onTogglePin={() => setSessionPinned(session.id, !isSessionPinned(session.id))}
-              onDelete={(e) => handleDelete(session.id, e)}
-              deleteLabel={t("sidebar.deleteChat")}
-              usage={usageByPeer.get(session.peerPubKeyB64)}
-              working={workingByPeer.get(session.peerPubKeyB64)}
-              reorder={pinnedIds.length > 1 && pinnedIds.includes(session.id)
-                ? { props: reorder.rowProps(session.id), dragging: reorder.dragging === session.id, drop: reorder.drop?.id === session.id ? reorder.drop.edge : undefined }
-                : undefined}
-            />
-          );
-        })}
+        {loose.map(chatRow)}
       </div>
 
       {confirmDeleteId && <DeleteChatDialog

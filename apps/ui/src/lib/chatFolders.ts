@@ -30,6 +30,9 @@ export const FOLDER_NAME_MAX = 40;
 /** Sent on this page when the folders change (another page of the app sees `storage`). */
 export const FOLDERS_EVENT = "chat-folders-updated";
 
+/** The id of a folder's chats in the page: what its header's button controls. */
+export const folderChatsId = (folderId: string) => `chat-folder-${folderId}`;
+
 const foldersKey = () => `${getPrefix()}chat_folders`;
 
 const isFolder = (f: unknown): f is ChatFolder =>
