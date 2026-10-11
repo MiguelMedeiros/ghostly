@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@ghostly/core";
+import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { EditQueue } from "../src/engine/edits";
@@ -874,6 +874,34 @@ describe("text in a chat", () => {
     // An id no message of mine has (a file's offer or an edit said on the DHT floor) is still looked for.
     await events.onMessageReceipt("floor-id");
     expect(history).toHaveBeenCalled();
+  });
+
+  it("a receipt for a file said on the DHT floor finds it without reading the chat's whole history again", async () => {
+    const chat = row();
+    const { node, events: pages, linkOf } = await started(chat);
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    const link = linkOf(chat.id), { events } = link.options;
+    const waiting = (wireId: string, at: number, fileOnFloor?: "sent") => ({ linkId: chat.id, id: `me_${at}`, text: "a.txt", sender: "me" as const, timestamp: at, via: "datalink" as const,
+      delivery: "waiting" as const, file: { id: `${chat.id}-out-${wireId}`, name: "a.txt", size: 1, mime: "text/plain" }, ...(fileOnFloor && { fileOnFloor }) });
+    const seen = { fileOnFloor: "seen", deliveryError: "Your contact sees it. The file goes when you are live." };
+    // Said on the floor in an earlier run: the chat's history is where it is found, once.
+    await db.addMessage(waiting("w1", 1, "sent"));
+    // The first id no message of mine has: the outbox, the edits and the floor's files each learn what waits, once.
+    await events.onMessageReceipt("an-edit-on-the-floor");
+    const history = vi.spyOn(db, "getMessages");
+    await events.onMessageReceipt(dhtFileId("w1"));
+    expect(await db.getMessage(chat.id, "me_1")).toMatchObject(seen);
+    // Said on the floor in this run: known from the moment it is said.
+    await db.addMessage(waiting("w2", 2));
+    Object.assign(link, { isDataLinkOpen: false, fileAnnounceError: () => null, announceFile: vi.fn(async () => null), dhtPendingId: dhtFileId("w2") });
+    await node["sayFileOnFloor"](node["links"].get(chat.id)!, (await db.getMessage(chat.id, "me_2"))!);
+    expect((await db.getMessage(chat.id, "me_2"))?.fileOnFloor).toBe("sent");
+    await events.onMessageReceipt(dhtFileId("w2"));
+    expect(await db.getMessage(chat.id, "me_2")).toMatchObject(seen);
+    // A receipt that names no file of mine changes nothing, and reads nothing.
+    await events.onMessageReceipt(dhtFileId("w3"));
+    expect(history).not.toHaveBeenCalled();
   });
 
   // covers: chat.link-preview.wire
