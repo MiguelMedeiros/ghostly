@@ -71,34 +71,173 @@ pub struct DialogWords {
     pub deny: &'static str,
 }
 
-/// The native dialog in the profile's language. `lang` is the page's word, one of the app's eight codes (English for
-/// anything else): the page names the language and nothing more, the words are these.
+/// One language's words: each question's title and text (`{at}` is the address), and the two buttons.
+struct Words {
+    share: (&'static str, &'static str),
+    first_use: (&'static str, &'static str),
+    allow: &'static str,
+    deny: &'static str,
+}
+
+const EN: Words = Words {
+    share: (
+        "Share {at}?",
+        "Contacts you choose will be able to open the app at {at} through Ghostly.\n\n\
+         Allow only if you are sharing this app in Ghostly now.",
+    ),
+    first_use: (
+        "Let contacts reach {at}?",
+        "A contact is asking for the app at {at}. This address is not on your list of \
+         shared services: Ghostly now asks once for each address it may reach.\n\n\
+         Allow only if you shared this app in Ghostly.",
+    ),
+    allow: "Allow",
+    deny: "Don't allow",
+};
+
+const PT: Words = Words {
+    share: (
+        "Compartilhar {at}?",
+        "Os contatos que você escolher poderão abrir o app em {at} pelo Ghostly.\n\n\
+         Permita só se você está compartilhando este app no Ghostly agora.",
+    ),
+    first_use: (
+        "Deixar contatos acessarem {at}?",
+        "Um contato está pedindo o app em {at}. Este endereço não está na sua lista de \
+         serviços compartilhados: agora o Ghostly pergunta uma vez para cada endereço que pode acessar.\n\n\
+         Permita só se você compartilhou este app no Ghostly.",
+    ),
+    allow: "Permitir",
+    deny: "Não permitir",
+};
+
+const ES: Words = Words {
+    share: (
+        "¿Compartir {at}?",
+        "Los contactos que elijas podrán abrir la app en {at} a través de Ghostly.\n\n\
+         Permítelo solo si estás compartiendo esta app en Ghostly ahora.",
+    ),
+    first_use: (
+        "¿Dejar que los contactos accedan a {at}?",
+        "Un contacto está pidiendo la app en {at}. Esta dirección no está en tu lista de \
+         servicios compartidos: ahora Ghostly pregunta una vez por cada dirección a la que puede acceder.\n\n\
+         Permítelo solo si compartiste esta app en Ghostly.",
+    ),
+    allow: "Permitir",
+    deny: "No permitir",
+};
+
+const FR: Words = Words {
+    share: (
+        "Partager {at} ?",
+        "Les contacts que vous choisissez pourront ouvrir l’app à l’adresse {at} via Ghostly.\n\n\
+         N’autorisez que si vous partagez cette app dans Ghostly maintenant.",
+    ),
+    first_use: (
+        "Laisser des contacts accéder à {at} ?",
+        "Un contact demande l’app à l’adresse {at}. Cette adresse n’est pas dans votre liste de \
+         services partagés : Ghostly demande désormais une fois pour chaque adresse qu’il peut joindre.\n\n\
+         N’autorisez que si vous avez partagé cette app dans Ghostly.",
+    ),
+    allow: "Autoriser",
+    deny: "Ne pas autoriser",
+};
+
+const IT: Words = Words {
+    share: (
+        "Condividere {at}?",
+        "I contatti che scegli potranno aprire l'app su {at} tramite Ghostly.\n\n\
+         Consenti solo se stai condividendo questa app in Ghostly adesso.",
+    ),
+    first_use: (
+        "Consentire ai contatti di raggiungere {at}?",
+        "Un contatto chiede l'app su {at}. Questo indirizzo non è nel tuo elenco di \
+         servizi condivisi: ora Ghostly chiede una volta per ogni indirizzo che può raggiungere.\n\n\
+         Consenti solo se hai condiviso questa app in Ghostly.",
+    ),
+    allow: "Consenti",
+    deny: "Non consentire",
+};
+
+const ZH: Words = Words {
+    share: (
+        "共享 {at}？",
+        "你选择的联系人将可以通过 Ghostly 打开位于 {at} 的应用。\n\n\
+         仅当你现在正在 Ghostly 中共享此应用时才允许。",
+    ),
+    first_use: (
+        "允许联系人访问 {at}？",
+        "有联系人请求访问位于 {at} 的应用。此地址不在你的共享服务列表中：\
+         Ghostly 现在会对它可能访问的每个地址询问一次。\n\n\
+         仅当你在 Ghostly 中共享过此应用时才允许。",
+    ),
+    allow: "允许",
+    deny: "不允许",
+};
+
+const JA: Words = Words {
+    share: (
+        "{at} を共有しますか？",
+        "選んだ連絡先が、Ghostly を通じて {at} のアプリを開けるようになります。\n\n\
+         いま Ghostly でこのアプリを共有している場合のみ許可してください。",
+    ),
+    first_use: (
+        "連絡先に {at} へのアクセスを許可しますか？",
+        "連絡先が {at} のアプリを求めています。このアドレスは共有サービスの一覧にありません。\
+         Ghostly は、アクセスする可能性のあるアドレスごとに一度確認するようになりました。\n\n\
+         Ghostly でこのアプリを共有した場合のみ許可してください。",
+    ),
+    allow: "許可",
+    deny: "許可しない",
+};
+
+const AR: Words = Words {
+    share: (
+        "مشاركة {at}؟",
+        "جهات الاتصال التي تختارها ستتمكن من فتح التطبيق على {at} عبر Ghostly.\n\n\
+         اسمح فقط إذا كنت تشارك هذا التطبيق في Ghostly الآن.",
+    ),
+    first_use: (
+        "السماح لجهات الاتصال بالوصول إلى {at}؟",
+        "جهة اتصال تطلب التطبيق على {at}. هذا العنوان ليس في قائمة خدماتك المشتركة: \
+         يسأل Ghostly الآن مرة واحدة عن كل عنوان قد يصل إليه.\n\n\
+         اسمح فقط إذا كنت قد شاركت هذا التطبيق في Ghostly.",
+    ),
+    allow: "السماح",
+    deny: "عدم السماح",
+};
+
+/// The words for the page's language. `lang` is its `<html lang>`, a tag ("pt-BR", "zh-CN"): the language decides,
+/// and one the app does not have reads as English.
+fn words_for(lang: &str) -> &'static Words {
+    let language = lang.split('-').next().unwrap_or_default();
+    match language.to_ascii_lowercase().as_str() {
+        "pt" => &PT,
+        "es" => &ES,
+        "fr" => &FR,
+        "it" => &IT,
+        "zh" => &ZH,
+        "ja" => &JA,
+        "ar" => &AR,
+        _ => &EN,
+    }
+}
+
+/// The native dialog in the language the page is shown in. `lang` is the page's word, and all the page says: the
+/// words are these, so a page still cannot write the dialog.
 #[cfg_attr(feature = "e2e-driver", allow(dead_code))]
 pub fn dialog_words(origin: &str, reason: Reason, lang: &str) -> DialogWords {
-    let _ = lang;
+    let words = words_for(lang);
     let at = label(origin);
     let (title, text) = match reason {
-        Reason::Share => (
-            format!("Share {at}?"),
-            format!(
-                "Contacts you choose will be able to open the app at {at} through Ghostly.\n\n\
-                 Allow only if you are sharing this app in Ghostly now."
-            ),
-        ),
-        Reason::FirstUse => (
-            format!("Let contacts reach {at}?"),
-            format!(
-                "A contact is asking for the app at {at}. This address is not on your list of \
-                 shared services: Ghostly now asks once for each address it may reach.\n\n\
-                 Allow only if you shared this app in Ghostly."
-            ),
-        ),
+        Reason::Share => words.share,
+        Reason::FirstUse => words.first_use,
     };
     DialogWords {
-        title,
-        text,
-        allow: "Allow",
-        deny: "Don't allow",
+        title: title.replace("{at}", at),
+        text: text.replace("{at}", at),
+        allow: words.allow,
+        deny: words.deny,
     }
 }
 

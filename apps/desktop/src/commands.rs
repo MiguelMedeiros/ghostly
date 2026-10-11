@@ -219,8 +219,10 @@ pub fn diagnostic_log(line: String) {
 }
 
 /// A request to a local app the profile shares (`space`, the page's database name): only to an
-/// address the person allowed in a native dialog, see `local_access`.
+/// address the person allowed in a native dialog, see `local_access`. `lang` is the language the
+/// page is shown in, for that dialog when this request is the first for its address.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn local_fetch<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     access: State<'_, LocalAccess>,

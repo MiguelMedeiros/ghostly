@@ -140,6 +140,12 @@ export function createTauriTransport(): PkarrTransport {
 }
 
 /**
+ * The language the page is shown in now (`<html lang>`, lib/documentLanguage.ts), for a native dialog Rust words
+ * itself (`local_access.rs`): the page names the language, never the words.
+ */
+const dialogLanguage = () => document.documentElement.lang;
+
+/**
  * The WebView may not talk to localhost (CSP, CORS); Rust may, and only to
  * loopback addresses this profile's person allowed (`local_service_allow`),
  * without following redirects. The Rust request cannot be aborted, so this
@@ -154,6 +160,7 @@ const tauriLocalFetch: LocalFetch = async (request) => {
     method: request.method,
     headers: request.headers,
     bodyB64: request.body ? toBase64(request.body) : null,
+    lang: dialogLanguage(),
   });
   const body = fromBase64(response.body_b64);
   return {
@@ -378,8 +385,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
         done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
       })),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
-    // answer per profile: `local_fetch` reaches only an address allowed there.
-    requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin }),
+    // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
+    requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
     async openService(peerPubKeyZ32, serviceId) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
