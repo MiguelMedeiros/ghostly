@@ -26,7 +26,7 @@ export class CliError extends Error {
 export function asCliError(error: unknown): CliError {
   if (error instanceof CliError) return error;
   if (error && typeof error === "object" && "code" in error && "message" in error && typeof (error as { code: unknown }).code === "string"
-    && (error as { code: string }).code in EXIT) return new CliError((error as { code: ErrorCode }).code, String((error as { message: unknown }).message));
+    && Object.hasOwn(EXIT, (error as { code: string }).code)) return new CliError((error as { code: ErrorCode }).code, String((error as { message: unknown }).message));
   const local = localFileError(error);
   if (local) return local;
   const unopened = profileOpenError(error);

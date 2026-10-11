@@ -698,17 +698,19 @@ export async function main(input: string[]): Promise<number> {
   if (argv[0] === "--version" || argv[0] === "version") { print({ version: VERSION }); return 0; }
   const [first, second] = argv;
   const two = second && !second.startsWith("-") ? `${first} ${second}` : "";
-  if (first === "profile" && !COMMANDS[two]) { await profileCommand(second, argv.slice(2)); return 0; }
+  // A command is one its table lists itself: every object has `constructor` and `toString`, which are no commands.
+  const text = (name: string) => Object.hasOwn(TEXT_COMMANDS, name), table = (name: string) => Object.hasOwn(COMMANDS, name);
+  if (first === "profile" && !table(two)) { await profileCommand(second, argv.slice(2)); return 0; }
   if (first === "daemon") { await daemonCommand(argv.slice(1)); return -1; }
   if (first === "listen") { await listenCommand(argv.slice(1)); return -1; }
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }
   if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
   if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
   if (two === "call pipe") { await callPipeCommand(argv.slice(2)); return -1; }
-  if (two && TEXT_COMMANDS[two]) { await textCommand(two, argv.slice(2)); return 0; }
-  if (two && COMMANDS[two]) { await tableCommand(two, argv.slice(2)); return 0; }
-  if (TEXT_COMMANDS[first]) { await textCommand(first, argv.slice(1)); return 0; }
-  if (COMMANDS[first]) { await tableCommand(first, argv.slice(1)); return 0; }
+  if (two && text(two)) { await textCommand(two, argv.slice(2)); return 0; }
+  if (two && table(two)) { await tableCommand(two, argv.slice(2)); return 0; }
+  if (text(first)) { await textCommand(first, argv.slice(1)); return 0; }
+  if (table(first)) { await tableCommand(first, argv.slice(1)); return 0; }
   throw unknownCommand(first, two ? second : undefined);
 }
 

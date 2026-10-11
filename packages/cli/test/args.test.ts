@@ -159,6 +159,8 @@ describe("errors", () => {
     expect(asCliError(new Error("A Mainnet payment needs you to confirm it as real money")).code).toBe("confirm");
     expect(asCliError(new Error("boom")).toJSON()).toEqual({ code: "engine", message: "boom" });
     expect(asCliError({ code: "not_found", message: "x" }).code).toBe("not_found");
+    // A code is one of the table's own: every object has `constructor`, which is none (and has no exit status).
+    expect(asCliError({ code: "constructor", message: "x" }).code).toBe("engine");
   });
 
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {
