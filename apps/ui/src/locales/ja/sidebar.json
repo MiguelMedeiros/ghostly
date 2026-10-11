@@ -5,8 +5,19 @@
   "deleteAllChats": "すべてのチャットを削除",
   "deleteChat": "チャットを削除",
   "folder": {
+    "create": "作成",
+    "delete": "フォルダを削除",
+    "deleteBody": "中のチャットは削除されません。フォルダなしで一覧に戻ります。",
+    "deleteTitle": "フォルダ「{{name}}」を削除しますか？",
     "empty": "このフォルダにはまだチャットがありません",
+    "move": "フォルダに移動…",
+    "nameLabel": "フォルダ名",
+    "new": "新しいフォルダ…",
+    "newTitle": "新しいフォルダ",
+    "none": "フォルダなし",
+    "options": "フォルダ「{{name}}」のオプション",
     "others": "その他のチャット",
+    "rename": "フォルダ名を変更",
     "unreadCount": "{{name}} に未読 {{count}} 件",
     "unreadOne": "{{name}} に未読 1 件"
   },
@@ -28,6 +39,8 @@
   "newMenu": {
     "chat": "チャット",
     "chatHint": "1人と、招待で",
+    "folder": "フォルダ",
+    "folderHint": "チャット一覧のセクション",
     "group": "グループ",
     "groupHint": "誰でも開けるリンク",
     "label": "グループまたはチャットを作成"
