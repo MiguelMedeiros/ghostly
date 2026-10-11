@@ -853,7 +853,12 @@ export class Communities {
     for (const [key, since] of live.pendingEntries) {
       const linkId = this.host.entries(groupId).get(key), up = !!linkId && this.host.linkReady(linkId, 2);
       // Nobody came (the joiner got in elsewhere, or left): dropped. Came and did not finish: not answered for a while.
-      if (!up && now - since > ENTRY_UNANSWERED_MS) live.pendingEntries.delete(key);
+      // Another hub let the joiner in meanwhile (each took the door for its own, their readings of the beacon apart):
+      // nobody comes to this session, dropped now. Kept its 90 s, it counted as letting someone in, and the reads that
+      // wait for an admission waited: the lobby of a hub left behind, read every half minute while the members of the
+      // hub that left asked there (CLI daemons, 2026-10-11). Not a session opened for a member whose welcome was lost.
+      const elsewhere = rosterHas(s.roster, key) && since < this.addedAt(s, key) + this.timings.knockFallbackMs;
+      if (!up && (elsewhere || now - since > ENTRY_UNANSWERED_MS)) live.pendingEntries.delete(key);
       else if (now - since > ENTRY_TIMEOUT_MS) { live.pendingEntries.delete(key); this.refused.set(key, now + REFUSED_FOR_MS); }
       else continue;
       if (linkId) await this.host.closeEdge(linkId);
@@ -1286,8 +1291,7 @@ export class Communities {
       // for a fallback, and for a member of the roster (its welcome was lost), only well after its admission.
       const stillKnocking = now - ts < 2 * this.timings.slowKnockMs;
       if (rosterHas(s.roster, key)) {
-        const added = [...s.state.chain].reverse().find(c => c.k === "add" && c.s === key)?.ts ?? 0;
-        if (!stillKnocking || ts < added + this.timings.knockFallbackMs) continue;
+        if (!stillKnocking || ts < this.addedAt(s, key) + this.timings.knockFallbackMs) continue;
       }
       // Turns count from when this knock was first seen with the current set of hubs at the door: when
       // that set changes (the door's app closed), the new door answers at once instead of waiting a turn.
@@ -1320,6 +1324,11 @@ export class Communities {
       try { await this.host.openEntry(link, "host", s.state.entry.seedB64, key); } catch { live.pendingEntries.delete(key); }
     }
     for (const [key, { first }] of live.knocksSeen) if (now - first > 2 * KNOCK_TTL_MS) live.knocksSeen.delete(key);
+  }
+
+  /** When the chain last added this member (0: never). */
+  private addedAt(s: CommunitySession, key: string): number {
+    return [...s.state.chain].reverse().find(c => c.k === "add" && c.s === key)?.ts ?? 0;
   }
 
   /** Leave requests: the door commits them (see `answerKnocks`); any hub after a while. */
