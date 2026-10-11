@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { IntentLink } from "@/components/site/IntentLink";
 import { Shell } from "@/components/site/Shell";
 import { Icon } from "@/components/site/icons";
 import { LevelBadge } from "@/components/site/Level";
@@ -99,9 +100,9 @@ export function DevelopersPage() {
                           {l.label} ↗
                         </a>
                       ) : (
-                        <Link className="link-arrow" href={l.href}>
+                        <IntentLink className="link-arrow" href={l.href}>
                           {l.label} →
-                        </Link>
+                        </IntentLink>
                       )}
                     </li>
                   ))}
