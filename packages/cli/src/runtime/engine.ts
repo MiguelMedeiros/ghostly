@@ -13,6 +13,7 @@ import { installFileFetch } from "./fileFetch";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import { RESTORED_MARK, type ProfilePaths } from "../profiles";
+import { servedApps } from "../appServe";
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -21,6 +22,8 @@ export interface Runtime {
   readonly webrtc: boolean;
   /** Why voice calls cannot run here, or null when they can (node-datachannel's media and Opus loaded). */
   readonly callsUnavailable: string | null;
+  /** apps/1 is offered to contacts: the profile served an app when this engine started (src/appServe.ts). */
+  readonly apps: boolean;
   readonly server: EngineServer;
   readonly store: PersistentIndexedDb;
   /** Says goodbye to peers, then folds the store. */
@@ -247,6 +250,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const mainline = dht.off ? null : new (await import("./mainline")).Mainline({ bootstrap: dht.bootstrap, host: dht.host });
   // `GHOSTLY_PKARR_RELAYS`: those relays only, in place before the engine publishes anything (the setting is not read).
   const transport = (mainline || pinned) ? new (await import("./mainline")).RelaysAndDht(mainline, pinned ? { relays: pinned } : {}, !!pinned) : null;
+  const apps = servedApps(paths.dir).length > 0;
   const server = new EngineServer({
     ...(transport ? { transport } : {}),
     irohWeb: true,
@@ -261,9 +265,10 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     fedimintSdk: nodeFedimintSdk(join(paths.dir, "fedimint")),
     // Local web apps may be shared with a contact, reached on loopback only (src/services.ts).
     servicesSupport: true,
-    // No mini-app runs here (WISP 1200 § Per client: CLI), and the bot side of apps/1 is phase 2: no apps/1 is offered
-    // and the app calls are refused, whatever the build's APPS_ENABLED says.
-    apps: false,
+    // No mini-app runs here (WISP 1200 § Per client: CLI). A profile that serves an app (`app serve`, src/appServe.ts)
+    // speaks apps/1 for it as a bot, with no store; any other offers no apps/1 and refuses the app calls, whatever the
+    // build's APPS_ENABLED says.
+    apps: apps ? "wire" : false,
     // A daemon stays online: a hub of the large private groups it is in (WISP 902 · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
     staysOnline: process.env.GHOSTLY_HUB !== "0",
     localFetch: nodeLocalFetch,
@@ -284,7 +289,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   }
   let closing: Promise<void> | null = null;
   return {
-    paths, server, store, webrtc, callsUnavailable,
+    paths, server, store, webrtc, callsUnavailable, apps,
     close: () => (closing ??= (async () => {
       await server.node.shutdown().catch(() => {});
       await mainline?.destroy().catch(() => {});
