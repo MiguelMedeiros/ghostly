@@ -29,7 +29,7 @@ async function setup() {
   await node.start();
   const answered = (paymentId: string) => (node as unknown as { notePaymentReceipt(linkId: string, paymentId: string): Promise<void> }).notePaymentReceipt(id, paymentId);
   const delivery = async (messageId: string) => (await db.getMessages(id)).find(m => m.id === messageId)?.delivery;
-  return { id, answered, delivery };
+  return { id, node, answered, delivery };
 }
 
 describe("a payment of mine in a 1:1 chat", () => {
@@ -50,5 +50,24 @@ describe("a payment of mine in a 1:1 chat", () => {
     await t.answered("req-1");
     expect(await t.delivery("me_1")).toBeUndefined();
     expect(await t.delivery("peer_1")).toBeUndefined();
+  });
+
+  it("reads the payment's own message, not the chat's whole history", async () => {
+    const t = await setup();
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign((t.node as unknown as { events: object }).events, { onMessageChanges: vi.fn() });
+    await db.addMessage({ linkId: t.id, id: "me_1", text: "21 sats via Cashu", sender: "me", timestamp: 1, via: "datalink", paymentId: "pay-1" });
+    await db.addMessage({ linkId: t.id, id: "me_2", text: "5 sats via Cashu", sender: "me", timestamp: 2, via: "datalink", paymentId: "pay-2" });
+    // The desk keeps each payment with the time it was made: its message is `me_<that time>`.
+    vi.spyOn(t.node["desk"], "payment").mockImplementation(id => ({ "pay-1": { createdAt: 1 }, "pay-2": { createdAt: 1 } })[id] as never);
+    const history = vi.spyOn(db, "getMessages");
+    await t.answered("pay-1");
+    expect(history).not.toHaveBeenCalled();
+    expect((await db.getMessage(t.id, "me_1"))?.delivery).toBe("delivered");
+    // A row at that time that carries another payment is not taken for it: the history is searched, as before.
+    await t.answered("pay-2");
+    expect(history).toHaveBeenCalledOnce();
+    history.mockRestore();
+    expect(await t.delivery("me_2")).toBe("delivered");
   });
 });
