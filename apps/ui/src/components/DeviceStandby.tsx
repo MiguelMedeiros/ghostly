@@ -13,6 +13,9 @@ import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 import { deviceWakeWords, useStandbyPush } from "../lib/wakePush";
 import { useComputerAwake } from "../lib/keepAwake";
+import { said } from "../lib/notices";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 const LINK = "min-h-11 px-2 text-sm text-text-muted underline underline-offset-2 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded";
 /** A part of the screen with more than a line in it: an offer, the progress of a move, the new device list. */
@@ -218,16 +221,28 @@ function SetNotice({ names }: { names: string[] }) {
 /**
  * "Not finished" (WISP 06 § Adding a device): the active device never listed this one. Try again looks for its record
  * once more; Remove takes the device set off this device, which then opens the profile it had before, as it was.
+ * A press that changes nothing says why under the buttons.
  */
 function Unfinished() {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const act = (work: () => Promise<unknown>) => { setBusy(true); void work().then(() => tryAgain(), () => setBusy(false)); };
+  // What a press that changed nothing came to: the other device has not listed this one yet, or the engine's refusal.
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const act = (work: () => Promise<boolean>) => {
+    setBusy(true); setProblem(null);
+    void work().then(
+      (done) => { if (done) return tryAgain(); setProblem(said("devices.join.unfinished", t)); setBusy(false); },
+      (cause: unknown) => { setProblem(problemText(cause, t)); setBusy(false); },
+    );
+  };
   return (
-    <Actions>
-      <button type="button" data-testid="device-standby-finish" disabled={busy} onClick={() => act(async () => { if (!(await engine.call("deviceEnrollFinish")).finished) throw new Error("not yet"); })} className={SCREEN_BUTTON}>{t("devices.standby.unfinished.retry")}</button>
-      <button type="button" data-testid="device-standby-remove" disabled={busy} onClick={() => act(() => engine.call("deviceEnrollRemove"))} className={SCREEN_QUIET}>{t("devices.standby.unfinished.remove")}</button>
-    </Actions>
+    <div className="space-y-3">
+      <Actions>
+        <button type="button" data-testid="device-standby-finish" disabled={busy} onClick={() => act(async () => (await engine.call("deviceEnrollFinish")).finished)} className={SCREEN_BUTTON}>{t("devices.standby.unfinished.retry")}</button>
+        <button type="button" data-testid="device-standby-remove" disabled={busy} onClick={() => act(async () => { await engine.call("deviceEnrollRemove"); return true; })} className={SCREEN_QUIET}>{t("devices.standby.unfinished.remove")}</button>
+      </Actions>
+      {problem && <Notice problem={problem} testId="device-standby-unfinished-notice" className="text-sm" />}
+    </div>
   );
 }
 
