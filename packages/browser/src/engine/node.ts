@@ -6855,10 +6855,14 @@ export class GhostlyNode implements EngineImplementation {
           void this.notePaymentReceipt(linkId, result.id).catch(() => {});
         },
         onFileStored: async wire => {
-          const stored = (await fileStore.listForLink(linkId)).find(file => file.direction === "in" && file.wireId === wire.id);
-          if (!stored?.digest || !stored.metadata) return undefined;
-          if (stored.metadata.name !== wire.name || stored.metadata.size !== wire.size || stored.metadata.mime !== wire.mime || stored.metadata.timestamp !== wire.timestamp) return undefined;
-          return stored.digest;
+          // A file this chat never took, as nearly every one asked about is: the chat knows the wire id of each file
+          // it stores (`linkFilesFrom`, `receiveFile`), so none of its file records is read for it. A group's edge
+          // keeps no such list of what the group stores: it reads, as before.
+          if (!stored.group && !this.links.get(linkId)?.files.wireIds.has(wire.id)) return undefined;
+          const held = (await fileStore.listForLink(linkId)).find(file => file.direction === "in" && file.wireId === wire.id);
+          if (!held?.digest || !held.metadata) return undefined;
+          if (held.metadata.name !== wire.name || held.metadata.size !== wire.size || held.metadata.mime !== wire.mime || held.metadata.timestamp !== wire.timestamp) return undefined;
+          return held.digest;
         },
         onFileIncoming: (file) => this.receiveFile(linkId, file),
         onFileProgress: (id, transferred, direction) =>
