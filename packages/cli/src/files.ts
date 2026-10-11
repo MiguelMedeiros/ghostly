@@ -145,6 +145,16 @@ export function fitName(name: string): string {
   return (stem.join("").trimEnd() || "file") + extension;
 }
 
+/**
+ * The name `file save --dir` writes a file under. Its sender chose it, and the folder is one scripts and people run
+ * tools in: a name that starts with a dash is an option to the tool a `*` hands it to ("-rf", "--checkpoint-action=…"),
+ * so it gets a `_` first, as a Windows device name does in `sanitizeFileName`.
+ */
+export function saveName(name: string): string {
+  const clean = sanitizeFileName(name);
+  return fitName(clean.startsWith("-") ? `_${clean}` : clean);
+}
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -248,7 +258,7 @@ export const FILE_METHODS: Record<string, Method> = {
     return { ...where, file: fileId, state: "done", size: transfer.size };
   },
 
-  /** Writes a received (or sent) file to disk: into `dir` under its own name, or to `path`. Never over a file unless `force`. */
+  /** Writes a received (or sent) file to disk: into `dir` under its own name (`saveName`), or to `path`. Never over a file unless `force`. */
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
     if (params.chat !== undefined) fileChat(ctx, params, fileId);
@@ -258,7 +268,7 @@ export const FILE_METHODS: Record<string, Method> = {
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), fitName(sanitizeFileName(stored.metadata.name)));
+    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.name));
     const flags = bool(params, "force") ? "w" : "wx";
     let out;
     try { out = await open(target, flags, 0o600); } catch (error) {

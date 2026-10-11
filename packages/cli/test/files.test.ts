@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { fitName, mimeOf } from "../src/files";
+import { fitName, mimeOf, saveName } from "../src/files";
 import { findMember, pictureFrom } from "../src/groupAdmin";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 // covers: headless.files, headless.group-admin
@@ -44,6 +44,21 @@ describe("the Node file store", () => {
     const emoji = fitName("😀".repeat(100));
     expect(emoji).toBe("😀".repeat(63));
     expect(fitName(`${"é".repeat(200)}.tar`)).toBe(`${"é".repeat(125)}.tar`);
+  });
+
+  it("saves a file under a name no tool takes for an option: a leading dash gets a _ first", () => {
+    expect(saveName("report.pdf")).toBe("report.pdf");
+    expect(saveName("a-b--c.txt")).toBe("a-b--c.txt");
+    expect(saveName("-rf")).toBe("_-rf");
+    expect(saveName("-")).toBe("_-");
+    expect(saveName("--checkpoint-action=exec=sh x.sh")).toBe("_--checkpoint-action=exec=sh x.sh");
+    // What `sanitizeFileName` takes off the front (spaces, dots, invisible characters, separators) must not uncover one.
+    for (const name of [" -x", ".-x", ". .-x", "\u200B-x", "/-x", "\\-x", ":-x", "\n-x"]) expect(saveName(name)).toBe("_-x");
+    // The _ counts in the 255 bytes, and the extension stays.
+    const long = saveName(`-${"文".repeat(120)}.txt`);
+    expect(Buffer.byteLength(long)).toBeLessThanOrEqual(255);
+    expect(long).toBe(`_-${"文".repeat(83)}.txt`);
+    expect(saveName(`-${"a".repeat(199)}`)).toBe(`_-${"a".repeat(199)}`);
   });
 
   it("names types by extension, and never trusts a given one blindly", () => {
