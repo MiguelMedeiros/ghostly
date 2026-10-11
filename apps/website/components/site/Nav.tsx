@@ -178,7 +178,7 @@ export function Nav({ apps = false }: { apps?: boolean }) {
             </summary>
             <div className="nav-sheet">
               {links.map((l) => (
-                <PageLink key={l.href} href={l.href}>
+                <PageLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
                   {l.label}
                 </PageLink>
               ))}
