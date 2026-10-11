@@ -342,6 +342,8 @@ mod linux {
             // Subscribed before the first notification is shown, so no click comes before the listener.
             let rule = zbus::MatchRule::builder()
                 .msg_type(zbus::message::Type::Signal)
+                // Only from the notification server: another process's signal opens nothing.
+                .sender(SERVER)?
                 .interface(SERVER)?
                 .path(PATH)?
                 .build();
@@ -440,9 +442,16 @@ mod linux {
                 .and_then(|connection| Notifier::new(connection, move |id| super::opened(&app, id)))
                 .ok();
         }
-        notifier
-            .as_ref()
-            .is_some_and(|notifier| notifier.show(id, body).is_ok())
+        match notifier.as_ref().map(|notifier| notifier.show(id, body)) {
+            Some(Ok(())) => true,
+            // The bus answered (no notification server, or it refused): the connection is good.
+            Some(Err(zbus::Error::MethodError(..))) | None => false,
+            // A connection that broke is not kept: its listener ends with it, and the next notification connects again.
+            Some(Err(_)) => {
+                *notifier = None;
+                false
+            }
+        }
     }
 
     #[cfg(test)]
@@ -555,6 +564,18 @@ mod linux {
                     .unwrap()
             };
             signal("ActionInvoked", &(99, "default"));
+            // Another process on the bus plays a click on ours: not the server, so it opens nothing.
+            bus.connect()
+                .build()
+                .unwrap()
+                .emit_signal(
+                    None::<()>,
+                    PATH,
+                    SERVER,
+                    "ActionInvoked",
+                    &(1u32, "default"),
+                )
+                .unwrap();
             signal("ActionInvoked", &(2, "reply"));
             server
                 .emit_signal(
