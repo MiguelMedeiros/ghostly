@@ -43,6 +43,7 @@ import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
 import { copyText } from "../lib/shareLink";
+import { pictureLinkUrl } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
 import { AppCardView } from "./apps/AppCardView";
@@ -798,6 +799,23 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
   const contentType = imgError || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  // The picture this bubble shows, if it shows one (a card or a system line never does).
+  const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
+  // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
+  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed) ? picture : null;
+  const [pictureRead, setPictureRead] = useState<{ link: string; url: string } | null>(null);
+  useEffect(() => {
+    if (!readHere) return;
+    let shown = true;
+    void pictureLinkUrl(readHere).then((url) => {
+      if (!shown) return;
+      if (url) setPictureRead({ link: readHere, url });
+      else setImgError(true);
+    });
+    return () => { shown = false; };
+  }, [readHere]);
+  const pictureSrc = picture === null ? null : autoLoads(picture) ? picture : pictureRead?.link === picture ? pictureRead.url : null;
   const download = message.file && !isSystem
     ? {
       file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const,
@@ -1089,16 +1107,21 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           <div className="relative">
             {/* A link says nothing of its picture's size: a placeholder 120 px high (as high as most GIFs and photos are
                 at least, shown here) until it loads, so it grows less when it does. */}
-            <img
-              src={message.text.trim()}
-              alt=""
-              data-testid="picture-link"
-              className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
-              style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
-              loading="lazy"
-              onLoad={() => setPictureLoaded(message.text.trim())}
-              onError={() => setImgError(true)}
-            />
+            {pictureSrc ? (
+              <img
+                src={pictureSrc}
+                alt=""
+                data-testid="picture-link"
+                className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
+                style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
+                loading="lazy"
+                onLoad={() => setPictureLoaded(message.text.trim())}
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              // Being read: the placeholder a picture has until it loads.
+              <div data-testid="picture-link-reading" aria-busy="true" className="rounded-[4px] w-[120px] h-[120px] bg-black/10" />
+            )}
             <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
