@@ -182,18 +182,34 @@ export async function signAppRevocation(statement: AppRevokeStatement, signer: S
 }
 
 /**
- * Reads one signed revocation (a parsed value, from `ghostly-revoke.json` or a store index's `revoked`): its shape, then
- * the signature under `ghostly-revoke/1` by the publisher its `app` names.
+ * The revocations a reader has already checked, by `appRevocationId`: a store index copies its `revoked` again in every
+ * version, so a reader that holds this checks each revocation's signature once. The reader bounds what it holds.
  */
-export function readAppRevocation(value: unknown): { ok: true; revocation: SignedAppRevocation } | { ok: false; reason: AppRevocationRefusal; detail?: string } {
+export interface AppRevocationsChecked { has(id: string): boolean; add(id: string): void }
+
+/** What a checked revocation is kept by: the SHA-256 of its canonical bytes (statement and signature), base64url. */
+export function appRevocationId(revocation: SignedAppRevocation): string {
+  return toBase64Url(sha256(canonicalJsonBytes(revocation as unknown as JsonValue)));
+}
+
+/**
+ * Reads one signed revocation (a parsed value, from `ghostly-revoke.json` or a store index's `revoked`): its shape, then
+ * the signature under `ghostly-revoke/1` by the publisher its `app` names. One that `checked` holds verified before, so
+ * its signature is not checked again; one that verifies now is added to it.
+ */
+export function readAppRevocation(value: unknown, checked?: AppRevocationsChecked): { ok: true; revocation: SignedAppRevocation } | { ok: false; reason: AppRevocationRefusal; detail?: string } {
   if (!exactKeys(value, ["statement", "signature"])) return { ok: false, reason: "bad-revocation", detail: "Keys are not statement and signature" };
   const problem = checkAppRevokeStatement(value.statement);
   if (problem) return { ok: false, reason: "bad-revocation", detail: problem };
   if (!isAppSignature(value.signature)) return { ok: false, reason: "bad-signature-statement" };
   const statement = value.statement as unknown as AppRevokeStatement;
-  const checked = verifyAppSignature(APP_PREFIXES.revoke, canonicalJsonBytes(statement), value.signature, appRefPublisher(statement.app));
-  if (!checked.ok) return checked;
-  return { ok: true, revocation: { statement, signature: value.signature } };
+  const revocation: SignedAppRevocation = { statement, signature: value.signature };
+  const id = checked && appRevocationId(revocation);
+  if (id !== undefined && checked!.has(id)) return { ok: true, revocation };
+  const verified = verifyAppSignature(APP_PREFIXES.revoke, canonicalJsonBytes(statement), value.signature, appRefPublisher(statement.app));
+  if (!verified.ok) return verified;
+  if (id !== undefined) checked!.add(id);
+  return { ok: true, revocation };
 }
 
 /**

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APP_CHECK_TIMINGS } from "../src/engine/apps";
 import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, boundedAppFetch, isAppFetchUrl } from "../src/engine/appFetch";
 import { DEFAULT_APP_STORES, DEFAULT_STORE_KEY, DEFAULT_STORE_URL } from "../src/engine/appDefaults";
-import { isAppKey, readAppStore } from "@ghostly/core";
+import { isAppKey, readAppStoreSteps } from "@ghostly/core";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, NOW_S, PINNED_URL, SIG_URL, STORE_KEY, STORE_URL, apps, bundle, emptyProfile, keyOf, listing, revocation, signer, storeFiles,
 } from "./appsSupport";
@@ -12,7 +12,7 @@ import {
 /** The real reader, counted: a refresh of an index whose bytes have not changed does not run it. */
 vi.mock("@ghostly/core", async (importOriginal) => {
   const core = await importOriginal<typeof import("@ghostly/core")>();
-  return { ...core, readAppStore: vi.fn(core.readAppStore) };
+  return { ...core, readAppStoreSteps: vi.fn(core.readAppStoreSteps) };
 });
 
 /*
@@ -252,13 +252,13 @@ describe("stores", () => {
     let now = NOW_MS;
     const store = apps(net, { now: () => now });
     await store.addStore({ url: STORE_URL });
-    vi.mocked(readAppStore).mockClear();
+    vi.mocked(readAppStoreSteps).mockClear();
     now += 2 * 3600 * 1000;
     expect(await store.refreshStores()).toMatchObject([{ sequence: 1, apps: [{ ref: v1.ref }], expired: true, fetchedAt: now }]);
-    expect(readAppStore, "its signature and revocations were checked when it was read").not.toHaveBeenCalled();
+    expect(readAppStoreSteps, "its signature and revocations were checked when it was read").not.toHaveBeenCalled();
     await net.putStore(await storeFiles({ sequence: 2, expires: NOW_S + 3 * 3600 }));
     expect(await store.refreshStores()).toMatchObject([{ sequence: 2, apps: [], expired: false }]);
-    expect(readAppStore).toHaveBeenCalledTimes(1);
+    expect(readAppStoreSteps).toHaveBeenCalledTimes(1);
   });
 
   it("refuses expires more than 90 days ahead, and says when one is past", async () => {

@@ -1,9 +1,10 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
   appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocation,
-  readAppStore, readCanonicalJson, toBase64Url, utf8Decode, utf8Encode,
-  type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
+  readAppStoreSteps, readCanonicalJson, toBase64Url, utf8Decode, utf8Encode,
+  type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
+  type AppStoreRead,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
@@ -50,6 +51,11 @@ export const APP_CHECK_TIMINGS = {
 
 /** Revocations are checked this long at a time before the page's thread is let go. */
 const REVOCATIONS_SLICE_MS = 10;
+/**
+ * Revocations of store indexes whose signature was checked, kept by `appRevocationId` so an index that changes around
+ * them does not have each checked again (the one read longest ago dropped first): four indexes' worth, about 1 MiB.
+ */
+const STORE_REVOCATIONS_KEPT = 4 * APP_STORE_LIMITS.revoked;
 /** `ghostly-revoke.json` files whose result is kept, so an unchanged one is not checked again (the oldest dropped first). */
 const REVOCATION_FILES_KEPT = 64;
 /** A fetched bundle kept for its install screen: at most this many, for this long. */
@@ -327,6 +333,19 @@ export class Apps {
   private readonly listingMisses = new Map<string, string>();
   /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused. */
   private readonly revocationFiles = new Map<string, SignedAppRevocation[] | null>();
+  /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
+  private readonly storeRevocations = new Set<string>();
+  private readonly checkedRevocations: AppRevocationsChecked = {
+    has: (id) => {
+      if (!this.storeRevocations.delete(id)) return false;
+      this.storeRevocations.add(id);
+      return true;
+    },
+    add: (id) => {
+      this.storeRevocations.add(id);
+      if (this.storeRevocations.size > STORE_REVOCATIONS_KEPT) this.storeRevocations.delete(this.storeRevocations.values().next().value!);
+    },
+  };
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -619,9 +638,12 @@ export class Apps {
 
   /**
    * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
-   * signature and every revocation in it were checked when it was read, so only its expiry is taken again.
+   * signature and every revocation in it were checked when it was read, so only its expiry is taken again. Any other
+   * index is read with a pause every few ms (the engine shares the page's thread, and an index holds up to 4096
+   * listings and 4096 revocations, each of these a signature check), and a revocation checked in an earlier read, of
+   * this store or another, a preview included, is not checked again.
    */
-  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<ReturnType<typeof readAppStore>> {
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
     const [indexBytes, sigBytes] = await Promise.all([
       this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
       this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
@@ -629,7 +651,13 @@ export class Apps {
     if (held?.index && held.digest !== undefined && toBase64Url(sha256(indexBytes)) === held.digest) {
       return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
     }
-    return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
+    const steps = readAppStoreSteps(indexBytes, sigBytes, this.nowS(), heldKey, this.checkedRevocations);
+    let since = performance.now();
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+      if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+    }
   }
 
   /**
