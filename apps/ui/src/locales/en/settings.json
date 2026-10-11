@@ -67,6 +67,8 @@
   },
   "incorrectPassword": "Incorrect password",
   "language": "Language",
+  "languageNotLoaded": "{{language}} could not be loaded. Check your connection.",
+  "languageRetry": "Try again",
   "license": "License",
   "linkPreviews": "Link previews",
   "linkPreviewsHint": "Send a title and picture with the links you share",

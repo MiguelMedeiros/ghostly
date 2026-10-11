@@ -67,6 +67,8 @@
   },
   "incorrectPassword": "Password errata",
   "language": "Lingua",
+  "languageNotLoaded": "Impossibile caricare {{language}}. Controlla la connessione.",
+  "languageRetry": "Riprova",
   "license": "Licenza",
   "linkPreviews": "Anteprime dei link",
   "linkPreviewsHint": "Invia titolo e immagine con i link che condividi",
