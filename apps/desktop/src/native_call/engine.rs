@@ -697,9 +697,8 @@ fn receiver(
             "appsrc name=rtp is-live=true format=time do-timestamp=true \
              caps=\"application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(string)VP8,payload=(int){payload_type}\" \
              ! rtpjitterbuffer latency=100 ! rtpvp8depay request-keyframe=true wait-for-keyframe=true ! vp8dec name=decoder \
-             ! videoconvert ! videoscale ! video/x-raw,width=[2,{SHOWN_MAX}],height=[2,{SHOWN_MAX}],pixel-aspect-ratio=1/1 \
-             ! jpegenc quality=70 \
-             ! appsink name=picture sync=false async=false max-buffers=2 drop=true"
+             ! {}",
+            shown()
         )
     } else {
         format!(
@@ -731,6 +730,40 @@ fn receiver(
         ready,
     )?;
     Ok((element(&pipeline, "rtp")?, pipeline, device))
+}
+
+/// What makes the pictures the element named `decoder` gives into JPEGs for the page ([`show`]).
+fn shown() -> String {
+    format!(
+        "videoconvert ! videoscale ! video/x-raw,width=[2,{SHOWN_MAX}],height=[2,{SHOWN_MAX}],pixel-aspect-ratio=1/1 \
+         ! jpegenc name=jpeg quality=70 \
+         ! appsink name=picture sync=false async=false max-buffers=2 drop=true"
+    )
+}
+
+/// The peer's pictures to the page, as JPEGs: at most SHOWN_FPS a second (videorate's drop-only asserts on 1.20
+/// here). The others are left out as they leave the decoder, before any is scaled or made a JPEG: a browser
+/// sends 30 a second.
+fn show(pipeline: &gst::Pipeline, page: Sink) -> Result<(), String> {
+    let last = Mutex::new(None::<Instant>);
+    element::<gst::Element>(pipeline, "decoder")?
+        .static_pad("src")
+        .ok_or("No decoder output")?
+        .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+            let mut last = last.lock().unwrap();
+            let now = Instant::now();
+            if last.is_some_and(|at| now - at < Duration::from_secs(1) / SHOWN_FPS) {
+                return gst::PadProbeReturn::Drop;
+            }
+            *last = Some(now);
+            gst::PadProbeReturn::Ok
+        });
+    each_buffer(&element(pipeline, "picture")?, move |buffer| {
+        if let Some(jpeg) = bytes_of(buffer) {
+            page(jpeg);
+        }
+    });
+    Ok(())
 }
 
 /// Counts what a receiving pipeline decodes and, for pictures, sends them to the page and asks for keyframes.
@@ -774,19 +807,7 @@ fn receiving(
             gst::PadProbeReturn::Ok
         });
     if video {
-        // At most SHOWN_FPS pictures a second go to the page (videorate's drop-only asserts on 1.20 here).
-        let (events, last) = (shared.events.clone(), Mutex::new(None::<Instant>));
-        each_buffer(&element(pipeline, "picture")?, move |buffer| {
-            let mut last = last.lock().unwrap();
-            let now = Instant::now();
-            if last.is_some_and(|at| now - at < Duration::from_secs(1) / SHOWN_FPS) {
-                return;
-            }
-            *last = Some(now);
-            if let Some(jpeg) = bytes_of(buffer) {
-                events(jpeg);
-            }
-        });
+        show(pipeline, shared.events.clone())?;
         // The depayloader lost a frame and wants a keyframe: that goes to the sender as a PLI.
         let keyframes = keyframes.clone();
         src.static_pad("src").ok_or("No RTP output")?.add_probe(
@@ -1614,6 +1635,82 @@ mod tests {
             started.elapsed() >= Duration::from_millis(900),
             "the tone lasted {:?}",
             started.elapsed()
+        );
+    }
+
+    /// A peer's pictures faster than the page is shown them (a browser sends 30 a second): the ones left out are
+    /// left out as they are decoded, so none is made a JPEG for nothing. 60 pictures as fast as they come stand
+    /// for the peer's.
+    #[test]
+    fn a_picture_the_page_is_not_shown_is_never_made_a_jpeg() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let pipeline = launch(&format!(
+            "videotestsrc num-buffers=60 ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 \
+             ! identity name=decoder ! {}",
+            shown()
+        ))
+        .unwrap();
+        let (decoded, encoded, pictures) = (
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(0)),
+        );
+        let count = |name: &str, pad: &str, into: &Arc<AtomicU64>| {
+            let into = into.clone();
+            element::<gst::Element>(&pipeline, name)
+                .unwrap()
+                .static_pad(pad)
+                .unwrap()
+                .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                    into.fetch_add(1, Ordering::Relaxed);
+                    gst::PadProbeReturn::Ok
+                });
+        };
+        // Before `show` adds anything of its own: every picture the decoder gives is counted.
+        count("decoder", "src", &decoded);
+        count("jpeg", "sink", &encoded);
+        let seen = pictures.clone();
+        show(
+            &pipeline,
+            Arc::new(move |jpeg: Vec<u8>| {
+                assert!(jpeg.starts_with(&[0xff, 0xd8]));
+                seen.fetch_add(1, Ordering::Relaxed);
+            }),
+        )
+        .unwrap();
+        let started = Instant::now();
+        start(&pipeline, "The picture").unwrap();
+        let ended = pipeline.bus().unwrap().timed_pop_filtered(
+            gst::ClockTime::from_seconds(60),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        );
+        let took = started.elapsed();
+        stop(pipeline);
+        assert!(
+            matches!(
+                ended.as_ref().map(|m| m.view()),
+                Some(gst::MessageView::Eos(_))
+            ),
+            "{ended:?}"
+        );
+        let (decoded, encoded, pictures) = (
+            decoded.load(Ordering::Relaxed),
+            encoded.load(Ordering::Relaxed),
+            pictures.load(Ordering::Relaxed),
+        );
+        assert_eq!(decoded, 60);
+        // The first one, then one for each fifteenth of a second gone by.
+        let most = 1 + took.as_millis() as u64 * u64::from(SHOWN_FPS) / 1000;
+        assert!(
+            (1..=most).contains(&pictures),
+            "{pictures} pictures shown in {took:?}"
+        );
+        assert_eq!(
+            encoded, pictures,
+            "{encoded} JPEGs made for {pictures} shown"
         );
     }
 
