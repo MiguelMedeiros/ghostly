@@ -97,6 +97,14 @@ describe("help", () => {
     expect((await ghostly(["version"])).stdout).toMatch(/^\{"version":"[^"]+"\}\n$/);
   });
 
+  it("a global option that takes a value, given none, says so as a command's option does", async () => {
+    for (const [args, name] of [[["-p"], "profile"], [["--profile"], "profile"], [["--home"], "home"], [["--pretty", "-p"], "profile"], [["send", "-p"], "profile"]] as const) {
+      const result = await ghostly([...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message: `--${name} needs a value` } });
+    }
+  });
+
   it("the version is in the help, and help version answers it", async () => {
     expect((await ghostly(["help"])).stdout).toMatch(/^ {2}version\s.*--version/m);
     const one = await ghostly(["help", "version"]);
