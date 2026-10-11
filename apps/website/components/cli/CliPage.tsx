@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { IntentLink } from "@/components/site/IntentLink";
 import { Shell } from "@/components/site/Shell";
 import { LevelBadge } from "@/components/site/Level";
 import { Reveal } from "@/components/home/Reveal";
@@ -118,9 +119,9 @@ export function CliPage() {
             </Link>
           </li>
           <li>
-            <Link className="link-arrow" href="/wisps/1100-headless">
+            <IntentLink className="link-arrow" href="/wisps/1100-headless">
               {t.links.wisp} →
-            </Link>
+            </IntentLink>
           </li>
         </ul>
         <aside className="cl-legacy">

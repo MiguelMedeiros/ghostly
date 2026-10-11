@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { IntentLink } from "@/components/site/IntentLink";
 import { Shell } from "@/components/site/Shell";
 import { LevelBadge } from "@/components/site/Level";
 import { Reveal } from "@/components/home/Reveal";
@@ -114,12 +115,12 @@ export function AgentsPage() {
         </ol>
         <p className="note muted ag-version">
           {t.connect.note.replace("{n}", NEXT_VERSION)}{" "}
-          <Link className="link-arrow" href={LINKS.cards}>
+          <IntentLink className="link-arrow" href={LINKS.cards}>
             {t.connect.cards} →
-          </Link>{" "}
-          <Link className="link-arrow" href={LINKS.buttons}>
+          </IntentLink>{" "}
+          <IntentLink className="link-arrow" href={LINKS.buttons}>
             {t.connect.buttons} →
-          </Link>
+          </IntentLink>
         </p>
       </section>
 
@@ -210,14 +211,14 @@ export function AgentsPage() {
             </a>
           </li>
           <li>
-            <Link className="link-arrow" href={LINKS.cards}>
+            <IntentLink className="link-arrow" href={LINKS.cards}>
               {t.links.cards} →
-            </Link>
+            </IntentLink>
           </li>
           <li>
-            <Link className="link-arrow" href={LINKS.buttons}>
+            <IntentLink className="link-arrow" href={LINKS.buttons}>
               {t.links.buttons} →
-            </Link>
+            </IntentLink>
           </li>
           <li>
             <a className="link-arrow" href={LINKS.cliGuide}>
@@ -240,9 +241,9 @@ export function AgentsPage() {
             </Link>
           </li>
           <li>
-            <Link className="link-arrow" href="/wisps/1100-headless">
+            <IntentLink className="link-arrow" href="/wisps/1100-headless">
               {t.links.wisp} →
-            </Link>
+            </IntentLink>
           </li>
         </ul>
       </section>
