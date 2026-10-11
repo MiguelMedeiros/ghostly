@@ -99,12 +99,19 @@ export function enrollLoading(error: unknown): boolean {
   return message.startsWith("enroll-loading:");
 }
 
+/** Said on the window with each device set the page reads (`useDeviceSet`): what waits for a profile to get one hears it. */
+export const DEVICE_SET_EVENT = "ghostly-device-set";
+
 /** The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read. */
 export function useDeviceSet(everyMs = 3_000): DeviceSetView | null {
   const [view, setView] = useState<DeviceSetView | null>(null);
   useEffect(() => {
     let live = true;
-    const read = () => void engine.call("deviceSet").then((next) => { if (live) setView(next); }, () => {});
+    const read = () => void engine.call("deviceSet").then((next) => {
+      if (!live) return;
+      setView(next);
+      window.dispatchEvent(new CustomEvent<DeviceSetView>(DEVICE_SET_EVENT, { detail: next }));
+    }, () => {});
     read();
     const timer = everyMs > 0 ? setInterval(read, everyMs) : undefined;
     return () => { live = false; clearInterval(timer); };
