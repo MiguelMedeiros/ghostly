@@ -28,5 +28,9 @@
     "sharedOne": "Partagé avec 1 contact",
     "stopped": "Arrêté"
   },
+  "window": {
+    "failed": "La requête a échoué.",
+    "unreachable": "Ce service n’est pas joignable. Les services existent tant que leur fantôme est en ligne."
+  },
   "yourApps": "Vos apps"
 }
