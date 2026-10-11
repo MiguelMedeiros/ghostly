@@ -67,6 +67,8 @@
   },
   "incorrectPassword": "密码错误",
   "language": "语言",
+  "languageNotLoaded": "无法加载 {{language}}。请检查网络连接。",
+  "languageRetry": "重试",
   "license": "许可证",
   "linkPreviews": "链接预览",
   "linkPreviewsHint": "分享链接时附带标题和图片",

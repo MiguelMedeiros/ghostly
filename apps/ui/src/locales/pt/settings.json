@@ -67,6 +67,8 @@
   },
   "incorrectPassword": "Senha incorreta",
   "language": "Idioma",
+  "languageNotLoaded": "Não foi possível carregar {{language}}. Verifique sua conexão.",
+  "languageRetry": "Tentar de novo",
   "license": "Licença",
   "linkPreviews": "Prévias de links",
   "linkPreviewsHint": "Envia título e imagem junto com os links que você compartilha",

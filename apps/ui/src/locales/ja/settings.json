@@ -67,6 +67,8 @@
   },
   "incorrectPassword": "パスワードが正しくありません",
   "language": "言語",
+  "languageNotLoaded": "{{language}} を読み込めませんでした。接続を確認してください。",
+  "languageRetry": "もう一度試す",
   "license": "ライセンス",
   "linkPreviews": "リンクのプレビュー",
   "linkPreviewsHint": "共有するリンクにタイトルと画像を添えて送ります",
