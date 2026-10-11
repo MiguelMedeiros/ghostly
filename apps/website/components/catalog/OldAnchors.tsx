@@ -10,7 +10,13 @@ import { useEffect } from "react";
 export function OldAnchors({ drafts }: { drafts: Record<string, string> }) {
   useEffect(() => {
     const follow = () => {
-      const id = decodeURIComponent(window.location.hash.slice(1));
+      let id: string;
+      try {
+        id = decodeURIComponent(window.location.hash.slice(1));
+      } catch {
+        // Not percent-encoding ("#100%"): no old anchor was ever written that way, so the page stays as it is.
+        return;
+      }
       if (!id || document.getElementById(id)) return;
       const slug = id.startsWith("wisp-") ? drafts[id.slice(5)] : undefined;
       if (slug) window.location.replace(`/wisps/${slug}`);
