@@ -24,7 +24,17 @@ import { appendFileSync } from "node:fs";
 const MAX_LINES = 600;
 const MIN_HOURS = 20;
 const PROTECTED = [/^\.github\//, /^tools\/scripts\/(security-scan|autorelease-gate)\.mjs$/];
-const LOCKFILES = new Set(["package-lock.json", "apps/website/package-lock.json", "Cargo.lock"]);
+// Every lock file the repository ships from: the app and its workspace, the website, the Desktop's HyperDHT sidecar, the
+// HyperDHT relay for browsers and Iroh for browsers. One that is missing here is read as code: a dependency added to it
+// would pass, and its lines would count against MAX_LINES.
+const LOCKFILES = new Set([
+  "package-lock.json",
+  "apps/website/package-lock.json",
+  "native/transports/hyperdht/package-lock.json",
+  "infra/services/hyperdht-relay/package-lock.json",
+  "Cargo.lock",
+  "native/transports/iroh-web/Cargo.lock",
+]);
 const VERSION_FILES = new Set([
   "package.json",
   "apps/web/package.json",
@@ -109,7 +119,7 @@ const cargoSources = (text) => {
   return sources;
 };
 for (const lock of files.filter((f) => LOCKFILES.has(f))) {
-  const sources = lock === "Cargo.lock" ? cargoSources : npmSources;
+  const sources = lock.endsWith("Cargo.lock") ? cargoSources : npmSources;
   const before = sources(await raw(lock, "main"));
   const after = sources(await raw(lock, sha));
   const added = [...after.keys()].filter((n) => !before.has(n));
