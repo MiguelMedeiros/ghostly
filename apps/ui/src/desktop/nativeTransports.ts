@@ -2,7 +2,9 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boolean }
-  | { type: "frame"; id: number; text: string } | { type: "closed"; id: number };
+  | { type: "frame"; id: number; text: string } | { type: "closed"; id: number }
+  /** The endpoint itself ended in Rust (HyperDHT: its runtime died or dropped it). */
+  | { type: "stopped" };
 
 /** Ordered IPC writes and bounded buffering before the session installs its reader. */
 class NativeChannel implements FrameChannel {
@@ -53,6 +55,15 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
   let stopped = false;
   const lifecycle: { endpoint?: NativeEndpoint } = {};
   const early: BoundChannel[] = [];
+  // Rust said the endpoint ended. Whoever holds it is told once, even when it starts listening after the word came.
+  let ended = false;
+  let unavailable: NativeEndpoint["onUnavailable"] = null;
+  const gone = () => {
+    const endpoint = lifecycle.endpoint;
+    if (stopped || !endpoint || !unavailable) return;
+    unavailable();
+    void endpoint.close().catch(() => {});
+  };
   events.onmessage = event => {
     if (event.type === "open") {
       const bound = { channel: new NativeChannel(event.id, () => endpointId, kind), binding: event.binding };
@@ -63,6 +74,7 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
         else early.push(bound);
       }
     } else if (event.type === "frame") (connections.get(event.id)?.channel as NativeChannel | undefined)?.receive(event.text);
+    else if (event.type === "stopped") { ended = true; gone(); }
     else { connections.get(event.id)?.channel.close(); connections.delete(event.id); }
   };
   // In the spelling native Iroh names relays with (the trailing dot), as a contact's record and the dial use.
@@ -70,21 +82,20 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
   const result = await invoke<{ id: number; descriptor: unknown }>(`paired_${kind}_start`, { seedB64, ...relays, events });
   endpointId = result.id;
   let handler: NativeEndpoint["onConnection"] = null;
-  const refresh = setInterval(() => {
+  // HyperDHT's address is the one it started with, and Rust says when the endpoint ends: nothing to ask for.
+  const refresh = kind === "hyperdht" ? undefined : setInterval(() => {
     void invoke(`paired_${kind}_address`, { endpointId: result.id }).then(descriptor => {
       const endpoint = lifecycle.endpoint;
       if (stopped || !endpoint || JSON.stringify(descriptor) === JSON.stringify(endpoint.descriptor)) return;
       endpoint.descriptor = descriptor; endpoint.onDescriptor?.();
-    }).catch(() => {
-      if (stopped) return;
-      lifecycle.endpoint?.onUnavailable?.();
-      void lifecycle.endpoint?.close().catch(() => {});
-    });
+    }).catch(gone);
   }, 5000);
   const endpoint: NativeEndpoint = {
     transport: kind === "iroh" ? "iroh/1" : "hyperdht/1", descriptor: result.descriptor, onDescriptor: null,
     get onConnection() { return handler; },
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
+    get onUnavailable() { return unavailable; },
+    set onUnavailable(value) { unavailable = value; if (value && ended) queueMicrotask(gone); },
     async connect(descriptor) {
       if (stopped) throw new Error("Native endpoint is stopped");
       // Iroh takes a relay spelled another way for another relay, and the native one homes on names with the trailing dot; a browser's record has none.
