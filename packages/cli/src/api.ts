@@ -135,7 +135,8 @@ const METHODS: Record<string, Method> = {
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(params)) {
-      const kind = SETTABLE[key];
+      // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
+      const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
       if (!kind) throw new CliError("bad_request", `${key} is not a setting the CLI changes (${Object.keys(SETTABLE).join(", ")})`);
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
@@ -338,7 +339,7 @@ const METHODS: Record<string, Method> = {
   async "chat.transport"(ctx, params) {
     const link = chatOf(ctx, params);
     const name = str(params, "transport", true);
-    const transport = TRANSPORT_NAMES[name];
+    const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     return chatDetailsJson(findChat(state(ctx).links, link.id));
@@ -634,9 +635,9 @@ export { findChat, findGroup } from "./apiKit";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
-/** Runs one method of the API. */
+/** Runs one method of the API: one the table lists itself (`constructor`, which every object has, is none). */
 export async function callApi(ctx: ApiContext, method: string, params: unknown = {}): Promise<unknown> {
-  const run = METHODS[method];
+  const run = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined;
   if (!run) throw new CliError("not_found", `No method ${method}`);
   if (params === null || typeof params !== "object" || Array.isArray(params)) throw new CliError("bad_request", "params must be an object");
   return run(ctx, params as Params);
