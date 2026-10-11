@@ -61,14 +61,18 @@ export type InstallerKey = "macArm" | "macIntel" | "windowsExe" | "linuxDeb" | "
  * caller passes a hint (`navigator.platform` never reveals the architecture;
  * the WebGL renderer or `userAgentData` would). Without one, Apple silicon is
  * the default Mac since every Mac sold since 2020 is one.
+ *
+ * Safari on an iPad sends a Mac's userAgent and platform, so the caller passes
+ * `navigator.maxTouchPoints`: a Mac reports 0, an iPad 5, and a tablet gets no pick.
  */
-export function defaultInstaller(userAgent: string, platform = "", arch?: string): InstallerKey | undefined {
+export function defaultInstaller(userAgent: string, platform = "", arch?: string, maxTouchPoints = 0): InstallerKey | undefined {
   const ua = userAgent.toLowerCase();
   const pf = platform.toLowerCase();
   const isPhone = /iphone|ipad|ipod|android/.test(ua);
   if (isPhone) return undefined;
   if (/windows/.test(ua) || pf.startsWith("win")) return "windowsExe";
   if (/macintosh|mac os x/.test(ua) || pf.startsWith("mac")) {
+    if (maxTouchPoints > 1) return undefined;
     if (arch && /x86|intel|x64|amd64/i.test(arch)) return "macIntel";
     return "macArm";
   }
