@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { IntentLink } from "@/components/site/IntentLink";
 import { Shell } from "@/components/site/Shell";
 import { LevelBadge } from "@/components/site/Level";
 import { Ghost } from "@/components/ghost/Ghost";
@@ -61,9 +61,9 @@ export function RoadmapPage() {
               {ahead.map((w) => (
                 <li key={w.id}>
                   {w.level && <LevelBadge level={w.level} small />}
-                  <Link href={`/wisps/${w.slug}`}>
+                  <IntentLink href={`/wisps/${w.slug}`}>
                     <span className="mono">{w.number}</span> {w.name}
-                  </Link>
+                  </IntentLink>
                 </li>
               ))}
             </ul>
@@ -205,9 +205,9 @@ export function RoadmapPage() {
           })}
         </div>
         <p>
-          <Link className="link-arrow" href={"/wisps/adapter-roadmap"}>
+          <IntentLink className="link-arrow" href="/wisps/adapter-roadmap">
             {t.inventory.source} →
-          </Link>
+          </IntentLink>
         </p>
       </section>
     </Shell>
