@@ -131,6 +131,7 @@
     "anotherButton": "Ajouter cet appareil",
     "anotherInfo": "Sur l’appareil que vous utilisez, ouvrez Profil, Appareils, Ajouter un appareil. Scannez son code avec l’appareil photo de cet appareil, ou dans Ghostly ici. Les deux appareils affichent ensuite les mêmes chiffres à vérifier.",
     "anotherLead": "Utilisez cet appareil avec un profil d’un autre appareil",
+    "cameraUnavailable": "Caméra indisponible. Collez le code de votre autre appareil ou ouvrez une image.",
     "check": "Vérifiez que votre autre appareil affiche les mêmes chiffres.",
     "code": "Code de votre autre appareil",
     "codeEmpty": "Le presse-papiers est vide. Copiez le code de votre autre appareil, puis appuyez sur {{keys}} ci-dessous.",

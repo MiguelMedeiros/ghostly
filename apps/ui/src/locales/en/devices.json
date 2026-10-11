@@ -131,6 +131,7 @@
     "anotherButton": "Add this device",
     "anotherInfo": "On the device you use now, open Profile, Devices, Add a device. Scan its code with this device's camera, or in Ghostly here. Both devices then show the same digits to check.",
     "anotherLead": "Use this device with a profile from another device",
+    "cameraUnavailable": "Camera unavailable. Paste the code from your other device, or open an image.",
     "check": "Check that your other device shows the same digits.",
     "code": "Code from your other device",
     "codeEmpty": "Clipboard is empty. Copy the code from your other device, then press {{keys}} below.",

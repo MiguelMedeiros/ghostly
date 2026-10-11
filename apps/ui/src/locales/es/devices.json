@@ -131,6 +131,7 @@
     "anotherButton": "Añadir este dispositivo",
     "anotherInfo": "En el dispositivo que usas ahora, abre Perfil, Dispositivos, Añadir un dispositivo. Escanea su código con la cámara de este dispositivo, o en Ghostly aquí. Luego ambos dispositivos muestran los mismos dígitos para comprobar.",
     "anotherLead": "Usa este dispositivo con un perfil de otro dispositivo",
+    "cameraUnavailable": "Cámara no disponible. Pega el código de tu otro dispositivo o abre una imagen.",
     "check": "Comprueba que tu otro dispositivo muestra los mismos dígitos.",
     "code": "Código de tu otro dispositivo",
     "codeEmpty": "El portapapeles está vacío. Copia el código de tu otro dispositivo y pulsa {{keys}} abajo.",
