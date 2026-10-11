@@ -86,9 +86,25 @@ describe("chats", () => {
     expect(findChatOrGroup([link("chatMine", { label: "Team Room" }), asName], [room], "Team Room")).toEqual({ link: expect.objectContaining({ id: "chatMine" }) });
     // A name no group has is the contact's chat as before; so is one only an invitation has.
     expect(findChatOrGroup([link("chatBob", { peerNick: "Bob" })], [room, { ...room, id: "i".repeat(22), name: "Bob", status: undefined, invitation: {} } as unknown as GroupView], "bob")).toEqual({ link: expect.objectContaining({ id: "chatBob" }) });
-    // Neither a chat nor a group: what a chat would say.
-    expect(() => findChatOrGroup([asName], [room], "zed")).toThrow(/No chat "zed"/);
+    // Neither a chat nor a group: one not_found naming both, and where to look.
+    expect(refused([asName], "zed")).toEqual({ code: "not_found", message: 'No chat or group "zed" (ghostly chat list, ghostly group list)' });
+    expect(() => chatOrGroup(ctx, "zed")).toThrow('No chat or group "zed" (ghostly chat list, ghostly group list)');
+    // An ambiguous name stays what it is, from either side; group:<id> is a group only.
+    expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
+    expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
+    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed"' });
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
     expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
+  });
+
+  it("a command that takes a chat or a group names both when neither has the name", async () => {
+    const { ctx } = fake();
+    const neither = { code: "not_found", message: 'No chat or group "alcie" (ghostly chat list, ghostly group list)' };
+    await expect(callApi(ctx, "chat.pin", { chat: "alcie", message: "m1" })).rejects.toMatchObject(neither);
+    await expect(callApi(ctx, "chat.forward", { chat: "alcie", messages: ["m1"], to: ["Alice"] })).rejects.toMatchObject(neither);
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m1"], to: ["alcie"] })).rejects.toMatchObject(neither);
+    await expect(callApi(ctx, "task.send", { chat: "alcie", card: { title: "t" } })).rejects.toMatchObject(neither);
   });
 
   it("a group this profile is in wins over an invitation with its name or id prefix", () => {
