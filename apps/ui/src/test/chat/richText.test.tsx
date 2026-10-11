@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { previewText } from "../../lib/chatList";
 import type { ChatMessage } from "../../lib/types";
@@ -80,6 +80,12 @@ describe("spoilers", () => {
 });
 
 describe("code blocks", () => {
+  // The highlighter is a lazy import, and its first load can take seconds on a busy machine. Loading it here leaves
+  // each test waiting for the redraw only.
+  beforeAll(async () => {
+    await import("../../components/rich/highlight");
+  }, 60_000);
+
   it("show the code with its language, highlighted once the highlighter loads", async () => {
     bubble("look:\n```ts\nconst answer: number = 42;\n```\nnice");
     const block = screen.getByTestId("rich-codeblock");
