@@ -60,8 +60,8 @@ describe("a profile that cannot be opened", () => {
     await view.user.click(more);
     expect(more).toHaveAttribute("aria-expanded", "true");
     const story = screen.getByTestId("profile-unavailable-text");
-    expect(story).toHaveTextContent("This profile's data is at version 12. This app, Ghostly 0.0.0-test, reads up to version 11.");
-    expect(story).toHaveTextContent("nothing was changed or deleted: your chats, keys and wallets are still there");
+    expect(story).toHaveTextContent("Its data is version 12; Ghostly 0.0.0-test reads up to 11.");
+    expect(story).toHaveTextContent("Nothing was opened, sent or changed: your chats, keys and wallets are still there");
 
     // Looking for the newer version is one press away; a client with none out yet says what else opens the profile.
     await view.user.click(screen.getByTestId("profile-unavailable-check"));
