@@ -63,6 +63,19 @@ describe("usage send", () => {
     expect(() => params(["Miguel", "--resets", "soon"])).toThrow(/--resets takes a time/);
   });
 
+  it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {
+    const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    usage(["Alice"], /^--left is needed \(or --used with --limit\): ghostly usage send/);
+    usage(["--all", "--window", "5 h"], /^--left is needed/);
+    usage(["Alice", "--used", "5"], /^--used goes with --limit: ghostly usage send/);
+    usage(["Alice", "--limit", "50", "--left", "40"], /^--limit goes with --used: ghostly usage send/);
+    usage(["Alice", "--left", "140"], /^--left takes a percent from 0 to 100, not 140$/);
+    // --json may give them, and the two ways to say it stand.
+    expect(params(["Alice", "--json", '{"left":40}']).card).toEqual({ left: 40 });
+    expect(params(["Alice", "--used", "5", "--limit", "50"]).card).toEqual({ used: 5, limit: 50 });
+    expect(params(["Alice", "--left", "0"]).card).toEqual({ left: 0 });
+  });
+
   it("sends the card once, then edits that one message with each report: one card per chat, whole reports", async () => {
     vi.useFakeTimers({ now: T0, toFake: ["Date"] });
     const { ctx, node, rows } = fake();
