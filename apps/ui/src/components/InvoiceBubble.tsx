@@ -8,7 +8,8 @@ import { useI18n, type Translate } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { LightningPayWith, useLightningPayer } from "./LightningPayWith";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import type { CashuInspection } from "../lib/platform";
+import type { CashuInspection, WalletNetwork } from "../lib/platform";
+import { mintNetwork } from "@ghostly/browser/shared/mints";
 import type { MoneyInText } from "../lib/money";
 import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
 import { moreMoneyMethod } from "../lib/parse/money-more";
@@ -283,13 +284,24 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
     }
   };
 
+  // Which money, said as on every other card. A test mint's ecash is worth nothing whoever holds it; "Real money" is
+  // said only where this wallet's own mints stand behind it, never on a contact's word for a mint it does not know.
+  const moneyOf = (network: WalletNetwork | undefined) => ({
+    tag: network && <NetworkTag network={network} testId="token-network" />,
+    unit: network && inspection.unit === "sat" ? satsIn(t, network) : inspection.unit,
+  });
+
   if (inspection.kind === "request") {
+    // Paid at one of the mints it names: the money that would leave is theirs, when they are all of one network.
+    const networks = new Set(inspection.mints.map(mintNetwork));
+    const money = moneyOf(networks.size === 1 ? [...networks][0] : undefined);
     return (
       <Card
         testId="cashu-request-bubble"
         label={t("payments.invoice.ecashRequest")}
+        tag={money.tag}
         amount={inspection.amount}
-        unit={inspection.unit}
+        unit={money.unit}
         otherUnit={inspection.unit === "sat" ? undefined : t("payments.invoice.otherUnitRequest", { unit: inspection.unit })}
         lines={[inspection.description, inspection.mints.length > 0 ? t("payments.invoice.mints", { mints: inspection.mints.map(host).join(", ") }) : undefined]}
         qr={value}
@@ -301,12 +313,15 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
 
   // Only sat ecash is redeemed here: a token of another unit is said as one, whatever its mint.
   const otherUnit = inspection.unit !== "sat";
+  const network = mintNetwork(inspection.mint);
+  const money = moneyOf(network === "testnet" || inspection.accepted ? network : undefined);
   return (
     <Card
       testId="cashu-token-bubble"
       label={t("payments.invoice.ecashToken")}
+      tag={money.tag}
       amount={inspection.amount}
-      unit={inspection.unit}
+      unit={money.unit}
       otherUnit={otherUnit ? t("payments.invoice.otherUnitToken", { unit: inspection.unit }) : undefined}
       lines={[inspection.memo, t("payments.invoice.mint", { mint: host(inspection.mint) }), !inspection.accepted && !mine ? t(otherUnit ? "payments.invoice.onlySat" : "payments.invoice.mintNotAdded") : undefined]}
       qr={value}

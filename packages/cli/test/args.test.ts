@@ -96,6 +96,23 @@ describe("the argument parser", () => {
     expect(liftGlobals(["--home", "/h", "send", "c", "--", "-dash"])).toEqual(["send", "c", "--home", "/h", "--", "-dash"]);
   });
 
+  it("a global option before the command never lands between an option and its value", () => {
+    // They went just before the first `--`, also when that `--` is an option's value: `--pretty profile set --name --`
+    // read `--name --pretty`, and the name contacts see became "--pretty".
+    const lifted = liftGlobals(["--pretty", "profile", "set", "--name", "--"]);
+    expect(lifted).toEqual(["profile", "set", "--pretty", "--name", "--"]);
+    expect(parseArgs(lifted.slice(2), { name: { type: "string", description: "" } })).toEqual({ positionals: [], options: { pretty: true, name: "--" } });
+    const edit = liftGlobals(["-p", "bot", "edit", "c", "m", "--text", "--"]);
+    expect(parseArgs(edit.slice(1), { text: { type: "string", description: "" } })).toEqual({ positionals: ["c", "m"], options: { profile: "bot", text: "--" } });
+    // Before the first option, and so before the `--` that ends them; an id that starts with a dash stays the id.
+    expect(liftGlobals(["--pretty", "send", "c", "--reply", "m1", "--", "-x"])).toEqual(["send", "c", "--pretty", "--reply", "m1", "--", "-x"]);
+    const show = liftGlobals(["--pretty", "chat", "show", HYPHEN_KEY]);
+    expect(parseArgs(show.slice(2), {}, () => true)).toEqual({ positionals: [HYPHEN_KEY], options: { pretty: true } });
+    // The command stays the first word, also when it is `--version`; a `--` right away still ends the options.
+    expect(liftGlobals(["--pretty", "--version"])).toEqual(["--version", "--pretty"]);
+    expect(liftGlobals(["--pretty", "--", "send"])).toEqual(["--pretty", "--", "send"]);
+  });
+
   it("takes a file by its id alone, or after its chat, for every file command", () => {
     const params = (name: string, values: string[]) => COMMANDS[name].params!({ positionals: values, options: {} }, positionals(COMMANDS[name], values));
     for (const action of ["accept", "decline", "pause", "resume", "cancel", "resend", "request"]) {
@@ -151,6 +168,37 @@ describe("the argument parser", () => {
     expect(positionals(TEXT_COMMANDS.send, ["alice"])).toEqual({ chat: "alice", text: undefined });
     expect(params("forward", ["g1", "m1", "m2", "--to", "bob"])).toMatchObject({ chat: "g1", messages: ["m1", "m2"], to: ["bob"] });
   });
+
+  it("says a flag left out or out of range as a usage error that names the flag, not the API's parameter", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    const usage = (name: string, argv: string[], message: string) => {
+      let error: unknown;
+      try { params(name, argv); } catch (caught) { error = caught; }
+      expect(error, name).toBeInstanceOf(CliError);
+      expect((error as CliError).code, name).toBe("usage");
+      expect((error as CliError).message, name).toBe(message);
+    };
+    usage("button update", ["alice", "m1"], `Give --chosen, --close or --text: ghostly ${COMMANDS["button update"].usage}`);
+    usage("button update", ["alice", "m1", "--wait", "confirmed", "--text", ""], `Give --chosen, --close or --text: ghostly ${COMMANDS["button update"].usage}`);
+    usage("chat verify", ["alice"], "--code is needed: ghostly chat verify <chat> --code <code>");
+    usage("chat verify", ["alice", "--code", " "], "--code is needed: ghostly chat verify <chat> --code <code>");
+    for (const [name, target] of [["typing", "alice"], ["group typing", "g1"]] as const) {
+      usage(name, [target, "--for", "9999"], "--for takes a number of seconds from 1 to 600, not 9999");
+      usage(name, [target, "--for", "0"], "--for takes a number of seconds from 1 to 600, not 0");
+      usage(name, [target, "--stop", "--for", "30"], "--for keeps it on: not with --stop");
+      expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
+      expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
+    }
+    // Each of the three is enough for an update, and a code is taken as typed.
+    expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
+    expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
+    expect(params("button update", ["alice", "m1", "--text", "Done"])).toMatchObject({ text: "Done" });
+    expect(params("chat verify", ["alice", "--code", "ab cd"])).toEqual({ chat: "alice", code: "ab cd" });
+  });
 });
 
 describe("errors", () => {
@@ -159,6 +207,8 @@ describe("errors", () => {
     expect(asCliError(new Error("A Mainnet payment needs you to confirm it as real money")).code).toBe("confirm");
     expect(asCliError(new Error("boom")).toJSON()).toEqual({ code: "engine", message: "boom" });
     expect(asCliError({ code: "not_found", message: "x" }).code).toBe("not_found");
+    // A code is one of the table's own: every object has `constructor`, which is none (and has no exit status).
+    expect(asCliError({ code: "constructor", message: "x" }).code).toBe("engine");
   });
 
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {

@@ -1,6 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
+import type { CashuInspection, LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../../components/MessageBubble";
 import { PaymentBubble } from "../../components/PaymentBubble";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
@@ -129,5 +129,79 @@ describe("a Lightning invoice in a message", () => {
     expect(within(card).getByTestId("invoice-network")).toHaveTextContent("Test money");
     expect(card).toHaveTextContent("test sats");
     expect(card).not.toHaveTextContent("you have no");
+  });
+});
+
+describe("ecash in a message", () => {
+  const TOKEN = "cashuB" + "o".repeat(40);
+  const REQUEST = "creqA" + "o".repeat(40);
+  const LOCAL_MINT = "http://127.0.0.1:3338";
+  const ecashMessage = (text: string, inspection: CashuInspection) => {
+    fakeEngine.setState({ links: [linkView()], wallet: both() });
+    fakeEngine.on("walletInspectCashu", () => ({ inspection }));
+    return renderApp(<MessageBubble message={{ id: "m1", text, sender: "peer", timestamp: Date.now(), status: "delivered" } as never} peerPubKey="peer" />);
+  };
+  const token = (mint: string, accepted = true) => ecashMessage(TOKEN, { kind: "token", amount: 1_000, unit: "sat", mint, accepted });
+  const request = (mints: string[]) => ecashMessage(REQUEST, { kind: "request", amount: 1_000, unit: "sat", mints });
+
+  it.each([
+    ["the public test mint", TEST_MINT],
+    ["a mint on this machine", LOCAL_MINT],
+  ])("a token of %s is test money, in test sats", async (_what, mint) => {
+    token(mint);
+    const card = await screen.findByTestId("cashu-token-bubble");
+    const tag = within(card).getByTestId("token-network");
+    expect(tag).toHaveTextContent("Test money");
+    expect(tag).toHaveAttribute("data-network", "testnet");
+    expect(card).toHaveTextContent("1,000test sats");
+  });
+
+  it("a token of a test mint the wallet does not have is still said to be test money", async () => {
+    token(LOCAL_MINT, false);
+    const card = await screen.findByTestId("cashu-token-bubble");
+    expect(within(card).getByTestId("token-network")).toHaveTextContent("Test money");
+    expect(card).toHaveTextContent("1,000test sats");
+  });
+
+  it("a token of one of the wallet's own mints is real money, in sats", async () => {
+    token(REAL_MINT);
+    const card = await screen.findByTestId("cashu-token-bubble");
+    const tag = within(card).getByTestId("token-network");
+    expect(tag).toHaveTextContent("Real money");
+    expect(tag).toHaveAttribute("data-network", "mainnet");
+    expect(card).toHaveTextContent("1,000sats");
+    expect(card).not.toHaveTextContent("test sats");
+  });
+
+  it("a token of a mint the wallet does not have is not called real money: nothing here vouches for that mint", async () => {
+    token("https://mint.unknown.example", false);
+    const card = await screen.findByTestId("cashu-token-bubble");
+    expect(within(card).queryByTestId("token-network")).not.toBeInTheDocument();
+    expect(card).toHaveTextContent("You have not added this mint");
+    expect(card).not.toHaveTextContent("test sats");
+  });
+
+  it("a request to be paid at a test mint is test money, in test sats", async () => {
+    request([TEST_MINT]);
+    const card = await screen.findByTestId("cashu-request-bubble");
+    expect(within(card).getByTestId("token-network")).toHaveTextContent("Test money");
+    expect(card).toHaveTextContent("1,000test sats");
+  });
+
+  it("a request to be paid at a real mint is real money", async () => {
+    request([REAL_MINT]);
+    const card = await screen.findByTestId("cashu-request-bubble");
+    expect(within(card).getByTestId("token-network")).toHaveTextContent("Real money");
+    expect(card).not.toHaveTextContent("test sats");
+  });
+
+  it.each([
+    ["no mint", []],
+    ["a test mint and a real one", [TEST_MINT, REAL_MINT]],
+  ])("a request that names %s does not say which money", async (_what, mints) => {
+    request(mints);
+    const card = await screen.findByTestId("cashu-request-bubble");
+    expect(within(card).queryByTestId("token-network")).not.toBeInTheDocument();
+    expect(card).not.toHaveTextContent("test sats");
   });
 });

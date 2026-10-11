@@ -856,6 +856,42 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       });
     });
 
+    it("an invitation from another contact does not end a leave the admin has not heard", async () => {
+      const { world, alice, bob, groupId, key, edge } = await trio();
+      const [aliceKey, bobKey] = [key(alice), key(bob)];
+      edge("alice", bob, false);
+      world.chats.delete("chat-ab");
+      await bob.leave(groupId); await world.settle();
+      const tombstone = async () => (await world.peers.get("bob")!.store.getGroups())[0];
+      expect((await tombstone()).left).toMatchObject({ admin: aliceKey });
+      // Someone else names the group's id on their chat with Bob, with a key of their own or with the admin's.
+      await bob.handleContactFrame("chat-xb", { t: "group-invite", g: groupId, name: "Ghosts", admin: createIdentity().pubKeyZ32, e: 0, n: 3 });
+      await bob.handleContactFrame("chat-xb", { t: "group-invite", g: groupId, name: "Ghosts", admin: aliceKey, e: 0, n: 3 });
+      expect(bob.views()).toEqual([]);
+      expect((await tombstone()).left).toMatchObject({ admin: aliceKey });
+      expect((await tombstone()).invitation).toBeUndefined();
+      expect([...world.peers.get("bob")!.edges.values()].map(e => e.peer)).toEqual([aliceKey]);
+      // The leave is still owed, and said when the admin is back.
+      edge("alice", bob, true);
+      await world.meet(); await world.settle();
+      expect(alice.views()[0].members.map(m => m.key)).not.toContain(bobKey);
+      expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
+    });
+
+    it("the admin a leave is owed to invites again over the chat that let the member in", async () => {
+      const { world, alice, bob, groupId, key, edge } = await trio();
+      const aliceKey = key(alice);
+      edge("alice", bob, false);
+      world.chats.delete("chat-ab");
+      await bob.leave(groupId); await world.settle();
+      // The admin took Bob out itself meanwhile; its invitation says as much as its answer to the leave would.
+      await alice.remove(groupId, key(bob)); await world.settle();
+      world.chats.set("chat-ab", ["alice", "bob"]);
+      await alice.invite(groupId, "chat-ab"); await world.settle();
+      expect(bob.views().map(v => v.invitation)).toMatchObject([{ linkId: "chat-ab", admin: aliceKey, accepted: false }]);
+      expect((await world.peers.get("bob")!.store.getGroups())[0].left).toBeUndefined();
+    });
+
     it("a tombstone survives a restart and still delivers the leave", async () => {
       const { world, alice, bob, groupId, key, edge, known } = await trio();
       const bobKey = key(bob);

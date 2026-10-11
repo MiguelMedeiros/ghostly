@@ -9,6 +9,7 @@ import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.LinkProperties
@@ -190,11 +191,14 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * Shares are numbered as they arrive: one that a newer share overtook stops copying and is never handed over, so a
    * big share that ends late cannot replace the one made after it. Older shares' copies go once a newer one is
    * handed over. The page reads the copies by token, as a paste's, then says it is done with them (`shareDone`).
+   * Only another app's `content://` streams are read (SharedStream): the app opens a stream as itself.
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
     val title = intent.getStringExtra(Intent.EXTRA_SUBJECT) ?: intent.getStringExtra(Intent.EXTRA_TITLE) ?: ""
-    val streams = streamsOf(intent).take(MAX_SHARED_FILES)
+    val authorities = ownAuthorities()
+    val streams =
+      streamsOf(intent).filter { SharedStream.takes(it.scheme, it.authority, authorities) }.take(MAX_SHARED_FILES)
     val resolver = activity.contentResolver
     val root = sharedRoot()
     val generation = shareGeneration.incrementAndGet()
@@ -268,8 +272,16 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       )
   }
 
+  /** The authorities of the app's own content providers (its FileProvider, the libraries'), from its manifest. */
+  @Suppress("DEPRECATION")
+  private fun ownAuthorities(): List<String> = try {
+    val info = activity.packageManager.getPackageInfo(activity.packageName, PackageManager.GET_PROVIDERS)
+    info.providers.orEmpty().flatMap { it.authority?.split(';').orEmpty() } + "${activity.packageName}.fileprovider"
+  } catch (e: Exception) {
+    listOf("${activity.packageName}.fileprovider")
+  }
+
   private fun displayName(uri: Uri): String? {
-    if (uri.scheme == "file") return uri.lastPathSegment
     return try {
       activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
         if (it.moveToFirst()) it.getString(0) else null

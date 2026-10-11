@@ -1,0 +1,1 @@
+The usage meter in a chat's header shows when it resets only where there is room: a phone's header keeps to the meter and the percent, and leaves the rest of the line to the contact's status. The details it opens say the reset time as before. No field and no rule changed.

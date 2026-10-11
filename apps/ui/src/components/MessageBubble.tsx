@@ -27,6 +27,7 @@ import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
@@ -727,6 +728,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const appsOn = useAppsAvailable();
   const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
   const rowRef = useRef<HTMLDivElement>(null);
+  // A control of the message taken out by its own press (my reaction's chip taken back, the red mark sent again): the
+  // focus stays on the message, so Tab goes on from it.
+  useFocusKept(rowRef);
   const openDetails = () => setDetails(true);
   // A double click on a control in the message (a file's Accept, Pause or Save, a player's Play, a link) is that
   // control's: two quick clicks on a button do not open the details too.

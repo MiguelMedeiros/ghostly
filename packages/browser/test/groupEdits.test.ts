@@ -104,6 +104,61 @@ describe("GroupEdits on its own", () => {
     edits.stop();
   });
 
+  describe("with rows read by their id", () => {
+    /** As the engine hosts it (`db.getMessage`): one row by its id, and the reads of the whole history counted. */
+    function byId(messages: StoredMessage[], hooks: { row?: (id: string) => Promise<void> | void; changed?: () => void } = {}) {
+      const sent: GroupEdit[] = [], reads = { n: 0 }, now = { t: 1_000_000 }, store = rows(messages);
+      const edits = new GroupEdits({
+        ...store,
+        messages: chat => { reads.n++; return store.messages(chat); },
+        message: async (chat, id) => { const row = messages.find(m => m.linkId === chat && m.id === id); await hooks.row?.(id); return row; },
+        changed: () => { hooks.changed?.(); },
+        membership: () => ({ me, members: new Set([me, bob, carol]), community: false, admin: true }),
+        send: async (_g, edit) => { sent.push(edit); return null; },
+        now: () => now.t,
+      });
+      return { edits, sent, reads, now };
+    }
+
+    it("reads the group's history once, then only the rows with an edit to say", async () => {
+      vi.useFakeTimers();
+      // One edit a run before this one left unsaid: nobody tells of it, the first look finds it.
+      const messages = [mine(0, "Working: 0 of 20"), { ...mine(1), edit: { seq: 1, at: 999_000, history: [], pending: true as const } }];
+      const { edits, sent, reads, now } = byId(messages);
+      await edits.edit("g1", mine(0).id, "Working: 1 of 20");
+      expect([sent.map(e => [e.id, e.e]), reads.n]).toEqual([[[mine(1).id, 1], [mine(0).id, 1]], 1]);
+      // More than a window takes: the last ones wait for their timer, which reads no history either.
+      for (let n = 2; n <= EDIT_SEND_LIMIT + 2; n++) await edits.edit("g1", mine(0).id, `Working: ${n} of 20`);
+      expect(messages[0].edit).toMatchObject({ seq: EDIT_SEND_LIMIT + 2, pending: true });
+      now.t += 10_000;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sent.at(-1)).toMatchObject({ id: mine(0).id, e: EDIT_SEND_LIMIT + 2, m: `Working: ${EDIT_SEND_LIMIT + 2} of 20` });
+      expect(messages.map(m => m.edit?.pending)).toEqual([undefined, undefined]);
+      expect(reads.n).toBe(1);
+      // A group that was forgotten starts over.
+      edits.forget("g1");
+      await edits.edit("g1", mine(1).id, "once more");
+      expect([sent.at(-1)!.m, reads.n]).toEqual(["once more", 2]);
+      edits.stop();
+    });
+
+    it("keeps a row edited again while it was read as said", async () => {
+      const messages = [mine(0, "v0")];
+      let again: Promise<unknown> | undefined, edit = false, written = () => {};
+      // The look's read of the row, as said, comes back only once the row was edited again.
+      const { edits, sent } = byId(messages, {
+        row: async id => { if (!edit) return; edit = false; again = edits.edit("g1", id, "v2"); await new Promise<void>(done => { written = done; }); },
+        changed: () => written(),
+      });
+      await edits.edit("g1", mine(0).id, "v1");
+      edit = true;
+      await edits.flush("g1");
+      await again;
+      expect(sent.map(e => [e.e, e.m])).toEqual([[1, "v1"], [2, "v2"]]);
+      expect(messages[0].edit).not.toHaveProperty("pending");
+    });
+  });
+
   it("takes a member's edit of its own message, the highest number winning in any order; never a new message", async () => {
     const { edits, messages } = setup([bobs(0, "v0")]);
     expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 3, ts: 30, m: "v3" })).toBe("applied");

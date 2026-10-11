@@ -318,7 +318,6 @@ test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", 
   await ana.page.getByTestId("apps-add-check").click();
   await ana.page.getByTestId("apps-add-store-confirm").click();
   const listed = ana.page.getByTestId("app-store").filter({ hasText: STORE_NAME });
-  await listed.getByRole("button", { name: new RegExp(STORE_NAME) }).click();
   await listed.getByTestId("app-listing-install").click();
   const screen = ana.page.getByTestId("app-install");
   await expect(screen.getByTestId("app-install-error")).toHaveText(TAMPERED);

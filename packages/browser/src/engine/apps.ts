@@ -1,8 +1,8 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision, appUpdateDecision,
-  canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocations, readAppStore,
-  toBase64Url, utf8Decode, utf8Encode,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
+  appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocation,
+  readAppStore, readCanonicalJson, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
@@ -48,6 +48,10 @@ export const APP_CHECK_TIMINGS = {
   freshMs: 60 * 60 * 1000,
 } as const;
 
+/** Revocations are checked this long at a time before the page's thread is let go. */
+const REVOCATIONS_SLICE_MS = 10;
+/** `ghostly-revoke.json` files whose result is kept, so an unchanged one is not checked again (the oldest dropped first). */
+const REVOCATION_FILES_KEPT = 64;
 /** A fetched bundle kept for its install screen: at most this many, for this long. */
 const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
@@ -302,11 +306,15 @@ export class Apps {
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
   private views: Promise<AppStoreView[]> | null = null;
+  private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
+  private heldStores: Promise<Map<string, AddedAppStore>> | null = null;
   /**
    * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest>`): the same
    * index listing the same is not peeked again at every check.
    */
   private readonly listingMisses = new Map<string, string>();
+  /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused. */
+  private readonly revocationFiles = new Map<string, SignedAppRevocation[] | null>();
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -330,6 +338,9 @@ export class Apps {
     if (this.sweep) clearTimeout(this.sweep);
     this.sweep = null;
     this.staged.clear();
+    this.held.clear();
+    this.heldStores = null;
+    this.views = null;
   }
 
   private schedule(ms: number, atStart = false): void {
@@ -362,8 +373,18 @@ export class Apps {
   private async installed(): Promise<InstalledApp[]> {
     return wrap((await store(STORES.apps, "readonly")).getAll());
   }
-  private async app(ref: string): Promise<InstalledApp | undefined> {
-    return wrap((await store(STORES.apps, "readonly")).get(ref));
+  /**
+   * An installed app's record, read once and again after it is written here (the only writer, as for `heldViews`). An
+   * app's every storage call, file read and chat frame asks for it. A reference not installed is not kept.
+   */
+  private app(ref: string): Promise<InstalledApp | undefined> {
+    const kept = this.held.get(ref);
+    if (kept) return kept;
+    const read: Promise<InstalledApp | undefined> = store(STORES.apps, "readonly").then((s) => wrap<InstalledApp | undefined>(s.get(ref)));
+    this.held.set(ref, read);
+    const drop = () => { if (this.held.get(ref) === read) this.held.delete(ref); };
+    read.then((app) => { if (!app) drop(); }, drop);
+    return read;
   }
   private async installedOrFail(ref: unknown): Promise<InstalledApp> {
     if (!isAppRef(ref)) fail("bad-ref", "Not an app reference");
@@ -395,7 +416,7 @@ export class Apps {
     if (app) await this.stillRunnable(app);
   }
   private async putApp(app: InstalledApp): Promise<void> {
-    await wrap((await store(STORES.apps, "readwrite")).put(app));
+    try { await wrap((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
   }
   /**
    * Writes an app's record back only while that install is still there (the same `installedAt`), read and written in
@@ -410,31 +431,47 @@ export class Apps {
       tx.objectStore(STORES.apps).put(app);
       put = true;
     };
-    await done(tx);
+    try { await done(tx); } finally { this.held.delete(app.ref); }
     return put;
   }
-  private async storeRecord(key: string): Promise<AddedAppStore | undefined> {
-    return wrap((await store(STORES.appStores, "readonly")).get(key));
-  }
-  private async putStore(record: AddedAppStore): Promise<void> {
-    await wrap((await store(STORES.appStores, "readwrite")).put(record));
-    this.views = null;
-  }
-  private async deleteStore(key: string): Promise<void> {
-    await wrap((await store(STORES.appStores, "readwrite")).delete(key));
-    this.views = null;
-  }
   /**
-   * The stores' views, read once and again after a store is written here (the only writer: pages in other tabs share
-   * this engine). An app's every storage call and chat frame checks them, and an index may be 4 MiB.
+   * The stores' records by key, read once and kept in step by the writes here (the only writer: pages in other tabs
+   * share this engine). A record holds its store's whole index, up to 4 MiB, and IndexedDB reads and writes it whole:
+   * the Apps page, the update check and an app's every storage call and chat frame ask for them.
    */
+  private records(): Promise<Map<string, AddedAppStore>> {
+    return this.heldStores ??= store(STORES.appStores, "readonly").then((s) => wrap<AddedAppStore[]>(s.getAll()))
+      .then((all) => new Map(all.map((r) => [r.key, r])), (error: unknown) => { this.heldStores = null; throw error; });
+  }
+  private async storeRecord(key: string): Promise<AddedAppStore | undefined> {
+    return (await this.records()).get(key);
+  }
+  /** A write of the stores' records: what is asked while it runs waits for it, as a read of IndexedDB would; one that fails leaves what was held. */
+  private async writeStores(write: (records: IDBObjectStore) => IDBRequest, apply: (held: Map<string, AddedAppStore>) => void): Promise<void> {
+    const before = this.records();
+    const written = before.then(async (held) => {
+      await wrap(write(await store(STORES.appStores, "readwrite")));
+      apply(held);
+      this.views = null;
+    });
+    const after = written.then(() => before, () => before);
+    this.heldStores = after;
+    after.catch(() => { if (this.heldStores === after) this.heldStores = null; });
+    await written;
+  }
+  private putStore(record: AddedAppStore): Promise<void> {
+    return this.writeStores((records) => records.put(record), (held) => held.set(record.key, record));
+  }
+  private deleteStore(key: string): Promise<void> {
+    return this.writeStores((records) => records.delete(key), (held) => held.delete(key));
+  }
+  /** The stores' views, made once and again after a store is written here: an app's every storage call and chat frame checks them. */
   private heldViews(): Promise<AppStoreView[]> {
     return this.views ??= this.stores().then((s) => this.storeViews(s), (error: unknown) => { this.views = null; throw error; });
   }
-  /** The stores the person has (a removed default is not one). */
+  /** The stores the person has (a removed default is not one), in the order of their keys, as IndexedDB lists them. */
   private async stores(): Promise<AddedAppStore[]> {
-    const all = await wrap<AddedAppStore[]>((await store(STORES.appStores, "readonly")).getAll());
-    return all.filter((s) => !s.removed);
+    return [...(await this.records()).values()].filter((s) => !s.removed).sort((a, b) => (a.key < b.key ? -1 : 1));
   }
 
   private storeViews(stores: AddedAppStore[]): AppStoreView[] {
@@ -573,10 +610,36 @@ export class Apps {
       if (read.has(url)) continue;
       read.add(url);
       try {
-        const read = readAppRevocations(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
-        if (read.ok) (out ??= []).push(...read.revocations.filter((r) => r.statement.app === ref));
+        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
+        if (file) (out ??= []).push(...file.filter((r) => r.statement.app === ref));
       } catch { /* not published there, or not reachable now */ }
     }
+    return out;
+  }
+
+  /**
+   * `readAppRevocations` (one entry that does not verify refuses the file, null here), with a pause every few ms: the
+   * engine shares the page's thread, and each entry is a signature check. The same bytes are not checked again.
+   */
+  private async readRevocationsFile(bytes: Uint8Array): Promise<SignedAppRevocation[] | null> {
+    const id = toBase64Url(sha256(bytes));
+    const known = this.revocationFiles.get(id);
+    if (known !== undefined) return known;
+    const read = readCanonicalJson(bytes);
+    let out: SignedAppRevocation[] | null = null;
+    if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
+      out = [];
+      let since = performance.now();
+      for (const entry of read.value) {
+        if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+        const one = readAppRevocation(entry);
+        if (!one.ok) { out = null; break; }
+        out.push(one.revocation);
+      }
+    }
+    this.revocationFiles.delete(id);
+    this.revocationFiles.set(id, out);
+    for (const old of this.revocationFiles.keys()) if (this.revocationFiles.size > REVOCATION_FILES_KEPT) this.revocationFiles.delete(old);
     return out;
   }
 
@@ -675,8 +738,12 @@ export class Apps {
         next = { ...s, problem: error instanceof AppFetchError ? error.code : "network" };
       }
       // Removed meanwhile: not put back.
-      if (!(await this.storeRecord(s.key)) || (await this.storeRecord(s.key))?.removed) continue;
-      await this.putStore(next);
+      const now = await this.storeRecord(s.key);
+      if (!now || now.removed) continue;
+      // Nothing to keep but when it was read: held here, not written (the whole index would be written with it).
+      const unchanged = now === s && next.index === s.index && next.digest === s.digest && next.problem === s.problem && next.equivocation === s.equivocation;
+      if (unchanged) (await this.records()).set(s.key, next);
+      else await this.putStore(next);
       out.push(this.summary(next));
     }
     return out;
@@ -1116,7 +1183,7 @@ export class Apps {
     const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage], "readwrite");
     tx.objectStore(STORES.apps).delete(app.ref);
     tx.objectStore(STORES.appStorage).delete(rowsOf(app.ref));
-    await done(tx);
+    try { await done(tx); } finally { this.held.delete(app.ref); }
     for (const key of [...this.usage.keys()]) if (key.startsWith(`${app.ref}\0`)) this.usage.delete(key);
     await this.removeBundle(app.bytes, app.digest);
     if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);

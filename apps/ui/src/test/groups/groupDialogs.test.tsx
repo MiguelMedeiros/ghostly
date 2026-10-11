@@ -2,7 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_GROUP_NAME_LENGTH, createIdentity, encodeCommunityLink, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
-import { GroupLinkPanel } from "../../components/GroupLinkPanel";
+import { GroupLinkPanel, GroupShareDialog } from "../../components/GroupLinkPanel";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { NewGroupDialog } from "../../components/NewGroupDialog";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
@@ -286,14 +286,81 @@ describe("GroupLinkPanel", () => {
     expect(screen.getByTestId("group-link-note")).toHaveTextContent("The group is full (32 of 32). Nobody joins until someone leaves.");
   });
 
-  it("replaces the link, or turns it off", async () => {
+  it.each([
+    { button: "group-link-reset", kind: "reset", title: "Make a new link?", confirm: "New link", method: "enableGroupLink" as const, params: { groupId: id, reset: true },
+      body: "The link shared so far stops working for good: whoever has it and has not joined yet cannot get in with it. Members stay in the group." },
+    { button: "group-link-disable", kind: "disable", title: "Turn the link off?", confirm: "Turn off", method: "disableGroupLink" as const, params: { groupId: id },
+      body: "The link shared so far stops working for good, and nobody can join by link until you turn it on, as a new link. Members stay in the group." },
+  ])("asks before $button ends the shared link; Cancel and Escape change nothing", async ({ button, kind, title, confirm, method, params, body }) => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
     engine.on("enableGroupLink", () => ({ link: entryLink })).on("disableGroupLink", () => undefined);
-    expect(screen.getByTestId("group-link-disable")).toHaveAttribute("title", "The link stops working. Turning it on makes a new link to share again.");
+    await user.click(screen.getByTestId(button));
+    const ask = screen.getByTestId("group-link-ask-dialog");
+    expect(ask).toHaveAttribute("data-kind", kind);
+    expect(ask).toHaveAccessibleName(title);
+    expect(ask).toHaveAccessibleDescription(body);
+    expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId(button));
+    // Escape, as the browser says it to the topmost dialog.
+    act(() => { screen.getByTestId("group-link-ask-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    expect(engine.callsTo("disableGroupLink")).toEqual([]);
+    await user.click(screen.getByTestId(button));
+    await user.click(within(screen.getByTestId("group-link-ask-dialog")).getByRole("button", { name: confirm }));
+    expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
+    expect(engine.callsTo(method)).toEqual([params]);
+  });
+
+  it("leaves the share dialog open when Escape closes the question over it", async () => {
+    const onClose = vi.fn();
+    const { user, engine } = renderApp(<GroupShareDialog group={admin({ entryLink })} onClose={onClose} />);
     await user.click(screen.getByTestId("group-link-reset"));
+    act(() => { screen.getByTestId("group-link-ask-dialog").dispatchEvent(new Event("cancel", { cancelable: true, bubbles: true })); });
+    expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-share-dialog")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+  });
+
+  it("keeps the keyboard focus in the panel when the link is turned off, then on", async () => {
+    const view = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
+    const { user, engine } = view;
+    engine.on("enableGroupLink", () => ({ link: entryLink })).on("disableGroupLink", () => undefined);
     await user.click(screen.getByTestId("group-link-disable"));
-    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id, reset: true }]);
-    expect(engine.callsTo("disableGroupLink")).toEqual([{ groupId: id }]);
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    // The engine's news: the group has no link, so the panel swaps and the button pressed is gone.
+    view.rerender(<GroupLinkPanel group={admin()} />);
+    expect(screen.getByTestId("group-link-enable")).toHaveFocus();
+    await user.click(screen.getByTestId("group-link-enable"));
+    view.rerender(<GroupLinkPanel group={admin({ entryLink })} />);
+    expect(screen.getByTestId("group-link-share")).toHaveFocus();
+  });
+
+  it("does not take the focus when the link goes off without a press here, or when the engine refused", async () => {
+    const view = renderApp(<><input data-testid="elsewhere" /><GroupLinkPanel group={admin({ entryLink })} /></>);
+    const { user, engine } = view;
+    const elsewhere = screen.getByTestId("elsewhere");
+    const rerender = (group: GroupView) => view.rerender(<><input data-testid="elsewhere" /><GroupLinkPanel group={group} /></>);
+    engine.on("disableGroupLink", () => { throw new Error("Only the admin can do that"); });
+    await user.click(screen.getByTestId("group-link-disable"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await user.click(elsewhere);
+    // Turned off from another of my devices, later.
+    rerender(admin());
+    expect(elsewhere).toHaveFocus();
+    rerender(admin({ entryLink }));
+    expect(elsewhere).toHaveFocus();
+    // Turned off here, and the focus moved on before the panel swapped: it stays where it went.
+    engine.on("disableGroupLink", () => undefined);
+    await user.click(screen.getByTestId("group-link-disable"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    await user.click(elsewhere);
+    rerender(admin());
+    expect(elsewhere).toHaveFocus();
   });
 
   it("shows and hides the QR", async () => {
@@ -308,6 +375,7 @@ describe("GroupLinkPanel", () => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
     engine.on("disableGroupLink", () => { throw new Error("Only the admin can do that"); });
     await user.click(screen.getByTestId("group-link-disable"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Only the admin can do that");
   });
 

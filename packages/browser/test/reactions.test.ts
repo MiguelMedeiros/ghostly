@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
 import { GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { Reactions, latestReaction } from "../src/engine/reactions";
+import { Reactions, latestReaction, noteIfStanding } from "../src/engine/reactions";
 import type { AttentionEvent } from "../src/shared/rpc";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet } from "./helpers/fakeNative";
@@ -177,6 +177,33 @@ describe("reacting over the live link", () => {
     t.contact.sendReaction({ id: lunch.wireId!, e: "", n: 40 });
     await vi.waitFor(() => expect(t.receipts).toContain(40));
     await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+  });
+
+  it("the reaction shown again after one is taken back is found by its row, the chat read whole only past those this run showed", async () => {
+    const t = await setup({ onMessageChanges: () => {} });
+    await t.agreed();
+    for (const text of ["breakfast?", "lunch?", "dinner?"]) await t.node.sendMessage({ linkId: t.id, text });
+    const [breakfast, lunch, dinner] = [await t.row("breakfast?"), await t.row("lunch?"), await t.row("dinner?")];
+    const says = async (to: StoredMessage, e: string, n: number) => {
+      t.contact.sendReaction({ id: to.wireId!, e, n });
+      await vi.waitFor(() => expect(t.receipts).toContain(n));
+    };
+    await says(breakfast, "😂", 10);
+    await says(lunch, "👍", 20);
+    await says(dinner, "🙏", 30);
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "🙏", snippet: "dinner?" }));
+    const whole = vi.spyOn(db, "getMessages");
+    const reads = () => whole.mock.calls.filter(([chat]) => chat === t.id).length;
+    // One that is not the one shown is taken back, then the one shown: the one before both is shown again.
+    await says(lunch, "", 40);
+    await says(dinner, "", 50);
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "😂", snippet: "breakfast?" }));
+    expect(reads()).toBe(0);
+    // Past what this run showed, the history says whether an older one is left.
+    await says(breakfast, "", 60);
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    expect(reads()).toBe(1);
+    whole.mockRestore();
   });
 
   it("a reaction to a message not here yet waits for it", async () => {
@@ -356,11 +383,69 @@ describe("the reactions store", () => {
     expect(rows.filter(r => r.reactions).length).toBe(7 * 32);
   });
 
+  it("tells whether a reaction shown before still stands on its row, with the row's text as it is now", () => {
+    const message = row({ id: "k:0:1", member: "k", text: "edited since", reactions: { a: { e: "👍", n: 2, at: 50 }, b: { e: "", n: 3, at: 60 } } });
+    const shown = { by: "a", emoji: "👍", at: 50, snippet: "as written", mine: false, message: "k:0:1" };
+    expect(noteIfStanding(shown, message)).toEqual({ ...shown, snippet: "edited since" });
+    // Replaced by another emoji, said again later, taken back, or never there.
+    expect(noteIfStanding({ ...shown, emoji: "😂" }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, at: 40 }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, by: "b", emoji: "", at: 60 }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, by: "c" }, message)).toBeUndefined();
+  });
+
   it("numbers mine past what waits to be confirmed, even when the clock goes back", async () => {
     const rows = [row({ linkId: "l", id: `peer_${"A".repeat(22)}` })];
     const { reactions } = memory(rows);
     const out = await reactions.mine("l", rows[0].id, "👍", [{ id: "B".repeat(22), e: "😂", n: 5_000 }]);
     expect(out).toMatchObject({ reaction: { id: "A".repeat(22), n: 5_001 } });
+  });
+
+  it("a reaction of mine reads the row it names; my highest number in a chat is read from its history once", async () => {
+    // Each reaction of mine (and each one taken back) read and sorted the whole chat or group: for the row, which the
+    // page names by its id, and for my highest number in it.
+    const rows = [
+      row({ linkId: "chat", id: "peer_AAAAAAAAAAAAAAAA", text: "theirs", reactions: { me: { e: "👍", n: 9_000, at: 1 } } }),
+      row({ linkId: "chat", id: "me_BBBBBBBBBBBBBBBB", sender: "me", text: "mine" }),
+      row({ id: "k:0:1", member: "k", text: "in the group", reactions: { me: { e: "👍", n: 7_000, at: 1 } } }),
+      row({ id: "k:0:2", member: "k", text: "the next one" }),
+      row({ id: "k:0:3", event: "joined", text: "" }),
+    ];
+    const { reactions, host } = memory(rows);
+    Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id) });
+    const whole = vi.spyOn(host, "messages");
+    const numbers: number[] = [];
+    const mine = async (chat: string, id: string, emoji: string, pending: WireReaction[] = []) => {
+      const out = await reactions.mine(chat, id, emoji, pending);
+      if ("error" in out) return out.error;
+      numbers.push(out.reaction.n);
+      return out.reaction.id;
+    };
+    // The clock (1,000) is behind my numbers in both: each goes past the highest of its own chat.
+    expect(await mine("group:g", "k:0:2", "😂")).toBe("k:0:2");
+    expect(await mine("chat", "me_BBBBBBBBBBBBBBBB", "🙏")).toBe("BBBBBBBBBBBBBBBB");
+    expect(numbers).toEqual([7_001, 9_001]);
+    expect(whole.mock.calls).toEqual([["group:g"], ["chat"]]);
+
+    whole.mockClear();
+    expect(await mine("group:g", "k:0:1", "🙏")).toBe("k:0:1");
+    expect(await mine("group:g", "k:0:1", "")).toBe("k:0:1");
+    expect(await mine("chat", "peer_AAAAAAAAAAAAAAAA", "😂")).toBe("AAAAAAAAAAAAAAAA");
+    // By the id both sides know it by, as the CLI may name it; and past what still waits to be confirmed.
+    expect(await mine("chat", "BBBBBBBBBBBBBBBB", "👍", [{ id: "C".repeat(16), e: "👍", n: 9_500 }])).toBe("BBBBBBBBBBBBBBBB");
+    expect(await mine("chat", "peer_AAAAAAAAAAAAAAAA", "")).toBe("AAAAAAAAAAAAAAAA");
+    expect(numbers.slice(2)).toEqual([7_002, 7_003, 9_002, 9_501, 9_502]);
+    // What takes no reaction, or is not here, is refused without the whole group either.
+    expect(await mine("group:g", "k:0:3", "👍")).toMatch(/takes no reaction/);
+    expect(await mine("group:g", "k:0:9", "👍")).toMatch(/not in this chat/);
+    expect(whole).not.toHaveBeenCalled();
+    expect(rows.map(r => r.reactions?.me?.e)).toEqual(["", "👍", "", "😂", undefined]);
+
+    // A chat that is gone is read again if it ever comes back.
+    reactions.forget("chat");
+    expect(await mine("chat", "me_BBBBBBBBBBBBBBBB", "🙏")).toBe("BBBBBBBBBBBBBBBB");
+    expect(whole.mock.calls).toEqual([["chat"]]);
+    expect(numbers.at(-1)).toBe(9_503);
   });
 });
 

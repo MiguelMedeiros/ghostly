@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Groups, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { createIdentity, encodeCommunityLink, identityFromSeedB64, type GhostRecord, type GroupState } from "@ghostly/core";
+import { GroupSession, commitUntaggedHash, confirmationTag, createIdentity, encodeCommunityLink, epochKeys, fromBase64Url, identityFromSeedB64, signCommit, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.invite, groups.remove-member, groups.admin-change, groups.rotate, groups.leave, groups.forget, groups.link.join, groups.link.replace, groups.protocol.entry
 
@@ -213,6 +213,33 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     const again = new Groups((bob as unknown as { host: GroupsHost }).host, world.peers.get("bob")!.store);
     await again.load();
     expect(view(again, groupId)).toMatchObject({ status: "removed" });
+  });
+
+  it("a member removed is let back into the history it kept only by that group's chain, not by another genesis under its id", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    await alice.send(groupId, "dinner at 8"); await world.settle();
+    await alice.remove(groupId, key(bob)); await world.settle();
+    // A contact who knows the id signs a genesis of their own under it: the id names no group by itself.
+    const state = GroupSession.create("Ghosts");
+    const { sig: _, c: __, ...draft } = { ...state.chain[0], g: groupId };
+    const genesis = signCommit({ ...draft, c: confirmationTag(epochKeys(fromBase64Url(state.secrets[0]), groupId, 0).confirm, commitUntaggedHash(draft)) }, identityFromSeedB64(state.seedB64).seed);
+    world.chats.set("chat-bm", ["bob", "mallory"]);
+    const mallory = world.add("mallory");
+    await world.peers.get("mallory")!.store.putGroup({ id: groupId, createdAt: Date.now(), state: { ...state, id: groupId, chain: [genesis] } });
+    await mallory.load();
+    await mallory.invite(groupId, "chat-bm"); await world.settle();
+    expect(view(bob, groupId).invitation?.admin).toBe(keyOf(state));
+    await bob.accept(groupId); await world.settle();
+    expect(view(bob, groupId)).toMatchObject({ invitation: { accepted: false } });
+    expect(view(bob, groupId).status).toBeUndefined();
+
+    // The real admin's invitation still takes its place, and the history kept is there once back.
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(bob, groupId).invitation?.admin).toBe(key(alice));
+    await bob.accept(groupId); await world.settle(); await world.meet();
+    expect(view(bob, groupId).status).toBe("active");
+    expect(view(bob, groupId).members.map(m => m.key).sort()).toEqual([key(alice), key(bob)].sort());
+    expect(world.texts("bob")).toContain("dinner at 8");
   });
 
   it("a pin by a member who is removed goes with them; the others' pins stay", async () => {
@@ -454,6 +481,27 @@ describe("invitations: what the admission exchange ignores", () => {
     for (const [i, claim] of claims.entries()) await bob.handleContactFrame(`chat-${i}`, { t: "group-invite", g: id(i), name: `g${i}`, admin, ...claim });
     expect(claims.map((_, i) => view(bob, id(i)).invitation!.members)).toEqual([1, 32, 1, 1, 12]);
     expect(claims.map((_, i) => world.peers.get("bob")!.store.groups.get(id(i))!.invitation)).toMatchObject([{ n: 1, e: 0 }, { n: 32, e: 2 }, { n: 1, e: 0 }, { n: 1, e: 0 }, { n: 12, e: 5 }]);
+  });
+
+  it("an invitation waiting for an answer is not replaced by another contact's under the same id", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    const admin = view(alice).myKey!;
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    // Another contact names the same id, with a key of its own or with the admin's: the first invitation stays.
+    await bob.handleContactFrame("chat-xb", { t: "group-invite", g: groupId, name: "Ghosts", admin: createIdentity().pubKeyZ32, e: 0, n: 3 });
+    await bob.handleContactFrame("chat-xb", { t: "group-invite", g: groupId, name: "Ghosts", admin, e: 0, n: 3 });
+    expect(view(bob).invitation).toMatchObject({ linkId: "chat-ab", admin, members: 1, accepted: false });
+    // The contact that sent it may send it again (renamed since, say).
+    await bob.handleContactFrame("chat-ab", { t: "group-invite", g: groupId, name: "Ghosts 2", admin, e: 0, n: 1 });
+    expect(view(bob)).toMatchObject({ name: "Ghosts 2", invitation: { linkId: "chat-ab", admin } });
+    // Accept goes to the admin that invited, who lets Bob in.
+    await bob.accept(groupId); await world.settle();
+    expect(view(bob).status).toBe("active");
+    expect(view(alice).invited).toEqual([]);
+    expect(view(alice).members).toHaveLength(2);
   });
 
   it("an invitation's name shows cleaned: no invisible, direction-changing or line-breaking text", async () => {

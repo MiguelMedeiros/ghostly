@@ -51,7 +51,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
 import { handOverCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
-import { callLineId } from "../lib/callLines";
+import { callLineId, callsBlockedText } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -261,7 +261,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
-  const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? t("calls.needLive") : deliveryPeer.callsUnavailable) : null;
+  const callsBlocked = paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
@@ -658,7 +658,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             title={t("common.back")}
             data-testid="chat-back"
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100">
               <path d="M15 19l-7-7 7-7" />
             </svg>
           </button>
@@ -838,7 +838,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
-      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} />
+      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
 

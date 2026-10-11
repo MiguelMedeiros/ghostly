@@ -229,6 +229,23 @@ describe("messages", () => {
     expect(await db.getMessages("group:g1")).toEqual([]);
     expect(await db.getMessages("group:g2")).toHaveLength(1);
   });
+
+  it("forgets a long group's history in one request, not one per message", async () => {
+    // One delete per message: in the CLI's store each walks the indexes again, 87 s for 2,000 messages (0.2 s as one range).
+    await db.putGroup({ id: "long" } as never);
+    await idb.transact([idb.STORES.messages], (s) => { for (let i = 0; i < 40; i++) s[idb.STORES.messages].put(message("group:long", `m${i}`)); });
+    // Groups whose ids sort right before and after it keep theirs.
+    await db.addMessage(message("group:lon", "1"));
+    await db.addMessage(message("group:longer", "1"));
+    const deletes = vi.spyOn(Object.getPrototypeOf(await idb.store(idb.STORES.messages, "readonly")) as IDBObjectStore, "delete");
+    await db.deleteGroup("long");
+    const requests = deletes.mock.contexts.filter((s) => s.name === idb.STORES.messages).length;
+    deletes.mockRestore();
+    expect(requests).toBe(1);
+    expect(await db.getMessages("group:long")).toEqual([]);
+    expect(await db.getMessages("group:lon")).toHaveLength(1);
+    expect(await db.getMessages("group:longer")).toHaveLength(1);
+  });
 });
 
 describe("settings and services", () => {

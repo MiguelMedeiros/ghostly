@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { APPS_CAPABILITY } from "@ghostly/core";
+import { APPS_CAPABILITY, fromBase64Url } from "@ghostly/core";
 import { APPS_ENABLED } from "../src/shared/features";
 import { appsChat } from "./helpers/appsChat";
 // covers: apps.chat.wire
@@ -14,6 +14,14 @@ import { appsChat } from "./helpers/appsChat";
 
 // The build's flag, off here whatever the constant says: a test that passes no `apps` reaches the default as dev ships it.
 vi.mock("../src/shared/features", async (actual) => ({ ...await actual<typeof import("../src/shared/features")>(), APPS_ENABLED: false }));
+
+// The curve is the real one; every key derived from a seed is noted, for the test that counts them.
+const derivedFrom = vi.hoisted(() => [] as Uint8Array[]);
+vi.mock("@noble/curves/ed25519.js", async (actual) => {
+  const real = await actual<typeof import("@noble/curves/ed25519.js")>();
+  const getPublicKey: typeof real.ed25519.getPublicKey = (seed, ...rest) => { derivedFrom.push(seed); return real.ed25519.getPublicKey(seed, ...rest); };
+  return { ...real, ed25519: { ...real.ed25519, getPublicKey } };
+});
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
@@ -64,6 +72,23 @@ describe("apps in the engine (apps/1)", () => {
     await call("appClose", { linkId: id, ref });
     await vi.waitFor(() => expect(contactGot.at(-1)).toEqual({ app, o: "close" }));
     expect(await call("appSend", { linkId: id, ref, data: 1 })).toEqual({ error: "not-open" });
+  });
+
+  it("on: an app's frames name it without deriving the chat's participation key again", async () => {
+    const { call, contact, contactGot, id, ref, app, seed } = await setup({ apps: true });
+    await vi.waitFor(() => expect(contact.supportsApps).toBe(true));
+    await call("appOpen", { linkId: id, ref, version: "1.0.0" });
+    contact.openApp(app, "1.0.0");
+    await vi.waitFor(() => expect(contactGot).toEqual([{ app, o: "open", v: "1.0.0" }]));
+    // Every derivation of this chat's own key from its seed, whoever asks.
+    const mine = fromBase64Url(seed);
+    derivedFrom.length = 0;
+    // Under a second of frames at the pace an app may send (`APP_SEND_LIMIT`), and the id asked for beside them.
+    for (let i = 0; i < 40; i++) expect(await call("appSend", { linkId: id, ref, data: { tick: i } })).toEqual({ error: null });
+    expect(await call("appId", { linkId: id, ref })).toEqual({ app });
+    expect(derivedFrom.filter((from) => from.length === mine.length && from.every((b, i) => b === mine[i]))).toHaveLength(0);
+    // The contact heard every frame under the id it works out itself.
+    await vi.waitFor(() => expect(contactGot.at(-1)).toEqual({ app, d: { tick: 39 } }));
   });
 
   it("on: refuses what is not an app reference, a version, or a paired chat", async () => {

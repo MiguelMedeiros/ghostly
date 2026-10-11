@@ -139,7 +139,6 @@ for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
     await check("add, a store");
     await page.getByTestId("apps-add-store-confirm").click();
     const listed = page.getByTestId("app-store").filter({ hasText: store.storeName });
-    await listed.getByRole("button", { name: new RegExp(store.storeName) }).click();
     await expect(listed.getByTestId("app-listing-install")).toBeVisible();
     await check("apps, a store");
 

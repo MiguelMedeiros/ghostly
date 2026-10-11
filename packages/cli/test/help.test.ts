@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ghostly } from "./support/cli";
+import { ghostly, home } from "./support/cli";
 // covers: headless.cli
 
 /** Help per command and per group, as a person or a bot asks for it: `help <words>` or `<words> --help`. */
@@ -56,6 +58,18 @@ describe("help", () => {
     expect((wrong.json.error as { message: string }).message).toMatch(/^Unknown command: wallet frob: ghostly wallet takes .*\bfaucet\b.* \(ghostly help wallet\)$/);
     expect((await ghostly(["frobnicate"])).json).toMatchObject({ error: { code: "usage", message: "Unknown command: frobnicate (ghostly help)" } });
     expect((await ghostly(["help", "listen"])).stdout).toContain("[--print]");
+  });
+
+  it("a word every object has (constructor, toString) is no command: unknown, and no profile is opened for it", async () => {
+    // The commands are looked up in a table, where `constructor` was found too: `ghostly constructor` said
+    // "ghostly undefined", and `ghostly constructor bob hi` opened the profile to answer "No method undefined" (exit 3).
+    const dir = home("own-names");
+    for (const args of [["constructor"], ["constructor", "bob", "hi"], ["toString", "bob"], ["__proto__", "bob", "hi"]]) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toMatchObject({ error: { code: "usage", message: `Unknown command: ${args.slice(0, 2).join(" ")} (ghostly help)` } });
+    }
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
   });
 
   it("a line of only global options names no command: it is the help, not an unknown command", async () => {

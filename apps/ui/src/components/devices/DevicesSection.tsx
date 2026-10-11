@@ -3,14 +3,14 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { MAX_DEVICES } from "@ghostly/browser/devices/state";
 import { useI18n } from "../../contexts/I18nContext";
-import { listNames, openJoinAnother, removeErrorKey, useDeviceSet } from "../../lib/devices";
+import { listNames, openJoinAnother, removeErrorKey, useConnectionCheck, useDeviceSet } from "../../lib/devices";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
 import { Menu, MenuItem, MenuSeparator } from "../Menu";
 import { hasStandby, keepAwakeSupported, useKeepAwakeSetting } from "../../lib/keepAwake";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { DeviceGlyph } from "./DeviceGlyph";
-import { MoveDialog } from "./Handoff";
+import { HandoffProgress, MoveDialog } from "./Handoff";
 import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
 import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { nextOf, said } from "../../lib/notices";
@@ -46,15 +46,11 @@ export function DevicesSection() {
   };
   const handoff = useHandoffView(!moving);
   const thisActive = view?.devices.some((device) => device.self && device.active) ?? false;
-  const [checked, setChecked] = useState<Record<string, string>>({});
-  const check = async (key: string) => {
-    setChecked((was) => ({ ...was, [key]: t("devices.section.checking") }));
-    try {
-      const { ms } = await engine.call("devicePing", { key });
-      setChecked((was) => ({ ...was, [key]: t("devices.section.answered", { ms: Math.max(1, Math.round(ms)) }) }));
-    } catch { setChecked((was) => ({ ...was, [key]: t("devices.section.noAnswer") })); }
-  };
+  // A move under way from this device (WISP 06 § Handoff progress, "on both devices"): one started here whose dialog was
+  // closed ("You can keep using Ghostly"), or one the other device started with Use here.
+  const running = thisActive && !moving && handoff?.role === "giver" && handoff.step !== "failed" ? handoff : null;
   const devices = view?.devices ?? [];
+  const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
   // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
   const stopped = view?.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
@@ -71,8 +67,14 @@ export function DevicesSection() {
           <Button data-testid="device-join-another-open" onClick={() => openJoinAnother()}>{t("devices.join.anotherButton")}</Button>
         </Row>
       )}
+      {/* Where that move stands, with Cancel while nothing has changed yet: the dialog is not the only place that says it. */}
+      {running && (
+        <div data-testid="handoff-running" className="px-4 py-3.5 text-sm">
+          <HandoffProgress view={running} onCancel={() => void engine.call("deviceHandoffCancel")} />
+        </div>
+      )}
       {devices.map((device) => (
-        <DeviceRow key={device.key} device={device} thisActive={thisActive} checked={checked[device.key]}
+        <DeviceRow key={device.key} device={device} thisActive={thisActive} busy={!!running} checked={checked[device.key]}
           onMove={() => setMoving({ key: device.key, name: device.name })} onCheck={() => void check(device.key)}
           onRemove={() => { setRemoved(null); setRemoving({ key: device.key, name: device.name }); }} />
       ))}
@@ -141,10 +143,11 @@ export function DevicesSection() {
 
 /**
  * One device: its mark, its name, its state and, for another device, whether its link is connected. "Move to
- * <device>" stays on the row, the main thing to do with a device; the rest is in its menu.
+ * <device>" stays on the row, the main thing to do with a device; the rest is in its menu. While a move runs (`busy`)
+ * no other is offered: the engine would refuse it.
  */
-function DeviceRow({ device, thisActive, checked, onMove, onCheck, onRemove }: {
-  device: Device; thisActive: boolean; checked?: string; onMove(): void; onCheck(): void; onRemove(): void;
+function DeviceRow({ device, thisActive, busy, checked, onMove, onCheck, onRemove }: {
+  device: Device; thisActive: boolean; busy: boolean; checked?: string; onMove(): void; onCheck(): void; onRemove(): void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -152,7 +155,7 @@ function DeviceRow({ device, thisActive, checked, onMove, onCheck, onRemove }: {
   const live = device.status === "live";
   const state = device.self ? (device.active ? t("devices.section.thisActive") : t("devices.section.thisStandby"))
     : device.active ? t("devices.section.active") : t("devices.section.standby");
-  const canMove = !device.self && live && thisActive;
+  const canMove = !device.self && live && thisActive && !busy;
   const canCheck = !device.self && live;
   const canRemove = !device.self && thisActive;
   const menuLabel = t("devices.section.menu", { device: device.name });

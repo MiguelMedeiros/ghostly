@@ -66,5 +66,5 @@ export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contact
   // The id as the contact computes it, from its own side of the two pinned keys.
   const app = chatAppId(identityFromSeedB64(theirs).publicKey, identityFromSeedB64(mine).publicKey, ref);
   const appEvents = () => events.filter((e): e is Extract<EngineEvent, { kind: "app-frame" }> => e.kind === "app-frame");
-  return { server, page, call, contact, contactGot, id, ref, app, appEvents };
+  return { server, page, call, contact, contactGot, id, ref, app, appEvents, seed: mine };
 }

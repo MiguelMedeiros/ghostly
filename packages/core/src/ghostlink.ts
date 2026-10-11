@@ -788,6 +788,8 @@ export class GhostLink {
   }
   /** The attempt (`connectionEpoch`) in which the data link began answering the contact's offer. */
   private answeringEpoch = -1;
+  /** Set while a dial waits for its WebRTC offer to be made: ends that wait, the contact's offer being answered instead. */
+  private offerReplaced?: () => void;
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
   /** The look due when a failed dial's backoff ends (`lookAtRetry`). */
@@ -1091,6 +1093,7 @@ export class GhostLink {
         if (state === "offering") { this.offerUnsent = true; this.dialUnseen = false; }
         if (state === "answering") {
           this.answeringEpoch = this.connectionEpoch;
+          this.offerReplaced?.();
           if (this.resumingOverRtc) { const epoch = this.connectionEpoch; setTimeout(() => this.maybeKnockAnswering(epoch), 0); }
         }
         this.answeredAt = 0;
@@ -2170,7 +2173,13 @@ export class GhostLink {
           this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }), ...(woke && { woke }) } : undefined;
           const gate = this.dialGate;
           this.dialGate = undefined;
-          if (await this.dataLink.connect(gate) === "held") {
+          // The contact's offer, read while this one still gathers, is answered in its place: the dial is over then, not
+          // when the wait for the candidates of a connection already closed ends (`OFFER_HOST_GATHER_MS`). Back after an
+          // absence, the knock that goes with that answer would find this dial still under way, and not go.
+          const replaced = new Promise<void>(resolve => { this.offerReplaced = resolve; });
+          const made = await Promise.race([this.dataLink.connect(gate), replaced]);
+          this.offerReplaced = undefined;
+          if (made === "held") {
             // Made early, and the first look did not find the contact: the dial is dropped, as if never made.
             traceLink(this.myPubKeyZ32, "dial-held", {});
             this.afterRtc = undefined; this.offered = undefined; return;

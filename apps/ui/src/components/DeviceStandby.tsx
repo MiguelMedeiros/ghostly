@@ -3,7 +3,7 @@ import type { DeviceGateView } from "@ghostly/browser/devices/gate";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
-import { listNames, reenrollHere, reloadIntoGate, useDeviceSet } from "../lib/devices";
+import { listNames, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
 import { DeviceGlyph } from "./devices/DeviceGlyph";
@@ -235,14 +235,9 @@ function Unfinished() {
 function Links() {
   const { t } = useI18n();
   const view = useDeviceSet();
-  const [answer, setAnswer] = useState<Record<string, string>>({});
   const others = view?.devices.filter((device) => !device.self) ?? [];
+  const { answers: answer, check } = useConnectionCheck(others);
   if (!others.length) return null;
-  const check = async (key: string) => {
-    setAnswer((was) => ({ ...was, [key]: t("devices.section.checking") }));
-    try { const { ms } = await engine.call("devicePing", { key }); setAnswer((was) => ({ ...was, [key]: t("devices.section.answered", { ms: Math.max(1, Math.round(ms)) }) })); }
-    catch { setAnswer((was) => ({ ...was, [key]: t("devices.section.noAnswer") })); }
-  };
   return (
     <section aria-label={t("devices.standby.links")} className="space-y-2 text-start">
       <p className="text-center text-xs font-semibold uppercase tracking-wide text-text-muted">{t("devices.standby.links")}</p>

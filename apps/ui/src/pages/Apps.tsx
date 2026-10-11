@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -60,8 +60,13 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
 /** How many listings a store's block shows at a time: a page a phone draws in a frame or two. */
 const LISTING_PAGE = 50;
 
-function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError }: {
+/** A store that lists this many apps or fewer shows them without being asked, beside other stores too. */
+const LISTING_FEW = 6;
+
+function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, onError }: {
   store: AppStoreSummary;
+  /** The only store of the page. */
+  alone: boolean;
   installed: readonly InstalledAppView[];
   onInstall: (listing: AppListing) => void;
   onChanged: () => void;
@@ -70,7 +75,10 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
   onError: (e: unknown) => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  // Its apps show from the start when it is the only store or lists a few: nothing told a person on a phone that the
+  // name opens them. Once the person closed or opened it, that stays.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? (store.apps.length > 0 && (alone || store.apps.length <= LISTING_FEW));
   const [busy, setBusy] = useState(false);
   const focusBack = useFocusBack(busy);
   const work = async (call: () => Promise<unknown>, done?: () => void) => {
@@ -81,6 +89,15 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
   // A store may list up to 4096 apps: one page of them at a time, and a search over them all.
   const [limit, setLimit] = useState(LISTING_PAGE);
   const [filter, setFilter] = useState("");
+  // Show more goes under the listings it adds, and away after the last ones: the focus goes to the first listing it
+  // added (its Install, or the row when it has none), so Tab goes on from there and not from the top of the page.
+  const [added, setAdded] = useState<number | null>(null);
+  const list = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (added === null) return;
+    const row = list.current?.querySelectorAll<HTMLElement>("[data-testid=app-listing]")[added];
+    (row?.querySelector<HTMLElement>("button") ?? row)?.focus({ preventScroll: true });
+  }, [added]);
   const have = useMemo(() => new Map(installed.map((a) => [a.ref, a])), [installed]);
   const removals = useMemo(() => new Map(store.removed.map((r) => [`${r.ref} ${r.digest}`, r])), [store.removed]);
   const matching = useMemo(() => {
@@ -90,8 +107,9 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
   const read = store.fetchedAt !== undefined || store.apps.length > 0;
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
   const toggle = () => {
-    setOpen(!open);
+    setChosen(!open);
     setLimit(LISTING_PAGE);
+    setAdded(null);
     setFilter("");
   };
   return (
@@ -99,7 +117,13 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <button type="button" aria-expanded={open} onClick={toggle} disabled={!read}
           className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          <span dir="auto" className="block text-sm text-text-primary truncate">{store.name ?? store.url}</span>
+          <span className="flex items-center gap-1.5">
+            <span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{store.name ?? store.url}</span>
+            {read && (
+              <svg aria-hidden="true" data-testid="app-store-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                className={`shrink-0 text-text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
+            )}
+          </span>
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             {kind && <span>{kind}</span>}
             {read && <span>{t(store.apps.length === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps.length })}</span>}
@@ -117,20 +141,21 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
       </div>
       {open && store.apps.length > LISTING_PAGE && (
         <div className="border-t border-border px-4 py-2">
-          <input type="search" data-testid="app-store-filter" value={filter} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); }}
+          <input type="search" data-testid="app-store-filter" value={filter} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
             placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}
             className="w-full rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
         </div>
       )}
       {open && (
-        <ul className="border-t border-border divide-y divide-border bg-surface-alt/40" data-testid="app-store-listing">
+        <ul ref={list} className="border-t border-border divide-y divide-border bg-surface-alt/40" data-testid="app-store-listing">
           {store.apps.length === 0 && <li className="px-4 py-3 text-xs text-text-muted">{t("apps.store.empty")}</li>}
           {store.apps.length > 0 && matching.length === 0 && <li className="px-4 py-3 text-xs text-text-muted">{t("apps.store.noMatch")}</li>}
-          {matching.slice(0, limit).map((listing) => {
+          {matching.slice(0, limit).map((listing, i) => {
             const app = have.get(listing.ref);
             const removed = removals.get(`${listing.ref} ${listing.digest}`);
             return (
-              <li key={listing.ref} className="flex items-center gap-3 px-4 py-3" data-testid="app-listing" data-ref={listing.ref}>
+              <li key={listing.ref} tabIndex={i === added ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
+                className="flex items-center gap-3 px-4 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                 <AppIcon size={32} installed={app} />
                 <span className="min-w-0 flex-1">
                   <span dir="auto" className="block text-sm text-text-primary truncate">{listing.title}</span>
@@ -143,7 +168,7 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
           })}
           {matching.length > limit && (
             <li>
-              <button type="button" data-testid="app-store-more" onClick={() => setLimit(limit + LISTING_PAGE)}
+              <button type="button" data-testid="app-store-more" onClick={() => { setAdded(limit); setLimit(limit + LISTING_PAGE); }}
                 className="w-full cursor-pointer px-4 py-2.5 text-xs font-medium text-accent hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                 {t("apps.store.showMore", { count: matching.length - limit })}
               </button>
@@ -218,7 +243,7 @@ export function Apps() {
       <Section title={t("apps.page.stores")} testId="apps-stores">
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
-            : stores.map((store) => <StoreBlock key={store.key} store={store} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
+            : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
               onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} onInstalled={(app) => setJustInstalled(app.ref)} />}

@@ -46,6 +46,11 @@ export interface PkarrRequestOptions {
    * a write while a link watches for one: what that contact, back, reads first.
    */
   watch?: boolean;
+  /**
+   * A 1:1 chat's read of a contact that went away from a live session within `DEPARTED_READ_MS` (link.ts): an app that
+   * restarts publishes its offer then. A few may go over the relay's minute (`DEPARTED_READS` in relay.ts).
+   */
+  departed?: boolean;
 }
 
 /**

@@ -401,6 +401,28 @@ describe("with the apps flag on", () => {
     expect(tried).toEqual(["app"]);
   });
 
+  it("a link without https:// to a host of the list is read as https://, as a repository is usually written", async () => {
+    const asked: unknown[] = [];
+    fakeEngine.on("appPreview", (params) => { asked.push(params); return preview(); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "github.com/ana/chess");
+    await user.click(screen.getByTestId("apps-add-check"));
+    await waitFor(() => expect(asked).toEqual([{ url: "https://github.com/ana/chess" }]));
+    expect(screen.queryByTestId("apps-add-error")).not.toBeInTheDocument();
+  });
+
+  it("words that are no link get the dialog's own error, not the browser's validation bubble", async () => {
+    const asked: unknown[] = [];
+    const refuse = (params: unknown) => { asked.push(params); throw new Error("host: Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS"); };
+    fakeEngine.on("appPreview", refuse).on("appStorePreview", refuse);
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "not a link");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.");
+    // As typed: only a host of the list gets https:// put before it.
+    expect(asked).toEqual([{ url: "not a link" }]);
+  });
+
   it("a version a store removed stays stopped: Run anyway in its details opens it, Keep it stopped does not", async () => {
     const onOpen = vi.fn();
     const removed = installed({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } });
@@ -560,7 +582,6 @@ describe("with the apps flag on", () => {
     expect(within(row).getByTestId("installed-app-hint")).toHaveAttribute("dir", "auto");
     expect(screen.getByText(unread)).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Ghostly")).toHaveAttribute("dir", "auto");
-    await user.click(screen.getByText("Ghostly"));
     expect(screen.getByText("Snake")).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Eat, grow.")).toHaveAttribute("dir", "auto");
     await user.click(within(row).getByRole("button", { name: `${title}: details` }));
@@ -570,6 +591,41 @@ describe("with the apps flag on", () => {
     expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
   });
 
+  it("a store's apps show without a tap when it is the only store or lists a few; a long list beside others waits behind its name, which says it opens", async () => {
+    const listings = (n: number, name: string) => Array.from({ length: n }, (_, i) => ({ ref: `${KEY}/${name}${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `${name} ${i}`, tagline: "A game" }));
+    const store = (key: string, name: string, n: number) => ({ key, fingerprint: "abcd efgh ijkl mnop", url: `https://raw.githubusercontent.com/g/${key}/HEAD/ghostly-store.json`, preloaded: false,
+      name, kind: "curated" as const, sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: listings(n, name), removed: [] });
+    let stores = [store("s", "Ghostly Store", 1)];
+    fakeEngine.on("appList", () => []).on("appCheckUpdates", () => []).on("appStoreList", () => stores);
+    const first = renderApp(<Apps />, { route: "/apps" });
+    // A new profile: the official store and its one app, whose Install is there to press.
+    const only = await screen.findByTestId("app-store");
+    expect(within(only).getByTestId("app-listing-install")).toBeInTheDocument();
+    const name = within(only).getByRole("button", { name: /Ghostly Store/ });
+    expect(name).toHaveAttribute("aria-expanded", "true");
+    expect(within(name).getByTestId("app-store-chevron")).toBeInTheDocument();
+    // Closed by the person, it stays closed; and opens again.
+    await first.user.click(name);
+    expect(name).toHaveAttribute("aria-expanded", "false");
+    expect(within(only).queryByTestId("app-listing")).not.toBeInTheDocument();
+    await first.user.click(name);
+    expect(within(only).getByTestId("app-listing-install")).toBeInTheDocument();
+    first.unmount();
+
+    stores = [store("s", "Ghostly Store", 1), store("b", "Big", 7), { ...store("u", "Unread", 0), fetchedAt: undefined as unknown as number }];
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const [few, many, unread] = await screen.findAllByTestId("app-store");
+    expect(within(few).getAllByTestId("app-listing")).toHaveLength(1);
+    expect(within(many).queryByTestId("app-listing")).not.toBeInTheDocument();
+    const opener = within(many).getByRole("button", { name: /Big/ });
+    expect(opener).toHaveAttribute("aria-expanded", "false");
+    expect(within(opener).getByTestId("app-store-chevron")).toBeInTheDocument();
+    await user.click(opener);
+    expect(within(many).getAllByTestId("app-listing")).toHaveLength(7);
+    // A store not read yet opens nothing, and says nothing of opening.
+    expect(within(unread).queryByTestId("app-store-chevron")).not.toBeInTheDocument();
+  });
+
   it("a store at the format's limit of 4096 listings opens with its first 50, Show more for the next, and a search over them all", async () => {
     const apps = Array.from({ length: 4096 }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` }));
     fakeEngine.on("appList", () => [installed({ ref: `${KEY}/app4000` })]).on("appCheckUpdates", () => [])
@@ -577,8 +633,7 @@ describe("with the apps flag on", () => {
         name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps,
         removed: [{ ref: `${KEY}/app4001`, digest: DIGEST, reason: "Malware", at: 1 }] }]);
     const { user } = renderApp(<Apps />, { route: "/apps" });
-    await user.click(await screen.findByText("Big"));
-    const listing = screen.getByTestId("app-store-listing");
+    const listing = await screen.findByTestId("app-store-listing");
     expect(within(listing).getAllByTestId("app-listing")).toHaveLength(50);
     await user.click(screen.getByTestId("app-store-more"));
     expect(within(listing).getAllByTestId("app-listing")).toHaveLength(100);
@@ -602,6 +657,28 @@ describe("with the apps flag on", () => {
     await user.click(screen.getByText("Big"));
     await user.click(screen.getByText("Big"));
     expect(within(screen.getByTestId("app-store-listing")).getAllByTestId("app-listing")).toHaveLength(50);
+  });
+
+  it("Show more from the keyboard moves the focus to the first listing it added, not to the page once the button is gone", async () => {
+    const apps = Array.from({ length: 120 }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` }));
+    fakeEngine.on("appList", () => [installed({ ref: `${KEY}/app100` })]).on("appCheckUpdates", () => [])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+        name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps, removed: [] }]);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await screen.findByTestId("app-store-listing");
+    const rows = () => within(screen.getByTestId("app-store-listing")).getAllByTestId("app-listing");
+    screen.getByTestId("app-store-more").focus();
+    await user.keyboard("{Enter}");
+    expect(rows()).toHaveLength(100);
+    expect(within(rows()[50]).getByTestId("app-listing-install")).toHaveFocus();
+
+    // The last page takes the button away. Its first listing is installed, with no button: the row itself takes the focus.
+    screen.getByTestId("app-store-more").focus();
+    await user.keyboard("{Enter}");
+    expect(rows()).toHaveLength(120);
+    expect(screen.queryByTestId("app-store-more")).not.toBeInTheDocument();
+    expect(rows()[100]).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
   });
 
   it("gives the card's title its own direction", async () => {

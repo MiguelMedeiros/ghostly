@@ -40,7 +40,16 @@ function globals(parsed: Parsed): Globals {
 function requireProfile(g: Globals): void {
   if (profileExists(g.home, g.profile)) return;
   if (g.profile === DEFAULT_PROFILE) { createProfile(g.home, g.profile); return; }
-  throw new CliError("not_found", `No profile ${g.profile}: make it with \`ghostly profile create ${g.profile}\``);
+  throw noProfile(g);
+}
+
+function noProfile(g: Globals): CliError {
+  return new CliError("not_found", `No profile ${g.profile}: make it with \`ghostly profile create ${g.profile}\``);
+}
+
+/** For a command that only reads: a mistyped profile is named as one, and `default` is not made by asking about it. */
+function knownProfile(g: Globals): void {
+  if (g.profile !== DEFAULT_PROFILE && !profileExists(g.home, g.profile)) throw noProfile(g);
 }
 
 /** A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. */
@@ -344,6 +353,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   pretty = g.pretty;
   if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub}` : "daemon [--detach]");
   if (sub === "status") {
+    knownProfile(g);
     const client = await connectDaemon(g.paths.socket);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
@@ -352,6 +362,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
     return;
   }
   if (sub === "stop") {
+    knownProfile(g);
     const client = await connectDaemon(g.paths.socket);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     print({ stopped: true, pid: await stopDaemon(g, client, Number(parsed.options.timeout) || 20) });
@@ -698,17 +709,19 @@ export async function main(input: string[]): Promise<number> {
   if (argv[0] === "--version" || argv[0] === "version") { print({ version: VERSION }); return 0; }
   const [first, second] = argv;
   const two = second && !second.startsWith("-") ? `${first} ${second}` : "";
-  if (first === "profile" && !COMMANDS[two]) { await profileCommand(second, argv.slice(2)); return 0; }
+  // A command is one its table lists itself: every object has `constructor` and `toString`, which are no commands.
+  const text = (name: string) => Object.hasOwn(TEXT_COMMANDS, name), table = (name: string) => Object.hasOwn(COMMANDS, name);
+  if (first === "profile" && !table(two)) { await profileCommand(second, argv.slice(2)); return 0; }
   if (first === "daemon") { await daemonCommand(argv.slice(1)); return -1; }
   if (first === "listen") { await listenCommand(argv.slice(1)); return -1; }
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }
   if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
   if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
   if (two === "call pipe") { await callPipeCommand(argv.slice(2)); return -1; }
-  if (two && TEXT_COMMANDS[two]) { await textCommand(two, argv.slice(2)); return 0; }
-  if (two && COMMANDS[two]) { await tableCommand(two, argv.slice(2)); return 0; }
-  if (TEXT_COMMANDS[first]) { await textCommand(first, argv.slice(1)); return 0; }
-  if (COMMANDS[first]) { await tableCommand(first, argv.slice(1)); return 0; }
+  if (two && text(two)) { await textCommand(two, argv.slice(2)); return 0; }
+  if (two && table(two)) { await tableCommand(two, argv.slice(2)); return 0; }
+  if (text(first)) { await textCommand(first, argv.slice(1)); return 0; }
+  if (table(first)) { await tableCommand(first, argv.slice(1)); return 0; }
   throw unknownCommand(first, two ? second : undefined);
 }
 

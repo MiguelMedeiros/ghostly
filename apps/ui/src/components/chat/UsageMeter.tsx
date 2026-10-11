@@ -12,8 +12,8 @@ import { InfoButton } from "../layout/Section";
 
 /*
  * A bot's usage (WISP 405 § Usage): how much of its quota is left, at a glance. A small meter and the percent on its
- * chat's row (`UsagePill`); the same in the chat's header with when it resets, a tap opening the details
- * (`UsageButton`); and the card itself in the chat, one quiet line that opens in place (`UsageView`). Colour only when
+ * chat's row (`UsagePill`); the same in the chat's header, with when it resets where there is room, a tap opening the
+ * details (`UsageButton`); and the card itself in the chat, one quiet line that opens in place (`UsageView`). Colour only when
  * it runs low; muted once the numbers are stale. Every string is the card's as the reader kept it, as plain text.
  */
 
@@ -42,7 +42,7 @@ function meterLabel(entry: UsageEntry, level: UsageLevel, now: number, t: Transl
 
 /**
  * The meter on a chat's row: the gauge and the percent, in the level's colour (none while there is plenty). `reset`:
- * with when the window starts again ("62% · 18:00"), as the header shows it.
+ * with when the window starts again ("62% · 18:00"), as a wide header shows it (a phone's keeps to the percent).
  */
 export function UsagePill({ entry, testId, reset = false, className = "" }: { entry: UsageEntry; testId: string; reset?: boolean; className?: string }) {
   const { t, language } = useI18n();
@@ -58,7 +58,8 @@ export function UsagePill({ entry, testId, reset = false, className = "" }: { en
       className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 h-[18px] text-[11px] font-medium leading-none tabular-nums whitespace-nowrap ${tone.pill} ${tone.text} ${className}`}>
       <UsageGauge left={left} level={level} />
       <span dir="ltr">{left}%</span>
-      {resets && <><span aria-hidden="true" className="opacity-60">·</span><span>{resets}</span></>}
+      {/* A phone's header has no room for the time beside the contact's status: there the details say it. */}
+      {resets && <span data-testid={`${testId}-resets`} className="inline-flex items-center gap-1 max-md:hidden"><span aria-hidden="true" className="opacity-60">·</span><span>{resets}</span></span>}
     </span>
   );
 }
@@ -150,7 +151,7 @@ function UsagePanel({ entry, anchorRef, onClose }: { entry: UsageEntry; anchorRe
       className="fixed z-50 flex flex-col rounded-lg border border-border bg-surface-alt shadow-lg outline-none animate-fade-in">{body}</div>, document.body);
 }
 
-/** The meter in a chat's header, with when it resets: a tap opens the details (a sheet on a phone). */
+/** The meter in a chat's header, with when it resets on a wide one: a tap opens the details (a sheet on a phone). */
 export function UsageButton({ entry }: { entry: UsageEntry }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);

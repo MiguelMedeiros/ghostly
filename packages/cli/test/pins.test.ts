@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, PinView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
-import { COMMANDS, positionals } from "../src/commands";
+import { parseArgs } from "../src/args";
+import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.pins
@@ -24,10 +25,28 @@ function fake(result: { error: string | null } = { error: null }) {
 }
 
 describe("pin", () => {
+  /** The command line as `ghostly pin …` reads it: the words and options parsed, then the method's parameters. */
+  const line = (...argv: string[]) => {
+    const parsed = parseArgs(argv, COMMANDS.pin.options ?? {}, idSlot(COMMANDS.pin));
+    return COMMANDS.pin.params!(parsed, positionals(COMMANDS.pin, parsed.positionals));
+  };
+
   it("takes a chat or a group and a message, or --remove", () => {
-    expect(COMMANDS.pin.usage).toBe("pin <chat|group> <message> [--remove]");
-    expect(positionals(COMMANDS.pin, ["alice", "peer_x"])).toEqual({ chat: "alice", message: "peer_x" });
-    expect(() => positionals(COMMANDS.pin, ["alice"])).toThrow(/Missing <message>/);
+    expect(COMMANDS.pin.usage).toBe("pin <chat|group> <message> | --remove");
+    expect(line("alice", "peer_x")).toEqual({ chat: "alice", message: "peer_x", remove: false });
+    expect(() => line("alice")).toThrow(/Missing <message>: ghostly pin <chat\|group> <message> \| --remove/);
+    expect(() => line()).toThrow(/Missing <chat>/);
+    expect(() => line("alice", "peer_x", "peer_y")).toThrow(/Too many arguments/);
+    // A group's id may start with a dash: it is still the message.
+    expect(line("crew", "-k:0:1")).toEqual({ chat: "crew", message: "-k:0:1", remove: false });
+  });
+
+  it("unpins with --remove alone: no message is named, and one given is not asked for", () => {
+    expect(line("alice", "--remove")).toEqual({ chat: "alice", message: undefined, remove: true });
+    expect(line("--remove", "alice")).toEqual({ chat: "alice", message: undefined, remove: true });
+    // A script that named the pinned message beside --remove goes on working.
+    expect(line("alice", "peer_x", "--remove")).toEqual({ chat: "alice", message: "peer_x", remove: true });
+    expect(() => line("alice", "peer_x", "peer_y", "--remove")).toThrow(/Too many arguments/);
   });
 
   it("goes to the engine for a chat or a group; --remove unpins; what the engine refuses is said", async () => {
