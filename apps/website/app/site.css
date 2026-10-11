@@ -525,8 +525,12 @@ body {
   flex-direction: column;
   gap: 4px;
   padding: 16px;
-  min-height: calc(100vh - var(--nav-h));
-  min-height: calc(100svh - var(--nav-h));
+  /* The rest of the screen as it is now, and no taller: on a short phone, or one on its side, the sheet scrolls to
+     its last entries instead of leaving them below the screen's edge. */
+  height: calc(100vh - var(--nav-h));
+  height: calc(100dvh - var(--nav-h));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg);
   border-top: 1px solid var(--line);
 }
