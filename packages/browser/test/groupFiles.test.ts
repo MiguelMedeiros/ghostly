@@ -435,6 +435,105 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
 
   const serving = (p: Peer) => (p.groups.files as unknown as { servingNow(): { peer: string; size: number }[] }).servingNow();
 
+  it("what a holder sends counts toward its day whatever the asker confirms, and an asker cannot have it sent past the day", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    const size = 200_000;
+    limits.serveBytesPerDay = 1_000_000;
+    const { messageId } = await t.send(alice, id, pattern(size, 3));
+    await t.world.run(2_000);
+    // Bob's side of files/3 is not the app here: it confirms every byte, and answers each `pf-sum` with `pf-accept
+    // {offset: 0}` (the file again from the start) `again` times, then leaves with nothing confirmed.
+    const edge = bob.host.edges(id).get(t.key(alice, id))!;
+    let again = 0, sent = 0, sums = 0, aborts = 0;
+    t.world.drop = (from, to, frame) => {
+      if (frame.t !== "pf-data") t.seen.push({ from: from.name, to: to.name, frame });
+      if (from !== alice || to !== bob || typeof frame.t !== "string" || !frame.t.startsWith("pf-")) return false;
+      // Answered once Alice's app is done sending the frame, as over a network.
+      const answer = (reply: Record<string, unknown>) => queueMicrotask(() => t.world.sendFiles(bob, edge, { ...reply, id: frame.id }));
+      if (frame.t === "pf-offer") answer({ t: "pf-accept", offset: 0 });
+      else if (frame.t === "pf-data") { const bytes = Buffer.from(frame.data as string, "base64url").length; sent += bytes; answer({ t: "pf-got", offset: (frame.offset as number) + bytes }); }
+      else if (frame.t === "pf-sum") { sums++; answer({ t: "pf-accept", offset: 0 }); if (sums > again) answer({ t: "pf-refuse", why: "invalid" }); }
+      else if (frame.t === "pf-abort") aborts++;
+      return true;
+    };
+    const answers = (to: string) => t.seen.filter(s => s.from === "alice" && s.to === to && (s.frame.t === "group-want-no" || s.frame.t === "pf-offer")).map(s => s.frame.t === "pf-offer" ? "offer" : s.frame.why);
+    // The file three times in one transfer, ended with nothing confirmed: 600 kB of the day's 1 MB went.
+    again = 2;
+    t.say(bob, alice, id, { t: "group-want", g: id, id: messageId });
+    await t.world.until(() => sums === 3 && !serving(alice).length, 60_000);
+    expect(sent).toBeGreaterThanOrEqual(3 * size);
+    const first = sent;
+    // Asked again, with no end to it: Alice stops at the day's bytes and says so.
+    again = 40;
+    t.say(bob, alice, id, { t: "group-want", g: id, id: messageId });
+    await t.world.until(() => aborts > 0 || sums > 40, 10 * 60_000);
+    expect(aborts).toBe(1);
+    expect(sent).toBeGreaterThan(first);
+    expect(sent).toBeLessThanOrEqual(limits.serveBytesPerDay + 2 * 16 * 1024);
+    expect(serving(alice)).toEqual([]);
+    // The day is spent: nobody else is served either.
+    for (const p of [bob, carol]) t.say(p, alice, id, { t: "group-want", g: id, id: messageId });
+    await t.world.run(1_000);
+    expect(answers("bob")).toEqual(["offer", "offer", "busy"]);
+    expect(answers("carol")).toEqual(["busy"]);
+  });
+
+  const servedToday = (p: Peer) => (p.groups.files as unknown as { served: { bytes: number } }).served.bytes;
+
+  it("an asker that says it has the whole file costs the holder none of its day, and the next member is served", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    const size = 100_000;
+    limits.serveBytesPerDay = 10 * size;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 5));
+    await t.world.run(2_000);
+    // Bob's side of files/3 is not the app here: it accepts each offer from the file's end, so no data comes, and
+    // refuses the file at its `pf-sum`.
+    const edge = bob.host.edges(id).get(t.key(alice, id))!;
+    let data = 0, sums = 0;
+    t.world.drop = (from, to, frame) => {
+      t.seen.push({ from: from.name, to: to.name, frame });
+      if (from !== alice || to !== bob || typeof frame.t !== "string" || !frame.t.startsWith("pf-")) return false;
+      const answer = (reply: Record<string, unknown>) => queueMicrotask(() => t.world.sendFiles(bob, edge, { ...reply, id: frame.id }));
+      if (frame.t === "pf-offer") answer({ t: "pf-accept", offset: size });
+      else if (frame.t === "pf-data") data++;
+      else if (frame.t === "pf-sum") { sums++; answer({ t: "pf-refuse", why: "no-room" }); }
+      return true;
+    };
+    // One more time than the day holds the file.
+    for (let i = 1; i <= 11; i++) {
+      t.say(bob, alice, id, { t: "group-want", g: id, id: messageId });
+      await t.world.until(() => sums === i && !serving(alice).length, 60_000);
+    }
+    expect(data).toBe(0);
+    expect(servedToday(alice)).toBe(0);
+    // Carol, on the app, gets the file from Alice (Bob holds none of it).
+    await carol.groups.downloadFile(t.got(carol, id, messageId).message!.file!.id);
+    await t.world.until(() => t.done(carol, id, messageId), 5 * 60_000);
+    expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
+    expect(servedToday(alice)).toBe(size);
+  });
+
+  it("a holder that serves the rest of a file counts that rest toward its day, not the whole file", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const size = 600_000, cut = 512 * 1024;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 12));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    // Alice's bytes to Carol stop coming past the first 512 KiB; Carol goes on with Bob from what she has.
+    t.hold = (from, to, frame) => from === alice && to === carol && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    t.world.reopen(carol);
+    await t.world.until(() => t.done(carol, id, messageId) && !serving(bob).length, 10 * 60_000);
+    expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
+    expect(t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-accept").map(s => s.frame.offset)).toEqual([cut]);
+    expect(servedToday(bob)).toBe(size - cut);
+  });
+
   it("askers that go away mid-download free the holder's places, and the next member is served", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol, dave, erin], id } = await t.mesh(["alice", "bob", "carol", "dave", "erin"]);

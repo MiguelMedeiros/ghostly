@@ -611,14 +611,27 @@ export class GroupFileDesk {
     return this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay ? "busy" : null;
   }
 
-  /** Transfers served now, all groups together: to whom, their size, and whether bytes are still to go. */
+  /**
+   * Transfers served now, all groups together: to whom, what each takes of the day (its size, or what it sent when
+   * that is more), and whether bytes are still to go.
+   */
   private servingNow(): { peer: string; size: number; sending: boolean }[] {
     const active: { peer: string; size: number; sending: boolean }[] = [];
     for (const edge of this.edgesById.values()) for (const wire of edge.serving.keys()) {
       const record = edge.files.get("out", wire);
-      if (record && !transferEnded(record)) active.push({ peer: edge.peer, size: record.file.size, sending: record.confirmed < record.file.size });
+      if (record && !transferEnded(record)) active.push({ peer: edge.peer, size: Math.max(record.file.size, edge.files.sent(wire)), sending: record.confirmed < record.file.size });
     }
     return active;
+  }
+
+  /**
+   * An asker has a served transfer send parts again (WISP 503 § Serving limits): every byte sent counts toward the day,
+   * so it goes on only while the day has room for it.
+   */
+  private mayResend(): boolean {
+    const today = Math.floor(this.deps.now() / 86_400_000);
+    if (this.served.day !== today) this.served = { day: today, bytes: 0 };
+    return this.served.bytes + this.servingNow().reduce((sum, a) => sum + a.size, 0) < GROUP_FILE_LIMITS.serveBytesPerDay;
   }
 
   /**
@@ -677,6 +690,7 @@ export class GroupFileDesk {
       changed: (record, transferred) => this.transferChanged(edge, record, transferred),
       room: () => this.deps.store.room(),
       writable: () => this.deps.writable?.(linkId),
+      resend: record => !edge.serving.has(record.id) || this.mayResend(),
     });
     this.edgesById.set(linkId, edge);
     return edge;
@@ -739,10 +753,10 @@ export class GroupFileDesk {
     if (transferEnded(record)) this.transferOver(edge, record);
     if (record.direction === "out") {
       if (transferEnded(record) && edge.serving.has(record.id)) {
-        // What a member took counts toward the day's serving, done or not.
+        // What was sent to a member counts toward the day's serving, done or not, and whatever it confirmed.
         const today = Math.floor(this.deps.now() / 86_400_000);
         if (this.served.day !== today) this.served = { day: today, bytes: 0 };
-        this.served.bytes += record.confirmed;
+        this.served.bytes += edge.files.sent(record.id);
         edge.serving.delete(record.id);
         edge.servedMoved.delete(record.id);
         // A slot is free: those turned away as busy hear this device holds their file (with the next `group-have`), and
