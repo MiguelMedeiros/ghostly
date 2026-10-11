@@ -13,6 +13,7 @@ import { NextSection } from "./NextSection";
 import { SpaceSection } from "./SpaceSection";
 import { OpenScene } from "./OpenScene";
 import { Finale } from "./Finale";
+import { LandOnHash } from "./LandOnHash";
 import "@/app/home.css";
 
 /**
@@ -27,6 +28,7 @@ export function HomePage({ version }: { version: string }) {
   const t = home;
   return (
     <Shell>
+      <LandOnHash />
       <StoryRail
         label={t.rail}
         marks={[
