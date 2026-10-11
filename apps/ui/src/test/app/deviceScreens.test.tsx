@@ -181,7 +181,8 @@ describe("Profile, Devices", () => {
     expect(screen.queryByTestId("handoff-running")).toBeNull();
     await user.click(within(phone).getByTestId("device-move"));
     const dialog = await screen.findByTestId("handoff-move-dialog");
-    expect(await within(dialog).findByTestId("handoff-line", {}, { timeout: 3_000 })).toHaveTextContent("Copying files · 120 MB of 480 MB");
+    expect(await within(dialog).findByTestId("handoff-line", {}, { timeout: 3_000 })).toHaveTextContent("Copying files");
+    expect(within(dialog).getByTestId("handoff-amount")).toHaveTextContent("120 MB of 480 MB");
     // While the dialog shows the move, the section does not show it a second time.
     expect(screen.queryByTestId("handoff-running")).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
@@ -189,7 +190,8 @@ describe("Profile, Devices", () => {
     const running = await screen.findByTestId("handoff-running", {}, { timeout: 3_000 });
     expect(screen.queryByTestId("handoff-move-dialog")).toBeNull();
     expect(running).toHaveTextContent("Moving your profile");
-    expect(within(running).getByTestId("handoff-line")).toHaveTextContent("Copying files · 120 MB of 480 MB");
+    expect(within(running).getByTestId("handoff-line")).toHaveTextContent("Copying files");
+    expect(within(running).getByTestId("handoff-amount")).toHaveTextContent("120 MB of 480 MB");
     // The engine refuses a second move as busy: none is offered while one runs.
     expect(screen.queryByTestId("device-move")).toBeNull();
     await user.click(within(running).getByTestId("handoff-cancel"));
@@ -224,6 +226,9 @@ describe("Profile, Devices", () => {
   });
 });
 
+/** The live region an element sits in, itself aside: what is read again, whole, when the element's text changes. */
+const liveRegionAround = (element: HTMLElement) => element.parentElement?.closest("[role=status], [role=alert], [role=log], [aria-live]") ?? null;
+
 const view = (patch: Partial<HandoffView>): HandoffView => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "connecting", bytes: 0, total: 0, ...patch });
 
 describe("the handoff's progress", () => {
@@ -234,10 +239,27 @@ describe("the handoff's progress", () => {
       "connecting:done", "copying:now", "ready:next", "rest:next", "checking:next", "switching:next", "settling:next",
     ]);
     expect(steps[1]).toHaveAttribute("aria-current", "step");
-    expect(screen.getByTestId("handoff-line")).toHaveTextContent("Copying files · 120 MB of 480 MB");
+    expect(steps[1]).toHaveTextContent("Copying files · 120 MB of 480 MB");
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
     expect(screen.getByTestId("handoff-cancel")).toHaveTextContent("Cancel");
     expect(screen.getByTestId("handoff-progress")).toHaveTextContent("Nothing changes until the last step.");
+  });
+
+  it("reads the step aloud once while files are copied: the bytes are beside the live line and on the bar, not in it", () => {
+    const copying = (bytes: number) => <HandoffProgress view={view({ step: "copying", bytes, total: 480 * 1024 ** 2 })} onCancel={() => {}} />;
+    const { rerender } = renderApp(copying(120 * 1024 ** 2));
+    const line = screen.getByTestId("handoff-line");
+    expect(line).toHaveAttribute("role", "status");
+    expect(line.textContent).toBe("Copying files");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuetext", "120 MB of 480 MB");
+    rerender(copying(240 * 1024 ** 2));
+    // The next read of the copy: the same element with the same words, so a screen reader has nothing new to say.
+    expect(screen.getByTestId("handoff-line")).toBe(line);
+    expect(line.textContent).toBe("Copying files");
+    expect(screen.getByTestId("handoff-amount")).toHaveTextContent("240 MB of 480 MB");
+    expect(liveRegionAround(screen.getByTestId("handoff-amount"))).toBeNull();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuetext", "240 MB of 480 MB");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
   });
 
   it("says where a dropped copy stopped, and that it goes on by itself", () => {
@@ -302,6 +324,27 @@ describe("the standby screen", () => {
     expect(links[0]).toHaveTextContent("Active");
     expect(screen.getByRole("navigation", { name: "Other profiles" })).toHaveTextContent("Switch to Work");
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
+  });
+
+  it("is a landmark, not a live region: only the state is read when it changes, and no live part sits in another", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? "live" as const : undefined })) }));
+    fakeEngine.on("deviceHandoffView", () => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "copying", bytes: 120 * 1024 ** 2, total: 480 * 1024 ** 2 }) satisfies HandoffView);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    fakeEngine.on("devicePing", () => ({ ms: 12 }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    const standby = screen.getByRole("main");
+    expect(standby).toBe(screen.getByTestId("device-standby"));
+    expect(standby).not.toHaveAttribute("role");
+    expect(standby).not.toHaveAttribute("aria-live");
+    // The state in words is what a change of state reads: the title and the hint, each alone.
+    expect(screen.getByTestId("device-standby-title")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByTestId("device-standby-hint")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByTestId("device-standby-hint").textContent).toBe("This device is on standby for this profile.");
+    await user.click(await screen.findByTestId("device-standby-check"));
+    const live = [screen.getByTestId("device-standby-title"), screen.getByTestId("device-standby-hint"), await screen.findByTestId("handoff-line"), await screen.findByTestId("device-standby-check-result")];
+    for (const part of live) expect(liveRegionAround(part)).toBeNull();
+    // Nothing a person presses is read again with them.
+    for (const part of [...standby.querySelectorAll<HTMLElement>("[role=status], [role=alert], [aria-live]")]) expect(part.querySelector("button")).toBeNull();
   });
 
   it("the answer of Check connection goes when that device's link is no longer connected", async () => {

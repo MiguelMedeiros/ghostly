@@ -102,7 +102,7 @@
       "checking": "正在检查",
       "connecting": "正在连接 {{device}}",
       "copy": "正在复制文件",
-      "copying": "正在复制文件 · {{done}} / {{total}}",
+      "copyAmount": "{{done}} / {{total}}",
       "done": "此设备现已处于活动状态。",
       "doneGiver": "{{device}} 现已处于活动状态。",
       "finishing": "即将完成：正在等待网络",

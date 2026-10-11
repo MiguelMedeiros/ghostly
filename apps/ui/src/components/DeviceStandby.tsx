@@ -59,13 +59,14 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   // Desktop: a handoff that runs here (this device takes the profile, or gives it in pass 2) keeps the computer awake.
   useComputerAwake();
   return (
-    <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
+    <main data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
       <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center gap-5 px-4 py-8 text-center">
         <div className="space-y-2">
           <div className="text-5xl" aria-hidden="true">👻</div>
-          <h1 data-testid="device-standby-title" className="text-lg font-semibold text-text-primary break-words">{title}</h1>
+          {/* The state is the only thing read aloud when it changes: a live region around the whole screen read all of it again at each change of a link or of a move. */}
+          <h1 data-testid="device-standby-title" aria-live="polite" className="text-lg font-semibold text-text-primary break-words">{title}</h1>
           <p className="flex items-start justify-center gap-1.5 text-sm text-text-secondary">
-            <span className="min-w-0 break-words">{hint}</span>
+            <span data-testid="device-standby-hint" aria-live="polite" className="min-w-0 break-words">{hint}</span>
             <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId="device-standby-info" className="mt-px" />
           </p>
           {open && (
@@ -99,7 +100,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
           </nav>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 

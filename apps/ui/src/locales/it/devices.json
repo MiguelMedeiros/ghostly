@@ -102,7 +102,7 @@
       "checking": "Controllo",
       "connecting": "Connessione a {{device}}",
       "copy": "Copia dei file",
-      "copying": "Copia dei file · {{done}} di {{total}}",
+      "copyAmount": "{{done}} di {{total}}",
       "done": "Questo dispositivo ora è attivo.",
       "doneGiver": "{{device}} ora è attivo.",
       "finishing": "Ultimo passaggio: in attesa della rete",
