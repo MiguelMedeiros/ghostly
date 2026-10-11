@@ -214,26 +214,24 @@
   padding: 9px 12px;
   border-radius: 12px;
   text-align: left;
-  border: 1px dashed color-mix(in srgb, var(--c) 40%, transparent);
+  /* A block that is not lit is quiet by its dashed, faint border and its empty fill, never by an opacity on the
+     whole block: its name and its level are text, and stay at AA contrast. */
+  border: 1px dashed color-mix(in srgb, var(--c) 22%, transparent);
   background: transparent;
   cursor: pointer;
   transition:
     background 0.35s var(--ease),
     border-color 0.35s,
     transform 0.35s var(--ease),
-    box-shadow 0.35s,
-    opacity 0.35s;
-  opacity: 0.55;
+    box-shadow 0.35s;
 }
 .bgrid-block[data-on="true"] {
-  opacity: 1;
   border: 1px solid color-mix(in srgb, var(--c) 75%, white 5%);
   background: color-mix(in srgb, var(--c) 22%, #0b121c);
   box-shadow: 0 8px 22px -12px color-mix(in srgb, var(--c) 70%, transparent);
   transform: translateY(-2px);
 }
 .bgrid-block:hover {
-  opacity: 1;
   border-color: color-mix(in srgb, var(--c) 80%, white 10%);
 }
 .bgrid-block[aria-expanded="true"] {

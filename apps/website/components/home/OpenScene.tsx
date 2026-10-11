@@ -106,7 +106,7 @@ function Legend({ layers }: { layers: string[] }) {
 function LegendItem({ p, n, i, color, children }: { p: MotionValue<number>; n: number; i: number; color: string; children: string }) {
   const on = useStep(p, 0, n, [0.3 + i * 0.05, 0.4 + i * 0.05], [0.25, 1]);
   return (
-    <motion.li style={{ opacity: on, ["--c" as string]: color }}>
+    <motion.li style={{ ["--on" as string]: on, ["--c" as string]: color }}>
       <span aria-hidden="true" />
       {children}
     </motion.li>
