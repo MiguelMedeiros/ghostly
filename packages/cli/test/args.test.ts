@@ -151,6 +151,37 @@ describe("the argument parser", () => {
     expect(positionals(TEXT_COMMANDS.send, ["alice"])).toEqual({ chat: "alice", text: undefined });
     expect(params("forward", ["g1", "m1", "m2", "--to", "bob"])).toMatchObject({ chat: "g1", messages: ["m1", "m2"], to: ["bob"] });
   });
+
+  it("says a flag left out or out of range as a usage error that names the flag, not the API's parameter", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    const usage = (name: string, argv: string[], message: string) => {
+      let error: unknown;
+      try { params(name, argv); } catch (caught) { error = caught; }
+      expect(error, name).toBeInstanceOf(CliError);
+      expect((error as CliError).code, name).toBe("usage");
+      expect((error as CliError).message, name).toBe(message);
+    };
+    usage("button update", ["alice", "m1"], `Give --chosen, --close or --text: ghostly ${COMMANDS["button update"].usage}`);
+    usage("button update", ["alice", "m1", "--wait", "confirmed", "--text", ""], `Give --chosen, --close or --text: ghostly ${COMMANDS["button update"].usage}`);
+    usage("chat verify", ["alice"], "--code is needed: ghostly chat verify <chat> --code <code>");
+    usage("chat verify", ["alice", "--code", " "], "--code is needed: ghostly chat verify <chat> --code <code>");
+    for (const [name, target] of [["typing", "alice"], ["group typing", "g1"]] as const) {
+      usage(name, [target, "--for", "9999"], "--for takes a number of seconds from 1 to 600, not 9999");
+      usage(name, [target, "--for", "0"], "--for takes a number of seconds from 1 to 600, not 0");
+      usage(name, [target, "--stop", "--for", "30"], "--for keeps it on: not with --stop");
+      expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
+      expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
+    }
+    // Each of the three is enough for an update, and a code is taken as typed.
+    expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
+    expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
+    expect(params("button update", ["alice", "m1", "--text", "Done"])).toMatchObject({ text: "Done" });
+    expect(params("chat verify", ["alice", "--code", "ab cd"])).toEqual({ chat: "alice", code: "ab cd" });
+  });
 });
 
 describe("errors", () => {
