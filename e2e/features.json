@@ -428,7 +428,7 @@
     {"id":"headless.one-shot","wisp":"1100","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"A command with no daemon runs the profile itself, waits for its outcome and leaves"},
     {"id":"headless.package","wisp":"1100","kind":"feature","clients":["cli"],"infra":[],"title":"The npm package: every import of the bundle declared, the WebAssembly beside it"},
     {"id":"headless.payments","wisp":"1100","kind":"feature","clients":["cli"],"infra":["cashu-mint"],"title":"Headless payments: pay and request in a chat, pay a request, pay an invoice or address, payment events; Mainnet only with --confirm-real"},
-    {"id":"headless.pins","wisp":"1100","kind":"feature","clients":["cli"],"infra":[],"title":"ghostly pin <chat|group> <message> [--remove]; chat.pinned / group.pinned in the event stream when someone else pins or unpins"},
+    {"id":"headless.pins","wisp":"1100","kind":"feature","clients":["cli"],"infra":[],"title":"ghostly pin <chat|group> <message> | --remove; chat.pinned / group.pinned in the event stream when someone else pins or unpins"},
     {"id":"headless.reactions","wisp":"1100","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"ghostly react <chat> <message> <emoji> [--remove] and group react; message.reaction / group.reaction in the event stream; reactions on each message of history"},
     {"id":"headless.replies","wisp":"1100","kind":"feature","clients":["cli"],"infra":[],"title":"send and group send take --reply <message>; message events carry replyTo (id, snippet, from, found)"},
     {"id":"headless.secret-guard","wisp":"1100","kind":"feature","clients":["cli"],"infra":[],"title":"send refuses seeds, keys and ecash unless --force (the app's detector)"},

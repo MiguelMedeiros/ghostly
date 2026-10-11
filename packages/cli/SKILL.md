@@ -282,7 +282,8 @@ id=$(ghostly send alice "Working: 0 of 3" | jq -r .messageId)   # a short status
 ghostly edit alice "$id" --text "Working: 2 of 3"  # …updated in place: the contact sees one message, marked edited
 gid=$(ghostly group send crew "Deploy: 0 of 3" --wait sent | jq -r .messageId)
 ghostly group edit crew "$gid" --text "Deploy: done" --wait sent
-ghostly pin alice "$id"                            # pinned at the top of the chat (one per chat); --remove unpins
+ghostly pin alice "$id"                            # pinned at the top of the chat (one per chat)
+ghostly pin alice --remove                         # unpinned
 ghostly chat history alice --limit 20              # oldest first
 ghostly chat disconnect alice --hold 30            # off the direct link for 30 min; short texts still go over the DHT
 ghostly chat connect alice                         # back now

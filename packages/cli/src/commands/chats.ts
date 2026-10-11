@@ -85,9 +85,14 @@ export const commands: Record<string, Command> = {
   "message details": { method: "chat.details", usage: "message details <chat> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "pin": {
-    method: "chat.pin", usage: "pin <chat|group> <message> [--remove]", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
-    args: ["chat", "message"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message" } },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, remove: options.remove === true }),
+    method: "chat.pin", usage: "pin <chat|group> <message> | --remove", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
+    args: ["chat", "message...?"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" } },
+    params: ({ options }, a) => {
+      // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read.
+      if (a.message === undefined && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
+      if (a.message?.includes(" ")) throw new CliError("usage", "Too many arguments: ghostly pin <chat|group> <message> | --remove");
+      return { chat: a.chat, message: a.message, remove: options.remove === true };
+    },
   },
   "react": {
     method: "chat.react", usage: "react <chat> <message> <emoji> [--remove]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
