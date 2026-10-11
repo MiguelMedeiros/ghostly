@@ -1,5 +1,5 @@
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
-import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
 import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
@@ -157,6 +157,18 @@ export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId:
 }
 
 export const groupOf = (ctx: ApiContext, params: Params) => findGroup(state(ctx).groups, str(params, "group", true));
+
+/**
+ * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no such
+ * row's key (the id both sides know, `wireId`) reads the whole history. `keep`: only a message it accepts (mine, or
+ * someone else's). The history is synchronous work on the daemon's one thread, about 120 ms at 10,000 messages.
+ */
+export async function messageOf(ctx: ApiContext, linkId: string, ref: string, keep: (message: StoredMessage) => boolean = () => true): Promise<StoredMessage | undefined> {
+  const found = await node(ctx).getMessage(linkId, ref);
+  if (found && keep(found)) return found;
+  const all = linkId.startsWith("group:") ? await node(ctx).groupMessages({ groupId: linkId.slice("group:".length) }) : await node(ctx).getMessages(linkId);
+  return all.find((m) => keep(m) && m.wireId === ref);
+}
 
 // ---------- waiting ----------
 
