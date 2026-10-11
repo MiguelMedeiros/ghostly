@@ -39,6 +39,15 @@ export function useInstalledApps(enabled: boolean): readonly InstalledAppView[] 
 }
 
 /**
+ * The app installed here under `ref`, if any: the one an app card with that ref opens (WISP 405 § An app). The card and
+ * its row both name it from here, so what is read out is what is shown. No `ref` (not an app card): nothing is asked.
+ */
+export function useInstalledApp(ref: string | undefined): InstalledAppView | undefined {
+  const installed = useInstalledApps(ref !== undefined);
+  return ref === undefined ? undefined : installed?.find((a) => a.ref === ref);
+}
+
+/**
  * The app card a person's app sends when they open (or share) an installed app in a 1:1 chat (WISP 405 § An app):
  * made from the app it installed and checked, never filled in by the person. Its `url` is where the installed version
  * came from, so a contact fetches the same bytes.

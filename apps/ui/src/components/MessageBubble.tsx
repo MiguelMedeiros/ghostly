@@ -47,6 +47,7 @@ import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
 import { AppCardView } from "./apps/AppCardView";
 import { useAppsAvailable } from "../lib/apps/flag";
+import { useInstalledApp } from "../lib/apps/installed";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -727,6 +728,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
   const appsOn = useAppsAvailable();
   const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
+  // Installed here: the card names the installed app, so its name for a screen reader does too (never the sender's).
+  const cardApp = useInstalledApp(appCard?.ref);
   const rowRef = useRef<HTMLDivElement>(null);
   // A control of the message taken out by its own press (my reaction's chip taken back, the red mark sent again): the
   // focus stays on the message, so Tab goes on from it.
@@ -944,7 +947,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             ref={bubbleRef}
             data-message-card
             role="group"
-            aria-label={appCard ? t("apps.card.label", { title: appCard.title }) : cardLabel(t, card as ShownCard)}
+            aria-label={appCard ? t("apps.card.label", { title: cardApp ? cardApp.title : appCard.title }) : cardLabel(t, card as ShownCard)}
             className={`status-card-surface w-full text-text-primary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
             style={swipe.dx > 0 ? { transform: `translateX(${swipe.offset}px)` } : undefined}
           >
