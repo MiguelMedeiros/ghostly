@@ -68,6 +68,12 @@ export function Nav({ apps = false }: { apps?: boolean }) {
     el.open = false;
   };
 
+  // A tap on any entry closes the sheet. The path does not change for the entry of the page already open, or for a
+  // section of it ("How it works" on the home page), so the effect above never runs for those.
+  const onSheetClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (menu.current && (e.target as Element).closest("a")) menu.current.open = false;
+  };
+
   const items = () => [...(ways.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
   const focusItem = (index: number) => {
     const all = items();
@@ -176,7 +182,7 @@ export function Nav({ apps = false }: { apps?: boolean }) {
                 <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
               </svg>
             </summary>
-            <div className="nav-sheet">
+            <div className="nav-sheet" onClick={onSheetClick}>
               {links.map((l) => (
                 <PageLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
                   {l.label}
@@ -186,7 +192,7 @@ export function Nav({ apps = false }: { apps?: boolean }) {
               <a className="nav-sheet-way" href={APP_URL}>
                 {t.web.label} ↗
               </a>
-              <Link className="nav-sheet-way" href={DOWNLOAD_HREF} onClick={() => menu.current && (menu.current.open = false)}>
+              <Link className="nav-sheet-way" href={DOWNLOAD_HREF}>
                 {t.download.label}
               </Link>
             </div>
