@@ -115,5 +115,7 @@
   "[desktop] › wallet-deck.spec.ts › the deck deals by itself while nobody touches it": 5.1,
   "[desktop] › wallet-deck.spec.ts › the keyboard moves through the cards": 1.8,
   "[desktop] › wallet-deck.spec.ts › with reduced motion the deck stays where the reader leaves it": 6.1,
+  "[phone] › negotiation-height-phone.spec.ts › a link to the section after the loop lands on its heading": 2.7,
+  "[phone] › negotiation-height-phone.spec.ts › the negotiation loop keeps one height through its four scenarios": 32.3,
   "[phone] › wallet-deck-phone.spec.ts › a phone gets the swipe track, and a swipe chooses the next card": 8.8
 }

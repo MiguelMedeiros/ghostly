@@ -13,11 +13,14 @@ import { expect, test } from "@playwright/test";
 
 test.use({ reducedMotion: "reduce" });
 
+/** The scenario on show: the frame also holds every scenario's finished picture unseen, to keep one height. */
+const SCENE = ".ng-scene:not([data-sizer])";
+
 test("a browser's relayed Iroh ranks after direct WebRTC", async ({ page }) => {
   await page.goto("/developers", { waitUntil: "networkidle" });
   const ng = page.locator(".ng");
   await ng.locator(".ng-tab", { hasText: "Desktop ↔ browser" }).click();
-  const rows = ng.locator(".ng-result .ng-rows li");
+  const rows = ng.locator(`${SCENE} .ng-result .ng-rows li`);
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText("webrtc/1");
   await expect(rows.nth(1)).toContainText("iroh/1");
@@ -28,8 +31,8 @@ test("nothing in common keeps the chat on the DHT", async ({ page }) => {
   await page.goto("/developers", { waitUntil: "networkidle" });
   const ng = page.locator(".ng");
   await ng.locator(".ng-tab", { hasText: "No common transport" }).click();
-  await expect(ng.locator(".ng-verdict")).toHaveText("No live line");
-  await expect(ng.locator(".ng-fail")).toContainText("stays on DHT text");
+  await expect(ng.locator(`${SCENE} .ng-verdict`)).toHaveText("No live line");
+  await expect(ng.locator(`${SCENE} .ng-fail`)).toContainText("stays on DHT text");
 });
 
 test("the availability map has the headless CLI", async ({ page }) => {
