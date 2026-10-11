@@ -106,6 +106,9 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   if ((message.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits)
     throw new CliError("refused", `This message took ${STATUS_CARD_LIMITS.edits} updates, the most one takes: ask again with a new send`, { messageId: message.id, edits: message.edit!.seq });
   const before = message.card;
+  // Said here, with the buttons it has, as a press says it: the card's own check names only the field.
+  if (chosen !== undefined && !before.buttons.some((b) => b.id === chosen))
+    throw new CliError("bad_request", `That message has no button ${JSON.stringify(chosen)}; its buttons: ${before.buttons.map((b) => b.id).join(", ")}`, { card: before });
   const card = checked({ ...before, ...(chosen !== undefined && { chosen }), ...((close || before.closed) && { closed: true }) });
   const text = newText ?? message.text;
   const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "confirmed"] as const, "none");
