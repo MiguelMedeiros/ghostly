@@ -37,3 +37,31 @@ for (const [width, height] of [
     await expect(sheet).toBeHidden();
   });
 }
+
+// The sheet covers the whole screen below the nav, so the focus must never sit on the page behind it. Tab past its
+// last entry used to walk through the page's links one by one, all of them out of sight.
+test("Tab past the last entry closes the phone menu", async ({ page }) => {
+  await page.goto("/developers");
+  const menu = page.locator(".nav-menu");
+  await page.getByLabel("Menu").click();
+  const sheet = page.locator(".nav-sheet");
+  // Inside the sheet Tab moves from entry to entry and the sheet stays open.
+  await sheet.getByRole("link", { name: /Open in your browser/ }).focus();
+  await page.keyboard.press("Tab");
+  await expect(sheet.getByRole("link", { name: "Download the app" })).toBeFocused();
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(sheet).toBeHidden();
+  expect(await menu.evaluate((el) => el.contains(document.activeElement)), "the focus left the menu").toBe(false);
+  await expect(page.locator(":focus")).toBeInViewport();
+});
+
+test("Escape closes the phone menu and returns the focus to its button", async ({ page }) => {
+  await page.goto("/developers");
+  await page.getByLabel("Menu").click();
+  const sheet = page.locator(".nav-sheet");
+  await sheet.getByRole("link", { name: "Download the app" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(page.getByLabel("Menu")).toBeFocused();
+});
