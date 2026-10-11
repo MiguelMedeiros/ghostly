@@ -407,7 +407,14 @@ const METHODS: Record<string, Method> = {
     return { group: groupId, link };
   },
   async "group.join"(ctx, params) {
-    const { groupId } = await node(ctx).joinGroupByLink({ link: str(params, "link", true) });
+    let groupId: string;
+    try {
+      ({ groupId } = await node(ctx).joinGroupByLink({ link: str(params, "link", true) }));
+    } catch (error) {
+      // Not a link to a group at all: the caller's input, as `invite join` answers a word that is no invite.
+      if (error instanceof Error && error.message === "This is not a link to a group") throw new CliError("bad_request", error.message);
+      throw error;
+    }
     return { group: groupId };
   },
   async "group.list"(ctx, params) {
