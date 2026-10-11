@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { configure, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
@@ -13,6 +13,14 @@ import { Home } from "../../pages/Home";
 import { renderApp } from "../render";
 import type { EnrollView } from "@ghostly/browser/devices/enroll";
 // covers: devices.enroll
+
+/*
+ * What these tests wait for sits behind the lock password's hash (600,000 rounds): about 200 ms on an idle machine,
+ * over a second on a busy runner. The default wait of 1 s is too short for that; and a test gets longer than its
+ * longest wait, so one that fails still says what it waited for.
+ */
+configure({ asyncUtilTimeout: 10_000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 /** happy-dom has no <dialog> modal; the dialog only needs to open. */
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
