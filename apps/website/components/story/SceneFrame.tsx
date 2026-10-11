@@ -5,7 +5,7 @@ import { animate as tween, motion, motionValue, useInView, useMotionValue, useMo
 import { useCalm } from "@/lib/useCalm";
 import { BEAT, DUR, EASE } from "@/lib/motion";
 import { useBeats, usePlayheadProgress } from "@/lib/playhead";
-import { EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
+import { ENTER, EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
 import { IDENTITY, measureFraming, sameFraming, STILL_LIGHT, stillCamera, type Framing } from "./framing";
 import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
 
@@ -38,6 +38,12 @@ export function useScene(): SceneState {
 
 /** How long a chapter's picture and copy take to fade in after it pins, and out before the hand-off (fractions of the chapter). */
 const FADE = 0.04;
+/**
+ * Where a link to a chapter (/#invite) lands in it, as a fraction of the chapter: after the fade-in, before the
+ * first step's beat. At the chapter's first pixel its picture and copy are still at opacity 0 (site.css reads it
+ * as --scene-arrive).
+ */
+const ARRIVE = (FADE + ENTER) / 2;
 
 function hexToRgb(hex: string) {
   const n = parseInt(hex.slice(1), 16);
@@ -55,6 +61,7 @@ function useBlocking(p: MotionValue<number>, chapter: Chapter, portrait: boolean
 
 export function SceneFrame({
   id,
+  alias,
   chapter,
   eyebrow,
   steps,
@@ -67,6 +74,8 @@ export function SceneFrame({
   children,
 }: {
   id: string;
+  /** A second name a link may use for this chapter (/#story is the invitation). */
+  alias?: string;
   chapter: Chapter;
   eyebrow: string;
   steps: SceneStep[];
@@ -169,11 +178,12 @@ export function SceneFrame({
 
   const room = ROOMS[chapter];
   const style = { "--chapter-bg": room, "--chapter-rgb": hexToRgb(room) } as React.CSSProperties;
+  const anchor = alias ? <span id={alias} className="scene-alias" /> : null;
 
   if (article && portrait) {
     // Phones: one picture per chapter, its steps as captions that take turns (PhoneChapter).
     return (
-      <PhoneChapter id={id} chapter={chapter} eyebrow={eyebrow} label={label} steps={steps} stills={stills} calm={calm} state={state} style={style} visual={visual}>
+      <PhoneChapter id={id} anchor={anchor} chapter={chapter} eyebrow={eyebrow} label={label} steps={steps} stills={stills} calm={calm} state={state} style={style} visual={visual}>
         {children}
       </PhoneChapter>
     );
@@ -184,6 +194,7 @@ export function SceneFrame({
     return (
       <SceneContext.Provider value={{ ...state, still: true }}>
       <section ref={ref} id={id} className="scene scene--static" data-chapter={chapter} aria-label={label} style={style}>
+        {anchor}
         <div className="wrap scene-static">
           <h2 className="eyebrow">{eyebrow}</h2>
           <ol className="scene-static-steps">
@@ -216,9 +227,11 @@ export function SceneFrame({
         data-chapter={chapter}
         data-inview={inView}
         data-copy={copyAt}
+        data-seams={seams}
         aria-label={label}
-        style={{ ...style, height: `${100 + n * length}svh` }}
+        style={{ ...style, height: `${100 + n * length}svh`, ["--scene-arrive" as string]: `${n * length * ARRIVE}svh` }}
       >
+        {anchor}
         <div className="scene-sticky">
           <motion.div className="scene-visual" aria-hidden="true" style={{ opacity: furniture }}>
             <StageFramingContext.Provider value={framing}>{visual}</StageFramingContext.Provider>
@@ -304,6 +317,7 @@ function holdFor(s: SceneStep): number {
  */
 function PhoneChapter({
   id,
+  anchor,
   chapter,
   eyebrow,
   label,
@@ -316,6 +330,7 @@ function PhoneChapter({
   children,
 }: {
   id: string;
+  anchor: React.ReactNode;
   chapter: Chapter;
   eyebrow: string;
   label?: string;
@@ -375,6 +390,7 @@ function PhoneChapter({
   return (
     <SceneContext.Provider value={value}>
       <section id={id} className="scene scene--static scene--phone" data-chapter={chapter} data-calm={calm} aria-label={label} style={style}>
+        {anchor}
         <div className="wrap scene-static">
           <h2 className="eyebrow" id={`${id}-eyebrow`}>
             {eyebrow}
