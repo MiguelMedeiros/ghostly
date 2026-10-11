@@ -34,6 +34,15 @@ describe("display text from a peer", () => {
     expect(sanitizeDisplayText("زنجیر\u200cها", 64)).toBe("زنجیر\u200cها");
   });
 
+  it("is no name when nothing of it shows by itself", () => {
+    const unseen = ["\u200d\u200d", "\u200c", "\u3164", "\u115f", "\u1160", "\uffa0", "\u2800", "\u034f", "\ufe0f", "\u17b5", "\u0301", " \u3164\u200d \u2800\u0301 "];
+    for (const name of unseen) expect(sanitizeDisplayText(name, 64), JSON.stringify(name)).toBeUndefined();
+    // The cut comes first: what shows past it does not make a name of what is kept.
+    expect(sanitizeDisplayText(`${"\u3164".repeat(4)}Ana`, 4)).toBeUndefined();
+    // Beside something that shows, the same characters stay where a script or an emoji needs them.
+    for (const name of ["👨\u200d👩\u200d👧", "नमस्ते", "علي", "e\u0301", "❤\ufe0f", "한\u3164글", "⠓⠊\u2800⠓⠊"]) expect(sanitizeDisplayText(name, 64)).toBe(name);
+  });
+
   it("counts characters, not code units, so no emoji is cut in half", () => {
     expect(sanitizeDisplayText("👻".repeat(80), MAX_NICK_LENGTH)).toBe("👻".repeat(MAX_NICK_LENGTH));
   });
