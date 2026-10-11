@@ -4,7 +4,7 @@ import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, list, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, list, messageOf, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -611,18 +611,6 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, command: s
     const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown} ${rest}`, { group: group.id });
   }
-}
-
-/**
- * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no row's
- * key (the id both sides know, `wireId`) reads the whole history. The history is synchronous work on the daemon's one
- * thread, about 120 ms at 10,000 messages.
- */
-async function messageOf(ctx: ApiContext, linkId: string, ref: string): Promise<StoredMessage | undefined> {
-  const found = await node(ctx).getMessage(linkId, ref);
-  if (found) return found;
-  const all = linkId.startsWith("group:") ? await node(ctx).groupMessages({ groupId: linkId.slice("group:".length) }) : await node(ctx).getMessages(linkId);
-  return all.find((m) => m.wireId === ref);
 }
 
 /**
