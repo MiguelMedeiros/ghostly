@@ -308,8 +308,17 @@ export const canGoAlone = (p) => !p.fork && !BASE.test(p.branch) && p.branch !==
  */
 export function squashMessage(p, commits) {
   const subjects = commits.map((c) => (c.commit?.message ?? "").split("\n")[0].trim()).filter(Boolean);
-  return { title: `${p.title} (#${p.number})`, message: subjects.map((s) => `* ${s}`).join("\n") };
+  return { title: noSkip(`${p.title} (#${p.number})`), message: noSkip(subjects.map((s) => `* ${s}`).join("\n")) };
 }
+
+/**
+ * The words that make GitHub start no workflow for a push or a pull request when the head commit's message holds
+ * them. A pull request's title or an earlier commit of it may carry one (its own head did not, so its CI ran): in a
+ * message the train writes they would stop the batch's CI from ever starting, and the train would rebuild the same
+ * batch every 20 minutes for good; on the base they would skip its own CI. So the train writes them in round brackets.
+ */
+export const SKIP_CI = /\[(skip ci|ci skip|no ci|skip actions|actions skip)\]/gi;
+export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -1137,7 +1146,7 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
         }
         const author = git(["log", "-1", "--format=%an <%ae>", ref]);
         const commits = git(["log", "--reverse", "--format=* %s", `HEAD..${ref}`]);
-        git([...identity(), "commit", "-q", "--no-verify", `--author=${author}`, "-m", `${p.title} (#${p.number})`, ...(commits ? ["-m", commits] : [])]);
+        git([...identity(), "commit", "-q", "--no-verify", `--author=${author}`, "-m", noSkip(`${p.title} (#${p.number})`), ...(commits ? ["-m", noSkip(commits)] : [])]);
         applied.push(p.number);
         commitOf[p.number] = git(["rev-parse", "HEAD"]);
       }
