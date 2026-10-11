@@ -318,8 +318,10 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   at the start. A flag, not profile state: each listener (each agent) has its own ([docs/CLI.md](../../docs/CLI.md#allowlist)).
 - `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile (or
   `group.mentioned`, `source: "group.mentioned"`, for a mention learned later):
-  `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
-  {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `press` (`{messageId, button, label,
+  `{seq, id: "agent.turn:<source>:<chat | group>:<messageId>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
+  {text, name, messageId, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `messageId` is made here
+  (`t_` and 32 hex digits) and every command that takes a message takes it; the id the message is stored under, which
+  its sender chose most of, is `untrusted.messageId`. `press` (`{messageId, button, label,
   inferred?}`): the message pressed a button of yours, as `button.pressed` says. `seq` is the source's (cursors
   work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.

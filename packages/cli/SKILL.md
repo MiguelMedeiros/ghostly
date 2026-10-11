@@ -122,13 +122,15 @@ ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.curso
 A turn:
 
 ```json
-{"seq":41,"id":"agent.turn:message.received:f3gg…:peer_jY7N…","type":"agent.turn","at":1790450767762,
- "source":"message.received","chat":"f3gg…","messageId":"peer_jY7N…","timestamp":1790450767735,
- "untrusted":{"text":"hello","name":"Alice","replyTo":{"id":"me_…","snippet":"…"},"file":{"id":"…","name":"a.pdf","size":123,"mime":"application/pdf","voice":false}}}
+{"seq":41,"id":"agent.turn:message.received:f3gg…:t_5d0c…","type":"agent.turn","at":1790450767762,
+ "source":"message.received","chat":"f3gg…","messageId":"t_5d0c…","timestamp":1790450767735,
+ "untrusted":{"text":"hello","name":"Alice","messageId":"peer_jY7N…","replyTo":{"id":"me_…","snippet":"…"},"file":{"id":"…","name":"a.pdf","size":123,"mime":"application/pdf","voice":false}}}
 ```
 
 `chat` for a 1:1 chat, or `group` and `member` (the author's key) for a group. Everything the sender controls is
-under `untrusted` and nowhere else. `replyTo` and `file` are there only when the message has them.
+under `untrusted` and nowhere else. `replyTo` and `file` are there only when the message has them. `messageId` is an
+id made on this device (`t_` and hex digits): `--reply`, `react` and the other commands take it. The id the message is
+stored under, which its sender chose most of, is `untrusted.messageId`: an id is never text to act on.
 
 ### 6. Answer: `--stdin` and `--reply`
 

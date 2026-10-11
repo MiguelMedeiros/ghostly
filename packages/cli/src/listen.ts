@@ -3,6 +3,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "nod
 import { CONTACT_KEY } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
+import { turnRef } from "./turnRefs";
 
 /**
  * What `ghostly listen` does with each event: print it as a JSON line, run a command with it on stdin, or POST it to
@@ -65,9 +66,9 @@ export async function allowlist(from: readonly string[], groups: readonly string
 
 /**
  * One agent turn (docs/CLI.md § Agent turns): a message a contact sent in a chat, or a group message that mentions
- * this profile. What the sender controls (the text, their name, a quoted snippet, a file's name) is under `untrusted`
- * and nowhere else: an agent reads it as data, never as its instructions. `seq` is the source event's, so `--cursor`
- * and `--since` work as for any event; `id` is stable for the message (dedupe on it).
+ * this profile. What the sender controls (the text, their name, a quoted snippet, a file's name, the id their message
+ * is stored under) is under `untrusted` and nowhere else: an agent reads it as data, never as its instructions. `seq` is
+ * the source event's, so `--cursor` and `--since` work as for any event; `id` is stable for the message (dedupe on it).
  */
 export interface AgentTurn extends GhostlyEvent {
   type: "agent.turn";
@@ -76,7 +77,7 @@ export interface AgentTurn extends GhostlyEvent {
   group?: string;
   /** A group's author (their key). */
   member?: string;
-  /** What `send --reply` (or `group send --reply`) takes to answer it. */
+  /** What `send --reply` (or `group send --reply`) takes to answer it: an id made here (`turnRef`), never the sender's. */
   messageId: string;
   timestamp: number;
   /**
@@ -84,7 +85,7 @@ export interface AgentTurn extends GhostlyEvent {
    * matched it: the question's id, the button's id and its label, all this profile's own words.
    */
   press?: { messageId: string; button: string; label: string; inferred?: true };
-  untrusted: { text: string; name: string | null; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean } };
+  untrusted: { text: string; name: string | null; messageId: string; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean } };
 }
 
 interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown } }
@@ -102,11 +103,13 @@ export function toTurn(event: GhostlyEvent): AgentTurn | null {
 
 function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<AgentTurn, "chat" | "group" | "member">, message: TurnMessage): AgentTurn {
   const file = message.file;
+  // The source event's id ends in the stored id, the sender's: this one is made of the same parts with the id made here.
+  const place = where.chat ?? where.group ?? "", messageId = turnRef(place, message.id);
   return {
-    seq: event.seq, id: `agent.turn:${event.id}`, type: "agent.turn", at: event.at, source, ...where, messageId: message.id, timestamp: message.timestamp,
+    seq: event.seq, id: `agent.turn:${source}:${place}:${messageId}`, type: "agent.turn", at: event.at, source, ...where, messageId, timestamp: message.timestamp,
     ...(message.press ? { press: message.press } : {}),
     untrusted: {
-      text: message.text, name: message.nick ?? null,
+      text: message.text, name: message.nick ?? null, messageId: message.id,
       ...(message.replyTo ? { replyTo: { id: message.replyTo.id, snippet: message.replyTo.snippet } } : {}),
       ...(file ? { file: { id: file.id, name: file.name, size: file.size, mime: file.mime, voice: !!file.voice } } : {}),
     },

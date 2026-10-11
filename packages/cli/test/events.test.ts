@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
+import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.events, headless.typing, headless.files
 
@@ -188,7 +189,7 @@ describe("the event stream", () => {
     h.sink.post({ kind: "messages", linkId: "group:g1", messages: [whole] });
     expect(events.map((e) => e.id)).toEqual(["group.message:g1:x", "group.mentioned:g1:x"]);
     expect(events[1]).toMatchObject({ type: "group.mentioned", group: "g1", messageId: "x", message: { id: "x", member: "k1", mentioned: true } });
-    expect(toTurn(events[1]!)).toMatchObject({ id: "agent.turn:group.mentioned:g1:x", source: "group.mentioned", group: "g1", member: "k1", messageId: "x", untrusted: { text: "@me look" } });
+    expect(toTurn(events[1]!)).toMatchObject({ id: `agent.turn:group.mentioned:g1:${turnRef("g1", "x")}`, source: "group.mentioned", group: "g1", member: "k1", messageId: turnRef("g1", "x"), untrusted: { text: "@me look", messageId: "x" } });
     // An edit that drops the mention and one that names me again: the edits, not the mention again.
     h.sink.post({ kind: "messages", linkId: "group:g1", messages: [{ ...stripped, edit: { seq: 1, at: 2, history: [] } }] });
     h.sink.post({ kind: "messages", linkId: "group:g1", messages: [{ ...whole, edit: { seq: 2, at: 3, history: [] } }] });
