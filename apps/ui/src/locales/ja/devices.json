@@ -102,7 +102,7 @@
       "checking": "確認中",
       "connecting": "{{device}} に接続中",
       "copy": "ファイルをコピー中",
-      "copying": "ファイルをコピー中 · {{done}} / {{total}}",
+      "copyAmount": "{{done}} / {{total}}",
       "done": "このデバイスがアクティブになりました。",
       "doneGiver": "{{device}} がアクティブになりました。",
       "finishing": "仕上げ中: ネットワークを待っています",

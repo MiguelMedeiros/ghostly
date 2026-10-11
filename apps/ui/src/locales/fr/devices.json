@@ -102,7 +102,7 @@
       "checking": "Vérification",
       "connecting": "Connexion à {{device}}",
       "copy": "Copie des fichiers",
-      "copying": "Copie des fichiers · {{done}} sur {{total}}",
+      "copyAmount": "{{done}} sur {{total}}",
       "done": "Cet appareil est maintenant actif.",
       "doneGiver": "{{device}} est maintenant actif.",
       "finishing": "Finalisation : en attente du réseau",

@@ -102,7 +102,7 @@
       "checking": "جارٍ التحقق",
       "connecting": "جارٍ الاتصال بـ {{device}}",
       "copy": "جارٍ نسخ الملفات",
-      "copying": "جارٍ نسخ الملفات · {{done}} من {{total}}",
+      "copyAmount": "{{done}} من {{total}}",
       "done": "هذا الجهاز نشط الآن.",
       "doneGiver": "{{device}} نشط الآن.",
       "finishing": "جارٍ الإنهاء: بانتظار الشبكة",

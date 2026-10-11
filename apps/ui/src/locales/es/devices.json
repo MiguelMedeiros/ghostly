@@ -102,7 +102,7 @@
       "checking": "Comprobando",
       "connecting": "Conectando con {{device}}",
       "copy": "Copiando archivos",
-      "copying": "Copiando archivos · {{done}} de {{total}}",
+      "copyAmount": "{{done}} de {{total}}",
       "done": "Este dispositivo ahora está activo.",
       "doneGiver": "{{device}} ahora está activo.",
       "finishing": "Terminando: esperando a la red",
