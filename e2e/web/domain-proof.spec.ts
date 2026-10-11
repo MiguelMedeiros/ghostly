@@ -1,7 +1,7 @@
 import { expect, test, type Peer } from "../support/fixtures";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
-import { DOMAIN_SLOTS, startTestDomain, type TestDomain } from "../support/domain";
+import { startTestDomain, type TestDomain } from "../support/domain";
 import { choose } from "../support/select";
 
 /**
@@ -26,8 +26,8 @@ async function startDomainProof(peer: Peer, domain: string, signer: "dns" | "htt
 }
 
 let site: TestDomain;
-test.beforeEach(async ({}, info) => { site = await startTestDomain(info.parallelIndex % DOMAIN_SLOTS); });
-test.afterEach(async () => { await site.close(); });
+test.beforeEach(async () => { site = await startTestDomain(); });
+test.afterEach(async () => { await site?.close(); });
 
 test("a domain proven by a DNS TXT record is verified by the one contact it is shared with, and not once the record is gone", { tag: ["@feature:proofs.domain.dns", "@feature:proofs.share"] }, async ({ peer }) => {
   const [alice, bob, carol] = await Promise.all([peer("dom-alice"), peer("dom-bob"), peer("dom-carol")]);
