@@ -206,7 +206,11 @@ function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) 
 function SetNotice({ names }: { names: string[] }) {
   const { t, language } = useI18n();
   const [busy, setBusy] = useState(false);
-  const answer = (wrong: boolean) => { setBusy(true); void engine.call("deviceSetNoticeSeen", { wrong }).finally(() => setBusy(false)); };
+  const [error, setError] = useState<Problem | null>(null);
+  const answer = (wrong: boolean) => {
+    setBusy(true); setError(null);
+    void engine.call("deviceSetNoticeSeen", { wrong }).catch((cause: unknown) => setError(problemText(cause, t))).finally(() => setBusy(false));
+  };
   return (
     <div className={`${PANEL} space-y-3`} data-testid="device-set-notice">
       <p data-testid="device-set-notice-title" className="font-semibold text-text-primary break-words">{t("devices.standby.notice.title", { devices: listNames(names, language) })}</p>
@@ -215,6 +219,7 @@ function SetNotice({ names }: { names: string[] }) {
         <button type="button" data-testid="device-set-notice-wrong" disabled={busy} onClick={() => answer(true)} className={`${SCREEN_QUIET} sm:order-1`}>{t("devices.standby.notice.wrong")}</button>
         <button type="button" data-testid="device-set-notice-ok" disabled={busy} onClick={() => answer(false)} className={`${SCREEN_BUTTON} max-sm:order-first sm:order-2`}>{t("devices.standby.notice.ok")}</button>
       </div>
+      {error && <Notice problem={error} testId="device-set-notice-error" className="" />}
     </div>
   );
 }
