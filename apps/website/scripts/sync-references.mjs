@@ -11,6 +11,7 @@ import { roadmapCandidates } from "./roadmap-candidates.mjs";
 import { roadmapTracks } from "./roadmap-tracks.mjs";
 import { siteFields } from "./wisp-header.mjs";
 import { readChanges, withRevisions } from "./wisp-changes.mjs";
+import { missingDocLinks } from "./doc-links.mjs";
 import { writeLlms } from "./llms.mjs";
 import { agentPromptJson } from "./agent-prompt.mjs";
 import { README, expectedReadme } from "./wisp-index.mjs";
@@ -140,6 +141,9 @@ const entries = paths.map((sourcePath) => {
   const changes = wispStems.has(stem) ? readChanges(source, stem) : [];
   if (wispStems.has(stem) && !changes.length) throw new Error(`docs/wisps/${stem}.md: no change file in docs/wisps/changes/${stem}/ (see 00-process.md, "Revisions")`);
   const body = changes.length ? withRevisions(text, stem, changes) : text;
+  // A relative link to a Markdown file that is not there would open a GitHub page that does not exist.
+  const missing = missingDocLinks(body, sourcePath, root);
+  if (missing.length) throw new Error(`${sourcePath}: ${missing.length} link(s) to a file that does not exist as published: ${missing.join(", ")}`);
   writeFileSync(resolve(destination, file), body);
   return {
     file,
