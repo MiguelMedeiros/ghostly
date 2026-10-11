@@ -115,7 +115,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `events [--since seq]` | What the event journal holds, without following |
 | `file list <chat\|group>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3), and so does a group's file that did not come by itself (over 8 MiB). A file's id names its chat or its group, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact (a group's file: from whoever holds it); either goes on from the bytes the receiver holds (files/3) |
-| `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk (never over one without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first) |
+| `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk: to `--path`, or into `--dir` under the name its sender gave it, with a `_` first when that name starts with `-`, so no tool run in the folder takes it for an option (the answer's `path` is what was written). Never over a file without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first |
 | `file send <chat\|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does. To a group (`group:<id>` when a chat has the same name), up to 100 MiB: every member sees it at once and each member's app fetches it from a member who has it (WISP 503) |
 | `file wait [<chat>] <file> [--timeout s]` | Wait until a transfer ends: exit `0` when the file is all here, `1` with the transfer's error when it failed (`details.retry`: `file resend` can go on), `4` on timeout (default 300 s) |
 | `forward <chat\|group> <message>… --to <chat\|group>… [--force] [--wait none\|sent] [--timeout s]` | Forward messages to up to 5 chats and groups (`--to` again for each; `group:<id>` names a group when a chat has the same name; an id that starts with a dash is taken as it is, `--to -Ab…` or `--to=-Ab…`). Each is a new message of yours that says it was forwarded (`forwarded`, the hop count) and nothing of who wrote it. Files go from the bytes this profile holds, never fetched again; a group takes texts only. A text that looks like a seed, a key or ecash needs `--force`. Answers `{from, results: [{to, kind, messageIds, error}]}`; any refusal fails the command (exit 1) with the results in `details`. `--wait sent`: each text on its way (a group's taken by an edge), each file's transfer done |
@@ -318,8 +318,10 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   at the start. A flag, not profile state: each listener (each agent) has its own ([docs/CLI.md](../../docs/CLI.md#allowlist)).
 - `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile (or
   `group.mentioned`, `source: "group.mentioned"`, for a mention learned later):
-  `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
-  {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `press` (`{messageId, button, label,
+  `{seq, id: "agent.turn:<source>:<chat | group>:<messageId>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
+  {text, name, messageId, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `messageId` is made here
+  (`t_` and 32 hex digits) and every command that takes a message takes it; the id the message is stored under, which
+  its sender chose most of, is `untrusted.messageId`. `press` (`{messageId, button, label,
   inferred?}`): the message pressed a button of yours, as `button.pressed` says. `seq` is the source's (cursors
   work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.

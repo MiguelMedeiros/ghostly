@@ -6,9 +6,9 @@ import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { GroupView, LinkView, MessageFile } from "@ghostly/browser/shared/types";
+import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
-import { bool, chatOf, findGroup, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { endTyping } from "./typing";
@@ -43,20 +43,8 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
   }));
 }
 
-/**
- * The chat a file command names, or else a group (`group:<id>`, or a group's id, prefix or name where no chat has it),
- * as `forward` reads them. A name that is neither says what a chat would.
- */
-function chatOrGroupOf(ctx: ApiContext, params: Params): { link: LinkView } | { group: GroupView } {
-  const ref = str(params, "chat", true);
-  if (ref.startsWith("group:")) return { group: findGroup(state(ctx).groups, ref.slice("group:".length)) };
-  try {
-    return { link: chatOf(ctx, params) };
-  } catch (error) {
-    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
-    try { return { group: findGroup(state(ctx).groups, ref) }; } catch { throw error; }
-  }
-}
+/** The chat or the group a file command names (`findChatOrGroup`). */
+const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
 
 /**
  * The chat or group a file belongs to: a file id starts with its chat's id (a group's file with `group-<id>-`), so it
@@ -155,6 +143,16 @@ export function fitName(name: string): string {
   const stem = [...name.slice(0, name.length - extension.length)];
   while (stem.length && !fits(stem.join("").trimEnd() + extension)) stem.pop();
   return (stem.join("").trimEnd() || "file") + extension;
+}
+
+/**
+ * The name `file save --dir` writes a file under. Its sender chose it, and the folder is one scripts and people run
+ * tools in: a name that starts with a dash is an option to the tool a `*` hands it to ("-rf", "--checkpoint-action=…"),
+ * so it gets a `_` first, as a Windows device name does in `sanitizeFileName`.
+ */
+export function saveName(name: string): string {
+  const clean = sanitizeFileName(name);
+  return fitName(clean.startsWith("-") ? `_${clean}` : clean);
 }
 
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
@@ -260,7 +258,7 @@ export const FILE_METHODS: Record<string, Method> = {
     return { ...where, file: fileId, state: "done", size: transfer.size };
   },
 
-  /** Writes a received (or sent) file to disk: into `dir` under its own name, or to `path`. Never over a file unless `force`. */
+  /** Writes a received (or sent) file to disk: into `dir` under its own name (`saveName`), or to `path`. Never over a file unless `force`. */
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
     if (params.chat !== undefined) fileChat(ctx, params, fileId);
@@ -270,7 +268,7 @@ export const FILE_METHODS: Record<string, Method> = {
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), fitName(sanitizeFileName(stored.metadata.name)));
+    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.name));
     const flags = bool(params, "force") ? "w" : "wx";
     let out;
     try { out = await open(target, flags, 0o600); } catch (error) {

@@ -718,6 +718,9 @@ describe("Ark receipts", () => {
     expect(sent).toEqual([{ kind: "res", frame: { id: "r", ok: true } }]);
     await pay("p6", JSON.stringify({ txid: tx("a") }));
     expect(arkWallet.adapter.verifyReceipt, "a settled receipt is not checked again").toHaveBeenCalledOnce();
+    await pay("p7", JSON.stringify({ txid: tx("a") }));
+    expect(state("p7"), "the same receipt under a new payment id is not another payment").toBeUndefined();
+    expect(arkWallet.adapter.verifyReceipt).toHaveBeenCalledOnce();
   });
 
   it("one request keeps one pending Ark receipt: more under fresh ids are not stored, said, or checked", async () => {
