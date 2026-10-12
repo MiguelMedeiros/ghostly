@@ -64,6 +64,14 @@ describe('OIDC sign-in answer', () => {
     await expect(completeSignIn(google, request, `${REDIRECT}#id_token=${idToken}&state=${request.state}`)).resolves.toBe(idToken);
   });
 
+  it('accepts the answer to a desktop (d.<port>.) and an Android (a.) request, prefix and all', async () => {
+    const { request, idToken } = await signedAnswer(google);
+    for (const statePrefix of ['d.50123.', 'a.']) {
+      const prefixed = { ...request, state: (await authorizationRequest({ provider: google, platform: 'desktop', nonce: NONCE, reveal: [], redirectUri: REDIRECT, statePrefix })).state };
+      await expect(completeSignIn(google, prefixed, `${REDIRECT}#id_token=${idToken}&state=${prefixed.state}`)).resolves.toBe(idToken);
+    }
+  });
+
   it('refuses an answer for another request, another address, a provider error or a token for another nonce or issuer', async () => {
     const { request, idToken, key } = await signedAnswer(google);
     await expect(completeSignIn(google, request, `${REDIRECT}#id_token=${idToken}&state=${'x'.repeat(43)}`)).rejects.toThrow(/does not belong/);
