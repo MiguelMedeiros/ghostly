@@ -4,6 +4,7 @@ import { CallOverlay } from "../../components/CallOverlay";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 import { renderApp } from "../render";
 import { installFakeMedia, media, removeFakeMedia } from "../voice/fakeMedia";
+import { setCallLevels } from "../../lib/voiceLevels";
 
 // covers: calls.speaking
 
@@ -126,6 +127,47 @@ describe("who is speaking in a call", () => {
     rerender({ isMuted: false });
     hear(0.2);
     expect(screen.getByTestId("call-self-avatar")).toHaveAttribute("data-speaking", "true");
+  });
+
+  it("takes both levels from the call itself where the page cannot hear it (Linux Desktop)", () => {
+    // There the microphone's track is a silent stand-in and a voice call has no stream of the contact.
+    const microphone = new FakeTrack("audio");
+    const said = { own: [] as ((level: number) => void)[], peer: [] as ((level: number) => void)[] };
+    const stopped = vi.fn();
+    const side = (of: "own" | "peer") => (heard: (level: number) => void) => {
+      said[of].push(heard);
+      heard(0);
+      return () => stopped(of);
+    };
+    setCallLevels(microphone as unknown as MediaStreamTrack, { own: side("own"), peer: side("peer") });
+    const { rerender } = call({ localStream: new FakeMediaStream([microphone]) as unknown as MediaStream, remoteStream: null });
+    const you = screen.getByTestId("call-self-avatar");
+
+    // Whatever an analyser would read of the silent track, it is not asked.
+    hear(0.2);
+    expect(avatar()).toHaveAttribute("data-speaking", "false");
+    expect(you).toHaveAttribute("data-speaking", "false");
+
+    said.peer[0](0.5);
+    hear(0.2);
+    expect(avatar()).toHaveAttribute("data-speaking", "true");
+    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.50");
+    expect(you).toHaveAttribute("data-speaking", "false");
+    said.own[0](0.3);
+    hear(0.2);
+    expect(you.style.getPropertyValue("--voice-level")).toBe("0.30");
+
+    // A level is said once and holds until the next: the contact goes on speaking, then stops.
+    hear(0.2, 800);
+    expect(avatar()).toHaveAttribute("data-speaking", "true");
+    said.peer[0](0);
+    hear(0.2, 800);
+    expect(avatar()).toHaveAttribute("data-speaking", "false");
+
+    // Muted, your side stops listening.
+    rerender({ isMuted: true });
+    expect(stopped).toHaveBeenCalledWith("own");
+    expect(you).not.toHaveAttribute("data-speaking");
   });
 
   it("leaves your avatar out where your picture shows, and before the call connects", () => {
