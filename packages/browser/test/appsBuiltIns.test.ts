@@ -2,7 +2,8 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { BUILT_IN_APPS, type BuiltInApp } from "../src/engine/appDefaults";
 import { BUILT_IN_APPS_KEY, builtInsDue } from "../src/engine/apps";
-import { PROFILE_SETTINGS_KEYS, STORES, clearProfileStores, store, wrap } from "../src/shared/idb";
+import { snapshotDatabase } from "../src/backup/database";
+import { PROFILE_SETTINGS_KEYS, STORES, clearProfileStores, databaseName, store, wrap } from "../src/shared/idb";
 import { BUNDLE_URL, FakeNet, NOW_MS, PUBLISHER, appRows, apps, bundle, bundleIds, emptyProfile, keyOf, signer, storageRows } from "./appsSupport";
 // covers: apps.engine.built-in
 
@@ -149,6 +150,13 @@ describe("removing sticks", () => {
     expect((await apps(net, { builtIns: [chess()] }).builtIns()).map((a) => a.ref)).toEqual([REF]);
     await wrap((await store(STORES.settings, "readwrite")).put("removed", BUILT_IN_APPS_KEY));
     expect((await apps(net, { builtIns: [chess()] }).builtIns()).map((a) => a.ref)).toEqual([REF]);
+  });
+
+  it("a backup carries the marks: a restored profile is not offered what its person removed", async () => {
+    await apps(net, { builtIns: [chess()] }).uninstall({ ref: REF });
+    const snapshot = (await snapshotDatabase(databaseName(), ["fileChunks"]))!;
+    const settings = snapshot.stores.find((s) => s.name === STORES.settings)!;
+    expect(settings.values[settings.keys.indexOf(BUILT_IN_APPS_KEY)]).toEqual({ removed: { [REF]: NOW_MS } });
   });
 
   it("\"Clear all data\" takes the marks with the apps: the profile is offered them as a new one is", async () => {
