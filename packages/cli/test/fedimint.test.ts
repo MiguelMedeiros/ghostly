@@ -9,8 +9,8 @@ import { ghostly, home, ok, Running } from "./support/cli";
 /**
  * A Fedimint wallet on Node against the shared e2e stack's regtest federation (e2e/support/fedimint-regtest: a
  * guardian, an LND gateway and an LND peer with a channel to it). Test coins only. It runs where the guardian's API
- * answers on this machine (`npm run e2e:infra:use`, or the stack itself) and `docker` reaches the stack; elsewhere it
- * is skipped.
+ * answers on this machine (`npm run e2e:infra:use`, or the stack itself), `docker` reaches the stack and Lightning
+ * routes through its gateway; elsewhere, and while the stack is still starting, it is skipped.
  */
 const ROOT = resolve(import.meta.dirname, "../../..");
 const API = new URL((process.env.GHOSTLY_FEDIMINT_API_URL ?? "ws://127.0.0.1:47095").replace(/^ws/, "http"));
@@ -25,7 +25,9 @@ function answers(url: URL): Promise<boolean> {
     socket.once("error", () => done(false));
   });
 }
-const reachable = await answers(API) && (() => { try { return regtest("invite").startsWith("fed1"); } catch { return false; } })();
+// The invite code is there minutes before the gateway serves the federation, while the stack starts: `wallet receive`
+// then fails with "No gateways available". `status` only reads; `ready` would change a stack other suites share.
+const reachable = await answers(API) && (() => { try { return regtest("invite").startsWith("fed1") && JSON.parse(regtest("status")).routes === true; } catch { return false; } })();
 
 const dir = home("fedimint");
 const as = (...args: string[]) => ghostly(["--home", dir, ...args]);
