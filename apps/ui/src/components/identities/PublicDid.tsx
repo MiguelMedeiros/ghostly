@@ -53,7 +53,7 @@ export function PublicDid({ state }: { state: EngineState }) {
       </Block>
       <Block testId="did-links">
         <p className="text-xs font-medium text-text-secondary">{t("identities.did.listTitle")}</p>
-        <InfoLine testId="did-warning" className="text-xs text-yellow-500" info={t("identities.did.warningInfo")}>{t("identities.did.warning")}<span className="block text-text-secondary">{t("identities.did.warningNext")}</span></InfoLine>
+        <InfoLine testId="did-warning" className="text-xs text-warn-ink" info={t("identities.did.warningInfo")}>{t("identities.did.warning")}<span className="block text-text-secondary">{t("identities.did.warningNext")}</span></InfoLine>
         {listable.length === 0 ? <p className="text-xs text-text-muted" data-testid="did-none">{t("identities.did.none")}</p>
           : listable.map(p => {
             const card = idCard(p, { now });

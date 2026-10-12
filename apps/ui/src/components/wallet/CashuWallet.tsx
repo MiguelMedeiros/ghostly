@@ -133,7 +133,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             <span className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</span>
             <span className="text-text-muted text-sm ms-2">{unit}</span>
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
-            {testMint && !testnet && <span className="block text-xs text-yellow-500 mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
+            {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
             {!!state.setAside && (
               <span className="mt-1 flex items-center gap-1.5 text-xs text-text-muted" data-testid="wallet-set-aside">
                 {t("wallet.cashu.setAside", { amount: formatAmount(state.setAside, t.language), unit })}
@@ -145,7 +145,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             )}
             {!!state.setAside && setAsideInfo && <span className="mt-1 block text-xs text-text-secondary" data-testid="wallet-set-aside-text">{t("wallet.cashu.setAsideInfo")}</span>}
             {!!state.unconfirmed && (
-              <span className="mt-1 flex items-center gap-1.5 text-xs text-yellow-500" data-testid="wallet-unconfirmed">
+              <span className="mt-1 flex items-center gap-1.5 text-xs text-warn-ink" data-testid="wallet-unconfirmed">
                 {t("wallet.cashu.unconfirmed", { amount: formatAmount(state.unconfirmed, t.language), unit })}
                 <button type="button" data-testid="wallet-unconfirmed-info" aria-expanded={unconfirmedInfo} aria-label={t("common.moreInfo")} title={t("common.moreInfo")} onClick={() => setUnconfirmedInfo(!unconfirmedInfo)}
                   className="relative grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 before:content-['']">
@@ -159,7 +159,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           <p className="text-text-primary" data-testid="wallet-balance">
             <span className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : formatAmount(ln.balance, t.language)}</span>
             <span className="text-text-muted text-sm ms-2">{t("wallet.lightning.balanceSource", { unit, source: sourceName ?? t("wallet.lightning.theSource") })}</span>
-            {ln?.status !== "ready" && <span className="block text-xs text-yellow-500 mt-1" data-testid="lightning-source-state">{ln?.error ? problemLine(ln.error, t) : t("wallet.lightning.connecting")}</span>}
+            {ln?.status !== "ready" && <span className="block text-xs text-warn-ink mt-1" data-testid="lightning-source-state">{ln?.error ? problemLine(ln.error, t) : t("wallet.lightning.connecting")}</span>}
           </p>
         )}
         <Actions value={action} onChange={choose} actions={rail === "cashu" ? ["receive", "send", "history"] : ["receive", "send"]} />
@@ -246,7 +246,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${ENGINE_NOTES[tx.note] ? t(ENGINE_NOTES[tx.note]) : tx.note}` : ""}</span>
-                      <span className={`shrink-0 ${tx.fee > 0 ? "text-yellow-500" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language) }) : t("wallet.cashu.history.noFee")}</span>
+                      <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language) }) : t("wallet.cashu.history.noFee")}</span>
                     </div>
                   </div>
                 );
