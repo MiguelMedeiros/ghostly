@@ -48,6 +48,8 @@ export const GROUP_EDIT_RESEND = 16;
 export const GROUP_EDIT_RESEND_WINDOW_MS = EDIT_RATE_WINDOW_MS + 1_000;
 /** An edge that opens for the first time since the app started hears my newest edits again, this many messages at most. */
 export const GROUP_EDIT_CATCH_UP = 256;
+/** Members' edits past what a window takes, kept per group until it has room: as many as a community's store hands back. */
+export const GROUP_EDITS_HELD = 256;
 /** An edit that could not go (no epoch key yet) is tried again after this long. */
 const RETRY_MS = 10_000;
 
@@ -61,6 +63,9 @@ export class GroupEdits {
   private readonly cards: CardEditPacer;
   private readonly sendPace = new Map<string, RateWindow>();
   private readonly receivePace = new Map<string, RateWindow>();
+  /** Per group, per member (`group\nmember`): its edits past the window, by message, waiting for room (`hold`). */
+  private readonly held = new Map<string, Map<string, Map<string, GroupEdit>>>();
+  private readonly heldTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly flushing = new Map<string, Promise<void>>();
   /** Per group: my rows known to have an edit to say, each with when it was last told (`edit`), by `tick`. */
@@ -201,7 +206,8 @@ export class GroupEdits {
   /**
    * An edit from a member, authenticated as `sender` by the group. Believed only while the sender is in the group (a
    * removed member's edits are dropped) and only of the sender's own message; the highest number wins. One of a message
-   * not here yet waits a minute for it. Past `EDIT_RECEIVE_LIMIT` a window from one member, the rest are dropped.
+   * not here yet waits a minute for it. Past `EDIT_RECEIVE_LIMIT` a window from one member, the rest wait for the next
+   * window (`hold`): a catch-up hands back every edit of an author at once, and one dropped is never handed again.
    */
   async receive(groupId: string, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const membership = this.host.membership(groupId);
@@ -209,7 +215,58 @@ export class GroupEdits {
     const key = `${groupId}\n${sender}`;
     let pace = this.receivePace.get(key);
     if (!pace) this.receivePace.set(key, pace = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS, this.now));
-    if (!pace.take()) return "dropped";
+    // Behind those that wait already, so a member's edits are taken in the order they came.
+    if (this.held.get(groupId)?.has(key) || !pace.take()) return this.hold(groupId, sender, edit, pace);
+    return this.take(groupId, membership, sender, edit);
+  }
+
+  /**
+   * An edit past what a member's window takes: kept, the highest number per message, `GROUP_EDITS_HELD` messages a
+   * group at most (the oldest go first), and taken when the window has room. The work stays what the window allows.
+   */
+  private hold(groupId: string, sender: string, edit: GroupEdit, pace: RateWindow): "waiting" | "dropped" {
+    const key = `${groupId}\n${sender}`;
+    let group = this.held.get(groupId);
+    if (!group) this.held.set(groupId, group = new Map());
+    let waiting = group.get(key);
+    if (!waiting) group.set(key, waiting = new Map());
+    const known = waiting.get(edit.id);
+    if (known && known.e >= edit.e) return "dropped";
+    waiting.delete(edit.id);
+    waiting.set(edit.id, edit);
+    let count = 0;
+    for (const member of group.values()) count += member.size;
+    for (const [member, edits] of group) {
+      if (count <= GROUP_EDITS_HELD) break;
+      while (count > GROUP_EDITS_HELD && edits.size) { edits.delete(edits.keys().next().value!); count--; }
+      if (!edits.size && member !== key) group.delete(member);
+    }
+    if (!this.heldTimers.has(key) && !this.stopped) this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(groupId, sender).catch(() => {}); }, Math.max(50, pace.wait())));
+    return waiting.has(edit.id) ? "waiting" : "dropped";
+  }
+
+  /** The window of a member has room again: its edits that waited are taken, oldest first, as many as it allows. */
+  private async takeHeld(groupId: string, sender: string): Promise<void> {
+    const key = `${groupId}\n${sender}`;
+    this.heldTimers.delete(key);
+    const group = this.held.get(groupId), waiting = group?.get(key), pace = this.receivePace.get(key);
+    if (this.stopped || !group || !waiting || !pace) return;
+    for (const [id, edit] of [...waiting]) {
+      const membership = this.host.membership(groupId);
+      // Out of the group meanwhile (the member, or me): nothing of it is believed.
+      if (!membership?.members.has(sender)) { waiting.clear(); break; }
+      if (!pace.take()) break;
+      // Unless a higher one took its place while the last was applied.
+      if (waiting.get(id) !== edit) continue;
+      waiting.delete(id);
+      await this.take(groupId, membership, sender, edit).catch(() => {});
+    }
+    if (waiting.size) { if (!this.heldTimers.has(key) && !this.stopped) this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(groupId, sender).catch(() => {}); }, Math.max(50, pace.wait()))); return; }
+    if (group.get(key) === waiting) group.delete(key);
+    if (!group.size) this.held.delete(groupId);
+  }
+
+  private async take(groupId: string, membership: { me: string }, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const chat = chatOf(groupId);
     const message = await this.find(chat, edit.id);
     if (!message) { this.buffer.hold(chat, { ...edit, sender }); return "waiting"; }
@@ -307,6 +364,7 @@ export class GroupEdits {
     this.known.delete(groupId);
     this.learnt.delete(groupId);
     this.dropResends(groupId);
+    this.dropHeld(groupId);
     this.buffer.forget(chatOf(groupId));
   }
 
@@ -316,5 +374,11 @@ export class GroupEdits {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.dropResends();
+    this.dropHeld();
+  }
+
+  private dropHeld(groupId?: string): void {
+    for (const [key, timer] of this.heldTimers) if (groupId === undefined || key.startsWith(`${groupId}\n`)) { clearTimeout(timer); this.heldTimers.delete(key); }
+    if (groupId === undefined) this.held.clear(); else this.held.delete(groupId);
   }
 }
