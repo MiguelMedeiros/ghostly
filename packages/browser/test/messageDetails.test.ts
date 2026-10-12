@@ -122,6 +122,24 @@ describe("a text over the live link", () => {
   }, 20_000);
 });
 
+describe("a text's row on its way out", () => {
+  it("is written once for each thing that happens to it: stored, gone, sent, delivered", async () => {
+    const t = await setup();
+    const written: string[] = [];
+    const original = IDBObjectStore.prototype.put;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore["put"]>) {
+      const row = args[0] as { sender?: string; delivery?: string; details?: MessageDetails };
+      if (this.name === "messages" && row.sender === "me") written.push(`${row.delivery}${row.details?.sentAt ? "+went" : ""}${row.details?.receiptAt ? "+receipt" : ""}`);
+      return original.apply(this, args);
+    });
+    cleanup.push(async () => { put.mockRestore(); });
+    expect((await t.node.sendMessage({ linkId: t.id, text: "once each" })).error).toBeNull();
+    await vi.waitFor(async () => expect((await t.messages()).find(m => m.sender === "me")?.details?.receiptAt).toBeDefined());
+    // Before: `sending` twice more (marked again as it went) and `delivered` twice (the mark, then the receipt's time).
+    expect(written).toEqual(["sending", "sending+went", "sent+went", "delivered+went+receipt"]);
+  }, 20_000);
+});
+
 describe("a file with files/3", () => {
   it("is remembered with its protocol, chunks, digest and the moment it was all there", async () => {
     const t = await setup();
