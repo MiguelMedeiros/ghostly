@@ -415,6 +415,14 @@ html[data-standalone="true"] {
   body {
     overscroll-behavior: none;
   }
+
+  /* A pinch on a touch screen zoomed the whole app (its bars, the composer, the list) and left it zoomed, while the
+     picture under the fingers could not be looked at closer. The page scrolls and pans as before, and never zooms:
+     a picture zooms in its viewer (components/AvatarViewer.tsx). A descendant's own `touch-action` narrows this
+     further (a floating call window, the viewer: `none`). Text still follows the system's text size. */
+  html {
+    touch-action: pan-x pan-y;
+  }
 }
 
 .pb-safe {
