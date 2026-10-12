@@ -196,6 +196,74 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.seen.filter(s => s.to === "carol" && s.frame.t === "pf-offer").map(s => s.from)).toEqual(["bob"]);
   });
 
+  it("a member back from away gets every file a connected member holds, its app started again and the authors gone, past what one group-have names", async () => {
+    const t = new FilesWorld();
+    limits.haveIds = 2;
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const sent = [];
+    for (let i = 0; i < 5; i++) sent.push(await t.send(alice, id, pattern(20_000, 20 + i), { name: `alice-${i}.bin` }));
+    await t.world.until(() => sent.every(s => t.done(bob, id, s.messageId)), 5 * 60_000);
+    // Bob's app starts again: what it queued to say is gone, and on an edge that opens it names a few of its files.
+    await t.restart(bob);
+    alice.online = false;
+    await t.world.run(2_000);
+    t.world.reopen(carol);
+    await t.world.until(() => sent.every(s => t.done(carol, id, s.messageId)), 5 * 60_000);
+    for (const s of sent) expect(sha(t.got(carol, id, s.messageId).bytes!)).toBe(s.meta.d);
+    expect(new Set(t.seen.filter(s => s.to === "carol" && s.frame.t === "pf-offer").map(s => s.from))).toEqual(new Set(["bob"]));
+  });
+
+  it("a Download of an older file, the asker's app started again and the author gone, comes from a connected member that holds it", async () => {
+    const t = new FilesWorld();
+    limits.haveIds = 1;
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    t.files.get(carol)!.settings.autoDownloads = false;
+    const sent = [];
+    for (let i = 0; i < 3; i++) sent.push(await t.send(alice, id, pattern(20_000, 30 + i), { name: `alice-${i}.bin` }));
+    await t.world.until(() => sent.every(s => t.done(bob, id, s.messageId)) && sent.every(s => !!t.got(carol, id, s.messageId).message?.file), 5 * 60_000);
+    alice.online = false;
+    await t.restart(carol);
+    await t.world.run(20_000);
+    for (const s of sent) {
+      await carol.groups.downloadFile(t.got(carol, id, s.messageId).message!.file!.id);
+      await t.world.until(() => t.done(carol, id, s.messageId), 2 * 60_000);
+      expect(sha(t.got(carol, id, s.messageId).bytes!)).toBe(s.meta.d);
+    }
+  });
+
+  it("a connected member that does not hold a file is asked for it once, then again when it says it holds it or its edge opens again", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    t.files.get(bob)!.settings.autoDownloads = false;
+    await t.world.run(2_000);
+    const { messageId, meta } = await t.send(alice, id, pattern(20_000, 40));
+    await t.world.until(() => !!t.got(bob, id, messageId).message?.file, 60_000);
+    alice.online = false;
+    await t.world.run(2_000);
+    t.world.reopen(carol);
+    const asked = () => t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "group-want").length;
+    await t.world.until(() => asked() === 1 && t.got(carol, id, messageId).transfer?.wait === "nobody", 5 * 60_000);
+    expect(t.seen.filter(s => s.from === "bob" && s.to === "carol" && s.frame.t === "group-want-no").map(s => s.frame.why)).toEqual(["gone"]);
+    // Round after round, bob is not asked again: he said he does not have it.
+    await t.world.run(4 * GROUP_FILE_LIMITS.wantWaitMs);
+    expect(asked()).toBe(1);
+    expect(t.got(carol, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "nobody" });
+    // His edge opens again: he may have fetched it meanwhile, so he is asked once more.
+    bob.online = false;
+    await t.world.run(2_000);
+    t.world.reopen(bob);
+    await t.world.until(() => asked() === 2, 5 * 60_000);
+    await t.world.run(4 * GROUP_FILE_LIMITS.wantWaitMs);
+    expect(asked()).toBe(2);
+    // The author is back, bob fetches it and says so: carol, whoever she gets it from, has it.
+    t.world.reopen(alice);
+    await t.world.until(() => t.done(carol, id, messageId), 5 * 60_000);
+    expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
+  });
+
   it("a holder serving other bytes is refused as damaged, and the next holder is asked", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);

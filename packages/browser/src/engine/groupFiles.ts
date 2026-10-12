@@ -157,7 +157,7 @@ interface Kept {
   asked: boolean;
   /** Every byte is here, checked against the author's digest: this device holds it. */
   held: boolean;
-  /** Members said to hold it (`group-have`), newest first. The author is asked whether or not it is here. */
+  /** Members said to hold it (`group-have`), or that offered it, newest first. The author is asked whether or not it is here. */
   holders: string[];
   /** A discard of what an earlier transfer stored, which the next one waits for. */
   idle?: Promise<void>;
@@ -214,6 +214,8 @@ interface Edge {
   haveAt: number;
   /** Message ids its member asked for while this device served all it serves at once: said in a `group-have` once a slot frees. */
   busy: Set<string>;
+  /** Message ids its member said it does not hold (`gone`): not asked of it again until it says it does, or the edge closes. */
+  gone: Set<string>;
 }
 
 /**
@@ -439,6 +441,8 @@ export class GroupFileDesk {
   session(groupId: string, peer: string, linkId: string, open: boolean): void {
     const edge = this.edge(groupId, peer, linkId);
     if (open) edge.files.attach(); else edge.files.detach();
+    // While the edge is down its member may fetch what it did not hold: asked again once it is back.
+    if (!open) edge.gone.clear();
     if (open) this.retry(groupId);
   }
 
@@ -488,6 +492,8 @@ export class GroupFileDesk {
         return Promise.resolve();
       }
       edge.taking.set(frame.id, kept.id);
+      // It offers the file: it holds it, whether or not it ever said so.
+      kept.holders = newestHolder(peer, kept.holders);
       want.wire = frame.id;
       want.why = undefined;
       want.movedAt = this.deps.now();
@@ -540,8 +546,11 @@ export class GroupFileDesk {
   }
 
   /**
-   * Asks the next holder for a file: the author first while its edge is up, then the holders whose edge is up. Only over
-   * an edge this device has. (A private group past 16 members, or a community, reaches a holder it has no edge with
+   * Asks the next holder for a file: the author first while its edge is up, then the holders whose edge is up, then every
+   * other member whose edge is up and that could read its message. Who holds what is heard, not kept: a holder names few
+   * of its files to an edge that opens, and none it was told of is known after a restart here, so a member in reach is
+   * asked whether or not it said so (one that does not hold it answers `gone`, and is not asked again). Only over an
+   * edge this device has. (A private group past 16 members, or a community, reaches a holder it has no edge with
    * over a file session of the two members, WISP 503 § The file session; that session is not built yet, so such a
    * holder is not asked, and the file waits for one that is reachable.)
    */
@@ -554,7 +563,8 @@ export class GroupFileDesk {
       .filter(key => membership && key !== membership.me && membership.inRoster(key));
     // Every holder known served it damaged: asking again would fetch the same bytes, all of them, round after round.
     if (known.length && known.every(key => kept.damaged.has(key))) { this.stopDamaged(kept); return; }
-    const order = known.filter(key => !want.tried.has(key) && !kept.damaged.has(key));
+    const others = [...edges.keys()].filter(key => !known.includes(key) && membership && key !== membership.me && membership.couldRead(key, kept.message));
+    const order = [...known, ...others].filter(key => !want.tried.has(key) && !kept.damaged.has(key) && !this.edgesById.get(edges.get(key) ?? "")?.gone.has(kept.message));
     let behind = false;
     for (const key of order) {
       const linkId = edges.get(key);
@@ -562,9 +572,10 @@ export class GroupFileDesk {
       // A holder serves this device one file at a time (WISP 503 § Serving limits): asked now, it would answer `busy`.
       // This one waits its turn, and is asked when the file before it ends (`transferChanged`).
       if (this.askedOf(linkId, want)) { behind = true; continue; }
-      if (!this.deps.send(linkId, { t: GROUP_WANT_FRAME, g: kept.groupId, id: kept.message })) { want.tried.add(key); continue; }
+      // Asked of it before the frame goes: its answer is this want's, however soon it comes.
       Object.assign(want, { holder: key, linkId, at: this.deps.now() });
-      this.show(kept, { state: "transferring", stage: "queued", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in" });
+      if (!this.deps.send(linkId, { t: GROUP_WANT_FRAME, g: kept.groupId, id: kept.message })) { want.tried.add(key); continue; }
+      if (want.holder === key) this.show(kept, { state: "transferring", stage: "queued", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in" });
       return;
     }
     Object.assign(want, { holder: undefined, linkId: undefined, at: this.deps.now() });
@@ -594,7 +605,10 @@ export class GroupFileDesk {
     const kept = this.kept.get(this.byMessage.get(`${groupId}\n${messageId}`) ?? "");
     const want = kept && this.wants.get(kept.id);
     if (!kept || !want || want.linkId !== linkId || want.wire) return;
-    if (why === "gone") kept.holders = kept.holders.filter(key => key !== peer);
+    if (why === "gone") {
+      kept.holders = kept.holders.filter(key => key !== peer);
+      this.edgesById.get(linkId)?.gone.add(messageId);
+    }
     if (why === "busy") want.why = "busy";
     want.tried.add(peer);
     want.holder = want.linkId = undefined;
@@ -607,7 +621,8 @@ export class GroupFileDesk {
   private heard(groupId: string, from: string, ids: string[]): void {
     const membership = this.deps.membership(groupId);
     if (!membership || from === membership.me || !membership.inRoster(from)) return;
-    const newest = (holders: string[]) => [from, ...holders.filter(key => key !== from)].slice(0, GROUP_FILE_LIMITS.holders);
+    const newest = (holders: string[]) => newestHolder(from, holders);
+    const edge = this.edgesById.get(this.deps.edges(groupId).get(from) ?? "");
     for (const message of ids) {
       const key = `${groupId}\n${message}`, kept = this.kept.get(this.byMessage.get(key) ?? "");
       if (!kept) {
@@ -618,6 +633,7 @@ export class GroupFileDesk {
       }
       if (kept.mine) continue;
       kept.holders = newest(kept.holders);
+      edge?.gone.delete(message);
       const want = this.wants.get(kept.id);
       if (!want) continue;
       want.tried.delete(from);
@@ -731,7 +747,7 @@ export class GroupFileDesk {
   private edge(groupId: string, peer: string, linkId: string): Edge {
     const known = this.edgesById.get(linkId);
     if (known) return known;
-    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(), haveAt: 0, busy: new Set() };
+    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(), haveAt: 0, busy: new Set(), gone: new Set() };
     edge.files = new ChatFiles({
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
@@ -895,6 +911,9 @@ export class GroupFileDesk {
     this.deps.changed();
   }
 }
+
+/** A file's holders with `key` the newest of them, the `holders` newest kept. */
+const newestHolder = (key: string, holders: string[]): string[] => [key, ...holders.filter(other => other !== key)].slice(0, GROUP_FILE_LIMITS.holders);
 
 function messageFile(kept: Kept): MessageFile {
   const { name, size, mime, voice, video, image } = kept.meta;
