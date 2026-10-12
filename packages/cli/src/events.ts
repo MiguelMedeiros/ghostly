@@ -439,8 +439,13 @@ export class EventHub {
     if (changes.length) this.persist(key, changes);
   }
 
+  /**
+   * Relaxed: nobody waits for it, and a note lost to a power cut is made again from the history at the next start
+   * (its event is then reported a second time, as after a crash between a message's row and its note). A disk sync
+   * for each one held the whole daemon for milliseconds, three times per message sent.
+   */
   private persist(chat: string, changes: [string, string | null][]): void {
-    const tx = this.db.transaction(SEEN, "readwrite");
+    const tx = this.db.transaction(SEEN, "readwrite", { durability: "relaxed" });
     const store = tx.objectStore(SEEN);
     for (const [id, state] of changes) {
       if (state === null) store.delete([chat, id]);
