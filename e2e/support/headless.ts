@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { TestInfo } from "@playwright/test";
 import { testNetworkEnv } from "../../packages/cli/test/support/network";
+import { endNow, spawnWhileParentLives } from "../../packages/cli/test/support/whileParentLives";
 
 /**
  * The headless Ghostly (`packages/cli`, WISP 1100) in a test: built once per run before the workers start
@@ -73,9 +74,10 @@ export class HeadlessBot {
     createInterface({ input: listen.stdout! }).on("line", (line) => { try { this.events.push(JSON.parse(line)); } catch { /* not JSON */ } });
   }
 
+  /** A long-running one (the daemon, the listener): gone with this worker if it dies before `stop` (a test's timeout). */
   private spawn(...args: string[]): ChildProcess {
     const env = this.envFor({ GHOSTLY_LINK_TRACE: this.linkTrace });
-    const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnWhileParentLives(process.execPath, [BIN, "--home", this.home, ...args], env);
     child.stderr!.on("data", (d: Buffer) => { this.stderr += d; process.stderr.write(d); });
     this.running.push(child);
     return child;
@@ -107,7 +109,7 @@ export class HeadlessBot {
       if (child.exitCode !== null) return done();
       child.once("exit", () => done());
       child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 20_000).unref();
+      setTimeout(() => endNow(child), 20_000).unref();
     })));
     rmSync(this.home, { recursive: true, force: true });
   }
