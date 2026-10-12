@@ -568,6 +568,8 @@ export interface GhostLinkOptions {
    * for a contact who is right there. `startedAt`: when the invite was made or joined.
    */
   pairingProgress?: { role: PairingRole; startedAt: number };
+  /** When the chat was made, for a saved one: a contact never seen is awaited from then, not from this start (`LinkSessionOptions.awaitingSince`). */
+  madeAt?: number;
   transport: PkarrTransport;
   nick?: string;
   /** This side's profile picture (a small JPEG data URL), told to a paired peer directly. */
@@ -916,6 +918,7 @@ export class GhostLink {
       nick: options.nick,
       lastSeenTimestamp: options.lastSeenTimestamp,
       pollIntervals: options.pollIntervals,
+      awaitingSince: options.madeAt,
       getServices: options.getServices,
       // A joiner dials the moment it sees the inviter, and an app back after a restart (`resume`) the moment it reads its
       // contact: its offer goes in its first packet, not in a second one right behind its presence. A joiner with no WebRTC

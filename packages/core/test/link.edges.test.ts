@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { identityFromSeedB64, type Identity } from "../src/identity";
+import { createIdentity, identityFromSeedB64, type Identity } from "../src/identity";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RelayTransport } from "../src/relay";
 import { fromBase64Url } from "../src/bytes";
 import { buildLinkRecords, emptyLinkRecords } from "../src/records";
 import { createLink, type LinkParams } from "../src/invite";
@@ -593,6 +594,58 @@ describe("LinkSession poll pacing", () => {
     await settle();
     expect(lastPoll(a.ev)).toBe(I.background);
     await a.s.stop(false);
+  });
+
+  it("counts that wait from when the chat was made: a saved chat reads in the background from its first read of a start", async () => {
+    // Made a month ago, its contact away since (no packet at the relays): no invite just sent.
+    const old = pair({ awaitingSince: NOW - 30 * 86_400_000 });
+    old.a.s.start();
+    await settle();
+    expect(old.a.transport.resolve).toHaveBeenLastCalledWith(old.params.mine.peerPubKeyZ32, { background: true, urgent: false });
+    expect(lastPoll(old.a.ev)).toBe(I.background);
+    await old.a.s.stop(false);
+    // Made three minutes ago, and the app opened again: the invite is awaited for the seven minutes left.
+    const recent = pair({ awaitingSince: NOW - 3 * 60_000 });
+    recent.a.s.start();
+    await settle();
+    expect(lastPoll(recent.a.ev)).toBe(I.active);
+    vi.setSystemTime(NOW + AWAITING_PEER_MS - 3 * 60_000);
+    recent.a.s.pollNow();
+    await settle();
+    expect(lastPoll(recent.a.ev)).toBe(I.background);
+    await recent.a.s.stop(false);
+    // Made when this device's clock was ahead: awaited ten minutes from this start, no longer.
+    vi.setSystemTime(NOW);
+    const ahead = pair({ awaitingSince: NOW + 86_400_000 });
+    ahead.a.s.start();
+    await settle();
+    expect(lastPoll(ahead.a.ev)).toBe(I.active);
+    vi.setSystemTime(NOW + AWAITING_PEER_MS);
+    ahead.a.s.pollNow();
+    await settle();
+    expect(lastPoll(ahead.a.ev)).toBe(I.background);
+    await ahead.a.s.stop(false);
+  });
+
+  it("50 saved chats started together leave the relays' minute room for what the app writes", async () => {
+    const requests: { at: number; method: string; host: string }[] = [];
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      requests.push({ at: Date.now() - NOW, method, host: new URL(String(input)).host });
+      return new Response(null, { status: method === "PUT" ? 204 : 404 });
+    }) as typeof fetch;
+    const relays = new RelayTransport({ relays: DEFAULT_RELAYS, fetch: fetchFn, log: () => {} });
+    // Chats made a month ago, their contacts away: nothing under their keys.
+    const chats = Array.from({ length: 50 }, () => new LinkSession({ params: createLink().mine, transport: relays, pollIntervals: I, awaitingSince: NOW - 30 * 86_400_000 }));
+    for (const chat of chats) chat.start();
+    // The app's own records go out 15 s into a start (the DID record), a message whenever it is sent.
+    await vi.advanceTimersByTimeAsync(15_000);
+    const reads = requests.filter((r) => r.method === "GET").length;
+    await expect(relays.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
+    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual([15_000, 15_000]);
+    // The chats' reads took the background share of each relay's minute, not the minute.
+    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE);
+    for (const chat of chats) await chat.stop(false);
   });
 
   it("polls fast while signaling, for a bounded time", async () => {
