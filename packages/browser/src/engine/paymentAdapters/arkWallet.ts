@@ -1,7 +1,7 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
 import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
+import { arkAddressPrefix, validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
 import { deleteDatabase, store, STORES, transact, wrap } from "../../shared/idb";
 import type { ArkadeAdapter, ArkConfig } from "./arkade";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
@@ -25,7 +25,7 @@ const loadArkade=()=>import("./arkade");
 export const RETIRE_READ_MS=10_000;
 /** Every new profile starts with this wallet: nothing to set up before receiving. */
 export const DEFAULT_ARK = {network:"bitcoin",provider:"https://arkade.computer",explorer:"https://mempool.space/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
-const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:"configuration",expiresAt:Date.now()+60000});};
+const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:`${arkAddressPrefix(network)}configuration`,expiresAt:Date.now()+60000});};
 /** A Testnet Ark wallet starts on Mutinynet: a public test network with its own Ark server. */
 export const TESTNET_ARK = {network:"mutinynet",provider:"https://mutinynet.arkade.sh",explorer:"https://mutinynet.com/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
 /** Bitcoin is real money; every other Ark network is for testing. */
