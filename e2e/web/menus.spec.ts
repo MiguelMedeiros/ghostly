@@ -76,8 +76,8 @@ test("every row of the chat, group and New menus is one line and whole, in every
       // The chat's ⋮: Pin, Mute notifications, Move to folder…, Search, Hold messages, Refresh, Tech Info, Delete.
       // Not in it: the connection (the header's connection control has it), Payments (the composer's + → Payment),
       // Identities (the contact's marks in the header, e2e/web/contact-identities.spec.ts) and Services (the
-      // composer's + → Shared services). On a phone the header keeps the name, a call and ⋮, so three of the header's
-      // own controls are its first rows: Video call, Connection options and Identities (chat-header-phone.spec.ts).
+      // composer's + → Shared services). On a phone the header keeps the name, the connection, a call and ⋮, so two of
+      // the header's own controls are its first rows: Video call and Identities (chat-header-phone.spec.ts).
       await go(chatHash);
       await page.getByTestId("chat-options").click();
       const chatMenu = page.getByTestId("chat-options-menu");
@@ -89,8 +89,9 @@ test("every row of the chat, group and New menus is one line and whole, in every
       await expect(chatMenu.getByTestId("chat-payments-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-identities-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-services-open")).toHaveCount(0);
-      for (const id of ["call-video", "connection-options", "chat-identity-badges"]) await expect(chatMenu.getByTestId(id), `${id}, ${at}`).toHaveCount(viewport === PHONE ? 1 : 0);
-      await oneLineEach(chatMenu, viewport === PHONE ? 11 : 8, `chat menu, ${at}`);
+      for (const id of ["call-video", "chat-identity-badges"]) await expect(chatMenu.getByTestId(id), `${id}, ${at}`).toHaveCount(viewport === PHONE ? 1 : 0);
+      await expect(chatMenu.getByTestId("connection-options")).toHaveCount(0);
+      await oneLineEach(chatMenu, viewport === PHONE ? 10 : 8, `chat menu, ${at}`);
       if (language !== "ar") await page.screenshot({ path: testInfo.outputPath(`chat-menu-${language}-${viewport.width}.png`) });
       await close(page, chatMenu);
 

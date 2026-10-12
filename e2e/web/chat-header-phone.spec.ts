@@ -1,18 +1,19 @@
 import { pasteInvite } from "../support/clipboard";
-import { expect, expectConnected, headerControl, test } from "../support/fixtures";
+import { expect, expectConnected, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
  * A chat's header on a phone. It had every button at once (the connection, a call, a video call, a bot's Tasks, ⋮),
  * the contact's marks, their key, a bot's meter and its activity dot: nine marks and buttons in three styles, and the
- * name cut to eight letters ("Cérebro (…"). It keeps the name, a voice call and ⋮ now, and one quiet line under the
- * name; the connection, the video call, the Tasks and the identities are rows of ⋮, which counts the running tasks.
+ * name cut to eight letters ("Cérebro (…"). It keeps the name, the connection, a voice call and ⋮ now, and one quiet
+ * line under the name; the video call, the Tasks and the identities are rows of ⋮, which counts the running tasks.
+ * The connection stays in the row: it changes by itself, and a chat that fails has to show it.
  */
 test.describe.configure({ timeout: 5 * 60_000 });
 
-const MOVED = ["call-video", "chat-tasks", "connection-options", "chat-identity-badges"];
+const MOVED = ["call-video", "chat-tasks", "chat-identity-badges"];
 
-test("on a phone a chat's header keeps the contact's whole name beside a call and ⋮, and has the rest in ⋮", { tag: ["@feature:app.mobile-layout", "@feature:chat.status-cards", "@feature:app.menus"] }, async ({ peer, relay }) => {
+test("on a phone a chat's header keeps the contact's whole name beside the connection, a call and ⋮, and has the rest in ⋮", { tag: ["@feature:app.mobile-layout", "@feature:chat.status-cards", "@feature:app.menus"] }, async ({ peer, relay }) => {
   const url = await relay.listen();
   const bot = new HeadlessBot();
   try {
@@ -37,8 +38,8 @@ test("on a phone a chat's header keeps the contact's whole name beside a call an
     /** The name's line against what it holds: cut with an ellipsis when `shown` < `whole`. */
     const line = () => name.evaluate((el) => ({ shown: el.parentElement!.clientWidth, whole: el.parentElement!.scrollWidth }));
 
-    // The names seen in the wild, a 25-letter one and an Arabic one, on each phone they fit.
-    const names: [string, number][] = [["Cérebro (Mac)", 320], ["Hermes (Omarchy)", 375], ["Maximiliano Albuquerque S", 390], ["عبد الرحمن الفارسي", 375]];
+    // The names seen in the wild and an Arabic one, on each phone they fit.
+    const names: [string, number][] = [["Cérebro (Mac)", 320], ["Hermes (Omarchy)", 375], ["عبد الرحمن الفارسي", 375]];
     for (const [shown, narrowest] of names) {
       if (shown !== "Cérebro (Mac)") await rename(shown);
       for (const phone of [{ width: 402, height: 874 }, { width: 390, height: 844 }, { width: 375, height: 667 }, { width: 320, height: 568 }]) {
@@ -49,10 +50,24 @@ test("on a phone a chat's header keeps the contact's whole name beside a call an
       }
     }
 
+    // A 25-letter name is longer than the row: it is cut with an ellipsis after twenty letters or more, never to eight.
+    await rename("Maximiliano Albuquerque S");
+    await page.setViewportSize({ width: 390, height: 844 });
+    const long = await name.evaluate((el) => {
+      const probe = document.createElement("span");
+      probe.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap";
+      probe.textContent = `${(el.textContent ?? "").slice(0, 20)}…`;
+      el.parentElement!.appendChild(probe);
+      const twenty = probe.getBoundingClientRect().width;
+      probe.remove();
+      return { shown: el.parentElement!.clientWidth, twenty };
+    });
+    expect(long.shown, JSON.stringify(long)).toBeGreaterThanOrEqual(long.twenty);
+
     for (const phone of [{ width: 402, height: 874 }, { width: 320, height: 568 }]) {
       await page.setViewportSize(phone);
-      // Two buttons, each a 44px target, whole and inside the screen; nothing else beside the name.
-      for (const id of ["call-audio", "chat-options"]) {
+      // Three buttons, each a 44px target, whole and inside the screen; nothing else beside the name.
+      for (const id of ["connection-options", "call-audio", "chat-options"]) {
         const box = (await page.getByTestId(id).boundingBox())!;
         expect(Math.min(box.width, box.height), `${id} at ${phone.width}px`).toBeGreaterThanOrEqual(44);
         expect(box.x + box.width, `${id} at ${phone.width}px`).toBeLessThanOrEqual(phone.width);
@@ -71,7 +86,7 @@ test("on a phone a chat's header keeps the contact's whole name beside a call an
     for (const id of MOVED) await expect(menu.getByTestId(id), id).toBeVisible();
     await expect(menu.getByTestId("call-video")).toHaveText("Video call");
     await expect(menu.getByTestId("chat-tasks")).toHaveText("Tasks, 1 active");
-    await expect(menu.getByTestId("connection-options")).toContainText(/Connected · /);
+    await expect(menu.getByTestId("connection-options")).toHaveCount(0);
     await expect(menu.getByTestId("chat-identity-badges")).toContainText(/\S{6}\.\.\.\S{6}/);
     await menu.getByTestId("chat-tasks").click();
     await expect(menu).toHaveCount(0);
@@ -79,15 +94,16 @@ test("on a phone a chat's header keeps the contact's whole name beside a call an
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("chat-tasks-panel")).toHaveCount(0);
     await expect(page.getByTestId("chat-options")).toBeFocused();
-    await (await headerControl(page, "connection-options")).click();
+    // The connection opens its panel from the header, as on a wide screen.
+    await page.getByTestId("connection-options").click();
     await expect(page.getByRole("dialog", { name: "Connection options" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Connection options" })).toBeHidden();
-    await expect(page.getByTestId("chat-options")).toBeFocused();
+    await expect(page.getByTestId("connection-options")).toBeFocused();
 
     // A phone on its side has the room: every button is in the header again.
     await page.setViewportSize({ width: 844, height: 390 });
-    for (const id of MOVED) await expect(page.getByTestId(id), id).toBeVisible();
+    for (const id of ["connection-options", ...MOVED]) await expect(page.getByTestId(id), id).toBeVisible();
   } finally {
     await bot.stop();
   }

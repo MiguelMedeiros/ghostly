@@ -2,7 +2,7 @@ import { test as base, expect, type Page, type TestInfo } from "@playwright/test
 import { _android, type AndroidDevice } from "playwright";
 import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
-import { closeHeaderMenu, expectConnected, openPeer, type Peer } from "../../support/fixtures";
+import { openPeer, type Peer } from "../../support/fixtures";
 import { LocalRelay } from "../../support/relay";
 
 export { expect };
@@ -321,17 +321,6 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 });
 
 /**
- * The open chat's connection control in the app. A phone's header keeps the name, a call and ⋮, so the control is a row
- * of ⋮, opened here when it is not on screen (`closeHeaderMenu` closes it after a read). The app keeps more than one
- * chat's page in the document: only the one on screen counts.
- */
-export async function appConnection(page: Page) {
-  const control = page.getByTestId("connection-options").filter({ visible: true }).first();
-  if (!(await control.isVisible())) await page.getByTestId("chat-options").filter({ visible: true }).first().click();
-  return control;
-}
-
-/**
  * The app makes a chat (New) and the web peer joins it with the invite the app shows: read from the card (the link the
  * QR holds), so pairing does not depend on the clipboard (the host spec checks that). Resolves once both are live.
  */
@@ -344,10 +333,7 @@ export async function pairWithWeb(app: AndroidApp, web: Peer): Promise<void> {
   await web.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
   await pasteInvite(web.page, invite);
   // Live on both sides: Iroh through the infra's relay, or WebRTC.
-  // A phone's connection control is a row of the chat's ⋮ (`appConnection`); the web peer's is in its header.
-  await expect(await appConnection(app.page)).toHaveAccessibleName(/Connected · /, { timeout: 150_000 });
-  await closeHeaderMenu(app.page);
-  await expectConnected(web.page, 150_000);
+  for (const page of [app.page, web.page]) await expect(page.getByTestId("connection-options").filter({ visible: true }).first()).toHaveAccessibleName(/Connected · /, { timeout: 150_000 });
   for (const page of [app.page, web.page]) await expect(page.getByPlaceholder("Message…")).toBeEnabled();
 }
 
