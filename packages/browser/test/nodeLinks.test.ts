@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@ghostly/core";
+import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { EditQueue } from "../src/engine/edits";
@@ -725,6 +725,23 @@ describe("files a contact sends", () => {
     expect(node.getState().transfers[`${chat.id}-out-b`]).toMatchObject({ state: "failed", error: expect.stringContaining("interrupted") });
     expect(linkOf(chat.id).options.events.onFileIncoming({ id: "a", name: "x", size: 1, mime: "", timestamp: 3 })).toBe("duplicate file id");
   });
+
+  it("asked whether it holds a file, a chat that never took it reads none of its stored files", async () => {
+    const chat = row();
+    await db.putLink(chat);
+    const wire = { id: "a", name: "a.txt", size: 5, mime: "text/plain", timestamp: 7 };
+    await fileStore.put({ id: `${chat.id}-in-a`, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "in", wireId: "a", digest: "digest-a",
+      metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp } });
+    const { linkOf } = await started();
+    const { onFileStored } = linkOf(chat.id).options.events;
+    const stored = vi.spyOn(fileStore, "listForLink");
+    // A new file, as nearly every one is: the chat knows the wire ids it holds, and this is none of them.
+    expect(await onFileStored!({ ...wire, id: "new" })).toBeUndefined();
+    expect(stored).not.toHaveBeenCalled();
+    // One it holds is answered with its digest, when the question names the same file.
+    expect(await onFileStored!(wire)).toBe("digest-a");
+    expect(await onFileStored!({ ...wire, size: 6 })).toBeUndefined();
+  });
 });
 
 describe("files sent to a contact", () => {
@@ -876,6 +893,34 @@ describe("text in a chat", () => {
     expect(history).toHaveBeenCalled();
   });
 
+  it("a receipt for a file said on the DHT floor finds it without reading the chat's whole history again", async () => {
+    const chat = row();
+    const { node, events: pages, linkOf } = await started(chat);
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    const link = linkOf(chat.id), { events } = link.options;
+    const waiting = (wireId: string, at: number, fileOnFloor?: "sent") => ({ linkId: chat.id, id: `me_${at}`, text: "a.txt", sender: "me" as const, timestamp: at, via: "datalink" as const,
+      delivery: "waiting" as const, file: { id: `${chat.id}-out-${wireId}`, name: "a.txt", size: 1, mime: "text/plain" }, ...(fileOnFloor && { fileOnFloor }) });
+    const seen = { fileOnFloor: "seen", deliveryError: "Your contact sees it. The file goes when you are live." };
+    // Said on the floor in an earlier run: the chat's history is where it is found, once.
+    await db.addMessage(waiting("w1", 1, "sent"));
+    // The first id no message of mine has: the outbox, the edits and the floor's files each learn what waits, once.
+    await events.onMessageReceipt("an-edit-on-the-floor");
+    const history = vi.spyOn(db, "getMessages");
+    await events.onMessageReceipt(dhtFileId("w1"));
+    expect(await db.getMessage(chat.id, "me_1")).toMatchObject(seen);
+    // Said on the floor in this run: known from the moment it is said.
+    await db.addMessage(waiting("w2", 2));
+    Object.assign(link, { isDataLinkOpen: false, fileAnnounceError: () => null, announceFile: vi.fn(async () => null), dhtPendingId: dhtFileId("w2") });
+    await node["sayFileOnFloor"](node["links"].get(chat.id)!, (await db.getMessage(chat.id, "me_2"))!);
+    expect((await db.getMessage(chat.id, "me_2"))?.fileOnFloor).toBe("sent");
+    await events.onMessageReceipt(dhtFileId("w2"));
+    expect(await db.getMessage(chat.id, "me_2")).toMatchObject(seen);
+    // A receipt that names no file of mine changes nothing, and reads nothing.
+    await events.onMessageReceipt(dhtFileId("w3"));
+    expect(history).not.toHaveBeenCalled();
+  });
+
   // covers: chat.link-preview.wire
   it("a link preview is kept with the message and goes with it; one of a link the text lacks is dropped", async () => {
     const chat = row();
@@ -937,6 +982,27 @@ describe("an away contact", () => {
     await node.retryMessage({ linkId: chat.id, messageId: "me_w9" });
     expect((await db.getMessages(chat.id))[0].delivery).toBe("sending");
     expect(hold).toHaveBeenCalledWith(chat.id, { kind: "text", id: "w9", messageId: "me_w9", bytes: 5, timestamp: 4 });
+  });
+
+  it("sealing a held text, retrying it and opening its details read that message, not the chat's whole history", async () => {
+    const { node, events: pages, chat, hold } = await away();
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    vi.spyOn(node["hold"], "retry").mockResolvedValue(false);
+    await db.addMessage({ linkId: chat.id, id: "me_w8", wireId: "w8", text: "before", sender: "me", timestamp: 3, via: "datalink", delivery: "delivered" });
+    await db.addMessage({ linkId: chat.id, id: "me_w9", wireId: "w9", text: "later", sender: "me", timestamp: 4, via: "hold", delivery: "failed", forwarded: 2 });
+    const host = node["hold"]["host"] as { text(linkId: string, messageId: string): Promise<string | null>; reply(linkId: string, messageId: string): Promise<unknown>; forwarded(linkId: string, messageId: string): Promise<number | undefined> };
+    const history = vi.spyOn(db, "getMessages");
+    // What the hold asks for when it seals the text: the text, what it answers, how far it was forwarded.
+    expect(await host.text(chat.id, "me_w9")).toBe("later");
+    expect(await host.text(chat.id, "me_gone")).toBeNull();
+    expect(await host.reply(chat.id, "me_w9")).toBeUndefined();
+    expect(await host.forwarded(chat.id, "me_w9")).toBe(2);
+    await node.retryMessage({ linkId: chat.id, messageId: "me_w9" });
+    expect(hold).toHaveBeenCalledWith(chat.id, { kind: "text", id: "w9", messageId: "me_w9", bytes: 5, timestamp: 4 });
+    expect(await node.messageDetails({ linkId: chat.id, messageId: "me_w9" })).toMatchObject({ message: { id: "me_w9", kind: "text", via: "hold" } });
+    expect(await node.messageDetails({ linkId: chat.id, messageId: "me_gone" })).toBeNull();
+    expect(history).not.toHaveBeenCalled();
   });
 
   it("a file waits in storage for the contact, within the size of one held item; a larger one waits for live", async () => {

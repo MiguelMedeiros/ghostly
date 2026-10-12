@@ -66,6 +66,10 @@ export const COMMUNITY_LIMITS = {
   side: 512,
   /** Commits waiting for their parent. */
   pendingCommits: 64,
+  /** Epoch secrets waiting for their commit. */
+  pendingSecrets: 32,
+  /** How long a commit waits for its parent, or a secret for its commit: many catch-ups; after it, a catch-up brings both again. */
+  pendingMs: 120_000,
   waiting: 64,
   waitingBytes: 1024 * 1024,
   replay: 256,
@@ -106,6 +110,13 @@ export type CommunityKind = "create" | "add" | "leave" | "remove" | "role" | "ro
 const KINDS: CommunityKind[] = ["create", "add", "leave", "remove", "role", "rotate", "link"];
 /** Kinds whose epoch secret is fresh: they take someone out, or start or re-key the group. */
 const FRESH: ReadonlySet<CommunityKind> = new Set(["create", "leave", "remove", "rotate"]);
+/**
+ * Commits that make the membership history longer and the group no smaller. A committer signs one only while the
+ * history keeps room for everyone else to get out after it: two commits a member (a leave or a remove is one, and a
+ * leaving admin hands the role over first). The history is never compacted, and one that filled with people in it
+ * took no leave, remove or handover any more. Its own rule: a history up to `COMMUNITY_LIMITS.chain` verifies as before.
+ */
+const GROWS: ReadonlySet<CommunityKind> = new Set(["add", "rotate", "link"]);
 /**
  * Kinds only the admin commits. They are final: a branch that drops one never replaces the branch
  * that has it, however long, so no member can undo a removal, a hand-over, a rotation or a link change
@@ -450,8 +461,8 @@ export class CommunitySession {
   /** Commit hash → roster after it, for a few main-branch commits older than the window that `couldRead` was asked about. */
   private pastRosters = new Map<string, Roster>();
   private mainIndex = new Map<string, number>();
-  private pendingCommits = new Map<string, { from: string; commit: unknown }>();
-  private pendingSecrets = new Map<string, SealedSecret>();
+  private pendingCommits = new Map<string, { from: string; commit: CommunityCommit; at: number }>();
+  private pendingSecrets = new Map<string, { sealed: SealedSecret; at: number }>();
   private waiting: { from: string; frame: CommunityMessageFrame }[] = [];
   private waitingBytes = 0;
   private asked = new Map<string, number>();
@@ -758,11 +769,20 @@ export class CommunitySession {
     if (typeof p !== "string" || !Number.isSafeInteger(e)) return false;
     const parent = this.known.get(p), parentRoster = parent ? this.rosterAt(p) : undefined;
     if (!parent || !parentRoster) {
-      // Its parent is not here yet: kept, within bounds, while I ask for what comes before.
-      if (this.pendingCommits.size < COMMUNITY_LIMITS.pendingCommits) {
-        this.pendingCommits.set(p + ":" + String(e), { from, commit: raw });
-        this.ask(from);
+      // Its parent is not here yet. Nothing says whether it follows one, so only its shape and its signature can be
+      // checked: signed, I ask for what comes before; signed by someone who is or was the admin, it is also kept for a
+      // while, the oldest giving its place. A member's is not kept (the catch-up brings it after its parent): anything
+      // a member signs would take every place and keep me asking.
+      const commit = parseCommit(raw);
+      if (!commit || commit.g !== this.id || !verify(fromBase64Url(commit.sig), utf8Encode(tuple(commit)), publicKeyFromZ32(commit.by))) return false;
+      if (this.wasAdmin(commit.by)) {
+        const now = this.hooks.clock?.() ?? Date.now(), key = p + ":" + String(e);
+        this.dropStale(this.pendingCommits, now);
+        this.pendingCommits.delete(key);
+        if (this.pendingCommits.size >= COMMUNITY_LIMITS.pendingCommits) this.pendingCommits.delete(this.pendingCommits.keys().next().value!);
+        this.pendingCommits.set(key, { from, commit, at: now });
       }
+      this.ask(from);
       return false;
     }
     const result = verifyCommunityCommit(raw, parent, parentRoster, this.id);
@@ -793,14 +813,25 @@ export class CommunitySession {
     if (!this.mainIndex.has(h)) this.state.side.push(commit);
     this.takeDerived(h);
     const sealed = this.pendingSecrets.get(h);
-    if (sealed) { this.pendingSecrets.delete(h); this.takeSecret(h, sealed); }
+    if (sealed) { this.pendingSecrets.delete(h); this.takeSecret(h, sealed.sealed); }
     await this.chooseBranch();
     // Anything that was waiting for this one; hubs relay those too.
     for (const [key, pending] of [...this.pendingCommits]) if (key.startsWith(h + ":")) {
       this.pendingCommits.delete(key);
-      if (await this.receiveCommit(pending.from, pending.commit)) this.hooks.relay?.({ t: "group-commit", v: 2, g: this.id, commit: pending.commit as CommunityCommit });
+      if (await this.receiveCommit(pending.from, pending.commit)) this.hooks.relay?.({ t: "group-commit", v: 2, g: this.id, commit: pending.commit });
     }
     return true;
+  }
+
+  /** Is, or was on the branch I follow, the admin (and was not taken out since). */
+  private wasAdmin(key: string): boolean {
+    if (this.wasRemoved(key)) return false;
+    return this.admin === key || this.state.chain.some((c, i) => i === 0 ? c.by === key : c.k === "role" && c.s === key);
+  }
+
+  /** What waited longer than `pendingMs` goes (the oldest first: a Map keeps the order they came in). */
+  private dropStale(pending: Map<string, { at: number }>, now: number): void {
+    for (const [key, { at }] of pending) { if (now - at < COMMUNITY_LIMITS.pendingMs) break; pending.delete(key); }
   }
 
   /**
@@ -895,7 +926,16 @@ export class CommunitySession {
   /** A sealed secret for a known commit I am in the roster of: kept only when it confirms. */
   private takeSecret(h: string, sealed: unknown): boolean {
     const c = this.known.get(h);
-    if (!c) { if (isSealed(sealed) && this.pendingSecrets.size < 32) this.pendingSecrets.set(h, sealed); return false; }
+    if (!c) {
+      // Its commit is not here yet, so nothing says it is one: kept for a while, the oldest giving its place.
+      if (!HASH.test(h) || !isSealed(sealed)) return false;
+      const now = this.hooks.clock?.() ?? Date.now();
+      this.dropStale(this.pendingSecrets, now);
+      this.pendingSecrets.delete(h);
+      if (this.pendingSecrets.size >= COMMUNITY_LIMITS.pendingSecrets) this.pendingSecrets.delete(this.pendingSecrets.keys().next().value!);
+      this.pendingSecrets.set(h, { sealed, at: now });
+      return false;
+    }
     if (this.state.secrets[h] || !isSealed(sealed) || !rosterHas(this.rosterAt(h) ?? [], this.myKey)) return false;
     const secret = openSecret(this.identity.seed, this.myKey, sealed, secretAad(this.id, h, this.myKey));
     if (!secret || !confirmationMatches(epochKeys(secret, this.id, c.e).confirm, communityUntaggedHash(c), c.c)) return false;
@@ -938,6 +978,7 @@ export class CommunitySession {
     const draftBase = { v: 2 as const, g: this.id, e: parent.e + 1, p: parentHash, k: kind, by: this.myKey, ...fields, ts: now };
     const roster = communityRoster(this.roster, draftBase);
     if (!roster) throw new Error("This change is not allowed");
+    if (GROWS.has(kind) && this.state.chain.length + 1 + 2 * (roster.length - 1) > COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
     const draft: Omit<CommunityCommit, "sig" | "c"> = { ...draftBase, m: rosterHash(roster) };
     const untagged = communityUntaggedHash(draft);
     let secret: Uint8Array;
@@ -1461,7 +1502,11 @@ export class CommunitySession {
   }
 
   /** Something is missing here: the current epoch's secret, or the epoch of frames waiting. */
-  get needsCatchUp(): boolean { return this.isMember && (!this.state.secrets[this.topHash] || this.waiting.length > 0 || this.pendingCommits.size > 0); }
+  get needsCatchUp(): boolean {
+    if (!this.isMember) return false;
+    this.dropStale(this.pendingCommits, this.hooks.clock?.() ?? Date.now());
+    return !this.state.secrets[this.topHash] || this.waiting.length > 0 || this.pendingCommits.size > 0;
+  }
   /** Asks a member I have an edge to for what I lack (the engine calls it now and then while `needsCatchUp`). */
   catchUp(to: string): void { this.ask(to); }
 

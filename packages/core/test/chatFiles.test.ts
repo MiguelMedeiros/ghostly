@@ -657,6 +657,70 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.b.sent.filter((f) => f.t === "pf-accept").map((f) => f.offset)).toEqual([0, 5 * FILE_LIMITS.chunkBytes]);
   });
 
+  /**
+   * A sender facing a receiver that is not the app: it confirms every byte, and answers each `pf-sum` with
+   * `pf-accept {offset: 0}` instead of `pf-done`, `laps` times at most.
+   */
+  function rewound(size: number, laps: number, resend?: ChatFilesHost["resend"]) {
+    const seen = { data: 0, sums: 0, aborts: 0, record: undefined as FileTransferRecord | undefined };
+    const src = source(size);
+    const files: ChatFiles = new ChatFiles({
+      send: (frame) => {
+        const answer = (reply: Record<string, unknown>) => setImmediate(() => void files.handle({ ...reply, id: frame.id }));
+        if (frame.t === "pf-offer") answer({ t: "pf-accept", offset: 0 });
+        else if (frame.t === "pf-data") { const bytes = Buffer.from(frame.data as string, "base64url").length; seen.data += bytes; answer({ t: "pf-got", offset: (frame.offset as number) + bytes }); }
+        else if (frame.t === "pf-sum") { if (++seen.sums <= laps) answer({ t: "pf-accept", offset: 0 }); }
+        else if (frame.t === "pf-abort") seen.aborts++;
+        return true;
+      },
+      decide: async () => "accept",
+      openTarget: async () => { throw new Error("nothing is received here"); },
+      openSource: async () => src,
+      changed: (record) => { seen.record = record; },
+      ...(resend && { resend }),
+    });
+    files.attach();
+    return { files, seen };
+  }
+
+  it("a receiver that asks for a file from the start again and again is sent a bounded part of it again, then the sender ends it", async () => {
+    const limits = FILE_LIMITS as { -readonly [K in keyof typeof FILE_LIMITS]: number }, before = limits.resendBytes;
+    limits.resendBytes = 2 * FILE_LIMITS.chunkBytes;
+    try {
+      const size = 8 * FILE_LIMITS.chunkBytes, { files, seen } = rewound(size, 50);
+      files.offer(file("rewind-0001", size));
+      await until(() => seen.record && seen.record.state !== "active" && seen.record.state !== "verifying" && seen.record.state !== "offered" && seen.record.state !== "queued" || seen.sums > 50);
+      // The file once, then twice its size and `resendBytes` again: nothing after that, and the receiver hears it ended.
+      expect(seen.data).toBe(3 * size + limits.resendBytes);
+      expect(seen.record).toMatchObject({ state: "failed", error: "Your contact asked for the same part of this file too many times" });
+      expect(seen.aborts).toBe(1);
+      expect(files.sent("rewind-0001")).toBe(seen.data);
+    } finally { limits.resendBytes = before; }
+  });
+
+  it("a host with a budget for what it sends is asked before a part goes again, and its no ends the transfer", async () => {
+    const size = 8 * FILE_LIMITS.chunkBytes, asked: number[] = [];
+    // One lap again is fine with this host; the next byte is not.
+    const { files, seen } = rewound(size, 50, (record, sent) => { asked.push(sent); return record.id === "budget-0001" && sent <= 2 * size; });
+    files.offer(file("budget-0001", size));
+    await until(() => seen.record?.state === "failed" || seen.sums > 50);
+    expect(seen.data).toBe(2 * size);
+    expect(seen.record?.state).toBe("failed");
+    expect(seen.aborts).toBe(1);
+    // Never asked within the file's size: an ordinary transfer does not pass through the host's budget.
+    expect(Math.min(...asked)).toBe(size + FILE_LIMITS.chunkBytes);
+  });
+
+  it("a receiver that asks for an earlier part a few times (a restart, a drop) still gets the whole file", async () => {
+    const size = 8 * FILE_LIMITS.chunkBytes, { files, seen } = rewound(size, 2);
+    files.offer(file("again-0001", size));
+    await until(() => seen.sums === 3);
+    await files.handle({ t: "pf-done", id: "again-0001" });
+    expect(seen.record?.state).toBe("done");
+    expect(files.sent("again-0001")).toBe(3 * size);
+    expect(seen.aborts).toBe(0);
+  });
+
   it("the last frames lost with nothing after them: the sender offers again after a quiet spell", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let lose = true;

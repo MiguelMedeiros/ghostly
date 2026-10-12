@@ -805,6 +805,18 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   display: none;
 }
 
+/* A second name for a chapter (/#story): an empty mark at its top. */
+.scene-alias {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+/* A link to a chapter that fades in as it pins (/#invite) lands inside it, where its picture and copy are there
+   (--scene-arrive, SceneFrame.tsx): at its first pixel, and the nav's height before it, the screen has no words. */
+html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) :is(.scene[data-seams="true"], .scene[data-seams="true"] > .scene-alias) {
+  scroll-margin-top: calc(-1 * (var(--nav-h) + 16px) - var(--scene-arrive, 0px));
+}
+
 /* The copy sits over the picture on a soft wash that runs the full height of
    the stage and fades before it reaches the actors, so it never has an edge. */
 .scene-wash {

@@ -168,3 +168,21 @@ describe("HTTPS only", () => {
     expect(read("apps/website/next.config.ts")).toMatch(/key: "Strict-Transport-Security", value: "max-age=31536000"/);
   });
 });
+
+describe("the web app's window", () => {
+  // A page of another site that opened the app would keep a handle to its window, and could set its address again and
+  // again (an invite link each time) without a reload. The header cuts that handle; `-allow-popups` keeps the windows
+  // the app opens itself (a sign-in). The sign-in's return page is opened by the provider inside such a window, which
+  // the app closes afterwards, so it stays without the header.
+  const locations = [...read("apps/web/nginx.conf").matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)].map((m) => ({ match: m[1]!, body: m[2]! }));
+  const opener = (match: string) => /add_header Cross-Origin-Opener-Policy "([^"]+)" always;/.exec(locations.find((l) => l.match === match)!.body)?.[1];
+
+  it("the app's pages cut the handle of a site that opened them, and keep the app's own popups", () => {
+    expect(opener("/")).toBe("same-origin-allow-popups");
+  });
+
+  it("the sign-in's return page keeps the popup's ties and every other header", () => {
+    expect(opener("= /oidc-callback.html")).toBeUndefined();
+    expect(locations.find((l) => l.match === "= /oidc-callback.html")!.body).toContain("include /etc/nginx/ghostly-headers.conf;");
+  });
+});

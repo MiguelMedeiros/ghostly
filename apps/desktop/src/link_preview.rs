@@ -153,6 +153,19 @@ fn allowed(url: &reqwest::Url) -> Result<(), String> {
     }
 }
 
+/// Whether a redirect to `next` is followed, after `previous` (the link asked, then each hop so far): few, each one
+/// allowed as the link itself, and a link asked over HTTPS never goes on over plain HTTP (a Lightning address is
+/// asked this way too, apps/ui/src/desktop/lnurlFetch.ts).
+fn follows(previous: &[reqwest::Url], next: &reqwest::Url) -> Result<(), String> {
+    if previous.len() >= MAX_REDIRECTS {
+        return Err("Too many redirects".into());
+    }
+    if previous.iter().any(|hop| hop.scheme() == "https") && next.scheme() != "https" {
+        return Err("A redirect from HTTPS to plain HTTP is not followed".into());
+    }
+    allowed(next)
+}
+
 fn client() -> Result<&'static reqwest::Client, String> {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     if let Some(client) = CLIENT.get() {
@@ -160,12 +173,9 @@ fn client() -> Result<&'static reqwest::Client, String> {
     }
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= MAX_REDIRECTS {
-                attempt.error("Too many redirects")
-            } else if let Err(reason) = allowed(attempt.url()) {
-                attempt.error(reason)
-            } else {
-                attempt.follow()
+            match follows(attempt.previous(), attempt.url()) {
+                Ok(()) => attempt.follow(),
+                Err(reason) => attempt.error(reason),
             }
         }))
         .dns_resolver(PublicOnly)
@@ -307,6 +317,34 @@ mod tests {
         for url in ["https://example.com/a?b=c", "http://93.184.215.14/"] {
             assert!(allowed(&reqwest::Url::parse(url).unwrap()).is_ok(), "{url}");
         }
+    }
+
+    #[test]
+    fn a_redirect_is_checked_before_it_is_followed() {
+        let url = |text: &str| reqwest::Url::parse(text).unwrap();
+        let asked = [url("https://example.com/a")];
+        assert!(follows(&asked, &url("https://other.example.net/b")).is_ok());
+        for refused in [
+            "http://other.example.net/b",
+            "https://192.168.0.1/b",
+            "https://localhost/b",
+            "https://other.example.net:8443/b",
+            "https://user:pw@other.example.net/b",
+        ] {
+            assert!(follows(&asked, &url(refused)).is_err(), "{refused}");
+        }
+        // A link asked over plain HTTP may go up to HTTPS, and then not back down.
+        let plain = [url("http://example.com/a")];
+        assert!(follows(&plain, &url("http://www.example.com/a")).is_ok());
+        assert!(follows(&plain, &url("https://www.example.com/a")).is_ok());
+        let up = [
+            url("http://example.com/a"),
+            url("https://www.example.com/a"),
+        ];
+        assert!(follows(&up, &url("http://www.example.com/b")).is_err());
+        let many = vec![url("https://example.com/a"); MAX_REDIRECTS];
+        assert!(follows(&many, &url("https://example.com/b")).is_err());
+        assert!(follows(&many[1..], &url("https://example.com/b")).is_ok());
     }
 
     #[tokio::test]

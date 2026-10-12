@@ -5,8 +5,19 @@
   "deleteAllChats": "Eliminar todos los chats",
   "deleteChat": "Eliminar chat",
   "folder": {
+    "create": "Crear",
+    "delete": "Eliminar carpeta",
+    "deleteBody": "Sus chats no se eliminan. Vuelven a la lista, sin carpeta.",
+    "deleteTitle": "¿Eliminar la carpeta “{{name}}”?",
     "empty": "Aún no hay chats en esta carpeta",
+    "move": "Mover a una carpeta…",
+    "nameLabel": "Nombre de la carpeta",
+    "new": "Nueva carpeta…",
+    "newTitle": "Nueva carpeta",
+    "none": "Sin carpeta",
+    "options": "Opciones de la carpeta {{name}}",
     "others": "Otros chats",
+    "rename": "Cambiar nombre de la carpeta",
     "unreadCount": "{{count}} sin leer en {{name}}",
     "unreadOne": "1 sin leer en {{name}}"
   },
@@ -28,6 +39,8 @@
   "newMenu": {
     "chat": "Chat",
     "chatHint": "Una persona, con una invitación",
+    "folder": "Carpeta",
+    "folderHint": "Una sección de tu lista de chats",
     "group": "Grupo",
     "groupHint": "Un enlace que cualquiera puede abrir",
     "label": "Crear un grupo o un chat"

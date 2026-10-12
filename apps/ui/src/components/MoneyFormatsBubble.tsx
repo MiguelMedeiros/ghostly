@@ -14,6 +14,8 @@ import { useI18n } from "../contexts/I18nContext";
 import { moneyLabel, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { OpenInWallet } from "./OpenInWallet";
+import { MoneyCopyRefused } from "./MoneyCopy";
+import { useMoneyCopy } from "../hooks/useMoneyCopy";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
@@ -55,18 +57,6 @@ export function MoneyNetworkTag({ network, chain }: { network?: WalletNetwork; c
       {test && chain && <span className="font-normal opacity-80">· {chain}</span>}
     </span>
   );
-}
-
-function useCopy(value: string) {
-  const [copied, setCopied] = useState(false);
-  return {
-    copied,
-    copy: async () => {
-      await navigator.clipboard.writeText(value).catch(() => {});
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    },
-  };
 }
 
 function Shell({ label, network, chain, amount, testId, lines, detail, qr, children }: {
@@ -227,7 +217,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
   const state = wallet?.getState() ?? null;
   const view = networkView(state, request.network), other = networkView(state, request.network === "mainnet" ? "testnet" : "mainnet");
   const bitcoin = view?.bitcoin;
-  const { copied, copy } = useCopy(request.address);
+  const { copied, failed, copy } = useMoneyCopy(request.address);
   const chainName = request.chain === "regtest" ? "regtest" : request.chain === "testnet" ? "testnet / signet" : undefined;
   const payable = !!wallet && !mine && !off && !request.unsupported;
   let status: React.ReactNode = null;
@@ -260,6 +250,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
         {status}
         <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
         <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={request.uri ?? `bitcoin:${request.address}`} title={t("payments.formats.openBitcoinTitle")} testId="onchain-open-wallet">{t("payments.invoice.openWallet")}</OpenInWallet>
+        {failed && <MoneyCopyRefused value={request.address} />}
       </Shell>
       {lightning && (
         <div className="mt-2" data-testid="onchain-lightning">
@@ -273,7 +264,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
 
 function Bolt12Card({ offer }: { offer: Bolt12Offer }) {
   const { t } = useI18n();
-  const { copied, copy } = useCopy(offer.offer);
+  const { copied, failed, copy } = useMoneyCopy(offer.offer);
   const chain = offer.network === "testnet" && offer.chain !== "other" ? offer.chain : undefined;
   const amount = offer.amountSat !== undefined
     ? <Amount sats={offer.amountSat} network={offer.network} />
@@ -289,6 +280,7 @@ function Bolt12Card({ offer }: { offer: Bolt12Offer }) {
     >
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyOffer")}</button>
       <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={`lightning:${offer.offer}`} title={t("payments.invoice.openTitle")} testId="bolt12-open-wallet">{t("payments.invoice.openWallet")}</OpenInWallet>
+      {failed && <MoneyCopyRefused value={offer.offer} />}
     </Shell>
   );
 }
@@ -300,7 +292,7 @@ function ArkCard({ request, mine, off }: { request: ArkRequest; mine: boolean; o
   const rail = request.kind;
   const view = networkView(state, request.network), other = networkView(state, request.network === "mainnet" ? "testnet" : "mainnet");
   const ark = rail === "arkade" ? view?.ark : view?.bark;
-  const { copied, copy } = useCopy(request.address);
+  const { copied, failed, copy } = useMoneyCopy(request.address);
   const uri = request.uri ?? `bitcoin:?ark=${request.address}`;
   let status: React.ReactNode = null;
   if (wallet && !mine && !off) {
@@ -329,6 +321,7 @@ function ArkCard({ request, mine, off }: { request: ArkRequest; mine: boolean; o
     >
       {status}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
+      {failed && <MoneyCopyRefused value={request.address} />}
     </Shell>
   );
 }
@@ -338,7 +331,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
   const wallet = useServicesPlatform()?.wallet;
   const state = wallet?.getState() ?? null;
   const chain = request.chainId !== undefined ? USDT_CHAINS[request.chainId]?.name ?? t("payments.formats.chainId", { id: request.chainId }) : undefined;
-  const { copied, copy } = useCopy(request.recipient);
+  const { copied, failed, copy } = useMoneyCopy(request.recipient);
   const network = request.network;
   const view = network ? networkView(state, network) : undefined, other = network ? networkView(state, network === "mainnet" ? "testnet" : "mainnet") : undefined;
   const usdt = view?.usdt;
@@ -380,6 +373,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
     >
       {status}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
+      {failed && <MoneyCopyRefused value={request.recipient} />}
     </Shell>
   );
 }

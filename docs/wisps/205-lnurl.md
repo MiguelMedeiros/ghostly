@@ -30,7 +30,13 @@ the person runs (or a custodian's); Ghostly does not provide one, and this draft
   that server learns that this client is about to pay. The client says which domain, and fetches only when the
   person asks. The fetch carries no credentials and no referrer.
 - **Transport.** HTTPS only. Plain HTTP is accepted for a `.onion` host and for a server on the client's own
-  machine (tests); a URL with credentials is refused, and so is a redirect to anything else.
+  machine (tests); a URL with credentials is refused, and so is a redirect to anything else. A redirect is
+  checked before it is followed, never after: at most 5 in a row, and one that leaves the host that was asked
+  goes on only over HTTPS to a public address (not this machine, a name of the local network, a private or
+  reserved IP address). A client that resolves names itself also refuses a name with any address that is not
+  public (Ghostly Desktop asks a redirecting service from Rust for this). A page's `fetch` cannot read where a
+  redirect leads (the answer is opaque: no status, no `Location`), so the web app and the browser extension
+  refuse a service that redirects.
 - **The `payRequest` is checked field by field**: `tag`, an acceptable `callback`, integer `minSendable ≤
   maxSendable` in millisats (amounts below one whole sat are refused: the client pays whole sats), `metadata`
   that is a JSON array of `[type, value]` pairs with a `text/plain` entry, and, for an address, a

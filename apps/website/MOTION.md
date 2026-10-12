@@ -163,6 +163,9 @@ watches:
 - Pause on hover and on keyboard focus; after a click on a control, hold the
   chosen state for 12 s, then resume.
 - Only run while at least half of the element is on screen.
+- A loop keeps one size through its phases and scenarios, at every width: nothing
+  outside it moves while it plays (the negotiation loop lays every scenario's
+  finished frame, unseen, in the cell the playing one is drawn in).
 - The wallet deck on the home is the app's own deck (`components/app/`, synced,
   never edited here); it keeps the app's springs. The site only deals its
   cards every 3.8 s while nobody is pointing at it.

@@ -40,6 +40,8 @@ use serde::Serialize;
 use tokio::sync::OnceCell;
 use url::Url;
 
+use crate::pkarr_network::read_body;
+
 /// How long each source has to answer a read or a put.
 const SOURCE_TIMEOUT: Duration = Duration::from_secs(8);
 /// How long a read or a put waits for the turn's node to join the DHT. Measured on the public DHT
@@ -285,8 +287,8 @@ async fn read_relay(
             {
                 return silent(source, "body too large");
             }
-            match response.bytes().await {
-                Ok(bytes) if bytes.len() <= MAX_BODY => SourceAnswer {
+            match read_body(&mut response, MAX_BODY).await {
+                Ok(Some(bytes)) => SourceAnswer {
                     source,
                     answered: true,
                     payloads: vec![URL_SAFE_NO_PAD.encode(&bytes)],
@@ -294,7 +296,7 @@ async fn read_relay(
                     stale,
                     detail: None,
                 },
-                Ok(_) => silent(source, "body too large"),
+                Ok(None) => silent(source, "body too large"),
                 Err(e) => silent(source, e.to_string()),
             }
         }
@@ -1002,5 +1004,29 @@ mod tests {
         let answers = read(&private.turn_sources(), &set.key(), None).await;
         assert_eq!(answers.len(), 1);
         assert_eq!(answers[0].source, relay.url);
+    }
+
+    #[tokio::test]
+    async fn a_relays_answer_is_given_up_on_once_it_is_too_large() {
+        // No length named and no end: read as far as one byte past the cap, not for as long as the source has.
+        let endless = crate::test_support::endless_relay().await;
+        let http = reqwest::Client::new();
+        let key = Set::new().key();
+        let started = std::time::Instant::now();
+        let within = Duration::from_secs(3);
+        let answer = read_relay(&http, &endless.url.parse().unwrap(), &key, within).await;
+        assert!(!answer.answered && answer.payloads.is_empty());
+        assert_eq!(answer.detail.as_deref(), Some("body too large"));
+        assert!(started.elapsed() < Duration::from_millis(1500));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let sent = endless.sent.load(Ordering::SeqCst);
+        assert!(sent > MAX_BODY && sent <= 16 * MAX_BODY, "sent {sent}");
+
+        // A length that says so is refused before any of it is read, as before.
+        let relay = pkarr_relay().await;
+        let large = vec![0u8; MAX_BODY + 1];
+        relay.packets.lock().unwrap().insert(key.to_z32(), large);
+        let answer = read_relay(&http, &relay.url.parse().unwrap(), &key, within).await;
+        assert_eq!(answer.detail.as_deref(), Some("body too large"));
     }
 }

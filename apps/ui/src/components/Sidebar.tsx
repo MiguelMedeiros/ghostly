@@ -4,7 +4,9 @@ import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { ChatRow, GroupRow } from "./ChatRow";
 import { ChatFolderHeader } from "./ChatFolderHeader";
-import { folderChatsId, setFolderFolded, useChatFolders } from "../lib/chatFolders";
+import { createFolder, folderChatsId, movePinnedBeside, setChatFolder, setFolderFolded, useChatFolders } from "../lib/chatFolders";
+import { FolderNameDialog } from "./chat/ChatFolderDialogs";
+import { FolderIcon } from "./chat/ChatFolderMenu";
 import { groupChat } from "../lib/chatMute";
 import { formatListTime } from "../lib/chatList";
 import { foldText } from "../lib/chatSearch";
@@ -31,7 +33,6 @@ import {
   listSessions,
   isSessionPinned,
   setSessionPinned,
-  movePinnedTo,
   deleteSession,
   getUnreadCount,
   markSessionAsRead,
@@ -91,6 +92,7 @@ export function Sidebar() {
   const [search, setSearch] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
+  const [showNewFolder, setShowNewFolder] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
@@ -218,9 +220,9 @@ export function Sidebar() {
   const looseGroups = shownGroups.filter(g => folderOfGroup(g) === undefined);
   const loose = filtered.filter(s => !filed(s.id));
   // The pinned chats are put in order by dragging one among the others; a search shows only some of them, so not then.
-  // Those in a folder keep their order from the chat's menu: a drag stays among the rows of one parent.
+  // Those in a folder are put in order from the chat's menu: a drag stays among the rows of one parent.
   const pinnedIds = pinnedRows(search ? [] : loose);
-  const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedTo });
+  const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedBeside });
 
   const groupRow = (group: (typeof groups)[number]) => (
     <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }} />
@@ -296,6 +298,9 @@ export function Sidebar() {
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>}>
                 {t("sidebar.newMenu.group")}
               </MenuItem>
+              <MenuItem testId="new-folder" onClick={() => { closeNewMenu(); setShowNewFolder(true); }} hint={t("sidebar.newMenu.folderHint")} icon={<FolderIcon />}>
+                {t("sidebar.newMenu.folder")}
+              </MenuItem>
             </Menu>
           </div>
           <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V6a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H9l-5 3v-6 M2 12h12 M10 8l4 4-4 4"/></svg><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
@@ -307,6 +312,7 @@ export function Sidebar() {
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
       <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />
       {showNewGroup && <NewGroupDialog returnFocus={newMoreRef} onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
+      {showNewFolder && <FolderNameDialog returnFocus={newMoreRef} onClose={() => setShowNewFolder(false)} onSave={name => { createFolder(name); setShowNewFolder(false); setSearch(""); }} />}
       {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); nav.conversation(chatPath(ensureSession(keys))); refreshSessions();}}
         onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
         onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
@@ -340,12 +346,12 @@ export function Sidebar() {
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
-        {shownFolders.map(folder => {
+        {shownFolders.map((folder, index) => {
           const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
           const itsChats = filtered.filter(s => folderOf(s.id) === folder.id);
           return (
             <div key={folder.id} role="group" aria-label={folder.name} data-testid="chat-folder-section">
-              <ChatFolderHeader folder={folder} sessions={itsChats.filter(s => s.id !== activeSessionId)} groups={itsGroups.filter(g => g.id !== activeGroupId)}
+              <ChatFolderHeader folder={folder} sessions={itsChats.filter(s => s.id !== activeSessionId)} groups={itsGroups.filter(g => g.id !== activeGroupId)} place={{ index, count: shownFolders.length }}
                 onToggle={() => setFolderFolded(folder.id, !folder.folded)} />
               {!folder.folded && <div id={folderChatsId(folder.id)} data-testid="chat-folder-chats">
                 {itsGroups.map(groupRow)}
@@ -392,7 +398,7 @@ export function Sidebar() {
       {confirmDeleteId && <DeleteChatDialog
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
-        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar />}
 
       {/* Resize Handle */}

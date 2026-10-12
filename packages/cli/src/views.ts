@@ -27,7 +27,10 @@ export interface ChatJson {
   /** How far the first pairing got (publishing, waiting, resolving, on-dht, live, …), while it is under way. */
   stage: string | null;
   verified: boolean;
-  /** The invite this side made for the chat, while it waits for the contact. */
+  /**
+   * The invite this side made for the chat, while it waits for the contact: `<hidden>` unless asked for
+   * (`--show-secret`), since whoever reads the code can take the chat. Null once the chat is paired, or without one.
+   */
   invite: string | null;
   /** A chat of the older protocol (WISP 402). */
   compatibility: boolean;
@@ -46,7 +49,7 @@ export function isLive(link: LinkView): boolean {
   return !link.profile || (link.pairing?.status === "ready" && !!link.pairing.transport);
 }
 
-export function chatJson(link: LinkView): ChatJson {
+export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
   const label = link.label?.trim() || null;
   const peerName = link.peerNick?.trim() || null;
   const live = isLive(link);
@@ -64,16 +67,16 @@ export function chatJson(link: LinkView): ChatJson {
     pairing: link.pairing?.status ?? null,
     stage: link.pairingProgress?.stage ?? null,
     verified: !!link.peerVerified,
-    invite: link.pairing?.status === "ready" ? null : link.inviteCode ?? null,
+    invite: link.pairing?.status === "ready" || !link.inviteCode ? null : showSecret === true ? link.inviteCode : "<hidden>",
     compatibility: !link.profile,
     peerPicture: !!link.peerAvatar,
   };
 }
 
 /** A chat's details: the summary plus what its connection panel shows. */
-export function chatDetailsJson(link: LinkView) {
+export function chatDetailsJson(link: LinkView, showSecret?: boolean) {
   return {
-    ...chatJson(link),
+    ...chatJson(link, showSecret),
     progress: link.pairingProgress ?? null,
     transports: { mine: link.availableTransports ?? [], peer: link.peerTransports ?? [], preferred: link.preferredTransport ?? null, fallback: link.transportFallback ?? null, automatic: link.transportAutomatic ?? null, relayed: link.relayedTransports ?? [] },
     wait: link.transportWait ?? null,

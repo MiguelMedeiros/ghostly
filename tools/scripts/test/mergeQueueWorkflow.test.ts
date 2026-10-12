@@ -31,6 +31,7 @@ describe("merge-queue.yml wakes the train", () => {
     expect(wakes({ event_name: "schedule", event: {} })).toBe(true);
     expect(wakes({ event_name: "workflow_dispatch", event: {} })).toBe(true);
     expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue" } } })).toBe(true);
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:priority" } } })).toBe(true);
     expect(wakes(ci("success"))).toBe(true);
     expect(wakes(ci("failure"))).toBe(true);
   });
@@ -41,8 +42,14 @@ describe("merge-queue.yml wakes the train", () => {
     expect(wakes(ci("cancelled"))).toBe(false);
   });
 
+  it("not for the labels the train puts on a pull request it drops from the line", () => {
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:conflict" } } })).toBe(false);
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:failed" } } })).toBe(false);
+  });
+
   it("not for another label or CI on a push", () => {
     expect(wakes({ event_name: "pull_request_target", event: { label: { name: "kind:bug" } } })).toBe(false);
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queued" } } })).toBe(false);
     expect(wakes(ci("success", "push"))).toBe(false);
   });
 });

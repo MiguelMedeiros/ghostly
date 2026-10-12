@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 const NAME = /^(\d{4}-\d\d-\d\d)-[a-z0-9][a-z0-9.-]*\.md$/;
 const REVISION = /^\d+(?:\.\d+)+$/;
 
-/** One change file: its date (from the name), its revision number if it has one, and its text (one paragraph). */
+/** One change file: its date (from the name), its revision number if it has one, and its text (one paragraph) as the WISP shows it. */
 export function parseChange(stem, name, text) {
   const where = `docs/wisps/changes/${stem}/${name}`;
   const date = name.match(NAME)?.[1];
@@ -24,7 +24,9 @@ export function parseChange(stem, name, text) {
       revision = value;
     }
   }
-  body = body.trim().replace(/\s*\n\s*/g, " ");
+  // The file sits two folders below its WISP and its text is pasted into the WISP's copy: a relative link written
+  // from the file (../../503-group-files.md, right on GitHub) is published from the WISP (503-group-files.md).
+  body = body.trim().replace(/\s*\n\s*/g, " ").replaceAll("](../../", "](");
   if (!body) throw new Error(`${where}: no text`);
   if (body.startsWith("- ") || body.startsWith("#")) throw new Error(`${where}: one paragraph of text, not a list or a heading`);
   return { date, revision, text: body, name };

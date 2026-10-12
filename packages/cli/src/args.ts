@@ -89,16 +89,23 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
 
 /** The global option a word names (`--profile`, `--profile=bot`, `-p`), else undefined. */
 export function globalOption(arg: string): OptionSpec | undefined {
+  const name = globalName(arg);
+  return name ? GLOBAL_OPTIONS[name] : undefined;
+}
+
+/** The name of the global option a word names (`profile` for `-p`), else undefined. */
+function globalName(arg: string): string | undefined {
   const eq = arg.indexOf("=");
   const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : arg.length === 2 && arg.startsWith("-") ? Object.entries(GLOBAL_OPTIONS).find(([, o]) => o.short === arg.slice(1))?.[0] : undefined;
-  return name && Object.hasOwn(GLOBAL_OPTIONS, name) ? GLOBAL_OPTIONS[name] : undefined;
+  return name && Object.hasOwn(GLOBAL_OPTIONS, name) ? name : undefined;
 }
 
 /**
  * Global options given before the command (`ghostly --profile bot send …`) move after it, where every command's
  * parser reads them. Stops at `--` and at the first word that is not a global option. They go before the first word
  * after the command's that starts with a dash (its first option, or the `--` that ends them), else at the end: never
- * between an option and its value, which may itself be `--` (`--pretty profile set --name --`).
+ * between an option and its value, which may itself be `--` (`--pretty profile set --name --`). One that takes a value
+ * and is the last word has none: a usage error.
  */
 export function liftGlobals(argv: readonly string[]): string[] {
   const lifted: string[] = [];
@@ -109,6 +116,8 @@ export function liftGlobals(argv: readonly string[]): string[] {
     const option = globalOption(arg);
     if (!option || arg === "--") break;
     const takesValue = option.type !== "boolean" && eq === -1;
+    // `ghostly -p` alone: a usage error, as `ghostly send -p` is, not the help a line of global options alone shows.
+    if (takesValue && i + 1 >= argv.length) throw new CliError("usage", `--${globalName(arg)} needs a value`);
     lifted.push(...argv.slice(i, i + (takesValue ? 2 : 1)));
     i += takesValue ? 2 : 1;
   }

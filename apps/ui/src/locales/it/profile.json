@@ -11,7 +11,7 @@
     "content": {
       "everything": "Tutto",
       "everythingSize": "File: {{size}}",
-      "info": "Il leggero tiene le chat e tutti i messaggi, i contatti, i gruppi, le identità, i portafogli e le impostazioni. Lascia fuori i file oltre 1 MB; i messaggi vocali fino a 4 MB restano. Dopo un ripristino, ogni file lasciato fuori appare come Non è in questo backup.",
+      "info": "Il leggero lascia fuori i file oltre 1 MB; i messaggi vocali fino a 4 MB restano. Dopo un ripristino, ogni file mancante appare come Non è in questo backup.",
       "label": "Contenuto",
       "leftOut": "I file oltre 1 MB sono stati lasciati fuori ({{size}}).",
       "light": "Leggero",
@@ -21,7 +21,7 @@
     "downloaded": "Scaricato {{name}} · {{size}}",
     "emptyFile": "Questo file è vuoto. Scegli un file di backup.",
     "fromFile": "File",
-    "holds": "Contiene: chat e relative chiavi, messaggi, file di qualsiasi dimensione, portafogli, servizi condivisi e impostazioni. Non contiene: le chiavi dello storage S3, l'iscrizione alle notifiche di questo dispositivo, i file ancora in arrivo e i dati locali dei portafogli Bark, Spark e Fedimint, che tornano con la loro frase di recupero (la frase è nel backup).",
+    "holds": "Tutto tranne le chiavi S3, l'iscrizione alle notifiche di questo dispositivo e i file ancora in arrivo. I portafogli Bark, Spark e Fedimint tornano con la loro frase di recupero, che è nel backup.",
     "keepOne": "L'originale è ancora qui? Usane solo uno: condividono i portafogli.",
     "list": "Elenca",
     "noneYet": "Ancora nessuno.",
@@ -80,7 +80,7 @@
       "copy": "Ripristina comunque come copia",
       "firstProfile": "Il primo profilo non si può eliminare. Per sostituirlo, cancella i suoi dati in Impostazioni.",
       "hint": "Entrambi agirebbero come la stessa persona per i tuoi contatti. Sostituisci l'originale, o non usarli tutti e due.",
-      "info": "Una copia ripristinata mantiene le chiavi di chat dell'originale. Se sono attivi entrambi, rispondono agli stessi contatti come una sola persona e si contendono le stesse connessioni, quindi i messaggi possono arrivare all'uno o all'altro. Sostituisci ripristina la copia, passa a quella e poi propone di eliminare l'originale con i soliti controlli: cosa contiene, prima un backup e il suo nome per confermare.",
+      "info": "Se sono attivi entrambi, i messaggi possono arrivare all'uno o all'altro. Sostituisci ripristina la copia, passa a quella e poi propone di eliminare l'originale, con i soliti controlli.",
       "replace": "Sostituisci l'originale",
       "title": "Questo backup è {{names}}, che è su questo dispositivo"
     },

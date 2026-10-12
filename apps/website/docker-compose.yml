@@ -6,7 +6,11 @@ services:
       context: ../..
       dockerfile: apps/website/Dockerfile
     ports:
-      - "${WEBSITE_PORT:-3000}:3000"
+      # Only this machine by default, as the web app's compose does. WEBSITE_PORT moves the port. A reverse proxy or a
+      # tunnel that reaches the site from another address needs WEBSITE_BIND with the address it comes to, e.g.
+      # WEBSITE_BIND=172.17.0.1:3000 for a proxy in another container (0.0.0.0:3000 opens it on every interface, and
+      # a port Docker publishes is not closed by ufw).
+      - "${WEBSITE_BIND:-127.0.0.1:${WEBSITE_PORT:-3000}}:3000"
     environment:
       - NODE_ENV=production
     restart: unless-stopped

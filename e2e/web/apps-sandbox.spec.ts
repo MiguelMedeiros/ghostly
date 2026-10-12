@@ -205,6 +205,31 @@ test("the broker answers 50 requests a second and refuses one over 64 KiB", {
   expect(await status(page, handle)).toEqual({ phase: "running", stopped: null });
 });
 
+test("an app that keeps sending far past the request rate is stopped, and the page stays smooth", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "evilpublisherkey/storm";
+  const handle = await open(page, ref, appEntry("storm"));
+  await expect.poll(() => status(page, handle), { timeout: 30_000 }).toEqual({ phase: "stopped", stopped: "protocol" });
+  await expect(page.locator("iframe")).toHaveCount(0);
+  // Only the first second's 50 reached the host, and the page's timers run on time once the app is gone.
+  const calls = await page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.calls());
+  expect(calls.filter((c) => c.ref === ref && c.op === "storage.get").length).toBeLessThanOrEqual(50);
+  const gap = await page.evaluate(() => new Promise<number>((done) => {
+    let longest = 0;
+    let last = performance.now();
+    const started = last;
+    const timer = setInterval(() => {
+      const now = performance.now();
+      longest = Math.max(longest, now - last);
+      last = now;
+      if (now - started > 2_000) { clearInterval(timer); done(longest); }
+    }, 10);
+  }));
+  expect(gap).toBeLessThan(500);
+});
+
 test("an app in a chat talks to its contact's app through the broker, and keeps its data in that chat", {
   tag: ["@feature:apps.web-sandbox"],
 }, async ({ page }) => {

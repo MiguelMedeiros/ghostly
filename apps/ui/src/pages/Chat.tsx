@@ -76,6 +76,8 @@ import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
+import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMenu";
+import { setChatFolder } from "../lib/chatFolders";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useWakeCall } from "../hooks/useWakeCall";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
@@ -420,6 +422,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
+  const [showFolders, setShowFolders] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
@@ -580,6 +583,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const handleDelete = () => {
     if (confirmDelete) {
       deleteSession(params.sessionId);
+      setChatFolder(params.sessionId, undefined);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));
       nav.home();
@@ -782,6 +786,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               </MenuItem>
               <PinMoveItems chat={sessionId} onMoved={place => { announcePinMove(place); closeMenu(); }} />
               <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
+              <FolderMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowFolders(true); }} />
               <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
               {/* Until the contact's session is ready, not just while the card is up: the card goes as soon as the
                   contact arrives, and this stays the way to copy the invite again until the chat is live. */}
@@ -832,6 +837,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               </MenuItem>
             </Menu>
             <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
+            <ChatFolderMenu chat={sessionId} open={showFolders} onClose={() => setShowFolders(false)} anchorRef={menuRef} returnFocus={optionsRef} />
           </div>
         </div>
       </div>

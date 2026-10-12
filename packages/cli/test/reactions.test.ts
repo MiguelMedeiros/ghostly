@@ -48,6 +48,19 @@ describe("react", () => {
   });
 });
 
+describe("react on a group", () => {
+  it("says it is a group and how to react there; a name nothing has is still no chat", async () => {
+    const { ctx, node } = fake();
+    for (const ref of ["Crew", "g1", "crew"]) {
+      await expect(callApi(ctx, "chat.react", { chat: ref, message: "k:0:1", emoji: "👍" })).rejects.toMatchObject({
+        code: "not_found", message: `${JSON.stringify(ref)} is a group, not a chat: ghostly group react ${ref} <message> <emoji>`, details: { group: "g1" },
+      });
+    }
+    expect(node.react).not.toHaveBeenCalled();
+    await expect(callApi(ctx, "chat.react", { chat: "Nobody", message: "x", emoji: "👍" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody"' });
+  });
+});
+
 describe("reactions on a message", () => {
   const message = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "c1", id: "me_r", text: "ship it", sender: "me", timestamp: 1, via: "datalink", ...fields });
 

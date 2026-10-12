@@ -35,7 +35,7 @@ export function mayPinIn(group: GroupView | undefined): boolean {
   return !!group?.myKey && group.status === "active" && mayPin(group.profile, group.myKey, group.members.find(m => m.role === "admin")?.key);
 }
 
-/** The row a pin names, when it is here: the row of that id (a group's), or of `peer_`/`me_` and that id, or any other. */
+/** The row a pin names, when it is here: the row of that id (a group's), or of `peer_`/`me_` and that id, or any other of a chat's. */
 export async function pinnedRow(host: PinsHost, chat: string, id: string): Promise<StoredMessage | undefined> {
   if (!id) return undefined;
   const group = isGroup(chat);
@@ -44,6 +44,8 @@ export async function pinnedRow(host: PinsHost, chat: string, id: string): Promi
       const row = await host.message(chat, rowId);
       if (row && replyRef(row, group) === id) return row;
     }
+    // In a group there is no other: a row that takes a pin goes by its own id there, and a long group is not read whole.
+    if (group) return undefined;
   }
   return reactionTarget(await host.messages(chat), id, group);
 }

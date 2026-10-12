@@ -42,7 +42,7 @@ const text = (n: number, lines = false) => Array.from({ length: n }, (_, i) => (
 const LONG_PATH = `data/${"p".repeat(APP_BUNDLE_LIMITS.pathBytes - "data/".length - ".json".length)}.json`;
 
 function limitFiles(): FileInput[] {
-  const files: FileInput[] = [ENTRY, file("icon.png", png(256, 256, APP_BUNDLE_LIMITS.iconBytes)), file(LONG_PATH, "{}")];
+  const files: FileInput[] = [ENTRY, file("icon.png", png(APP_BUNDLE_LIMITS.iconEdge, APP_BUNDLE_LIMITS.iconEdge, APP_BUNDLE_LIMITS.iconBytes)), file(LONG_PATH, "{}")];
   for (let i = 1; i <= APP_BUNDLE_LIMITS.screenshots; i++) files.push(file(`screenshots/${i}.png`, SCREENSHOT));
   for (let i = files.length; i < APP_BUNDLE_LIMITS.files; i++) files.push(file(`data/level-${String(i).padStart(2, "0")}.json`, `{"level":${i}}`));
   return files;
@@ -83,7 +83,7 @@ async function build(): Promise<Vectors> {
     sources: [RAW, PINNED], proofs: [], homepage: "https://example.org/chess", support: "https://example.org/chess/issues", releaseNotes: "Castling fixed.",
     view: "full",
   }, [ENTRY, file("icon.png", ICON), file("screenshots/1.png", SCREENSHOT), file("screenshots/2.jpg", fill(32, 7)), file("data/openings.json", "[\"e4\",\"d4\"]")], publisher)).bytes);
-  addValid("every bound at its limit: 64 files, a 128-byte path, a 256 KiB icon, 8 screenshots, the longest texts and 8 sources", (await buildAppBundle({ ...DRAFT, ...LIMIT_FIELDS }, limitFiles(), publisher)).bytes);
+  addValid("every bound at its limit: 64 files, a 128-byte path, a 256 KiB icon of 1024 × 1024, 8 screenshots, the longest texts and 8 sources", (await buildAppBundle({ ...DRAFT, ...LIMIT_FIELDS }, limitFiles(), publisher)).bytes);
   addValid("an app that asks for the internet", (await buildAppBundle({ ...DRAFT, permissions: ["internet"] }, [ENTRY], publisher)).bytes);
   addValid("a version with no permission and the proprietary licence", (await buildAppBundle({ ...DRAFT, permissions: [], license: "proprietary" }, [ENTRY], publisher)).bytes);
   const big = await largest();
@@ -183,6 +183,8 @@ async function build(): Promise<Vectors> {
   no("a screenshot that is not a picture type", "bad-path", "screenshots/ holds .png, .jpg or .webp", await hand({}, [ENTRY, file("screenshots/1.gif", SCREENSHOT)]));
   no("an icon one byte past 256 KiB", "bad-icon", "From the manifest's size", await hand({}, [file("icon.png", png(256, 256, APP_BUNDLE_LIMITS.iconBytes + 1)), ENTRY]));
   no("an icon that is not square", "bad-icon", "256 × 128", await hand({}, [file("icon.png", png(256, 128)), ENTRY]));
+  no("an icon one pixel past 1024 on a side", "bad-icon", "1025 × 1025 in 64 bytes: the pixels are bounded, not only the bytes", await hand({}, [file("icon.png", png(APP_BUNDLE_LIMITS.iconEdge + 1, APP_BUNDLE_LIMITS.iconEdge + 1)), ENTRY]));
+  no("an icon of 23000 × 23000", "bad-icon", "A small file whose header asks for gigabytes once decoded", await hand({}, [file("icon.png", png(23000, 23000)), ENTRY]));
   no("an icon that is not a PNG", "bad-icon", "Zeros", await hand({}, [file("icon.png", fill(64)), ENTRY]));
   no("an entry that is not HTML", "bad-entry", "The entry is one .html file", await hand({ entry: "main.js" }, [ENTRY, file("main.js", "1")]));
   no("an entry the bundle does not hold", "bad-entry", "play.html is not in files", await hand({ entry: "play.html" }));

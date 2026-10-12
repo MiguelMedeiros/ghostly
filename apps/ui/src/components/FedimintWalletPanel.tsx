@@ -37,7 +37,7 @@ const stateOf = (t: Translate, state: string) => {
 /** A history row's amount, signed, and its fee when there is one. */
 const amountOf = (t: Translate, tx: { kind: string; amount?: number; fee?: number }) => {
   const amount = tx.amount !== undefined ? `${tx.kind.endsWith("out") ? "−" : "+"}${formatAmount(tx.amount, t.language)}` : "";
-  return tx.fee ? t("wallet.fedimint.amountFee", { amount, fee: tx.fee }) : amount;
+  return tx.fee ? t("wallet.fedimint.amountFee", { amount, fee: formatAmount(tx.fee, t.language) }) : amount;
 };
 
 /** What a federation says about itself, before and after joining it. */
@@ -68,6 +68,10 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
   const [invite, setInvite] = useState(""), [preview, setPreview] = useState<FederationInfo | null>(null), [joining, setJoining] = useState(false);
   const [amount, setAmount] = useState(""), [invoice, setInvoice] = useState(""), [notesIn, setNotesIn] = useState(""), [received, setReceived] = useState("");
   const [notesOut, setNotesOut] = useState<{ notes: string; operation: string; federation: string } | null>(null);
+  // What became of notes taken back, said under Send: kept apart from `received`, which Receive shows as notes redeemed.
+  const [tookBack, setTookBack] = useState("");
+  // The chosen federation's movements: the history holds every federation's.
+  const history = (fm?.history ?? []).filter((tx) => federations.length < 2 || tx.federation === current?.id);
   const [restoreInvites, setRestoreInvites] = useState(""), [phrase, setPhrase] = useState(""), [shownPhrase, setShownPhrase] = useState("");
   const [password, setPassword] = useState(""), [file, setFile] = useState(""), [filePassword, setFilePassword] = useState(""), [open, setOpen] = useState<"none" | "backup" | "restore">("none");
   const test = current ? current.network !== "bitcoin" : state.mode === "testnet";
@@ -107,7 +111,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
   return <div className="space-y-6" data-testid="fedimint-wallet">
     {!federations.length ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="fedimint-empty"><p className="text-text-primary">{t("wallet.fedimint.empty")}</p><Notice>{t("wallet.fedimint.emptyNote")}</Notice></div>
     : <div className="space-y-4">
-      {federations.length > 1 && <Select aria-label={t("wallet.fedimint.federation")} value={current?.id ?? ""} onChange={(id) => { setSelected(id); setInvoice(""); setNotesOut(null); }}
+      {federations.length > 1 && <Select aria-label={t("wallet.fedimint.federation")} value={current?.id ?? ""} onChange={(id) => { setSelected(id); setInvoice(""); setNotesOut(null); setTookBack(""); }}
         options={federations.map((f) => ({ value: f.id, label: f.name ?? short(f.id), description: `${formatAmount(f.balance, t.language)} ${unit}` }))} />}
       {current && <>
         <p className="text-text-primary" data-testid="fedimint-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(current.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
@@ -131,17 +135,17 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
         </div>}
         {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
           <p className="text-xs text-text-secondary">{t("wallet.fedimint.sendAbout")}</p>
-          <Amount value={amount} onChange={(v) => { setAmount(v); setNotesOut(null); setConfirming(false); }} unit={unit} testId="fedimint-send-amount" />
+          <Amount value={amount} onChange={(v) => { setAmount(v); setNotesOut(null); setConfirming(false); setTookBack(""); }} unit={unit} testId="fedimint-send-amount" />
           {!notesOut ? (confirming ? <ConfirmRealMoney what={t("wallet.fedimint.asNotes", { amount: formatAmount(Number(amount), t.language) })} busy={busy} onSend={() => spend(true)} onBack={() => setConfirming(false)} />
             // Notes of a Mainnet federation are real money: the second step first, as for every other spend.
             : <Button variant="primary" className="w-full" data-testid="fedimint-spend" disabled={busy || !ready || !Number(amount) || Number(amount) > current.balance} onClick={() => (real ? setConfirming(true) : spend(false))}>{Number(amount) > current.balance ? t("wallet.fedimint.tooMuch") : t("wallet.fedimint.createNotes")}</Button>)
             : <div className="space-y-2">
               <Address value={notesOut.notes} testId="fedimint-notes-out" note={t("wallet.fedimint.notesOutNote")} />
-              <Button data-testid="fedimint-take-back" disabled={busy} onClick={() => void run(async () => { const state = await wallet.fedimintTakeBack(notesOut.federation, notesOut.operation); if (state === "pending") throw new Error(t("wallet.fedimint.notAnswered")); setNotesOut(null); setReceived(state === "canceled" ? t("wallet.fedimint.takenBack") : t("wallet.fedimint.alreadyRedeemed")); })}>{t("wallet.fedimint.takeBack")}</Button>
+              <Button data-testid="fedimint-take-back" disabled={busy} onClick={() => void run(async () => { const state = await wallet.fedimintTakeBack(notesOut.federation, notesOut.operation); if (state === "pending") throw new Error(t("wallet.fedimint.notAnswered")); setNotesOut(null); setTookBack(state === "canceled" ? t("wallet.fedimint.takenBack") : t("wallet.fedimint.alreadyRedeemed")); })}>{t("wallet.fedimint.takeBack")}</Button>
             </div>}
         </div>}
         {action === "history" && <div className="bg-surface rounded-xl p-2 animate-fade-in" data-testid="fedimint-history">
-          {!(fm?.history ?? []).length ? <p className="text-xs text-text-muted p-2">{t("wallet.fedimint.nothingYet")}</p> : (fm!.history.filter((tx) => federations.length < 2 || tx.federation === current.id)).map((tx) => (
+          {!history.length ? <p className="text-xs text-text-muted p-2">{t("wallet.fedimint.nothingYet")}</p> : history.map((tx) => (
             <div key={tx.id} className="flex items-center gap-3 px-2 py-2 text-sm border-b border-border last:border-0" data-testid="fedimint-tx">
               <span className="flex-1 text-text-primary">{tx.paymentId && !tx.paymentId.startsWith("wallet-") ? t("wallet.fedimint.kindChat", { kind: kindOf(t, tx.kind) }) : kindOf(t, tx.kind)}</span>
               <span className="tabular-nums text-text-secondary">{amountOf(t, tx)}</span>
@@ -149,6 +153,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
             </div>))}
         </div>}
         {received && action !== "receive" && <Notice tone="success">{received}</Notice>}
+        {tookBack && action === "send" && <Notice tone="success" testId="fedimint-taken-back">{tookBack}</Notice>}
       </>}
     </div>}
     {error && <Notice problem={error} />}

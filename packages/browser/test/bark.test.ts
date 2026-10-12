@@ -5,6 +5,7 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { BarkAdapter, barkTiming, type BarkConfig } from "../src/engine/paymentAdapters/bark";
 import { BarkWallet, MAINNET_BARK, SECOND_TERMS, TESTNET_BARK, readableBarkError } from "../src/engine/paymentAdapters/barkWallet";
+import { RETIRE_READ_MS } from "../src/engine/paymentAdapters/arkWallet";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
@@ -311,6 +312,80 @@ describe("the Bark wallet", () => {
     expect(wallet.view).toMatchObject({ network: "regtest", locked: false });
     expect((await settingsKeys()).some((k) => k.startsWith("barkWallet-retired-"))).toBe(true);
     await wallet.stop();
+  });
+
+  /**
+   * Under fake timers the wallet's own short waits only move as the clock does, and sealing a phrase takes real
+   * time: tick and let the real loop turn until `work` ends.
+   */
+  const settled = async <T>(work: Promise<T>): Promise<T> => {
+    let over = false;
+    const ended = work.finally(() => { over = true; });
+    ended.catch(() => {});
+    for (const until = Date.now() + 3_000; !over;) {
+      if (Date.now() > until) throw new Error("still waiting");
+      await vi.advanceTimersByTimeAsync(1);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    return ended;
+  };
+  const nothing = { spendableSats: 0, pendingInRoundSats: 0, pendingExitSats: 0, pendingLightningSendSats: 0, claimableLightningReceiveSats: 0, pendingBoardSats: 0 };
+  const local = { network: "regtest", provider: "http://127.0.0.1:44135", explorer: "http://127.0.0.1:44102" } as const;
+
+  it("a Testnet wallet whose server stopped answering moves to another test network after 10 s, on its last balance read", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const wallet = make();
+      await settled(wallet.start());
+      await settled(wallet.ensureReady(true));
+      // Read as empty, then its server goes quiet: the switch waits 10 s for it, no longer.
+      await settled(wallet.refresh());
+      walletOf((await settled(wallet.backup())).config).balance = () => new Promise(() => {});
+      server.network = "regtest";
+      const moving = wallet.create(local);
+      moving.catch(() => {});
+      await vi.advanceTimersByTimeAsync(RETIRE_READ_MS - 1);
+      expect(wallet.view.network).toBe("signet");
+      await vi.advanceTimersByTimeAsync(1);
+      await settled(moving);
+      expect(wallet.view).toMatchObject({ network: "regtest", locked: false });
+      expect((await settled(settingsKeys())).some((k) => k.startsWith("barkWallet-retired-"))).toBe(true);
+
+      // A wallet last read with coins stays, quiet server or not: spendable, on their way in, or on their way out.
+      server.network = "signet";
+      for (const [part, seen] of [["spendableSats", { balance: 500 }], ["pendingBoardSats", { pending: 500 }], ["claimableLightningReceiveSats", { pending: 500 }], ["pendingExitSats", { exiting: 500 }]] as const) {
+        const coins = walletOf((await settled(wallet.backup())).config);
+        coins.balance = async () => ({ ...nothing, [part]: 500 });
+        await settled(wallet.refresh());
+        expect(wallet.view, part).toMatchObject({ balance: 0, ...seen });
+        coins.balance = () => new Promise(() => {});
+        const refused = expect(wallet.create({ ...TESTNET_BARK }), part).rejects.toThrow("will not be replaced");
+        await vi.advanceTimersByTimeAsync(RETIRE_READ_MS);
+        await settled(refused);
+        expect(wallet.view, part).toMatchObject({ network: "regtest", locked: false });
+      }
+      await settled(wallet.stop());
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a Mainnet wallet waits for its server's own word before it is replaced, however long it takes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const main = new FakeBarkServer("03" + "cd".repeat(32), "bitcoin", "main");
+      const wallet = new BarkWallet("mainnet", vi.fn(), async () => main.sdk());
+      await settled(wallet.start()); await settled(wallet.createDefaultNow());
+      let answer!: (balance: typeof nothing) => void;
+      const word = new Promise<typeof nothing>((resolve) => { answer = resolve; });
+      [...main.wallets.values()][0].balance = () => word;
+      let over = false;
+      const replacing = wallet.create({ ...MAINNET_BARK }).finally(() => { over = true; });
+      replacing.catch(() => {});
+      await vi.advanceTimersByTimeAsync(10 * RETIRE_READ_MS);
+      expect(over).toBe(false);
+      answer({ ...nothing, spendableSats: 500 });
+      await settled(expect(replacing).rejects.toThrow("will not be replaced"));
+      await settled(wallet.stop());
+    } finally { vi.useRealTimers(); }
   });
 
   it("an encrypted backup restores the phrase, the server and the payments into a fresh profile", async () => {

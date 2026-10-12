@@ -3,7 +3,7 @@ import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
 import { fromBase64Url, toBase64Url, utf8Encode } from "../src/bytes";
 import { confirmationMatches, confirmationTag, decryptText, edgeParams, encryptText, epochKeys, newEpochSecret, openSecret, sealSecret } from "../src/groupCrypto";
 import { MAX_GROUP_MEMBERS, commitHash, commitUntaggedHash, signCommit, verifyChain, verifyCommit, type GroupCommit, type Roster } from "../src/groupCommits";
-import { GROUP_LIMITS, GroupSession, groupMessageId, type GroupMessageFrame } from "../src/groupSession";
+import { GROUP_LIMITS, GroupSession, groupMessageId, type GroupEdgeFrame, type GroupMessageFrame } from "../src/groupSession";
 import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.protocol.crypto, groups.protocol.commits, groups.create, groups.invite, groups.send, groups.catch-up, groups.remove-member, groups.admin-change, groups.rotate, groups.leave
 
@@ -286,6 +286,32 @@ describe("group session", () => {
     expect(carol.status).toBe("forked"); // it *is* a validly signed fork of epoch 3, and that is what the protocol says about it
     await dave.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: clone(stale.top) });
     expect(dave.status).toBe("forked");
+  });
+
+  it("names everyone only while its author is still the admin: a former admin's old epoch gives no `*`, in a message or an edit", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice, "Bob"), carol = await admit(mesh, alice, "Carol");
+    const everyone = [{ k: "*", o: 0, l: 4 }];
+    const sent = await alice.sendText("@all one", 1, everyone); await mesh.settle();
+    expect(mesh.inbox.get(carol.myKey)![0].mentions).toEqual(everyone); // the admin's, while it is the admin
+    const before = clone(mesh.saved.get(alice.myKey)!);
+    await alice.transferAdmin(bob.myKey); await mesh.settle();
+    expect(carol.admin).toBe(bob.myKey);
+    // Alice's app as it was before she handed the role on: it still seals under the epoch she was the admin of.
+    const frames: GroupEdgeFrame[] = [];
+    const stale = new GroupSession(before, { save: async () => {}, send: (_to, frame) => { frames.push(clone(frame)); return true; }, message: () => {}, changed: () => {} });
+    expect(stale.isAdmin).toBe(true);
+    await stale.sendText("@all @Carol", 2, [...everyone, { k: carol.myKey, o: 5, l: 6 }]);
+    await stale.sendEdit((sent as { id: string }).id, { v: 1, ts: 3, text: "@all three", mentions: everyone });
+    for (const frame of frames) await carol.handle(alice.myKey, clone(frame));
+    const two = mesh.inbox.get(carol.myKey)!.find(m => m.text === "@all @Carol")!;
+    expect(two.epoch).toBe(stale.epoch);
+    expect(two.mentions).toEqual([{ k: carol.myKey, o: 5, l: 6 }]);
+    expect(mesh.edits.get(carol.myKey)!.find(e => e.m === "@all three")).not.toHaveProperty("k");
+    // The admin now names everyone, as before.
+    await bob.sendText("@all four", 4, everyone); await mesh.settle();
+    expect(mesh.inbox.get(carol.myKey)!.find(m => m.text === "@all four")!.mentions).toEqual(everyone);
   });
 
   it("lets a member leave: its secrets go at once, the admin removes it, and the admin cannot leave first", async () => {

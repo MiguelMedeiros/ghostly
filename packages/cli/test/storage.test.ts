@@ -6,7 +6,8 @@ import { openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtim
 // covers: headless.storage
 
 const opened: PersistentIndexedDb[] = [];
-afterEach(() => { opened.length = 0; });
+// A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
+afterEach(async () => { await Promise.all(opened.splice(0).map((store) => store.close())); });
 
 async function open(dir: string) {
   const store = await openPersistentIndexedDb(dir);
@@ -273,4 +274,113 @@ describe("persistent IndexedDB", () => {
     await expect(openPersistentIndexedDb(dir)).rejects.toThrow(/newer/);
     expect(readFileSync(join(dir, "snapshot.bin")).length).toBeGreaterThan(0);
   });
+
+  /** A database with every shape of index the engine and the wallets use: compound, nested, unique, multi-entry. */
+  async function indexed(factory: IDBFactory): Promise<IDBDatabase> {
+    (await db(factory)).close();
+    return new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 2);
+      request.onupgradeneeded = () => {
+        const messages = request.transaction!.objectStore("messages");
+        messages.createIndex("byLinkTime", ["linkId", "timestamp"]);
+        messages.createIndex("byCard", "card.kind");
+        request.result.createObjectStore("proofs", { keyPath: "secret" }).createIndex("byAmount", "amount", { unique: true });
+        const notes = request.result.createObjectStore("notes", { autoIncrement: true });
+        notes.createIndex("byTag", "tags", { multiEntry: true });
+        notes.createIndex("byOwner", "owner");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  it("keeps every index in step with its store through overwrites, deletes, refused puts and aborted transactions", async () => {
+    const factory = await open(folder());
+    const d = await indexed(factory);
+    let seed = 69;
+    const random = (below: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % below; };
+    const schema: Record<string, { name: string; path: string | string[]; multiEntry?: boolean }[]> = {
+      messages: [{ name: "byLink", path: "linkId" }, { name: "byLinkTime", path: ["linkId", "timestamp"] }, { name: "byCard", path: "card.kind" }],
+      proofs: [{ name: "byAmount", path: "amount" }],
+      notes: [{ name: "byTag", path: "tags", multiEntry: true }, { name: "byOwner", path: "owner" }],
+    };
+    const at = (value: unknown, path: string) => path.split(".").reduce<unknown>((object, step) => (object as Record<string, unknown> | undefined)?.[step], value);
+    /** What an index must hold for a store's records: [index key, primary key] in the index's order. */
+    const expected = (index: { path: string | string[]; multiEntry?: boolean }, keys: IDBValidKey[], values: unknown[]) => {
+      const entries: [IDBValidKey, IDBValidKey][] = [];
+      values.forEach((value, i) => {
+        const key = Array.isArray(index.path) ? index.path.map((path) => at(value, path)) : at(value, index.path);
+        if (key === undefined || (Array.isArray(key) && !index.multiEntry && key.includes(undefined))) return;
+        for (const one of index.multiEntry && Array.isArray(key) ? [...new Set(key)] : [key]) entries.push([one as IDBValidKey, keys[i]]);
+      });
+      return entries.sort((a, b) => factory.cmp(a[0], b[0]) || factory.cmp(a[1], b[1]));
+    };
+    const held = async (store: IDBObjectStore, name: string) => {
+      const entries: [IDBValidKey, IDBValidKey][] = [];
+      await new Promise<void>((resolve, reject) => {
+        const request = store.index(name).openKeyCursor();
+        request.onsuccess = () => { const cursor = request.result; if (!cursor) return resolve(); entries.push([cursor.key, cursor.primaryKey]); cursor.continue(); };
+        request.onerror = () => reject(request.error);
+      });
+      return entries;
+    };
+    const check = async () => {
+      for (const [name, indexes] of Object.entries(schema)) {
+        const store = d.transaction(name).objectStore(name);
+        const [keys, values] = [await read(store.getAllKeys()), await read(store.getAll())];
+        for (const index of indexes) expect(await held(d.transaction(name).objectStore(name), index.name), `${name}.${index.name}`).toEqual(expected(index, keys, values));
+      }
+    };
+    const message = () => ({ linkId: `chat-${random(4)}`, id: `m${random(60)}`, ...(random(5) ? { timestamp: random(1000) } : {}), ...(random(3) ? {} : { card: { kind: ["task", "usage"][random(2)] } }) });
+    const tags = () => Array.from({ length: random(4) }, () => `t${random(5)}`);
+
+    let aborted = 0, refused = 0;
+    for (let round = 0; round < 120; round++) {
+      const abort = random(6) === 0;
+      const t = d.transaction(["messages", "proofs", "notes"], "readwrite");
+      const done = new Promise<boolean>((resolve) => { t.oncomplete = () => resolve(true); t.onabort = () => resolve(false); });
+      for (let op = 0; op < 12; op++) {
+        const kind = random(10);
+        if (kind < 4) t.objectStore("messages").put(message());
+        else if (kind === 4) t.objectStore("messages").delete([`chat-${random(4)}`, `m${random(60)}`]);
+        else if (kind === 5 && random(4) === 0) { const chat = `chat-${random(4)}`; t.objectStore("messages").delete(IDBKeyRange.bound([chat, "m1"], [chat, "m3"])); }
+        else if (kind === 6) {
+          // Amounts collide: the unique index refuses some, and the request's handler keeps the transaction going.
+          const request = t.objectStore("proofs").put({ secret: `s${random(30)}`, amount: random(40) });
+          request.onerror = (event) => { refused++; event.preventDefault(); event.stopPropagation(); };
+        } else if (kind === 7) t.objectStore("proofs").delete(`s${random(30)}`);
+        else if (kind === 8) t.objectStore("notes").put({ owner: `o${random(3)}`, tags: tags() }, random(3) ? 1 + random(40) : undefined);
+        else t.objectStore("notes").delete(random(4) ? 1 + random(40) : IDBKeyRange.bound(1 + random(20), 25 + random(20)));
+      }
+      if (abort) t.abort();
+      if (!(await done)) aborted++;
+      if (round % 10 === 9) await check();
+    }
+    await check();
+    expect(aborted).toBeGreaterThan(5);
+    expect(refused).toBeGreaterThan(5);
+    expect(await read(d.transaction("messages").objectStore("messages").count())).toBeGreaterThan(10);
+  });
+
+  it("writes over a message in the time of a new one, however many messages the profile's other chats hold", async () => {
+    const d = await indexed(await open(folder()));
+    for (let from = 0; from < 20_000; from += 5000) {
+      await tx(d, ["messages"], (s) => {
+        for (let i = from; i < from + 5000; i++) s.messages.put({ linkId: `chat-${i % 10}`, id: `m${i}`, timestamp: i, text: "x".repeat(40) });
+      });
+    }
+    // A sent message is written again for each step of its delivery; a walk of the indexes took about 70 ms each here.
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "new", id: "only", timestamp: 1, status: "sending" }); });
+    const started = performance.now();
+    await tx(d, ["messages"], (s) => {
+      for (let i = 0; i < 60; i++) s.messages.put({ linkId: "new", id: "only", timestamp: 1, status: `step-${i}` });
+      for (let i = 0; i < 20; i++) s.messages.delete(["chat-3", `m${3 + 10 * i}`]);
+    });
+    const took = performance.now() - started;
+    const messages = () => d.transaction("messages").objectStore("messages");
+    expect(await read(messages().index("byLink").getAll("new"))).toEqual([{ linkId: "new", id: "only", timestamp: 1, status: "step-59" }]);
+    expect(await read(messages().index("byLinkTime").count(IDBKeyRange.bound(["chat-3", -Infinity], ["chat-3", Infinity])))).toBe(1980);
+    expect(await read(messages().count())).toBe(19_981);
+    expect(took).toBeLessThan(1500);
+  }, 60_000);
 });

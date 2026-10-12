@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint && node scripts/check-dashes.mjs && node scripts/check-single-source.mjs",
-    "test": "node --test scripts/single-source.test.mjs scripts/wisp-changes.test.mjs scripts/wisp-index.test.mjs scripts/llms.test.mjs scripts/agent-prompt.test.mjs scripts/echo-bot.test.mjs",
+    "test": "node --test scripts/single-source.test.mjs scripts/wisp-changes.test.mjs scripts/doc-links.test.mjs scripts/wisp-index.test.mjs scripts/llms.test.mjs scripts/agent-prompt.test.mjs scripts/echo-bot.test.mjs scripts/shot-widths.test.mjs scripts/shots-version.test.mjs scripts/default-installer.test.mjs",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "sync:references": "node scripts/sync-references.mjs && node scripts/sync-store.mjs",
     "sync:app-deck": "node scripts/sync-app-deck.mjs",

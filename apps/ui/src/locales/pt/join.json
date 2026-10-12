@@ -24,6 +24,7 @@
   "scan": "Escanear QR",
   "submit": "Entrar",
   "title": "Entrar numa conversa",
+  "tooManyLinks": "Muitos links de convite abertos. Apague uma conversa que não teve resposta ou cole o convite em Entrar.",
   "typo": "Este código tem um erro de digitação. Confira ou peça o código de novo.",
   "update": "Este convite foi criado por um Ghostly mais novo. Atualize para entrar."
 }

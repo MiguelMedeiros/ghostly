@@ -3,6 +3,7 @@ import { Interface } from "ethers";
 import { USDT_LOCAL } from "../support/usdt-local.mjs";
 import { strangerInvoice } from "../support/bolt11";
 import { TEST_COINS, chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, test, type Peer, type PeerOptions, type WalletKind } from "../support/fixtures";
+import { mockMutinynetArk } from "../support/ark-mainnet";
 import { recoverExpiredArk, smallExpiredArk } from "../support/arkRecover";
 import { composerRow } from "../support/composer";
 import { mockEthereum } from "../support/ethereum";
@@ -112,7 +113,8 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_ARK_REGTEST=1");
   test.setTimeout(10 * 60_000);
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
-  const [alice, bob] = await twoInTestnet(peer, ["ark-p-alice", "ark-p-bob"], ["arkade"]);
+  // Mutinynet is answered here: New makes the wallet there first, and a slow public server would fail New or hold the move to Regtest, not this test's server.
+  const [alice, bob] = await twoInTestnet(peer, ["ark-p-alice", "ark-p-bob"], ["arkade"], { beforeOpen: mockMutinynetArk });
   const panel = (p: Peer) => p.page.getByTestId("ark-wallet");
   const balance = (p: Peer) => panel(p).getByTestId("ark-balance");
   for (const p of [alice, bob]) {

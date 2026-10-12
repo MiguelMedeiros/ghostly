@@ -82,6 +82,11 @@ export interface ChatSession {
   participationSeedB64?: string;
   /** The joiner's copy of that public key, from the code: the only key that may answer first. */
   peerParticipationKeyB64?: string;
+  /**
+   * Made by an invite link opened in the app (the address, a `web+ghostly:` link), not by Join's paste or scan: only a
+   * few such chats may wait for an answer at a time (`LINK_CHATS_WAITING` in storage.ts).
+   */
+  viaLink?: true;
   messages: ChatMessage[];
   /**
    * How many older messages the stored copy leaves out, which the engine keeps (`STORED_MESSAGES` in storage.ts). A

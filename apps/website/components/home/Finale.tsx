@@ -64,13 +64,13 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
   const [poof, setPoof] = useState(false);
   const [installer, setInstaller] = useState<InstallerKey | undefined>(undefined);
 
-  // The installer for this machine. Chrome on a Mac says whether it is Apple silicon.
+  // The installer for this machine. Chrome on a Mac says whether it is Apple silicon; an iPad looks like a Mac but for its touch points.
   useEffect(() => {
     const nav = navigator as Navigator & {
       userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }> };
     };
     let cancelled = false;
-    const guess = defaultInstaller(nav.userAgent, nav.platform);
+    const guess = defaultInstaller(nav.userAgent, nav.platform, undefined, nav.maxTouchPoints);
     setInstaller(guess);
     if (guess === "macArm" && nav.userAgentData) {
       nav.userAgentData

@@ -33,12 +33,18 @@ const nextConfig: NextConfig = {
   // Scripts from this site only: its own files and the inline ones Next.js writes into each page (the page's data, the
   // two head scripts in app/layout.tsx). No third-party script runs, so none that a proxy slips into the page does
   // either (Cloudflare's Web Analytics beacon was injected into every page; /privacy says there are no analytics).
+  // No page of another site (or of this one: the site frames nothing of its own) shows a page of the site inside a
+  // frame, the invite dialog included: frame-ancestors, and X-Frame-Options for a browser that reads only that. A file
+  // is read as the type the site says it is, and a link out of the site says only which site it came from.
   async headers() {
     return [{
       source: "/:path*",
       headers: [
         { key: "Strict-Transport-Security", value: "max-age=31536000" },
-        { key: "Content-Security-Policy", value: `${SCRIPT_SRC}; object-src 'none'; base-uri 'self'` },
+        { key: "Content-Security-Policy", value: `${SCRIPT_SRC}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'` },
+        { key: "X-Frame-Options", value: "DENY" },
+        { key: "X-Content-Type-Options", value: "nosniff" },
+        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
       ],
     }];
   },

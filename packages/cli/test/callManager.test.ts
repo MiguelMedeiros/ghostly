@@ -1,8 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { connect, type Socket } from "node:net";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { connect, Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { heardCallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { AudioSocket, audioSocketPath } from "../src/calls/audioSocket";
@@ -470,6 +470,124 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(b.calls.list()).toEqual([]);
     expect(b.events.filter((e) => e.type === "call.incoming")).toEqual([]);
     await a.calls.stopAll();
+  });
+
+  describe("a call that ends while it is answered or placed", () => {
+    /** One manager whose signals go nowhere, and what its profile's folder still holds: socket files, listening servers. */
+    const lone = (chat: string) => {
+      const dir = tmp();
+      const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` } } as unknown as Side;
+      const engine: CallEngine = { getState: () => ({ links: [side.link] }) as unknown as EngineState, setCallSignal: async ({ signal }) => { side.signals.push(signal); } };
+      side.calls = new CallManager({ engine, emit: (type, _id, fields) => side.events.push({ type, ...fields }), profileDir: dir });
+      const folder = join(audioSocketPath(dir, "0".repeat(12)), "..");
+      const files = () => existsSync(folder) ? readdirSync(folder) : [];
+      const servers = () => (process as unknown as { _getActiveHandles(): unknown[] })._getActiveHandles()
+        .filter((handle) => handle instanceof Server && handle.listening && String(handle.address()).startsWith(folder)).length;
+      return { side, files, servers };
+    };
+    /** A caller's offer, and the same offer and its hang-up as the callee's chat session hands them over, each round later than the last. */
+    const offered = async () => {
+      const caller = lone("chat-ab");
+      await caller.side.calls.start("chat-ab", {});
+      const offer = JSON.parse(signalsOf(caller.side, "o")[0]!) as { ts: number };
+      let round = 0;
+      return {
+        caller,
+        offer: () => heardCallSignal(JSON.stringify({ ...offer, ts: offer.ts + ++round * 10 }), Date.now()),
+        hangUp: () => heardCallSignal(JSON.stringify({ t: "h", ts: offer.ts + round * 10 + 1 }), Date.now()),
+      };
+    };
+    const settled = () => new Promise((r) => setTimeout(r, 300));
+
+    it("auto-answer: the offer and its hang-up at once, 5 times, leave no socket, no listening server and no call", async () => {
+      const { caller, offer, hangUp } = await offered();
+      const callee = lone("chat-ba");
+      callee.side.calls.setAuto({ on: true });
+      for (let i = 0; i < 5; i++) {
+        callee.side.calls.onSignal("chat-ba", offer());
+        callee.side.calls.onSignal("chat-ba", hangUp());
+        await settled();
+      }
+      expect(callee.side.events.map((e) => e.type)).toEqual(Array(5).fill(["call.incoming", "call.ended"]).flat());
+      expect(callee.side.calls.list()).toEqual([]);
+      expect(callee.files()).toEqual([]);
+      expect(callee.servers()).toBe(0);
+      // No answer was sent for a call that was over.
+      expect(signalsOf(callee.side, "a")).toEqual([]);
+      await caller.side.calls.stopAll();
+      await callee.side.calls.stopAll();
+    });
+
+    it("`call answer`: the hang-up while the answer loads its stack, or while its socket opens, refuses the answer and leaves nothing", async () => {
+      const { caller, offer, hangUp } = await offered();
+      const callee = lone("chat-ba");
+      callee.side.calls.onSignal("chat-ba", offer());
+      const early = callee.side.calls.answer(undefined, {});
+      callee.side.calls.onSignal("chat-ba", hangUp());
+      await expect(early).rejects.toMatchObject({ code: "unavailable" });
+
+      // The hang-up comes as the socket opens: `end` finds none on the call yet.
+      const open = AudioSocket.open.bind(AudioSocket);
+      const opening = vi.spyOn(AudioSocket, "open").mockImplementation(async (...args) => {
+        const socket = await open(...args);
+        callee.side.calls.onSignal("chat-ba", hangUp());
+        return socket;
+      });
+      try {
+        callee.side.calls.onSignal("chat-ba", offer());
+        await expect(callee.side.calls.answer(undefined, {})).rejects.toMatchObject({ code: "unavailable" });
+        expect(opening).toHaveBeenCalledTimes(1);
+      } finally {
+        opening.mockRestore();
+      }
+      await settled();
+      expect(callee.side.events.filter((e) => e.type === "call.ended")).toMatchObject([{ reason: "missed" }, { reason: "remote-hangup" }]);
+      expect(callee.side.calls.list()).toEqual([]);
+      expect(callee.files()).toEqual([]);
+      expect(callee.servers()).toBe(0);
+      expect(signalsOf(callee.side, "a")).toEqual([]);
+      await caller.side.calls.stopAll();
+      await callee.side.calls.stopAll();
+    });
+
+    it("a call hung up while its socket opens is not placed, and leaves nothing", async () => {
+      const caller = lone("chat-ab");
+      const open = AudioSocket.open.bind(AudioSocket);
+      const opening = vi.spyOn(AudioSocket, "open").mockImplementation(async (...args) => {
+        const socket = await open(...args);
+        void caller.side.calls.hangup(undefined);
+        return socket;
+      });
+      try {
+        await expect(caller.side.calls.start("chat-ab", {})).rejects.toMatchObject({ code: "unavailable" });
+      } finally {
+        opening.mockRestore();
+      }
+      await settled();
+      expect(caller.side.calls.list()).toEqual([]);
+      expect(caller.files()).toEqual([]);
+      expect(caller.servers()).toBe(0);
+      expect(signalsOf(caller.side, "o")).toEqual([]);
+      await caller.side.calls.stopAll();
+    });
+
+    it("a call answered twice at once is answered once, on one socket", async () => {
+      const { caller, offer } = await offered();
+      const callee = lone("chat-ba");
+      callee.side.calls.onSignal("chat-ba", offer());
+      const answers = await Promise.allSettled([callee.side.calls.answer(undefined, {}), callee.side.calls.answer(undefined, {})]);
+      expect(answers.map((a) => a.status)).toEqual(["fulfilled", "rejected"]);
+      expect(answers[1]).toMatchObject({ reason: { code: "refused" } });
+      expect(callee.side.calls.list()).toMatchObject([{ state: "connecting" }]);
+      expect(callee.files()).toHaveLength(1);
+      expect(callee.servers()).toBe(1);
+      expect(signalsOf(callee.side, "a")).toHaveLength(1);
+      await callee.side.calls.hangup(undefined);
+      expect(callee.files()).toEqual([]);
+      expect(callee.servers()).toBe(0);
+      await caller.side.calls.stopAll();
+      await callee.side.calls.stopAll();
+    });
   });
 
   it("an answer refused as its connection closes: both sides start over once, on new connections and the same sockets", async () => {
