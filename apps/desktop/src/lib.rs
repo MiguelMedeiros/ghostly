@@ -60,6 +60,7 @@ mod turn_network;
 #[cfg(test)]
 mod turn_record;
 mod types;
+mod unread_count;
 #[cfg(desktop)]
 mod viewer;
 
@@ -206,6 +207,7 @@ macro_rules! commands {
             paired_transport::paired_native_close,
             paired_transport::paired_native_send,
             share::share_text,
+            unread_count::native_unread_count,
         ]
     };
 }
@@ -593,6 +595,7 @@ mod tests {
         arguments["origin"] = serde_json::json!("http://127.0.0.1:9");
         arguments["profile"] = serde_json::json!("x");
         arguments["record"] = serde_json::json!(null);
+        arguments["count"] = serde_json::json!(0);
         arguments
     }
 

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-unread-count"
+description = "Enables the native_unread_count command without any pre-configured scope."
+commands.allow = ["native_unread_count"]
+
+[[permission]]
+identifier = "deny-native-unread-count"
+description = "Denies the native_unread_count command without any pre-configured scope."
+commands.deny = ["native_unread_count"]

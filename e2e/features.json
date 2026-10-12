@@ -701,6 +701,7 @@
     "apps/desktop/src/device_state.rs": ["devices.*"],
     "apps/desktop/src/push_send.rs": [],
     "apps/desktop/src/turn_{network,record}.rs": ["devices.turn.*"],
+    "apps/desktop/src/unread_count.rs": ["app.attention.badge"],
     "apps/extension/public/_locales/**/*": ["extension.engine"],
     "apps/extension/public/icons/**/*": ["extension.engine"],
     "apps/extension/public/manifest.json": ["*"],
