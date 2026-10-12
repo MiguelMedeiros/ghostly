@@ -5,6 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.storage
 
+/** Every disk sync the store asks for. */
+const syncs = vi.hoisted(() => ({ count: 0 }));
+vi.mock("node:fs", async (original) => {
+  const fs = await original<typeof import("node:fs")>();
+  return { ...fs, fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); } };
+});
+
 const opened: PersistentIndexedDb[] = [];
 // A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
 afterEach(async () => { await Promise.all(opened.splice(0).map((store) => store.close())); });
@@ -57,6 +64,46 @@ describe("persistent IndexedDB", () => {
     expect((byLink[1] as { bytes: Uint8Array }).bytes).toEqual(new Uint8Array([1, 2, 3]));
     expect(await read(second.transaction("messages").objectStore("messages").count())).toBe(2);
     expect(await read(second.transaction("settings").objectStore("settings").get("settings"))).toEqual({ online: true, relays: ["http://127.0.0.1:1"] });
+  });
+
+  it("leaves a relaxed transaction's sync to the next transaction, or to a second later: it is on disk either way", async () => {
+    const dir = folder();
+    const d = await db(await open(dir));
+    const relaxed = (value: string, key: string) => {
+      const t = d.transaction("settings", "readwrite", { durability: "relaxed" });
+      t.objectStore("settings").put(value, key);
+      return new Promise<void>((resolve) => { t.oncomplete = () => resolve(); });
+    };
+    let before = syncs.count;
+    await relaxed("sending", "seen:m1");
+    await relaxed("sent", "seen:m1");
+    expect(syncs.count - before).toBe(0);
+    // Written all the same: a process that dies now has lost neither.
+    const journal = readFileSync(join(dir, "journal.bin"));
+    expect(journal.includes("sent")).toBe(true);
+
+    // The next transaction syncs before it says `complete`, as every one did: the relaxed entries go with it.
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "m1", text: "hello" }); });
+    expect(syncs.count - before).toBe(1);
+
+    // With no transaction after it, a relaxed one is synced within a second, once.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      before = syncs.count;
+      await relaxed("delivered", "seen:m1");
+      await relaxed("yes", "seen:m2");
+      expect(syncs.count - before).toBe(0);
+      vi.advanceTimersByTime(1_000);
+      expect(syncs.count - before).toBe(1);
+      vi.advanceTimersByTime(5_000);
+      expect(syncs.count - before).toBe(1);
+    } finally { vi.useRealTimers(); }
+
+    // Crash: all of it is there.
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("settings").objectStore("settings").get("seen:m1"))).toBe("delivered");
+    expect(await read(again.transaction("settings").objectStore("settings").get("seen:m2"))).toBe("yes");
+    expect(await read(again.transaction("messages").objectStore("messages").get(["a", "m1"]))).toMatchObject({ text: "hello" });
   });
 
   it("drops an aborted transaction", async () => {

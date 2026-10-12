@@ -10,7 +10,8 @@ import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
  * this module makes it durable with a snapshot and an append-only journal in the profile's folder:
  *
  * - every committed read-write transaction appends its puts, deletes and clears to `journal.bin` and is fsynced
- *   before the transaction's `complete` event reaches the engine (a Cashu proof saved is a proof on disk);
+ *   before the transaction's `complete` event reaches the engine (a Cashu proof saved is a proof on disk); one opened
+ *   with `durability: "relaxed"` is appended at once and synced with the next one, or within a second;
  * - a schema change (an upgrade, a deleted database) writes a whole new `snapshot.bin` instead;
  * - at start the snapshot is loaded, the journal replayed, and both folded into a fresh snapshot (with no journal, the
  *   snapshot stays as it is).
@@ -48,7 +49,7 @@ interface RawStore {
   clear(rollbackLog?: unknown[]): void;
 }
 interface RawDatabase { name: string; version: number; rawObjectStores: Map<string, RawStore>; transactions: unknown[] }
-type RawTransaction = IDBTransaction & { _rollbackLog: unknown[]; _state: string; db: { _rawDatabase: RawDatabase } };
+type RawTransaction = IDBTransaction & { durability?: string; _rollbackLog: unknown[]; _state: string; db: { _rawDatabase: RawDatabase } };
 interface RawClasses {
   Database: new (name: string, version: number) => RawDatabase;
   ObjectStore: new (db: RawDatabase, name: string, keyPath: string | string[] | null, autoIncrement: boolean) => RawStore;
@@ -66,6 +67,8 @@ const JOURNAL = "journal.bin";
 const COMPACT_BYTES = 32 * 1024 * 1024;
 /** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
 const CLOSE_WAIT_MS = 5_000;
+/** How long a relaxed transaction's entry may wait for a sync when no other transaction brings one. */
+const RELAXED_SYNC_MS = 1_000;
 const BLOB = "__ghostlyBlob";
 const RANGE = "__ghostlyRange";
 const PROBE = "__ghostly_storage_probe__";
@@ -99,6 +102,8 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   let queue: Promise<void> = Promise.resolve();
   let queued = 0;
   let schemaDirty = false;
+  /** Set while the journal holds relaxed entries no sync has covered yet. */
+  let relaxed: ReturnType<typeof setTimeout> | null = null;
   const pending = new WeakMap<unknown[], Op[]>();
 
   const snapshotPath = join(dir, SNAPSHOT);
@@ -143,7 +148,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
       if (this.mode === "versionchange") schemaDirty = true;
       else {
         const ops = pending.get(this._rollbackLog);
-        if (ops?.length) append(ops);
+        if (ops?.length) append(ops, this.durability === "relaxed");
       }
       pending.delete(this._rollbackLog);
       if (schemaDirty) void enqueue(writeSnapshot);
@@ -166,30 +171,43 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     return request;
   };
 
-  function append(ops: Op[]) {
+  function append(ops: Op[], lazy: boolean) {
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
-      writeEntry(serialize(ops));
+      writeEntry(serialize(ops), lazy);
       return;
     }
-    void enqueue(async () => writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op))))));
+    void enqueue(async () => writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy));
   }
 
   function enqueue(work: () => Promise<void> | void): Promise<void> {
     queued++;
-    queue = queue.then(work).catch((error) => {
-      process.stderr.write(`ghostly: storage write failed: ${error instanceof Error ? error.message : String(error)}\n`);
-    }).finally(() => { queued--; });
+    queue = queue.then(work).catch(failed).finally(() => { queued--; });
     return queue;
   }
 
-  function writeEntry(entry: Buffer) {
+  function failed(error: unknown) {
+    process.stderr.write(`ghostly: storage write failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+
+  /**
+   * `lazy`: a relaxed transaction's entry. A sync blocks the whole process for milliseconds, and what such a
+   * transaction wrote can be made again (the event set's note of a message it already reported): written, it outlives
+   * the process; a power cut may take its last second.
+   */
+  function writeEntry(entry: Buffer, lazy = false) {
     if (!writing) return;
     journalFd ??= openSync(journalPath, "a", 0o600);
     const header = Buffer.alloc(4);
     header.writeUInt32BE(entry.length);
     writeSync(journalFd, Buffer.concat([header, entry]));
-    fsyncSync(journalFd);
+    if (lazy) relaxed ??= setTimeout(() => { try { sync(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
+    else sync();
     if (statSync(journalPath).size > COMPACT_BYTES) void enqueue(writeSnapshot);
+  }
+
+  function sync() {
+    if (relaxed) { clearTimeout(relaxed); relaxed = null; }
+    if (journalFd !== null) fsyncSync(journalFd);
   }
 
   async function writeSnapshot() {
@@ -214,6 +232,8 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     const fd = openSync(temporary, "w", 0o600);
     try { writeSync(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
     renameSync(temporary, snapshotPath);
+    // The snapshot holds what the journal's entries said, the relaxed ones too.
+    if (relaxed) { clearTimeout(relaxed); relaxed = null; }
     if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
     rmSync(journalPath, { force: true });
   }
