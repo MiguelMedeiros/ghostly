@@ -1,13 +1,13 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { CliError } from "../src/errors";
+import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, eventHandler, hookEnv, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, eventHandler, hookEnv, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
@@ -243,6 +243,32 @@ describe("listen with an allowlist and --turns", () => {
     expect(node.react).toHaveBeenLastCalledWith({ linkId: "c1", messageId: theirs, emoji: "👍" });
     await expect(callApi(ctx, "chat.delete", { chat: "c1", message: groupRef })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(ctx, "chat.delete", { chat: "c1", message: turnRef("c1", "gone") })).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("a cursor in a folder that is not there, or that takes no file, is refused before anything starts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    // Nothing to check without one; a folder that is there takes it, and the check leaves nothing behind.
+    checkCursor(undefined);
+    checkCursor(join(dir, "cursor"));
+    writeFileSync(join(dir, "kept"), "7\n");
+    checkCursor(join(dir, "kept"));
+    expect(readFileSync(join(dir, "kept"), "utf8")).toBe("7\n");
+    expect(readdirSync(dir)).toEqual(["kept"]);
+    const refusal = (path: string) => { try { checkCursor(path); } catch (error) { return asCliError(error).toJSON(); } return null; };
+    expect(refusal(join(dir, "nodir", "cursor"))).toEqual({ code: "not_found", message: `No such file or folder: ${join(dir, "nodir")}` });
+    // A file where the folder should be.
+    expect(refusal(join(dir, "kept", "cursor"))).toEqual({ code: "not_found", message: `No such file or folder: ${join(dir, "kept")}` });
+    // A folder that takes no file (not as root, which writes anywhere).
+    const closed = join(dir, "closed");
+    mkdirSync(closed, { mode: 0o500 });
+    if (process.getuid?.() !== 0) expect(refusal(join(closed, "cursor"))).toEqual({ code: "refused", message: `Not allowed to write or read ${closed}` });
+
+    // The command says it at once, with the code a bot branches on, and no profile was opened or made for it.
+    const home = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const result = await ghostly(["--home", home, "listen", "--cursor", join(dir, "nodir", "cursor")]);
+    expect(result.code, result.stdout + result.stderr).toBe(3);
+    expect(result.json).toEqual({ error: { code: "not_found", message: `No such file or folder: ${join(dir, "nodir")}` } });
+    expect(readdirSync(home)).toEqual([]);
   });
 
   it("--turns takes the place of --type", async () => {
