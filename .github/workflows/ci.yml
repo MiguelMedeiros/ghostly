@@ -56,6 +56,9 @@ jobs:
   # A skipped job still reports its check, and the gate job (CI Success) accepts it only when this job said so. Pushes
   # (dev, main) run everything. If the lookup fails, so does this job, and CI Success with it: nothing is skipped by
   # accident.
+  # A push to dev whose tree a pull request's green CI Success already tested (the merge train's batch head, or a pull
+  # request merged at a head that held dev's tip; ci-changes.mjs's testedAs) runs only lint and types and Tauri Backend,
+  # whose run on dev saves the Cargo cache pull requests restore. Any doubt runs everything.
   # A merge queue entry plans from everything it would put on dev (its base against its head: every queued pull
   # request up to it) and is never a draft. If that diff cannot be read it runs everything instead of failing, which
   # would drop it and every pull request behind it from the queue.
@@ -65,6 +68,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      actions: read
     outputs:
       rust: ${{ steps.plan.outputs.rust }}
       website: ${{ steps.plan.outputs.website }}
@@ -74,6 +78,7 @@ jobs:
       full: ${{ steps.plan.outputs.full }}
       affected: ${{ steps.plan.outputs.affected }}
       draft: ${{ steps.plan.outputs.draft }}
+      tested: ${{ steps.plan.outputs.tested }}
     steps:
       - name: Checkout the gate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -93,6 +98,7 @@ jobs:
           FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
           BASE_SHA: ${{ github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          TREE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && github.event.head_commit.tree_id || '' }}
         run: |
           if [[ "$EVENT" == "merge_group" ]]; then
             echo "draft=false" >> "$GITHUB_OUTPUT"
@@ -110,7 +116,11 @@ jobs:
           fi
           if [[ "$EVENT" != "pull_request" ]]; then
             echo "draft=false" >> "$GITHUB_OUTPUT"
-            node tools/scripts/ci-changes.mjs --draft=false --all
+            if [[ -n "$TREE" ]]; then
+              node tools/scripts/ci-changes.mjs --draft=false --tree="$TREE"
+            else
+              node tools/scripts/ci-changes.mjs --draft=false --all
+            fi
             exit 0
           fi
           # The draft state now, not the event's: see `on.pull_request` above.
@@ -783,6 +793,8 @@ jobs:
       - name: Check all jobs passed
         env:
           DRAFT: ${{ needs.changes.outputs.draft }}
+          TESTED: ${{ needs.changes.outputs.tested }}
+          PUSH_TO_DEV: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
           CHANGES: ${{ needs.changes.result }}
           FULL: ${{ needs.changes.outputs.full }}
           AFFECTED_GATE: ${{ needs.changes.outputs.affected }}
@@ -803,14 +815,19 @@ jobs:
           DESKTOP_MEDIA: ${{ needs.desktop-media.result }}
           DESKTOP_MACOS: ${{ needs.desktop-macos.result }}
         run: |
-          # Not a draft (this job is "CI Success"): the plan must be the full tier, or nothing passes.
-          if [[ "$DRAFT" != "true" && ( "$FULL" != "true" || "$AFFECTED_GATE" != "false" ) ]]; then
+          # Not a draft (this job is "CI Success"): the plan must be the full tier, or nothing passes. Only a push to dev
+          # whose tree already passed it may plan less.
+          if [[ "$TESTED" == "true" && "$PUSH_TO_DEV" != "true" ]]; then
+            echo "::error::Only a push to dev can count as tested by another run"
+            exit 1
+          fi
+          if [[ "$DRAFT" != "true" && "$TESTED" != "true" && ( "$FULL" != "true" || "$AFFECTED_GATE" != "false" ) ]]; then
             echo "::error::A run planned with draft=$DRAFT full=$FULL affected=$AFFECTED_GATE cannot pass CI Success"
             exit 1
           fi
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
-          summary="draft=$DRAFT changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
+          summary="draft=$DRAFT tested=$TESTED changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
           if [[ "$CHANGES" != "success" || "$FRONTEND_CHECKS" != "success" ]] || \
              ! ok "$FRONTEND_TESTS" "$FULL" || ! ok "$FRONTEND_BUILD" "$FULL" || ! ok "$AFFECTED" "$AFFECTED_GATE" || \
              ! ok "$PACKAGES_TESTS" "$PACKAGES" || ! ok "$CLI_ARM64" "$PACKAGES" || ! ok "$TAURI" "$RUST" || \
@@ -818,6 +835,9 @@ jobs:
              ! ok "$DESKTOP_MEDIA" "$APP" || ! ok "$DESKTOP_MACOS" "$APP"; then
             echo "One or more jobs failed: $summary"
             exit 1
+          fi
+          if [[ "$TESTED" == "true" ]]; then
+            echo "::notice::This tree passed CI Success on a pull request already (see Changed paths): lint, types and Tauri Backend passed again on dev."
           fi
           if [[ "$DRAFT" == "true" ]]; then
             echo "::notice::Draft: the fast tier passed. The required CI Success comes from the full run that leaving draft (gh pr ready) starts."
