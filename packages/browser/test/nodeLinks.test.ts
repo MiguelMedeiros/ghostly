@@ -1279,6 +1279,35 @@ describe("private groups through the engine", () => {
       expect(iroh).toHaveBeenCalledOnce();
     });
 
+    // libdatachannel's race on a loaded core refused every answer to the edge's offers, through the pauses after them:
+    // the next offer would wait minutes of backoff while the member is there (meshSignals on CI, 2026-10-11).
+    it("an edge whose answers WebRTC here keeps refusing goes on over a native transport, as one whose WebRTC connected nothing", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const refused = await openEdge(node, state, createIdentity().pubKeyZ32);
+      const fine = await openEdge(node, state, createIdentity().pubKeyZ32);
+      await node["nativeQueue"];
+      expect(iroh).not.toHaveBeenCalled();
+      const first = edgeOf(refused), other = edgeOf(fine);
+      first.options.events.onAnswersRefused();
+      await vi.waitFor(() => expect(edgeOf(refused)).not.toBe(first));
+      // No goodbye: the member must not take the restart for a leave.
+      expect(first.stop).toHaveBeenCalledWith(false);
+      const again = edgeOf(refused);
+      expect(again.options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(again.registerEndpoint).toHaveBeenCalledOnce());
+      expect(edgeOf(fine)).toBe(other);
+      expect(other.registerEndpoint).not.toHaveBeenCalled();
+      // Said again by the old link: nothing more.
+      first.options.events.onAnswersRefused();
+      await node["nativeQueue"];
+      expect(edgeOf(refused)).toBe(again);
+      expect(iroh).toHaveBeenCalledOnce();
+    });
+
     it("an edge that ran a native endpoint says its transports on from then, and one that never did says none", async () => {
       // An edge whose WebRTC failed once said `_tr = ["iroh/1"]` for that run. Back with WebRTC it ran no endpoint and
       // published no `_tr` at all, so the member's app kept dialling the Iroh endpoint of the run before, for good.

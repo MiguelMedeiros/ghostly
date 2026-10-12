@@ -56,6 +56,12 @@ export interface DataLinkOptions {
    */
   onAnswerReplaced?: () => void;
   /**
+   * This side's answers were refused more times in a row than it offers again at once for (`ANSWER_REFUSED_REDIALS`):
+   * the WebRTC of this device takes none now (libdatachannel's race, on a loaded core), and the next offer would wait
+   * the caller's backoff, minutes after a few failures. Nothing about the network: the answerer was there each time.
+   */
+  onAnswersRefused?: () => void;
+  /**
    * What an attempt said about direct connections from this device (`directPath.ts`): it opened (and, later, closed);
    * it did not connect and this device had no public candidate for it, or a public port per STUN server; or this
    * side's offer was answered and no path connected.
@@ -156,6 +162,8 @@ export class DataLink {
   private answered: { offer: RtcSignal; at: number; again: number } | null = null;
   /** Answers refused since a connection last opened, each followed by a new offer at once (`ANSWER_REFUSED_REDIALS`). */
   private refusedAnswers = 0;
+  /** The last answer dropped as not for this side's offer (`answer-dropped`): each is said once. */
+  private droppedAnswerTs = 0;
 
   constructor(private readonly options: DataLinkOptions) {}
 
@@ -248,6 +256,12 @@ export class DataLink {
       } catch (error) {
         if (this.pc === pc) this.answerRefused(error);
       }
+    } else if (signal.t === "a" && signal.ts !== this.droppedAnswerTs) {
+      // An answer to an offer this side no longer waits on (one it made before, given up when its answer was refused),
+      // or one that came while this side was not offering: dropped, and said once, or a link that waited on its next
+      // answer after it showed nothing of why (meshSignals on CI, 2026-10-09).
+      this.droppedAnswerTs = signal.ts;
+      traceLink(this.options.myPubKeyZ32, "answer-dropped", { state: this.state, ...(this.myOfferTs && signal.o !== undefined ? { offerMs: signal.o - this.myOfferTs } : {}) });
     }
   }
 
@@ -318,7 +332,7 @@ export class DataLink {
     const again = this.refusedAnswers < ANSWER_REFUSED_REDIALS;
     traceLink(this.options.myPubKeyZ32, "answer-refused", { error: error instanceof Error ? error.message : String(error), again });
     this.reset();
-    if (!again) return;
+    if (!again) { this.options.onAnswersRefused?.(); return; }
     this.refusedAnswers++;
     this.options.onAnswerReplaced?.();
   }

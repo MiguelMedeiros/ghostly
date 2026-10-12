@@ -6536,6 +6536,10 @@ export class GhostlyNode implements EngineImplementation {
           this.directPath.note(peer, evidence);
           if (!entry && evidence !== "open" && evidence !== "closed") void this.edgeWithoutRtc(linkId);
         },
+        // WebRTC here refused every answer to the edge's offers, through the pauses after them: the next offer would
+        // wait minutes of backoff while the member is there. The edge goes on over a native transport for this run, as
+        // one whose WebRTC connected nothing does.
+        onAnswersRefused: () => { if (!entry) void this.edgeWithoutRtc(linkId); },
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
