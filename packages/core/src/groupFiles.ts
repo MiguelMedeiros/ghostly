@@ -21,7 +21,7 @@ export const GROUP_FILE_LIMITS = {
   serveAtOnce: 3,
   /** File announcements a member sends to one group in a minute. */
   announcePerMinute: 8,
-  /** File announcements taken from one member of a group in `announceWindowMs`; past it, shown as text, unfetched. */
+  /** File announcements of one member of a group fetched by themselves in `announceWindowMs`; past it, kept for a Download. */
   announceTaken: 30,
   announceWindowMs: 10 * 60_000,
   /** Holders remembered per file. */

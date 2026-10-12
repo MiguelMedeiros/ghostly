@@ -54,7 +54,7 @@ The ciphertext of a community `group-msg` opens to `{ "text", "fl", "nick"? }`: 
 - **Edits.** An edit changes the caption only (902 § Edits, 903 § Edits); the file is the one the first frame announced, and an edit body carrying `fl` is dropped.
 - **Forwards.** A file forwarded into a group (400 § Forwards) is a new announcement by the forwarder, with the forwarder's own copy as its first holder and `f` as for a forwarded text. A file forwarded out of a group is a new 1:1 file (501) from the bytes on the forwarder's device; a file not downloaded yet is not offered for forwarding.
 - **Frames said again** (902 § Catch-up, 2026-10-04) carry `fl` sealed again for the new header; the file and its digest stay the first frame's.
-- **Pace.** A member's app sends at most 8 file announcements a minute per group. A receiver takes at most 30 announcements from one member in 10 minutes per group; past that it shows them as the fallback text, unfetched.
+- **Pace.** A member's app sends at most 8 file announcements a minute per group. A receiver fetches by itself the files of at most 30 announcements from one member in 10 minutes per group, counted as they arrive; past that it keeps each file unfetched, shown with a **Download** like a file too large to fetch by itself. A catch-up brings a member's announcements together, however far apart they were sent, so none of them is lost to this limit.
 
 ## Getting the bytes
 
