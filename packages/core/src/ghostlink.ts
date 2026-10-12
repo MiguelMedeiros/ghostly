@@ -148,6 +148,16 @@ export const DEMOTE_AFTER_FAILURES = 3;
 export const DEMOTE_MS = 60 * 60_000;
 const AUTO_CONNECT_MAX_RETRY_MS = 3 * 60_000;
 /**
+ * WebRTC here refused more answers to this side's offers in a row than the data link offers again at once for
+ * (`ANSWER_REFUSED_REDIALS`): libdatachannel's race, which on a loaded core can refuse a whole run of them. The contact
+ * was there each time, so the next offer goes after a short pause, doubled each time, up to this many pauses, rather
+ * than after the backoff of failed dials (three minutes after five): a member let in to a group over slow relays was
+ * up with another member only 34 s after its welcome, and 180 s when that late dial was refused too (meshSignals on
+ * CI, 2026-10-11). Past them, the backoff as before: an answer that never goes in must not become a stream of offers.
+ */
+export const ANSWERS_REFUSED_PAUSES = 3;
+export const ANSWERS_REFUSED_PAUSE_MS = 2_000;
+/**
  * A first pairing is different: the contact is right there, having just read the invite, so an attempt
  * that did not make it in `PAIRING_ATTEMPT_MS` is given up and the next one starts after `PAIRING_RETRY_MS`
  * (doubling up to `PAIRING_MAX_RETRY_MS`), instead of the 90 s and 20 s a saved contact's reconnect waits.
@@ -424,6 +434,11 @@ export interface GhostLinkEvents {
   onDataLinkState?(state: DataLinkState): void;
   /** What a WebRTC attempt of this link said about direct connections from this device (`directPath.ts`). */
   onDirectEvidence?(evidence: DirectEvidence): void;
+  /**
+   * WebRTC here refused this side's answers in a row through every pause after them (`ANSWERS_REFUSED_PAUSES`): the next
+   * offer waits the backoff of failed dials, minutes, while the contact is there.
+   */
+  onAnswersRefused?(): void;
   /** The contact's packet came between two reads of its record: its clock against this one (`LinkSessionEvents.onPeerClock`). */
   onPeerClock?(packetAt: number, readBefore: number, readAt: number): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -769,6 +784,9 @@ export class GhostLink {
   private afterRtc?: { epoch: number; rest: PairedTransport[] };
   /** When the transports after WebRTC are dialled while its offer is still out (`race`). */
   private raceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Pauses taken after a run of refused answers since WebRTC last opened, and the one under way (`ANSWERS_REFUSED_PAUSES`). */
+  private refusedPauses = 0;
+  private refusedPause: ReturnType<typeof setTimeout> | null = null;
   /** Set while `race` dials: the offer ending meanwhile is followed up by the race. */
   private racing = false;
   /**
@@ -1069,6 +1087,7 @@ export class GhostLink {
       offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
       onAnswerReplaced: () => this.redial(),
       onDirect: evidence => events.onDirectEvidence?.(evidence),
+      onAnswersRefused: () => this.answersRefused(),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
         const plan = this.switcher.pending;
@@ -1089,7 +1108,7 @@ export class GhostLink {
         this.trackDataLink(state);
         if (this.activeBinding) return;
         events.onDataLinkState?.(state);
-        if (state === "open") this.afterRtc = undefined;
+        if (state === "open") { this.afterRtc = undefined; this.refusedPauses = 0; }
         if (state === "offering") { this.offerUnsent = true; this.dialUnseen = false; }
         if (state === "answering") {
           this.answeringEpoch = this.connectionEpoch;
@@ -1483,6 +1502,7 @@ export class GhostLink {
   async stop(announce = true): Promise<void> {
     this.stopped = true;
     this.clearRace();
+    if (this.refusedPause) clearTimeout(this.refusedPause);
     if (this.retryLook) clearTimeout(this.retryLook);
     if (this.dhtPinGrace) clearTimeout(this.dhtPinGrace);
     if (this.waiting?.timer) clearTimeout(this.waiting.timer);
@@ -2763,6 +2783,16 @@ export class GhostLink {
     if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect || this.channel || this.dialing || this.dataLink.state !== "idle") return;
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures, again: true });
     this.autoDial();
+  }
+
+  /** WebRTC here refused a run of answers to this side's offers (`ANSWERS_REFUSED_PAUSES`): the next offer goes after a short pause. */
+  private answersRefused(): void {
+    if (this.refusedPause || this.stopped) return;
+    // Past them, the owner hears it: a group's edge goes on over a native transport for the run (node.ts `edgeWithoutRtc`).
+    if (this.refusedPauses >= ANSWERS_REFUSED_PAUSES) { traceLink(this.myPubKeyZ32, "answers-refused-out", {}); this.options.events?.onAnswersRefused?.(); return; }
+    const ms = ANSWERS_REFUSED_PAUSE_MS * 2 ** this.refusedPauses++;
+    traceLink(this.myPubKeyZ32, "answers-refused-pause", { pause: this.refusedPauses, ms });
+    this.refusedPause = setTimeout(() => { this.refusedPause = null; this.redial(); }, ms);
   }
 
   /**
