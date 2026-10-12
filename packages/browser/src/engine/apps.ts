@@ -215,6 +215,8 @@ export interface AppPreview {
   run: AppRunStatus;
   listedBy: AppListedBy[];
   unknownPublisher: boolean;
+  /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
+  carried?: true;
 }
 
 export type AppCheckOutcome = "updated" | "ask" | "equivocation" | "none";
@@ -940,7 +942,7 @@ export class Apps {
       const app = (await this.offered(source.builtIn)) ?? fail("not-offered", "This app does not come with Ghostly here");
       const { bundle, bytes } = await this.bundled(app);
       // From its public URL, not from the build: what a card sent to a contact names, and where its revocations are read.
-      return this.stage(bundle, bytes, app.url);
+      return this.stage(bundle, bytes, app.url, undefined, true);
     }
     if ("url" in source) {
       urls = [(typeof source.url === "string" && appPasteUrl(source.url, "app.ghostlyapp")) || notReadable(source.url, "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS")];
@@ -960,7 +962,7 @@ export class Apps {
       const carried = typeof digest === "string" ? await this.offered(ref) : undefined;
       if (carried && carried.digest === digest) {
         const held = await this.bundled(carried).catch(() => null);
-        if (held) return this.stage(held.bundle, held.bytes, carried.url);
+        if (held) return this.stage(held.bundle, held.bytes, carried.url, undefined, true);
       }
       urls = [url];
       expect = { ref, ...(typeof sequence === "number" && { sequence }), ...(typeof digest === "string" && { digest }) };
@@ -992,7 +994,7 @@ export class Apps {
     if (oldest) this.sweep = setTimeout(() => this.sweepStaged(), STAGED.ms - (this.now() - oldest.at));
   }
 
-  private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string): Promise<AppPreview> {
+  private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string, carried = false): Promise<AppPreview> {
     for (const [digest, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(digest);
     this.staged.delete(bundle.digest);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
@@ -1012,6 +1014,7 @@ export class Apps {
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), installed?.revocations),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      ...(carried && { carried: true as const }),
     };
   }
 

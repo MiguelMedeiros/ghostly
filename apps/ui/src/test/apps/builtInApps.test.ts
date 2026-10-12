@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { appRef, isAppKey, readAppBundleAsync } from "@ghostly/core";
 import { BUILT_IN_APPS } from "@ghostly/browser/engine/appDefaults";
@@ -13,7 +13,7 @@ import { readBuiltInApp } from "../../lib/apps/builtIns";
  * files only.
  */
 
-const file = (name: string) => new Uint8Array(readFileSync(fileURLToPath(new URL(`../../assets/apps/${name}.ghostlyapp`, import.meta.url))));
+const file = (name: string) => new Uint8Array(readFileSync(join(import.meta.dirname, "..", "..", "assets", "apps", `${name}.ghostlyapp`)));
 
 afterEach(() => { vi.unstubAllGlobals(); });
 

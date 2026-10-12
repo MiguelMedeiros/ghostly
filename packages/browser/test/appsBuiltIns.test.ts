@@ -184,7 +184,7 @@ describe("opened from the build", () => {
     carried = v1.bytes;
     const store = apps(net, { readBuiltIn, builtIns: [chess(v1.digest)] });
     const preview = await store.preview({ builtIn: REF });
-    expect(preview).toMatchObject({ ref: REF, digest: v1.digest, install: "new", asks: ["chat", "name"], from: BUNDLE_URL });
+    expect(preview).toMatchObject({ ref: REF, digest: v1.digest, install: "new", asks: ["chat", "name"], from: BUNDLE_URL, carried: true });
     expect(reads).toBe(1);
     expect(await appRows()).toEqual([]);
     expect(await bundleIds()).toEqual([]);
@@ -243,12 +243,13 @@ describe("opened from the build", () => {
     carried = v1.bytes;
     const store = apps(net, { readBuiltIn, builtIns: [chess(v1.digest)] });
     const preview = await store.preview({ card: { ref: REF, url: PINNED_URL, sequence: 1, digest: v1.digest } });
-    expect(preview).toMatchObject({ ref: REF, digest: v1.digest, install: "new", from: BUNDLE_URL });
+    expect(preview).toMatchObject({ ref: REF, digest: v1.digest, install: "new", from: BUNDLE_URL, carried: true });
     expect(net.requests).toEqual([]);
 
     net.put(PINNED_URL, v2.bytes);
     const newer = await store.preview({ card: { ref: REF, url: PINNED_URL, sequence: 2, digest: v2.digest } });
     expect(newer).toMatchObject({ digest: v2.digest, from: PINNED_URL });
+    expect(newer.carried).toBeUndefined();
     expect(net.requests).toEqual([PINNED_URL]);
   });
 
