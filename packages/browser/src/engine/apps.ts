@@ -273,7 +273,7 @@ export const BUILT_IN_APPS_KEY = "appBuiltIns";
 /** The built-in apps the person removed, by reference, and when (WISP 1200 § Built-in apps: removing sticks). */
 export interface BuiltInAppMarks { removed: Record<string, number> }
 /** A built-in app this profile is offered: one the person has neither installed nor removed. Nothing of it is stored. */
-export interface BuiltInAppOffer { ref: string; publisher: string; name: string; fingerprint: string; digest: string; url: string }
+export interface BuiltInAppOffer { ref: string; publisher: string; name: string; fingerprint: string; digest: string; url: string; title: string; tagline: string }
 
 /** The marks as kept, read with nothing taken on trust: a record that is not one is no mark. */
 function builtInMarks(kept: unknown): BuiltInAppMarks {
@@ -298,12 +298,13 @@ const builtInRef = (app: BuiltInApp) => appRef(app.publisher, app.name);
 /**
  * The entries of the built-in list this profile is offered (WISP 1200 § Built-in apps): each reference once, not
  * installed (`installed`, by reference) and not removed by the person. An entry that is not a whole one (its key, its
- * name, its digest, a URL off the list of `appFetch.ts`) is skipped, as a build with no bundle for it would be.
+ * name, its digest, a URL off the list of `appFetch.ts`, no title or tagline) is skipped, as a build with no bundle
+ * for it would be.
  */
 export function builtInsDue(list: readonly BuiltInApp[], installed: ReadonlySet<string>, marks: BuiltInAppMarks): BuiltInApp[] {
   const due = new Map<string, BuiltInApp>();
   for (const app of list) {
-    if (!isAppKey(app.publisher) || !isAppHash(app.digest) || !isAppFetchUrl(app.url)) continue;
+    if (!isAppKey(app.publisher) || !isAppHash(app.digest) || !isAppFetchUrl(app.url) || !app.title || !app.tagline) continue;
     const ref = builtInRef(app);
     if (!isAppRef(ref) || due.has(ref) || installed.has(ref) || marks.removed[ref] !== undefined) continue;
     due.set(ref, app);
@@ -502,6 +503,7 @@ export class Apps {
     const [installed, marks] = await Promise.all([this.installed(), this.builtInMarks()]);
     return builtInsDue(list, new Set(installed.map((a) => a.ref)), marks).map((app) => ({
       ref: builtInRef(app), publisher: app.publisher, name: app.name, fingerprint: appFingerprint(app.publisher), digest: app.digest, url: app.url,
+      title: app.title, tagline: app.tagline,
     }));
   }
 

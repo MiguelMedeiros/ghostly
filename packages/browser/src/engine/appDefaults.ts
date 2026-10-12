@@ -28,7 +28,11 @@ export const DEFAULT_APP_STORES: readonly { url: string; key: string }[] = DEFAU
  * app card sent in a chat names, and where its revocations and a restored profile's files are read: the copy in the
  * build is never a source a contact could read.
  */
-export interface BuiltInApp { publisher: string; name: string; digest: string; url: string }
+export interface BuiltInApp {
+  publisher: string; name: string; digest: string; url: string;
+  /** The pinned bundle's own title and tagline, as its manifest says them: what its row shows before the file is read. */
+  title: string; tagline: string;
+}
 
 /**
  * The apps that come with Ghostly. A short list kept here on purpose, never "everything in the official store": an
@@ -42,5 +46,6 @@ export const BUILT_IN_APPS: readonly BuiltInApp[] = [
     publisher: "odcgw6wjw8dynqop84r47jbjcdqossbgrfiejd367e14hgxmjcho", name: "chess",
     digest: "EEnFmP0grTkTe_9qgapQsEEZzWB9FcpoimWkHnfecVs",
     url: "https://cdn.jsdelivr.net/gh/MiguelMedeiros/ghostly-chess@c665ab194478145fd9b9a4777e6c0d1893969649/app.ghostlyapp",
+    title: "Chess", tagline: "Play chess with a contact, live in your chat",
   },
 ];

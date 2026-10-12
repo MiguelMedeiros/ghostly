@@ -23,7 +23,7 @@ beforeEach(async () => {
 });
 
 const DIGEST = "A".repeat(43);
-const chess = (digest = DIGEST): BuiltInApp => ({ publisher: keyOf(PUBLISHER), name: "chess", digest, url: BUNDLE_URL });
+const chess = (digest = DIGEST): BuiltInApp => ({ publisher: keyOf(PUBLISHER), name: "chess", digest, url: BUNDLE_URL, title: "Chess", tagline: "Play chess with a contact" });
 const REF = `${keyOf(PUBLISHER)}/chess`;
 const marks = async () => wrap((await store(STORES.settings, "readonly")).get(BUILT_IN_APPS_KEY));
 /** The file the build carries, as the client's host reads it: these bytes, and a count of the reads. */
@@ -33,7 +33,7 @@ const readBuiltIn = async () => { reads++; if (carried instanceof Error) throw c
 
 describe("the list", () => {
   it("offers each whole entry once, unless it is installed or the person removed it", () => {
-    const other: BuiltInApp = { publisher: keyOf(signer("other publisher")), name: "notes", digest: DIGEST, url: BUNDLE_URL };
+    const other: BuiltInApp = { publisher: keyOf(signer("other publisher")), name: "notes", digest: DIGEST, url: BUNDLE_URL, title: "Notes", tagline: "Notes for two" };
     const otherRef = `${other.publisher}/notes`;
     const none = { removed: {} };
     expect(builtInsDue([chess(), other, chess("B".repeat(43))], new Set(), none)).toEqual([chess(), other]);
@@ -49,6 +49,8 @@ describe("the list", () => {
       { ...chess(), digest: "short" },
       { ...chess(), url: "https://example.com/app.ghostlyapp" },
       { ...chess(), url: "/apps/chess.ghostlyapp" },
+      { ...chess(), title: "" },
+      { ...chess(), tagline: "" },
     ]) expect(builtInsDue([bad], new Set(), { removed: {} }), JSON.stringify(bad)).toEqual([]);
   });
 });
@@ -57,7 +59,7 @@ describe("offered, not installed", () => {
   it("a start stores nothing, grants nothing and asks the network for nothing", async () => {
     const store = apps(net, { readBuiltIn, builtIns: [chess()] });
     await store.start();
-    expect(await store.builtIns()).toEqual([{ ref: REF, publisher: keyOf(PUBLISHER), name: "chess", fingerprint: expect.stringMatching(/^(\w{4} ){3}\w{4}$/), digest: DIGEST, url: BUNDLE_URL }]);
+    expect(await store.builtIns()).toEqual([{ ref: REF, publisher: keyOf(PUBLISHER), name: "chess", fingerprint: expect.stringMatching(/^(\w{4} ){3}\w{4}$/), digest: DIGEST, url: BUNDLE_URL, title: "Chess", tagline: "Play chess with a contact" }]);
     expect(await store.list()).toEqual([]);
     expect(await appRows()).toEqual([]);
     expect(await bundleIds()).toEqual([]);

@@ -36,6 +36,8 @@ describe("the bundles this build carries", () => {
       expect(read.bundle.digest).toBe(app.digest);
       expect(appRef(read.bundle.manifest.publisher, read.bundle.manifest.name)).toBe(appRef(app.publisher, app.name));
       expect(read.bundle.manifest.runtime.clients).toEqual(expect.arrayContaining(["web", "desktop"]));
+      // What its row shows before the file is read is what the bundle says of itself.
+      expect({ title: app.title, tagline: app.tagline }).toEqual({ title: read.bundle.manifest.title, tagline: read.bundle.manifest.tagline });
     }
   });
 
