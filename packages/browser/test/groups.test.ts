@@ -254,6 +254,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(alice.views()[0].lastMentionAt).toBeUndefined();
     // After a restart it is what it was: when the mention came, not only when it was written.
     const before = bob.views()[0].lastMentionAt;
+    await bob.flush();
     const again = new Groups({ ...(bob as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("bob")!.store);
     await again.load();
     expect(again.views()[0].lastMentionAt).toBe(before);

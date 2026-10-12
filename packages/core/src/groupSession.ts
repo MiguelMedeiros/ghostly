@@ -85,6 +85,8 @@ export const GROUP_LIMITS = {
   catchUpSlice: CATCH_UP_SLICE,
   /** Between two slices, when the member's app cannot say it handled one (`handled` resolves `false`). */
   catchUpPauseMs: CATCH_UP_PAUSE_MS,
+  /** A received message is in the saved state within this long (`persistSoon`): a burst of them is one save, not one each. */
+  saveWithinMs: 1000,
 } as const;
 
 /** What every member should know about who can read what, in the words the apps show. */
@@ -387,6 +389,8 @@ export class GroupSession {
   private pendingMeta: { from: string; frame: unknown } | undefined;
   /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
   private passOn: GroupEdgeFrame[] | null = null;
+  /** Set while a save of what received messages changed is due (`persistSoon`). */
+  private saveTimer: ReturnType<typeof setTimeout> | undefined;
   /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
   /** Catch-up answers still going out, a slice at a time (`handOut`). */
@@ -571,7 +575,26 @@ export class GroupSession {
     this.queue = operation.then(() => {}, () => {});
     return operation;
   }
-  private persist(): Promise<void> { return this.hooks.save(structuredClone(this.state)); }
+  private persist(): Promise<void> {
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
+    return this.hooks.save(structuredClone(this.state));
+  }
+  /**
+   * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message changes (what was seen, what is kept to hand
+   * on): the state holds the whole hand-on log, and a member back in a busy group wrote all of it once per message.
+   * The message itself is stored before (`hooks.message`). An app killed before the save takes those frames again when
+   * it syncs: its store has the messages already, and the state then catches up.
+   */
+  private persistSoon(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      // Between two frames, never in the middle of one being handled.
+      void this.serialize(() => this.hooks.save(structuredClone(this.state))).catch(() => {});
+    }, GROUP_LIMITS.saveWithinMs);
+  }
+  /** Writes what is waiting to be saved now (before a restart, in tests). */
+  flush(): Promise<void> { return this.serialize(async () => { if (this.saveTimer) await this.persist(); }); }
   private secret(epoch: number): Uint8Array | undefined {
     const s = this.state.secrets[epoch];
     return s ? fromBase64Url(s) : undefined;
@@ -1115,7 +1138,7 @@ export class GroupSession {
       // I read the first one: kept and passed on for those who could not, not shown twice.
       this.markSeen(raw);
       this.keep(clean(raw));
-      await this.persist();
+      this.persistSoon();
       if (rosterHas(this.roster, raw.s)) this.took(clean(raw));
       return;
     }
@@ -1142,7 +1165,7 @@ export class GroupSession {
     // The first one, should it come too (I was in its epoch): a duplicate.
     if (firstFrame && rosterHas(this.state.chain[firstFrame.e]?.m ?? [], this.myKey)) this.markSeen(firstFrame);
     this.keep(clean(raw));
-    await this.persist();
+    this.persistSoon();
     // Passed on only while its author is a member: someone removed is not carried for, even for epochs it was in.
     if (rosterHas(this.roster, raw.s)) this.took(clean(raw));
   }
