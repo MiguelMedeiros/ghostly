@@ -79,20 +79,16 @@ export class EventHub {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const rows = await new Promise<{ key: IDBValidKey; value: string }[]>((resolve, reject) => {
-      const out: { key: IDBValidKey; value: string }[] = [];
-      const request = this.db.transaction(SEEN).objectStore(SEEN).openCursor();
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (!cursor) return resolve(out);
-        out.push({ key: cursor.key, value: cursor.value as string });
-        cursor.continue();
-      };
+    // Two requests for the whole set, never a cursor: a cursor costs one tree search per row on Node's IndexedDB.
+    const store = this.db.transaction(SEEN).objectStore(SEEN);
+    const all = <T>(request: IDBRequest<T[]>) => new Promise<T[]>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    for (const { key, value } of rows) {
-      const [chat, id] = key as [string, string];
-      this.seenOf(chat).set(id, value);
+    const [keys, values] = await Promise.all([all(store.getAllKeys()), all(store.getAll() as IDBRequest<string[]>)]);
+    for (let i = 0; i < keys.length; i++) {
+      const [chat, id] = keys[i] as [string, string];
+      this.seenOf(chat).set(id, values[i]);
     }
     this.mentionsNoted = this.firstRun || this.seen.get(FORMAT)?.get(MENTIONS_NOTED) === "yes";
   }

@@ -256,6 +256,31 @@ describe("the event stream", () => {
     expect(events.map((e) => e.id)).toEqual(["group.message:g1:x", "group.message:g1:y"]);
   });
 
+  it("reads a large seen set at start in two requests, without a cursor step per row", async () => {
+    const history = (chat: string) => Array.from({ length: 2_000 }, (_, i) => message(chat, `m${i}`, i % 2 ? { sender: "me", delivery: "delivered" } : {}));
+    const first = await hub("large.jsonl");
+    first.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", history("c1")], ["c2", history("c2")]]));
+    // The seen set is written behind the baseline: a read queued after it runs once those rows are in.
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("large.jsonl");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const store = db.transaction("seen").objectStore("seen");
+    const proto = Object.getPrototypeOf(store) as IDBObjectStore;
+    expect(await new Promise<number>((resolve) => { const request = store.count(); request.onsuccess = () => resolve(request.result); })).toBeGreaterThanOrEqual(4_000);
+    db.close();
+    const cursors = vi.spyOn(proto, "openCursor");
+    const requests = [vi.spyOn(proto, "getAllKeys"), vi.spyOn(proto, "getAll"), vi.spyOn(proto, "get")];
+    const later = await hub("large.jsonl");
+    expect(cursors).not.toHaveBeenCalled();
+    expect(requests.reduce((n, spy) => n + spy.mock.calls.length, 0)).toBe(2);
+    vi.restoreAllMocks();
+    // Every row is back under its own chat and message: nothing is reported twice, a delivery change and a new message are.
+    later.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", history("c1")], ["c2", [...history("c2").slice(0, 1_999), message("c2", "m1999", { sender: "me", delivery: "failed" }), message("c2", "fresh")]]]));
+    expect(later.events.map((e) => e.id)).toEqual(["message.delivery:c2:m1999:failed", "message.received:c2:fresh"]);
+  });
+
   it("says when the journal no longer holds what a listener asks for", async () => {
     const { h } = await hub("d.jsonl");
     const lines = [5, 6].map((seq) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 })).join("\n") + "\n";
