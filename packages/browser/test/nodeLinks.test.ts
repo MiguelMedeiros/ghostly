@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
-import { GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
+import { GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { EditQueue } from "../src/engine/edits";
 import { STORES, fileStore, transact } from "../src/shared/idb";
@@ -72,6 +72,10 @@ vi.mock("@ghostly/core", async (importOriginal) => {
   }
   return { ...actual, GhostLink: RecordedLink };
 });
+
+/** Iroh's browser build (`NodeOptions.irohWeb`) is replaced by a recorder too: no wasm, no relay. */
+const irohWeb = vi.hoisted(() => ({ start: vi.fn() }));
+vi.mock("../src/platform/irohWeb", async (importOriginal) => ({ ...await importOriginal<typeof import("../src/platform/irohWeb")>(), createIrohWebEndpoint: irohWeb.start }));
 
 const fixture = { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "fixture", relays: [] }) };
 const nodes: GhostlyNode[] = [];
@@ -1385,6 +1389,74 @@ describe("private groups through the engine", () => {
       onTestFinished(() => { vi.unstubAllGlobals(); });
       expect(host.staysOnline()).toBe(true);
       expect(host.peerRoom(groupId)).toBeUndefined();
+    });
+
+    it("an app whose Iroh is the browser build holds twelve Iroh listeners for group links: six members with no WebRTC are all reached, the thirteenth waits", async () => {
+      // As the CLI runs (the web app the same, its HyperDHT through a relay): Iroh's wasm, HyperDHT of its own, WebRTC.
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      irohWeb.start.mockImplementation(async () => endpoint());
+      const hyper = vi.fn(async () => ({ ...endpoint(), transport: "hyperdht/1" as const, descriptor: { publicKey: "ef".repeat(32) } }));
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, irohWeb: true, nativeTransports: { "hyperdht/1": hyper } });
+      nodes.push(node);
+      await node.start();
+      const { groupId } = await node.createGroup({ name: "Team" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const members: string[] = [], edgeIds: string[] = [];
+      const join = async (count: number) => {
+        for (let i = 0; i < count; i++) {
+          const member = createIdentity().pubKeyZ32;
+          members.push(member);
+          edgeIds.push(await openEdge(node, state, member));
+          // The member's app said it has no WebRTC on this link (a Linux Desktop, or an edge whose WebRTC connected nothing).
+          edgeOf(edgeIds.at(-1)!).options.events.onPacketTransports(["iroh/1", "hyperdht/1"], {});
+        }
+      };
+      const running = (transport: string) => edgeIds.filter((id) => edgeOf(id).availableTransports.includes(transport));
+      const waiting = () => members.filter((member) => (node["edgeView"](groupId, member) as GroupEdgeView | undefined)?.noSlot);
+      await join(6);
+      await vi.waitFor(() => expect(running("iroh/1")).toHaveLength(6));
+      // HyperDHT keeps its four: a link needs one native transport, and none of the six waits.
+      await vi.waitFor(() => expect(running("hyperdht/1")).toHaveLength(GROUP_NATIVE_SLOTS));
+      expect(waiting()).toHaveLength(0);
+      await join(7);
+      await vi.waitFor(() => expect(waiting()).toHaveLength(1));
+      expect(running("iroh/1")).toHaveLength(GROUP_IROH_WEB_SLOTS);
+      expect(running("hyperdht/1")).toHaveLength(GROUP_NATIVE_SLOTS);
+      // With no WebRTC (GHOSTLY_WEBRTC=0), those twelve are what its groups may hold in all.
+      vi.unstubAllGlobals();
+      expect((node["groups"]["host"] as { peerRoom(groupId: string): number | undefined }).peerRoom(groupId)).toBe(GROUP_IROH_WEB_SLOTS);
+      expect(GROUP_IROH_WEB_SLOTS).toBe(12);
+    });
+
+    it("1:1 chats hold eight of the browser build's sixteen Iroh listeners as before, and group links what they leave", async () => {
+      // Nine saved contacts: eight keep a listener, as on every app; the ninth takes one when its chat is in use.
+      const chats = Array.from({ length: 9 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      irohWeb.start.mockImplementation(async () => endpoint());
+      await db.putSettings({ ...(await db.getSettings()), hyperdhtRelay: "" });
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, irohWeb: true });
+      nodes.push(node);
+      await node.start();
+      const onIroh = (ids: string[]) => ids.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"));
+      await vi.waitFor(() => expect(onIroh(chats.map((c) => c.id))).toHaveLength(8));
+      await node["nativeQueues"].get("iroh/1");
+      expect(onIroh(chats.map((c) => c.id))).toHaveLength(8);
+      const { groupId } = await node.createGroup({ name: "Team" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const members = Array.from({ length: 9 }, () => createIdentity().pubKeyZ32);
+      const edgeIds: string[] = [];
+      for (const member of members) edgeIds.push(await openEdge(node, state, member));
+      for (const id of edgeIds) edgeOf(id).options.events.onPacketTransports(["iroh/1"], {});
+      // Eight of the nine links take the eight listeners the chats leave; the ninth waits, and no chat lost its own.
+      const waiting = () => members.filter((member) => (node["edgeView"](groupId, member) as GroupEdgeView | undefined)?.noSlot);
+      await vi.waitFor(() => expect(waiting()).toHaveLength(1));
+      expect(onIroh(edgeIds)).toHaveLength(8);
+      expect(onIroh(chats.map((c) => c.id))).toHaveLength(8);
     });
 
     it("group links hold at most half the native slots, a chat takes one back from an idle group link, and a link with none says it waits", async () => {

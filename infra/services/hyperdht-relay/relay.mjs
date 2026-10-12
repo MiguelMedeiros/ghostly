@@ -7,8 +7,9 @@ import WsStream from '@hyperswarm/dht-relay/ws'
 import { WebSocketServer } from 'ws'
 
 /**
- * What one relay accepts. A Ghostly browser holds one WebSocket, listens once per saved chat (at most eight
- * native listeners per app) and dials a contact now and then; everything above that is someone else's traffic.
+ * What one relay accepts. A Ghostly browser holds one WebSocket, listens once per saved chat or group link (at most
+ * eight native listeners per app, and one per linked device) and dials a contact now and then; everything above that
+ * is someone else's traffic.
  */
 export const DEFAULT_LIMITS = Object.freeze({
   /** WebSockets at once, over all clients. */
