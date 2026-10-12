@@ -64,6 +64,8 @@ const SNAPSHOT = "snapshot.bin";
 const JOURNAL = "journal.bin";
 /** A journal past this is folded into the snapshot at the next quiet moment. */
 const COMPACT_BYTES = 32 * 1024 * 1024;
+/** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
+const CLOSE_WAIT_MS = 5_000;
 const BLOB = "__ghostlyBlob";
 const RANGE = "__ghostlyRange";
 const PROBE = "__ghostly_storage_probe__";
@@ -216,6 +218,21 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     rmSync(journalPath, { force: true });
   }
 
+  /**
+   * Resolves once no transaction is left to run. The engine does not wait for every write (`void db.deleteLink(…)`),
+   * and fake-indexeddb runs a transaction on a later turn of the event loop: a command that closed in the turn it wrote
+   * in (no chat to say goodbye to) took its last snapshot before the write, and answered done for what was not on disk.
+   * Two quiet turns in a row: a write that begins when another ends (a chat's messages after its row) is seen too.
+   */
+  async function settled() {
+    const until = Date.now() + CLOSE_WAIT_MS;
+    for (let quiet = 0; quiet < 2 && Date.now() < until; ) {
+      await new Promise((resolve) => setImmediate(resolve));
+      const busy = [...raw._databases.values()].some((db) => db.transactions.some((transaction) => (transaction as RawTransaction)._state !== "finished"));
+      quiet = busy ? 0 : quiet + 1;
+    }
+  }
+
   const installed = globalThis as unknown as Record<string, unknown>;
   installed.indexedDB = factory;
   installed.IDBKeyRange = IDBKeyRange;
@@ -225,6 +242,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     flush: () => queue,
     compact: () => enqueue(writeSnapshot),
     async close() {
+      await settled();
       await enqueue(writeSnapshot);
       writing = false;
       if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
