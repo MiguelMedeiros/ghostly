@@ -35,3 +35,10 @@ export function applyMessageChanges(history: readonly StoredMessage[], changes: 
   }
   return out;
 }
+
+/** A row as a page gets it: without the frame a private group's message came in (`StoredMessage.frame`), which only the engine reads. */
+export function withoutFrame(message: StoredMessage): StoredMessage {
+  if (message.frame === undefined) return message;
+  const { frame: _frame, ...row } = message;
+  return row;
+}
