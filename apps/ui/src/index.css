@@ -675,6 +675,21 @@ html[data-standalone="true"] {
   font-size: 13px;
 }
 
+/* Your own side of a voice call, beside the contact: smaller, so it is never taken for them. */
+.call-mini .call-sides {
+  gap: 14px;
+  padding: 0 10px;
+}
+
+.call-mini .call-self .call-avatar {
+  width: 32px;
+  height: 32px;
+}
+
+.call-mini .call-self .call-avatar span {
+  font-size: 13px;
+}
+
 /* The header of a right-column page (components/layout/Page.tsx): one 3.5rem line, or two when its
    controls wrap under the title in a narrow column. The inset is 0 everywhere but under a phone's notch. */
 .page-header {
