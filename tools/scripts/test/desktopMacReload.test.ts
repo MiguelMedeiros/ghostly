@@ -1,7 +1,5 @@
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { createContext, runInContext, type Context } from "node:vm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MacDriver } from "../../../e2e/support/desktopMac";
 
 /*
@@ -9,20 +7,21 @@ import { MacDriver } from "../../../e2e/support/desktopMac";
  * (apps/desktop/src/e2e_driver.rs), with a page that is a `node:vm` context. A reload here does what WKWebView does: the
  * document that asked for it goes on answering, `complete`, for a moment, then a new one loads. A script started in
  * that moment is lost with the old document, which is how `desktop-macos/device-signing-key.spec.ts` waited two
- * minutes for an answer nobody held any more.
+ * minutes for an answer nobody held any more. The driver's `fetch` is answered in this process, with no server: a
+ * listening socket would run whatever script any local process sent it.
  */
 
 /** How long the old document goes on answering after `location.reload()`, and how long the new one loads. */
 const COMMIT_MS = 300;
 const LOAD_MS = 200;
 
-let server: Server | undefined;
-afterEach(async () => {
-  await new Promise((done) => server?.close(done) ?? done(null));
-  server = undefined;
+const ENDPOINT = "http://desktop-driver.test";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
-async function fakeDriver(): Promise<{ driver: MacDriver; documents: () => number }> {
+function fakeDriver(): { driver: MacDriver; documents: () => number } {
   let documents = 0;
   let page: Context;
   const open = (readyState: string) => {
@@ -41,23 +40,17 @@ async function fakeDriver(): Promise<{ driver: MacDriver; documents: () => numbe
   };
   open("complete");
 
-  server = createServer((request, response) => {
-    let body = "";
-    request.on("data", (chunk) => { body += chunk; });
-    request.on("end", () => {
-      const { script } = JSON.parse(body) as { script: string };
-      response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify(runInContext(script, page)));
-    });
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    if (`${init.method} ${url}` !== `POST ${ENDPOINT}/eval`) throw new Error(`unexpected ${init.method} ${url}`);
+    const { script } = JSON.parse(init.body as string) as { script: string };
+    return new Response(JSON.stringify(runInContext(script, page)), { headers: { "content-type": "application/json" } });
   });
-  await new Promise<void>((done) => server!.listen(0, "127.0.0.1", done));
-  const { port } = server.address() as AddressInfo;
-  return { driver: new MacDriver(`http://127.0.0.1:${port}`, "token"), documents: () => documents };
+  return { driver: new MacDriver(ENDPOINT, "token"), documents: () => documents };
 }
 
 describe("MacDriver.reload", () => {
   it("answers once the new document has loaded, not while the old one still says complete", async () => {
-    const { driver, documents } = await fakeDriver();
+    const { driver, documents } = fakeDriver();
     await driver.execute(`window.before = "the old document";`);
 
     await driver.reload();
@@ -67,7 +60,7 @@ describe("MacDriver.reload", () => {
   });
 
   it("a script started after it finishes in the new document", async () => {
-    const { driver } = await fakeDriver();
+    const { driver } = fakeDriver();
 
     await driver.reload();
 
@@ -75,7 +68,7 @@ describe("MacDriver.reload", () => {
   });
 
   it("says so when no new document comes", async () => {
-    const { driver } = await fakeDriver();
+    const { driver } = fakeDriver();
     await driver.execute(`window.location.reload = () => {};`);
 
     await expect(driver.reload(400)).rejects.toThrow("The page did not reload");
