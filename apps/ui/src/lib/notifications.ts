@@ -61,6 +61,18 @@ function noticeId(id:string):string{
   }
   return notice;
 }
+/**
+ * What the notification of the page's `event` said is over (a ring that ended): it goes, where the app can take one
+ * back (the Android and Linux apps, the extension); elsewhere it closes by itself.
+ */
+export function clearNotification(event:string):void{
+  const id=notices.get(event);
+  if(!id) return;
+  notices.delete(event);
+  chats.delete(id);
+  if(native()) void invoke("native_clear_notification",{id}).catch(()=>{/* gone already, or an older app */});
+  else void extension()?.notifications?.clear?.(id)?.catch(()=>{/* gone already */});
+}
 const openers=new Set<(chat:string)=>void>();
 let listening=false;
 /** Opens the chat of a notification shown from this page; false when it was not. */
