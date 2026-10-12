@@ -1509,8 +1509,10 @@ export class Groups {
           return;
         }
         if (existing?.state && existing.state.status === "active") {
-          // Already in (through the link, say): its admin stops showing us as invited. Only the admin we know hears it.
-          if (this.sessions.get(g)?.admin === frame.admin) this.host.sendOnLink(linkId, { t: "group-decline", g });
+          // Already in: its admin stops showing us as invited. Only over the chat that admitted us, which is the admin's:
+          // anyone else who knows the id and the admin's key would learn from the answer whether we are still in. One
+          // who came in through the link has no such chat; its admin's invitation ages out unanswered.
+          if (this.sessions.get(g)?.admin === frame.admin && existing.contacts?.[frame.admin] === linkId) this.host.sendOnLink(linkId, { t: "group-decline", g });
           return;
         }
         // Already accepting one. The same admin inviting again over the same chat never got my accept: this one replaces it.
