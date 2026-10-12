@@ -999,6 +999,7 @@
     "apps/ui/src/lib/videoPlayer.ts": ["files.video.*","files.audio.*"],
     "apps/ui/src/lib/videoPoster.ts": ["files.video.*"],
     "apps/ui/src/lib/voiceDecode.ts": ["files.voice.*","files.download"],
+    "apps/ui/src/lib/voiceLevels.ts": ["calls.speaking","calls.linux-native"],
     "apps/ui/src/lib/wakePush.ts": ["push.wake.*"],
     "apps/ui/src/lib/webrtc.ts": ["transport.webrtc","calls.*"],
     "apps/ui/src/lib/windowAway.ts": ["app.idle","chat.paired.pairing-progress"],

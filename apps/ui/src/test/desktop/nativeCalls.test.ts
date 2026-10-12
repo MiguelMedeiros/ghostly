@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 
-// covers: calls.linux-native, calls.devices-linux, calls.reconnect
+// covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking
 
 /**
  * Ghostly Desktop on Linux calls without WebRTC in its WebView: apps/ui/src/desktop/nativeCalls.ts stands in for
@@ -25,6 +25,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
 const { callRtcConfig } = await import("@ghostly/core");
 const { chooseDevice } = await import("../../lib/mediaDevices");
+const { callLevels } = await import("../../lib/voiceLevels");
 
 const commands = () => tauri.invoke.mock.calls.map(([command]) => command);
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).buffer;
@@ -232,6 +233,47 @@ describe("the RTCPeerConnection stand-in", () => {
     accepted();
     await answering;
     await vi.waitFor(() => expect(seen).toEqual(["answer taken", "ice connected"]));
+  });
+
+  it("tells who is speaking: each side's level as Rust reads it, found from the call's microphone", async () => {
+    const pc = new NativePeerConnection({});
+    const ice = vi.fn();
+    pc.oniceconnectionstatechange = ice;
+    // The page hears neither side: the microphone's track is a silent stand-in, and a voice call has no stream of the peer.
+    const local = await nativeCallMedia().getUserMedia({ audio: true });
+    pc.addTrack(local.getAudioTracks()[0]);
+    const levels = callLevels(local)!;
+    const [mic, peer]: number[][] = [[], []];
+    const stopMic = levels.own((level) => mic.push(level));
+    levels.peer((level) => peer.push(level));
+    expect([mic, peer]).toEqual([[0], [0]]);
+
+    const events = tauri.channels[0];
+    events.onmessage(json({ levels: { mic: 0.4 } }));
+    events.onmessage(json({ levels: { peer: 0.25 } }));
+    events.onmessage(json({ levels: { mic: 7, peer: -1 } }));
+    events.onmessage(json({ levels: { mic: "loud" } }));
+    expect([mic, peer]).toEqual([[0, 0.4, 1], [0, 0.25, 0]]);
+    // A level is no ICE state.
+    expect(ice).not.toHaveBeenCalled();
+
+    stopMic();
+    events.onmessage(json({ levels: { mic: 0.1, peer: 0.1 } }));
+    expect([mic, peer]).toEqual([[0, 0.4, 1], [0, 0.25, 0, 0.1]]);
+    // Whoever listens later starts from the last level said.
+    const late: number[] = [];
+    levels.own((level) => late.push(level));
+    expect(late).toEqual([0.1]);
+  });
+
+  it("has no levels to tell for a microphone no call sends, or a stream that is not a call's", async () => {
+    const idle = await nativeCallMedia().getUserMedia({ audio: true });
+    const heard = vi.fn();
+    callLevels(idle)!.own(heard)();
+    expect(heard).not.toHaveBeenCalled();
+    // Such a stream's sound is measured by the page itself.
+    expect(callLevels(new FakeMediaStream([new FakeTrack("audio")]) as unknown as MediaStream)).toBeUndefined();
+    expect(callLevels(null)).toBeUndefined();
   });
 
   it("mutes the microphone in Rust once the call has started", async () => {
