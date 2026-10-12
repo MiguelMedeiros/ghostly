@@ -1105,6 +1105,8 @@ export class GhostLink {
       onAnswersRefused: () => this.answersRefused(),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
+        // Its offer was made or answered before the pin: whatever pinned meanwhile, this session began unpinned.
+        if (this.rtcStartedUnpinned) this.openedUnpinned.add(channel);
         const plan = this.switcher.pending;
         if (plan?.choices.includes("webrtc/1") && this.paired?.state.status === "ready") {
           void this.attachCandidate(channel, undefined, plan).catch(() => {});
@@ -1121,6 +1123,7 @@ export class GhostLink {
         const was = this.lastDataLinkState;
         traceLink(this.myPubKeyZ32, "datalink", { state });
         this.trackDataLink(state);
+        if (state === "offering" || state === "answering") this.rtcStartedUnpinned = !options.pairing?.credentials.peerKey && !options.pairing?.credentials.expectedPeerKey;
         if (this.activeBinding) return;
         events.onDataLinkState?.(state);
         if (state === "open") { this.afterRtc = undefined; this.refusedPauses = 0; }
@@ -3476,6 +3479,8 @@ export class GhostLink {
   private readonly dialedIn = new WeakSet<FrameChannel>();
   /** Connections whose session started with no key pinned nor named by the invite. */
   private readonly openedUnpinned = new WeakSet<FrameChannel>();
+  /** The WebRTC offer under way was made or answered with no key pinned nor named by the invite (its channel opens later). */
+  private rtcStartedUnpinned = false;
 
   /**
    * `migration`: the channel is a candidate that takes over from the session open now once it authenticated. With a
