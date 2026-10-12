@@ -57,7 +57,8 @@
 // .github/workflows/merge-queue.yml runs it with the queue app's token (GH_TOKEN); pushes made with the workflow's own
 // GITHUB_TOKEN would start no CI. Until that app exists a Mac runs it with its gh login (`gh auth token` when GH_TOKEN
 // is unset) and its git credentials for `origin`; --every <seconds> repeats the run. Without --base the workflow runs
-// every base that has a queued pull request or a batch open (--list-bases prints them as JSON), and a Mac runs `dev`
+// every base that has a queued pull request or a batch open (--list-bases prints them as JSON; with --woken <commit>,
+// the head of the CI run that woke the workflow, only the bases where that commit heads one of them), and a Mac runs `dev`
 // and every `epic/*` branch, logging them each round. Every request and git call has a timeout, and a round that runs
 // past ROUND_DEADLINE is cut and logged, so the loop never stalls silently. --dry-run reads the live repo,
 // builds batches in a temporary worktree (never pushed) and prints what it would do; it changes nothing on GitHub.
@@ -1239,9 +1240,18 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
   };
 }
 
-/** The bases with a train to run: `dev` and `epic/<name>` branches with a queued pull request or a batch open. */
-export const trainBases = (pulls) =>
-  [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || isBatch(p, p.base))).map((p) => p.base))].sort();
+/** A whole commit id, as a CI run names its head. */
+const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/**
+ * The bases with a train to run: `dev` and `epic/<name>` branches with a queued pull request or a batch open. `woken`:
+ * the head commit of the CI run that woke the workflow, when one did. Then only the bases where that commit is the head
+ * of a queued pull request or of a batch: the only CI runs that move a train. A run on a pull request that is not in
+ * line (a draft still worked on, a ready one before `queue`) or on a head a push has replaced moves nothing, and the
+ * `queue` label wakes the train by itself when it is added. Anything that is not a commit id is no `woken`.
+ */
+export const trainBases = (pulls, woken) =>
+  [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || isBatch(p, p.base)) && (!COMMIT.test(woken ?? "") || p.sha === woken)).map((p) => p.base))].sort();
 
 /** The bases a Mac serves without --base, the queue app configured or not: `dev` and every `epic/*` branch. */
 export const localBases = async (gh) => ["dev", ...(await gh.epicBranches()).filter((b) => BASE.test(b)).sort()];
@@ -1302,7 +1312,7 @@ async function main() {
   const opt = (name) => (flag(name) ? args[args.indexOf(name) + 1] : undefined);
   const dry = flag("--dry-run") || process.env.DRY_RUN === "true";
   if (!dry && !flag("--run") && !flag("--list-bases")) {
-    console.error("usage: merge-train.mjs --run | --dry-run | --list-bases  [--base <branch>] [--every <seconds>] [--also <n,n>]");
+    console.error("usage: merge-train.mjs --run | --dry-run | --list-bases [--woken <commit>]  [--base <branch>] [--every <seconds>] [--also <n,n>]");
     process.exit(2);
   }
   const also = (opt("--also") ?? "").split(",").filter(Boolean).map(Number);
@@ -1313,7 +1323,7 @@ async function main() {
   const token = process.env.GH_TOKEN || execFileSync("gh", ["auth", "token"], { encoding: "utf8", timeout: 60_000 }).trim();
   const scrub = (s) => String(s).replaceAll(token, "***");
   const gh = restLayer(token, repo);
-  if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls())));
+  if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls(), opt("--woken"))));
   const local = !process.env.GITHUB_ACTIONS && !dry;
   if (local) lock(join(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 60_000 }).trim(), "merge-train.lock"));
   // The login the train comments as: the app's bot on a runner (set by the workflow), the gh user on a Mac.

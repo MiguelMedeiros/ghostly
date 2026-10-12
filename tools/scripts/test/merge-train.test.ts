@@ -1669,6 +1669,36 @@ describe("the bases with a train", () => {
     expect(trainBases([pr("epic/a/b", [LABEL.queue]), pr("epic/z", [], batchBody("epic/z", "a", "b", [], []), "batch/epic/z-1", true)])).toEqual([]);
   });
 
+  it("woken by a CI run are only those where its commit is the head of a queued pull request or of a batch", () => {
+    const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = [], body = "", branch = "fix") => ({ base, sha, labels, body, branch, fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", c, [], batchBody("epic/x", "abc", c, [], []), "batch/epic/x-1"), pr("epic/y", d, [LABEL.priority])];
+    // No CI run woke it (the schedule, a label, a push, by hand): every base with a train, as before.
+    expect(trainBases(pulls)).toEqual(["dev", "epic/x", "epic/y"]);
+    // The head of a queued pull request, and of a batch: its base's train alone.
+    expect(trainBases(pulls, a)).toEqual(["dev"]);
+    expect(trainBases(pulls, c)).toEqual(["epic/x"]);
+    expect(trainBases(pulls, d)).toEqual(["epic/y"]);
+    // A pull request not in line (a draft still worked on, a ready one before `queue`), and a commit that heads none
+    // (the head a queued one had before a push): no train can do anything with that run.
+    expect(trainBases(pulls, b)).toEqual([]);
+    expect(trainBases(pulls, "e".repeat(40))).toEqual([]);
+    // The same commit at the head of two pull requests (a fork of a queued branch): the base of the queued one.
+    expect(trainBases([...pulls, pr("epic/y", a)], a)).toEqual(["dev"]);
+    // Not a commit (the workflow gave nothing, or something else): every base, never none by mistake.
+    expect(trainBases(pulls, "")).toEqual(["dev", "epic/x", "epic/y"]);
+    expect(trainBases(pulls, "abc")).toEqual(["dev", "epic/x", "epic/y"]);
+  });
+
+  it("woken by a CI run are read from the open pull requests' heads as GitHub lists them", async () => {
+    const queued = "1".repeat(40), draft = "2".repeat(40);
+    const open = (number: number, sha: string, labels: string[]) => ({ number, title: "t", body: "", draft: false, head: { sha, ref: `fix-${number}`, repo: { full_name: "o/r" } }, labels: labels.map((name) => ({ name })), created_at: "2026-10-12T00:00:00Z", base: { ref: "dev" } });
+    const gh = restLayer("t", "o/r", { fetchImpl: async () => ({ status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify([open(1, queued, [LABEL.queue]), open(2, draft, [])]) }), wait: async () => {} });
+    const pulls = await gh.pulls();
+    expect(trainBases(pulls, queued)).toEqual(["dev"]);
+    expect(trainBases(pulls, draft)).toEqual([]);
+  });
+
   it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {
     const refs = ["refs/heads/epic/x", "refs/heads/epic/apps-1.2", "refs/heads/epic/a/b"].map((ref) => ({ ref }));
     const gh = restLayer("t", "o/r", { fetchImpl: async () => ({ status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(refs) }), wait: async () => {} });
