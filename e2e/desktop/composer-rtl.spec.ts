@@ -29,7 +29,9 @@ test("in Arabic the message field shows no scrollbar after the window narrows wi
   await expect.poll(() => app.execute(BARS), { message: "the field, wide" }).toEqual([0, 0]);
 
   expect(await windows.resize(400, 800), "the window takes the phone's width").toBe(400);
-  // The layout settles a moment after the window does: read for a while, as a person looks at it.
+  // The layout settles a moment after the window does (a first reading may still show a bar that is on its way out):
+  // wait for it, then read for a while, as a person looks at it. The bars this is about stayed for good.
+  await expect.poll(() => app.execute(BARS), { message: "the field, once the narrow layout settled" }).toEqual([0, 0]);
   const seen = new Set<string>();
   for (const end = Date.now() + 2_000; Date.now() < end; await new Promise((done) => setTimeout(done, 200))) seen.add(JSON.stringify(await app.execute(BARS)));
   expect([...seen], "the field's scrollbars after the window narrowed").toEqual(["[0,0]"]);
