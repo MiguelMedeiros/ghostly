@@ -121,6 +121,8 @@ describe("open-payment-link", () => {
     "lightning:LNURL1DP68GURN8GHJ7UM9WFMXJCM99E3K7MF0V9CXJ0M385EKVCENXC6R2C35XVUKXEFCV5MKVV34X5EKZD3EV56NYD3HXQURZEPEXEJXXEPNXSCRVWFNV9NXZCN9XQ6XYEFHVGCXXCMYXYMNSERXFQ5FNS",
     "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Coffee&lightning=lnbc1x",
     "bitcoin:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ?ark=tark1q",
+    // A label and message as the app writes them (apps/ui/src/lib/parse/money-bitcoin.ts bip21Uri).
+    "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E",
   ])("hands %s to the system's wallet", async (uri) => {
     expect(await send({ target: "background", type: "open-payment-link", uri })).toEqual({ ok: true });
     expect(world.callsTo("tabs.create")).toEqual([[uri]]);

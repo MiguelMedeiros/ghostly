@@ -764,6 +764,8 @@ mod tests {
             "lightning:lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq",
             "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Coffee%20shop&lightning=lnbc1x",
             "bitcoin:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ?ark=tark1q",
+            // A label and message as the app writes them (apps/ui/src/lib/parse/money-bitcoin.ts bip21Uri).
+            "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E",
             longest.as_str(),
             // Nothing after the scheme opens only the wallet (the extension asks for one character more).
             "lightning:",
