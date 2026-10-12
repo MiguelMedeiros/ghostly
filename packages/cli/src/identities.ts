@@ -13,9 +13,10 @@ import { CliError } from "./errors";
  * - `external-tool` (ssh-keygen, gpg, a Bitcoin wallet): `identity add` prints the statement and what to run, and
  *   `identity complete` takes what the tool printed. Between the two the draft lives in the daemon's memory.
  * - `publish` (a DNS record, a file on a domain): the same, and `complete` asks the engine to look it up.
- * - `in-app` (a Nostr signer over NIP-46, Pubky, AT Protocol): one `identity add`, with the signer's fields; a link
- *   or code the signer waits on is reported as an `identity.approval` event and printed by the command.
- * - `redirect` (OpenID Connect) needs a browser window: app only.
+ * - `in-app` (a Nostr signer over NIP-46, Pubky): one `identity add`, with the signer's fields; a link or code the
+ *   signer waits on is reported as an `identity.approval` event and printed by the command.
+ * - `redirect` (OpenID Connect), and the in-app signers that live in the page (a NIP-07 extension, an AT Protocol
+ *   sign-in window), need a browser window: app only.
  */
 
 interface Draft { draftId: string; provider: string; signer: string; binding: IdentityBinding; createdAt: number }
@@ -29,11 +30,23 @@ function provider(id: string): IdentityProofProvider {
   return found;
 }
 
+/**
+ * A signer that runs in this process: not a browser sign-in, and not one that says it cannot run here (a NIP-07
+ * extension, an AT Protocol sign-in window: neither exists outside the app's page).
+ */
+function headless(s: IdentitySigner<unknown>): boolean {
+  if (s.kind === "redirect") return false;
+  try { return s.available?.() ?? true; } catch { return false; }
+}
+
 function signerOf(p: IdentityProofProvider, id?: string): IdentitySigner<unknown> {
-  const usable = p.signers.filter((s) => s.kind !== "redirect");
+  const usable = p.signers.filter(headless);
   const found = id ? p.signers.find((s) => s.id === id) : usable[0];
   if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label} proofs need a browser window: make them in the app`);
-  if (found.kind === "redirect") throw new CliError("unavailable", `${found.label} signs in through a browser window: make this proof in the app`);
+  if (!headless(found)) {
+    const instead = usable.length ? ` (here: --signer ${usable.map((s) => s.id).join(" or ")})` : "";
+    throw new CliError("unavailable", `${found.label} needs a browser window: make this proof in the app${instead}`);
+  }
   return found as IdentitySigner<unknown>;
 }
 
@@ -53,9 +66,12 @@ function pruneDrafts(now = Date.now()) {
 }
 
 async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
-  const normalized = p.subject?.normalize ? p.subject.normalize(subject) : subject;
+  let normalized: string;
+  try { normalized = p.subject?.normalize ? p.subject.normalize(subject) : subject; } catch (error) {
+    throw new CliError("bad_request", error instanceof Error ? error.message : String(error));
+  }
   if (!normalized) throw new CliError("bad_request", `Not a ${p.subject?.label ?? "subject"} ${p.label} takes`);
-  const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: 400 });
+  const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
 
@@ -64,7 +80,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     return {
       providers: IDENTITY_PROVIDERS.map((p) => ({
         id: p.id, label: p.label, category: p.category, subject: p.subject ? { label: p.subject.label, placeholder: p.subject.placeholder ?? null } : null,
-        signers: p.signers.map((s) => ({ id: s.id, kind: s.kind, label: s.label, headless: s.kind !== "redirect",
+        signers: p.signers.map((s) => ({ id: s.id, kind: s.kind, label: s.label, headless: headless(s),
           ...(s.kind === "in-app" && s.fields ? { fields: s.fields.map((f) => ({ name: f.name, label: f.label, kind: f.kind, optional: !!f.optional })) } : {}) })),
       })),
     };
