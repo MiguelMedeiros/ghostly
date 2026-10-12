@@ -696,6 +696,10 @@
     "orTestnet": "または「新規」で Testnet の Spark ウォレットを作成：regtest で動き、sats に価値はなく、キーも不要です。",
     "phraseNote": "Spark の運営者はあなたのものを何も保管していません。フレーズがあれば、どの Spark ウォレットでも sats を取り戻せます。支払い履歴はバックアップファイルから戻ります。",
     "regtestLabel": "Regtest · Breez のテスト用 Spark · 価値のない sats",
+    "status": {
+      "failed": "失敗",
+      "pending": "保留中"
+    },
     "to": "Spark アドレスまたはインボイス",
     "toPlaceholder": "Spark アドレスまたはインボイス（{{prefix}}）",
     "tokenInvoice": "この Spark インボイスは sats ではなくトークン用です。",

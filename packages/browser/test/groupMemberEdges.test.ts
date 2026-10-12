@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, GroupSession, createIdentity, identityFromSeedB64, type GroupCommit, type GroupEdgeFrame } from "@ghostly/core";
+import { GhostLink, GroupSession, PIN_LIMITS, createIdentity, identityFromSeedB64, type GroupCommit, type GroupEdgeFrame } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { FAREWELL_OPEN_MS, type Groups, type GroupsHost } from "../src/engine/groups";
 import { MeshHubs, removalEpoch } from "../src/engine/meshHubs";
@@ -305,5 +305,42 @@ describe("a hub and an edge to someone out of the roster", () => {
     inner.sayReach("g", session, live, 100_000);
     expect(sent.map(s => s.to).sort()).toEqual(["e-admin", "e-member"]);
     expect(sent.every(s => !(s.frame as unknown as { k: string[] }).k.includes(gone))).toBe(true);
+  });
+});
+
+describe("a member's pins in a private group are paced, and one that changes nothing costs nothing", () => {
+  it("copies of an older signed pin check no signature and read no history; newer ones are taken at the window's pace", async () => {
+    const { node, groupId, session, members: [bob, carol] } = await adminOf(["bob", "carol"]);
+    const chat = `group:${groupId}`, absent = `${bob.key}:1:999999999`;
+    const said = await node.sendGroupMessage({ groupId, text: "the one pinned" });
+    const messageId = (said as { messageId: string }).messageId;
+    // Signed by a member before the pin shown now, naming a message that is not here.
+    const older = session.pinFrame({ id: absent, n: Date.now() - 60_000 });
+    expect((await node.pinMessage({ linkId: chat, messageId })).error).toBeNull();
+    const shown = () => node.getState().groups.find(g => g.id === groupId)?.pin;
+    const pinned = shown();
+    expect(pinned?.messageId).toBe(messageId);
+
+    const histories = vi.spyOn(db, "getMessages"), checks = vi.spyOn(session, "signedPin");
+    const read = () => histories.mock.calls.filter(([c]) => c === chat).length;
+    for (let i = 0; i < 20; i++) await bob.events.onGroupFrame(structuredClone(older));
+    await settle();
+    expect(checks).toHaveBeenCalledTimes(0);
+    expect(read()).toBe(0);
+    expect(shown()).toEqual(pinned);
+
+    // Newer ones, from another member's edge: the window's worth is taken, each reading one row and never the history.
+    carol.sent.length = 0;
+    const n = Date.now() + 1000;
+    for (let i = 0; i < PIN_LIMITS.receive + 5; i++) await carol.events.onGroupFrame(session.pinFrame({ id: absent, n: n + i }));
+    await settle();
+    expect(checks).toHaveBeenCalledTimes(PIN_LIMITS.receive);
+    expect(read()).toBe(0);
+    expect(shown()).toMatchObject({ id: absent, by: "me" });
+    expect(shown()?.messageId).toBeUndefined();
+    // And bob's window is still full of the copies: a newer pin over his edge waits for the next one.
+    await bob.events.onGroupFrame(session.pinFrame({ id: "", n: n + 100 }));
+    expect(checks).toHaveBeenCalledTimes(PIN_LIMITS.receive);
+    expect(shown()?.id).toBe(absent);
   });
 });

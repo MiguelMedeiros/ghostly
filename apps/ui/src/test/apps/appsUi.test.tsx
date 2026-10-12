@@ -310,6 +310,8 @@ describe("with the apps flag on", () => {
     await waitFor(() => expect(within(shown).getByTestId("app-card-check")).toHaveTextContent("Installed"));
     expect(within(shown).getByTestId("app-card-title")).toHaveTextContent("Private Notes 3.1.0");
     expect(within(shown).getByTestId("app-card-title")).not.toHaveTextContent("Chess");
+    // The card's name for a screen reader is the same app's, not Ana's word for it.
+    expect(shown.closest("[data-message-card]")).toHaveAttribute("aria-label", "App: Private Notes");
     expect(within(shown).getByTestId("app-card-waiting")).toHaveTextContent("Private Notes needs you both online");
     await user.click(within(shown).getByTestId("app-card-open"));
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));

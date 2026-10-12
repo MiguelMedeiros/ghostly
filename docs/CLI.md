@@ -209,7 +209,7 @@ Safety rules the CLI enforces:
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards) refuses text that looks like a
   recovery phrase, a private key or a Cashu token (exit 5) unless `--force`.
-- **Secrets stay hidden.** Seeds, keys, wallet phrases, backups and group entry links are printed only with `--show-secret` (or `group link`, for a group's link).
+- **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out) or
 5 (needs `--force`, `--yes` or `--confirm-real`).

@@ -7,5 +7,5 @@
 export const LEVELS = ["available", "planned", "research"] as const;
 export type Level = (typeof LEVELS)[number];
 
-/** Only the app screenshots' caption uses it ("{n}" in home.next.fromDev); the screenshots' own card owns that caption. */
-export const NEXT_VERSION = "1.0.1";
+/** The release whose CLI first had status cards and buttons ("{n}" in agents.connect.note): it stays as it is. */
+export const CARDS_VERSION = "1.0.1";

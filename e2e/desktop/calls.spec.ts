@@ -37,6 +37,42 @@ const picture = (p: DesktopPerson) => p.app.execute<{ width: number; time: numbe
   const video = document.querySelector('[data-testid="remote-video"]');
   return video ? { width: video.videoWidth, time: video.currentTime, shown: !video.classList.contains("hidden") } : null;`);
 
+/**
+ * Why a call window shows no picture, for a failure's report: the state of its <video> and of the stream it was
+ * given, and whether a second <video> given that same stream shows a picture within 5 s. One there says the peer's
+ * pictures reach the page and the window's own player never started; none says they stopped before it.
+ */
+const noPicture = (p: DesktopPerson) => p.app.executeAsync<string>(`
+  const done = arguments[arguments.length - 1];
+  const video = document.querySelector('[data-testid="remote-video"]');
+  const stream = video && video.srcObject;
+  const state = (v) => ({ width: v.videoWidth, time: v.currentTime, ready: v.readyState, network: v.networkState, paused: v.paused, error: v.error && v.error.message });
+  if (!stream) return done(JSON.stringify({ video: video && state(video), stream: null }));
+  const tracks = stream.getTracks().map((t) => ({ kind: t.kind, state: t.readyState, muted: t.muted, enabled: t.enabled }));
+  const second = document.createElement("video");
+  second.muted = true;
+  second.autoplay = true;
+  second.playsInline = true;
+  second.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
+  document.body.append(second);
+  second.srcObject = stream;
+  setTimeout(() => {
+    const seen = { video: state(video), tracks, second: state(second) };
+    second.srcObject = null;
+    second.remove();
+    done(JSON.stringify(seen));
+  }, 5000);`);
+
+/** The peer's picture reaches the call window; when it does not, the report says what the window had instead. */
+async function showsPicture(p: DesktopPerson, message: string): Promise<void> {
+  try {
+    await expect.poll(async () => (await picture(p))?.width ?? 0, { timeout: 30_000, message }).toBeGreaterThan(0);
+  } catch (error) {
+    test.info().annotations.push({ type: `${p.name}'s picture`, description: await noPicture(p).catch((failed) => String(failed)) });
+    throw error;
+  }
+}
+
 /** The call window's own camera (the self view): its size, how far it has played, and whether it is paused. */
 const selfView = (p: DesktopPerson) => p.app.execute<{ width: number; time: number; paused: boolean; ready: number } | null>(`
   const video = document.querySelector('[data-testid="call-self-view"] video');
@@ -122,7 +158,7 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
         return !!s && s.audioReceived > 50 && s.videoReceived > 10;
       }, { timeout: 60_000, message: `${p.name} hears and sees the other` }).toBe(true);
       // The picture reaches the call window, and moves.
-      await expect.poll(async () => (await picture(p))?.width ?? 0, { timeout: 30_000, message: `${p.name}'s window shows a picture` }).toBeGreaterThan(0);
+      await showsPicture(p, `${p.name}'s window shows a picture`);
       const before = (await picture(p))!.time;
       await expect.poll(async () => (await picture(p))!.time, { message: `${p.name}'s picture plays` }).toBeGreaterThan(before);
       // And the caller's own camera, in the corner, from the start: no need to turn it off and on.
@@ -163,10 +199,10 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
     await b.press("Accept audio call");
     await expect.poll(() => connected(b), { timeout: 60_000, message: "bia's call connects" }).toBe(true);
     await expect.poll(async () => (await stats(b))?.videoReceived ?? 0, { timeout: 60_000, message: "bia sees ana" }).toBeGreaterThan(10);
-    await expect.poll(async () => (await picture(b))?.width ?? 0, { timeout: 30_000, message: "bia's window shows ana" }).toBeGreaterThan(0);
+    await showsPicture(b, "bia's window shows ana");
     await b.press("Turn camera on");
     await expect.poll(async () => (await stats(a))?.videoReceived ?? 0, { timeout: 60_000, message: "ana sees bia" }).toBeGreaterThan(10);
-    await expect.poll(async () => (await picture(a))?.width ?? 0, { timeout: 30_000, message: "ana's window shows bia" }).toBeGreaterThan(0);
+    await showsPicture(a, "ana's window shows bia");
     await selfViewPlays(b, "once the camera is turned on in a voice answer");
     await a.press("End call");
     for (const p of [a, b]) {

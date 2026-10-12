@@ -1,9 +1,9 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  APP_PREFIXES, APP_STORE_LIMITS, appRef, appStoreDecision, appUpdateDecision, buildAppBundle, canonicalJson, canonicalJsonBytes, checkAppListing,
+  APP_PREFIXES, APP_STORE_LIMITS, appRef, appRevocationId, appStoreDecision, appUpdateDecision, buildAppBundle, canonicalJson, canonicalJsonBytes, checkAppListing,
   checkAppStoreIndex, readAppListing,
-  readAppStore, signAppObject, signAppRevocation, signAppStore, utf8Encode, type AppStoreDecision, type AppStoreIndex, type AppStoreVersion,
+  readAppStore, readAppStoreSteps, signAppObject, signAppRevocation, signAppStore, utf8Encode, type AppStoreDecision, type AppStoreIndex, type AppStoreVersion,
   type AppUpdateDecision, type AppVersion,
 } from "../src/index";
 import { APPS_NOW, DRAFT, ENTRY, appKey, appSigner, matchVectorFile } from "./appVectors";
@@ -125,6 +125,17 @@ async function build(): Promise<Vectors> {
   await no("a removal without a reason", "missing-key", { ...base, removed: [{ ref: REF, digest: v1.digest, at: APPS_NOW }] });
   await no("a revocation that does not verify", "bad-revocation", { ...base, revoked: [{ ...revoked, statement: { ...revoked.statement, reason: "Changed by the store" } }] });
   await no("a revocation signed by the store", "bad-revocation", { ...base, revoked: [await signAppRevocation({ ghostlyRevoke: 1, app: appRef(appKey("store"), "chess"), upTo: 1 }, store).then((r) => ({ ...r, statement: { ...r.statement, app: REF } }))] });
+  // The index's own signature is checked before its revocations' signatures (their shape comes before both), so an
+  // index nobody signed costs its reader one signature check, whatever it carries.
+  const forged = { ...revoked, statement: { ...revoked.statement, reason: "Changed by the store" } };
+  const unsigned = async (name: string, refusal: string, entry: unknown) => {
+    const s = await signed({ ...base, revoked: [entry] });
+    invalid.push({ name, refusal, index: s.index.replace("Vector store", "Vector stork"), sig: s.sig });
+  };
+  await unsigned("a revocation that does not verify, in an index whose signature does not verify", "bad-signature", forged);
+  await unsigned("a revocation of another shape, in an index whose signature does not verify", "bad-revocation", { ...revoked, later: 1 });
+  await no("a revocation that does not verify, in an index signed by another key than the one held", "store-key", { ...base, revoked: [forged] }, { heldKey: appKey("other store") });
+  await no("a revocation that does not verify, in an index whose expires is too far ahead", "bad-revocation", { ...base, revoked: [forged], expires: APPS_NOW + APP_STORE_LIMITS.expiresAheadS + 1 });
   invalid.push({ name: "bytes that are not JSON", refusal: "not-json", index: "ghostly-store", sig: good.sig });
 
   // `strict`: read as a store checks a listing.json it is about to sign (the default), or, false, as a client reads an
@@ -192,6 +203,55 @@ describe("app store vectors", () => {
     for (const c of [...v.listings.valid, ...v.listings.invalid].filter((c) => c.strict)) expect(readAppListing(c.json), c.name).toEqual(readAppListing(c.json, { strict: true }));
     for (const c of v.storeDecisions) expect(appStoreDecision(c.held, c.read), c.name).toBe(c.decision);
     for (const c of v.appDecisions) expect(appUpdateDecision(c.installed, c.candidate), c.name).toBe(c.decision);
+  });
+});
+
+describe("reading a store in steps", () => {
+  /** Runs the steps to their end, counted. */
+  const run = (steps: ReturnType<typeof readAppStoreSteps>) => {
+    for (let count = 0; ; count++) {
+      const step = steps.next();
+      if (step.done) return { read: step.value, steps: count };
+    }
+  };
+  const index = async (revoked: unknown[]) => {
+    const value = { ghostlyStore: 1, key: appKey("store"), name: "S", kind: "curated", sequence: 1, expires: APPS_NOW, apps: [], removed: [], revoked };
+    const { bytes, signature } = await signAppObject(APP_PREFIXES.store, value, store);
+    return [bytes, canonicalJsonBytes(signature), APPS_NOW] as const;
+  };
+  const revocations = (count: number) => Promise.all(Array.from({ length: count }, (_, i) => signAppRevocation({ ghostlyRevoke: 1, app: appRef(appKey("publisher"), `app-${i}`), upTo: 1 }, publisher)));
+
+  it("reads every vector as the reader in one run does, with a step for each listing, removal and revocation", async () => {
+    const v = matchVectorFile(FILE, await build());
+    for (const c of [...v.valid, ...v.invalid]) {
+      const args = [utf8Encode(c.index), utf8Encode(c.sig), v.inputs.now, c.heldKey] as const;
+      expect(run(readAppStoreSteps(...args)).read, c.name).toEqual(readAppStore(...args));
+    }
+    const first = v.valid[0]!;
+    expect(run(readAppStoreSteps(utf8Encode(first.index), utf8Encode(first.sig), v.inputs.now)).steps).toBeGreaterThanOrEqual(3);
+    expect(run(readAppStoreSteps(...await index(await revocations(40)))).steps).toBeGreaterThanOrEqual(40);
+  });
+
+  it("a revocation the reader holds as checked is not checked again, and only one that verifies is added", async () => {
+    const revoked = await revocations(3);
+    const held = new Set<string>();
+    const asked: string[] = [];
+    const checked = { has: (id: string) => { asked.push(id); return held.has(id); }, add: (id: string) => { held.add(id); } };
+    expect(run(readAppStoreSteps(...await index(revoked), undefined, checked)).read.ok).toBe(true);
+    expect([...held]).toEqual(revoked.map(appRevocationId));
+    expect(asked).toEqual(revoked.map(appRevocationId));
+
+    // One whose statement changed after signing: refused, never added, whatever else the reader holds.
+    const forged = { ...revoked[0]!, statement: { ...revoked[0]!.statement, upTo: 9 } };
+    const refused = run(readAppStoreSteps(...await index([...revoked, forged]), undefined, checked)).read;
+    expect(refused.ok ? "accepted" : refused.reason).toBe("bad-revocation");
+    expect(held.size).toBe(3);
+    // What the reader holds is its own word that the signature verified: an id it holds is not verified again.
+    held.add(appRevocationId(forged));
+    expect(run(readAppStoreSteps(...await index([...revoked, forged]), undefined, checked)).read.ok).toBe(true);
+    // The shape is still read each time: the id covers the statement and the signature, nothing beside them.
+    const later = run(readAppStoreSteps(...await index([{ ...forged, later: 1 }]), undefined, checked)).read;
+    expect(later.ok ? "accepted" : later.reason).toBe("bad-revocation");
   });
 });
 

@@ -696,6 +696,10 @@
     "orTestnet": "Oppure crea un portafoglio Spark su Testnet con Nuova: funziona su regtest, con sats senza valore e senza chiave.",
     "phraseNote": "Gli operatori di Spark non custodiscono nulla di tuo: la frase recupera i sats in qualsiasi portafoglio Spark. La cronologia dei pagamenti viene dal file di backup.",
     "regtestLabel": "Regtest · Spark di prova di Breez · sats senza valore",
+    "status": {
+      "failed": "non riuscito",
+      "pending": "in attesa"
+    },
     "to": "Indirizzo o fattura Spark",
     "toPlaceholder": "Indirizzo o fattura Spark ({{prefix}})",
     "tokenInvoice": "Quella fattura Spark è per un token, non per sats.",

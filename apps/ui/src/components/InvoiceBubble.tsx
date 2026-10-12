@@ -15,6 +15,8 @@ import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
 import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
 import { OpenInWallet } from "./OpenInWallet";
+import { MoneyCopyRefused } from "./MoneyCopy";
+import { useMoneyCopy } from "../hooks/useMoneyCopy";
 import { rawError } from "../lib/errorText";
 import { qrFits } from "../lib/qrFits";
 import { problemText, type Problem } from "../lib/problemText";
@@ -42,18 +44,6 @@ function markSettled(id: string) {
 const button =
   "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
 const quiet = "px-3 py-1.5 max-md:min-h-11 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer inline-flex items-center";
-
-function useCopy(value: string) {
-  const [copied, setCopied] = useState(false);
-  return {
-    copied,
-    copy: async () => {
-      await navigator.clipboard.writeText(value).catch(() => {});
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    },
-  };
-}
 
 function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId }: {
   label: string;
@@ -145,7 +135,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
-  const { copied, copy } = useCopy(invoice.invoice);
+  const { copied, failed, copy } = useMoneyCopy(invoice.invoice);
   useEffect(() => {
     const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 15_000);
     return () => clearInterval(timer);
@@ -224,6 +214,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
           )}
         </>
       )}
+      {failed && <MoneyCopyRefused value={invoice.invoice} />}
       {error && <Notice problem={error} className="text-xs m-0 basis-full" ink />}
     </Card>
   );
@@ -237,7 +228,7 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
   const lightningPayer = useLightningPayer(all?.forNetwork(network));
   const wallet = lightningPayer.payer;
   const [paying, setPaying] = useState(false);
-  const { copied, copy } = useCopy(destination.text);
+  const { copied, failed, copy } = useMoneyCopy(destination.text);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid="lnurl-bubble">
       <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{destination.kind === "address" ? t("payments.invoice.lightningAddress") : "LNURL"}</p>
@@ -250,6 +241,7 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
           {wallet && !mine && !off && <LightningPayWith payer={lightningPayer} unit={satsIn(t, network)} testId="lnurl-lightning-card" />}
           {wallet && !mine && !off && <button className={button} data-testid="lnurl-pay-open" onClick={() => setPaying(true)}>{t("payments.invoice.pay")}</button>}
           <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
+          {failed && <MoneyCopyRefused value={destination.text} />}
         </div>
       )}
     </div>
@@ -264,7 +256,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
   const [redeemed, setRedeemed] = useState(() => isSettled(id));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
-  const { copied, copy } = useCopy(value);
+  const { copied, failed, copy } = useMoneyCopy(value);
 
   useEffect(() => {
     let alive = true;
@@ -307,6 +299,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
         qr={value}
       >
         <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
+        {failed && <MoneyCopyRefused value={value} />}
       </Card>
     );
   }
@@ -353,6 +346,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
         )
       )}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
+      {failed && <MoneyCopyRefused value={value} />}
       {error && <Notice problem={error} className="text-xs m-0 basis-full" ink />}
     </Card>
   );

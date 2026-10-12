@@ -696,6 +696,10 @@
     "orTestnet": "或者用“新建”创建 Testnet Spark 钱包：它运行在 regtest 上，sats 没有价值，也不需要密钥。",
     "phraseNote": "Spark 的运营方不持有你的任何资产：凭短语可在任何 Spark 钱包中找回 sats。付款记录来自备份文件。",
     "regtestLabel": "Regtest · Breez 的测试 Spark · 没有价值的 sats",
+    "status": {
+      "failed": "失败",
+      "pending": "待处理"
+    },
     "to": "Spark 地址或发票",
     "toPlaceholder": "Spark 地址或发票（{{prefix}}）",
     "tokenInvoice": "该 Spark 发票针对的是代币，不是 sats。",

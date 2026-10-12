@@ -97,4 +97,17 @@ describe("the Spark panel", () => {
     expect(rows[0]).toHaveTextContent("+1,200 test satsSpark · lunch");
     expect(rows[1]).toHaveTextContent("−300 test satsLightning · pending");
   });
+
+  it("a history row writes its fee like its amount, and what is not completed in the app's language", async () => {
+    const history = [{ id: "t1", direction: "out" as const, amount: 12_000, fee: 1_500, at: Date.UTC(2026, 8, 24), status: "pending" as const, via: "lightning" as const },
+      { id: "t2", direction: "out" as const, amount: 300, fee: 0, at: Date.UTC(2026, 8, 24), status: "failed" as const, via: "spark" as const }];
+    const english = renderApp(<SparkWalletPanel wallet={wallet} state={ready({ history })} />);
+    expect(screen.getAllByTestId("spark-history-row")[0]).toHaveTextContent("Lightning · pending · fee 1,500");
+    expect(screen.getAllByTestId("spark-history-row")[1]).toHaveTextContent("Spark · failed");
+    english.unmount();
+    renderApp(<SparkWalletPanel wallet={wallet} state={ready({ history })} />, { language: "pt" });
+    await screen.findByText("Histórico");
+    expect(screen.getAllByTestId("spark-history-row")[0]).toHaveTextContent("Lightning · pendente · taxa 1.500");
+    expect(screen.getAllByTestId("spark-history-row")[1]).toHaveTextContent("Spark · falhou");
+  });
 });

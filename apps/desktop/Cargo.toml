@@ -1,6 +1,6 @@
 [package]
 name = "ghostly"
-version = "1.2.1"
+version = "1.2.2"
 edition = "2021"
 
 # The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
@@ -84,6 +84,8 @@ tauri-plugin-single-instance = "2"
 # the clipboard with, at the versions it uses.
 x11rb = "0.13"
 wl-clipboard-rs = "0.9"
+# Notifications whose click opens the chat (src/notifications.rs): the version notify-rust already brings.
+zbus = "5"
 
 # The window follows WebView2 in and out of full screen (src/fullscreen.rs): the versions Tauri's wry uses.
 [target.'cfg(windows)'.dependencies]

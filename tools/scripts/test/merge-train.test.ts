@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -203,10 +203,10 @@ function fakeRepo() {
     },
   };
   /** A pull request with `queue`; its head sits on the base's tip unless it is `behind`. */
-  const add = (number: number, { ci = green as object[], draft = false, priority = false, base = "dev", behind = false } = {}) => {
+  const add = (number: number, { ci = green as object[], draft = false, priority = false, priorityOnly = false, base = "dev", behind = false } = {}) => {
     const sha = `h${number}`;
-    pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base });
-    events.set(number, [{ event: "labeled", label: { name: LABEL.queue }, created_at: new Date(Date.UTC(2026, 9, 8, 0, 0, clock++)).toISOString() }]);
+    pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: priorityOnly ? [LABEL.priority] : [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base });
+    events.set(number, [{ event: "labeled", label: { name: priorityOnly ? LABEL.priority : LABEL.queue }, created_at: new Date(Date.UTC(2026, 9, 8, 0, 0, clock++)).toISOString() }]);
     runs.set(sha, ci);
     sitsOn.set(sha, behind ? "old" : tips[base]);
   };
@@ -244,6 +244,8 @@ describe("the line", () => {
     const at = (name: string, created_at: string, event = "labeled") => ({ event, label: { name }, created_at });
     expect(queuedAt([at("queue", "2026-10-08T01:00:00Z"), at("queue", "2026-10-08T01:00:00Z", "unlabeled"), at("queue", "2026-10-08T04:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T04:00:00Z");
     expect(queuedAt([], "2026-10-01T00:00:00Z")).toBe("2026-10-01T00:00:00Z");
+    // queue:priority alone puts a pull request in the line, so the time it was given counts too.
+    expect(queuedAt([at("queue:priority", "2026-10-08T02:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T02:00:00Z");
   });
 
   it("lets only ready, green pull requests board, twelve at most", () => {
@@ -299,6 +301,21 @@ describe("the line", () => {
 });
 
 describe("a run of the train", () => {
+  it("takes a pull request with queue:priority and no queue as in the line, first", async () => {
+    const repo = fakeRepo();
+    for (const n of [31, 32]) repo.add(n);
+    repo.add(33, { priorityOnly: true });
+    const r = await repo.run();
+    expect(repo.members()).toEqual([33, 31, 32]);
+    expect(repo.comments.get(33)![0].body).toMatch(new RegExp(`in batch #${r.inFlight}`));
+
+    // Alone in the line it is still a line: the train has something to run.
+    const lone = fakeRepo();
+    lone.add(41, { priorityOnly: true });
+    await lone.run();
+    expect(lone.landed).toEqual(["#41"]);
+  });
+
   it("boards the twelve oldest green pull requests and tells everyone in line where they are", async () => {
     const repo = fakeRepo();
     const twelve = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
@@ -1322,6 +1339,15 @@ describe("one pull request alone", () => {
     expect(squashMessage({ title: "feat: x", number: 7 }, [])).toEqual({ title: "feat: x (#7)", message: "" });
   });
 
+  it("writes the words that make GitHub skip CI in round brackets, in every message it composes", () => {
+    // In a batch's head commit they stop the batch's CI from ever starting: the train then rebuilds the same batch
+    // every 20 minutes for good. A title edited while queued, or an earlier commit of the pull request, can carry them.
+    for (const words of ["skip ci", "ci skip", "no ci", "skip actions", "actions skip", "Skip CI"]) expect(noSkip(`docs: typo [${words}]`)).toBe(`docs: typo (${words})`);
+    expect(noSkip("fix: [skip] a [ci] label")).toBe("fix: [skip] a [ci] label");
+    const commits = [{ commit: { message: "docs: typo [skip ci]\n\nbody" } }, { commit: { message: "fix: the real change" } }];
+    expect(squashMessage({ title: "fix: x [ci skip]", number: 7 }, commits)).toEqual({ title: "fix: x (ci skip) (#7)", message: "* docs: typo (skip ci)\n* fix: the real change" });
+  });
+
   it("lands a rebased pull request by the same squash merge, at the commit CI passed on", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
@@ -1598,6 +1624,8 @@ describe("the bases with a train", () => {
     const pulls = [pr("dev", [LABEL.queue]), pr("dev", [LABEL.queue]), pr("epic/apps-1.2", [], batch, "batch/epic/apps-1.2-1"), pr("epic/x"), pr("main", [LABEL.queue]), pr("dev")];
     expect(trainBases(pulls)).toEqual(["dev", "epic/apps-1.2"]);
     expect(trainBases([pr("dev", ["bug"])])).toEqual([]);
+    // queue:priority alone is in the line: the base has a train to run (three green fixes waited 8 h without it).
+    expect(trainBases([pr("dev", [LABEL.priority])])).toEqual(["dev"]);
     // Only bases tick accepts, so a strange epic name never turns the workflow red; a forged batch names no base.
     expect(trainBases([pr("epic/a/b", [LABEL.queue]), pr("epic/z", [], batchBody("epic/z", "a", "b", [], []), "batch/epic/z-1", true)])).toEqual([]);
   });
@@ -1835,10 +1863,10 @@ describe("building a batch with git", () => {
         for (const part of ["first", "second"]) {
           writeFileSync(join(origin, `${part}-${number}.txt`), "x\n");
           git(["add", `${part}-${number}.txt`]);
-          git(["commit", "-q", "-m", `${part} of ${number}`, "-m", "A body that stays out."]);
+          git(["commit", "-q", "-m", `${part} of ${number}${number === 2 && part === "first" ? " [skip ci]" : ""}`, "-m", "A body that stays out."]);
         }
         git(["update-ref", `refs/pull/${number}/head`, "HEAD"]);
-        return { number, title: `fix: number ${number}`, sha: git(["rev-parse", "HEAD"]) };
+        return { number, title: `fix: number ${number}${number === 2 ? " [no ci]" : ""}`, sha: git(["rev-parse", "HEAD"]) };
       });
       git(["clone", "-q", "origin", "clone"], root);
       const clone = join(root, "clone");
@@ -1855,6 +1883,8 @@ describe("building a batch with git", () => {
       expect(git(["rev-parse", `${built.sha}^`], clone)).toBe(built.commits[1]);
       expect(git(["rev-parse", `${built.commits[1]}^`], clone)).toBe(built.baseSha);
       expect(git(["log", "-1", "--format=%B", built.commits[1]], clone)).toBe("fix: number 1 (#1)\n\n* first of 1\n* second of 1");
+      // The batch's head commit never holds the words that make GitHub start no CI for it.
+      expect(git(["log", "-1", "--format=%B", built.sha], clone)).toBe("fix: number 2 (no ci) (#2)\n\n* first of 2 (skip ci)\n* second of 2");
       expect(batchBody("dev", built.baseSha, built.sha, prs, [], {}, built.commits)).toContain(`{"number":2,"sha":"${prs[1].sha}","commit":"${built.sha}"}`);
       layer.close();
     } finally {

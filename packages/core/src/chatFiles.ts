@@ -27,6 +27,8 @@ import { parseVoiceMeta } from "./voice";
  * receiver says where it stands (accept from an offset, wait, done, refuse) and the sender goes on from
  * there. Nothing but the offset a receiver confirms moves a sender forward. A receiver may say `pf-accept`
  * again at any time (nothing arrived for a while, or its person asked again): the sender goes on from that offset.
+ * What a sender sends again that way is bounded (`FILE_LIMITS.resendBytes`, and the host's `resend`): past it the
+ * sender ends the transfer.
  */
 
 export const FILE_LIMITS = {
@@ -62,6 +64,11 @@ export const FILE_LIMITS = {
   readBytes: 1024 * 1024,
   /** The session refused a data frame (its send budget was full): the sender looks again after this long. */
   sendRetryMs: 250,
+  /**
+   * What a sender sends of one file beyond its size (parts sent again after a drop, a restart of the receiver, or a
+   * `pf-accept` from an earlier offset): twice the file's size and this much. Past it the sender ends the transfer (WISP 501 § Resume).
+   */
+  resendBytes: 256 * 1024 * 1024,
 } as const;
 
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -177,12 +184,19 @@ export interface ChatFilesHost {
    * promises that never let the budget drain, and froze the app.
    */
   writable?(): Promise<void> | undefined;
+  /**
+   * Asked before each data frame once a transfer has sent more than its file's size (`sent` is every byte of data sent
+   * for it so far, parts sent again included): false ends the transfer. A host with a budget for what it sends says so here.
+   */
+  resend?(record: FileTransferRecord, sent: number): boolean;
   now?(): number;
 }
 
 interface Outgoing {
   source?: Promise<OutgoingSource>;
   next: number;
+  /** Bytes of data sent for it since the app started (or since its person sent it again), parts sent again included. */
+  sent: number;
   /** Bumped whenever sending stops or restarts: a read that finishes late sends nothing. */
   generation: number;
   /**
@@ -249,7 +263,7 @@ export class ChatFiles {
   restore(records: FileTransferRecord[]): void {
     for (const record of records) {
       const entry: Entry = { record: { ...record } };
-      if (record.direction === "out") entry.out = { next: record.confirmed, generation: 0 };
+      if (record.direction === "out") entry.out = { next: record.confirmed, sent: 0, generation: 0 };
       else entry.in = { written: record.confirmed, stored: record.confirmed, acked: record.confirmed, checkpointed: record.confirmed, writing: Promise.resolve() };
       this.entries.set(key(record.direction, record.id), entry);
     }
@@ -268,6 +282,10 @@ export class ChatFiles {
   transferred(direction: "in" | "out", id: string): number {
     const entry = this.entries.get(key(direction, id));
     return entry ? this.moved(entry) : 0;
+  }
+  /** Bytes of data sent for a file so far, parts sent again included: what sending it cost, whatever the receiver confirmed. */
+  sent(id: string): number {
+    return this.entries.get(key("out", id))?.out?.sent ?? 0;
   }
   private moved(entry: Entry): number {
     return entry.in && !transferEnded(entry.record) ? Math.max(entry.in.stored, entry.record.confirmed) : entry.record.confirmed;
@@ -333,7 +351,7 @@ export class ChatFiles {
     if (this.entries.has(key("out", file.id))) throw new Error("File transfer already active");
     const entry: Entry = {
       record: { id: file.id, direction: "out", file, state: "queued", confirmed: 0, since: this.now(), ...(digest && { digest }) },
-      out: { next: 0, generation: 0 },
+      out: { next: 0, sent: 0, generation: 0 },
     };
     this.entries.set(key("out", file.id), entry);
     this.changed(entry);
@@ -391,6 +409,16 @@ export class ChatFiles {
     return this.attached && record.state === "active" && out.next < record.file.size && out.next - record.confirmed < FILE_LIMITS.windowBytes;
   }
 
+  /**
+   * Whether the next `length` bytes go. Within the file's size they always do; past it the receiver is having parts
+   * sent again, which nothing it says bounds, so this side does.
+   */
+  private mayResend(entry: Entry, length: number): boolean {
+    const { record } = entry, size = record.file.size, sent = entry.out!.sent + length;
+    if (sent <= size) return true;
+    return sent - size <= 2 * size + FILE_LIMITS.resendBytes && this.host.resend?.({ ...record }, sent) !== false;
+  }
+
   private async pump(entry: Entry): Promise<void> {
     const out = entry.out!;
     if (out.pumping === out.generation) return;
@@ -404,8 +432,14 @@ export class ChatFiles {
         const room = this.host.writable?.();
         if (room) await room;
         if (generation !== out.generation || !this.shouldPump(entry) || out.next !== offset) break;
+        if (!this.mayResend(entry, chunk.length)) {
+          this.send({ t: "pf-abort", id: entry.record.id });
+          this.end(entry, "failed", "Your contact asked for the same part of this file too many times");
+          break;
+        }
         if (!this.send({ t: "pf-data", id: entry.record.id, offset, data: toBase64Url(chunk) })) { refused = true; break; }
         out.next = offset + chunk.length;
+        out.sent += chunk.length;
       }
     } catch (error) {
       if (generation === out.generation) {
@@ -868,7 +902,7 @@ export class ChatFiles {
     // The digest is taken again from the source: the one sent last time may be what was wrong.
     Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, since: this.now() });
     clearTimeout(entry.out!.timer); clearTimeout(entry.out!.wake);
-    entry.out = { next: 0, generation: entry.out!.generation + 1 };
+    entry.out = { next: 0, sent: 0, generation: entry.out!.generation + 1 };
     this.changed(entry);
     if (this.attached) this.announce(entry);
   }

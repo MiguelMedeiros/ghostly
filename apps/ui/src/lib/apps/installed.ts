@@ -16,7 +16,8 @@ const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
 
 // After any update check (the engine's scheduled one included), once a screen has read the list or an app runs: a
-// version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`).
+// version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`). The engine says
+// the same after an uninstall, to every page: the app's frames stop wherever they run.
 engine.onAppsChecked(() => { if (apps !== null || appsRunning()) void refreshInstalledApps(); });
 
 /** Reads the list again. */
@@ -36,6 +37,15 @@ export function useInstalledApps(enabled: boolean): readonly InstalledAppView[] 
   const list = useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => apps, () => apps);
   useEffect(() => { if (enabled && apps === null && !loading) void refreshInstalledApps(); }, [enabled]);
   return enabled ? list : null;
+}
+
+/**
+ * The app installed here under `ref`, if any: the one an app card with that ref opens (WISP 405 § An app). The card and
+ * its row both name it from here, so what is read out is what is shown. No `ref` (not an app card): nothing is asked.
+ */
+export function useInstalledApp(ref: string | undefined): InstalledAppView | undefined {
+  const installed = useInstalledApps(ref !== undefined);
+  return ref === undefined ? undefined : installed?.find((a) => a.ref === ref);
 }
 
 /**

@@ -20,6 +20,8 @@ interface StoredArk {config:ArkConfig;seed:EncryptedSeed;deviceKey?:string}
 export interface ArkCreate {network:ArkConfig["network"];provider:string;explorer:string;password?:string;mnemonic?:string}
 /** The Ark SDK, a large part of the app: loaded once an Ark wallet is made, opened or restored, not with the engine. */
 const loadArkade=()=>import("./arkade");
+/** How long a Testnet wallet about to make way for another waits for its server to say what it holds. */
+export const RETIRE_READ_MS=10_000;
 /** Every new profile starts with this wallet: nothing to set up before receiving. */
 export const DEFAULT_ARK = {network:"bitcoin",provider:"https://arkade.computer",explorer:"https://mempool.space/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
 const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:"configuration",expiresAt:Date.now()+60000});};
@@ -206,9 +208,22 @@ export class ArkWallet {
     const saved=this.saved!;
     const intents=await wrap<SavedIntent[]>((await store(STORES.intents,"readonly")).getAll());
     if(intents.some(i=>this.ours(i)))throw new Error(refusal);
-    if(this.adapter && await this.gate.within(this.adapter.balance())>0)throw new Error(refusal);
+    if(this.adapter && await this.gate.within(this.held(this.adapter))>0)throw new Error(refusal);
     await this.lock();
     return saved;
+  }
+  /**
+   * What the wallet holds, asked of its server. A test network's server that stopped answering must not hold the
+   * wallet on it (one that never answered does not either): past RETIRE_READ_MS the last balance read stands.
+   * Mainnet waits for its server's own word.
+   */
+  private held(adapter:ArkadeAdapter):Promise<number> {
+    const asked=adapter.balance();
+    if(this.network!=="testnet")return asked;
+    return new Promise<number>((resolve,reject)=>{
+      const timer=setTimeout(()=>resolve(this.view.balance),RETIRE_READ_MS);
+      asked.then(resolve,reject).finally(()=>clearTimeout(timer));
+    });
   }
   /** A payment of this wallet's network (the other network's wallet has its own). */
   private ours(intent:SavedIntent) {return intent.review.method==="arkade"&&arkMode(intent.review.network as ArkConfig["network"])===this.network;}

@@ -1,9 +1,10 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
   appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocation,
-  readAppStore, readCanonicalJson, toBase64Url, utf8Decode, utf8Encode,
-  type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
+  readAppStoreSteps, readCanonicalJson, toBase64Url, utf8Decode, utf8Encode,
+  type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
+  type AppStoreRead,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
@@ -50,6 +51,11 @@ export const APP_CHECK_TIMINGS = {
 
 /** Revocations are checked this long at a time before the page's thread is let go. */
 const REVOCATIONS_SLICE_MS = 10;
+/**
+ * Revocations of store indexes whose signature was checked, kept by `appRevocationId` so an index that changes around
+ * them does not have each checked again (the one read longest ago dropped first): four indexes' worth, about 1 MiB.
+ */
+const STORE_REVOCATIONS_KEPT = 4 * APP_STORE_LIMITS.revoked;
 /** `ghostly-revoke.json` files whose result is kept, so an unchanged one is not checked again (the oldest dropped first). */
 const REVOCATION_FILES_KEPT = 64;
 /** A fetched bundle kept for its install screen: at most this many, for this long. */
@@ -149,6 +155,11 @@ export interface InstalledAppView {
   pending?: { sequence: number; version: string; added: AppPermission[] };
   equivocation?: { sequence: number; at: number };
   checkedAt?: number;
+  /**
+   * Versions started here that are no longer the one installed (an update came while they ran) and are now revoked, or
+   * removed by a store: `run` judges the installed version only, and a frame that still runs one of these is stopped too.
+   */
+  stopped?: { digest: string; run: AppRunStatus }[];
 }
 
 export interface AppStoreSummary {
@@ -292,7 +303,7 @@ export class Apps {
   /** Reads of a bundle under way, by digest: icons drawn at once share one read. */
   private readonly verifying = new Map<string, Promise<AppBundle>>();
   /**
-   * The `icon.png` of each checked bundle, by digest (at most 256 KiB, or null for none): every icon shown on the Apps
+   * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
   private readonly icons = new Map<string, Uint8Array | null>();
@@ -305,6 +316,13 @@ export class Apps {
   private checking: Promise<AppCheckResult[]> | null = null;
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
+  /** The apps started here (`entry`), for this engine's life: one of them uninstalled since may still have a frame open. */
+  private readonly ran = new Set<string>();
+  /**
+   * The versions started here (`entry`), by reference: digest to `sequence`, for this engine's life. A frame goes on
+   * running the version it started with whatever is installed since, so that version is the one judged when it asks.
+   */
+  private readonly started = new Map<string, Map<string, number>>();
   private views: Promise<AppStoreView[]> | null = null;
   private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
   private heldStores: Promise<Map<string, AddedAppStore>> | null = null;
@@ -315,6 +333,19 @@ export class Apps {
   private readonly listingMisses = new Map<string, string>();
   /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused. */
   private readonly revocationFiles = new Map<string, SignedAppRevocation[] | null>();
+  /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
+  private readonly storeRevocations = new Set<string>();
+  private readonly checkedRevocations: AppRevocationsChecked = {
+    has: (id) => {
+      if (!this.storeRevocations.delete(id)) return false;
+      this.storeRevocations.add(id);
+      return true;
+    },
+    add: (id) => {
+      this.storeRevocations.add(id);
+      if (this.storeRevocations.size > STORE_REVOCATIONS_KEPT) this.storeRevocations.delete(this.storeRevocations.values().next().value!);
+    },
+  };
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -396,24 +427,44 @@ export class Apps {
    * a store of the person's removed (unless this run was started with Run anyway), is cut off with `stopped`, whether
    * or not the page stops its frame.
    */
-  private async stillRunnable(app: InstalledApp): Promise<InstalledApp> {
-    const run = this.runStatus(app, await this.heldViews(), app.revocations);
+  private async stillRunnable(app: InstalledApp, digest?: unknown): Promise<InstalledApp> {
+    const version = this.versionRunning(app, digest);
+    const run = this.runStatus(version, await this.heldViews(), app.revocations);
     if (run.status === "revoked") fail("stopped", "Its publisher revoked this version");
-    if (run.status === "removed" && !this.anyway.has(`${app.ref} ${app.digest}`)) fail("stopped", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
+    if (run.status === "removed" && !this.anyway.has(`${version.ref} ${version.digest}`)) fail("stopped", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     return app;
   }
 
-  private async runningOrFail(ref: unknown): Promise<InstalledApp> {
-    return this.stillRunnable(await this.installedOrFail(ref));
+  /**
+   * The version a frame runs: the one it names by `digest` (what `entry` gave it), which an update installed since does
+   * not change. None named: the installed one. One never started here does not run.
+   */
+  private versionRunning(app: InstalledApp, digest: unknown): AppVersion {
+    if (digest === undefined || digest === app.digest) return app;
+    const sequence = typeof digest === "string" ? this.started.get(app.ref)?.get(digest) : undefined;
+    if (sequence === undefined) fail("stopped", "This version is not running");
+    return { ref: app.ref, sequence, digest: digest as string };
+  }
+
+  /** The versions started here that are not the installed one any more. */
+  private startedBefore(app: InstalledApp): AppVersion[] {
+    return [...this.started.get(app.ref) ?? []].filter(([digest]) => digest !== app.digest).map(([digest, sequence]) => ({ ref: app.ref, sequence, digest }));
+  }
+
+  private async runningOrFail(ref: unknown, digest?: unknown): Promise<InstalledApp> {
+    return this.stillRunnable(await this.installedOrFail(ref), digest);
   }
 
   /**
    * Before an app's frames go to a contact (`appOpen`, `appSend`): refused with `stopped` as its storage is. A reference
-   * not installed here (a bot that speaks an app's messages) is not this store's to refuse.
+   * not installed here (a bot that speaks an app's messages) is not this store's to refuse, unless it ran here and was
+   * uninstalled since: the person removed it, so a frame of it still open says nothing more (`not-installed`). `digest`:
+   * the version the frame runs (`versionRunning`).
    */
-  async chatRunnable({ ref }: { ref: string }): Promise<void> {
+  async chatRunnable({ ref, digest }: { ref: string; digest?: string }): Promise<void> {
     const app = isAppRef(ref) ? await this.app(ref) : undefined;
-    if (app) await this.stillRunnable(app);
+    if (!app && this.ran.has(ref)) fail("not-installed", "This app is not installed");
+    if (app) await this.stillRunnable(app, digest);
   }
   private async putApp(app: InstalledApp): Promise<void> {
     try { await wrap((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
@@ -587,9 +638,12 @@ export class Apps {
 
   /**
    * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
-   * signature and every revocation in it were checked when it was read, so only its expiry is taken again.
+   * signature and every revocation in it were checked when it was read, so only its expiry is taken again. Any other
+   * index is read with a pause every few ms (the engine shares the page's thread, and an index holds up to 4096
+   * listings and 4096 revocations, each of these a signature check), and a revocation checked in an earlier read, of
+   * this store or another, a preview included, is not checked again.
    */
-  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<ReturnType<typeof readAppStore>> {
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
     const [indexBytes, sigBytes] = await Promise.all([
       this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
       this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
@@ -597,7 +651,13 @@ export class Apps {
     if (held?.index && held.digest !== undefined && toBase64Url(sha256(indexBytes)) === held.digest) {
       return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
     }
-    return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
+    const steps = readAppStoreSteps(indexBytes, sigBytes, this.nowS(), heldKey, this.checkedRevocations);
+    let since = performance.now();
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+      if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+    }
   }
 
   /**
@@ -1054,10 +1114,11 @@ export class Apps {
       }
       // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
       const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
-      // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version. While no
-      // file answers, every kept one stays (it may name a version not found yet): a file that changes does not pile up.
+      // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
+      // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
+      // version not found yet): a file that changes does not pile up.
       const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
-      const versions: AppVersion[] = [app, ...(app.pending ? [versionOf(app.pending.manifest, app.pending.digest)] : [])];
+      const versions: AppVersion[] = [app, ...(app.pending ? [versionOf(app.pending.manifest, app.pending.digest)] : []), ...this.startedBefore(app)];
       const stays = (app.revocations ?? []).filter((r) => !revocations || versions.some((v) => appRevocationFor(v, [r])));
       const merged = new Map([...stays, ...(revocations ?? [])].map((r) => [canonicalJson(r), r]));
       // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
@@ -1134,13 +1195,18 @@ export class Apps {
     if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
     const bundle = await this.verifiedBundle(app);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
+    this.ran.add(app.ref);
+    const versions = this.started.get(app.ref) ?? new Map<string, number>();
+    this.started.set(app.ref, versions.set(app.digest, app.sequence));
     return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], view: appViewOf(bundle.manifest), entry: utf8Decode(entry) };
   }
 
-  /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). */
-  async file({ ref, path }: { ref: string; path: string }): Promise<Uint8Array> {
+  /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). `digest`: the version the frame runs. */
+  async file({ ref, path, digest }: { ref: string; path: string; digest?: string }): Promise<Uint8Array> {
     // Its icon still shows on the Apps page and in chats once it is stopped: a picture the publisher signed, nothing more.
-    const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref);
+    const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref, digest);
+    // A version that runs on after its update: its bundle went with the update, and the installed one's files are not its own.
+    if (path !== APP_ICON_PATH && digest !== undefined && digest !== app.digest) fail("no-file", "No such file in this app");
     const icon = path === APP_ICON_PATH ? this.icons.get(app.digest) : undefined;
     if (icon) return icon.slice();
     if (icon === null) fail("no-file", "No such file in this app");
@@ -1154,6 +1220,7 @@ export class Apps {
   private async view(app: InstalledApp, stores: AddedAppStore[]): Promise<InstalledAppView> {
     const { manifest } = app;
     const listedBy = this.listedBy(app.ref, stores);
+    const stopped = this.startedBefore(app).map((v) => ({ digest: v.digest, run: this.runStatus(v, this.storeViews(stores), app.revocations) })).filter((v) => v.run.status !== "ok");
     return {
       ref: app.ref, name: app.name, publisher: app.publisher, fingerprint: appFingerprint(app.publisher),
       title: manifest.title, tagline: manifest.tagline, ...(manifest.description !== undefined && { description: manifest.description }),
@@ -1164,6 +1231,7 @@ export class Apps {
       ...(app.pending && { pending: { sequence: app.pending.sequence, version: app.pending.manifest.version, added: [...app.pending.added] } }),
       ...(app.equivocation && { equivocation: { sequence: app.equivocation.sequence, at: app.equivocation.at } }),
       ...(app.checkedAt !== undefined && { checkedAt: app.checkedAt }),
+      ...(stopped.length && { stopped }),
     };
   }
 
@@ -1185,6 +1253,7 @@ export class Apps {
     tx.objectStore(STORES.appStorage).delete(rowsOf(app.ref));
     try { await done(tx); } finally { this.held.delete(app.ref); }
     for (const key of [...this.usage.keys()]) if (key.startsWith(`${app.ref}\0`)) this.usage.delete(key);
+    this.started.delete(app.ref);
     await this.removeBundle(app.bytes, app.digest);
     if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);
   }
@@ -1221,15 +1290,15 @@ export class Apps {
     return used;
   }
 
-  async storageGet({ ref, scope, key }: { ref: string; scope: string; key: string }): Promise<{ value: JsonValue } | null> {
-    const app = await this.runningOrFail(ref);
+  async storageGet({ ref, scope, key, digest }: { ref: string; scope: string; key: string; digest?: string }): Promise<{ value: JsonValue } | null> {
+    const app = await this.runningOrFail(ref, digest);
     const row = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, this.scopeOf(scope), this.keyOf(key)]));
     return row ? { value: JSON.parse(row.value) as JsonValue } : null;
   }
 
   /** Keeps a JSON value under a key: at most 64 KiB, and 5 MiB for every key of this app in this scope. */
-  async storageSet({ ref, scope, key, value }: { ref: string; scope: string; key: string; value: unknown }): Promise<void> {
-    const app = await this.runningOrFail(ref);
+  async storageSet({ ref, scope, key, value, digest }: { ref: string; scope: string; key: string; value: unknown; digest?: string }): Promise<void> {
+    const app = await this.runningOrFail(ref, digest);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     let text: string | undefined;
     try { text = JSON.stringify(value); } catch { text = undefined; }
@@ -1256,8 +1325,8 @@ export class Apps {
     });
   }
 
-  async storageDelete({ ref, scope, key }: { ref: string; scope: string; key: string }): Promise<void> {
-    const app = await this.runningOrFail(ref);
+  async storageDelete({ ref, scope, key, digest }: { ref: string; scope: string; key: string; digest?: string }): Promise<void> {
+    const app = await this.runningOrFail(ref, digest);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     await this.serial(`${app.ref}\0${where}`, async () => {
       const used = await this.usageOf(app.ref, where);
@@ -1268,8 +1337,8 @@ export class Apps {
     });
   }
 
-  async storageKeys({ ref, scope }: { ref: string; scope: string }): Promise<string[]> {
-    const app = await this.runningOrFail(ref);
+  async storageKeys({ ref, scope, digest }: { ref: string; scope: string; digest?: string }): Promise<string[]> {
+    const app = await this.runningOrFail(ref, digest);
     const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(rowsOf(app.ref, this.scopeOf(scope)))) as [string, string, string][];
     return keys.map((k) => k[2]);
   }

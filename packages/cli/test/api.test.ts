@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
-import { callApi, findChat, findGroup, mentionsFor, redactSettings, type ApiContext } from "../src/api";
+import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
+import { parseArgs } from "../src/args";
+import { COMMANDS } from "../src/commands";
 import type { GhostlyEvent } from "../src/events";
 import { chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
@@ -86,9 +88,25 @@ describe("chats", () => {
     expect(findChatOrGroup([link("chatMine", { label: "Team Room" }), asName], [room], "Team Room")).toEqual({ link: expect.objectContaining({ id: "chatMine" }) });
     // A name no group has is the contact's chat as before; so is one only an invitation has.
     expect(findChatOrGroup([link("chatBob", { peerNick: "Bob" })], [room, { ...room, id: "i".repeat(22), name: "Bob", status: undefined, invitation: {} } as unknown as GroupView], "bob")).toEqual({ link: expect.objectContaining({ id: "chatBob" }) });
-    // Neither a chat nor a group: what a chat would say.
-    expect(() => findChatOrGroup([asName], [room], "zed")).toThrow(/No chat "zed"/);
+    // Neither a chat nor a group: one not_found naming both, and where to look.
+    expect(refused([asName], "zed")).toEqual({ code: "not_found", message: 'No chat or group "zed" (ghostly chat list, ghostly group list)' });
+    expect(() => chatOrGroup(ctx, "zed")).toThrow('No chat or group "zed" (ghostly chat list, ghostly group list)');
+    // An ambiguous name stays what it is, from either side; group:<id> is a group only.
+    expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
+    expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
+    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed"' });
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
     expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
+  });
+
+  it("a command that takes a chat or a group names both when neither has the name", async () => {
+    const { ctx } = fake();
+    const neither = { code: "not_found", message: 'No chat or group "alcie" (ghostly chat list, ghostly group list)' };
+    await expect(callApi(ctx, "chat.pin", { chat: "alcie", message: "m1" })).rejects.toMatchObject(neither);
+    await expect(callApi(ctx, "chat.forward", { chat: "alcie", messages: ["m1"], to: ["Alice"] })).rejects.toMatchObject(neither);
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m1"], to: ["alcie"] })).rejects.toMatchObject(neither);
+    await expect(callApi(ctx, "task.send", { chat: "alcie", card: { title: "t" } })).rejects.toMatchObject(neither);
   });
 
   it("a group this profile is in wins over an invitation with its name or id prefix", () => {
@@ -395,6 +413,50 @@ describe("groups", () => {
     const { ctx, node } = fake();
     await callApi(ctx, "group.send", { group: "Crew", text: "@Ana ping", mentions: ["Ana"] });
     expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: "g1", text: "@Ana ping", mentions: [{ k: "abcd1234zz", o: 0, l: 4 }] });
+  });
+});
+
+describe("a pending chat's invite code is a secret", () => {
+  const CODE = "ghostly1pendingsecret";
+  const pending = () => {
+    const made = fake();
+    const state = made.node.getState();
+    made.node.getState = () => ({ ...state, links: [link("chat-zero"), link("chat-one", { label: "Alice", inviteCode: CODE, pairing: { status: "waiting" } } as never), link("chat-two", { peerNick: "Bob", inviteCode: CODE, pairing: { status: "ready" } } as never)] });
+    return { ...made, node: { ...made.node, renameLink: vi.fn(async () => undefined), connect: vi.fn(async () => undefined), disconnect: vi.fn(), setChatTransport: vi.fn(async () => undefined) } };
+  };
+
+  it("is hidden in every chat summary unless asked for, and only list and show take the asking", async () => {
+    const made = pending();
+    const ctx = { ...made.ctx, runtime: { server: { node: made.node }, paths: { name: "default" } } } as unknown as ApiContext;
+    expect(chatJson(link("c", { inviteCode: CODE } as never), true).invite).toBe(CODE);
+    expect(chatJson(link("c")).invite).toBeNull();
+    // Array.map hands the index as the second argument: it must never read as "show".
+    expect(JSON.stringify([link("a"), link("b", { inviteCode: CODE } as never)].map(chatJson as never))).not.toContain(CODE);
+    for (const [method, params] of [["chat.get", {}], ["chat.rename", { name: "Alice" }], ["chat.connect", {}], ["chat.disconnect", {}], ["chat.transport", { transport: "dht" }], ["chat.wait", { until: "text", timeout: 1 }]] as const) {
+      const hidden = await callApi(ctx, method, { chat: "chat-one", ...params });
+      expect(JSON.stringify(hidden), method).not.toContain(CODE);
+      expect(hidden, method).toMatchObject({ invite: "<hidden>" });
+    }
+    const listed = await callApi(ctx, "chat.list", {}) as { chats: { id: string; invite: string | null }[] };
+    expect(JSON.stringify(listed)).not.toContain(CODE);
+    expect(Object.fromEntries(listed.chats.map((c) => [c.id, c.invite]))).toEqual({ "chat-zero": null, "chat-one": "<hidden>", "chat-two": null });
+    expect(await callApi(ctx, "chat.get", { chat: "chat-one", showSecret: true })).toMatchObject({ invite: CODE });
+    expect((await callApi(ctx, "chat.list", { showSecret: true }) as typeof listed).chats.find((c) => c.id === "chat-one")).toMatchObject({ invite: CODE });
+    // Paired: the code opens nothing any more, and is not printed either way.
+    expect(await callApi(ctx, "chat.get", { chat: "chat-two", showSecret: true })).toMatchObject({ invite: null });
+    expect(JSON.stringify(await callApi(ctx, "chat.rename", { chat: "chat-one", name: "Alice", showSecret: true }))).not.toContain(CODE);
+  });
+
+  it("chat list and chat show ask with --show-secret; engine getState hides it too", () => {
+    const flag = { "show-secret": { type: "boolean" as const, description: "" } };
+    expect(COMMANDS["chat list"].params!(parseArgs([], flag), {})).toEqual({});
+    expect(COMMANDS["chat list"].params!(parseArgs(["--show-secret"], flag), {})).toEqual({ showSecret: true });
+    expect(COMMANDS["chat show"].params!(parseArgs(["Alice"], flag), { chat: "Alice" })).toEqual({ chat: "Alice" });
+    expect(COMMANDS["chat show"].params!(parseArgs(["Alice", "--show-secret"], flag), { chat: "Alice" })).toEqual({ chat: "Alice", showSecret: true });
+    const printed = hideStateSecrets({ ...pending().node.getState(), groups: [{ ...group, entryLink: "ghostly-link" }] });
+    expect(JSON.stringify(printed)).not.toMatch(/ghostly1pendingsecret|ghostly-link|"SK"/);
+    expect(printed.links.map((l) => l.inviteCode)).toEqual([undefined, "<hidden>", "<hidden>"]);
+    expect(printed.groups[0]).toMatchObject({ entryLink: "<hidden>" });
   });
 });
 

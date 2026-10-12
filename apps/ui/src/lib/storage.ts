@@ -687,7 +687,7 @@ export function sessionLinkParams(session: ChatSession): LinkParams {
  */
 export function ensureSession(
   keys: SessionKeys,
-  options: { inviteCode?: string; createdAt?: number } = {},
+  options: { inviteCode?: string; createdAt?: number; viaLink?: boolean } = {},
 ): string {
   const existing = findSession(keys.seedB64, keys.peerPubKeyB64);
   if (existing && existing.profile !== keys.profile) throw new Error("Invitation profile does not match this stored conversation");
@@ -704,8 +704,22 @@ export function ensureSession(
       ...(keys.peerParticipationKeyB64 ? { peerParticipationKeyB64: keys.peerParticipationKeyB64 } : {}),
       messages: [],
       createdAt: options.createdAt ?? Date.now(),
+      ...(options.viaLink ? { viaLink: true as const } : {}),
     });
   }
   if (options.inviteCode) saveInviteCode(id, options.inviteCode);
   return id;
+}
+
+/**
+ * How many chats made by an invite link may wait for an answer at once. Opening a link takes nothing from the person
+ * (a page can send the browser to one), and each chat it makes is a row to delete and a link the engine runs: past
+ * this, a link makes no chat until one of them is answered or deleted. Join's paste and scan are the person's own act
+ * and are not counted.
+ */
+export const LINK_CHATS_WAITING = 3;
+
+/** The chats an invite link made that nothing came back from yet: no message, no name, no sync. */
+export function linkChatsWaiting(): number {
+  return listSessions().filter((s) => s.viaLink && !s.messages.length && !s.older && !s.lastSyncAt && !s.nick).length;
 }

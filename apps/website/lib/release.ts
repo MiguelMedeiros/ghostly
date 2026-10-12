@@ -3,7 +3,10 @@
  * published one (lib/latestRelease.ts). `tools/scripts/bump-version.mjs` sets it, and
  * /latest.json answers with it.
  */
-export const VERSION = "1.2.1";
+export const VERSION = "1.2.2";
+
+/** The version an app screenshot's caption names ("Ghostly {n}"): that release without its patch, so it follows each bump. */
+export const SHOTS_VERSION = VERSION.split(".").slice(0, 2).join(".");
 
 const BASE = "https://github.com/MiguelMedeiros/ghostly/releases";
 
@@ -49,6 +52,9 @@ export const DOWNLOADS = downloads(VERSION);
 /** The installer a download strip should lead with. */
 export type InstallerKey = "macArm" | "macIntel" | "windowsExe" | "linuxDeb" | "linuxAppImage";
 
+/** How a Linux userAgent or platform names an ARM machine: "Linux aarch64", "Linux armv7l", "CrOS aarch64". */
+const LINUX_ARM = /\b(aarch64|arm(64|v\d\w*)?)\b/;
+
 /**
  * Maps a browser's userAgent and platform strings to the installer most people
  * on that machine want. Pure, so it can be unit-tested and called during
@@ -58,18 +64,26 @@ export type InstallerKey = "macArm" | "macIntel" | "windowsExe" | "linuxDeb" | "
  * caller passes a hint (`navigator.platform` never reveals the architecture;
  * the WebGL renderer or `userAgentData` would). Without one, Apple silicon is
  * the default Mac since every Mac sold since 2020 is one.
+ *
+ * Safari on an iPad sends a Mac's userAgent and platform, so the caller passes
+ * `navigator.maxTouchPoints`: a Mac reports 0, an iPad 5, and a tablet gets no pick.
+ *
+ * A release's Linux files are amd64 only (assetNames), so a Linux machine that
+ * says it is ARM gets none: neither file runs there.
  */
-export function defaultInstaller(userAgent: string, platform = "", arch?: string): InstallerKey | undefined {
+export function defaultInstaller(userAgent: string, platform = "", arch?: string, maxTouchPoints = 0): InstallerKey | undefined {
   const ua = userAgent.toLowerCase();
   const pf = platform.toLowerCase();
   const isPhone = /iphone|ipad|ipod|android/.test(ua);
   if (isPhone) return undefined;
   if (/windows/.test(ua) || pf.startsWith("win")) return "windowsExe";
   if (/macintosh|mac os x/.test(ua) || pf.startsWith("mac")) {
+    if (maxTouchPoints > 1) return undefined;
     if (arch && /x86|intel|x64|amd64/i.test(arch)) return "macIntel";
     return "macArm";
   }
   if (/linux|x11|cros/.test(ua) || pf.startsWith("linux")) {
+    if (LINUX_ARM.test(ua) || LINUX_ARM.test(pf)) return undefined;
     if (/ubuntu|debian|mint|pop!_os|elementary/.test(ua)) return "linuxDeb";
     return "linuxAppImage";
   }

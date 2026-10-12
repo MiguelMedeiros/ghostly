@@ -52,10 +52,19 @@ describe("opening an app on Desktop", () => {
     await open(REF, LINK);
     await open(REF, null, { runAnyway: true });
     const removed = { status: "removed", by: [{ name: "Ghostly" }] };
-    stopTakenDown([{ ref: REF, run: removed }]);
+    stopTakenDown([{ ref: REF, digest: "d", run: removed }]);
     expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1"]);
-    stopTakenDown([{ ref: REF, run: { status: "revoked" } }]);
+    stopTakenDown([{ ref: REF, digest: "d", run: { status: "revoked" } }]);
     expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1", "app-2"]);
+  });
+
+  it("closes an app's window when the app is no longer installed, Run anyway or not", async () => {
+    const { calls, open, stops } = setup();
+    await open(REF, LINK);
+    await open(REF, null, { runAnyway: true });
+    stopTakenDown([{ ref: `${REF}-other`, digest: "d", run: { status: "ok" } }]);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1", "app-2"]);
+    expect(stops).toEqual(["stopped", "stopped"]);
   });
 
   it("names its window after the app and the contact in a chat, and the app alone outside one", async () => {

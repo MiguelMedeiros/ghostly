@@ -34,7 +34,6 @@ export const VARIABLES = {
   E2E_WEB_PORT: ["47100", "Port the suite serves the web build on (vite preview); LND's restcors allows this origin"],
   E2E_MINT_URL: ["http://127.0.0.1:47090", "Cashu test mint answering for testnut.cashu.space (support/mint.ts)"],
   E2E_LNURL_PORT: ["47110", "First port the in-process Lightning address server tries (support/lnurl.ts; ten ports)"],
-  E2E_DOMAIN_PORT: ["47120", "First port of the in-process domain-proof servers (support/domain.ts; two per worker slot)"],
 
   // The regtest chain.
   GHOSTLY_BITCOIND_RPC_URL: ["http://127.0.0.1:47001", "bitcoind RPC (regtest)"],
@@ -90,7 +89,7 @@ export const VARIABLES = {
 };
 
 /** The suite's own ports: `npm run e2e:full` passes them to its children, `.env.e2e` leaves them out. */
-export const HARNESS_PORTS = ["E2E_WEB_PORT", "E2E_LNURL_PORT", "E2E_DOMAIN_PORT"];
+export const HARNESS_PORTS = ["E2E_WEB_PORT", "E2E_LNURL_PORT"];
 
 /**
  * Every port the environment publishes for an endpoint above, in order, and arkd's admin API: the port after its
@@ -116,7 +115,6 @@ export const read = (name) => process.env[name] || here(VARIABLES[name][0]);
 export const endpoints = {
   webPort: Number(read("E2E_WEB_PORT")),
   lnurlPort: Number(read("E2E_LNURL_PORT")),
-  domainPort: Number(read("E2E_DOMAIN_PORT")),
   bitcoind: { url: read("GHOSTLY_BITCOIND_RPC_URL"), user: read("GHOSTLY_BITCOIND_RPC_USER"), password: read("GHOSTLY_BITCOIND_RPC_PASSWORD") },
   esplora: read("GHOSTLY_ESPLORA_URL"),
   ark: { server: read("GHOSTLY_ARK_SERVER_URL"), esplora: read("GHOSTLY_ARK_ESPLORA_URL") },

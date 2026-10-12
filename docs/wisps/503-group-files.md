@@ -92,17 +92,20 @@ The frames of [501 § files/3](501-paired-files.md#frames) are unchanged on a fi
 
 - **Voice messages** (a file with `voice`) are fetched as soon as they are announced, up to 15 minutes of audio, so they play at a tap, as in a chat.
 - **Other files** of at most **8 MiB** are fetched by themselves while what this device took that way from the group (and still keeps) stays within **256 MiB**. Larger ones, or past that total, show their name, size, picture size or video poster and a **Download**; the person decides, and the device's free space is checked first. A device may turn automatic downloads of a group off, or lower the limit; nothing about that is sent.
+- **Stopping one.** A file that is coming, or that the device chose to fetch, stops when its person cancels it: nobody is asked for it any more, the transfer under way is refused (`pf-refuse`, `cancelled`), what came of it is deleted, and it waits for a Download. Paused instead, what came stays and the next transfer goes on from it. Turning automatic downloads off stops every file chosen that way that is not here yet, in the running app and when it starts again; each waits for a Download.
 - A file the person deletes on its device is no longer served from there (`gone` to the next asker) and can be downloaded again while some holder keeps it.
 
 ### Serving limits
 
 A holder serves at most **3 transfers at once**, all groups together, and at most one per asking member; more are `busy`. A transfer whose every byte the member confirmed (only its `pf-done` to come) is not that member's one: its next want may overtake that `pf-done`. A member asks a holder for one file at a time: while one is asked of it or coming from it, the next waits its turn, and is asked as soon as that one ends. It serves at most **1 GiB a day** of group files to others (its person can raise it, or turn serving off: then it answers `busy` and is no holder in its `group-have`). The author always serves its own files, within the same limits, so an announcement never depends on someone else being generous.
 
+What counts toward the day is every byte of data the holder sent, whatever the asker confirmed and however the transfer ended (revision 2026-10-09): a part sent again, after a drop or because the asker accepted from an earlier offset, counts again. A transfer that has sent more than its file's size goes on only while the day has room; past it the holder ends it with `pf-abort`, and the asker asks the next holder.
+
 ## What apps from before see
 
 - **A private group:** an app that did not announce version 6 in `paired-groups` drops `fl` (it is outside `sig`, and it ignores fields it does not know), so it shows the fallback text: "📎 report.pdf (2.4 MB): update Ghostly to get files in groups". It never receives `group-have` or `group-want` (they flow only where both sides announced 6), and never offers to serve. When it hands the frame on in a catch-up it keeps only the fields of a message frame it knows (902 § Catch-up), so the copy arrives without `fl`, its `xs` no longer verifies, and a member on a new app takes it as provisional: the fallback text shows until a whole copy (from the author, or from a member on a new app) brings the file.
 - **A community:** an app from before reads `text` and ignores `fl`, and relays the frame unchanged as a hub. An `x` frame `group-have` is one it drops.
-- **The CLI:** `ghostly file send <group> <path> [--voice]` announces and serves; incoming group files land in the daemon's files folder as 1:1 files do, under the same automatic limits.
+- **The CLI:** `ghostly file send <group> <path> [--voice]` announces and serves; incoming group files land in the daemon's files folder as 1:1 files do, under the same automatic limits. `file cancel|pause|resume <file>` stop and go on with one that is coming; `settings set autoDownloads false` turns automatic downloads off, `settings set serveFiles false` serving.
 
 Version 6 of `paired-groups` says an app takes group files: it announces files, answers wants and takes `group-have`. An app sends `fl` to any group; the fallback is what makes that safe.
 

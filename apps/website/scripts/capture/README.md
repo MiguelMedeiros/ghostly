@@ -19,6 +19,10 @@ It joins the shared environment on "one" (`npm run e2e:infra:use -- --host one`:
 ports, writes `.env.e2e`, never starts, resets or seeds it), builds the web app and the extension,
 serves the web app with `vite preview` on port 4380, runs the specs with 2 workers, writes each
 shot as a 2x WebP into `public/screenshots/current/` under its stable name, and stops the server.
+Each shot gets narrower copies beside it (`chat-1280.webp` and `chat-2000.webp` for the 2560 wide
+`chat.webp`, `chat-mobile-300.webp` for the 780 wide `chat-mobile.webp`): a page names them in its
+`srcset` (`lib/shots.ts`), so a browser loads the one that fits the width it draws. Commit them with
+the shot; `node scripts/capture/widths.mjs` writes them again for every shot in the folder.
 Shots named `x-*` are for looking at while composing a section; they stay in the scratch folder
 the command prints and are never committed.
 
@@ -55,7 +59,8 @@ funded is reported and shot as the app shows it.
 
 `helpers.ts` holds the cast (names, colors, pictures drawn on a canvas), pairing, conversations,
 `shot()`, persistent profiles and the extension launcher; `wallet.ts` funds each rail;
-`gallery.ts` is the little app the services spec shares; `run.mjs` is the command above.
+`gallery.ts` is the little app the services spec shares; `run.mjs` is the command above, and
+`widths.mjs` writes the narrower copies (the widths are `lib/shot-widths.json`).
 
 Phone shots use a real phone context (390 × 844, touch, mobile user agent, 2x). Where a phone
 needs the same data as the desktop shot (payments, groups, identities), the spec keeps that

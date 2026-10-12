@@ -210,7 +210,8 @@ describe("listen with an allowlist and --turns", () => {
       getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [{ id: "g1", name: "Crew", members: [] }], settings: {}, transport: {} }),
       // The newest page holds only the group's message and the chat's old one: the turn's is found in the whole history.
       messagePage: vi.fn(async ({ linkId }: { linkId: string }) => ({ messages: linkId === "c1" ? chat.slice(0, 1) : crew, more: linkId === "c1" })),
-      getMessages: vi.fn(async () => chat), groupMessages: vi.fn(async () => crew), getMessage: vi.fn(async () => undefined),
+      getMessages: vi.fn(async () => chat), groupMessages: vi.fn(async () => crew),
+      getMessage: vi.fn(async (linkId: string, id: string) => (linkId === "c1" ? chat : crew).find((m) => m.id === id)),
       sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mine:1:1" })), groupTaken: () => 0,
       react: vi.fn(async () => ({ error: null })), pinMessage: vi.fn(async () => ({ error: null })), deleteMessage: vi.fn(async () => {}), messageDetails: vi.fn(async () => ({})),
       forwardMessages: vi.fn(async () => ({ results: [{ messageIds: [], error: null }] })), pressButton: vi.fn(async () => ({ error: null })),

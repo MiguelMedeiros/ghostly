@@ -173,6 +173,20 @@ class Driver {
     await this.call("POST", "/window", { handle });
   }
 
+  /**
+   * Sizes the window commands go to, as a drag of its edge does, and answers the page's width after it. On a display
+   * with no window manager (Xvfb) that is `width`; a compositor may leave the window as it was.
+   */
+  async resize(width: number, height: number): Promise<number> {
+    await this.call("POST", "/window/rect", { width, height });
+    let inner = 0;
+    for (const deadline = Date.now() + 5_000; Date.now() < deadline; await sleep(100)) {
+      inner = await this.execute<number>("return innerWidth");
+      if (inner === width) break;
+    }
+    return inner;
+  }
+
   async close(): Promise<void> {
     await this.call("DELETE", "").catch(() => {});
   }
@@ -180,8 +194,11 @@ class Driver {
 
 export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
 
-/** Going from window to window (an app's own window, WISP 1200): WebDriver's, which the macOS driver has no part of. */
-export type DesktopWindows = Pick<Driver, "windows" | "window" | "switchTo">;
+/**
+ * Going from window to window (an app's own window, WISP 1200) and sizing one: WebDriver's, which the macOS driver has
+ * no part of.
+ */
+export type DesktopWindows = Pick<Driver, "windows" | "window" | "switchTo" | "resize">;
 
 /** `app`'s windows, where its driver is WebDriver's (Linux and Windows). */
 export function desktopWindows(app: DesktopApp): DesktopWindows {

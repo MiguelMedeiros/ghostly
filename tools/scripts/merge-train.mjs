@@ -3,8 +3,8 @@
 // `queue` to an approved, green pull request; the train lines them up and lands them in batches, or alone when only one
 // is in line.
 //
-// - The line, per base: `queue:priority` first, then by the time each got `queue` (the latest `labeled` event, so
-//   taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request with
+// - The line, per base: `queue:priority` first (alone it is in the line too), then by the time each got `queue` (the
+//   latest `labeled` event, so taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request with
 //   neither CI Success nor the draft's fast tier (CI Success (draft)) green on its last commit, or with CI Success red
 //   there, waits without losing its place. A green run of CI that skipped jobs the pull request's own files turn on
 //   (ci.yml planned it from other files: a run for another base) does not count; the run before it does.
@@ -190,9 +190,15 @@ export const ordinal = (n) => {
   return `${n}${["th", "st", "nd", "rd"][(v - 20) % 10] ?? ["th", "st", "nd", "rd"][v] ?? "th"}`;
 };
 
-/** When a pull request joined the line: the latest time it got `queue`. */
+/**
+ * In the line: `queue`, or `queue:priority` alone. A pull request given only `queue:priority` is in the line, first:
+ * read as "not queued", it sat for hours while the train had nothing to run (2026-10-09).
+ */
+export const inLine = (labels) => labels.includes(LABEL.queue) || labels.includes(LABEL.priority);
+
+/** When a pull request joined the line: the latest time it got `queue` (or `queue:priority`, which puts it there too). */
 export function queuedAt(events, fallback) {
-  const times = events.filter((e) => e.event === "labeled" && e.label?.name === LABEL.queue).map((e) => e.created_at);
+  const times = events.filter((e) => e.event === "labeled" && inLine([e.label?.name])).map((e) => e.created_at);
   return times.sort().at(-1) ?? fallback;
 }
 
@@ -302,8 +308,17 @@ export const canGoAlone = (p) => !p.fork && !BASE.test(p.branch) && p.branch !==
  */
 export function squashMessage(p, commits) {
   const subjects = commits.map((c) => (c.commit?.message ?? "").split("\n")[0].trim()).filter(Boolean);
-  return { title: `${p.title} (#${p.number})`, message: subjects.map((s) => `* ${s}`).join("\n") };
+  return { title: noSkip(`${p.title} (#${p.number})`), message: noSkip(subjects.map((s) => `* ${s}`).join("\n")) };
 }
+
+/**
+ * The words that make GitHub start no workflow for a push or a pull request when the head commit's message holds
+ * them. A pull request's title or an earlier commit of it may carry one (its own head did not, so its CI ran): in a
+ * message the train writes they would stop the batch's CI from ever starting, and the train would rebuild the same
+ * batch every 20 minutes for good; on the base they would skip its own CI. So the train writes them in round brackets.
+ */
+export const SKIP_CI = /\[(skip ci|ci skip|no ci|skip actions|actions skip)\]/gi;
+export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -347,7 +362,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
 
   const open = await gh.pulls(base);
   const batches = open.filter((p) => isBatch(p, base)).sort((a, b) => a.number - b.number);
-  const queued = open.filter((p) => !isBatch(p, base) && (p.labels.includes(LABEL.queue) || also.includes(p.number)));
+  const queued = open.filter((p) => !isBatch(p, base) && (inLine(p.labels) || also.includes(p.number)));
   for (const p of queued) {
     const events = await gh.events(p.number);
     p.queuedAt = queuedAt(events, p.createdAt);
@@ -358,11 +373,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
     // Written before the latest `queue` (taken off and added again): it speaks for an earlier head, and the label
     // added since vouches for the one it was added on. It is rewritten (or deleted) like any position comment.
-    const relabeled = p.labels.includes(LABEL.queue) ? queuedAt(events, null) : null;
+    const relabeled = inLine(p.labels) ? queuedAt(events, null) : null;
     if (p.sticky && relabeled && Date.parse(p.sticky.updated_at ?? p.sticky.created_at) < Date.parse(relabeled)) [p.stale, p.sticky] = [p.sticky, undefined];
     p.alone = aloneMark(p.sticky);
     // No position comment records the queued head yet: tell it by time, the head's first CI against the label.
-    if (!p.sticky && p.labels.includes(LABEL.queue)) {
+    if (!p.sticky && inLine(p.labels)) {
       p.labeledAt = queuedAt(events, null);
       p.pushedAt = await gh.headPushedAt(p.sha);
     }
@@ -380,7 +395,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   };
   /** Posts or edits a pull request's position comment, and keeps the copy read at the start of the run current. */
   const setSticky = async (p, text) => {
-    if (!p.labels.includes(LABEL.queue)) return; // --also: pretended, never commented on
+    if (!inLine(p.labels)) return; // --also: pretended, never commented on
     if (!p.sticky && p.stale) {
       await w.editComment(p.stale.id, text);
       p.sticky = { ...p.stale, body: text };
@@ -1131,7 +1146,7 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
         }
         const author = git(["log", "-1", "--format=%an <%ae>", ref]);
         const commits = git(["log", "--reverse", "--format=* %s", `HEAD..${ref}`]);
-        git([...identity(), "commit", "-q", "--no-verify", `--author=${author}`, "-m", `${p.title} (#${p.number})`, ...(commits ? ["-m", commits] : [])]);
+        git([...identity(), "commit", "-q", "--no-verify", `--author=${author}`, "-m", noSkip(`${p.title} (#${p.number})`), ...(commits ? ["-m", noSkip(commits)] : [])]);
         applied.push(p.number);
         commitOf[p.number] = git(["rev-parse", "HEAD"]);
       }
@@ -1215,7 +1230,7 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
 
 /** The bases with a train to run: `dev` and `epic/<name>` branches with a queued pull request or a batch open. */
 export const trainBases = (pulls) =>
-  [...new Set(pulls.filter((p) => BASE.test(p.base) && (p.labels.includes(LABEL.queue) || isBatch(p, p.base))).map((p) => p.base))].sort();
+  [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || isBatch(p, p.base))).map((p) => p.base))].sort();
 
 /** The bases a Mac serves without --base, the queue app configured or not: `dev` and every `epic/*` branch. */
 export const localBases = async (gh) => ["dev", ...(await gh.epicBranches()).filter((b) => BASE.test(b)).sort()];

@@ -1,12 +1,21 @@
 import { Ghost } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
-import { NEXT_VERSION } from "@/lib/status";
+import { SHOTS_VERSION } from "@/lib/release";
+import { shotSrcSet } from "@/lib/shots";
 import { findWisp } from "@/lib/wisps";
 import type { HomeCopy } from "@/content/home";
 import { IdentityDeck, type IdentityCard } from "./IdentityDeck";
 import { Reveal } from "./Reveal";
 import { WalletDeck } from "./WalletDeck";
 import "@/app/space.css";
+
+/**
+ * The Profile page (npm run capture, scripts/capture/profiles.spec.ts). `sizes` is the width it is drawn at
+ * (space.css): it covers a square window, 58% of the page and 679px at most, so it is 1.56 times as wide as the
+ * window; up to 860px it is 178% of the window, which shows its right side.
+ */
+const SHOT = "/screenshots/current/profiles.webp";
+const SHOT_SIZES = "(min-width: 861px) min(86.6vw - 48px, 1060px), calc(172.4vw - 41px)";
 
 const PROFILE_COLORS = ["#22d3ee", "#a78bfa", "#4ade80"];
 const THEMES = [
@@ -54,10 +63,10 @@ export function SpaceSection({ t, w, ids, shotLabel }: { t: HomeCopy["space"]; w
                 </div>
                 <div className="sp-window-body">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/screenshots/current/profiles.webp" alt="The Profile page with three profiles, Personal, Work and Club, and backups above them" loading="lazy" width={1280} height={820} />
+                  <img src={SHOT} srcSet={shotSrcSet(SHOT, "desktop")} sizes={SHOT_SIZES} alt="The Profile page with three profiles, Personal, Work and Club, and backups above them" loading="lazy" width={1280} height={820} />
                 </div>
               </div>
-              <figcaption className="caption">{shotLabel.replace("{n}", NEXT_VERSION)}</figcaption>
+              <figcaption className="caption">{shotLabel.replace("{n}", SHOTS_VERSION)}</figcaption>
             </figure>
 
             <div className="sp-rail">
