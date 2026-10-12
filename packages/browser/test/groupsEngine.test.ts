@@ -1335,7 +1335,32 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     expect(world.peers.get("bob")!.entries.size).toBe(1);
   });
 
-  it("a contact who came in through the link and is invited again declines: the admin's row is no longer Invited…", async () => {
+  it("a member gives no answer that depends on being in to a chat that did not admit it, even one naming the admin", async () => {
+    const { world, alice, others: [bob, mallory], groupId, key } = await groupOf(["bob", "mallory"]);
+    world.chats.set("chat-bm", ["bob", "mallory"]);
+    const admin = key(alice);
+    await alice.remove(groupId, key(mallory)); await world.settle();
+    const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
+    const probe = async () => {
+      await bob.handleContactFrame("chat-bm", { t: "group-invite", g: groupId, name: "x", admin, e: 0, n: 2 });
+      const answered = sent.mock.calls.some(([linkId, frame]) => linkId === "chat-bm" && (frame as { t?: string }).t === "group-decline");
+      await bob.handleContactFrame("chat-bm", { t: "group-decline", g: groupId });
+      sent.mockClear();
+      return answered;
+    };
+    expect(view(bob, groupId)).toMatchObject({ status: "active" });
+    expect(await probe()).toBe(false);
+    expect(view(bob, groupId)).toMatchObject({ status: "active" });
+    // Its admin, over the chat that admitted it, is still told it is in.
+    await bob.handleContactFrame("chat-ab", { t: "group-invite", g: groupId, name: "Ghosts", admin });
+    expect(sent).toHaveBeenCalledWith("chat-ab", { t: "group-decline", g: groupId });
+    sent.mockClear();
+    await alice.remove(groupId, key(bob)); await world.settle();
+    expect(view(bob, groupId)).toMatchObject({ status: "removed" });
+    expect(await probe()).toBe(false);
+  });
+
+  it("a contact who came in through the link and is invited again does not answer: nobody can tell the admin's chat", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const world = new World();
     const alice = world.add("alice", timings), bob = world.add("bob", timings);
@@ -1347,11 +1372,11 @@ describe("the group's link: knocks, pending entries and refusals", () => {
       await alice.tick(Date.now()); await bob.tick(Date.now()); await world.settle(); await world.meetEntries(); await world.meet();
     }
     expect(view(bob, groupId).status).toBe("active");
-    await alice.invite(groupId, "chat-ab"); await world.settle();
-    expect(view(alice, groupId).invited).toEqual([]);
-    expect(view(bob, groupId)).toMatchObject({ status: "active" });
-    // Someone who names another admin learns nothing: no answer.
     const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(sent).not.toHaveBeenCalled();
+    expect(view(bob, groupId)).toMatchObject({ status: "active" });
+    // Someone who names another admin learns nothing either.
     await bob.handleContactFrame("chat-ab", { t: "group-invite", g: groupId, name: "Ghosts", admin: createIdentity().pubKeyZ32 });
     expect(sent).not.toHaveBeenCalled();
   });
