@@ -568,6 +568,33 @@ describe("a run of the train", () => {
     expect(repo.pulls.get(1)!.open && repo.pulls.get(2)!.open).toBe(true);
   });
 
+  it("takes out a pull request that changes a workflow when GitHub refuses the batch's push for it, and boards the rest", async () => {
+    // The queue app's token has no `workflows` permission: GitHub refuses any push whose commits change a workflow, so
+    // every run failed and the whole line waited behind that one pull request.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if (sha.split(":")[1]?.split(",").includes("12")) {
+        throw new Error(`Command failed: git push -q --force origin ${sha}:refs/heads/${branch}\n ! [remote rejected]   ${sha} -> ${branch} (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)\nerror: failed to push some refs`);
+      }
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 13]);
+    expect(r.dropped).toEqual([12]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    // Any other refusal is still the run's error.
+    repo.git.push = async () => { throw new Error("Command failed: git push\nfatal: unable to access"); };
+    repo.add(14);
+    repo.batch()!.open = false;
+    await expect(repo.run()).rejects.toThrow(/unable to access/);
+  });
+
   it("closes a batch whose branch got a commit the train did not build", async () => {
     const repo = fakeRepo();
     repo.add(11);
