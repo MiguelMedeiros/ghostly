@@ -120,9 +120,11 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
 /**
  * Tab only, for a modal that moves the focus and answers Escape its own way (the message details panel): Tab and
  * Shift+Tab go round its own controls and never to the page behind it. Over other open modals, the newest keeps Tab.
+ * `on` turns it off while what holds it is not over the page (a call in its small window).
  */
-export function useTabTrap(ref: RefObject<HTMLElement | null>) {
+export function useTabTrap(ref: RefObject<HTMLElement | null>, on = true) {
   useEffect(() => {
+    if (!on) return;
     modals.push(ref);
     const key = (e: KeyboardEvent) => { if (modals[modals.length - 1] === ref) keepTabInside(e, ref.current); };
     document.addEventListener("keydown", key);
@@ -131,7 +133,7 @@ export function useTabTrap(ref: RefObject<HTMLElement | null>) {
       const at = modals.lastIndexOf(ref);
       if (at >= 0) modals.splice(at, 1);
     };
-  }, [ref]);
+  }, [ref, on]);
 }
 
 /**

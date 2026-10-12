@@ -5,6 +5,7 @@ import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
+import { useTabTrap } from "../hooks/useDismiss";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 
@@ -117,6 +118,25 @@ export function CallOverlay({
     { enabled: mini, minWidth: 190, minHeight: 128 },
   );
 
+  // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call, and
+  // what had the focus (the button that started the call) has it back when the call ends. Not in the small window:
+  // the chat beside it is in use.
+  const box = miniWindow.boxProps.ref;
+  const opener = useRef<HTMLElement | null>(null);
+  useTabTrap(box, !mini);
+  useEffect(() => {
+    if (mini) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (box.current && !box.current.contains(active)) {
+      if (active && active !== document.body) opener.current = active;
+      box.current.focus({ preventScroll: true });
+    }
+    return () => {
+      const before = opener.current;
+      if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
+    };
+  }, [mini, box]);
+
   // Your own picture keeps the shape of what it shows (camera or screen), so there are never bars around it.
   const [selfAspect, setSelfAspect] = useState(4 / 3);
   const selfView = useFloatingBox(
@@ -192,10 +212,11 @@ export function CallOverlay({
       {...miniWindow.boxProps}
       data-testid="call-window"
       data-mini={mini}
+      {...(mini ? {} : { role: "dialog", "aria-label": peerName, tabIndex: -1 })}
       className={
         mini
           ? "call-mini floating fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl"
-          : "fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center"
+          : "fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center focus:outline-none"
       }
     >
       {mini && <Grips handleProps={miniWindow.handleProps} />}
