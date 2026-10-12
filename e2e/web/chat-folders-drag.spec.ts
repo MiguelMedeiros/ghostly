@@ -90,3 +90,63 @@ test("a chat is dragged onto a folder and back out onto Other chats, which folds
   await page.getByTestId("chat-folder-others-toggle").click();
   await expect(page.getByTestId("sidebar").getByTestId("chat-row")).toHaveCount(2);
 });
+
+test("pinned chats are put in order by dragging inside a folder and inside Other chats, and a row dropped on another folder still changes folder", { tag: ["@feature:chats.folders", "@feature:chats.list.pin-order"] }, async ({ peer }) => {
+  const { page } = await peer("carol", { viewport: { width: 1100, height: 800 } });
+  const sidebar = page.getByTestId("sidebar");
+  const ids: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const before = page.url();
+    await page.getByTestId("sidebar-new-chat").click();
+    await expect(page).not.toHaveURL(before);
+    ids.push(page.url().split("/chat/")[1]!);
+  }
+  const row = (chat: string) => sidebar.locator(`[data-testid="chat-row"][data-chat="${chat}"]`);
+  const order = (root: Locator) => root.getByTestId("chat-row").evaluateAll(list => list.map(el => (el as HTMLElement).dataset.chat!));
+  for (const chat of ids) {
+    await row(chat).hover();
+    await row(chat).getByTestId("chat-row-pin").click();
+    await expect(row(chat).getByTestId("chat-row-pinned")).toHaveCount(1);
+  }
+  await page.mouse.move(900, 700);
+  await newFolder(page, "Friends");
+  const friends = folder(page, "Friends"), loose = page.getByTestId("chat-folder-loose");
+  const [a, b, c, d] = ids;
+  // The newest pin is on top: d, c, b, a. Two go into the folder, two stay out.
+  await drag(page, row(d), friends.getByTestId("chat-folder"));
+  await page.mouse.up();
+  await drag(page, row(c), friends.getByTestId("chat-folder"));
+  await page.mouse.up();
+  await expect.poll(() => order(friends)).toEqual([d, c]);
+  await expect.poll(() => order(loose)).toEqual([b, a]);
+
+  // Inside the folder: the top one under the other. A line shows where it lands, and the folder is not marked.
+  await drag(page, row(d), row(c));
+  const below = (await row(c).boundingBox())!;
+  await page.mouse.move(below.x + below.width / 3, below.y + below.height - 4, { steps: 4 });
+  await expect(row(c).getByTestId("chat-row-drop")).toHaveAttribute("data-edge", "after");
+  await expect(friends).not.toHaveAttribute("data-drop-over", "true");
+  await page.mouse.up();
+  await expect.poll(() => order(friends)).toEqual([c, d]);
+  await expect.poll(() => order(loose)).toEqual([b, a]);
+
+  // Inside Other chats, with a folder in the list.
+  await drag(page, row(b), row(a));
+  const under = (await row(a).boundingBox())!;
+  await page.mouse.move(under.x + under.width / 3, under.y + under.height - 4, { steps: 4 });
+  await expect(row(a).getByTestId("chat-row-drop")).toHaveAttribute("data-edge", "after");
+  await page.mouse.up();
+  await expect.poll(() => order(loose)).toEqual([a, b]);
+  await expect.poll(() => order(friends)).toEqual([c, d]);
+
+  // The same drag, let go over the other part of the list, changes folder instead.
+  await drag(page, row(a), friends.getByTestId("chat-folder"));
+  await expect(friends).toHaveAttribute("data-drop-over", "true");
+  await page.mouse.up();
+  await expect.poll(() => order(loose)).toEqual([b]);
+  await expect(friends.getByTestId("chat-row")).toHaveCount(3);
+
+  await page.reload();
+  await expect.poll(() => order(folder(page, "Friends"))).toHaveLength(3);
+  expect((await order(folder(page, "Friends"))).filter(id => id !== a)).toEqual([c, d]);
+});
