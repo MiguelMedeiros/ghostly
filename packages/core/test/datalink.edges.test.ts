@@ -873,6 +873,8 @@ describe("DataLink says what each attempt showed about direct connections (direc
       const a = link("aaaa", "bbbb", gathering(...candidates), { onDirect });
       await a.dl.connect();
       await a.dl.handleSignal(answerTo(parseRtcSignal(a.lastSignal())!));
+      // ICE gives up half a minute on, as it does when no path connects.
+      vi.advanceTimersByTime(30_000);
       a.pc().setConnectionState("failed");
       expect(onDirect.mock.calls, evidence).toEqual([[evidence]]);
       expect(a.dl.state).toBe("idle");
@@ -926,6 +928,37 @@ describe("DataLink says what each attempt showed about direct connections (direc
     }
     expect(c.dl.state).toBe("idle");
     expect(onDirect.mock.calls).toEqual([["no-public"]]);
+  });
+
+  // What an edge between two CLIs did on one loaded core (groupCompat, 4 runs in 60): either of these was taken for a
+  // network that lets no direct connection through, the edge gave WebRTC up for the run, and a member whose app has
+  // WebRTC alone was never reached again.
+  it("an answer whose connection fails as soon as it is in says nothing of the network: it was refused, and the offer goes again", async () => {
+    const onDirect = vi.fn(), onAnswerReplaced = vi.fn();
+    const a = link("aaaa", "bbbb", () => {}, { onDirect, onAnswerReplaced });
+    await a.dl.connect();
+    await a.dl.handleSignal(answerTo(parseRtcSignal(a.lastSignal())!));
+    expect(a.dl.state).toBe("connecting");
+    // libdatachannel's race, a moment later than inside setRemoteDescription: the connection closes right after it.
+    vi.advanceTimersByTime(8);
+    a.pc().setConnectionState("closed");
+    expect(a.dl.state).toBe("idle");
+    expect(onDirect).not.toHaveBeenCalled();
+    expect(onAnswerReplaced).toHaveBeenCalledOnce();
+  });
+
+  it("an answer to an offer the offerer gave up meanwhile says nothing of the network when its connection fails", async () => {
+    let standing = true;
+    const onDirect = vi.fn();
+    const b = link("bbbb", "aaaa", () => {}, { onDirect, offerStanding: () => standing });
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    // The offerer's packet no longer carries that offer (the answer was refused there, and its redials are spent).
+    standing = false;
+    vi.advanceTimersByTime(39_500);
+    b.pc().setConnectionState("failed");
+    expect(b.dl.state).toBe("idle");
+    expect(b.pcs).toHaveLength(1);
+    expect(onDirect).not.toHaveBeenCalled();
   });
 
   it("a connection that gathers no candidate at all, every time, says this device has no public candidate", async () => {

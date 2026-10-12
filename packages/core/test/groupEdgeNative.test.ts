@@ -232,12 +232,13 @@ describe("a group's edge with a member whose app has no WebRTC", () => {
 
   // Either key order: the side whose attempt failed may be the one that dials, or the one that answered.
   for (const failing of ["the side that dials", "the side that answered"] as const) it(`an edge whose WebRTC failed on ${failing} goes live over Iroh in seconds, not after the other side's attempt runs out`, async () => {
-    // Offer and answer meet, and one side's connection fails at once (ICE gave up: a VPN, a firewall). That side starts
+    // Offer and answer meet, and one side's connection fails soon (ICE gave up: a VPN, a firewall; the side that dials
+    // 2 s on, as one that failed within a second of its answer was an answer refused, offered again). That side starts
     // the edge again with no WebRTC (node.ts `edgeWithoutRtc`), and says so in its packet. The other side still held
     // its attempt, connecting, and took nothing else until it timed out (30 s): a member let in over slow relays reached
     // another 32 to 73 s after its welcome (meshSignals.test.ts on CI, 2026-10-06).
     rtc.blocked = true;
-    if (failing === "the side that dials") rtc.blockedFailsAfterMs = 0; else rtc.answerFailsAfterMs = 0;
+    if (failing === "the side that dials") rtc.blockedFailsAfterMs = 2_000; else rtc.answerFailsAfterMs = 0;
     const group = toBase64Url(randomBytes(16));
     let [one, two] = [createIdentity(), createIdentity()];
     const edgeKey = (me: Identity, peer: Identity) => edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32).peerPubKeyZ32;
@@ -284,7 +285,7 @@ describe("a member whose edge went native once, back with WebRTC", () => {
   async function wentNativeOnce(dials: "the member back" | "the reader", options: { back?: Partial<MemberOptions>; reader?: Partial<MemberOptions> } = {}) {
     // The attempt that fails is the member's own: its offer's, or its answer's.
     rtc.blocked = true;
-    if (dials === "the member back") rtc.blockedFailsAfterMs = 0; else rtc.answerFailsAfterMs = 0;
+    if (dials === "the member back") rtc.blockedFailsAfterMs = 2_000; else rtc.answerFailsAfterMs = 0;
     const group = toBase64Url(randomBytes(16));
     let [one, two] = [createIdentity(), createIdentity()];
     const edgeKey = (me: Identity, peer: Identity) => edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32).peerPubKeyZ32;
