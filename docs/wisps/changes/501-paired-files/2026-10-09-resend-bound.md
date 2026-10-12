@@ -1,0 +1,1 @@
+A `files/3` sender bounds what it sends again: it counts every byte of data it sent for a file, and once that passes three times the file's size and 256 MiB it ends the transfer with `pf-abort`. An `accept` from an earlier offset is still followed until then.

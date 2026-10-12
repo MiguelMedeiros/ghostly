@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { NameStep } from "./components/NameStep";
@@ -15,9 +15,10 @@ import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
 import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { PreUnlockRing } from "./components/PreUnlockRing";
-import { ensureSession, loadSession } from "./lib/storage";
+import { LINK_CHATS_WAITING, ensureSession, linkChatsWaiting, loadSession, type SessionKeys } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { menuPage } from "./components/MenuPage";
 import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
 import { LimitedStartGate } from "./components/devices/LimitedStart";
@@ -34,16 +35,7 @@ import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
 
-/**
- * A page of the menu, loaded the first time it is opened: the first screen (the chat list) does not wait for them.
- * Nothing is drawn in its place for the moment it takes.
- */
-function menuPage<P extends object>(load: () => Promise<ComponentType<P>>) {
-  const Page = lazy(async () => ({ default: await load() }));
-  return function MenuPage(props: P) {
-    return <Suspense fallback={null}><Page {...props} /></Suspense>;
-  };
-}
+// The pages of the menu, each loaded the first time it is opened (components/MenuPage.tsx).
 const Settings = menuPage(() => import("./pages/Settings").then((m) => m.Settings));
 const Services = menuPage(() => import("./pages/Services").then((m) => m.Services));
 const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile));
@@ -52,12 +44,6 @@ const Apps = menuPage(() => import("./pages/Apps").then((m) => m.Apps));
 const Tasks = menuPage(() => import("./pages/Tasks").then((m) => m.Tasks));
 const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
 
-/**
- * An invite link, or a chat address from before chats were routed by session
- * id, carries the chat's keys. Store them and replace the address at once, so
- * the keys stay out of the history. Runs while locked too: the address must
- * not wait for the password.
- */
 /**
  * A device code's link that names the profile, `#<profile>#ghostly1z…` (WISP 06 § Adding a device), as the router reads
  * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
@@ -68,11 +54,45 @@ function namedDeviceLink(pathname: string, hash: string): string | null {
   return link.profile && /^ghostly1/i.test(link.code) && isDeviceCode(link.code) ? named : null;
 }
 
+/**
+ * An invite link, or a chat address from before chats were routed by session
+ * id, carries the chat's keys. They leave the address at once, so they stay
+ * out of the history: the address must not wait for the password. The chat
+ * itself is made once the lock is passed, as a group's link is joined, and
+ * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`).
+ */
 function ChatLinkIntake() {
   const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const { t } = useI18n();
-  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | null>(null);
+  const { isLocked } = useLockScreen();
+  const locked = useRef(isLocked);
+  locked.current = isLocked;
+  /** The invite a link brought while locked: the last one, kept in memory only. */
+  const [held, setHeld] = useState<SessionKeys | null>(null);
+  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | null>(null);
+
+  const open = useCallback((keys: SessionKeys) => {
+    // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
+    const outcome = classifyInvite(keys);
+    let sessionId: string | null;
+    if (outcome.kind === "own") { sessionId = outcome.sessionId; showJoinNotice("join.own"); }
+    else if (outcome.kind === "new" && linkChatsWaiting() >= LINK_CHATS_WAITING) {
+      setInvalid("join.tooManyLinks");
+      navigate("/", { replace: true });
+      return;
+    } else {
+      try { sessionId = ensureSession(keys, { viaLink: true }); } catch { sessionId = null; }
+      if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
+    }
+    if (!sessionId) {
+      setInvalid("join.invalid");
+      navigate("/", { replace: true });
+      return;
+    }
+    window.dispatchEvent(new Event("session-updated"));
+    navigate(chatPath(sessionId), { replace: true });
+  }, [navigate]);
 
   // An effect, not a layout effect: the router starts listening in its own layout effect, after this
   // one's, and would miss a navigation made before it (an invite link opened in a new tab).
@@ -85,25 +105,22 @@ function ChatLinkIntake() {
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
     if (isDeviceCode(rest)) { offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
-    let sessionId: string | null = null;
     if (reading.ok) {
-      // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
-      const outcome = classifyInvite(reading.keys);
-      if (outcome.kind === "own") { sessionId = outcome.sessionId; showJoinNotice("join.own"); }
-      else {
-        try { sessionId = ensureSession(reading.keys); } catch { sessionId = null; }
-        if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
-      }
-    } else if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
-    if (!sessionId) {
-      // Whatever it was, it leaves the address bar and the history: it may hold a key.
-      setInvalid(reading.ok ? "join.invalid" : INVITE_REFUSAL_MESSAGE[reading.reason]);
-      navigate("/", { replace: true });
+      if (locked.current) { setHeld(reading.keys); navigate("/", { replace: true }); }
+      else open(reading.keys);
       return;
     }
-    window.dispatchEvent(new Event("session-updated"));
-    navigate(chatPath(sessionId), { replace: true });
-  }, [pathname, hash, navigate]);
+    if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
+    // Whatever it was, it leaves the address bar and the history: it may hold a key.
+    setInvalid(INVITE_REFUSAL_MESSAGE[reading.reason]);
+    navigate("/", { replace: true });
+  }, [pathname, hash, navigate, open]);
+
+  useEffect(() => {
+    if (!held || isLocked) return;
+    setHeld(null);
+    open(held);
+  }, [held, isLocked, open]);
 
   useEffect(() => {
     if (!invalid) return;

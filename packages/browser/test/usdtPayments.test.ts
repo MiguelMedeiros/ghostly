@@ -30,3 +30,35 @@ it('waits for chain confirmation and does not reuse a receipt to settle a differ
  receipt.mockResolvedValue({settled:true});await desk.reconcileUsdtReceipts();
  expect(desk.payment('r1')?.state).toBe('settled');expect(desk.payment('r2')?.state).toBe('pending');
 });
+it('one transaction is one received payment: its receipt under a new payment id is not checked or stored again',async()=>{
+ const t=target();const createdAt=Date.now();
+ seed('payments',[{id:'r1',linkId:'l',kind:'request',direction:'out',amount:1000000,unit:'testusdt',state:'pending',createdAt,target:t}]);
+ const receipt=vi.fn().mockResolvedValue({settled:false,pending:true});
+ const desk=new PaymentDesk({} as CashuWallet,{getLink:()=>({supportsUsdtPayments:true,sendPaymentResult:vi.fn()}) as unknown as GhostLink,storeMessage:vi.fn(),onChange:vi.fn()},undefined,{adapter:{receipt}} as unknown as UsdtWallet);
+ await desk.start();
+ const pay=(id:string)=>desk.onPayment('l',{id,requestId:'r1',timestamp:createdAt,amount:{value:'1000000',asset:'testusdt'},endpoint:[ENDPOINT.usdt,JSON.stringify({txid:'0x'+'a'.repeat(64)})]});
+ await pay('p1');await pay('p2');
+ receipt.mockResolvedValue({settled:true});await desk.reconcileUsdtReceipts();
+ expect(desk.payment('r1')?.state).toBe('settled');
+ const asked=receipt.mock.calls.length;
+ await pay('p3');
+ expect(desk.payment('p1')?.state).toBe('settled');
+ expect([desk.payment('p2'),desk.payment('p3')]).toEqual([undefined,undefined]);
+ expect(receipt).toHaveBeenCalledTimes(asked);
+});
+it('a waiting receipt dropped by hand frees its request for another receipt; a paid one is not dropped',async()=>{
+ const t=target();const createdAt=Date.now();
+ seed('payments',[{id:'r1',linkId:'l',kind:'request',direction:'out',amount:1000000,unit:'testusdt',state:'pending',createdAt,target:t}]);
+ const landed='0x'+'b'.repeat(64);
+ const receipt=vi.fn(async(txid:string)=>txid===landed?{settled:true}:{settled:false,pending:true});
+ const desk=new PaymentDesk({} as CashuWallet,{getLink:()=>({supportsUsdtPayments:true,sendPaymentResult:vi.fn()}) as unknown as GhostLink,storeMessage:vi.fn(),onChange:vi.fn()},undefined,{adapter:{receipt}} as unknown as UsdtWallet);
+ await desk.start();
+ const pay=(id:string,txid:string)=>desk.onPayment('l',{id,requestId:'r1',timestamp:createdAt,amount:{value:'1000000',asset:'testusdt'},endpoint:[ENDPOINT.usdt,JSON.stringify({txid})]});
+ await pay('p1','0x'+'a'.repeat(64));await pay('p2',landed);
+ expect(desk.payment('p2'),'held by the first receipt').toBeUndefined();
+ await desk.dropReceipt('r1');expect(desk.payment('r1')?.state,'a request is not a receipt').toBe('pending');
+ await desk.dropReceipt('p1');expect(desk.payment('p1')).toMatchObject({state:'failed',error:'Removed here'});
+ await pay('p2',landed);
+ expect(desk.payment('p2')?.state).toBe('settled');expect(desk.payment('r1')?.state).toBe('settled');
+ await desk.dropReceipt('p2');expect(desk.payment('p2')?.state).toBe('settled');
+});

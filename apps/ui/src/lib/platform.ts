@@ -430,6 +430,11 @@ export interface AppsPlatform {
   runnerServed?: boolean;
   /** The entry of an installed app, checked again: refused when revoked, or removed unless `runAnyway`. */
   entry(ref: string, runAnyway?: boolean): Promise<AppEntry>;
+  /**
+   * This platform for one running app, whose every call names the version it runs (`AppEntry.digest`): an update
+   * installed while it runs does not make it the new version (WISP 1200 § Takedowns). Absent where no engine judges versions.
+   */
+  running?(digest: string): AppsPlatform;
   /** One file of an installed app's bundle. */
   file(ref: string, path: string): Promise<Uint8Array>;
   storage: {

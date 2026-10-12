@@ -1,8 +1,9 @@
 //! Bounded, main-window-only bridge for native paired channels. No application
 //! identities or receipts live here: those remain in the shared paired engine.
 use base64::Engine;
+use futures_util::{Stream, StreamExt};
 use ghostly_transports::iroh_transport as wire;
-use iroh::{endpoint::Connection, Endpoint};
+use iroh::{endpoint::Connection, Endpoint, Watcher};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -30,6 +31,10 @@ pub enum Event {
     Closed {
         id: u64,
     },
+    /// The endpoint's own address, when it came to be another.
+    Address {
+        descriptor: wire::Address,
+    },
 }
 struct Socket {
     connection: Connection,
@@ -39,11 +44,46 @@ struct Peer {
     endpoint: Endpoint,
     events: Channel<Event>,
     listener: tokio::task::JoinHandle<()>,
+    watcher: tokio::task::JoinHandle<()>,
+}
+impl Peer {
+    /// Nothing more is accepted on it or said about it.
+    fn silence(&self) {
+        self.listener.abort();
+        self.watcher.abort();
+    }
+}
+
+/// How long an address is left to settle before the page is told: a network change moves the home relay and the
+/// direct addresses one after the other, and each word to the page is a record published again.
+const ADDRESS_SETTLES: Duration = Duration::from_secs(1);
+
+/// Tells the page the endpoint's address each time it came to be another than the last one `said`, so the page
+/// never asks. `changes` yields when something about the address moved (Iroh's own watcher), `current` reads it.
+async fn tell_address(
+    mut changes: impl Stream + Unpin,
+    current: impl Fn() -> wire::Address,
+    mut said: wire::Address,
+    events: Channel<Event>,
+) {
+    while changes.next().await.is_some() {
+        tokio::time::sleep(ADDRESS_SETTLES).await;
+        let descriptor = current();
+        if descriptor == said {
+            continue;
+        }
+        said = descriptor.clone();
+        if events.send(Event::Address { descriptor }).is_err() {
+            break;
+        }
+    }
 }
 #[derive(Default)]
 struct Inner {
     peers: HashMap<u64, Peer>,
     sockets: HashMap<u64, (u64, Socket)>,
+    /// Which page of the Ghostly window this is, counted from the app's start (`page_started`).
+    page: u64,
 }
 #[derive(Clone, Default)]
 pub struct TransportState {
@@ -140,15 +180,30 @@ impl TransportState {
     /// starts watching for this app to come back. Bounded by `within`: exiting never waits on a
     /// relay that does not answer.
     pub async fn shutdown(&self, within: Duration) {
-        let peers: Vec<Peer> = {
-            let mut inner = self.inner.lock().unwrap();
-            for (_, (_, socket)) in inner.sockets.drain() {
-                socket.connection.close(0u32.into(), b"app exiting");
-            }
-            inner.peers.drain().map(|(_, peer)| peer).collect()
-        };
+        let peers = self.release(b"app exiting");
         let closing = close_all(peers);
         let _ = tokio::time::timeout(within, closing).await;
+    }
+    /// Every connection closed and every endpoint off the books, now; the endpoints are the caller's to close.
+    fn release(&self, why: &'static [u8]) -> Vec<Peer> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.page += 1;
+        for (_, (_, socket)) in inner.sockets.drain() {
+            socket.connection.close(0u32.into(), why);
+        }
+        inner.peers.drain().map(|(_, peer)| peer).collect()
+    }
+    /// The Ghostly window's page starts: the app opening, the page loaded again (another profile, Clear all data, a
+    /// device that became a standby), or the WebView back after its process died. The page before it held the
+    /// endpoints by ids only it knew, and it may have gone without stopping one (its process died, a stop asked for
+    /// as the page went never arrived, a listener was still starting): nothing here would ever stop them, and with
+    /// eight left behind no chat of the new page gets a listener. So they are off the books before the new page asks,
+    /// each contact hears the close at once, and the endpoints are closed in the background.
+    pub fn page_started(&self) {
+        let peers = self.release(b"page gone");
+        if !peers.is_empty() {
+            tauri::async_runtime::spawn(close_all(peers));
+        }
     }
     /// The network changed (Android's own callback: there Iroh's netwatch may not see it, denied the routing table):
     /// every endpoint looks again at its addresses and paths now. Returns how many were told.
@@ -177,9 +232,13 @@ impl TransportState {
         local_only: bool,
         relays: &[String],
     ) -> Result<Started, String> {
-        if self.inner.lock().unwrap().peers.len() >= 8 {
-            return Err("Native endpoint limit reached".into());
-        }
+        let page = {
+            let inner = self.inner.lock().unwrap();
+            if inner.peers.len() >= 8 {
+                return Err("Native endpoint limit reached".into());
+            }
+            inner.page
+        };
         let endpoint = if relays.is_empty() || local_only {
             wire::endpoint(seed, local_only).await?
         } else {
@@ -209,16 +268,30 @@ impl TransportState {
             }
         });
         let mut inner = self.inner.lock().unwrap();
+        // The page that asked is gone (another one started while this endpoint was binding): nobody holds its id.
+        if inner.page != page {
+            listener.abort();
+            tauri::async_runtime::spawn(async move { endpoint.close().await });
+            return Err("The page that asked for this endpoint is gone".into());
+        }
         if inner.peers.len() >= 8 {
             listener.abort();
             return Err("Native endpoint limit reached".into());
         }
+        let watched = endpoint.clone();
+        let watcher = tokio::spawn(tell_address(
+            endpoint.watch_addr().stream_updates_only(),
+            move || wire::address(&watched),
+            descriptor.clone(),
+            events.clone(),
+        ));
         inner.peers.insert(
             id,
             Peer {
                 endpoint,
                 events,
                 listener,
+                watcher,
             },
         );
         Ok(Started { id, descriptor })
@@ -228,7 +301,7 @@ impl TransportState {
 async fn close_all(peers: Vec<Peer>) {
     let mut closing = tokio::task::JoinSet::new();
     for peer in peers {
-        peer.listener.abort();
+        peer.silence();
         closing.spawn(async move { peer.endpoint.close().await });
     }
     while closing.join_next().await.is_some() {}
@@ -345,7 +418,7 @@ pub async fn paired_iroh_stop(
         inner.peers.remove(&endpoint_id)
     };
     if let Some(peer) = peer {
-        peer.listener.abort();
+        peer.silence();
         peer.endpoint.close().await;
     }
     Ok(())
@@ -460,6 +533,84 @@ mod tests {
         to: &wire::Address,
     ) -> Result<u64, String> {
         paired_iroh_connect(app.state(), from, to.clone()).await
+    }
+
+    /// The page is told an address that came to be another, once it settled, and only then: it never has to ask.
+    #[tokio::test(start_paused = true)]
+    async fn the_page_is_told_each_address_the_endpoint_comes_to_have_once() {
+        let address = |relay: Option<&str>, addresses: &[&str]| wire::Address {
+            id: "ab".repeat(32),
+            relay: relay.map(String::from),
+            addresses: addresses.iter().map(|a| a.to_string()).collect(),
+        };
+        let first = address(None, &["192.168.1.5:4433"]);
+        let now = Arc::new(Mutex::new(first.clone()));
+        let (changed, changes) = mpsc::unbounded_channel::<()>();
+        let (events, seen) = channel();
+        let read = now.clone();
+        let telling = tokio::spawn(tell_address(
+            tokio_stream(changes),
+            move || read.lock().unwrap().clone(),
+            first,
+            events,
+        ));
+        let told = || seen.lock().unwrap().clone();
+
+        // Something moved that left the address as it was said: nothing.
+        changed.send(()).unwrap();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(told().is_empty(), "{:?}", told());
+
+        // It homed on a relay, then a direct address came 200 ms later: one word, with both.
+        *now.lock().unwrap() = address(Some("https://relay.test./"), &["192.168.1.5:4433"]);
+        changed.send(()).unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let settled = address(
+            Some("https://relay.test./"),
+            &["192.168.1.5:4433", "203.0.113.7:4433"],
+        );
+        *now.lock().unwrap() = settled.clone();
+        changed.send(()).unwrap();
+        assert!(told().is_empty(), "told before it settled");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(
+            told(),
+            vec![serde_json::json!({"type": "address", "descriptor": settled})]
+        );
+
+        // Nothing moves for an hour: nothing is said, and nothing is asked.
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        assert_eq!(told().len(), 1);
+
+        // The endpoint is gone (Iroh's watcher ends): so is the telling.
+        drop(changed);
+        telling.await.unwrap();
+    }
+
+    fn tokio_stream(mut changes: mpsc::UnboundedReceiver<()>) -> impl Stream<Item = ()> + Unpin {
+        futures_util::stream::poll_fn(move |cx| changes.poll_recv(cx))
+    }
+
+    /// A real endpoint is watched from its start, and no longer once it is stopped.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_endpoint_is_watched_until_it_is_stopped() {
+        let app = app();
+        let (alice, _, _) = start(&app, 50).await;
+        let watcher = {
+            let state = app.state::<TransportState>();
+            let inner = state.inner.lock().unwrap();
+            inner.peers[&alice].watcher.abort_handle()
+        };
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!watcher.is_finished());
+        paired_iroh_stop(app.state(), alice).await.unwrap();
+        for _ in 0..200 {
+            if watcher.is_finished() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the watcher outlived its endpoint");
     }
 
     #[tokio::test]
@@ -657,6 +808,39 @@ mod tests {
                 .unwrap(),
             "Native endpoint limit reached"
         );
+    }
+
+    /// A page that starts (loaded again, or back after its process died) finds its eight places free: what the
+    /// page before it left running is stopped, and a contact on the other end hears the close at once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_that_starts_frees_what_the_page_before_it_left_running() {
+        let (page, contact) = (app(), app());
+        let mut left = Vec::new();
+        for seed in 30..38 {
+            left.push(start(&page, seed).await.0);
+        }
+        let (_bob, bob_address, bob_seen) = start(&contact, 40).await;
+        connect(&page, left[0], &bob_address).await.unwrap();
+        let accepted = event(&bob_seen, kind("open")).await["id"].clone();
+        let (events, _) = channel();
+        let ninth = page
+            .state::<TransportState>()
+            .start([41; 32], events, true, &[])
+            .await;
+        assert_eq!(ninth.err().unwrap(), "Native endpoint limit reached");
+
+        page.state::<TransportState>().page_started();
+
+        assert_eq!(event(&bob_seen, kind("closed")).await["id"], accepted);
+        for id in left {
+            assert_eq!(
+                paired_iroh_address(page.state(), id).await.unwrap_err(),
+                "Endpoint closed"
+            );
+        }
+        for seed in 50..58 {
+            start(&page, seed).await;
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

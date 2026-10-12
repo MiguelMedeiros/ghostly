@@ -381,8 +381,7 @@ function identityKit(w: World): IdentityKit | undefined {
       let site: TestDomain | undefined;
       return {
         before: async () => {
-          // Two ports per worker: the ephemeral environment's slots, or the matrix's own range.
-          site = await startTestDomain(w.info.parallelIndex % 40, Number(process.env.E2E_DOMAIN_PORT || 47320));
+          site = await startTestDomain();
           w.cleanup.push(() => site?.close());
           for (const p of [a, b]) await site.attach(p.context);
         },

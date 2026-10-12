@@ -136,6 +136,11 @@ export interface DhtDeliveryState {
    * someone else who used the same invite first. Kept until an envelope of the contact's newer than the last read opens.
    */
   inviteTaken?: true;
+  /**
+   * Layer 1 carried this chat with the pinned key at least once: the contact pinned this side, for good. What reads as
+   * "the invite was taken" from then on is not the contact's word (`sealedToAnother`).
+   */
+  wasLive?: true;
 }
 export interface DhtDeliveryView {
   mode: DeliveryMode;
@@ -410,6 +415,14 @@ export class DhtDelivery {
     this.live = live;
     if (!live) { this.urgent = true; void this.tick(); return; }
     this.fastUntil = 0; this.signalReads = 0;
+    // Remembered past this session, and whatever said the invite was taken was not the contact (`sealedToAnother`).
+    if (this.options.credentials.peerKey && (!this.state.wasLive || this.state.inviteTaken)) void this.serialize(async () => {
+      const taken = this.state.inviteTaken;
+      if (taken) traceLink(this.from, "invite-untaken", {});
+      const { inviteTaken: _taken, ...kept } = this.state;
+      await this.persist({ ...kept, wasLive: true });
+      if (taken) this.changed();
+    }).catch(() => { /* a failed save: said again at the next session */ });
     if (this.options.credentials.peerKey && this.state.peerMode) void this.tick(); else this.schedule();
   }
   get isLive(): boolean { return this.live; }
@@ -687,14 +700,15 @@ export class DhtDelivery {
   }
   /**
    * The contact's envelope is sealed to another key (`open`): it pinned someone else who used the same invite first, so
-   * nothing of this side's will ever be read. Said once this side is not proven the one it pinned (never seen in the
-   * pinned mailbox, no text confirmed, never live). The hint is sealed under the invite's key, which any copy of it
-   * holds: a passive warning, taken back by the contact's next envelope that opens here.
+   * nothing of this side's will ever be read. Said only while this side is not proven the one it pinned: no envelope
+   * sealed to this side read (`peerPinned`), no text confirmed, never live (`wasLive`). The hint is sealed under the
+   * invite's key, which any copy of it holds, so past that proof it says nothing of the contact: a passive warning,
+   * taken back by the contact's next envelope that opens here, or by a live session.
    */
   private async sealedToAnother(sender: string): Promise<void> {
     const expected = this.options.credentials.peerKey ?? this.options.credentials.expectedPeerKey;
     if (this.state.inviteTaken || !expected || sender !== expected) return;
-    if (this.state.peerPinned === "seen" || this.state.confirmed || this.live) return;
+    if (this.state.peerPinned || this.state.confirmed || this.state.wasLive || this.live) return;
     traceLink(this.from, "invite-taken", {});
     await this.persist({ ...this.state, inviteTaken: true });
     this.changed();

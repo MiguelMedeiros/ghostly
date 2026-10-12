@@ -164,6 +164,12 @@ describe("the turn record", () => {
     // The two joiners stay: an emoji sequence and Persian or Indic text need them.
     expect(turnName("👩‍💻 Ana")).toBe("👩‍💻 Ana");
     expect(turnName("می\u200Cخوام")).toBe("می\u200Cخوام");
+    // A name with nothing to see in it is no name, as one with nothing left is none.
+    for (const name of ["\u200D\u200D", "\u200C", "\u3164", "\u115F", "\u1160", "\uFFA0", "\u2800", "\u034F", "\uFE0F", "\u17B5", "\u0301", " \u3164\u200D\u2800 "]) expect(turnName(name), JSON.stringify(name)).toBe("");
+    // The cut comes first: sixteen bytes of fillers and a letter after them is no name either.
+    expect(turnName(`${"\u3164".repeat(6)}Ana`)).toBe("");
+    // Beside something that shows they stay (names that fit the sixteen bytes).
+    for (const name of ["👩\u200D💻", "नमस्", "علي", "e\u0301", "❤\uFE0F"]) expect(turnName(name)).toBe(name);
     // What it makes, it reads as it is: a name made here is never changed by the next reader.
     for (const name of ["Ana 👩‍👩‍👧‍👧", "a name that ends \u202E in a cut", "\u200B Mac\u00ADBook Pro 16 "]) expect(turnName(turnName(name))).toBe(turnName(name));
   });

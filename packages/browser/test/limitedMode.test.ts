@@ -272,6 +272,18 @@ describe("what the pages may call in limited mode", () => {
     expect((await db.getLinks()).find((l) => l.id === link.id)?.deletedIds).toEqual([messageId]);
   });
 
+  it("deleting the chat line of a contact's receipt drops that receipt at the payment desk", async () => {
+    const link = await profile();
+    const paymentId = "p-in", messageId = "peer_5";
+    await db.putMessage({ linkId: link.id, id: messageId, text: "", sender: "peer", timestamp: 5, via: "datalink", paymentId } as never);
+    const { call, made } = await server(false);
+    const inner = (made as unknown as { node: GhostlyNode }).node as unknown as { desk: { dropReceipt(id: string): Promise<void>; withdraw(id: string): Promise<void> } };
+    const drop = vi.spyOn(inner.desk, "dropReceipt"), withdraw = vi.spyOn(inner.desk, "withdraw");
+    expect((await call("deleteMessage", { linkId: link.id, messageId })).error).toBeUndefined();
+    await vi.waitFor(() => expect(drop.mock.calls).toEqual([[paymentId]]));
+    expect(withdraw).not.toHaveBeenCalled();
+  });
+
   it("the start runs its steps in the order of the base branch: the wallets and the payment desk before the chats are loaded", async () => {
     await profile();
     const { calls, transport } = recording();

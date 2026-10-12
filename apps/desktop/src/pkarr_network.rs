@@ -598,6 +598,22 @@ fn short(key: &PublicKey) -> String {
     key.to_z32().chars().take(6).collect()
 }
 
+/// A relay's answer, counted as it arrives: `None` once it is past `max`, with the rest left unread. An answer
+/// that names no length is not held whole first.
+pub(crate) async fn read_body(
+    response: &mut reqwest::Response,
+    max: usize,
+) -> Result<Option<Vec<u8>>, reqwest::Error> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > max {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(Some(body))
+}
+
 /// A failed request in a few words, with its deepest cause, which says why ("dns error", "invalid peer certificate:
 /// UnknownIssuer", "Connection refused"): reqwest's own text stops at "error sending request".
 fn request_error(error: &reqwest::Error) -> String {
@@ -1267,7 +1283,7 @@ impl Pkarr {
     }
 
     async fn relay_get_within(&self, url: &Url, key: &PublicKey, timeout: Duration) -> RelayAnswer {
-        let response = match self
+        let mut response = match self
             .inner
             .http
             .get(key_url(url, key))
@@ -1289,14 +1305,12 @@ impl Pkarr {
                 {
                     return RelayAnswer::Other("body too large".into());
                 }
-                match response.bytes().await {
-                    Ok(bytes) if bytes.len() <= MAX_BODY => {
-                        match SignedPacket::from_relay_payload(key, &bytes) {
-                            Ok(packet) => RelayAnswer::Packet(packet),
-                            Err(e) => RelayAnswer::Other(format!("invalid packet: {e}")),
-                        }
-                    }
-                    Ok(_) => RelayAnswer::Other("body too large".into()),
+                match read_body(&mut response, MAX_BODY).await {
+                    Ok(Some(bytes)) => match SignedPacket::from_relay_payload(key, &bytes.into()) {
+                        Ok(packet) => RelayAnswer::Packet(packet),
+                        Err(e) => RelayAnswer::Other(format!("invalid packet: {e}")),
+                    },
+                    Ok(None) => RelayAnswer::Other("body too large".into()),
                     Err(e) if e.is_timeout() => RelayAnswer::Timeout,
                     Err(e) => RelayAnswer::Other(e.to_string()),
                 }
@@ -1958,6 +1972,30 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(800)).await;
         pkarr.resolve(&key).await.unwrap();
         assert_eq!(gets(&dht), 2, "the next poll after it ends starts another");
+    }
+
+    #[tokio::test]
+    async fn a_relays_answer_is_given_up_on_once_it_is_too_large() {
+        // No length named and no end: read as far as one byte past the cap, not for as long as the request may take.
+        let endless = crate::test_support::endless_relay().await;
+        let key = Keypair::random().public_key();
+        let pkarr = Pkarr::new(None, &[endless.url.parse().unwrap()]).unwrap();
+        let started = Instant::now();
+        let answer = pkarr
+            .relay_get_within(&endless.url.parse().unwrap(), &key, Duration::from_secs(3))
+            .await;
+        assert!(matches!(&answer, RelayAnswer::Other(why) if why == "body too large"));
+        assert!(started.elapsed() < Duration::from_millis(1500));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let sent = endless.sent.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(sent > MAX_BODY && sent <= 16 * MAX_BODY, "sent {sent}");
+
+        // A length that says so is refused before any of it is read, as before.
+        let relay = pkarr_relay().await;
+        let large = vec![0u8; MAX_BODY + 1];
+        relay.packets.lock().unwrap().insert(key.to_z32(), large);
+        let answer = pkarr.relay_get(&relay.url.parse().unwrap(), &key).await;
+        assert!(matches!(&answer, RelayAnswer::Other(why) if why == "body too large"));
     }
 
     #[tokio::test]

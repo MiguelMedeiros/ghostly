@@ -49,7 +49,7 @@
     "confirm": "Supprimer définitivement cette copie ? Ce qui n'est que dans celle-ci sera perdu.",
     "discard": "Supprimer",
     "hint": "Une copie de ce profil d'avant la reprise par un autre appareil.",
-    "info": "Quand cet appareil a repris le profil avec Utiliser ici, il a gardé ce qu'il contenait alors. Les messages et paiements qui ne sont que dans cette copie ne sont pas dans votre profil. Supprimer retire la copie de cet appareil définitivement.",
+    "info": "Utiliser ici a gardé ce que cet appareil contenait alors. Les messages et paiements qui ne sont que dans cette copie ne sont pas dans votre profil. Supprimer la retire définitivement.",
     "title": "Uniquement sur cet appareil"
   },
   "handoff": {
@@ -102,7 +102,7 @@
       "checking": "Vérification",
       "connecting": "Connexion à {{device}}",
       "copy": "Copie des fichiers",
-      "copying": "Copie des fichiers · {{done}} sur {{total}}",
+      "copyAmount": "{{done}} sur {{total}}",
       "done": "Cet appareil est maintenant actif.",
       "doneGiver": "{{device}} est maintenant actif.",
       "finishing": "Finalisation : en attente du réseau",
@@ -129,8 +129,9 @@
     "already": "J’utilise déjà Ghostly",
     "another": "Ajouter cet appareil à un autre profil",
     "anotherButton": "Ajouter cet appareil",
-    "anotherInfo": "Sur l’appareil que vous utilisez, ouvrez Profil, Appareils, Ajouter un appareil. Scannez son code avec l’appareil photo de cet appareil, ou dans Ghostly ici. Les deux appareils affichent ensuite les mêmes chiffres à vérifier.",
+    "anotherInfo": "Sur l’appareil que vous utilisez, ouvrez Profil, Appareils, Ajouter un appareil. Scannez son code ici. Les deux appareils affichent ensuite les mêmes chiffres à vérifier.",
     "anotherLead": "Utilisez cet appareil avec un profil d’un autre appareil",
+    "cameraUnavailable": "Caméra indisponible. Collez le code de votre autre appareil ou ouvrez une image.",
     "check": "Vérifiez que votre autre appareil affiche les mêmes chiffres.",
     "code": "Code de votre autre appareil",
     "codeEmpty": "Le presse-papiers est vide. Copiez le code de votre autre appareil, puis appuyez sur {{keys}} ci-dessous.",
@@ -176,10 +177,10 @@
     "banner": "Hors ligne tant que Ghostly ne peut pas vérifier quel appareil est actif",
     "bannerHint": "Les messages que vous écrivez attendent jusque-là.",
     "hint": "Vérifiez votre connexion.",
-    "info": "Avant de se connecter, Ghostly vérifie qu'aucun autre appareil n'a pris ce profil. Démarrer quand même l'ouvre ici hors ligne : vous pouvez lire et écrire, et rien n'est envoyé, payé ni reçu tant que la vérification n'a pas fonctionné. Ghostly réessaie toutes les 30 secondes.",
+    "info": "Démarrer quand même l'ouvre hors ligne : vous pouvez lire et écrire, mais rien n'est envoyé, payé ni reçu tant que la vérification n'a pas fonctionné. Ghostly réessaie toutes les 30 secondes.",
     "restoreBanner": "Copie restaurée, hors ligne pour l'instant",
     "restoreBannerHint": "Ghostly vérifie si votre profil fonctionne sur un autre appareil.",
-    "restoreInfo": "Cette sauvegarde date d'avant que votre profil ait d'autres appareils, et Ghostly n'a pas pu les vérifier lors de la restauration. Tant qu'il ne le peut pas, rien n'est envoyé, payé ni reçu, et aucun groupe n'est modifié. Si un autre appareil utilise votre profil, cette copie passe en attente ; sinon, elle démarre d'elle-même. Ghostly réessaie toutes les 30 secondes.",
+    "restoreInfo": "Tant que la vérification n'a pas fonctionné, rien n'est envoyé, payé ni reçu. Si un autre appareil utilise votre profil, cette copie passe en attente ; sinon, elle démarre d'elle-même.",
     "startAnyway": "Démarrer quand même",
     "title": "Impossible de vérifier quel appareil est actif",
     "tryAgain": "Réessayer"
@@ -252,7 +253,7 @@
     "button": "Nouveau secret des appareils",
     "done": "Nouveau secret des appareils créé.",
     "hint": "Un appareil qui n’est pas dans cette liste ne pourra plus utiliser ce profil.",
-    "info": "À utiliser quand un appareil peut encore détenir le secret des appareils de ce profil, par exemple celui que vous avez remplacé. Vos autres appareils reçoivent le nouveau secret la prochaine fois qu’ils ouvrent Ghostly.",
+    "info": "À utiliser quand un appareil que vous avez remplacé peut encore détenir le secret des appareils. Les autres reçoivent le nouveau quand ils ouvrent Ghostly.",
     "make": "Créer",
     "notNow": "Pas maintenant",
     "offer": "Vous avez pris le relais de {{device}}. Il détient encore le secret des appareils de ce profil.",
@@ -329,7 +330,7 @@
       "retry": "Réessayer",
       "title": "Pas terminé"
     },
-    "unreadableInfo": "Ghostly lit lequel de vos appareils est actif avant de démarrer quoi que ce soit. Cela n'a pas fonctionné ici : rien n'a été démarré, rien n'a été envoyé et rien n'a été modifié. Redémarrez l'application ou l'appareil, puis réessayez."
+    "unreadableInfo": "Avant de démarrer, Ghostly lit lequel de vos appareils est actif. Cela a échoué : rien n'a été envoyé ni modifié. Redémarrez l'application ou l'appareil, puis réessayez."
   },
   "takeover": {
     "checking": "Vérification de l'appareil actif · environ 30 secondes",

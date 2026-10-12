@@ -15,9 +15,9 @@
     "renewalOpen": "Finché Ghostly è aperto",
     "renewalRegtest": "Disattivato su regtest",
     "small": "{{amount}} {{unit}} sono scaduti, troppo pochi per recuperarli da soli. Vengono recuperati con le prossime monete che scadono.",
-    "smallInfo": "Un recupero crea una sola moneta nuova, e il server Ark non crea monete sotto la sua dimensione minima. Questi sats sono ancora tuoi: quando scadono altre monete, Recupera le prende tutte insieme.",
+    "smallInfo": "Un recupero crea una sola moneta, e il server Ark non crea monete sotto la sua dimensione minima. Questi sats restano tuoi.",
     "sweeping": "{{amount}} {{unit}} sono scaduti. Potrai recuperarli quando il server Ark avrà spazzato il loro lotto.",
-    "sweepingInfo": "Le monete Ark stanno in un lotto che scade; Ghostly le rinnova prima, finché è aperto. Le monete scadute sono ancora tue, ma prima il server Ark riporta il loro lotto on-chain (uno sweep). Questo attende nuovi blocchi Bitcoin, spesso un'ora o più. Fino ad allora non si possono né spendere né recuperare; dopo, Recupera le sposta in un nuovo lotto.",
+    "sweepingInfo": "Le monete scadute restano tue. Prima il server Ark riporta il loro lotto on-chain, spesso più di un'ora. Dopo, Recupera le sposta in un nuovo lotto.",
     "useProvider": "Usa questo provider"
   },
   "away": {
@@ -696,6 +696,10 @@
     "orTestnet": "Oppure crea un portafoglio Spark su Testnet con Nuova: funziona su regtest, con sats senza valore e senza chiave.",
     "phraseNote": "Gli operatori di Spark non custodiscono nulla di tuo: la frase recupera i sats in qualsiasi portafoglio Spark. La cronologia dei pagamenti viene dal file di backup.",
     "regtestLabel": "Regtest · Spark di prova di Breez · sats senza valore",
+    "status": {
+      "failed": "non riuscito",
+      "pending": "in attesa"
+    },
     "to": "Indirizzo o fattura Spark",
     "toPlaceholder": "Indirizzo o fattura Spark ({{prefix}})",
     "tokenInvoice": "Quella fattura Spark è per un token, non per sats.",

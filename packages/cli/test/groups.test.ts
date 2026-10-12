@@ -44,6 +44,16 @@ function fake(messages: StoredMessage[] = []) {
   return { ctx, node };
 }
 
+describe("group join", () => {
+  it("a word that is no group link is bad_request, as invite join answers a non-invite; the engine's other errors pass", async () => {
+    const answer = (error: Error) => ({ getState: () => ({ links: [], groups: [], settings: {}, transport: {} }) as unknown as EngineState, joinGroupByLink: vi.fn(async () => { throw error; }) });
+    const ctx = (node: ReturnType<typeof answer>) => ({ runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" }) as unknown as ApiContext;
+    await expect(callApi(ctx(answer(new Error("This is not a link to a group"))), "group.join", { link: "hello" })).rejects.toMatchObject({ code: "bad_request", message: "This is not a link to a group" });
+    await expect(callApi(ctx(answer(new Error("Go online to join a group"))), "group.join", { link: LINK })).rejects.toThrow("Go online to join a group");
+    await expect(callApi(ctx(answer(new Error("Go online to join a group"))), "group.join", { link: LINK })).rejects.not.toMatchObject({ code: "bad_request" });
+  });
+});
+
 describe("a group message names its author", () => {
   it("from the roster when the message came with the member's key only", () => {
     expect(groupMessageJson(message("a", { member: "anakey" }), group)).toMatchObject({ nick: "Ana", member: "anakey" });

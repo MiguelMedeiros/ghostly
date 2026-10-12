@@ -67,6 +67,27 @@ describe("in the composer", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("files not read yet (the Android app's) are read when the composer takes them, not before", async () => {
+    const read = vi.fn(async () => [file("photo.jpg")]);
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    act(() => receiveShare(share({ files: [{ name: "photo.jpg", size: 3, type: "image/jpeg" }], read })));
+    expect(read).not.toHaveBeenCalled();
+    act(() => sendShareTo("chat-1"));
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getByTestId("attachment-item")).toHaveTextContent("photo.jpg");
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("a share whose files cannot be read any more says so", async () => {
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    act(() => {
+      receiveShare(share({ files: [{ name: "photo.jpg", size: 3, type: "image/jpeg" }], read: () => Promise.reject(new Error("Nothing pasted under that token")) }));
+      sendShareTo("chat-1");
+    });
+    expect(await screen.findByText(/Nothing pasted under that token/)).toBeInTheDocument();
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+  });
+
   it("another chat's composer leaves it alone", () => {
     renderApp(<LockScreenProvider><MessageInput draftId="chat-2" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
     act(() => {

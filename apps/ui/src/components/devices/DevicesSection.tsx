@@ -44,6 +44,12 @@ export function DevicesSection() {
     try { await engine.call("deviceNewSecret"); setSecret({ done: true }); }
     catch (cause) { const key = removeErrorKey(cause); setSecret({ error: key ? said(key, t) : problemText(cause, t) }); }
   };
+  // What the engine refused of "Not now" on the secret offer and of "Let <device> try again": said under each.
+  const [refused, setRefused] = useState<{ dismiss?: Problem; allow?: Problem }>({});
+  const ask = (which: "dismiss" | "allow", work: Promise<unknown>) => {
+    setRefused((was) => ({ ...was, [which]: undefined }));
+    void work.catch((cause: unknown) => setRefused((was) => ({ ...was, [which]: problemText(cause, t) })));
+  };
   const handoff = useHandoffView(!moving);
   const thisActive = view?.devices.some((device) => device.self && device.active) ?? false;
   // A move under way from this device (WISP 06 § Handoff progress, "on both devices"): one started here whose dialog was
@@ -94,9 +100,10 @@ export function DevicesSection() {
           {stopped
             ? <Button variant="primary" data-testid="device-secret-offer-remove" onClick={() => setRemoving({ key: stopped.key, name: stopped.name })}>{t("devices.secret.removeOffer", { device: stopped.name })}</Button>
             : <Button variant="primary" data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.button")}</Button>}
-          <Button data-testid="device-secret-offer-dismiss" onClick={() => void engine.call("deviceSecretOfferDismiss")}>{t("devices.secret.notNow")}</Button>
+          <Button data-testid="device-secret-offer-dismiss" onClick={() => ask("dismiss", engine.call("deviceSecretOfferDismiss"))}>{t("devices.secret.notNow")}</Button>
         </Row>
       )}
+      {thisActive && view?.secretOffer && refused.dismiss && <div className="px-4 py-3"><Notice problem={refused.dismiss} testId="device-secret-offer-error" /></div>}
       {/* On a Desktop with a standby device (WISP 06 § User experience): this device's own switch, never the profile's. */}
       {keepAwakeSupported() && hasStandby(view) && (
         <Row label={t("devices.section.keepAwake")} info={t("devices.section.keepAwakeHint")} testId="device-keep-awake">
@@ -116,9 +123,10 @@ export function DevicesSection() {
       )}
       {handoff?.failure === "password" && handoff.role === "giver" && (
         <Row testId="handoff-wrong-password" label={t("devices.handoff.wrongPassword", { device: handoff.device })}>
-          <Button data-testid="handoff-allow" onClick={() => void engine.call("deviceHandoffAllow", { key: handoff.key })}>{t("devices.handoff.allowAgain", { device: handoff.device })}</Button>
+          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }))}>{t("devices.handoff.allowAgain", { device: handoff.device })}</Button>
         </Row>
       )}
+      {handoff?.failure === "password" && handoff.role === "giver" && refused.allow && <div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
       {/* A move whose copy stopped (WISP 06 § Handoff progress, Failures): the profile is still here; Try again moves it. */}
       {thisActive && handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && STOPPED.has(handoff.failure) && (() => {
         const name = devices.find((device) => device.key === handoff.key)?.name || handoff.device || t("devices.join.otherDevice");

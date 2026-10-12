@@ -546,6 +546,11 @@ body {
 .nav-sheet a:hover {
   background: var(--surface-2);
 }
+/* The page that is open, marked as in the desktop nav. */
+.nav-sheet a[aria-current="page"] {
+  color: var(--cyan);
+  background: rgba(255, 255, 255, 0.04);
+}
 .nav-sheet .nav-sheet-way {
   color: var(--cyan);
 }
@@ -798,6 +803,18 @@ body {
 /* In the story the act draws the actors; a scene's own ghosts only carry the stills. */
 html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act--static) .scene-actors-static {
   display: none;
+}
+
+/* A second name for a chapter (/#story): an empty mark at its top. */
+.scene-alias {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+/* A link to a chapter that fades in as it pins (/#invite) lands inside it, where its picture and copy are there
+   (--scene-arrive, SceneFrame.tsx): at its first pixel, and the nav's height before it, the screen has no words. */
+html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) :is(.scene[data-seams="true"], .scene[data-seams="true"] > .scene-alias) {
+  scroll-margin-top: calc(-1 * (var(--nav-h) + 16px) - var(--scene-arrive, 0px));
 }
 
 /* The copy sits over the picture on a soft wash that runs the full height of

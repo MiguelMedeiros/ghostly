@@ -38,6 +38,13 @@ test("the published copy gets the header rows and the log, newest first", () => 
   );
 });
 
+test("a change's links are written from its folder and published from the WISP's", () => {
+  const text = change("2026-10-07-group-files.md", "See [WISP 503](../../503-group-files.md), [a section](../../400-chat.md#pins), [the protocol](../../../PROTOCOL.md) and [WISP 501](501-paired-files.md).").text;
+  assert.equal(text, "See [WISP 503](503-group-files.md), [a section](400-chat.md#pins), [the protocol](../PROTOCOL.md) and [WISP 501](501-paired-files.md).");
+  const source = "| Field | Value |\n|---|---|\n| Status | Draft |\n\n## Revision log\n\nSee the folder.\n";
+  assert.match(withRevisions(source, "400-chat", [change("2026-10-07-group-files.md", "Now in [WISP 503](../../503-group-files.md).")]), /^- 2026-10-07: Now in \[WISP 503\]\(503-group-files\.md\)\.$/m);
+});
+
 test("a source written the old way is refused: a Revision row, or a log line in the document", () => {
   const changes = [change("2026-09-28-pins.md", "Pins.")];
   const header = "| Field | Value |\n|---|---|\n| Status | Draft |\n";

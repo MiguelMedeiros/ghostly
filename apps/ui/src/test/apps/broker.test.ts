@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -19,7 +19,7 @@ function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }) {
   const stops: AppStopReason[] = [];
   const broker = createBroker({
     host,
-    launch: { ref: REF, version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK, name: "Ana" }, ...launch },
+    launch: { ref: REF, digest: "d", version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK, name: "Ana" }, ...launch },
     view: { theme: () => "dark", locale: () => "pt-BR" },
     post: (message, transfer) => posted.push({ message: message as Record<string, unknown>, transfer }),
     stopped: (reason) => stops.push(reason),
@@ -232,6 +232,40 @@ describe("requests", () => {
     await vi.waitFor(() => expect(posted.find((p) => p.message.id === 99)?.message).toMatchObject({ ok: true }));
   });
 
+  it("stops an app that sends ten times the rate: nothing more of it is read or answered", async () => {
+    const { broker, host, run, posted, stops, clock } = setup();
+    run();
+    clock.t += 1_001;
+    for (let id = 1; id <= STOP_REQUESTS_PER_SECOND; id++) broker.message({ id, type: "storage.keys", args: [] });
+    expect(stops).toEqual([]);
+    expect(broker.phase).toBe("running");
+    // The one over: read by nothing (a getter on it would throw), the app stopped, its chat closed.
+    const unread = Object.defineProperty({}, "id", { enumerable: true, get() { throw new Error("read"); } });
+    broker.message(unread);
+    expect(stops).toEqual(["protocol"]);
+    expect(broker.phase).toBe("stopped");
+    const before = posted.length;
+    for (let id = 1_000; id < 2_000; id++) broker.message({ id, type: "storage.keys", args: [] });
+    await new Promise((done) => setTimeout(done, 0));
+    expect(posted.length).toBe(before);
+    expect(posted.filter((p) => p.message.error === "too-fast").length).toBe(STOP_REQUESTS_PER_SECOND - MINI_APP_LIMITS.requestsPerSecond);
+    expect(host.calls.filter((c) => c.op === "storage.keys").length).toBe(MINI_APP_LIMITS.requestsPerSecond);
+    expect(host.calls.filter((c) => c.op === "chat.close").length).toBe(1);
+    expect(stops).toEqual(["protocol"]);
+  });
+
+  it("keeps an app that bursts under ten times the rate, second after second", async () => {
+    const { broker, run, stops, clock, ask } = setup();
+    run();
+    for (let second = 0; second < 5; second++) {
+      clock.t += 1_001;
+      for (let i = 0; i < STOP_REQUESTS_PER_SECOND; i++) broker.message({ junk: i });
+    }
+    expect(stops).toEqual([]);
+    clock.t += 1_001;
+    expect(await ask("storage.keys")).toMatchObject({ ok: true });
+  });
+
   it("context: the version, the chat, the client's theme and language, the name only with its permission", async () => {
     const named = setup({ permissions: ["chat", "name"] });
     named.run();
@@ -395,4 +429,26 @@ describe("the runner, from what the person granted", () => {
     run();
     for (const type of ["internet", "permissions", "runner"]) expect(await ask(type, ["internet"])).toMatchObject({ ok: false, error: "unknown-type" });
   });
+});
+
+it("asks the engine as the version it runs: every call goes to the platform of its entry's digest", async () => {
+  const platform = memoryHost();
+  const bound = memoryHost();
+  const digests: string[] = [];
+  platform.running = (digest) => { digests.push(digest); return bound; };
+  const broker = createBroker({
+    host: platform,
+    launch: { ref: REF, digest: "digest-7", version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK } },
+    view: { theme: () => "dark", locale: () => "en" },
+    post: () => {},
+    stopped: () => {},
+  });
+  broker.load();
+  broker.message({ id: 0, type: "writing", args: [] });
+  broker.load();
+  broker.message({ id: 1, type: "storage.set", args: ["k", 1] });
+  broker.message({ id: 2, type: "chat.send", args: [1] });
+  await vi.waitFor(() => expect(bound.calls.map((c) => c.op)).toEqual(expect.arrayContaining(["chat.open", "storage.set", "chat.send"])));
+  expect(digests).toEqual(["digest-7"]);
+  expect(platform.calls).toEqual([]);
 });

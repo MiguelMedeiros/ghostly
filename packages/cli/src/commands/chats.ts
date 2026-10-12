@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, force, groupWait, cursor, needs, prLinked, quota, routineFields, routineOptions, runOf, taskFields, taskOptions, typingFor, usageFields, usageOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, needs, prLinked, quota, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, typingFor, usageFields, usageOptions, wait } from "./shared";
 
 const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
@@ -44,13 +44,13 @@ export const commands: Record<string, Command> = {
     options: { limit: { type: "number", description: "Messages per page (default 50)" }, before: { type: "string", description: "Only before this message id or timestamp" }, after: { type: "string", description: "Only after this message id or timestamp" } },
     params: ({ options }, { chat }) => ({ chat, limit: options.limit, before: cursor(options.before), after: cursor(options.after) }),
   },
-  "chat list": { method: "chat.list", usage: "chat list", summary: "Chats, newest first" },
+  "chat list": { method: "chat.list", usage: "chat list [--show-secret]", summary: "Chats, newest first (a pending invite code only with --show-secret)", options: showInvite, params: ({ options }) => secret(options) },
   "chat remove": {
     method: "chat.remove", usage: "chat remove <chat> --yes", summary: "Delete a chat, its keys and history on this device", args: ["chat"],
     options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { chat }) => ({ chat, yes: options.yes === true }),
   },
   "chat rename": { method: "chat.rename", usage: "chat rename <chat> <name...>", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
-  "chat show": { method: "chat.get", usage: "chat show <chat>", summary: "One chat and its connection", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "chat show": { method: "chat.get", usage: "chat show <chat> [--show-secret]", summary: "One chat and its connection (its pending invite code only with --show-secret)", args: ["chat"], options: showInvite, params: ({ options }, { chat }) => ({ chat, ...secret(options) }) },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
     method: "chat.verify", usage: "chat verify <chat> --code <code>", summary: "Mark a contact verified after comparing codes", args: ["chat"],

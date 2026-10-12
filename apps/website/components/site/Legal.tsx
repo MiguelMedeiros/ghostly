@@ -2,12 +2,12 @@ import { Nav } from "@/components/site/Nav";
 import { SiteFooter } from "@/components/site/Footer";
 import { GhostPet } from "@/components/site/GhostPet";
 import { IdleLoops } from "@/components/site/IdleLoops";
-import { REPO_URL } from "@/content/shell";
+import { REPO_URL, shell } from "@/content/shell";
 import { appsReleased } from "@/lib/appsGate";
 
 /**
  * The layout of the two legal pages, /privacy and /terms: a title, the date, a lead, then short sections. Like Shell, it
- * rests the footer's loops while they are off screen (IdleLoops).
+ * starts with the skip link and rests the footer's loops while they are off screen (IdleLoops).
  */
 export async function LegalPage({
   title,
@@ -23,6 +23,9 @@ export async function LegalPage({
   const apps = await appsReleased();
   return (
     <>
+      <a className="skip-link" href="#content">
+        {shell.skip}
+      </a>
       <Nav apps={apps} />
       <main id="content" className="pt-16 bg-[#060a10] min-h-screen">
         <div className="max-w-3xl mx-auto px-4 py-16">

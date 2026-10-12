@@ -56,7 +56,7 @@ test("behind a network that blocks direct connections, chats go live through a r
   const note = alice.page.getByTestId("connection-direct-blocked");
   await expect(note).toContainText(HINT, { timeout: 30_000 });
   await note.getByTestId("connection-direct-blocked-info").click();
-  await expect(note.getByTestId("connection-direct-blocked-text")).toContainText("the app cannot tell which");
+  await expect(note.getByTestId("connection-direct-blocked-text")).toContainText("never what they say");
   await alice.page.keyboard.press("Escape");
 
   // Their contacts are on open networks: nothing is said there.

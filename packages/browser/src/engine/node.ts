@@ -294,6 +294,8 @@ interface LiveLink {
   lastSyncAt: number;
   poll: LinkView["poll"];
   files: LinkFiles;
+  /** The files of mine said on the DHT floor and not seen there yet, by floor id; read once in a run (`floorFilesOf`). */
+  floorFiles?: Promise<Map<string, string>>;
   /** The chat's connection story (paired chats), made from `stored.transportLog` on first use. */
   transportLog?: TransportLog;
   /** A group's entry session whose admission is done: it closes once its data link does (`GroupsHost.entryDone`). */
@@ -437,9 +439,17 @@ export interface NodeOptions {
   /**
    * Mini-apps in 1:1 chats (`apps/1`, WISP 1200 § In a chat): offered on paired sessions, and the `app*` calls. Default:
    * `APPS_ENABLED` (on from release 1.2). A host that runs no mini-app (the CLI, the extension, the Android app) pins it to false
-   * whatever the flag says, and its app calls are refused as "not on this client"; tests turn it on.
+   * whatever the flag says, and its app calls are refused as "not on this client"; tests turn it on. `"wire"` is a host
+   * that runs no mini-app and speaks an app's messages itself (a bot, WISP 1200 § A bot on the other side): `apps/1` is
+   * offered and the chat calls (`appId`, `appOpen`, `appClose`, `appSend`) answer, whatever the flag says, with no store:
+   * no installed app, no store read, no update check and no app storage, and those calls are refused as with false.
    */
-  apps?: boolean;
+  apps?: boolean | "wire";
+  /**
+   * Held items (WISP 404) are also read from plain HTTP on this machine: the e2e suite's local S3 server. Default off,
+   * and off in every shipped app: a contact names those addresses.
+   */
+  holdLoopback?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -521,6 +531,12 @@ export interface NodeOptions {
    * relay in the settings. Ghostly Desktop posts from Rust; the CLI's `fetch` has no CORS to refuse it.
    */
   pushSend?: (request: PushRequest) => Promise<number>;
+  /**
+   * How a Lightning address or LNURL service is asked (WISP 205 § Transport). Default: `fetch`, which in a page cannot
+   * read where a redirect leads, so a service that redirects is refused there. Ghostly Desktop passes one that asks
+   * from Rust when the service redirects, where every hop is checked before it is followed.
+   */
+  lnurlFetch?: typeof fetch;
 }
 
 export interface NodeEvents {
@@ -860,6 +876,7 @@ export class GhostlyNode implements EngineImplementation {
     descriptors: () => this.providers().lightning,
     host: () => this.providerHost(network),
     hasMints: () => this.networkMints(network).length > 0,
+    fetch: (...request) => (this.options.lnurlFetch ?? globalThis.fetch)(...request),
     events: {
       changed: () => void this.refreshWallet(),
       received: (op) => void this.desk.onLightningPaid(op),
@@ -948,12 +965,12 @@ export class GhostlyNode implements EngineImplementation {
       await this.messagesChanged(linkId, [messageId]);
       this.emitState();
     },
-    text: async (linkId, messageId) => (await db.getMessages(linkId)).find((m) => m.id === messageId)?.text ?? null,
+    text: async (linkId, messageId) => (await db.getMessage(linkId, messageId))?.text ?? null,
     reply: async (linkId, messageId) => {
-      const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+      const message = await db.getMessage(linkId, messageId);
       return message && GhostlyNode.wireReply(message);
     },
-    forwarded: async (linkId, messageId) => (await db.getMessages(linkId)).find((m) => m.id === messageId)?.forwarded,
+    forwarded: async (linkId, messageId) => (await db.getMessage(linkId, messageId))?.forwarded,
     file: async (fileId) => {
       const stored = await fileStore.get(fileId);
       if (!stored?.metadata) return null;
@@ -984,6 +1001,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
     changed: () => this.emitState(),
+    loopbackStorage: () => this.options.holdLoopback === true,
     // Tests shorten the lifetime to watch an item expire; nothing else reads this, and it never lengthens it.
     ttlMs: () => { try { const raw = typeof localStorage !== "undefined" ? localStorage.getItem("ghostly-test-hold-ttl") : null; const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; } catch { return undefined; } },
   });
@@ -1607,7 +1625,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
     // Mini-apps (WISP 1200): the default stores preloaded, and the update check, which asks nothing with no app installed.
-    if (this.appsOn) void this.appStore.start().catch(() => {});
+    if (this.appsOn && !this.appsWireOnly) void this.appStore.start().catch(() => {});
     // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
     // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
     if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
@@ -2074,7 +2092,7 @@ export class GhostlyNode implements EngineImplementation {
   private appShelf?: Apps;
   /** The installed apps and stores, refused while the apps feature is off. */
   private get appStore(): Apps {
-    if (!this.appsOn) throw this.appsOff();
+    if (!this.appsOn || this.appsWireOnly) throw this.appsOff();
     return this.appShelf ??= new Apps({
       fetch: boundedAppFetch({ fetcher: this.options.appFetch, online: () => this.networkOn }),
       isChat: (scope) => { const stored = this.links.get(scope)?.stored; return !!stored && !stored.group && !!stored.profile && !!stored.pairedPeerKey; },
@@ -2092,15 +2110,20 @@ export class GhostlyNode implements EngineImplementation {
   appInstall(params: { digest: string; grant: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
   appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
-  appUninstall(params: { ref: string }): Promise<void> { return this.appStore.uninstall(params); }
+  /** Uninstalls an app. One running then is closed in every chat (the contact hears `close`), and the pages are told, to stop its frames. */
+  async appUninstall(params: { ref: string }): Promise<void> {
+    await this.appStore.uninstall(params);
+    this.appsCloseOf(params.ref);
+    this.events.onAppsChecked?.();
+  }
   appRunCheck(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.runCheck(params); }
   appFetchFiles(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.fetchFiles(params); }
   appEntry(params: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> { return this.appStore.entry(params); }
-  appFile(params: { ref: string; path: string }): Promise<Uint8Array> { return this.appStore.file(params); }
-  appStorageGet(params: { ref: string; scope: string; key: string }): Promise<{ value: import("@ghostly/core").JsonValue } | null> { return this.appStore.storageGet(params); }
-  appStorageSet(params: { ref: string; scope: string; key: string; value: unknown }): Promise<void> { return this.appStore.storageSet(params); }
-  appStorageDelete(params: { ref: string; scope: string; key: string }): Promise<void> { return this.appStore.storageDelete(params); }
-  appStorageKeys(params: { ref: string; scope: string }): Promise<string[]> { return this.appStore.storageKeys(params); }
+  appFile(params: { ref: string; path: string; digest?: string }): Promise<Uint8Array> { return this.appStore.file(params); }
+  appStorageGet(params: { ref: string; scope: string; key: string; digest?: string }): Promise<{ value: import("@ghostly/core").JsonValue } | null> { return this.appStore.storageGet(params); }
+  appStorageSet(params: { ref: string; scope: string; key: string; value: unknown; digest?: string }): Promise<void> { return this.appStore.storageSet(params); }
+  appStorageDelete(params: { ref: string; scope: string; key: string; digest?: string }): Promise<void> { return this.appStore.storageDelete(params); }
+  appStorageKeys(params: { ref: string; scope: string; digest?: string }): Promise<string[]> { return this.appStore.storageKeys(params); }
   appDataExport(params: { ref: string }): Promise<AppDataExport[]> { return this.appStore.exportData(params); }
 
   getState(): EngineState {
@@ -3224,7 +3247,7 @@ export class GhostlyNode implements EngineImplementation {
   async retryMessage({ linkId, messageId }: { linkId: string; messageId: string }): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile) throw new Error("Retry is only available for paired chat messages");
-    const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+    const message = await db.getMessage(linkId, messageId);
     if (message?.via === "hold") {
       // Its item again if it is still known; held anew (a fresh sequence, the same message id) if it was dropped.
       if (await this.hold.retry(linkId, messageId)) return;
@@ -3334,7 +3357,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   async messageDetails({ linkId, messageId }: { linkId: string; messageId: string }): Promise<MessageDetailsView | null> {
     if (typeof linkId !== "string" || typeof messageId !== "string") throw new Error("Chat not found");
-    const message = (await db.getMessages(linkId)).find(m => m.id === messageId);
+    const message = await db.getMessage(linkId, messageId);
     if (!message) return null;
     const live = this.links.get(linkId), stored = live?.stored;
     const group = linkId.startsWith("group:") ? (await db.getGroups()).find(g => g.id === linkId.slice("group:".length)) : undefined;
@@ -3432,12 +3455,23 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * The message of mine that carries a payment or a request, read by its id: `me_<the time the desk keeps for it>`.
+   * The chat's history is read only when that row does not carry it, so it costs the same in a long chat as in a short one.
+   */
+  private async paymentMessage(linkId: string, paymentId: string): Promise<StoredMessage | undefined> {
+    const at = this.desk.payment(paymentId)?.createdAt;
+    const message = at === undefined ? undefined : await db.getMessage(linkId, `me_${at}`);
+    if (message?.sender === "me" && message.paymentId === paymentId) return message;
+    return (await db.getMessages(linkId)).find(m => m.sender === "me" && m.paymentId === paymentId);
+  }
+
+  /**
    * The contact's app answered for a payment of mine (`pay-res`): its message gets two ticks, as a text gets from its
    * receipt. A payment goes with no delivery state of its own, so its mark read one tick for good. 1:1 chats only: a
    * group's payments live in the group's history, under other ids.
    */
   private async notePaymentReceipt(linkId: string, paymentId: string): Promise<void> {
-    const message = (await db.getMessages(linkId)).find(m => m.sender === "me" && m.paymentId === paymentId);
+    const message = await this.paymentMessage(linkId, paymentId);
     if (!message || message.delivery === "delivered") return;
     const marked = await db.patchMessage(linkId, message.id, m => m.delivery === "delivered" ? null : { delivery: "delivered", deliveryError: undefined });
     if (marked) { await this.messagesChanged(linkId, [message.id]); this.emitState(); }
@@ -3457,6 +3491,8 @@ export class GhostlyNode implements EngineImplementation {
       const message = await db.getMessage(linkId, messageId);
       // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
       if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
+      // A contact's receipt still waiting for its money is dropped with its message: its request can take another.
+      if (message?.paymentId && message.sender === "peer") await this.desk.dropReceipt(message.paymentId).catch(() => {});
       // A file whose offer went on the floor, deleted before it went live: the contact's bubble is told on the next session.
       if (message?.sender === "me" && message.file && message.delivery === "waiting" && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen")) {
         const wireId = message.file.id.slice(`${linkId}-out-`.length);
@@ -3597,11 +3633,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void | Promise<void> {
-    // A group's file (WISP 503): asked for (Download), or asked for again; its transfers are the group's to run.
+    // A group's file (WISP 503): asked for (Download), asked for again or gone on with; stopped (Cancel, or Decline
+    // for one not asked for yet) or paused. Its transfers are the group's to run.
     if (typeof linkId === "string" && linkId.startsWith("group:")) {
-      if (action !== "accept" && action !== "request") throw new Error("A group's file is downloaded (accept) or asked for again (request)");
       if (!fileId.startsWith(`group-${linkId.slice("group:".length)}-`)) throw new Error("No such file in this group");
-      return this.groups.downloadFile(fileId);
+      if (action === "accept" || action === "request" || action === "resume") return this.groups.downloadFile(fileId);
+      if (action === "cancel" || action === "decline" || action === "pause") return this.groups.haltFile(fileId, action === "pause");
+      throw new Error("A group's file is not sent again from here");
     }
     const live = this.links.get(linkId);
     if (!live) throw new Error("No such chat");
@@ -3680,19 +3718,35 @@ export class GhostlyNode implements EngineImplementation {
     const error = await link.announceFile(offer, message.timestamp, GhostlyNode.wireReply(message), message.forwarded);
     const said = !error && link.dhtPendingId === dhtFileId(offer.wireId);
     if (!said && error !== DHT_FILE_TOO_LARGE) return;
-    await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" || current.fileOnFloor ? null
+    const noted = await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" || current.fileOnFloor ? null
       : { fileOnFloor: said ? "sent" : "unfit", ...(said && { details: withSend(current.details, { at, ...pathSnapshot(live, "pkarr"), result: "sent" }) }) });
+    // Its receipt finds it by its floor id; a list not read yet reads it from the history (`floorFilesOf`).
+    if (said && noted) await live.floorFiles?.then(known => known.set(dhtFileId(offer.wireId), message.id), () => {});
     await this.messagesChanged(linkId, [message.id]);
   }
 
   /** A receipt on the DHT floor that names a waiting file's offer (`dhtFileId`): its bubble is in place on the contact's side. */
   private async fileSeenOnFloor(linkId: string, id: string): Promise<void> {
-    const prefix = `${linkId}-out-`;
-    const message = (await db.getMessages(linkId)).find(m => m.sender === "me" && m.file?.id.startsWith(prefix) && m.fileOnFloor === "sent" && dhtFileId(m.file.id.slice(prefix.length)) === id);
-    if (!message) return;
-    const seen = await db.patchMessage(linkId, message.id, current => current.fileOnFloor !== "sent" ? null
+    const live = this.links.get(linkId);
+    if (!live) return;
+    const said = await this.floorFilesOf(live), messageId = said.get(id);
+    if (!messageId) return;
+    said.delete(id);
+    const seen = await db.patchMessage(linkId, messageId, current => current.fileOnFloor !== "sent" ? null
       : { fileOnFloor: "seen", ...(current.delivery === "waiting" && { deliveryError: "Your contact sees it. The file goes when you are live." }) });
-    if (seen) await this.messagesChanged(linkId, [message.id]);
+    if (seen) await this.messagesChanged(linkId, [messageId]);
+  }
+
+  /**
+   * The files of mine said on the floor and not seen there yet, their message by their floor id (`dhtFileId`). Read from
+   * the chat's history once in a run, then kept as files are said (`sayFileOnFloor`): a receipt that names none of them
+   * costs the same in a long chat as in a short one.
+   */
+  private floorFilesOf(live: LiveLink): Promise<Map<string, string>> {
+    const linkId = live.stored.id, prefix = `${linkId}-out-`;
+    return live.floorFiles ??= db.getMessages(linkId).then(history => new Map(history
+      .filter(m => m.sender === "me" && m.file?.id.startsWith(prefix) && m.fileOnFloor === "sent")
+      .map(m => [dhtFileId(m.file!.id.slice(prefix.length)), m.id])), error => { live.floorFiles = undefined; throw error; });
   }
 
   /**
@@ -4378,11 +4432,17 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Mini-apps are on in this build (`APPS_ENABLED`) or for this engine (`apps`). */
-  private get appsOn(): boolean { return this.options.apps ?? APPS_ENABLED; }
+  private get appsOn(): boolean { return !!(this.options.apps ?? APPS_ENABLED); }
+  /** `apps/1` only (`apps: "wire"`): this host runs no mini-app and keeps no store, so nothing is installed here to check. */
+  private get appsWireOnly(): boolean { return this.options.apps === "wire"; }
 
-  /** Why an app call is refused: this client runs no mini-app (`apps: false`), or the build has them off. */
+  /** Why an app call is refused: this client runs no mini-app (`apps: false`, or `"wire"` for the store's), or the build has them off. */
   private appsOff(): Error {
-    return new Error(this.options.apps === false ? "Apps do not run on this client" : "Apps are unavailable in this release");
+    return new Error(this.options.apps === false || this.appsWireOnly ? "Apps do not run on this client" : "Apps are unavailable in this release");
+  }
+  /** Before an app's frames go to a contact: a version removed or revoked here says nothing more (WISP 1200 § Takedowns). */
+  private async appChatRunnable(ref: string, digest?: string): Promise<void> {
+    if (!this.appsWireOnly) await this.appStore.chatRunnable({ ref, digest });
   }
 
   /** A paired 1:1 chat and the chat app id of `ref` in it, from the two pinned participation keys (WISP 1200 § In a chat). */
@@ -4406,11 +4466,11 @@ export class GhostlyNode implements EngineImplementation {
    * This side opened an app in a paired chat, or updated it: `open` goes to the contact now when the session is live,
    * and again on every session that comes back while it stays open.
    */
-  async appOpen({ linkId, ref, version }: { linkId: string; ref: string; version: string }): Promise<{ app: string }> {
+  async appOpen({ linkId, ref, version, digest }: { linkId: string; ref: string; version: string; digest?: string }): Promise<{ app: string }> {
     const { live, app } = this.appChat(linkId, ref);
     if (!isAppVersion(version)) throw new Error("Not an app version");
     // A version removed or revoked since it started says nothing more to the contact (WISP 1200 § Takedowns).
-    await this.appStore.chatRunnable({ ref });
+    await this.appChatRunnable(ref, digest);
     const open = live.appsOpen ??= new Map();
     if (live.link) live.link.openApp(app, version);
     else open.set(app, version);
@@ -4425,10 +4485,10 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** One data frame of an app open on both sides, on the live session only; nothing is kept to send later. */
-  async appSend({ linkId, ref, data }: { linkId: string; ref: string; data: unknown }): Promise<{ error: AppSendError | null }> {
+  async appSend({ linkId, ref, data, digest }: { linkId: string; ref: string; data: unknown; digest?: string }): Promise<{ error: AppSendError | null }> {
     const { live, app } = this.appChat(linkId, ref);
     if (!live.appsOpen?.has(app)) return { error: "not-open" };
-    await this.appStore.chatRunnable({ ref });
+    await this.appChatRunnable(ref, digest);
     return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
   }
 
@@ -4439,6 +4499,17 @@ export class GhostlyNode implements EngineImplementation {
         if (live.link) live.link.closeApp(app);
         else live.appsOpen?.delete(app);
       }
+    }
+  }
+
+  /** An app that went (uninstalled) is closed in every chat it was open in, as `appClose` does. */
+  private appsCloseOf(ref: string): void {
+    for (const [linkId, live] of this.links) {
+      if (!live.appsOpen?.size) continue;
+      const { app } = this.appChat(linkId, ref);
+      if (!live.appsOpen.has(app)) continue;
+      if (live.link) live.link.closeApp(app);
+      else live.appsOpen.delete(app);
     }
   }
 
@@ -4488,6 +4559,8 @@ export class GhostlyNode implements EngineImplementation {
     const view = this.groups.views().find(g => g.id === groupId);
     if (!pin || !view?.myKey || view.status !== "active" || !view.members.some(m => m.key === member)) return;
     if (!mayPin(view.profile, member, view.members.find(m => m.role === "admin")?.key)) return;
+    // One that would not be kept (`setPin`'s rule) reads no row.
+    if (!pinIsNewer(this.groups.pinOf(groupId), pin)) return;
     const kept = await this.pinCame(`group:${groupId}`, member === view.myKey ? "me" : member, pin);
     if (!await this.groups.setPin(groupId, { ...kept, ...(via && { k: via.frame.k, sig: via.frame.sig }) }) || !via) return;
     for (const key of this.memberEdges(groupId).keys()) if (key !== via.from && key !== member) this.sendGroupPinFrame(groupId, key);
@@ -4742,7 +4815,7 @@ export class GhostlyNode implements EngineImplementation {
   private async closeRequest(paymentId: string, reason: string): Promise<void> {
     const request = this.desk.payment(paymentId);
     if (!request || !(await this.desk.close(paymentId, reason, "your contact removed the wallet it was paid to"))) return;
-    const message = (await db.getMessages(request.linkId)).find((m) => m.paymentId === paymentId && m.sender === "me");
+    const message = await this.paymentMessage(request.linkId, paymentId);
     if (message) await this.hold.forget(request.linkId, message.id).catch(() => {});
   }
 
@@ -5374,6 +5447,8 @@ export class GhostlyNode implements EngineImplementation {
       if (settings[key] !== false) delete this.settings[key];
       else this.settings[key] = false;
       await db.putSettings(this.settings);
+      // Off: what was chosen to fetch by itself and is not here yet stops coming.
+      if (key === "autoDownloads" && settings[key] === false) await this.groups.autoDownloadsOff();
     }
     // Load public profiles: absent means on; turned off, nothing read before is kept.
     if (settings.publicProfiles !== undefined) {
@@ -6827,10 +6902,14 @@ export class GhostlyNode implements EngineImplementation {
           void this.notePaymentReceipt(linkId, result.id).catch(() => {});
         },
         onFileStored: async wire => {
-          const stored = (await fileStore.listForLink(linkId)).find(file => file.direction === "in" && file.wireId === wire.id);
-          if (!stored?.digest || !stored.metadata) return undefined;
-          if (stored.metadata.name !== wire.name || stored.metadata.size !== wire.size || stored.metadata.mime !== wire.mime || stored.metadata.timestamp !== wire.timestamp) return undefined;
-          return stored.digest;
+          // A file this chat never took, as nearly every one asked about is: the chat knows the wire id of each file
+          // it stores (`linkFilesFrom`, `receiveFile`), so none of its file records is read for it. A group's edge
+          // keeps no such list of what the group stores: it reads, as before.
+          if (!stored.group && !this.links.get(linkId)?.files.wireIds.has(wire.id)) return undefined;
+          const held = (await fileStore.listForLink(linkId)).find(file => file.direction === "in" && file.wireId === wire.id);
+          if (!held?.digest || !held.metadata) return undefined;
+          if (held.metadata.name !== wire.name || held.metadata.size !== wire.size || held.metadata.mime !== wire.mime || held.metadata.timestamp !== wire.timestamp) return undefined;
+          return held.digest;
         },
         onFileIncoming: (file) => this.receiveFile(linkId, file),
         onFileProgress: (id, transferred, direction) =>

@@ -33,7 +33,12 @@ interface RawIndex {
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
 interface RawRecordStore {
   values(): Iterable<RawRecord>; clear(): unknown;
-  records: { _root: RawNode | undefined; _numNodes: number; _numTombstones: number };
+  get(key: Key): RawRecord | undefined;
+  put(record: RawRecord, noOverwrite?: boolean): RawRecord | undefined;
+  delete(key: Key): RawRecord[];
+  deleteByValue(key: Key): RawRecord[];
+  records: { _root: RawNode | undefined; _numNodes: number; _numTombstones: number; delete(record: RawRecord): void };
+  keysAreUnique: boolean;
 }
 interface RawStore {
   name: string; keyPath: string | string[] | null; autoIncrement: boolean; deleted: boolean;
@@ -48,6 +53,7 @@ interface RawClasses {
   Database: new (name: string, version: number) => RawDatabase;
   ObjectStore: new (db: RawDatabase, name: string, keyPath: string | string[] | null, autoIncrement: boolean) => RawStore;
   Index: new (store: RawStore, name: string, keyPath: string | string[], multiEntry: boolean, unique: boolean) => RawIndex;
+  RecordStore: new (keysAreUnique: boolean) => RawRecordStore;
 }
 
 interface SnapshotIndex { name: string; keyPath: string | string[]; multiEntry: boolean; unique: boolean }
@@ -83,6 +89,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   const factory = new IDBFactory();
   const raw = factory as unknown as { _databases: Map<string, RawDatabase> };
   const classes = await probeClasses(factory);
+  dropIndexEntriesByRecord(classes, (a, b) => factory.cmp(a, b));
 
   let writing = true;
   let restoring = true;
@@ -240,10 +247,67 @@ async function probeClasses(factory: IDBFactory): Promise<RawClasses> {
     Database: rawDb.constructor as RawClasses["Database"],
     ObjectStore: rawStore.constructor as RawClasses["ObjectStore"],
     Index: rawStore.rawIndexes.get("i")!.constructor as RawClasses["Index"],
+    RecordStore: rawStore.records.constructor as RawClasses["RecordStore"],
   };
   db.close();
   await new Promise<void>((resolve) => { const request = factory.deleteDatabase(PROBE); request.onsuccess = request.onerror = () => resolve(); });
   return classes;
+}
+
+/** The classes whose index upkeep is already by record: they are fake-indexeddb's own, shared by every store opened. */
+const byRecord = new WeakSet<object>();
+
+/**
+ * fake-indexeddb drops an overwritten or deleted record from an index by walking every entry of it (an index is in
+ * its own key's order, not the record's): each delivery mark, edit or reaction cost time with every message of the
+ * profile, 170 ms at 10,000, and a long chat slowed every other one. The store has the records it just replaced or
+ * removed in hand, and they say which entries to drop; a call that comes any other way still walks.
+ */
+function dropIndexEntriesByRecord(classes: RawClasses, cmp: (a: Key, b: Key) => number) {
+  const storeProto = classes.ObjectStore.prototype as RawStore;
+  const recordsProto = classes.RecordStore.prototype as RawRecordStore;
+  if (byRecord.has(storeProto)) return;
+  byRecord.add(storeProto);
+  const { storeRecord, deleteRecord } = storeProto;
+  const { put, delete: remove, deleteByValue } = recordsProto;
+  let gone: { indexes: Map<string, RawIndex>; records: RawRecord[] } | null = null;
+
+  storeProto.storeRecord = function (this: RawStore, record, noOverwrite, rollbackLog) {
+    if (!this.rawIndexes.size) return storeRecord.call(this, record, noOverwrite, rollbackLog);
+    const records: Partial<RawRecordStore> = this.records, indexes = this.rawIndexes, outer = gone;
+    records.put = (next, keep) => {
+      const replaced = put.call(this.records, next, keep);
+      gone = { indexes, records: replaced ? [replaced] : [] };
+      return replaced;
+    };
+    try { return storeRecord.call(this, record, noOverwrite, rollbackLog); } finally { delete records.put; gone = outer; }
+  };
+  storeProto.deleteRecord = function (this: RawStore, key, rollbackLog) {
+    if (!this.rawIndexes.size) return deleteRecord.call(this, key, rollbackLog);
+    const records: Partial<RawRecordStore> = this.records, indexes = this.rawIndexes, outer = gone;
+    records.delete = (range) => {
+      const removed = remove.call(this.records, range);
+      gone = { indexes, records: removed };
+      return removed;
+    };
+    try { deleteRecord.call(this, key, rollbackLog); } finally { delete records.delete; gone = outer; }
+  };
+  recordsProto.deleteByValue = function (this: RawRecordStore, key) {
+    let index: RawIndex | undefined;
+    if (gone) for (const candidate of gone.indexes.values()) if (candidate.records === this) index = candidate;
+    if (!gone || !index) return deleteByValue.call(this, key);
+    const dropped: RawRecord[] = [];
+    for (const entry of indexEntries(index, gone.records, cmp)) {
+      // A unique index finds an entry by its key alone: it may be another record's (a put the index refused).
+      if (this.keysAreUnique) {
+        const held = this.get(entry.key);
+        if (!held || cmp(held.value, entry.value) !== 0) continue;
+      }
+      this.records.delete(entry);
+      dropped.push(entry);
+    }
+    return dropped;
+  };
 }
 
 /**

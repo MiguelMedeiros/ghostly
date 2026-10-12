@@ -376,6 +376,75 @@ describe("richer task cards on the board", () => {
   });
 });
 
+describe("a card a bot sent to several chats", () => {
+  /** The Coordinator is a contact and a member of two groups, under a key of its own in each; each group knows its chat. */
+  function everywhere() {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Coordinator" });
+    const members = (key: string) => [{ key: "me-key", me: true, nick: "Me" }, { key, me: false, nick: "Coordinator" }] as never;
+    const state = {
+      links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" })],
+      groups: [
+        groupView({ id: "g1", name: "Sala de Máquinas", status: "active", memberLinks: { "link-1": "coord-in-g1" }, members: members("coord-in-g1") }),
+        groupView({ id: "g2", name: "Phone", status: "active", memberLinks: { "link-1": "coord-in-g2" }, members: members("coord-in-g2") }),
+      ],
+    };
+    return state;
+  }
+  const blocked = task({ status: "blocked", title: "Wait for the relay" });
+  const copies = () => [
+    row("link-1", blocked, { id: "in-chat", editedAt: NOW - 3 * 60_000 }),
+    row("group:g1", blocked, { id: "in-g1", member: "coord-in-g1", editedAt: NOW - 2 * 60_000 }),
+    row("group:g2", blocked, { id: "in-g2", member: "coord-in-g2", editedAt: NOW - 60_000 }),
+    row("link-1", task({ id: "alone", status: "blocked" })),
+  ];
+
+  it("is one card and counts once in its column and in the header, with the chats it lives in", async () => {
+    const state = everywhere();
+    const { user, engine } = renderApp(<><Tasks /><Where /></>, { route: "/tasks" });
+    engine.on("statusCardIndex", copies).setState(state);
+    await loaded();
+    expect(within(column("blocked")).getByRole("heading")).toHaveTextContent("Blocked2");
+    expect(cardIds("blocked").sort()).toEqual(["alone", "relay"]);
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("2 active · 2 tasks");
+
+    const card = column("blocked").querySelector<HTMLElement>('[data-card-id="relay"]')!;
+    expect(within(card).getByTestId("board-card-bot")).toHaveTextContent("Coordinator");
+    // The chat it changed last in, and one more: the bot's own chat is the bot's chip.
+    const chats = within(card).getByTestId("board-card-chat");
+    expect(chats).toHaveTextContent("Phone+1");
+    expect(chats).toHaveAttribute("title", "Phone, Sala de Máquinas");
+    expect(within(card).getByTestId("board-card-open")).toHaveAccessibleName(expect.stringContaining("Blocked, Coordinator in Phone, Sala de Máquinas, updated"));
+    await user.click(within(card).getByTestId("board-card-details-toggle"));
+    expect(within(card).getByTestId("board-card-chats")).toHaveTextContent("Phone, Sala de Máquinas, Coordinator");
+
+    // It opens where it changed last.
+    await user.click(within(card).getByTestId("board-card-open"));
+    expect(screen.getByTestId("where")).toHaveTextContent("/group/g2");
+    expect(screen.getByTestId("where")).toHaveAttribute("data-jump", "in-g2");
+  });
+
+  it("is one bot's: a column for the bot, and a column for each chat it is in", async () => {
+    const state = everywhere();
+    const { user, engine } = renderApp(<Tasks />, { route: "/tasks" });
+    engine.on("statusCardIndex", copies).setState(state);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-group-bot"));
+    expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent)).toEqual(["Coordinator2"]);
+    await user.click(screen.getByTestId("tasks-group-chat"));
+    expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent).sort()).toEqual(["Coordinator2", "Phone1", "Sala de Máquinas1"]);
+  });
+
+  it("counts once on the way to the board", async () => {
+    const state = everywhere();
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    engine.on("statusCardIndex", copies).setState(state);
+    act(() => engine.messages("link-1", [{ linkId: "link-1", id: "x", text: "", sender: "peer", timestamp: 1, via: "datalink", card: blocked } as StoredMessage]));
+    const entry = await screen.findByTestId("sidebar-tasks");
+    await waitFor(() => expect(within(entry).getByTestId("sidebar-tasks-summary")).toHaveTextContent("2 active"));
+    expect(entry).toHaveAccessibleName("Tasks, 2 active");
+  });
+});
+
 describe("the Tasks board on a phone", () => {
   it("shows the columns as tabs with their counts, one column for each", async () => {
     viewport(375, 740);

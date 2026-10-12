@@ -83,6 +83,17 @@ export function precacheList(files: readonly string[]): string[] {
   return ["/", ...new Set(paths)].sort((a, b) => (a === "/" ? -1 : b === "/" ? 1 : a.localeCompare(b)));
 }
 
+/**
+ * How the install asks for a precached file. A file under `/assets/` has a digest of its content in its name and the
+ * server calls it immutable, so the copy the browser already holds is the file: the page has just loaded most of
+ * them, and a deploy changes few. Asked past the HTTP cache, every one of them is downloaded again, at the first
+ * visit and at each deploy. The page and the files beside it keep their names from one deploy to the next, so those
+ * are asked past it (`reload`): the shell is this deploy's and not an older copy.
+ */
+export function precacheMode(path: string): "default" | "reload" {
+  return path.startsWith("/assets/") ? "default" : "reload";
+}
+
 /** A shared item as the manifest's `share_target` params name it. */
 export interface SharedItem {
   title: string;

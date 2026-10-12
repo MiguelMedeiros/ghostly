@@ -5,7 +5,7 @@ import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { Button } from "../wallet/ui";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
-import { useInstalledApps } from "../../lib/apps/installed";
+import { useInstalledApp } from "../../lib/apps/installed";
 import { appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
 import { appErrorCode, appErrorText } from "../../lib/apps/errors";
@@ -32,12 +32,11 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   marks?: ReactNode;
 }) {
   const { t } = useI18n();
-  const installed = useInstalledApps(true);
   const platform = useServicesPlatform();
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
-  const app = installed?.find((a) => a.ref === card.ref);
+  const app = useInstalledApp(card.ref);
   // Installed here: the app's own checked title and version, the one Open starts, never the sender's words for it.
   const title = app ? app.title : card.title;
   const version = app ? app.version : card.version;
