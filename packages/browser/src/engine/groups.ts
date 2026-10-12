@@ -282,6 +282,8 @@ const ENTRY_RELEASE_MS = 2_000;
 const REMOVED_LINGER_MS = 15_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
 const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
+/** Admin side: how long a contact invited over its chat is waited for. After, it holds no place and may be invited again. */
+const INVITED_KEPT_MS = LEFT_KEPT_MS;
 /** How long the admin keeps the edge to a member it removed while that member was away, to tell it (`StoredGroup.farewells`). */
 export const FAREWELL_KEPT_MS = LEFT_KEPT_MS;
 /**
@@ -650,6 +652,15 @@ export class Groups {
     const { [linkId]: _answered, ...rest } = group.invited;
     group.invited = Object.keys(rest).length ? rest : undefined;
     return true;
+  }
+
+  /** Admin side: a contact whose answer did not come in `INVITED_KEPT_MS` (a decline lost on the way, an app gone) is not waited for any more. */
+  private async ageInvited(group: StoredGroup, now: number): Promise<void> {
+    const stale = Object.entries(group.invited!).filter(([, at]) => now - at > INVITED_KEPT_MS);
+    if (!stale.length) return;
+    for (const [linkId] of stale) this.answered(group, linkId);
+    await this.store.putGroup(group);
+    this.host.emit();
   }
 
   async accept(groupId: string): Promise<void> {
@@ -1110,6 +1121,7 @@ export class Groups {
         }
         if (group.invitation?.seedB64 && !group.state) { this.acceptAgain(group, now); continue; }
         const session = this.sessions.get(group.id);
+        if (group.invited) await this.ageInvited(group, now);
         if (!group.entry || !session) continue;
         if (!session.isAdmin) { await this.disableLink(group.id); continue; }
         const pending = this.pendingEntries.get(group.id);
