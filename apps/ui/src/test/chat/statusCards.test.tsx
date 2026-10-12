@@ -66,7 +66,7 @@ describe("a task card in the chat", () => {
     expect(screen.getByTestId("status-card").querySelector("a, strong")).toBeNull();
   });
 
-  it("tells the statuses apart: running in the accent, done in green with ✓, failed in red with ✕, blocked in amber", () => {
+  it("tells the statuses apart: running in the accent, done in green with ✓, failed in red with ✕, blocked in the warn ink", () => {
     renderApp(<>{(["running", "done", "failed", "blocked", "queued"] as const).map(status =>
       <MessageBubble key={status} message={message(card({ status, progress: 30 }), { id: status })} peerPubKey="peer" />)}</>);
     const tone = (status: string) => {
@@ -78,7 +78,10 @@ describe("a task card in the chat", () => {
     expect(tone("done").bar).toContain("bg-success");
     expect(tone("failed").label).toHaveTextContent("✕ Failed");
     expect(tone("failed").bar).toContain("bg-danger");
-    expect(tone("blocked").label.className).toContain("text-amber-500");
+    // The word is in the warn ink, which the light themes darken to 4.5:1; the bar is no text and stays amber.
+    expect(tone("blocked").label.className).toContain("text-warn-ink");
+    expect(tone("blocked").label.className).not.toContain("text-amber-500");
+    expect(tone("blocked").bar).toContain("bg-amber-500");
     expect(tone("queued").label.className).toContain("text-text-primary/65");
   });
 
@@ -501,7 +504,7 @@ describe("the Tasks panel under a bot room's load", () => {
     const [hermesOne, coord, hermesZero] = sections;
     expect(within(within(hermesOne).getByTestId("chat-tasks-active")).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["bench", "e2e"]);
     expect(within(hermesOne).getAllByTestId("chat-tasks-item-status").map(s => s.textContent)).toEqual(["Blocked", "Running"]);
-    expect(within(hermesOne).getAllByTestId("chat-tasks-item-status")[0].className).toContain("text-amber-500");
+    expect(within(hermesOne).getAllByTestId("chat-tasks-item-status")[0].className).toContain("text-warn-ink");
     const order = [...hermesOne.querySelectorAll("[data-testid=chat-tasks-active], [data-testid=chat-tasks-routines]")].map(el => el.getAttribute("data-testid"));
     expect(order).toEqual(["chat-tasks-active", "chat-tasks-routines"]);
     // Zero's ten routines: one line, folded.

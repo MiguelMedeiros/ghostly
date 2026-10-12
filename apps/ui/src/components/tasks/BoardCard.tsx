@@ -20,7 +20,7 @@ import { MemberFace, type MemberFaceOf } from "../chat/SenderAvatar";
 const CHECKS_MARK: Record<PrChecks, { mark: string; tone: string }> = {
   passing: { mark: "✓", tone: "text-success" },
   failing: { mark: "✕", tone: "text-danger-ink" },
-  pending: { mark: "●", tone: "text-amber-500" },
+  pending: { mark: "●", tone: "text-warn-ink" },
 };
 
 const chip = "inline-flex min-w-0 items-center gap-1 rounded-full bg-text-primary/[0.07] px-1.5 py-px text-[11px] leading-4 text-text-secondary";

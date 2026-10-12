@@ -314,6 +314,7 @@ describe("richer task cards on the board", () => {
     expect(within(card("pass")).getByTestId("board-card-checks")).toHaveTextContent("✓Checks passing");
     expect(within(card("fail")).getByTestId("board-card-checks")).toHaveTextContent("✕Checks failing");
     expect(within(card("wait")).getByTestId("board-card-checks")).toHaveTextContent("●Checks pending");
+    expect(within(card("wait")).getByTestId("board-card-checks").className).toContain("text-warn-ink");
     expect(within(card("pass")).getByTestId("board-card-pr")).toHaveAttribute("title", "Open on github.com · Open · Checks passing");
     expect(within(card("pass")).getByTestId("board-card-open")).toHaveAccessibleName(/PR #612, Open, Checks passing, updated /);
     await user.click(within(card("wait")).getByRole("button", { name: "Details" }));
