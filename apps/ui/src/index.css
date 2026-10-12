@@ -658,6 +658,19 @@ html[data-standalone="true"] {
   font-size: 18px;
 }
 
+/* Who is speaking in a call (hooks/useVoiceRing.ts): a ring on the avatar, as wide as the voice is loud. With
+   motion reduced it is a steady ring while they speak. */
+.call-avatar {
+  --voice-swing: 9px;
+  transition: box-shadow 0.12s linear;
+}
+.call-mini .call-avatar { --voice-swing: 4px; }
+.call-avatar[data-speaking="true"] {
+  box-shadow: 0 0 0 calc(3px + var(--voice-level, 0) * var(--voice-swing)) var(--color-accent);
+}
+:root[data-reduce-motion="true"] .call-avatar { --voice-swing: 0px; }
+@media (prefers-reduced-motion: reduce) { .call-avatar, .call-mini .call-avatar { --voice-swing: 0px; } }
+
 .call-mini .call-name {
   font-size: 13px;
 }
