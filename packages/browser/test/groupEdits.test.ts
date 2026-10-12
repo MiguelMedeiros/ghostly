@@ -419,6 +419,8 @@ describe("edits on headless peers", { timeout: 120_000 }, () => {
       await turn();
     }
     expect(carol.peer.messages.filter(m => !m.event)).toHaveLength(40);
+    // An edit takes no number of its own: nothing of Bob's reads as missing at Carol.
+    expect(world.view(carol.peer, id)!.members.find(m => m.key === world.view(bob.peer, id)!.myKey)).toMatchObject({ missing: 0 });
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
 });
