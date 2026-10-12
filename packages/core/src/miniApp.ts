@@ -81,7 +81,8 @@ export interface MiniAppRequest {
  * - `bad-path`: a `file` path that is not a string of 1 to 1024 characters.
  * - `bad-request`: a request that is not `{id, type, args}` with JSON arguments.
  * - `failed`: anything else; the client's own words never reach the app.
- * - `full`: a storage write would take the scope past 5 MiB, so the app can make room.
+ * - `full`: a storage write would take the scope past 5 MiB (each key counts 128 bytes beside its own and its value's),
+ *   so the app can make room.
  * - `no-file`: the bundle has no such file.
  * - `not-allowed`: `chat.send` without the `chat` permission, or with the app opened alone.
  * - `not-open`: `chat.send` before this side's chat has the app open.
@@ -132,7 +133,9 @@ export const MINI_APP_LIMITS = {
   storageKeyBytes: 256,
   /** One stored JSON value, serialized. */
   storageValueBytes: 64 * 1024,
-  /** Everything an app keeps in one scope (per app and per chat, or alone). */
+  /** Counted for each stored key beside its own bytes and its value's: what keeping the key costs the device. */
+  storageRowBytes: 128,
+  /** Everything an app keeps in one scope (per app and per chat, or alone): each key, its value and `storageRowBytes`. */
   storageScopeBytes: 5 * 1024 * 1024,
   /** One `chat.send` value, serialized: the `paired-app` data cap (decision D5 of the plan). */
   chatDataBytes: 32 * 1024,

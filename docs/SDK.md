@@ -246,8 +246,8 @@ try {
   not JSON are `bad-request`. A later client may add a code: treat one you do not know as `failed`.
 - `MiniAppAnswer` and `MiniAppEvent` are the broker's messages, for a test harness that stands in for it. A `file`
   answer carries an `ArrayBuffer` on the port, or base64 `bytes` on Desktop; the app gets an `ArrayBuffer` either way.
-- `MINI_APP_LIMITS` holds the broker's bounds (64 KiB a request, 50 a second, 64 KiB a stored value, 5 MiB a scope,
-  32 KiB a chat frame).
+- `MINI_APP_LIMITS` holds the broker's bounds (64 KiB a request, 50 a second, 64 KiB a stored value, 5 MiB a scope
+  with 128 bytes counted for each key beside its own and its value's, 32 KiB a chat frame).
 - `AppManifestSource` is `ghostly-app.json`: `satisfies AppManifestSource` checks it as you write it.
   `ghostly app publish` adds `publisher`, `files` and the next `sequence`, and signs the bundle.
 - The entry imports nothing at run time, so an app's single-file bundle takes only the few constants it uses.
