@@ -407,6 +407,49 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(world.peers.get("bob")!.store.groups.get(groupId)).not.toHaveProperty("declined");
   });
 
+  it("an invitation deleted from this device is declined: the admin's row is no longer Invited…", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.forget(groupId); await world.settle();
+    expect(bob.views()).toEqual([]);
+    expect(view(alice, groupId).invited).toEqual([]);
+    expect(world.peers.get("bob")!.store.groups.size).toBe(0);
+    // Deleted while the inviter's chat is down: said when it is next up, as a Decline is.
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    world.chats.delete("chat-ab");
+    await bob.forget(groupId); await world.settle();
+    expect(bob.views()).toEqual([]);
+    expect(view(alice, groupId).invited).toEqual(["chat-ab"]);
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await bob.tick(Date.now() + 1000); await world.settle();
+    expect(view(alice, groupId).invited).toEqual([]);
+    expect(world.peers.get("bob")!.store.groups.size).toBe(0);
+    // One accepted that the admin never heard, then deleted: the admin stops waiting too.
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); world.drop();
+    await bob.forget(groupId); await world.settle();
+    expect(view(alice, groupId)).toMatchObject({ invited: [], members: [expect.anything()] });
+    // One its inviter takes back goes without an answer: nobody is waiting for one.
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
+    await bob.handleContactFrame("chat-ab", { t: "group-decline", g: groupId });
+    expect(bob.views()).toEqual([]);
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("deleting a removed group that was invited again declines the invitation and keeps nothing of the group", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    await alice.remove(groupId, key(bob)); await world.settle();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.forget(groupId); await world.settle();
+    expect(bob.views()).toEqual([]);
+    expect(world.peers.get("bob")!.store.groups.size).toBe(0);
+    expect(view(alice, groupId).invited).toEqual([]);
+  });
+
   it("an invitation its inviter takes back goes from the list, accepted or not; nobody else's word takes it", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
