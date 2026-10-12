@@ -427,6 +427,46 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(view(alice, groupId).members).toHaveLength(2);
   });
 
+  it("deleting or leaving a group, or handing its admin role on, takes back the invitations nobody answered", async () => {
+    // Deleted, alone in it.
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), dan = world.add("dan");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const gone = await alice.create("Ghosts", "mesh");
+    await alice.invite(gone, "chat-ab"); await world.settle();
+    expect(view(bob, gone).invitation).toBeDefined();
+    await alice.forget(gone); await world.settle();
+    expect(bob.views()).toEqual([]);
+    // Left, alone in it. A chat that is down is not told, and nothing is thrown for it.
+    world.chats.set("chat-ad", ["alice", "dan"]);
+    const left = await alice.create("Ghouls", "mesh");
+    await alice.invite(left, "chat-ab"); await alice.invite(left, "chat-ad"); await world.settle();
+    world.chats.delete("chat-ad");
+    await alice.leave(left); await world.settle();
+    expect(bob.views()).toEqual([]);
+    expect(view(dan, left).invitation).toBeDefined();
+
+    // The role handed on: the old admin's invitations go, here and at the invitee, and stay gone after a restart.
+    const { world: w, alice: admin, others: [next], groupId, key } = await groupOf(["bob"]);
+    const carol = w.add("carol"), erin = w.add("erin");
+    w.chats.set("chat-ac", ["alice", "carol"]); w.chats.set("chat-ae", ["alice", "erin"]);
+    await admin.invite(groupId, "chat-ac"); await w.settle();
+    await admin.makeAdmin(groupId, key(next)); await w.settle();
+    expect(carol.views()).toEqual([]);
+    expect(view(admin, groupId).invited).toEqual([]);
+    expect(w.peers.get("alice")!.store.groups.get(groupId)!.invited).toBeUndefined();
+    expect(view(await w.restart("alice"), groupId).invited).toEqual([]);
+
+    // Left with members in it: the role goes to one of them first, and the invitation is taken back all the same.
+    const { world: v, alice: leaver, groupId: kept } = await groupOf(["bob"]);
+    const frank = v.add("frank");
+    v.chats.set("chat-af", ["alice", "frank"]);
+    await leaver.invite(kept, "chat-af"); await v.settle();
+    await leaver.leave(kept); await v.settle();
+    expect(frank.views()).toEqual([]);
+    void erin;
+  });
+
   it("accepting needs the inviter connected", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
