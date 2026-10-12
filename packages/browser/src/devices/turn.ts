@@ -1,5 +1,5 @@
 import {
-  classifyTurnRead, fromBase64Url, nextTurnPosition, randomBytes, readTurnPacket, signTurnPacket, signTurnRelease, toBase64Url, turnKeys, turnPutSummary,
+  bytesEqual, classifyTurnRead, fromBase64Url, nextTurnPosition, readTurnPacket, signTurnPacket, signTurnRelease, toBase64Url, turnInstance, turnKeys, turnPutSummary, turnStatedVerifier, turnVerifierMark,
   TURN_LAST_SEQUENCE, TURN_MAX, TURN_PUT_WINDOW_MS, TURN_RAISE_READ_TIMEOUT_MS, TURN_SETTLE_MS,
   type TurnConditions, type TurnFields, type TurnKeys, type TurnNetwork, type TurnRead, type TurnRecord, type TurnRelease, type TurnSigner, type TurnSourcePut,
 } from "@ghostly/core";
@@ -56,7 +56,7 @@ export interface TurnKeeperOptions {
   signer: TurnSigner;
   store?: TurnStore;
   now?: () => number;
-  /** 8 random bytes for a record's `instance`. */
+  /** A record's `instance`, in place of the keeper's own (`instanceFor`). */
   instance?: () => Uint8Array;
   /** Waits this long (tests move a clock of their own). */
   sleep?: (ms: number) => Promise<void>;
@@ -131,6 +131,25 @@ export function takeoverTurn(record: Pick<DeviceRecord, "turn" | "releasedTurn" 
   const highest = Math.max(read.record?.turn ?? 0, record.turn, record.releasedTurn ?? 0, seenTurn <= TURN_MAX ? seenTurn : 0);
   if (highest + 1 > TURN_MAX) throw new TurnClosedError();
   return highest + 1;
+}
+
+/**
+ * The `instance` of the record a device writes as the active one: it states the mark of the verifier beside its device
+ * state (`turnInstance`, WISP 06 § Record), which on an active device is the profile's. `unstated`: a handoff's taker,
+ * whose device state does not hold the verifier of the profile it just installed; it states it once its engine runs.
+ */
+export function instanceFor(record: Pick<DeviceRecord, "verifier">, unstated = false): Uint8Array {
+  return turnInstance(unstated ? null : turnVerifierMark(record.verifier ?? null));
+}
+
+/**
+ * The last record of the device set this device knows after a read: the one the sources returned when it is above
+ * the packet it stored, else the stored one. A lower record (`behind`) and a tombstone say nothing here.
+ */
+export function latestKnown(read: Pick<TurnRead, "result" | "record">, stored: TurnRecord | null): TurnRecord | null {
+  const news = (read.result === "other" || read.result === "clone" || read.result === "mine") && read.record && !read.record.tombstone ? read.record : null;
+  if (!news) return stored;
+  return !stored || news.sequence >= stored.sequence ? news : stored;
 }
 
 /** The record's slots as the device state keeps them. */
@@ -320,7 +339,7 @@ export class TurnKeeper {
     // A release names its turn: one given for a turn that can no longer be written is of no use.
     if (place.raised && options.release) throw new Error("Something was seen above the turn this release names");
     if (place.raised) release = await signTurnRelease(keys.address, place.turn, ownSlot, ownSlot, ownKey, new Uint8Array(32), this.options.signer);
-    const fields: TurnFields = { turn: place.turn, rev: place.rev, author: ownSlot, active: ownSlot, slots, instance: (this.options.instance ?? (() => randomBytes(8)))(), ...(release ? { release } : {}) };
+    const fields: TurnFields = { turn: place.turn, rev: place.rev, author: ownSlot, active: ownSlot, slots, instance: this.options.instance?.() ?? instanceFor(record, !!options.release), ...(release ? { release } : {}) };
     const payload = await signTurnPacket(keys, fields, this.options.signer);
     // Stored before it is put: what this device finds on the network after a crash is never newer than what it holds.
     held.record = await this.store.amend(this.options.profile, { ...options.patch, turn: place.turn, rev: place.rev, turnPacket: toBase64Url(payload), activeSlot: ownSlot, ...(options.slots ? { deviceSet: options.slots } : {}) });
@@ -335,12 +354,36 @@ export class TurnKeeper {
   }
 
   /**
+   * The active device says which verifier the profile has now (WISP 06 § Record, the verifier mark): when the record it
+   * stored states another one (the lock password changed, or the record was written before the verifier was at hand),
+   * it reads, and on `mine` or `none` writes its next record. True when the stored record states it (already, or now
+   * written); false when nothing was written (not the active device, no good read, another device's record there: the
+   * next check or start settles that, and every start writes a record anyway). Null for a `single` profile.
+   */
+  stateVerifier(): Promise<boolean | null> {
+    return this.exclusive(async () => {
+      const held = await this.held();
+      if (!held) return null;
+      if (held.record.state !== "active" || !held.wrote || !held.storedRecord) return false;
+      const stated = turnStatedVerifier(held.storedRecord.instance);
+      if (stated && bytesEqual(stated, turnVerifierMark(held.record.verifier ?? null))) return true;
+      const read = await this.readWith(held);
+      if (!read.good || (read.result !== "mine" && read.result !== "none")) return false;
+      try { await this.writeWith(held, conditionsAfter(read, read.result === "none" ? "none" : "seen")); } catch (error) {
+        if (error instanceof TurnClosedError) return false;
+        throw error;
+      }
+      return true;
+    });
+  }
+
+  /**
    * A forced takeover (WISP 06 § Settle): reads the turn, makes the device `taking` (with the state it had, to go
    * back to), writes the record of `turn` with no release within `P` of that read, and settles as every device that
    * raises the turn does. `start` says it is the active device now; `gated` that it lost and is what it was before.
    * With no good read, or at a closed or tombstoned address, nothing is written. Null for a `single` profile.
    */
-  raise(options: { turn?: number; slots?: (DeviceSlot | null)[] } = {}): Promise<TurnOutcome | null> {
+  raise(options: { turn?: number; slots?: (DeviceSlot | null)[]; before?: (latest: TurnRecord | null) => void } = {}): Promise<TurnOutcome | null> {
     return this.exclusive(async () => {
       const held = await this.held();
       if (!held) return null;
@@ -348,6 +391,8 @@ export class TurnKeeper {
       if (prior !== "standby" && prior !== "superseded") throw new Error(`A ${prior} device does not force a takeover`);
       const read = await this.readWith(held, true);
       if (!read.good || read.result === "tombstone") return this.settle(held, read, true);
+      // What the caller checks against the last record known before anything is written (`takeover.ts`): it throws to refuse.
+      options.before?.(latestKnown(read, held.storedRecord));
       // One above the highest turn this device knows (WISP 06 § Forced takeover): the one it read, the one it stored,
       // and any it signed a release for, so a releaser that takes the profile back goes above its taker's release.
       const turn = options.turn ?? takeoverTurn(held.record, read);
@@ -355,7 +400,7 @@ export class TurnKeeper {
       // settles can offer a new device secret against it by name.
       const stopping = held.record.activeSlot !== undefined && held.record.activeSlot !== held.ownSlot ? held.record.deviceSet[held.record.activeSlot]?.key : undefined;
       held.record = await this.store.move(this.options.profile, "taking", { handoff: { role: "taking", step: `${TAKEOVER}${prior}`, ...(stopping ? { peer: stopping } : {}) } });
-      try { await this.writeWith(held, read.conditions, { ...options, turn }, true); } catch (error) {
+      try { await this.writeWith(held, read.conditions, { turn, ...(options.slots ? { slots: options.slots } : {}) }, true); } catch (error) {
         // Nothing was put: the device is what it was.
         if (!held.wroteNow) held.record = await this.store.move(this.options.profile, prior, { handoff: undefined, settle: undefined });
         // No record can be written above what it saw: it stays what it was, and the host is told.

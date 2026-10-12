@@ -336,6 +336,8 @@
     "checking": "Vérification de l'appareil actif · environ 30 secondes",
     "confirm": "Tapez {{device}} pour confirmer",
     "fail": {
+      "changed": "Le mot de passe de verrouillage a changé depuis que cet appareil a eu le profil",
+      "changedNext": "Choisissez Utiliser ici et saisissez le nouveau mot de passe.",
       "lockedOut": "Trop d'essais. Réessayez plus tard.",
       "name": "Tapez le nom de l'appareil qui s'arrête.",
       "noCopy": "Cet appareil n'a pas de copie du profil",

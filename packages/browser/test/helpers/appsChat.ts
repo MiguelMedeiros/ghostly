@@ -3,7 +3,7 @@ import { GhostLink, chatAppId, createIdentity, createLink, identityFromSeedB64, 
 import { EngineServer, type EngineClientSink } from "../../src/engine/server";
 import { db } from "../../src/engine/db";
 import type { EngineEvent, RpcResponse } from "../../src/shared/rpc";
-import { FakeNativeNet } from "./fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./fakeNative";
 
 /**
  * A real engine with one paired 1:1 chat, live with its contact's link over a stand-in for Iroh, as reactions.test.ts
@@ -24,7 +24,7 @@ export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contact
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const server = new EngineServer({ transport, automaticWallets: false, nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") },
     ...(apps !== undefined && { apps }), ...(appFetch && { appFetch }) });
@@ -46,7 +46,7 @@ export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contact
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     appsSupport: contactApps,
     events: { onPairingState: state => { contactState = state; }, onAppFrame: event => { contactGot.push(event); } },

@@ -71,7 +71,7 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
   upgrade: { mine?: boolean; contact?: boolean } = {}): App {
   const app = { name, side, dhtState, requests: [] } as unknown as App;
   const native = kind === "webrtc" ? undefined : kind === "webrtc+hyperdht" ? "hyperdht/1" as const : "iroh/1" as const;
-  const peerNative = native === "hyperdht/1" ? { publicKey: `${contact.name}:hyperdht/1` } : { id: `${contact.name}:iroh/1`, relay: "https://relay.test./", addresses: [] };
+  const peerNative = native === "hyperdht/1" ? { publicKey: world.native.key("hyperdht/1", contact.name) } : { id: world.native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] };
   const rtcToo = kind !== "iroh";
   app.link = new GhostLink({
     params: side.params,
@@ -263,7 +263,7 @@ describe("the web app back first, the Desktop's knock on a path that dies", () =
     world.native.deadPaths.add("desktop");
     desktop = startApp(world, "desktop", made.inviter, { side: made.joiner, name: "web" }, "iroh", desktop.dhtState, true);
     // The web app's capability record, read a few seconds after the knock went out, says how to dial it now.
-    if (record) setTimeout(() => desktop.link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "web:iroh/1", relay: "https://relay2.test./", addresses: [] } }, true), record.afterMs);
+    if (record) setTimeout(() => desktop.link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: world.native.key("iroh/1", "web"), relay: "https://relay2.test./", addresses: [] } }, true), record.afterMs);
     let rejected = false;
     const liveMs = await until(() => {
       rejected ||= (desktop.link as unknown as { securityRejected: boolean }).securityRejected;

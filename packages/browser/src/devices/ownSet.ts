@@ -1,5 +1,5 @@
 import {
-  TURN_SETTLE_MS, bytesEqual, classifyTurnRead, fromBase64Url, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffRetryAfter, newDeviceSetSecret,
+  turnInstance, turnVerifierMark, TURN_SETTLE_MS, bytesEqual, classifyTurnRead, fromBase64Url, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffRetryAfter, newDeviceSetSecret,
   randomBytes, readTurnPacket, signTombstone, signTurnPacket, toBase64Url, turnKeys, type TurnNetwork, type TurnRead, type TurnSigner,
 } from "@ghostly/core";
 import { pendingRaise } from "./raise";
@@ -122,7 +122,7 @@ export async function planOwnSet(record: DeviceRecord, ports: Pick<OwnSetPorts, 
   const own = record.deviceSet[record.ownSlot]!;
   const slots = Array.from({ length: MAX_DEVICES }, (_, i) => (i === record.ownSlot ? { key: fromBase64Url(own.key), name: own.name } : null));
   const tombstone = await signTombstone(turnKeys(fromBase64Url(record.d)), record.ownSlot, slots, ports.signer, { instance: instanceBelow(under, random) });
-  const packet = await signTurnPacket(turnKeys(d), { turn: record.turn, rev: 0, author: record.ownSlot, active: record.ownSlot, slots, instance: random(8) }, ports.signer);
+  const packet = await signTurnPacket(turnKeys(d), { turn: record.turn, rev: 0, author: record.ownSlot, active: record.ownSlot, slots, instance: turnInstance(turnVerifierMark(record.verifier ?? null), random) }, ports.signer);
   return { d: toBase64Url(d), tombstone: toBase64Url(tombstone), packet: toBase64Url(packet), at: null, sources: [] };
 }
 

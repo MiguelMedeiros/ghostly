@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   fromBase64Url, identityFromSeed, readTurnPacket, sign, signTurnPacket, signTurnRelease, toBase64Url, turnKeys, TURN_SETTLE_MS,
-  type Identity, type TurnRecord, type TurnRelease,
+  type Identity, type TurnRecord, type TurnRelease, turnStatedVerifier,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import { TurnKeeper, type TurnStore } from "../src/devices/turn";
@@ -77,6 +77,9 @@ describe("the take of a handoff", () => {
     expect(network.puts().map((p) => [p.source, p.condition])).toEqual([["dht", sequence], ["https://relay.test", sequence]]);
     expect(clock.slept).toEqual([TURN_SETTLE_MS]);
     expect(store.record.settle).toBeUndefined();
+    // The taker's device state does not hold the verifier of the profile it installed: its first record states none of
+    // its own making (its engine states the profile's once it runs).
+    expect(turnStatedVerifier(record.instance)).toBeNull();
   });
 
   it("over a later rev of the releaser's turn it never stored (the releaser started again since): still no rival", async () => {
