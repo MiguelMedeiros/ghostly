@@ -738,8 +738,12 @@ export class PaymentDesk {
     // And only what is of that network: a Testnet request naming a real mint never has real ecash spent on it. A
     // test mint's invoice reads like a Bitcoin one, so only an invoice of a test chain is known to be test money.
     const bolt11 = allowed("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
-    const chain = bolt11 ? decodeBolt11(bolt11)?.network : undefined;
-    const invoice = bolt11 && !(network === "mainnet" && chain && chain !== "bitcoin") ? bolt11 : undefined;
+    // An invoice for another amount than the request's, or (beside an on-chain or Ark target) of another network than
+    // the target's, is not this payment: it is never offered, here or to another wallet.
+    const decoded = bolt11 ? decodeBolt11(bolt11) : null;
+    const chain = decoded?.network;
+    const sameTarget = !(target?.method === "bitcoin" || target?.method === "arkade" || target?.method === "bark") || (chain === "bitcoin") === (walletNetworkOf(target.network) === "mainnet");
+    const invoice = bolt11 && decoded?.amountSat === amount && sameTarget && !(network === "mainnet" && chain && chain !== "bitcoin") ? bolt11 : undefined;
     const mints = allowed("cashu") ? parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? "").filter((mint) => mintNetwork(mint) === network) : [];
     if (!target && !invoice && !mints.length && !federations) return;
     await this.save({

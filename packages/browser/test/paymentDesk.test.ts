@@ -12,6 +12,7 @@ import type { PendingSwap, StoredMessage, StoredPayment } from "../src/shared/ty
 import { resetDb, rows, seed } from "./fakes";
 import { paymentAlias, paymentWireId } from "../src/shared/paymentIds";
 import { replyRef } from "../src/shared/replies";
+import { invoiceFor } from "./helpers/invoice";
 // covers: payments.cashu.send, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.chat.methods, payments.chat.refused, payments.external, payments.arkade.request, payments.bark.send, payments.bitcoin.send, payments.usdt.send, delivery.hold.request, chat.waiting
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
@@ -26,6 +27,8 @@ const MINT = "https://mint.example";
 const ARK = "https://mutinynet.arkade.sh";
 const BARK = "https://ark.signet.2nd.dev";
 const INVOICE = "lnbc-invoice";
+/** What a contact's 40-sat request carries: an invoice that asks exactly that. */
+const ASKED = invoiceFor(40);
 const CHECK = JSON.stringify({ check: true });
 const tx = (c: string) => c.repeat(64);
 
@@ -313,7 +316,7 @@ describe("two contacts' requests under one id", () => {
 });
 
 describe("a contact's request arriving", () => {
-  const lnRequest = (id: string, extra: Partial<PaymentRequest> = {}): PaymentRequest => ({ id, timestamp: 3, amount: { value: "40", asset: "sat" }, endpoints: [[ENDPOINT.bolt11, INVOICE], [ENDPOINT.cashu, cashuRequestPayload([MINT])]], ...extra });
+  const lnRequest = (id: string, extra: Partial<PaymentRequest> = {}): PaymentRequest => ({ id, timestamp: 3, amount: { value: "40", asset: "sat" }, endpoints: [[ENDPOINT.bolt11, ASKED], [ENDPOINT.cashu, cashuRequestPayload([MINT])]], ...extra });
 
   it("is taken once, whatever a second copy says", async () => {
     const { desk } = setup();
@@ -329,8 +332,26 @@ describe("a contact's request arriving", () => {
     expect([desk.payment("r-ark"), desk.payment("r-mix")]).toEqual([undefined, undefined]);
     allowed.lightning = false; // Not on a live session: what counts is what this device enabled.
     await desk.onPaymentRequest("l", lnRequest("r-held"), true);
-    expect(desk.payment("r-held")).toMatchObject({ invoice: INVOICE, mints: [MINT] });
+    expect(desk.payment("r-held")).toMatchObject({ invoice: ASKED, mints: [MINT] });
     expect(host.storeMessage).toHaveBeenCalledWith(expect.objectContaining({ via: "hold", paymentId: "r-held" }));
+  });
+
+  it("keeps an invoice only when it asks the request's amount, and beside an address only of the address's network", async () => {
+    const { desk } = setup();
+    const asked = (id: string, endpoints: [string, string][], network: "mainnet" | "testnet" = "testnet") => desk.onPaymentRequest("l", { ...lnRequest(id), amount: { value: "1000", asset: "sat" }, endpoints, network });
+    const onchain = JSON.stringify(btc());
+    await asked("ln-more", [[ENDPOINT.bolt11, invoiceFor(100_000)]]);
+    await asked("ln-any", [[ENDPOINT.bolt11, "lnbc-invoice"]]);
+    await asked("btc-more", [[ENDPOINT.bitcoin, onchain], [ENDPOINT.bolt11, invoiceFor(100_000, "lnbcrt")]]);
+    await asked("btc-real", [[ENDPOINT.bitcoin, onchain], [ENDPOINT.bolt11, invoiceFor(1_000)]]);
+    expect([desk.payment("ln-more"), desk.payment("ln-any")]).toEqual([undefined, undefined]);
+    expect(desk.payment("btc-more")).toMatchObject({ target: { method: "bitcoin" }, invoice: undefined });
+    expect(desk.payment("btc-real")).toMatchObject({ target: { method: "bitcoin" }, invoice: undefined });
+    // The same amount, on the address's network (or a test mint's invoice beside no address), is kept.
+    const exact = invoiceFor(1_000, "lnbcrt"), testMint = invoiceFor(1_000);
+    await asked("btc-same", [[ENDPOINT.bitcoin, onchain], [ENDPOINT.bolt11, exact]]);
+    await asked("ln-same", [[ENDPOINT.bolt11, testMint]]);
+    expect([desk.payment("btc-same")?.invoice, desk.payment("ln-same")?.invoice]).toEqual([exact, testMint]);
   });
 
   it("only whole sats: anything else is answered as refused and not kept", async () => {
