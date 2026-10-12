@@ -506,6 +506,40 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(refused === "bob" ? bob : carol, id, messageId).bytes!)).toBe(meta.d);
   });
 
+  it.each([2, 6])("%i files sent together reach a group of 16 as fast as its edges carry them, with no wait for the next group-have", async count => {
+    const t = new FilesWorld();
+    const { peers: [alice, ...others], id } = await t.mesh(Array.from({ length: 16 }, (_, i) => `m${i}`));
+    const sent = await Promise.all(Array.from({ length: count }, (_, i) => t.send(alice, id, pattern(50_000, i + 1), { name: `photo-${i}.jpg` })));
+    const start = t.world.now, at: number[] = [];
+    // An edge here carries a whole file within a second: what takes longer is a member waiting to hear whom to ask.
+    while (!others.every(p => sent.every(s => t.done(p, id, s.messageId))) && t.world.now - start < 120_000) {
+      await t.world.run(1000);
+      at.push(others.reduce((n, p) => n + sent.filter(s => t.done(p, id, s.messageId)).length, 0));
+    }
+    expect(at.at(-1)).toBe(15 * count);
+    // A second with nothing arriving is a member that was turned away as busy, or waits for a holder, and was not told.
+    expect(at.filter((n, i) => n === (at[i - 1] ?? 0))).toEqual([]);
+    for (const p of others) for (const s of sent) expect(sha(t.got(p, id, s.messageId).bytes!)).toBe(s.meta.d);
+  });
+
+  it("an edge takes a few group-have frames in a window, and what is past them is said when it has room again", async () => {
+    // Set before the edges are: an edge counts its frames from when it is made.
+    Object.assign(limits, { haveFrames: 2, haveIds: 1 });
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    // Bob fetches nothing by itself: what goes on the edge is what Alice says she holds.
+    t.files.get(bob)!.settings.autoDownloads = false;
+    const sent = await Promise.all([1, 2, 3, 4, 5].map(seed => t.send(alice, id, pattern(1000, seed))));
+    const said = () => t.seen.filter(s => s.from === "alice" && s.frame.t === "group-have").flatMap(s => s.frame.ids as string[]);
+    const start = t.world.now;
+    await t.world.run(GROUP_FILE_LIMITS.haveWindowMs - 1000);
+    expect(said()).toHaveLength(2);
+    await t.world.until(() => said().length === 5, 60_000);
+    // Each file said once, the last of them two windows on.
+    expect(said().sort()).toEqual(sent.map(s => s.messageId).sort());
+    expect(t.world.now - start).toBeGreaterThan(2 * GROUP_FILE_LIMITS.haveWindowMs);
+  });
+
   const serving = (p: Peer) => (p.groups.files as unknown as { servingNow(): { peer: string; size: number }[] }).servingNow();
 
   it("what a holder sends counts toward its day whatever the asker confirms, and an asker cannot have it sent past the day", async () => {

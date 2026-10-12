@@ -209,9 +209,9 @@ interface Edge {
   taking: Map<string, string>;
   /** Transfers that ended on the edge, oldest first: the last `ENDED_KEPT` keep their record, the rest are forgotten. */
   ended: ["in" | "out", string][];
-  /** Message ids to say in the next `group-have`, and when one last went. */
+  /** Message ids to say in the next `group-have`, and the frames of it that went lately (`haveFrames` in `haveWindowMs`). */
   have: Set<string>;
-  haveAt: number;
+  haveSent: RateWindow;
   /** Message ids its member asked for while this device served all it serves at once: said in a `group-have` once a slot frees. */
   busy: Set<string>;
   /** Message ids its member said it does not hold (`gone`): not asked of it again until it says it does, or the edge's session closes or opens. */
@@ -521,8 +521,7 @@ export class GroupFileDesk {
     }
     this.letGo();
     for (const edge of this.edgesById.values()) {
-      if (!edge.have.size || now - edge.haveAt < GROUP_FILE_LIMITS.haveEveryMs || !this.deps.ready(edge.linkId)) continue;
-      this.sendHave(edge, [...edge.have]);
+      if (edge.have.size && this.deps.ready(edge.linkId)) this.sendHave(edge, [...edge.have]);
     }
     for (const [groupId, have] of this.communityHave) {
       if (!have.ids.size || now - have.at < GROUP_FILE_LIMITS.communityHaveEveryMs) continue;
@@ -721,16 +720,24 @@ export class GroupFileDesk {
     }
   }
 
-  /** Says on an edge which files this device holds. */
+  /**
+   * Says on an edge which files this device holds, as many frames as the edge takes now (`haveFrames` in
+   * `haveWindowMs`); the ids past that, and those of a frame that could not go, wait for the next tick with room.
+   */
   private sendHave(edge: Edge, ids: string[]): void {
+    for (const id of ids) edge.have.add(id);
     for (let i = 0; i < ids.length; i += GROUP_FILE_LIMITS.haveIds) {
-      if (!this.deps.send(edge.linkId, { t: GROUP_HAVE_FRAME, g: edge.groupId, ids: ids.slice(i, i + GROUP_FILE_LIMITS.haveIds) })) return;
+      const frame = ids.slice(i, i + GROUP_FILE_LIMITS.haveIds);
+      if (edge.haveSent.wait() || !this.deps.send(edge.linkId, { t: GROUP_HAVE_FRAME, g: edge.groupId, ids: frame })) return;
+      edge.haveSent.take();
+      for (const id of frame) edge.have.delete(id);
     }
-    edge.have.clear();
-    edge.haveAt = this.deps.now();
   }
 
-  /** This device holds a new file: the group hears it with the next `group-have` (batched, `haveEveryMs` at most on an edge). */
+  /**
+   * This device holds a new file: the group hears it with the next `group-have`, which gathers what there is to say
+   * until the next tick.
+   */
   private queueHave(kept: Kept): void {
     if (!this.deps.settings().serveFiles) return;
     if (this.deps.membership(kept.groupId)?.community) {
@@ -747,7 +754,8 @@ export class GroupFileDesk {
   private edge(groupId: string, peer: string, linkId: string): Edge {
     const known = this.edgesById.get(linkId);
     if (known) return known;
-    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(), haveAt: 0, busy: new Set(), gone: new Set() };
+    const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(),
+      haveSent: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Set(), gone: new Set() };
     edge.files = new ChatFiles({
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
