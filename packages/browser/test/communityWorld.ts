@@ -234,6 +234,13 @@ export class CommunityWorld {
       storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
       forgetFrame: async (linkId, id) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) delete row.frame; },
       keepFrame: async (linkId, id, frame) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) row.frame = frame; },
+      // The history is the order rows came in: these go to its end, in this order.
+      placeAgain: async (linkId, ids) => {
+        for (const id of ids) {
+          const i = messages.findIndex(m => m.linkId === linkId && m.id === id);
+          if (i >= 0) messages.push(...messages.splice(i, 1));
+        }
+      },
       emit: () => {},
       myNick: () => peer.nick,
       staysOnline: () => !!peer.staysOnline,

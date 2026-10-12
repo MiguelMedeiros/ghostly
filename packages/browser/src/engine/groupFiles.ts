@@ -239,6 +239,11 @@ export class GroupFileDesk {
   /** `<group>\n<message id>` → local id. */
   private readonly byMessage = new Map<string, string>();
   private readonly wants = new Map<string, Want>();
+  /**
+   * The want last asked on each edge (by link id), and its file: whether a file is asked of an edge's member is read here,
+   * not by going through every want each time (`askedOf`). An entry the want has moved on from is dropped when read.
+   */
+  private readonly askedOn = new Map<string, { id: string; want: Want }>();
   private readonly edgesById = new Map<string, Edge>();
   /** My file about to be announced, by `<group>\n<digest>`: the message that announces it takes this local id. */
   private readonly own = new Map<string, string>();
@@ -537,12 +542,30 @@ export class GroupFileDesk {
 
   private newWant(): Want { return { at: this.deps.now(), tried: new Set(), moved: 0, movedAt: 0 }; }
 
-  /** Wants of this group that wait for a holder: asked now (an edge came up, or a member said it holds something). */
+  /**
+   * Wants of this group that wait for a holder: asked now (an edge came up or freed, or a member said it holds
+   * something). One queued behind an edge's file is asked only while an edge of the group is free to take it: once every
+   * edge has a file asked of it, it would only queue again. So a file that ends asks the few wants it frees an edge for,
+   * not every want waiting (a member back from away with hundreds of files to fetch asked each of them once per file).
+   */
   private retry(groupId: string): void {
+    let free: boolean | undefined;
     for (const [id, want] of this.wants) {
       const kept = this.kept.get(id);
-      if (kept?.groupId === groupId && !want.holder) this.ask(kept);
+      if (kept?.groupId !== groupId || want.holder) continue;
+      if (this.deps.transfers.get(id)?.stage === "queued" && !(free ??= this.edgeFree(groupId))) continue;
+      this.ask(kept);
+      // That ask may have taken the last free edge.
+      free = undefined;
     }
+  }
+
+  /** An edge of the group is up, its files/3 live, and no file is asked of its member: a want could be asked on it. */
+  private edgeFree(groupId: string): boolean {
+    for (const linkId of this.deps.edges(groupId).values()) {
+      if (this.deps.ready(linkId) && this.edgesById.get(linkId)?.files.live && !this.askedOf(linkId)) return true;
+    }
+    return false;
   }
 
   /**
@@ -574,6 +597,7 @@ export class GroupFileDesk {
       if (this.askedOf(linkId, want)) { behind = true; continue; }
       // Asked of it before the frame goes: its answer is this want's, however soon it comes.
       Object.assign(want, { holder: key, linkId, at: this.deps.now() });
+      this.askedOn.set(linkId, { id: kept.id, want });
       if (!this.deps.send(linkId, { t: GROUP_WANT_FRAME, g: kept.groupId, id: kept.message })) { want.tried.add(key); continue; }
       if (want.holder === key) this.show(kept, { state: "transferring", stage: "queued", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in" });
       return;
@@ -586,9 +610,16 @@ export class GroupFileDesk {
       wait, note: WAITING_NOTES[wait], ...(wait === "damaged" && { stalled: true }) });
   }
 
-  /** Another file is asked of, or coming from, the member at the other end of this edge. */
-  private askedOf(linkId: string, except: Want): boolean {
-    for (const want of this.wants.values()) if (want !== except && want.linkId === linkId) return true;
+  /**
+   * Another file is asked of, or coming from, the member at the other end of this edge. A want gets its edge only in
+   * `ask`, which notes it in `askedOn`, and one edge has one want at a time: the want noted there is it, while it still
+   * waits and is still on that edge.
+   */
+  private askedOf(linkId: string, except?: Want): boolean {
+    const on = this.askedOn.get(linkId);
+    if (!on || on.want === except) return false;
+    if (on.want.linkId === linkId && this.wants.get(on.id) === on.want) return true;
+    this.askedOn.delete(linkId);
     return false;
   }
 
@@ -915,10 +946,20 @@ export class GroupFileDesk {
       this.pace(this.sentTaken, groupId, GROUP_FILE_LIMITS.announceTaken, GROUP_FILE_LIMITS.announceWindowMs)];
   }
 
+  /** A file's row shows `view`; the engine hears of it only when that is not what the row shows already. */
   private show(kept: Kept, view: FileTransferView): void {
+    if (sameView(this.deps.transfers.get(kept.id), view)) return;
     this.deps.transfers.set(kept.id, view);
     this.deps.changed();
   }
+}
+
+/** Two views of a transfer that say the same: their fields are all plain values. */
+function sameView(a: FileTransferView | undefined, b: FileTransferView): boolean {
+  if (!a) return false;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof FileTransferView)[]);
+  for (const key of keys) if (a[key] !== b[key]) return false;
+  return true;
 }
 
 /** A file's holders with `key` the newest of them, the `holders` newest kept. */

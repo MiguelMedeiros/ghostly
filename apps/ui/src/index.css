@@ -1285,6 +1285,8 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 .connection-switch-track::after { content: ""; display: block; width: 16px; height: 16px; margin: 3px; border-radius: 50%; background: var(--theme-text-primary); transition: transform 160ms ease; }
 .connection-switch input:checked + .connection-switch-track { background: var(--theme-accent); border-color: var(--theme-accent); }
 .connection-switch input:checked + .connection-switch-track::after { transform: translateX(16px); background: var(--theme-panel-header); }
+/* Right to left the knob starts at the right end, so on it moves left: else it leaves its track (Arabic). */
+[dir="rtl"] .connection-switch input:checked + .connection-switch-track::after { transform: translateX(-16px); }
 .connection-switch input:focus-visible + .connection-switch-track { outline: 2px solid var(--theme-accent); outline-offset: 3px; }
 .connection-switch input:disabled + .connection-switch-track { opacity: 0.55; }
 @media (prefers-reduced-motion: reduce) {

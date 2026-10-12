@@ -335,6 +335,12 @@ export function squashMessage(p, commits) {
 export const SKIP_CI = /\[(skip ci|ci skip|no ci|skip actions|actions skip)\]/gi;
 export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 
+/** GitHub's refusal of a push whose commits change a workflow, by a token without the `workflows` permission. */
+const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
+
+const workflowText = (base, workflows) =>
+  `Merge train: this pull request changes a workflow (${workflows.join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission (then remove \`queue:failed\`).`;
+
 const conflictText = (base, reason) =>
   reason === "empty"
     ? `Merge train: this pull request has no changes left against \`${base}\`, so it left the line. Close it if it already landed.`
@@ -487,7 +493,26 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const aboard = prs.filter((p) => built.applied.includes(p.number));
     if (!aboard.length) return board(next);
     const branch = `batch/${base}-${stamp}`;
-    await (dry ? say(`(dry run) would push ${built.sha.slice(0, 12)} to ${branch}`) : git.push(branch, built.sha));
+    try {
+      await (dry ? say(`(dry run) would push ${built.sha.slice(0, 12)} to ${branch}`) : git.push(branch, built.sha));
+    } catch (e) {
+      // The queue app's token may not push commits that change a workflow (it has no `workflows` permission): the pull
+      // requests aboard that change one leave the line, saying so, and the rest board without them. Else every run
+      // failed here, and the whole line waited behind them.
+      if (!WORKFLOW_PUSH_REFUSED.test(`${e?.message ?? e}`)) throw e;
+      const changing = [];
+      for (const p of aboard) {
+        const workflows = (await gh.pullFiles(p.number)).filter((f) => f.startsWith(".github/workflows/"));
+        if (workflows.length) changing.push([p, workflows]);
+      }
+      if (!changing.length) throw e;
+      for (const [p, workflows] of changing) {
+        say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
+        done.dropped.push(p.number);
+        await leave(p, LABEL.failed, workflowText(base, workflows));
+      }
+      return board(prs.filter((p) => !changing.some(([c]) => c === p)), next, extra);
+    }
     const title = `train: ${aboard.length} into ${base} (${aboard.map((p) => `#${p.number}`).join(" ")})`;
     const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next, extra, built.commits) });
     say(`OPEN #${pr.number} ${title}`);

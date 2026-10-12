@@ -146,6 +146,14 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot take calls", "calls.contactCannot"),
   exact("Your contact needs an updated Ghostly for calls", "calls.contactOutdated"),
   exact("Calls are not available in this app", "calls.unavailableHere"),
+  // In a call: why a screen share failed (packages/react useWebRTC.ts `screenShareErrorMessage`), the call window's
+  // alert, and why the share button is off (`screenShareUnavailable`; apps/ui/src/desktop/nativeCalls.ts on Linux).
+  exact("Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings.", "calls.share.blocked", "calls.share.blockedNext"),
+  exact("There is no screen to share", "calls.share.noScreen"),
+  exact("Screen sharing is not available here", "calls.share.notHere"),
+  exact("Could not share the screen. Try again.", "calls.share.failed", "calls.share.failedNext"),
+  exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
+  exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
   // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts).
   exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable"),

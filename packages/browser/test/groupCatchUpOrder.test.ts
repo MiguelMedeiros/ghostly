@@ -107,6 +107,21 @@ describe("a member back in a private group reads what it missed in the order it 
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
   });
 
+  it("one member wrote 200 and every edge opens at once: that member's lines in the order written, the newest last", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
+    const [alice, , , dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    const written: string[] = [];
+    for (let i = 1; i <= 200; i++) { written.push(`alice ${i}`); await alice.groups.send(id, `alice ${i}`); await world.run(50); }
+    // Alice's own answer brings her newest 32; the older ones come from the others, asked for 32 at a time.
+    world.slow = (_from, to) => to === dave ? 4 : 0;
+    world.reopen(dave);
+    await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 120_000);
+    await world.run(1_000);
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
+  });
+
   it("what the member asked first writes meanwhile is not its answer: the others are told as soon as that has come", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
     const [alice, bob, carol, dave, eve] = peers;
