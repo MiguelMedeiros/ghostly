@@ -215,8 +215,8 @@ export function eventTime(taken: Map<string, Set<number>>, groupId: string, time
 export const arrivalNow = (tick: number): number => Math.max(tick, Date.now());
 /**
  * Keeps on the group's record when a member's message came, where that is later than what it holds: the record is
- * saved with the session right after (a message taken moves its state), so a message handed to me late still makes
- * the group unread after the app starts again. Read from the history alone, by its own time, it sorted among what I
+ * saved with the session soon after (a message taken moves its state, saved within `GROUP_LIMITS.saveWithinMs` and when
+ * the app stops), so a message handed to me late still makes the group unread after the app starts again. Read from the history alone, by its own time, it sorted among what I
  * had read and the mark was gone on the next start.
  */
 export function noteCame(group: Pick<StoredGroup, "came"> | undefined, came: number, peer: boolean, mentioned: boolean): void {
