@@ -179,7 +179,7 @@ import type {
 import { WALLET_TYPES } from "../shared/types";
 import type { WakeSubscription } from "../shared/types";
 import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, type BackupReminders } from "../shared/backupReminder";
-import type { MessageChanges } from "../shared/messageChanges";
+import { withoutFrame, type MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
 import { buttonPress, buttonsState, messageButtons } from "../shared/buttons";
 import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
@@ -1292,6 +1292,9 @@ export class GhostlyNode implements EngineImplementation {
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeNewMessage(message),
     completeMessage: message => this.completeGroupMessage(message),
+    // A row of its own, small: written with no disk sync of its own (the frame is a copy others hold too).
+    forgetFrame: async (linkId, id) => { await db.patchMessage(linkId, id, stored => stored.frame ? { frame: undefined } : null, true); },
+    keepFrame: async (linkId, id, frame) => { await db.patchMessage(linkId, id, () => ({ frame }), true); },
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
     emit: () => this.emitState(),
@@ -2265,16 +2268,22 @@ export class GhostlyNode implements EngineImplementation {
     return undefined;
   }
 
-  getMessages(linkId: string): Promise<StoredMessage[]> {
-    return db.getMessages(linkId);
+  /** A chat's or a group's history, as a page gets it (`withoutFrame`). */
+  async getMessages(linkId: string): Promise<StoredMessage[]> {
+    return (await db.getMessages(linkId)).map(withoutFrame);
   }
 
   /** One message of a chat, read by its id: the whole history costs a read of every row. */
-  getMessage(linkId: string, id: string): Promise<StoredMessage | undefined> {
-    return db.getMessage(linkId, id);
+  async getMessage(linkId: string, id: string): Promise<StoredMessage | undefined> {
+    const message = await db.getMessage(linkId, id);
+    return message && withoutFrame(message);
   }
 
-  async messagePage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+  async messagePage(asked: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+    const page = await this.storedPage(asked);
+    return { ...page, messages: page.messages.map(withoutFrame) };
+  }
+  private async storedPage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
     if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("limit: a whole number of messages, at least 1");
     if (before === undefined) return db.getMessagePage(linkId, { limit });
     if (typeof before === "number") {
@@ -4238,7 +4247,7 @@ export class GhostlyNode implements EngineImplementation {
     if (typeof groupId !== "string") return { error: "No such group", refused: true };
     return this.groups.fileCheck(groupId);
   }
-  groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
+  async groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return (await this.groups.messages(groupId)).map(withoutFrame); }
 
   /**
    * Presses a button of a message someone else sent to a chat or a group (`group:<id>`), WISP 406 · Message Buttons:
@@ -7447,7 +7456,7 @@ export class GhostlyNode implements EngineImplementation {
     // A file it announces (WISP 503) comes only with the whole copy, which also says what the row shows for it.
     const added: Partial<StoredMessage> = { ...(whole.mentions && { mentions: whole.mentions }), ...(whole.mentioned && { mentioned: true }),
       ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }), ...(whole.card && { card: whole.card }), ...(whole.press && { press: whole.press }),
-      ...(whole.file && { file: whole.file, text: whole.text }) };
+      ...(whole.file && { file: whole.file, text: whole.text }), ...(whole.frame && { frame: whole.frame }) };
     if (!Object.keys(added).length) return;
     // A card belongs to its version: an edit taken meanwhile keeps its own.
     const patched = await db.patchMessage(message.linkId, message.id, stored => {
@@ -7473,11 +7482,11 @@ export class GhostlyNode implements EngineImplementation {
       if (fresh) { this.reactionNotes.set(linkId, fresh); this.emitState(); }
     }
     const onChanges = this.events.onMessageChanges;
-    if (!onChanges) return this.events.onMessages(linkId, await db.getMessages(linkId));
+    if (!onChanges) return this.events.onMessages(linkId, await this.getMessages(linkId));
     const unique = [...new Set(ids)];
     if (!unique.length) return;
     const rows = await Promise.all(unique.map(id => db.getMessage(linkId, id)));
-    onChanges.call(this.events, linkId, { messages: rows.filter((row): row is StoredMessage => !!row), deleted: unique.filter((_, i) => !rows[i]) });
+    onChanges.call(this.events, linkId, { messages: rows.filter((row): row is StoredMessage => !!row).map(withoutFrame), deleted: unique.filter((_, i) => !rows[i]) });
   }
 
   /**

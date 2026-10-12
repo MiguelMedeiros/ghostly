@@ -564,6 +564,8 @@ export interface ServicesPlatform {
   /**
    * A URL a `<video>` plays a stored file from without the page holding it (Desktop: served in ranges by Rust), for
    * a file `getFile` cannot hand out. Null where the platform cannot, or the file is gone. Call `release` when done.
+   * Rejects with `NO_ROOM_TO_PLAY` (@ghostly/browser/shared/fileBytes) when the disk has no room for the copy the
+   * player makes of it (Desktop on Linux): the file is offered to save instead.
    */
   streamFile?(fileId: string): Promise<{ url: string; release(): void } | null>;
   /**

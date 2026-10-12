@@ -1,6 +1,7 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, PIN_LIMITS, ReactionWindow, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
+  GROUP_LIMITS, frameBytes, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -108,6 +109,13 @@ export interface GroupsHost {
    * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
    */
   completeMessage?(message: StoredMessage): Promise<void>;
+  /**
+   * A stored message of a private group no longer keeps the frame it came in (`StoredMessage.frame`): newer ones took
+   * its place among those kept to hand on (`GROUP_LIMITS.relay`). Absent: the frame stays on its row.
+   */
+  forgetFrame?(linkId: string, id: string): Promise<void>;
+  /** A stored message of a private group takes this frame as the one it keeps (in the place of its own, if it has one). */
+  keepFrame?(linkId: string, id: string, frame: GroupMessageFrame): Promise<void>;
   /** A private group's roster or my status in it changed, or I forgot it. */
   membersChanged?(groupId: string): void;
   /**
@@ -319,12 +327,16 @@ export const MESH_GOSSIP_MS = 60_000;
 export const MESH_GAP_AGAIN_MS = 10_000;
 /**
  * A member whose messages were just asked of another (`Groups.askOf`) is told where I am only once that one's answer
- * has come: no message from it for this long, or `MESH_SYNC_HOLD_MAX_MS` after it was asked. Told at once, its own
+ * has come: no message of it for this long, or `MESH_SYNC_HOLD_MAX_MS` after it was asked. Told at once, its own
  * answer raced the other's, which holds the same messages among everyone's in the order they were written, and a
  * member back in a group of five read each member's lines apart, the newest above older ones (WISP 902 § Catch-up).
+ * A message of the answer is one written before the asking: what the member writes meanwhile is no reason to wait, so
+ * the longest wait only has to cover a whole answer (the 256 messages a member keeps for the others and its own last
+ * 32) at the pace of a phone with a long history, 600 ms a frame. At ten seconds, an answer of 200 messages at four a
+ * second was cut at the 40th, and the others' newest lines landed above what was still coming.
  */
 export const MESH_SYNC_HOLD_MS = 1_500;
-export const MESH_SYNC_HOLD_MAX_MS = 10_000;
+export const MESH_SYNC_HOLD_MAX_MS = 180_000;
 /** What a mesh member asked others for, for one reachable member some of whose messages never reached it (`Groups.gapsOf`). */
 interface GapAsk { mark: string; of: Set<string>; noticed?: number; at?: number; last?: { via: string; at: number; asked: Record<string, number[]> } }
 /** Where a member's gossip turns start among the members it is connected to: a number of its own, from its key. */
@@ -373,6 +385,8 @@ export function meshEdgeIntervals(base: PollIntervals, members: () => number): P
 export class Groups {
   private readonly stored = new Map<string, StoredGroup>();
   private readonly sessions = new Map<string, GroupSession>();
+  /** Per private group, the rows that hold the frame their message came in (`StoredMessage.frame`), oldest first, and what each counts for. */
+  private readonly framesKept = new Map<string, { id: string; bytes: number }[]>();
   /** Contacts (chat ids, kept in `StoredGroup.invited`) and entry sessions I invited to each group, until they answer. */
   private readonly invited = new Map<string, Set<string>>();
   /** Invitee side: when my accept of each invitation was last said, how many times since the inviter's chat came up, and whether it was down. */
@@ -499,10 +513,13 @@ export class Groups {
     await this.communities.load(all.filter(g => g.community || g.joining));
     for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
-      if (group.state) this.attach(group.state);
-      if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
       const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
+      const framed = history.filter(m => m.frame);
+      this.framesKept.set(group.id, framed.map(m => ({ id: m.id, bytes: frameBytes(m.frame!) })));
+      // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`), not from its own record.
+      if (group.state) this.attach(group.state, framed.map(m => m.frame!));
+      if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
       const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
       // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
@@ -1077,6 +1094,7 @@ export class Groups {
     this.lastRoster.delete(groupId);
     this.lastTold.delete(groupId);
     this.pendingEntries.delete(groupId);
+    this.framesKept.delete(groupId);
     this.knocked.delete(groupId);
     this.knockCheckAt.delete(groupId);
     this.knockRewrites.delete(groupId);
@@ -1650,8 +1668,9 @@ export class Groups {
       return;
     }
     const taken = await session.handle(peerKey, frame);
-    // A message over this edge: what this member was asked for may still be coming (`holdSync`).
-    if (taken.some(f => f.t === "group-msg")) {
+    // A message over this edge written before this member was asked: its answer is still coming (`holdSync`).
+    const askedAt = this.askedAt(groupId, peerKey);
+    if (taken.some(f => f.t === "group-msg" && f.ts < askedAt)) {
       let handed = this.lastHanded.get(groupId);
       if (!handed) this.lastHanded.set(groupId, (handed = new Map()));
       handed.set(peerKey, this.now());
@@ -1847,9 +1866,16 @@ export class Groups {
     return out;
   }
 
+  /** When `via` was last asked for another member's messages (`askOf`), or 0: what it sends written before that is its answer. */
+  private askedAt(groupId: string, via: string): number {
+    let at = 0;
+    for (const asked of this.relayAsked.get(groupId)?.values() ?? []) if (asked.via === via && asked.at > at) at = asked.at;
+    return at;
+  }
+
   /**
    * Whether the answer of the member asked for someone's messages may still be coming: its edge up, asked under
-   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message from it (or the asking) under `MESH_SYNC_HOLD_MS` ago.
+   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message of its answer (or the asking) under `MESH_SYNC_HOLD_MS` ago.
    */
   private answering(groupId: string, { via, at }: { via: string; at: number }, now: number): boolean {
     const edge = this.host.edges(groupId).get(via);
@@ -1864,7 +1890,12 @@ export class Groups {
    */
   private holdSync(groupId: string, peerKey: string): boolean {
     const asked = this.relayAsked.get(groupId)?.get(peerKey);
-    if (!asked || asked.via === peerKey || !this.answering(groupId, asked, this.now())) { this.syncHeld.get(groupId)?.delete(peerKey); return false; }
+    if (!asked || asked.via === peerKey || !this.answering(groupId, asked, this.now())) {
+      this.syncHeld.get(groupId)?.delete(peerKey);
+      // Reached again: what was asked for it while it was unreachable is over, and the next time it is, it is asked for anew.
+      this.relayAsked.get(groupId)?.delete(peerKey);
+      return false;
+    }
     let held = this.syncHeld.get(groupId);
     if (!held) this.syncHeld.set(groupId, (held = new Map()));
     held.set(peerKey, { ...asked });
@@ -1879,6 +1910,7 @@ export class Groups {
     for (const [key, asked] of held) {
       if (this.answering(groupId, asked, now)) continue;
       held.delete(key);
+      if (this.relayAsked.get(groupId)?.get(key)?.via === asked.via) this.relayAsked.get(groupId)!.delete(key);
       const edge = edges.get(key);
       if (!edge || !this.host.linkReady(edge) || !rosterHas(session.roster, key)) continue;
       try { this.host.sendOnLink(edge, session.syncFrame(this.askOf(groupId, session, key))); } catch { /* it closed: it is told when it opens again */ }
@@ -2068,13 +2100,32 @@ export class Groups {
 
   // -- internals -----------------------------------------------------------
 
+  /**
+   * A message's row took the frame it came in: past `GROUP_LIMITS.relay` frames (or their bytes) in a group, the oldest
+   * rows give theirs up, so a group's history holds the frames of its newest messages only.
+   */
+  private async frameKept(groupId: string, id: string, frame: GroupMessageFrame): Promise<void> {
+    let kept = this.framesKept.get(groupId);
+    if (!kept) this.framesKept.set(groupId, (kept = []));
+    // The whole copy of a message stored before (`completeMessage`) takes its row's place in the line once.
+    if (kept.some(k => k.id === id)) return;
+    kept.push({ id, bytes: frameBytes(frame) });
+    let bytes = kept.reduce((sum, k) => sum + k.bytes, 0);
+    while (kept.length > GROUP_LIMITS.relay || bytes > GROUP_LIMITS.relayBytes) {
+      const oldest = kept.shift()!;
+      bytes -= oldest.bytes;
+      await this.host.forgetFrame?.(MESSAGE_LINK(groupId), oldest.id).catch(() => {});
+    }
+  }
+
   private session(groupId: string): GroupSession {
     const session = this.sessions.get(groupId);
     if (!session) throw new Error("Group not found");
     return session;
   }
 
-  private attach(state: GroupState): void {
+  /** `frames`: what the group's rows hold to hand on, oldest first (none yet for a group just made, joined or given back). */
+  private attach(state: GroupState, frames: GroupMessageFrame[] = []): void {
     const session: GroupSession = new GroupSession(state, {
       clock: () => this.now(),
       seqFloor: () => this.host.seqFloor?.() ?? 0,
@@ -2115,9 +2166,13 @@ export class Groups {
         // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
         const file = m.file && this.files ? await this.files.announced(state.id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }) };
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }),
+          ...(m.frame && { frame: m.frame }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 902 · Group Mesh § Catch-up).
-        const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
+        const completed = !!m.completes && !!this.host.completeMessage;
+        const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message);
+        // On its row now: new, or the whole copy of one stored before. A copy I had already changes no row.
+        if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
@@ -2126,6 +2181,8 @@ export class Groups {
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },
+      // Said again for a message I had read: its row takes this frame, the one a member who could not read the first asks for.
+      kept: async (id, frame) => { await this.host.keepFrame?.(MESSAGE_LINK(state.id), id, frame).catch(() => {}); await this.frameKept(state.id, id, frame); },
       edit: e => this.host.groupEdit?.(state.id, e),
       changed: () => {
         // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).
@@ -2140,7 +2197,7 @@ export class Groups {
           return edge && this.host.linkHandled ? this.host.linkHandled(edge) : Promise.resolve(false);
         },
       }),
-    });
+    }, frames);
     this.sessions.set(state.id, session);
     this.lastRoster.set(state.id, session.roster);
     this.lastTold.set(state.id, { status: session.status, top: session.top });

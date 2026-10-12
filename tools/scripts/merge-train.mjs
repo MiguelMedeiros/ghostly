@@ -57,7 +57,8 @@
 // .github/workflows/merge-queue.yml runs it with the queue app's token (GH_TOKEN); pushes made with the workflow's own
 // GITHUB_TOKEN would start no CI. Until that app exists a Mac runs it with its gh login (`gh auth token` when GH_TOKEN
 // is unset) and its git credentials for `origin`; --every <seconds> repeats the run. Without --base the workflow runs
-// every base that has a queued pull request or a batch open (--list-bases prints them as JSON), and a Mac runs `dev`
+// every base that has a queued pull request or a batch open (--list-bases prints them as JSON; with --woken <commit>,
+// the head of the CI run that woke the workflow, only the bases where that commit heads one of them), and a Mac runs `dev`
 // and every `epic/*` branch, logging them each round. Every request and git call has a timeout, and a round that runs
 // past ROUND_DEADLINE is cut and logged, so the loop never stalls silently. --dry-run reads the live repo,
 // builds batches in a temporary worktree (never pushed) and prints what it would do; it changes nothing on GitHub.
@@ -239,11 +240,15 @@ export const readState = (body) => {
   }
 };
 
+/** A pull request that looks like a batch: from this repository, on a `batch/<base>-` branch, with a mark. */
+const batchShaped = (p, base) => !p.fork && p.branch.startsWith(`batch/${base}-`) && readState(p.body)?.base === base;
+
 /**
- * A batch is a pull request the train opened: from this repository, on a `batch/<base>-` branch, with its mark. Only
- * the mark is not enough, since anyone can write one in a pull request's body (a fork's head could be named `dev`).
+ * A batch is a pull request the train opened: shaped like one, opened by the train's own login (`login`), and holding
+ * at least one pull request (the train never opens an empty batch). Only the shape is not enough, since anyone who can
+ * push a branch can name it `batch/dev-…` and write the mark in its body (and a fork's head could be named `dev`).
  */
-export const isBatch = (p, base) => !p.fork && p.branch.startsWith(`batch/${base}-`) && readState(p.body)?.base === base;
+export const isBatch = (p, base, login) => !!login && p.author === login && batchShaped(p, base) && readState(p.body).prs?.length > 0;
 
 /** An epic's umbrella (or main) merges into its base with a merge commit, never squashed into a batch. */
 const mergeCommitOnly = (p) => p.branch.startsWith("epic/") || p.branch === "main";
@@ -371,8 +376,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   };
 
   const open = await gh.pulls(base);
-  const batches = open.filter((p) => isBatch(p, base)).sort((a, b) => a.number - b.number);
-  const queued = open.filter((p) => !isBatch(p, base) && (inLine(p.labels) || also.includes(p.number)));
+  const batches = open.filter((p) => isBatch(p, base, login)).sort((a, b) => a.number - b.number);
+  const queued = open.filter((p) => !isBatch(p, base, login) && (inLine(p.labels) || also.includes(p.number)));
   for (const p of queued) {
     const events = await gh.events(p.number);
     p.queuedAt = queuedAt(events, p.createdAt);
@@ -492,7 +497,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   };
 
   // A run that stopped after landing a batch (a crash, the API budget) left its originals open: close them now.
-  for (const b of (await gh.mergedPulls(base)).filter((p) => isBatch(p, base))) {
+  for (const b of (await gh.mergedPulls(base)).filter((p) => isBatch(p, base, login))) {
     for (const s of readState(b.body).prs) {
       const p = byNumber.get(s.number);
       if (p && p.sha === s.sha && !gone.has(p.number)) await landed(p, b.number);
@@ -957,6 +962,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     labels: p.labels.map((l) => l.name),
     createdAt: p.created_at,
     base: p.base.ref,
+    author: p.user?.login,
   });
   return {
     pulls: async (base) => (await all(`/pulls?state=open${base ? `&base=${encodeURIComponent(base)}` : ""}`)).map(pull),
@@ -1239,9 +1245,19 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
   };
 }
 
-/** The bases with a train to run: `dev` and `epic/<name>` branches with a queued pull request or a batch open. */
-export const trainBases = (pulls) =>
-  [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || isBatch(p, p.base))).map((p) => p.base))].sort();
+/** A whole commit id, as a CI run names its head. */
+const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/**
+ * The bases with a train to run: `dev` and `epic/<name>` branches with a queued pull request or a batch open. `woken`:
+ * the head commit of the CI run that woke the workflow, when one did. Then only the bases where that commit is the head
+ * of a queued pull request or of a batch: the only CI runs that move a train. A run on a pull request that is not in
+ * line (a draft still worked on, a ready one before `queue`) or on a head a push has replaced moves nothing, and the
+ * `queue` label wakes the train by itself when it is added. Anything that is not a commit id is no `woken`. A batch
+ * counts by its shape here (the train's login is not known yet): the run itself ignores one another login opened.
+ */
+export const trainBases = (pulls, woken) =>
+  [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || batchShaped(p, p.base)) && (!COMMIT.test(woken ?? "") || p.sha === woken)).map((p) => p.base))].sort();
 
 /** The bases a Mac serves without --base, the queue app configured or not: `dev` and every `epic/*` branch. */
 export const localBases = async (gh) => ["dev", ...(await gh.epicBranches()).filter((b) => BASE.test(b)).sort()];
@@ -1302,7 +1318,7 @@ async function main() {
   const opt = (name) => (flag(name) ? args[args.indexOf(name) + 1] : undefined);
   const dry = flag("--dry-run") || process.env.DRY_RUN === "true";
   if (!dry && !flag("--run") && !flag("--list-bases")) {
-    console.error("usage: merge-train.mjs --run | --dry-run | --list-bases  [--base <branch>] [--every <seconds>] [--also <n,n>]");
+    console.error("usage: merge-train.mjs --run | --dry-run | --list-bases [--woken <commit>]  [--base <branch>] [--every <seconds>] [--also <n,n>]");
     process.exit(2);
   }
   const also = (opt("--also") ?? "").split(",").filter(Boolean).map(Number);
@@ -1313,7 +1329,7 @@ async function main() {
   const token = process.env.GH_TOKEN || execFileSync("gh", ["auth", "token"], { encoding: "utf8", timeout: 60_000 }).trim();
   const scrub = (s) => String(s).replaceAll(token, "***");
   const gh = restLayer(token, repo);
-  if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls())));
+  if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls(), opt("--woken"))));
   const local = !process.env.GITHUB_ACTIONS && !dry;
   if (local) lock(join(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 60_000 }).trim(), "merge-train.lock"));
   // The login the train comments as: the app's bot on a runner (set by the workflow), the gh user on a Mac.
