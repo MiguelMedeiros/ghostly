@@ -6703,6 +6703,8 @@ export class GhostlyNode implements EngineImplementation {
       // A chat never paired: the one who made the invite still holds it; the one who joined does not.
       pairingProgress: stored.profile && stored.participationSeed && !stored.pairedPeerKey
         ? { role: stored.inviteCode ? "inviter" : "joiner", startedAt: stored.createdAt } : undefined,
+      // An invite sent ten minutes ago or more is no longer awaited at the active pace, however often the app starts.
+      madeAt: stored.createdAt,
       transport: this.transport,
       nick: this.sharedNick,
       avatar: this.sharedAvatar,
