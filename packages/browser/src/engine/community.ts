@@ -381,11 +381,10 @@ export class Communities {
     return [...this.stored.values()].flatMap((group): GroupView[] => {
       const live = this.live.get(group.id);
       const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
-      if (this.knocking(group, live)) {
-        return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false,
-          invitation: { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group),
-            ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } }];
-      }
+      const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group),
+        ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } : undefined;
+      // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
+      if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
       if (!live) return [];
       const s = live.session, edges = this.host.edges(group.id);
       const ready = (key: string) => { const id = edges.get(key); return !!id && this.host.linkReady(id, 2); };
@@ -394,7 +393,7 @@ export class Communities {
       const former = Object.entries(s.state.nicks).filter(([key]) => !rosterHas(s.roster, key));
       return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
         ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
-        canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}),
+        canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
         community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(ready).length },
         members: s.roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
           nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
@@ -450,6 +449,14 @@ export class Communities {
   /** Knocking to get in: a joiner, or someone who was in (removed, or its admission lost) asking again. Not a member checking it still is. */
   private knocking(group: StoredGroup, live: Live | undefined): boolean {
     return !!group.joining && (!live || live.session.status !== "active");
+  }
+
+  /**
+   * Someone removed keeps the group as it was here while it knocks to get back in, and when it gives up (`decline`).
+   * Not a session whose admission lost a race: that knock is still its join.
+   */
+  private keptWhileKnocking(live: Live | undefined): boolean {
+    return live?.session.status === "removed";
   }
 
   /** `check`: a member, as far as this device knows, asking the door whether it still is (`joinByLink`). */
@@ -585,11 +592,14 @@ export class Communities {
 
   /**
    * A join through the link that no member answered yet, given up: listed as an invitation, it is declined as one.
-   * A member trying to get back in (its session lost) leaves instead, which keeps nothing either.
+   * Someone removed who knocked to get back in only stops knocking: the group and its history stay here, as a private
+   * group's do for someone removed, invited again, who declines. A member trying to get back in (its session lost)
+   * leaves instead, which keeps nothing.
    */
   async decline(groupId: string): Promise<void> {
     const group = this.stored.get(groupId), live = this.live.get(groupId);
     if (!group || !this.knocking(group, live)) throw new Error("No invitation to decline");
+    if (this.keptWhileKnocking(live)) return this.endCheck(group);
     if (live) throw new Error("You were in this group: leave it to stop trying to get back in");
     await this.forget(groupId);
   }
