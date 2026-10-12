@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, readFileSync, statSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
+import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.storage
 
 /** Every disk sync the store asks for. */
@@ -279,12 +279,16 @@ describe("persistent IndexedDB", () => {
     const probe = await db(new (await import("fake-indexeddb")).IDBFactory());
     const rawStore = (probe.transaction("messages").objectStore("messages") as unknown as { _rawObjectStore: object })._rawObjectStore;
     const storeRecord = vi.spyOn(Object.getPrototypeOf(rawStore) as { storeRecord(...args: unknown[]): unknown }, "storeRecord");
+    // Nor one checked `cmp` per key compared: these are strings, numbers and arrays of them, ordered directly.
+    const cmp = vi.spyOn((await import("fake-indexeddb")).IDBFactory.prototype, "cmp");
     let again: IDBDatabase;
     try {
       const factory = await open(dir);
       expect(storeRecord.mock.calls.length).toBe(0);
+      expect(cmp.mock.calls.length).toBe(0);
+      cmp.mockRestore();
       again = await new Promise<IDBDatabase>((resolve) => { const request = factory.open("ghostly", 2); request.onsuccess = () => resolve(request.result); });
-    } finally { storeRecord.mockRestore(); }
+    } finally { storeRecord.mockRestore(); cmp.mockRestore(); }
 
     const messages = () => again.transaction("messages").objectStore("messages");
     expect(await read(messages().count())).toBe(3000);
@@ -305,6 +309,25 @@ describe("persistent IndexedDB", () => {
     expect((await read(messages().index("byLinkTime").get(IDBKeyRange.bound(["chat-0", -Infinity], ["chat-0", Infinity]))) as { id: string }).id).toBe("new");
     expect(await read(again.transaction("log").objectStore("log").getAllKeys())).toEqual([1, 2, 3, 4]);
     await expect(tx(again, ["proofs"], (s) => { s.proofs.put({ secret: "dup", amount: 7 }); })).rejects.toThrow();
+  });
+
+  it("orders stored keys as IndexedDB does, and leaves what it does not order itself to cmp", async () => {
+    const { IDBFactory } = await import("fake-indexeddb");
+    const factory = new IDBFactory(), cmp = vi.fn((a: unknown, b: unknown) => factory.cmp(a, b)), order = keyOrder(cmp);
+    const plain: unknown[] = [-Infinity, -1, -0, 0, 0.5, 2, 10, Infinity, "", "10", "2", "a", "a\u0000", "ab", "b", "\ud83d\ude00", "\uffff",
+      [], [0], [0, 0], [0, "a"], [1], ["a"], ["a", 1], ["a", "b"], ["a", [1]], ["a", [1, 2]], ["b"], [[]], [[], 1], [["a"]]];
+    for (const a of plain) for (const b of plain) expect(order(a, b), `${JSON.stringify(a)} against ${JSON.stringify(b)}`).toBe(factory.cmp(a, b));
+    expect(cmp).not.toHaveBeenCalled();
+    // A date, bytes, and an array that holds one: cmp's, with the same answer.
+    const other: unknown[] = [new Date(5), new Date(7), new Uint8Array([1, 2]).buffer, new Uint8Array([1, 3]).buffer, ["a", new Date(5)], ["a", new Date(7)], [new Uint8Array([9]).buffer]];
+    for (const a of [...plain, ...other]) for (const b of other) {
+      expect(order(a, b), `${String(a)} against ${String(b)}`).toBe(factory.cmp(a, b));
+      expect(order(b, a), `${String(b)} against ${String(a)}`).toBe(factory.cmp(b, a));
+    }
+    expect(cmp).toHaveBeenCalled();
+    // Not a key: refused as cmp refuses it.
+    expect(() => order(NaN, 1)).toThrow();
+    expect(() => order({}, "a")).toThrow();
   });
 
   it("leaves the snapshot as it is at open when no journal follows it", async () => {
