@@ -29,6 +29,8 @@ const isGroupSignal = (who: Asker): boolean => who.group && !who.background && (
 const watchLane = (who: Asker): string => `${+who.urgent}${+who.background}`;
 /** A group's read that is not a background one: an edge's, a private group's knock poll (`GROUP_RATION_WINDOW_MS`). */
 const isGroupRead = (who: Asker): boolean => who.group && !who.write && !who.background;
+/** A background read that takes its turn per key with the others (`BACKGROUND_TURN_MS`): not a community door's bell. */
+const isBackgroundRead = (who: Asker): boolean => who.background && !who.write && !who.door;
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
 
@@ -143,6 +145,16 @@ export const WATCH_SHARE = 1 / 3;
  * waits, the others wait too (`WATCH_SHARE`, `GROUP_RATION_WINDOW_MS`). One that stops asking loses it.
  */
 const WATCH_TURN_MS = 5_000;
+/**
+ * Background reads take turns per key the same way: while a key read longer ago asked within this long and was not read
+ * since, a background read of another key waits. A saved chat that is not live reads its contact every 30 s in the
+ * background, and one the budget refused read again only at its next poll. A request frees 60 s after the one that took
+ * it, which is the poll after next of the chat that took it: the same chats took every request that freed. A daemon with
+ * 30 chats and 5 groups, back after a restart while its groups signaled, read some contacts once in 10 min, and those
+ * chats stayed down although both sides were online and offering (CLI bug hunt, 2026-10-12). A link's background read
+ * the budget refused reads again when it frees a request (`LinkSession`), so the key whose turn it is is there to take it.
+ */
+const BACKGROUND_TURN_MS = 5_000;
 /** How long a read that let an older one go first waits before it asks again. */
 const TURN_WAIT_MS = 1_000;
 /**
@@ -295,6 +307,8 @@ export class RelayTransport implements PkarrTransport {
    * it is under the watch share (`WATCH_SHARE`) and while the groups' reads are rationed (`GROUP_RATION_WINDOW_MS`).
    */
   private readonly readTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean; watch: boolean; lane: string }>();
+  /** Per key read in the background, when a read of it last went out and when it last asked (`BACKGROUND_TURN_MS`). */
+  private readonly backgroundTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean }>();
   /** Groups' reads (not background ones) on each relay in the last `GROUP_RATION_WINDOW_MS`. */
   private readonly spentGroupReads = new Map<string, number[]>();
   /** When a group's read last found each relay's minute full: its reads there are rationed for `GROUP_RATION_MS`. */
@@ -314,6 +328,11 @@ export class RelayTransport implements PkarrTransport {
   /** Per relay and key, the newest packet that relay held back for its budget while another relay took it (`catchUpLater`). */
   private readonly catchUp = new Map<string, { relay: string; key: string; payload: Uint8Array; timestamp: bigint }>();
   private catchUpTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Per key whose reads the budget held back since its last read went out: when a request frees for it
+   * (`readHeldBackFor`), and how many times in a row.
+   */
+  private readonly heldBack = new Map<string, { until: number; times: number }>();
   /** When the relays last answered a read of each key, for `FRESH_READ_MS`. */
   private readonly readAt = new Map<string, number>();
   private readonly freshReadMs: number;
@@ -717,9 +736,15 @@ export class RelayTransport implements PkarrTransport {
     // budget held the read (a relay that failed it says nothing of them: an inviter's placeholder under its contact's
     // key would hide the outage)…
     const known = down ? this.newest.get(pubKeyZ32) : newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
-    if (resting && known) return known;
+    if (resting && known) {
+      if (!down && budgetWait < Infinity) this.heldBackUntil(pubKeyZ32, Date.now() + budgetWait);
+      return known;
+    }
     // …or, knowing nothing yet, that the read waits for the budget.
-    if (!down && budgetWait < Infinity) throw new DiscoveryBudgetError(budgetWait);
+    if (!down && budgetWait < Infinity) {
+      this.heldBackUntil(pubKeyZ32, Date.now() + budgetWait);
+      throw new DiscoveryBudgetError(budgetWait);
+    }
     throw new Error("No Pkarr relay reachable");
   }
 
@@ -779,9 +804,22 @@ export class RelayTransport implements PkarrTransport {
 
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.readAt.get(pubKeyZ32); }
 
+  readHeldBackFor(pubKeyZ32: string): number | undefined {
+    const held = this.heldBack.get(pubKeyZ32);
+    return held === undefined ? undefined : Math.max(0, held.until - Date.now());
+  }
+
+  private heldBackUntil(pubKeyZ32: string, until: number): void {
+    const times = (this.heldBack.get(pubKeyZ32)?.times ?? 0) + 1;
+    this.heldBack.delete(pubKeyZ32);
+    this.heldBack.set(pubKeyZ32, { until, times });
+    if (this.heldBack.size > READ_TURNS_KEPT) this.heldBack.delete(this.heldBack.keys().next().value!);
+  }
+
   /** The relays answered a read of this key now; answers older than `FRESH_READ_MS` are dropped as the list grows. */
   private answeredRead(pubKeyZ32: string): void {
     const now = Date.now();
+    this.heldBack.delete(pubKeyZ32);
     this.readAt.delete(pubKeyZ32);
     this.readAt.set(pubKeyZ32, now);
     // Oldest first: drop the stale ones from the front.
@@ -876,6 +914,7 @@ export class RelayTransport implements PkarrTransport {
       if (isChat(who)) this.chatNeed(key).urgentAt = now;
     }
     if (isGroupRead(who)) this.readAsked(key, who, now);
+    if (isBackgroundRead(who)) this.backgroundAsked(key, now);
     if (this.heldFor(relay, who, now, key) > 0) {
       // The minute is full: the groups' reads are rationed from now on.
       if (isGroupRead(who) && (this.spent.get(relay)?.length ?? 0) >= this.limitOf(relay)) this.groupsFullAt.set(relay, now);
@@ -894,6 +933,7 @@ export class RelayTransport implements PkarrTransport {
       this.spentGroupReads.get(relay)!.push(now);
       this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: isWatch(who), lane: watchLane(who) });
     }
+    if (isBackgroundRead(who)) this.backgroundTurns.set(key, { servedAt: now, askedAt: now, waiting: false });
     return true;
   }
 
@@ -930,6 +970,8 @@ export class RelayTransport implements PkarrTransport {
       // community door's bell does not: the links it signals for are often the ones its last admission opened.
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
       if (signaling > 0 && !who.door) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
+      // In turn per key: a key read longer ago that is asking too goes first (`BACKGROUND_TURN_MS`).
+      if (isBackgroundRead(who) && this.backgroundAhead(key, now) > 0) wait = Math.max(wait, TURN_WAIT_MS);
     }
     // Groups' urgent reads: their share of the minute spread over it (`GROUP_BURST_MS`).
     const burst = (this.spentGroupUrgent.get(relay) ?? []).filter((at) => now - at < GROUP_BURST_MS);
@@ -991,6 +1033,28 @@ export class RelayTransport implements PkarrTransport {
       if (other === key || !turn.waiting || now - turn.askedAt >= WATCH_TURN_MS) continue;
       if (watchLane !== undefined && (!turn.watch || turn.lane !== watchLane)) continue;
       if (turn.servedAt < mine) ahead++;
+    }
+    return ahead;
+  }
+
+  /** A background read of `key` asks: it waits for its turn from now on, unless it is taken (`backgroundAhead`). */
+  private backgroundAsked(key: string, now: number): void {
+    for (const [other, turn] of this.backgroundTurns) if (now - Math.max(turn.askedAt, turn.servedAt) >= 60_000) this.backgroundTurns.delete(other);
+    this.backgroundTurns.set(key, { servedAt: this.backgroundTurns.get(key)?.servedAt ?? -Infinity, askedAt: now, waiting: true });
+  }
+
+  /**
+   * Keys read in the background, still asking, that were read longer ago than `key`. One asks again after the budget
+   * held it back (a link's poll does, a one-off look does not), and keeps asking within `BACKGROUND_TURN_MS` of its last
+   * ask, or of when it was told the budget frees a request for it (`readHeldBackFor`).
+   */
+  private backgroundAhead(key: string | undefined, now: number): number {
+    const mine = key === undefined ? -Infinity : this.backgroundTurns.get(key)?.servedAt ?? -Infinity;
+    let ahead = 0;
+    for (const [other, turn] of this.backgroundTurns) {
+      const held = this.heldBack.get(other);
+      if (other === key || !turn.waiting || turn.servedAt >= mine || !held || held.times < 2) continue;
+      if (now - Math.max(turn.askedAt, held.until) < BACKGROUND_TURN_MS) ahead++;
     }
     return ahead;
   }
