@@ -1,6 +1,6 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, parseGroupCommit, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, PIN_LIMITS, ReactionWindow, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
+  EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterAdmin, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
   GROUP_LIMITS, frameBytes, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
@@ -315,6 +315,11 @@ const ACCEPT_AGAINS = 5;
 const REWELCOME_MS = ACCEPT_AGAIN_MS / 2;
 /** Invitee side: the invitations one contact chat may have waiting here at a time. More are answered as declined. */
 const MAX_INVITATIONS_PER_CHAT = 4;
+/** Invitee side, removed and invited again: the chat that let me into the group I kept, if it is its admin's. */
+const keptAdminChat = (kept?: StoredGroup): string | undefined => {
+  const admin = kept?.state && rosterAdmin(kept.state.chain[kept.state.chain.length - 1].m);
+  return admin ? kept.contacts?.[admin] : undefined;
+};
 /** What an invitation says of its group, kept as a claim within what a group can be: an epoch from 0, a roster of 1 to the most a group holds. */
 function invitationClaims(frame: Record<string, unknown>): { e: number; n: number } {
   const e = Number.isSafeInteger(frame.e) ? frame.e as number : 0, n = Number.isSafeInteger(frame.n) ? frame.n as number : 1;
@@ -779,7 +784,8 @@ export class Groups {
     const previous = group.previous;
     // Taken back with nothing to keep: who took it back is owed no answer.
     if (!previous) return this.forget(group.id, false);
-    if (owed) previous.declined = owed; else delete previous.declined;
+    // A decline owed to another chat (the admin's, while another contact's invitation stood) stays owed.
+    if (owed) previous.declined = owed; else if (previous.declined?.linkId === group.invitation?.linkId) delete previous.declined;
     this.acceptSaid.delete(group.id);
     this.stored.set(group.id, previous);
     if (previous.state) this.attach(previous.state);
@@ -1521,10 +1527,11 @@ export class Groups {
         // again (its app invites nobody it still holds as a member). Anyone else's frame would end the leave unsaid.
         if (existing?.left && (existing.left.admin !== frame.admin || existing.contacts?.[existing.left.admin] !== linkId)) return;
         // An invitation waits for my answer: another contact's, under the same id, does not take its place (Accept would
-        // go to that contact). The one who sent it may send it again. One to a group I kept (`genesis`) gives way all the
-        // same: only that group's chain is let in on Accept, and its admin must not find the place taken by anyone's.
-        // One taken back waits for nothing: any invitation takes its place.
-        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !existing.invitation.genesis && !existing.invitation.takenBack) return;
+        // go to that contact). The one who sent it may send it again. One to a group I kept (`genesis`) gives way to its
+        // admin's, over the chat that let me in: only that group's chain is let in on Accept, and its admin must not find
+        // the place taken by anyone's. Another contact's would take the admin's place. One taken back waits for nothing:
+        // any invitation takes its place.
+        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !(existing.invitation.genesis && linkId === keptAdminChat(existing.previous)) && !existing.invitation.takenBack) return;
         if ([...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack).length >= 32) return;
         // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
         // Past that the inviter is told no, as it would be by a Decline, and may invite again later. Only one of its own
