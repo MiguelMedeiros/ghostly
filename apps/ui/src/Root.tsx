@@ -130,7 +130,7 @@ function ChatLinkIntake() {
 
   return invalid ? (
     <div role="alert" data-testid="invite-link-invalid" onClick={() => setInvalid(null)}
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
+      className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
       {t(invalid)}
     </div>
   ) : null;
@@ -148,7 +148,7 @@ function JoinNotice() {
   }, [notice]);
   return notice ? (
     <div role="status" data-testid="join-notice" onClick={() => setNotice(null)}
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl cursor-pointer">
+      className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl cursor-pointer">
       {t(notice)}
     </div>
   ) : null;
@@ -182,7 +182,7 @@ function GroupLinkIntake() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, hasUnlocked]);
   return problem ? (
-    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex w-max max-w-[calc(100vw_-_2rem)] items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
+    <div className="top-notice flex items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
       <Notice problem={problem} testId="group-link-invalid" className="min-w-0 text-sm" />
       <button type="button" data-testid="group-link-invalid-close" onClick={() => setProblem(null)} aria-label={t("common.close")}
         className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>

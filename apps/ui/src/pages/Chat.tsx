@@ -623,7 +623,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && (chatApp.wide || chatApp.view === "full") ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {(wakeCall.waking || wakeCall.gaveUp) && (
         <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
+          className="top-notice flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
           <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
           {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
         </div>
@@ -631,14 +631,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {/* Our call rang out (RING_MS): it ended by itself, and says why. */}
       {webrtc.noAnswer && (
         <div role="status" data-testid="call-no-answer"
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
+          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
           {t("calls.noAnswer")}
         </div>
       )}
       {/* A call could not use the microphone or camera (refused, or none there): it says why, and how to fix it. */}
       {webrtc.mediaProblem && (
         <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
           <span className="block font-medium">{t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}</span>
           <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" ? "calls.mediaDeniedNext" : "calls.mediaUnavailableNext")}</span>
         </div>
@@ -647,7 +647,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
         <div role="status" data-testid="call-mic-paused"
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
           {t("calls.micPaused")}
         </div>
       )}
