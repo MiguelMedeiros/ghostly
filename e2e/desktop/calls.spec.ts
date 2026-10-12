@@ -85,6 +85,10 @@ async function selfViewPlays(p: DesktopPerson, when: string): Promise<void> {
   await expect.poll(async () => (await selfView(p))!.time, { timeout: 15_000, message: `${p.name}'s own camera plays ${when}` }).toBeGreaterThan(before + 0.5);
 }
 
+/** Whether the ring of who is speaking is on an avatar of the call window: "true", "false", or null when it reads no level (or is not there). */
+const speaking = (p: DesktopPerson, avatar: "call-peer-avatar" | "call-self-avatar") => p.app.execute<string | null>(`
+  return document.querySelector('[data-testid="' + arguments[0] + '"]')?.getAttribute("data-speaking") ?? null;`, avatar);
+
 const callWindows = (p: DesktopPerson) => p.app.execute<number>(`return document.querySelectorAll('[data-testid="call-window"]').length;`);
 
 /** The call window's clock: the call is connected. No word boundary: WebKit's innerText runs the title into it. */
@@ -95,8 +99,8 @@ const button = (p: DesktopPerson, selector: string) => p.app.execute<{ disabled:
   const button = document.querySelector(arguments[0]);
   return button ? { disabled: button.disabled, title: button.getAttribute("title") } : null;`, selector);
 
-test("two Linux Desktops call each other: decline, then sound and pictures both ways, mute, camera off, hang up, a video call answered with voice", {
-  tag: ["@feature:calls.linux-native", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.decline"],
+test("two Linux Desktops call each other: decline, then sound and pictures both ways, mute, camera off, hang up, a video call answered with voice, a voice call that marks who is speaking", {
+  tag: ["@feature:calls.linux-native", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.decline", "@feature:calls.audio", "@feature:calls.speaking"],
 }, async () => {
   test.setTimeout(10 * 60_000);
   const relay = new LocalRelay();
@@ -207,6 +211,27 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
     await a.press("End call");
     for (const p of [a, b]) {
       await expect.poll(() => callWindows(p), { timeout: 60_000, message: `${p.name}'s second call window closes` }).toBe(0);
+    }
+
+    // A voice call marks who is speaking. The page hears neither side here (the sound stays in Rust), so the rings
+    // follow the levels Rust reads: the test tone both ways, on each side's own avatar and on the other's.
+    await b.press("Audio call");
+    await a.press("Accept audio call");
+    for (const p of [a, b]) {
+      await expect.poll(() => connected(p), { timeout: 60_000, message: `${p.name}'s voice call connects` }).toBe(true);
+      await expect.poll(() => speaking(p, "call-peer-avatar"), { timeout: 30_000, message: `${p.name} sees the other speaking` }).toBe("true");
+      await expect.poll(() => speaking(p, "call-self-avatar"), { timeout: 30_000, message: `${p.name} sees their own voice` }).toBe("true");
+    }
+    // Muted, ana's ring is gone on both sides; bia's goes on.
+    await a.press("Mute");
+    await expect.poll(() => speaking(a, "call-self-avatar"), { message: "ana's own ring is off while muted" }).toBeNull();
+    await expect.poll(() => speaking(b, "call-peer-avatar"), { timeout: 30_000, message: "bia sees ana fall silent" }).toBe("false");
+    expect(await speaking(a, "call-peer-avatar")).toBe("true");
+    await a.press("Unmute");
+    await expect.poll(() => speaking(b, "call-peer-avatar"), { timeout: 30_000, message: "bia sees ana speak again" }).toBe("true");
+    await b.press("End call");
+    for (const p of [a, b]) {
+      await expect.poll(() => callWindows(p), { timeout: 60_000, message: `${p.name}'s voice call window closes` }).toBe(0);
     }
   } finally {
     for (const done of cleanup.reverse()) await done();
