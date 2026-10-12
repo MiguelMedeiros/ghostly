@@ -45,6 +45,11 @@ export const GROUP_FILE_LIMITS = {
    * left for the next holder too.
    */
   wantWaitMs: 30_000,
+  /**
+   * How long a served transfer with all its bytes confirmed waits for the member's word that its check passed once the
+   * member's next want has overtaken it.
+   */
+  doneWaitMs: 5_000,
   /** A file session closes this long after its last transfer ends. */
   sessionIdleMs: 60_000,
   /** File sessions opening at once, and open at once, all groups together. */

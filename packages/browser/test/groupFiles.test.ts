@@ -742,6 +742,45 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(servedToday(alice)).toBe(size);
   });
 
+  it("a member holds one serving place, and a transfer that only goes back and forth is let go", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    const tiny = await t.send(alice, id, pattern(1_000, 7)), report = await t.send(alice, id, pattern(100_000, 8));
+    await t.world.run(2_000);
+    // Bob's side of files/3 is not the app here: it accepts each offer from the file's end, never says `pf-done`, and
+    // every 10 seconds accepts again one byte back or forth.
+    const edge = bob.host.edges(id).get(t.key(alice, id))!;
+    const wires: string[] = [];
+    t.world.drop = (from, to, frame) => {
+      t.seen.push({ from: from.name, to: to.name, frame });
+      if (from !== alice || to !== bob || typeof frame.t !== "string" || !frame.t.startsWith("pf-")) return false;
+      if (frame.t === "pf-offer") {
+        wires.push(frame.id as string);
+        queueMicrotask(() => t.world.sendFiles(bob, edge, { t: "pf-accept", id: frame.id, offset: 1_000 }));
+      }
+      return true;
+    };
+    const answers = (to: string) => t.seen.filter(s => s.from === "alice" && s.to === to && (s.frame.t === "group-want-no" || s.frame.t === "pf-offer")).map(s => s.frame.t === "pf-offer" ? "offer" : s.frame.why);
+    for (let i = 0; i < 3; i++) {
+      t.say(bob, alice, id, { t: "group-want", g: id, id: tiny.messageId });
+      await t.world.run(300);
+    }
+    // One done but for its `pf-done` (which the next want may overtake), and one more: never all three places.
+    expect(answers("bob")).toEqual(["offer", "offer", "busy"]);
+    await carol.groups.downloadFile(t.got(carol, id, report.messageId).message!.file!.id);
+    for (let i = 0; i < 6; i++) {
+      await t.world.run(10_000);
+      for (const wire of wires) t.world.sendFiles(bob, edge, { t: "pf-accept", id: wire, offset: i % 2 ? 1_000 : 999 });
+    }
+    expect(t.done(carol, id, report.messageId)).toBe(true);
+    // A minute of going back and forth is no progress: Bob's transfers were let go, and he is served again.
+    t.say(bob, alice, id, { t: "group-want", g: id, id: tiny.messageId });
+    await t.world.run(300);
+    expect(answers("bob").slice(3)).toEqual(["offer"]);
+    expect(serving(alice).filter(a => a.peer === t.key(bob, id))).toHaveLength(1);
+  });
+
   it("a holder that serves the rest of a file counts that rest toward its day, not the whole file", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
