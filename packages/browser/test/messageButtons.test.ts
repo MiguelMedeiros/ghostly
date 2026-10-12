@@ -45,7 +45,8 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
     peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } }, ...(hold && { hold: { ...emptyHoldState(), enabled: true, peerAllows: true } }) });
   for (const row of rows) await db.putMessage({ ...row, linkId: id });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
-  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false,
+  const onMessages = vi.fn<(linkId: string, messages: StoredMessage[]) => void>();
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages, onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
   if (hold) Object.assign((node as unknown as { hold: { host: object } }).hold.host, hold);
   let contactState: PairingState = { status: "connecting" };
@@ -76,7 +77,7 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
   await vi.waitFor(() => expect([view().pairing?.status, contactState.status]).toEqual(["ready", "ready"]));
   const row = async (messageId: string) => (await db.getMessages(id)).find(m => m.id === messageId)!;
   const peerRow = async (text: string) => { await vi.waitFor(async () => expect((await db.getMessages(id)).find(m => m.text === text && m.sender === "peer")).toBeDefined()); return (await db.getMessages(id)).filter(m => m.text === text && m.sender === "peer").at(-1)!; };
-  return { node, contact, id, contactGot, contactEdits, contactReceipts, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
+  return { node, onMessages, contact, id, contactGot, contactEdits, contactReceipts, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
 }
 
 const ask = (extra: Record<string, unknown> = {}) => ({ kind: "buttons", id: "ask-30", buttons: [{ id: "yes", label: "Yes", style: "primary", once: true }, { id: "no", label: "No", once: true }, { id: "more", label: "Tell me more" }], ...extra });
@@ -171,7 +172,9 @@ describe("pressing a contact's buttons", () => {
     const [any, closed] = [await t.peerRow("Any time"), await t.peerRow(QUESTION)];
     const whole = vi.spyOn(db, "getMessages");
     const mine = await t.node.sendMessage({ linkId: t.id, text: "Mine?", card: ask() });
-    await vi.waitFor(async () => expect((await t.row(mine.messageId!)).delivery).not.toBe("sending"));
+    // The contact's receipt reads the whole chat once more for this host (no onMessageChanges), and on a busy machine it
+    // comes after "sent": wait until the page has been told the row is delivered, so that read is over before counting.
+    await vi.waitFor(() => expect(t.onMessages.mock.calls.some(([, rows]) => rows.some(m => m.id === mine.messageId && m.delivery === "delivered"))).toBe(true));
     whole.mockClear();
     expect(await t.node.pressButton({ linkId: t.id, messageId: closed.id, buttonId: "yes" })).toMatchObject({ refused: true, error: "These buttons are closed" });
     expect(await t.node.pressButton({ linkId: t.id, messageId: mine.messageId!, buttonId: "yes" })).toMatchObject({ refused: true });
