@@ -725,6 +725,23 @@ describe("files a contact sends", () => {
     expect(node.getState().transfers[`${chat.id}-out-b`]).toMatchObject({ state: "failed", error: expect.stringContaining("interrupted") });
     expect(linkOf(chat.id).options.events.onFileIncoming({ id: "a", name: "x", size: 1, mime: "", timestamp: 3 })).toBe("duplicate file id");
   });
+
+  it("asked whether it holds a file, a chat that never took it reads none of its stored files", async () => {
+    const chat = row();
+    await db.putLink(chat);
+    const wire = { id: "a", name: "a.txt", size: 5, mime: "text/plain", timestamp: 7 };
+    await fileStore.put({ id: `${chat.id}-in-a`, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "in", wireId: "a", digest: "digest-a",
+      metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp } });
+    const { linkOf } = await started();
+    const { onFileStored } = linkOf(chat.id).options.events;
+    const stored = vi.spyOn(fileStore, "listForLink");
+    // A new file, as nearly every one is: the chat knows the wire ids it holds, and this is none of them.
+    expect(await onFileStored!({ ...wire, id: "new" })).toBeUndefined();
+    expect(stored).not.toHaveBeenCalled();
+    // One it holds is answered with its digest, when the question names the same file.
+    expect(await onFileStored!(wire)).toBe("digest-a");
+    expect(await onFileStored!({ ...wire, size: 6 })).toBeUndefined();
+  });
 });
 
 describe("files sent to a contact", () => {
