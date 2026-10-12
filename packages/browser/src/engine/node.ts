@@ -1263,7 +1263,7 @@ export class GhostlyNode implements EngineImplementation {
     groupEdit: async (groupId, { sender, ...edit }) => { await this.groupEdits.receive(groupId, sender, edit); },
     groupReaction: (groupId, member, reaction) => this.receiveGroupReaction(groupId, member, reaction),
     groupPin: (groupId, from, { member, pin, frame }) => this.receiveGroupPin(groupId, member, pin, { from, frame }),
-    // My latest edits, again, to a member whose edge opened: a private group has no catch-up for them. The group's pin too.
+    // My edits a member has not heard, to its edge that opened: a private group has no catch-up for them. The group's pin too.
     edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); this.sendGroupPinFrame(groupId, peer); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
     // Files in groups (WISP 503): kept where a chat's are, their bytes over the edges' files/3.
@@ -1308,6 +1308,10 @@ export class GhostlyNode implements EngineImplementation {
       return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!this.groups.views().find(g => g.id === groupId)?.isAdmin };
     },
     send: (groupId, edit, to) => this.groups.sendEdit(groupId, edit, to),
+    edge: (groupId, member) => {
+      const link = this.links.get(this.memberEdges(groupId).get(member) ?? "")?.link;
+      return link?.supportsGroupVersion(1) ? link : undefined;
+    },
   });
 
   /** A community member's edit, signed by them: of their own message, and only while they are a member. */
