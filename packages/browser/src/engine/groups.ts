@@ -114,6 +114,8 @@ export interface GroupsHost {
    * its place among those kept to hand on (`GROUP_LIMITS.relay`). Absent: the frame stays on its row.
    */
   forgetFrame?(linkId: string, id: string): Promise<void>;
+  /** A stored message of a private group takes this frame as the one it keeps (in the place of its own, if it has one). */
+  keepFrame?(linkId: string, id: string, frame: GroupMessageFrame): Promise<void>;
   /** A private group's roster or my status in it changed, or I forgot it. */
   membersChanged?(groupId: string): void;
   /**
@@ -507,11 +509,13 @@ export class Groups {
     await this.communities.load(all.filter(g => g.community || g.joining));
     for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
-      if (group.state) this.attach(group.state);
-      if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
       const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
-      this.framesKept.set(group.id, history.filter(m => m.frame).map(m => ({ id: m.id, bytes: frameBytes(m.frame!) })));
+      const framed = history.filter(m => m.frame);
+      this.framesKept.set(group.id, framed.map(m => ({ id: m.id, bytes: frameBytes(m.frame!) })));
+      // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`), not from its own record.
+      if (group.state) this.attach(group.state, framed.map(m => m.frame!));
+      if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
       const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
       // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
@@ -2102,7 +2106,8 @@ export class Groups {
     return session;
   }
 
-  private attach(state: GroupState): void {
+  /** `frames`: what the group's rows hold to hand on, oldest first (none yet for a group just made, joined or given back). */
+  private attach(state: GroupState, frames: GroupMessageFrame[] = []): void {
     const session: GroupSession = new GroupSession(state, {
       clock: () => this.now(),
       seqFloor: () => this.host.seqFloor?.() ?? 0,
@@ -2158,6 +2163,8 @@ export class Groups {
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },
+      // Said again for a message I had read: its row takes this frame, the one a member who could not read the first asks for.
+      kept: async (id, frame) => { await this.host.keepFrame?.(MESSAGE_LINK(state.id), id, frame).catch(() => {}); await this.frameKept(state.id, id, frame); },
       edit: e => this.host.groupEdit?.(state.id, e),
       changed: () => {
         // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).
@@ -2172,7 +2179,7 @@ export class Groups {
           return edge && this.host.linkHandled ? this.host.linkHandled(edge) : Promise.resolve(false);
         },
       }),
-    });
+    }, frames);
     this.sessions.set(state.id, session);
     this.lastRoster.set(state.id, session.roster);
     this.lastTold.set(state.id, { status: session.status, top: session.top });
