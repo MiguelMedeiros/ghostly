@@ -5,6 +5,7 @@ import { TransportIcon } from "./TransportIcon";
 import { transportName } from "../lib/connection";
 import { liveTransport, ownTransports, transportOptions } from "../lib/transportEvents";
 import { useI18n } from "../contexts/I18nContext";
+import { radioGroupKeys, radioTabStop } from "../lib/radioGroup";
 
 /** A choice for the chat's connection: Automatic, a transport, or DHT only (WISP 400). */
 export type ConnectionChoice = PairedTransport | "auto" | "dht";
@@ -38,36 +39,44 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
     const already = choice === "dht" ? dht : !dht && (choice === "auto" ? automatic : !automatic && link.preferredTransport === choice && current === choice);
     if (!already) onChoose(choice);
   }
+  // In the order shown: Automatic (with a choice to make), each transport, DHT only. One of them is the group's Tab stop.
+  const rows = [
+    ...(single ? [] : [{ checked: automatic && !dht, disabled }]),
+    ...options.map(o => ({ checked: !dht && (single ? o.available : !automatic && link.preferredTransport === o.transport), disabled: disabled || !o.available })),
+    { checked: dht, disabled },
+  ];
+  const stop = radioTabStop(rows), offset = single ? 0 : 1;
+  const tabIndex = (row: number) => (row === stop ? 0 : -1);
   return (
-    <div role="radiogroup" aria-label={t("connection.option.group")} data-testid="transport-options">
-      {!single && <Option testId="connection-option-auto" checked={automatic && !dht} disabled={disabled} onClick={() => choose("auto")}
+    <div role="radiogroup" aria-label={t("connection.option.group")} data-testid="transport-options" onKeyDown={radioGroupKeys}>
+      {!single && <Option testId="connection-option-auto" {...rows[0]} tabIndex={tabIndex(0)} onClick={() => choose("auto")}
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></svg>}
         hint={automaticHint} label={t("connection.option.automatic")} />}
       {/* Every transport, what this app lacks too: off, and why. */}
-      {options.map(o => {
+      {options.map((o, i) => {
         const inUse = current === o.transport && o.available, waiting = link.transportWait?.transport === o.transport && !dht;
         const using = [t("connection.option.inUse"), ...(o.relayed ? [t("connection.relayed")] : []), ...(link.transportRttMs !== undefined ? [t("connection.ms", { ms: link.transportRttMs })] : [])].join(" · ");
         return <Option key={o.transport} testId={`connection-option-${o.transport.replace("/1", "")}`} icon={<TransportIcon transport={o.transport} />}
-          checked={!dht && (single ? o.available : !automatic && link.preferredTransport === o.transport)} disabled={disabled || !o.available} inUse={inUse}
+          {...rows[offset + i]} tabIndex={tabIndex(offset + i)} inUse={inUse}
           mark={inUse ? using : waiting && o.available ? t("connection.option.waiting") : undefined}
           off={!o.available ? o.reason : undefined} hint={!o.available ? o.reason : inUse ? using : waiting ? t("connection.option.chosenWaiting") : !automatic && link.preferredTransport === o.transport ? t("connection.option.chosenNotInUse") : o.relayed ? t("connection.option.throughRelay") : undefined}
           onClick={() => choose(o.transport)} label={transportName(o.transport)} />;
       })}
-      <Option testId="connection-option-dht" checked={dht} disabled={disabled} onClick={() => choose("dht")} label={t("connection.dhtOnly")}
+      <Option testId="connection-option-dht" {...rows[rows.length - 1]} tabIndex={tabIndex(rows.length - 1)} onClick={() => choose("dht")} label={t("connection.dhtOnly")}
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 7 9-4 9 4-9 4Z" /><path d="m3 12 9 4 9-4M3 17l9 4 9-4" /></svg>}
         hint={peerDht && !dht ? t("connection.option.dhtContactChose") : dht ? t("connection.option.dhtOn") : t("connection.option.dhtOff")} />
     </div>
   );
 }
 
-function Option({ label, hint, off, mark, icon, checked, inUse = false, disabled, onClick, testId }: {
-  label: string; hint?: string; off?: string; mark?: string; icon: ReactNode; checked: boolean; inUse?: boolean; disabled: boolean; onClick(): void; testId: string;
+function Option({ label, hint, off, mark, icon, checked, inUse = false, disabled, tabIndex, onClick, testId }: {
+  label: string; hint?: string; off?: string; mark?: string; icon: ReactNode; checked: boolean; inUse?: boolean; disabled: boolean; tabIndex: number; onClick(): void; testId: string;
 }) {
   return (
     // One line: the radio is what is chosen; the mark ("In use · 42 ms") is what carries the chat now, which may be
     // another row. The longer word on a row (why it is off, what it does) is its tooltip and accessible description;
     // on a narrow screen, with no hover to show a tooltip, why an option is off is a second line too.
-    <button type="button" role="radio" aria-checked={checked} aria-label={label} aria-description={hint} disabled={disabled} data-testid={testId} data-in-use={inUse ? "" : undefined} onClick={onClick}
+    <button type="button" role="radio" aria-checked={checked} aria-label={label} aria-description={hint} disabled={disabled} tabIndex={tabIndex} data-testid={testId} data-in-use={inUse ? "" : undefined} onClick={onClick}
       title={hint ? `${label}: ${hint}` : undefined}
       className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-start text-xs transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-default max-md:min-h-11 ${checked ? "text-text-primary" : "text-text-secondary"} ${disabled && !checked ? "opacity-60" : ""}`}>
       <span aria-hidden="true" className={`flex shrink-0 ${checked ? "text-accent" : ""}`}>{icon}</span>
