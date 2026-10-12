@@ -207,6 +207,39 @@ describe("updates", () => {
     expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
   });
 
+  it("a newer version at the app's source that a store removed, or its publisher revoked, costs a peek at each check, never the whole bundle", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const v2 = await bundle({ sequence: 2, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v2.bytes);
+    const reads = () => net.fetch.mock.calls.filter(([url]) => String(url) === BUNDLE_URL).map(([, init]) => ((init?.headers ?? {}) as Record<string, string>).range ? "peek" : "whole");
+    const visits = async () => {
+      net.fetch.mockClear();
+      for (let visit = 0; visit < 3; visit++) expect(await store.checkUpdates()).toEqual([{ ref: v1.ref, outcome: "none", run: { status: "ok" } }]);
+      return reads();
+    };
+    // A store the person added removed v2.
+    await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v2.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.addStore({ url: STORE_URL });
+    expect(await visits(), "removed by a store").toEqual(["peek", "peek", "peek"]);
+    // The store's next index carries the publisher's revocation of v2 instead.
+    await net.putStore(await storeFiles({ sequence: 2, revoked: [await revocation(v1.ref, [v2.digest], "Broken build")] }));
+    expect(await visits(), "revoked, as a store copied it").toEqual(["peek", "peek", "peek"]);
+    // The store says nothing of it any more; its publisher revoked it beside its source.
+    await net.putStore(await storeFiles({ sequence: 3 }));
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v2.digest], "Broken build")]));
+    expect(await visits(), "revoked beside its source").toEqual(["peek", "peek", "peek"]);
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    // The next version, which nobody refuses, is read whole and installs.
+    const v3 = await bundle({ sequence: 3, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v3.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ sequence: 3, digest: v3.digest });
+  });
+
   it("a lower sequence is never installed over a higher one", async () => {
     const { store } = await installed({ sequence: 3 });
     const old = await bundle({ sequence: 2 });
