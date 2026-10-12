@@ -635,7 +635,8 @@ fn stream_url(token: &str, loopback: Option<u16>) -> String {
 /// Whether a file of `size` bytes leaves `PLAY_MARGIN` free on a disk with `free` bytes once WebKitGTK copied it.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn room_to_play(size: u64, free: u64) -> bool {
-    size.saturating_add(PLAY_MARGIN) <= free
+    size.checked_add(PLAY_MARGIN)
+        .is_some_and(|needed| needed <= free)
 }
 
 /// Free bytes where WebKitGTK puts its copy. `GHOSTLY_STREAM_TMP_FREE` stands in for the disk's answer, for tests;
