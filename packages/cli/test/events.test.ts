@@ -153,6 +153,25 @@ describe("the event stream", () => {
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
 
+  it("notes what it reported with relaxed transactions: a message's delivery states cost the daemon no disk sync each", async () => {
+    const { h } = await hub("relaxed.jsonl");
+    const db = (h as unknown as { db: IDBDatabase }).db;
+    const transaction = vi.spyOn(db, "transaction");
+    h.baseline(state([link("c1")]), new Map([["c1", []]]));
+    for (const delivery of ["sending", "sent", "delivered"] as const)
+      h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "me_1", { sender: "me", delivery })] });
+    const writes = transaction.mock.calls.filter(([, mode]) => mode === "readwrite");
+    expect(writes.length).toBe(4);
+    expect(writes.map(([, , options]) => options)).toEqual(writes.map(() => ({ durability: "relaxed" })));
+    transaction.mockRestore();
+
+    // Still read back by the next run: nothing is reported twice.
+    await new Promise((r) => setTimeout(r, 50));
+    const second = await hub("relaxed.jsonl");
+    second.h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "me_1", { sender: "me", delivery: "delivered" })]]]));
+    expect(second.events).toEqual([]);
+  });
+
   it("after a restart: seq goes on, only what is new is reported, and the journal replays", async () => {
     const first = await hub("b.jsonl");
     first.h.baseline(state([link("c1")]), new Map([["c1", []]]));
