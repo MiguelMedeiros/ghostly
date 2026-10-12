@@ -563,6 +563,40 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(view(alice, groupId).invited).toEqual([]);
   });
 
+  it("an invitation nobody answered in a week stops counting as invited: the contact can be invited again", async () => {
+    const world = new World();
+    let alice = world.add("alice");
+    const bob = world.add("bob");
+    world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]); world.chats.set("chat-ac", ["alice", "carol"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    const day = 24 * 60 * 60_000, start = Date.now();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    // Bob's answer never comes (his app sent none, or it was lost on the way).
+    await alice.tick(start + 6 * day);
+    expect(view(alice, groupId).invited).toEqual(["chat-ab"]);
+    // Carol is invited on the sixth day: her week starts then.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start + 6 * day);
+    await alice.invite(groupId, "chat-ac"); await world.settle();
+    clock.mockRestore();
+    await alice.tick(start + 8 * day);
+    expect(view(alice, groupId).invited).toEqual(["chat-ac"]);
+    expect(world.peers.get("alice")!.store.groups.get(groupId)!.invited).toEqual({ "chat-ac": start + 6 * day });
+    alice = await world.restart("alice");
+    expect(view(alice, groupId).invited).toEqual(["chat-ac"]);
+    // An accept that comes after the week lets nobody in, and is refused; invited again, Bob joins.
+    await bob.accept(groupId); await world.settle();
+    expect(view(alice, groupId).members).toHaveLength(1);
+    expect(bob.views()).toEqual([]);
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(alice, groupId).invited).toEqual(["chat-ac", "chat-ab"]);
+    await bob.accept(groupId); await world.settle(); await world.meet();
+    expect(view(bob, groupId).status).toBe("active");
+    await alice.tick(start + 14 * day);
+    expect(view(alice, groupId)).toMatchObject({ invited: [], members: [expect.anything(), expect.anything()] });
+    expect(world.peers.get("alice")!.store.groups.get(groupId)!.invited).toBeUndefined();
+  });
+
   it("an accept the admin's app never heard is said again, when the inviter's chat comes up and a few times while it is", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
