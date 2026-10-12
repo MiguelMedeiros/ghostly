@@ -32,6 +32,15 @@ export interface BuiltInApp { publisher: string; name: string; digest: string; u
 
 /**
  * The apps that come with Ghostly. A short list kept here on purpose, never "everything in the official store": an
- * entry is added with its bundle, pinned by digest, and a build with no bundle has no entry.
+ * entry is added with its bundle (apps/ui/src/assets/apps, read by `readBuiltInApp`), pinned by digest.
+ *
+ * Chess: Ghostly's own publisher key for it (fingerprint odcg w6wj w8dy nqop), version 2.3.0 (`sequence` 4), at the
+ * commit of its repository that the official store lists.
  */
-export const BUILT_IN_APPS: readonly BuiltInApp[] = [];
+export const BUILT_IN_APPS: readonly BuiltInApp[] = [
+  {
+    publisher: "odcgw6wjw8dynqop84r47jbjcdqossbgrfiejd367e14hgxmjcho", name: "chess",
+    digest: "EEnFmP0grTkTe_9qgapQsEEZzWB9FcpoimWkHnfecVs",
+    url: "https://cdn.jsdelivr.net/gh/MiguelMedeiros/ghostly-chess@c665ab194478145fd9b9a4777e6c0d1893969649/app.ghostlyapp",
+  },
+];

@@ -110,7 +110,7 @@ import {
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
-import { Apps, type AppDataExport, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type InstalledAppView } from "./apps";
+import { Apps, type AppDataExport, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
 import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
@@ -460,6 +460,11 @@ export interface NodeOptions {
    * whatever is passed here. Default: `fetch`. Tests pass their own.
    */
   appFetch?: typeof fetch;
+  /**
+   * The bundle this build carries for a built-in mini-app (WISP 1200 § Built-in apps), by its digest: a file of the
+   * client itself. Without it no built-in app is offered. The engine checks what it returns.
+   */
+  builtInApp?: (app: { publisher: string; name: string; digest: string }) => Promise<Uint8Array>;
   /** Create and connect the Ark, Bark, Spark and USDT wallets at start. Default: on; tests without a network turn it off. */
   automaticWallets?: boolean;
   /**
@@ -2098,9 +2103,11 @@ export class GhostlyNode implements EngineImplementation {
       isChat: (scope) => { const stored = this.links.get(scope)?.stored; return !!stored && !stored.group && !!stored.profile && !!stored.pairedPeerKey; },
       online: () => this.networkOn && !this.shuttingDown,
       checked: () => this.events.onAppsChecked?.(),
+      ...(this.options.builtInApp && { readBuiltIn: this.options.builtInApp }),
     });
   }
   appList(): Promise<InstalledAppView[]> { return this.appStore.list(); }
+  appBuiltIns(): Promise<BuiltInAppOffer[]> { return this.appStore.builtIns(); }
   appStoreList(): Promise<AppStoreSummary[]> { return this.appStore.listStores(); }
   appStorePreview(params: { url: string }): Promise<AppStorePreview> { return this.appStore.previewStore(params); }
   appStoreAdd(params: { url: string; key?: string }): Promise<AppStoreSummary> { return this.appStore.addStore(params); }
