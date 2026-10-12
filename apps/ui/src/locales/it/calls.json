@@ -39,6 +39,16 @@
   "reconnecting": "Riconnessione...",
   "rejected": "Chiamata rifiutata",
   "selfView": "Trascina per spostare, tira un angolo per ridimensionare, doppio clic per ripristinare",
+  "share": {
+    "blocked": "La condivisione dello schermo è bloccata",
+    "blockedNext": "Consenti la registrazione dello schermo per questa app nelle impostazioni sulla privacy del sistema.",
+    "contactCannot": "L'app del tuo contatto non può mostrare uno schermo in questa chiamata",
+    "failed": "Impossibile condividere lo schermo",
+    "failedNext": "Riprova.",
+    "noScreen": "Non c'è nessuno schermo da condividere",
+    "notHere": "La condivisione dello schermo non è disponibile qui",
+    "notOnLinux": "La condivisione dello schermo non è ancora disponibile su Linux"
+  },
   "shareScreen": "Condividi schermo",
   "sharing": {
     "both": "Tu e {{name}} state condividendo i vostri schermi",
