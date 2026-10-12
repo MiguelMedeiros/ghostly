@@ -100,7 +100,15 @@ test("a tap on a picture in a chat on a phone opens it large, in its own shape, 
   // A pinch on it zooms the picture, not the page: the browser's own zoom of the app stays at 1.
   const image = viewer.getByTestId("avatar-viewer-image");
   const cdp = await bob.page.context().newCDPSession(bob.page);
-  await cdp.send("Input.synthesizePinchGesture", { x: large.x + large.width / 2, y: large.y + large.height / 2, scaleFactor: 2.5, relativeSpeed: 400, gestureSourceType: "touch" });
+  // Two fingers, spreading 240px apart from (x, y), as raw touches: Chromium's synthetic pinch never zooms the page.
+  const pinchAt = async (x: number, y: number) => {
+    const touch = (type: "touchStart" | "touchMove" | "touchEnd", spread: number) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x: x - 20 - spread, y, id: 0 }, { x: x + 20 + spread, y, id: 1 }] });
+    await touch("touchStart", 0);
+    for (let step = 1; step <= 20; step++) { await touch("touchMove", step * 6); await bob.page.waitForTimeout(16); }
+    await touch("touchEnd", 0);
+    await bob.page.waitForTimeout(300);
+  };
+  await pinchAt(large.x + large.width / 2, large.y + large.height / 2);
   await expect.poll(() => image.getAttribute("data-zoom").then(Number)).toBeGreaterThan(1.5);
   expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
   await expect(viewer).toBeVisible();
@@ -113,14 +121,11 @@ test("a tap on a picture in a chat on a phone opens it large, in its own shape, 
   await tapAt(large.x + large.width / 2, large.y + large.height / 2);
   await expect(image).toHaveAttribute("data-zoom", "1.00");
 
-  // The chat under it does not zoom either.
-  await viewer.getByTestId("avatar-viewer-close").click();
-  await expect(viewer).toHaveCount(0);
-  await cdp.send("Input.synthesizePinchGesture", { x: 200, y: 400, scaleFactor: 2.5, relativeSpeed: 400, gestureSourceType: "touch" });
-  await bob.page.waitForTimeout(300);
-  expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
-  await open.click();
   await viewer.getByTestId("avatar-viewer-close").click();
   await expect(viewer).toHaveCount(0);
   await expect(open).toBeFocused();
+
+  // The chat under it does not zoom either (the pinch's hold may open a message's details: only the scale counts).
+  await pinchAt(200, 400);
+  expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 });
