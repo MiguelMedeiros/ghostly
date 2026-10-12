@@ -44,7 +44,8 @@ export interface FileBytes {
   save?(id: string, name: string): Promise<boolean>;
   /**
    * A URL a `<video>` or `<audio>` plays the stored file from, served in ranges by the platform (Desktop, for a file
-   * too large for `blob`), or null when there is no such file. The URL works until `release`.
+   * too large for `blob`), or null when there is no such file. The URL works until `release`. Rejects with
+   * `NO_ROOM_TO_PLAY` when the disk has no room for the copy the player makes of it (Linux's WebKitGTK): save it instead.
    */
   stream?(id: string, type: string): Promise<FileStream | null>;
   /**
@@ -67,6 +68,9 @@ export type FileBytesKind = "opfs" | "native" | "idb";
 
 /** Bytes a space's files take (`FileBytes.usage`): the files and how many, and the copies staged for a save. */
 export interface FileUsage { files: number; count: number; staged: number }
+
+/** Why `FileBytes.stream` refused a file this device holds: no room on the disk for the player's copy of it. */
+export const NO_ROOM_TO_PLAY = "no_room_to_play";
 
 /** A stored file being served to a media element: its URL, and how to stop serving it. */
 export interface FileStream {

@@ -33,6 +33,14 @@ pub const MAX_BODY: u64 = 4 * 1024 * 1024;
 pub const WHOLE_MAX: u64 = 16 * 1024 * 1024;
 /// Files open for playing at once: a new one past this closes the oldest.
 pub const MAX_GRANTS: usize = 16;
+/// WebKitGTK's player copies a file it plays over HTTP whole into `/var/tmp` (`WebKit-Media-*`), as fast as it reads
+/// it, even paused, and each play makes a new copy. A file that would not fit there with this much to spare is not
+/// served: the page offers to save it instead (`NO_ROOM_TO_PLAY`).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const PLAY_MARGIN: u64 = 500 * 1024 * 1024;
+/// What `file_bytes_stream_open` answers for such a file.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const NO_ROOM_TO_PLAY: &str = "no_room_to_play";
 
 /// The types a file is served as: what `<video>` and `<audio>` play. Anything else goes out as opaque bytes.
 const MEDIA_TYPES: &[&str] = &[
@@ -624,6 +632,26 @@ fn stream_url(token: &str, loopback: Option<u16>) -> String {
     format!("{SCHEME}://localhost/{token}")
 }
 
+/// Whether a file of `size` bytes leaves `PLAY_MARGIN` free on a disk with `free` bytes once WebKitGTK copied it.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn room_to_play(size: u64, free: u64) -> bool {
+    size.checked_add(PLAY_MARGIN)
+        .is_some_and(|needed| needed <= free)
+}
+
+/// Free bytes where WebKitGTK puts its copy. `GHOSTLY_STREAM_TMP_FREE` stands in for the disk's answer, for tests;
+/// None when neither says, and then the file plays.
+#[cfg(target_os = "linux")]
+fn media_tmp_free() -> Option<u64> {
+    if let Some(free) = std::env::var("GHOSTLY_STREAM_TMP_FREE")
+        .ok()
+        .and_then(|value| value.parse().ok())
+    {
+        return Some(free);
+    }
+    fs4::available_space("/var/tmp").ok()
+}
+
 #[derive(serde::Serialize)]
 pub struct StreamOpened {
     pub url: String,
@@ -645,6 +673,12 @@ pub fn file_bytes_stream_open<R: tauri::Runtime>(
     let grants = app
         .try_state::<StreamGrants>()
         .ok_or("File storage unavailable")?;
+    #[cfg(target_os = "linux")]
+    if let (Some(size), Some(free)) = (store.size(&space, &id)?, media_tmp_free()) {
+        if !room_to_play(size, free) {
+            return Err(NO_ROOM_TO_PLAY.into());
+        }
+    }
     let token = grants.open(&store, &space, &id, &mime)?;
     #[cfg(target_os = "linux")]
     let port = Some(grants.loopback_port(&store)?);
@@ -698,6 +732,17 @@ mod tests {
             .headers()
             .get(name)
             .and_then(|value| value.to_str().ok())
+    }
+
+    #[test]
+    fn a_file_plays_only_when_webkits_copy_of_it_leaves_the_margin_free() {
+        let gb = 1024 * 1024 * 1024;
+        assert!(room_to_play(gb, gb + PLAY_MARGIN));
+        assert!(!room_to_play(gb, gb + PLAY_MARGIN - 1));
+        assert!(!room_to_play(gb, gb));
+        assert!(room_to_play(0, PLAY_MARGIN));
+        assert!(!room_to_play(0, 0));
+        assert!(!room_to_play(u64::MAX, u64::MAX));
     }
 
     #[test]

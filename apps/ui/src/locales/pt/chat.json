@@ -228,6 +228,7 @@
   "media": {
     "downloadSize": "Baixar {{size}}",
     "noRoom": "Espaço insuficiente: {{size}} livres",
+    "noRoomToPlay": "Sem espaço livre em disco para tocar aqui. Baixe o arquivo.",
     "notYet": "Toca depois de enviado.",
     "wantsToSend": "{{name}} quer enviar · {{size}} livres"
   },
