@@ -49,6 +49,12 @@ export interface CallSignal {
   x?: 1;
   /** On the answer to a restart offer (`r`): that offer's `ts`, so an answer to an older one is told apart. */
   re?: number;
+  /**
+   * On an offer or an answer: 0 when this side takes no picture and sends none (the headless CLI: a bot has no screen
+   * to show one on). Its video section is rebuilt closed (`a=inactive`), so the other side sends nothing on it, a
+   * camera turned on mid-call included. Older apps leave it out, and ignore it: they send a picture nobody reads.
+   */
+  vr?: 0;
 }
 
 /** What the rebuilt SDP gives Opus and VP8 unless the signal says otherwise. */
@@ -420,11 +426,14 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
     restart.re = raw.re;
   }
 
+  // Any other value of `vr` says nothing: the video section stays open, as without it.
+  const closed: Pick<CallSignal, "vr"> = raw.vr === 0 ? { vr: 0 } : {};
+
   // `o` names the offer an answer is for; on anything else it says nothing.
   if (raw.o !== undefined && (typeof raw.o !== "number" || !Number.isFinite(raw.o))) return null;
   const answers = raw.t === "a" && raw.o !== undefined ? { o: raw.o } : {};
 
-  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture, ...payloadTypes, ...restart, ...answers, ...heard };
+  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture, ...payloadTypes, ...restart, ...closed, ...answers, ...heard };
 }
 
 /**
@@ -565,8 +574,8 @@ export function buildSdpFromSignal(signal: CallSignal): string {
         // No header extensions here: their ids differ between engines, and an
         // answer that maps an id differently from the real offer is rejected
         // by Chromium ("Failed to set recv parameters").
-        "a=sendrecv",
-        `a=msid:stream video0`,
+        // `vr: 0`: the sender takes no picture and sends none, so the section is closed and names no stream.
+        ...(signal.vr === 0 ? ["a=inactive"] : ["a=sendrecv", "a=msid:stream video0"]),
         "a=rtcp-mux",
         "a=rtcp-rsize",
         `a=rtpmap:${vp8} VP8/90000`,
@@ -574,8 +583,7 @@ export function buildSdpFromSignal(signal: CallSignal): string {
         `a=rtcp-fb:${vp8} nack`,
         `a=rtcp-fb:${vp8} nack pli`,
         `a=rtcp-fb:${vp8} goog-remb`,
-        `a=ssrc:${videoSsrc} cname:pkarr`,
-        `a=ssrc:${videoSsrc} msid:stream video0`,
+        ...(signal.vr === 0 ? [] : [`a=ssrc:${videoSsrc} cname:pkarr`, `a=ssrc:${videoSsrc} msid:stream video0`]),
       );
     }
   });
