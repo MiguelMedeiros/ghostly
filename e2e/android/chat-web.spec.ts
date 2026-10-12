@@ -1,5 +1,5 @@
-import { chat, say } from "../support/fixtures";
-import { expect, pairWithWeb, sayFromApp, test } from "./support/android";
+import { chat, closeHeaderMenu, say } from "../support/fixtures";
+import { appConnection, expect, pairWithWeb, sayFromApp, test } from "./support/android";
 
 /**
  * The Android app and a person on the web app: the app makes the chat, the web peer joins with its invite, and
@@ -11,7 +11,8 @@ test("pairs with a web peer and messages go both ways", { tag: ["@feature:androi
   const web = await webPeer("web");
   const started = Date.now();
   await pairWithWeb(app, web);
-  const link = await app.page.getByTestId("connection-options").filter({ visible: true }).first().getAttribute("aria-label");
+  const link = await (await appConnection(app.page)).getAttribute("aria-label");
+  await closeHeaderMenu(app.page);
   test.info().annotations.push({ type: "link", description: `${link} after ${Date.now() - started} ms` });
 
   await sayFromApp(app, "hello from android");

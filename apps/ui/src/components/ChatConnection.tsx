@@ -3,7 +3,8 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useCopyKey } from "../hooks/useCopyKey";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
-import { useId, useRef, useState, useSyncExternalStore, type FocusEvent } from "react";
+import { useId, useRef, useState, useSyncExternalStore, type FocusEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
@@ -48,8 +49,11 @@ type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" |
  *
  * It is the header's only connection element: while a first pairing is on its way (`pairing`), the icon is the
  * pairing scene in small, its name says the stage, and the panel says how far it got, with a way to the scene.
+ *
+ * On a phone held upright the header keeps the name, a call and ⋮ (`menuRow`): the control is a row of the ⋮ menu
+ * there, with the state in words under its name, and the same panel opens under the header.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "" }: {
+export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "", menuRow }: {
   peerKey: string;
   paired?: boolean;
   /** This side's key in the chat. */
@@ -60,6 +64,11 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   pairing?: { progress: PairingProgressState; onShow?(): void };
   /** Before its control's test ids, where a second copy is on screen (a mini-app's header: `app-`), so the chat's stay unique. */
   testIdPrefix?: string;
+  /**
+   * The control as a row of the chat's ⋮ menu: `slot` is where the row goes while that menu is open, `onPick` closes
+   * the menu, and the focus goes back to `returnFocus` (⋮) as the panel closes.
+   */
+  menuRow?: { slot: HTMLElement | null; onPick(): void; returnFocus: RefObject<HTMLElement | null> };
 }) {
   const state = useSyncExternalStore(subscribe, snapshot);
   const link = paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined, pair = link?.pairing;
@@ -70,7 +79,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   // never as the chat's connection failure.
   const [verifyError, setVerifyError] = useState("");
   const [busy, setBusy] = useState(false), [comparing, setComparing] = useState(false);
-  const root = useRef<HTMLDetailsElement>(null), trigger = useRef<HTMLElement>(null);
+  const root = useRef<HTMLDetailsElement>(null), trigger = useRef<HTMLElement>(null), panel = useRef<HTMLDivElement>(null);
   // Offline either way: Ghostly's own switch, or a device with no network. The banner says the second; what the relays
   // answer meanwhile (nothing reachable, cooling down) is that and nothing more, so it is no connection issue.
   const id = useId(), ghostlyOnline = state?.settings.online ?? true, deviceOnline = useOnline(), online = ghostlyOnline && deviceOnline;
@@ -168,7 +177,15 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const rtt = liveOn && !failure && !pair?.transitionTarget ? link?.transportRttMs : undefined;
   const keyOfMine = myKey || link?.myPubKeyZ32;
   const [tip, setTip] = useState(false);
-  const close = () => { if (root.current?.open) { root.current.open = false; trigger.current?.focus(); } };
+  const close = () => { if (root.current?.open) { root.current.open = false; (menuRow ? menuRow.returnFocus : trigger).current?.focus(); } };
+  // From the ⋮ menu's row: the menu goes, the panel opens under the header and takes the focus.
+  const pick = () => {
+    menuRow?.onPick();
+    if (!root.current) return;
+    root.current.open = true; setMenuOpen(true);
+    panel.current?.focus({ preventScroll: true });
+  };
+  const tone = kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted" : "text-accent";
   useOutsideDismiss(root, menuOpen, close);
   // Focus gone to a control outside (a Tab past its end): it closes and leaves the focus there. On a phone the panel
   // covers the messages, and the control would be under it. A click on its text moves the focus nowhere: it stays.
@@ -189,7 +206,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     if (e.key !== "Escape") return;
     if (root.current?.open) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
   }} className="relative" data-testid={`${testIdPrefix}connection-menu`}>
-    <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid={`${testIdPrefix}connection-options`} data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined}
+    <summary ref={trigger} hidden={!!menuRow} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid={menuRow ? undefined : `${testIdPrefix}connection-options`} data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined}
       data-pairing={stage} data-status={status} data-busy={glyph || connecting || retrying || undefined} aria-label={t("connection.panel.titleWith", { label })} aria-describedby={`${id}-tip`}
       onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
       onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
@@ -197,7 +214,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {glyph ? <PairingGlyph stage={stage!} direction={direction} size={18} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={18} weight={2} />}
       {!glyph && (dots[kind] || retrying) && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-1.5 max-md:top-1.5 ${dots[kind] ?? "bg-text-muted"} ${connecting || retrying ? "motion-safe:animate-pulse" : ""}`} />}
     </summary>
-    <div role="dialog" aria-label={t("connection.panel.title")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
+    <div ref={panel} tabIndex={-1} role="dialog" aria-label={t("connection.panel.title")} className="outline-none absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
       <div className="flex items-center gap-2 px-1 font-medium text-text-primary" data-testid="connection-state">
         {glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />}
         <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · <bdi data-testid="connection-rtt">{t("connection.ms", { ms: rtt })}</bdi></span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
@@ -305,6 +322,13 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       </div>
     </div>
   </details>
+  {menuRow?.slot && createPortal(
+    <button type="button" data-menu-item data-testid={`${testIdPrefix}connection-options`} data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined}
+      data-pairing={stage} data-status={status} data-busy={glyph || connecting || retrying || undefined} aria-label={t("connection.panel.titleWith", { label })} aria-haspopup="dialog" onClick={pick}
+      className="flex w-full min-w-0 items-center gap-3 whitespace-nowrap px-3 py-2 text-start text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none max-md:min-h-12 max-md:rounded-lg">
+      <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${tone}`}>{glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={2} />}</span>
+      <span className="min-w-0"><span data-menu-text className="block truncate">{t("connection.panel.title")}</span><span data-menu-text className="block truncate text-xs text-text-muted">{label}{elapsed && ` · ${elapsed}`}</span></span>
+    </button>, menuRow.slot)}
   <span role="tooltip" id={`${id}-tip`} data-testid="connection-tooltip" className={`pointer-events-none absolute end-0 top-full z-50 mt-1.5 w-max max-w-[min(16rem,55vw)] rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] leading-4 text-text-primary shadow-lg motion-safe:transition-opacity ${tip && !menuOpen ? "opacity-100" : "invisible opacity-0"}`}>
     {label}{elapsed && ` · ${elapsed}`}{summary && !failure && <span data-testid="connection-tooltip-detail" className="mt-0.5 block text-text-secondary">{summary.detail}</span>}
     {slow && <span className="mt-0.5 block text-text-secondary">{slow}</span>}

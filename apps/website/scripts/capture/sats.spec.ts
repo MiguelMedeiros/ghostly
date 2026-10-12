@@ -4,7 +4,7 @@
 import { test, expect, type Browser } from "@playwright/test";
 import { rmSync } from "node:fs";
 import { LocalRelay } from "../../../../e2e/support/relay";
-import { CAST, chat, converse, go, newProfile, open, pair, person, shot, toBottom, type Peer } from "./helpers";
+import { CAST, chat, converse, go, live, newProfile, open, pair, person, shot, toBottom, type Peer } from "./helpers";
 import { fund, openWallet } from "./wallet";
 import { composerRow } from "../../../../e2e/support/composer";
 
@@ -95,8 +95,7 @@ test("wallets and payments in the chat, desktop and phone", async ({ browser, ba
   await go(phone, route);
   await expect(chat(phone).getByText("paid ⚡ see you friday")).toBeVisible({ timeout: 60_000 });
   // The reopened chat reconnects to Casper first: the header says "Connected", not "retrying live".
-  await expect(phone.page.locator('[data-testid=connection-options][aria-label*="Connected · WebRTC"]')).toBeVisible({ timeout: 90_000 })
-    .catch(() => console.log("  [mBoo] not live yet"));
+  await live(phone, 90_000);
   await phone.page.waitForTimeout(1500);
   await toBottom(phone);
   await shot(phone, "sats-mobile.png");

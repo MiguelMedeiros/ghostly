@@ -232,6 +232,32 @@ export const test = base.extend<Fixtures>({
   },
 });
 
+/** A phone held upright: a chat's header keeps the name, a voice call and ⋮ there (`usePhoneHeader` in the app). */
+export const phoneHeader = (page: Page): Promise<boolean> => page.evaluate(() => matchMedia("(max-width: 480px)").matches);
+
+/**
+ * A control of a 1:1 chat's header that is a row of ⋮ on an upright phone: the connection (`connection-options`), the
+ * video call (`call-video`), a bot's Tasks (`chat-tasks`) and the contact's identities (`chat-identity-badges`).
+ * On screen when this resolves: on such a phone ⋮ is opened for it. A click on the row closes the menu by itself.
+ */
+export async function headerControl(page: Page, id: string): Promise<Locator> {
+  const control = page.getByTestId(id);
+  if ((await phoneHeader(page)) && !(await control.isVisible())) await page.getByTestId("chat-options").filter({ visible: true }).click();
+  return control;
+}
+
+/** The ⋮ menu `headerControl` opened on a phone, closed again when the control was only read. */
+export async function closeHeaderMenu(page: Page): Promise<void> {
+  const menu = page.getByTestId("chat-options-menu");
+  if (await menu.isVisible()) { await page.keyboard.press("Escape"); await expect(menu).toHaveCount(0); }
+}
+
+/** The chat on screen is live: its connection control says "Connected · <transport>". */
+export async function expectConnected(page: Page, timeout = 90_000): Promise<void> {
+  await expect(await headerControl(page, "connection-options")).toHaveAccessibleName(/Connected · /, { timeout });
+  await closeHeaderMenu(page);
+}
+
 /** `host` creates a chat, `guest` joins it with the invite code. Resolves once both have the chat open. */
 export async function link(host: Peer, guest: Peer): Promise<void> {
   await host.page.getByTitle("New Chat").click();
@@ -274,7 +300,7 @@ export async function chooseDhtOnly(page: Page): Promise<void> {
  * Off leaves it for Automatic, or for the one transport a browser runs (which is Automatic there too).
  */
 export async function setDhtOnly(page: Page, on: boolean): Promise<void> {
-  if ((await page.getByTestId("connection-menu").getAttribute("open")) === null) await page.getByTestId("connection-options").click();
+  if ((await page.getByTestId("connection-menu").getAttribute("open")) === null) await (await headerControl(page, "connection-options")).click();
   const panel = page.getByRole("dialog", { name: "Connection options" });
   const choice = panel.getByRole("radio", { name: "DHT only", exact: true });
   const back = panel.getByRole("radio", { name: "Automatic", exact: true }).or(panel.getByRole("radio", { name: "WebRTC", exact: true })).first();
@@ -446,8 +472,12 @@ export async function connect(a: Peer, b: Peer): Promise<void> {
   await say(a, `hello from ${a.name}`);
   await expect(chat(b).getByText(`hello from ${a.name}`)).toBeVisible();
   // A legacy chat says it in the strip, a paired one in the pairing banner.
-  for (const peer of [a, b]) await expect(
-    peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })
-      .or(peer.page.locator("[data-testid=connection-options][aria-label*=\"Connected · WebRTC\"]")),
-  ).toBeVisible();
+  for (const peer of [a, b]) {
+    await headerControl(peer.page, "connection-options");
+    await expect(
+      peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })
+        .or(peer.page.locator("[data-testid=connection-options][aria-label*=\"Connected · WebRTC\"]")),
+    ).toBeVisible();
+    await closeHeaderMenu(peer.page);
+  }
 }

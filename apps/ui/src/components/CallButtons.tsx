@@ -6,13 +6,15 @@ interface CallButtonsProps {
   /** A call is already ringing or running. */
   busy: boolean;
   onCall: (withVideo: boolean) => void;
+  /** A phone's header: the voice call alone, as large as ⋮ beside it; the video call is a row of the ⋮ menu. */
+  phone?: boolean;
 }
 
 /**
  * The chat header's call buttons: a voice call and a video call. There is no button for the screen here: it is
  * shared from inside a call, voice or video (CallOverlay).
  */
-export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
+export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) {
   const { t } = useI18n();
   // `aria-disabled` during a call, not `disabled`: a disabled button gives up the keyboard focus, and the call that
   // ends has nowhere to give it back.
@@ -24,14 +26,14 @@ export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
         onClick={() => { if (!busy) onCall(false); }}
         disabled={!!blocked}
         aria-disabled={busy || undefined}
-        className={`p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${off}`}
+        className={`${phone ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-2 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${off}`}
         title={blocked ?? t("calls.audio")}
         aria-label={t("calls.audio")}
         data-testid="call-audio"
       >
         <svg
-          width="18"
-          height="18"
+          width={phone ? 20 : 18}
+          height={phone ? 20 : 18}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -43,7 +45,7 @@ export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
         </svg>
       </button>
       {/* Video call button */}
-      <button
+      {!phone && <button
         onClick={() => { if (!busy) onCall(true); }}
         disabled={!!blocked}
         aria-disabled={busy || undefined}
@@ -65,7 +67,7 @@ export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
           <path d="M23 7l-7 5 7 5V7z" />
           <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
         </svg>
-      </button>
+      </button>}
     </>
   );
 }
