@@ -49,7 +49,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app cannot take calls", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated Ghostly for calls", `${CORE}/ghostlink.ts`],
   ["Calls are not available in this app", `${CORE}/ghostlink.ts`],
-  ["All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "packages/browser/src/engine/node.ts"],
+  ["All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "packages/browser/src/engine/node.ts"],
   ["Could not reach the HyperDHT relay", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["The HyperDHT relay did not answer", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["The HyperDHT relay closed the connection", `${BROWSER}/platform/hyperdhtRelay.ts`],
