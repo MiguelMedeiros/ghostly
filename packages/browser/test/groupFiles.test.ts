@@ -487,6 +487,39 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sent.filter(m => !t.got(bob, id, m).message?.file)).toEqual([]);
   });
 
+  it(`a member back from away keeps every file one member sent meanwhile: past ${GROUP_FILE_LIMITS.announceTaken} they wait for a Download`, async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    // 2.4 a minute for 15 minutes: a pace Alice's own app allows, and Bob gets every one as a file.
+    const count = GROUP_FILE_LIMITS.announceTaken + 6, sent: { messageId: string; meta: GroupFileMeta }[] = [];
+    for (let i = 0; i < count; i++) {
+      sent.push(await t.send(alice, id, pattern(1_000 + i, i), { name: `photo-${i}.jpg`, mime: "image/jpeg" }));
+      await t.world.run(25_000);
+    }
+    await t.world.until(() => sent.every(s => t.done(bob, id, s.messageId)), 60_000);
+    // Carol's catch-up brings them together: what one member's announcements may make her app fetch by itself stays bounded.
+    t.world.reopen(carol);
+    await t.world.until(() => sent.every(s => t.got(carol, id, s.messageId).message), 5 * 60_000);
+    await t.world.run(5 * 60_000);
+    const got = sent.map(s => t.got(carol, id, s.messageId));
+    expect(got.filter(g => !g.message!.file).map(g => g.message!.text)).toEqual([]);
+    expect(got.filter(g => g.transfer?.state === "done")).toHaveLength(GROUP_FILE_LIMITS.announceTaken);
+    const waiting = sent.filter(s => t.got(carol, id, s.messageId).transfer?.state !== "done");
+    for (const s of waiting) {
+      expect(t.got(carol, id, s.messageId)).toMatchObject({ message: { text: fileMessageText(s.meta) }, transfer: { state: "transferring", stage: "asking" }, bytes: undefined });
+    }
+    // Nobody was asked for them; their person asks, and they come.
+    expect(t.seen.filter(s => s.from === "carol" && s.frame.t === "group-want")).toHaveLength(GROUP_FILE_LIMITS.announceTaken);
+    for (const s of waiting) await carol.groups.downloadFile(t.got(carol, id, s.messageId).message!.file!.id);
+    await t.world.until(() => sent.every(s => t.done(carol, id, s.messageId)), 5 * 60_000);
+    for (const s of waiting) expect(sha(t.got(carol, id, s.messageId).bytes!)).toBe(s.meta.d);
+    // After a restart they are still files.
+    await t.restart(carol);
+    expect(sent.filter(s => !t.got(carol, id, s.messageId).message?.file)).toEqual([]);
+  });
+
   it("a member refused as busy is told when the holder's slot frees, and asks it again before the round is over", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
