@@ -119,14 +119,21 @@ pub async fn native_private_notification(id: String, body: String) -> Result<boo
 }
 
 /// The chat of notification `id` was read in the app. Android keeps a notification until it is tapped or swiped (and
-/// shows none past 50 an app posted), so it goes now; elsewhere they go by themselves.
+/// shows none past 50 an app posted), and a Linux desktop keeps a list of them, so it goes now; elsewhere they go by
+/// themselves.
 #[tauri::command]
 pub async fn native_clear_notification(id: String) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         crate::android::cancel_notification(&id).await
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(move || linux::clear(&id))
+            .await
+            .map_err(|_| "Notification delivery unavailable".to_string())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "linux")))]
     {
         let _ = id;
         Ok(())
@@ -388,7 +395,18 @@ mod linux {
             Ok(Self { connection, shown })
         }
 
+        /// The server's id of our notification `id`, while it is shown.
+        fn server_id(&self, id: &str) -> Option<u32> {
+            let shown = self.shown.lock().unwrap();
+            shown
+                .iter()
+                .find(|(_, ours)| ours == id)
+                .map(|(server_id, _)| *server_id)
+        }
+
+        /// Shown again under the same `id` (a chat's next messages), it takes the place of the one still there.
         pub(super) fn show(&self, id: &str, body: &str) -> zbus::Result<()> {
+            let replaces = self.server_id(id).unwrap_or(0);
             // The installed app's desktop entry and icon (Ghostly.desktop, ghostly.png); the sound stays the
             // local audio controller's, as on macOS.
             let hints = HashMap::from([
@@ -403,7 +421,7 @@ mod linux {
                 "Notify",
                 &(
                     "Ghostly",
-                    0u32,
+                    replaces,
                     "ghostly",
                     "Ghostly",
                     body,
@@ -414,11 +432,30 @@ mod linux {
             )?;
             let server_id: u32 = reply.body().deserialize()?;
             let mut shown = self.shown.lock().unwrap();
+            // Newest last, and once: the one it replaced is this one now.
+            shown.retain(|(theirs, ours)| *theirs != server_id && ours != id);
             shown.push_back((server_id, id.to_string()));
             if shown.len() > KEPT {
                 shown.pop_front();
             }
             Ok(())
+        }
+
+        /// Takes our notification `id` back from the server; nothing when it is gone already.
+        pub(super) fn clear(&self, id: &str) -> zbus::Result<()> {
+            let Some(server_id) = self.server_id(id) else {
+                return Ok(());
+            };
+            self.shown.lock().unwrap().retain(|(_, ours)| ours != id);
+            self.connection
+                .call_method(
+                    Some(SERVER),
+                    PATH,
+                    Some(SERVER),
+                    "CloseNotification",
+                    &server_id,
+                )
+                .map(drop)
         }
     }
 
@@ -451,6 +488,16 @@ mod linux {
                 *notifier = None;
                 false
             }
+        }
+    }
+
+    /// Nothing before the first notification was shown from here: there is none to take back.
+    pub fn clear(id: &str) {
+        let mut notifier = NOTIFIER.lock().unwrap();
+        let cleared = notifier.as_ref().map(|notifier| notifier.clear(id));
+        // As in `show`: a connection that broke is not kept.
+        if matches!(&cleared, Some(Err(error)) if !matches!(error, zbus::Error::MethodError(..))) {
+            *notifier = None;
         }
     }
 
@@ -522,6 +569,88 @@ mod linux {
                 let _ = self.0.send((app_name, icon, body, actions, hints));
                 self.1
             }
+        }
+
+        /// A notification server that keeps a list, as GNOME, KDE and swaync do: what it still shows, by its id.
+        struct Listing(Arc<Mutex<Vec<(u32, String)>>>, u32);
+
+        #[zbus::interface(name = "org.freedesktop.Notifications")]
+        impl Listing {
+            #[allow(clippy::too_many_arguments)]
+            fn notify(
+                &mut self,
+                _app_name: String,
+                replaces_id: u32,
+                _icon: String,
+                _summary: String,
+                body: String,
+                _actions: Vec<String>,
+                _hints: HashMap<String, OwnedValue>,
+                _timeout: i32,
+            ) -> u32 {
+                let mut shown = self.0.lock().unwrap();
+                if let Some(kept) = shown.iter_mut().find(|(id, _)| *id == replaces_id) {
+                    kept.1 = body;
+                    return replaces_id;
+                }
+                self.1 += 1;
+                shown.push((self.1, body));
+                self.1
+            }
+
+            fn close_notification(&mut self, id: u32) {
+                self.0.lock().unwrap().retain(|(shown, _)| *shown != id);
+            }
+        }
+
+        /// A chat's notifications used to pile up in the desktop's list, each burst a new one, and none was taken
+        /// back. Now a chat has one, which its next burst replaces, and reading the chat closes it.
+        #[test]
+        fn a_chat_has_one_notification_until_it_is_read() {
+            let bus = Bus::start();
+            let listed: Arc<Mutex<Vec<(u32, String)>>> = Arc::default();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Listing(Arc::clone(&listed), 0))
+                .unwrap()
+                .build()
+                .unwrap();
+            let notifier = Notifier::new(bus.connect().build().unwrap(), |_| {}).unwrap();
+            let listed = || listed.lock().unwrap().clone();
+
+            notifier.show("chat-a", "first burst").unwrap();
+            notifier.show("chat-b", "another chat").unwrap();
+            notifier.show("chat-a", "second burst").unwrap();
+            notifier.show("chat-a", "third burst").unwrap();
+            assert_eq!(
+                listed(),
+                [
+                    (1, "third burst".to_string()),
+                    (2, "another chat".to_string())
+                ]
+            );
+
+            // Read in the app: only that chat's goes, and once.
+            notifier.clear("chat-a").unwrap();
+            assert_eq!(listed(), [(2, "another chat".to_string())]);
+            notifier.clear("chat-a").unwrap();
+            notifier.clear("never-shown").unwrap();
+            assert_eq!(listed(), [(2, "another chat".to_string())]);
+
+            // Its next message is a new notification, which replaces none of another chat's.
+            notifier.show("chat-a", "after it was read").unwrap();
+            assert_eq!(
+                listed(),
+                [
+                    (2, "another chat".to_string()),
+                    (3, "after it was read".to_string())
+                ]
+            );
+            notifier.clear("chat-b").unwrap();
+            notifier.clear("chat-a").unwrap();
+            assert_eq!(listed(), []);
         }
 
         /// The click the issue measured as lost: the server offers the body as the `default` action, and its
