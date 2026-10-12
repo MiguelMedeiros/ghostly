@@ -64,7 +64,7 @@ test("a picture's bubble is as tall from the start as the picture it shows", { t
   expect(await mine.evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(330);
 });
 
-test("a tap on a picture in a chat on a phone opens it large, in its own shape; a long press still opens the reactions", { tag: ["@feature:files.image.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+test("a tap on a picture in a chat on a phone opens it large, in its own shape, and a pinch zooms it and not the page; a long press still opens the reactions", { tag: ["@feature:files.image.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   // Only profile pictures opened large: a tap on a picture someone sent did nothing, and a phone showed it at 330px.
   const [alice, bob] = await Promise.all([peer("view-alice"), peer("view-bob", { mobile: true, viewport: { width: 402, height: 874 } })]);
   await link(alice, bob);
@@ -96,6 +96,30 @@ test("a tap on a picture in a chat on a phone opens it large, in its own shape; 
   const large = (await viewer.getByTestId("avatar-viewer-image").boundingBox())!;
   expect(large.width).toBeGreaterThan(360);
   expect(large.width / large.height).toBeCloseTo(2, 1);
+
+  // A pinch on it zooms the picture, not the page: the browser's own zoom of the app stays at 1.
+  const image = viewer.getByTestId("avatar-viewer-image");
+  const cdp = await bob.page.context().newCDPSession(bob.page);
+  await cdp.send("Input.synthesizePinchGesture", { x: large.x + large.width / 2, y: large.y + large.height / 2, scaleFactor: 2.5, relativeSpeed: 400, gestureSourceType: "touch" });
+  await expect.poll(() => image.getAttribute("data-zoom").then(Number)).toBeGreaterThan(1.5);
+  expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+  await expect(viewer).toBeVisible();
+  // A double tap puts it back whole.
+  const tapAt = async (x: number, y: number) => {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  };
+  await tapAt(large.x + large.width / 2, large.y + large.height / 2);
+  await tapAt(large.x + large.width / 2, large.y + large.height / 2);
+  await expect(image).toHaveAttribute("data-zoom", "1.00");
+
+  // The chat under it does not zoom either.
+  await viewer.getByTestId("avatar-viewer-close").click();
+  await expect(viewer).toHaveCount(0);
+  await cdp.send("Input.synthesizePinchGesture", { x: 200, y: 400, scaleFactor: 2.5, relativeSpeed: 400, gestureSourceType: "touch" });
+  await bob.page.waitForTimeout(300);
+  expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+  await open.click();
   await viewer.getByTestId("avatar-viewer-close").click();
   await expect(viewer).toHaveCount(0);
   await expect(open).toBeFocused();
