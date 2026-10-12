@@ -323,7 +323,15 @@ interface LiveLink {
   appsOpen?: Map<string, string>;
   /** The public key of `stored.participationSeed`, derived once for that seed (`participationKeyOf`). */
   participationKey?: { seed: string; key: string };
+  /**
+   * The messages of mine that wait for the live link and go from `sendWaiting` (`waitsForLive`), by their id. Read from
+   * the chat's history once in a run (with the chat, at the start), then kept as they are stored (`storeNewMessage`).
+   */
+  waitingSends?: Promise<Set<string>>;
 }
+
+/** A file or a payment request of mine that waits for the chat to be live (a text that waits is its outbox's). */
+const waitsForLive = (m: StoredMessage) => m.sender === "me" && m.delivery === "waiting" && (!!m.file || !!m.paymentId);
 
 /** This side's participation key in a chat: derived from its seed once, not at every state built. */
 function participationKeyOf(live: LiveLink): string | undefined {
@@ -1627,6 +1635,8 @@ export class GhostlyNode implements EngineImplementation {
       if (!stored.group) this.fileDesk.restore(stored.id, storedFiles);
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
+      // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
+      if (!stored.group) this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
       history.set(stored.id, messages);
       // What the contact's clock was when the chat was last live: its first message of this run is read by it.
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
@@ -3830,8 +3840,14 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.link?.isDataLinkOpen) return;
     const withTexts = this.outboxFor(linkId).sendsFiles;
-    const waiting = (await db.getMessages(linkId)).filter(m => m.sender === "me" && m.delivery === "waiting" && ((m.file && !withTexts) || m.paymentId))
-      .sort((a, b) => a.timestamp - b.timestamp);
+    const known = await this.waitingSendsOf(live), waiting: StoredMessage[] = [];
+    for (const id of [...known]) {
+      const message = await db.getMessage(linkId, id);
+      // Deleted, or gone since (a 1:1 chat's file goes through its outbox): it waits no more.
+      if (!message || !waitsForLive(message)) known.delete(id);
+      else if ((message.file && !withTexts) || message.paymentId) waiting.push(message);
+    }
+    waiting.sort((a, b) => a.timestamp - b.timestamp);
     // A session that just opened has not heard the contact's capabilities yet (files/3 comes in them): asked a little.
     if (waiting.some((m) => m.file) && !GhostlyNode.takesFiles(live.link)) await GhostlyNode.largeFilesAgreed(live.link);
     for (const message of waiting) {
@@ -3850,8 +3866,18 @@ export class GhostlyNode implements EngineImplementation {
           await db.putMessage({ ...sentNow(message), details: { ...withSend(message.details, { at, ...pathSnapshot(live, "datalink"), result: "sent" }), sentAt: at } });
         } else await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive payment requests.");
       }
+      known.delete(message.id);
     }
     if (waiting.length) await this.messagesChanged(linkId, waiting.map(m => m.id));
+  }
+
+  /**
+   * The ids of my messages that wait for the live link (`waitsForLive`). A chat loaded at the start has them from that
+   * read; any other reads its history once in a run. A session that opens then reads those rows, however long the chat.
+   */
+  private waitingSendsOf(live: LiveLink): Promise<Set<string>> {
+    return live.waitingSends ??= db.getMessages(live.stored.id).then(history => new Set(history.filter(waitsForLive).map(m => m.id)),
+      error => { live.waitingSends = undefined; throw error; });
   }
 
   private receiveFile(
@@ -7500,6 +7526,8 @@ export class GhostlyNode implements EngineImplementation {
       message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
     }
     if (!(await db.addMessage(message))) return false;
+    // It waits for the live link: `sendWaiting` finds it by its id (a list not read yet reads it from the history).
+    if (live && waitsForLive(message)) void live.waitingSends?.then(known => known.add(message.id), () => {});
     this.clockSample(message);
     const newest = this.newestAt.get(message.linkId);
     if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, writtenAt(message, this.clockLeads.get(message.linkId))));
