@@ -1309,12 +1309,13 @@ export class GhostlyNode implements EngineImplementation {
     // My edits a member has not heard, to its edge that opened: a private group has no catch-up for them. The group's pin too.
     edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); this.sendGroupPinFrame(groupId, peer); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
-    // Files in groups (WISP 503): kept where a chat's are, their bytes over the edges' files/3.
+    // Files in groups (WISP 503): kept where a chat's are, their bytes over the edges' files/3 (as binary with files/4).
     groupFiles: {
       store: storedGroupFiles,
       transfers: this.transfers,
       settings: () => ({ autoDownloads: this.settings.autoDownloads !== false, serveFiles: this.settings.serveFiles !== false }),
       sendFiles: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
+      sendData: (linkId, id, offset, data) => this.links.get(linkId)?.link?.sendFileData(id, offset, data) ?? false,
       writable: linkId => this.links.get(linkId)?.link?.filesWritable(),
     },
   });
@@ -6520,6 +6521,7 @@ export class GhostlyNode implements EngineImplementation {
       barkPaymentsSupport: !entry,
       // An edge carries the bytes of the group's files between its two members (WISP 503); an entry session does not.
       largeFilesSupport: !entry,
+      binaryFilesSupport: !entry,
       params: stored,
       rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId),
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
@@ -6712,7 +6714,6 @@ export class GhostlyNode implements EngineImplementation {
       callsSupport: this.options.callsSupport ?? typeof RTCPeerConnection !== "undefined",
       callsMissing: this.options.callsUnavailable,
       largeFilesSupport: true,
-      // 1:1 chats only for now: a group's file session stays on files/3 frames (WISP 503).
       binaryFilesSupport: true,
       // 1:1 chats only: group edges (startEdge) never offer it.
       typingSupport: true,

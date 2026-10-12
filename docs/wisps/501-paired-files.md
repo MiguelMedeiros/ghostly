@@ -75,7 +75,7 @@ Implemented in [`chatFiles.ts`](../../packages/core/src/chatFiles.ts) (protocol)
   It means what `pf-data {id, offset, data}` means, and every rule that names a data frame (flow, confirming, resume, what is sent again and its bound, backpressure) counts it the same way, by its bytes of data.
 - **Sender.** For each chunk, a sender sends the binary message when `files/4` is on for the open session at that moment, and the `pf-data` frame otherwise. A transfer under way follows the session: after a transport switch or a reconnection it goes on in whichever form the new session agreed, from the offset the receiver accepts.
 - **Receiver.** An app that lists `files/4` takes a file's data in either form, at any time, for the same transfer. A binary message that is malformed (shorter than its header and one byte, another kind, an id length or an id outside the above, an offset past 2^53 - 1, more than 16,384 bytes of data), that names no transfer under way, or that comes while `files/4` is not on, is dropped as a malformed frame is: it ends neither the transfer nor the session, and the resume rules bring the bytes again.
-- **Not covered.** `files/2`, held files ([404](404-store-and-forward.md)) and a file's offer said on the DHT floor are unchanged. A group's file session ([503](503-group-files.md)) stays on `files/3` frames until 503 says otherwise.
+- **Not covered.** `files/2`, held files ([404](404-store-and-forward.md)) and a file's offer said on the DHT floor are unchanged. A group's file session ([503](503-group-files.md#the-file-session)) agrees it as a chat does.
 
 ## files/2 framing
 

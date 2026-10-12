@@ -115,6 +115,8 @@ export interface GroupFilesHost {
   settings(): { autoDownloads: boolean; serveFiles: boolean };
   /** A files/3 frame on an edge's open session; false when it could not go. */
   sendFiles(linkId: string, frame: Record<string, unknown>): boolean;
+  /** A file's bytes on an edge, in the form its session agreed (`GhostLink.sendFileData`, files/4). Absent: `pf-data` frames. */
+  sendData?(linkId: string, id: string, offset: number, data: Uint8Array): boolean;
   /** Resolves once the edge's session can take another data frame. */
   writable?(linkId: string): Promise<void> | undefined;
 }
@@ -768,6 +770,7 @@ export class GroupFileDesk {
       openSource: record => this.openSource(edge, record),
       changed: (record, transferred) => this.transferChanged(edge, record, transferred),
       room: () => this.deps.store.room(),
+      ...(this.deps.sendData && { sendData: (id: string, offset: number, data: Uint8Array) => this.deps.sendData!(linkId, id, offset, data) }),
       writable: () => this.deps.writable?.(linkId),
       resend: record => !edge.serving.has(record.id) || this.mayResend(),
     });
