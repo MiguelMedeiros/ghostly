@@ -37,7 +37,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const whyId = useId();
   /** Its bytes are not on this device: gone, or (`left-out`) left out of the light backup this profile came from. */
   const [missing, setMissing] = useState<boolean | "left-out">(false);
-  /** The file is kept, but too large for this app to hand out: it is saved through the system instead. */
+  /** The file is kept, but nothing of it is shown here (not a picture, or one too large to read): Save without a preview. */
   const [saveOnly, setSaveOnly] = useState(false);
   // Right after a start the engine has not put its transfers back yet: a file still moving is not shown as finished.
   const settled = (transfer === null && !restoring) || transfer?.state === "done";
@@ -67,14 +67,16 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   useEffect(() => {
     if (!platform || !readable || blobUrl) return;
     let cancelled = false;
-    void platform.getFile(file.id).then(async (blob) => {
+    // Only a picture is read, to show it: any other file asks whether it is here (its size), not for its bytes. A
+    // platform that cannot tell is asked for the file, as before.
+    void (picture || !platform.fileHeld ? platform.getFile(file.id) : Promise.resolve(null)).then(async (blob) => {
       if (cancelled) return;
       if (!blob) {
-        if (!settled) return;
-        // Too large to hand out here, or not here at all: only a file this device holds offers Save.
+        // A picture too large to hand out here, or not here at all: only a file this device holds offers Save.
         const held = await fileHeld(platform, file.id, transfer?.state === "done");
         if (cancelled) return;
-        const saveable = held === "here" && !!platform.saveFile && transfer?.state === "done";
+        const saveable = held === "here" && (picture || !platform.fileHeld ? !!platform.saveFile && transfer?.state === "done" : true);
+        if (!saveable && !settled) return;
         setSaveOnly(saveable);
         setMissing(saveable ? false : held === "left-out" ? "left-out" : true);
         return;
