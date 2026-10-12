@@ -39,6 +39,16 @@
   "reconnecting": "Reconnecting...",
   "rejected": "Call rejected",
   "selfView": "Drag to move, pull a corner to resize, double-click to reset",
+  "share": {
+    "blocked": "Screen sharing is blocked",
+    "blockedNext": "Allow screen recording for this app in your system's privacy settings.",
+    "contactCannot": "Your contact's app cannot show a screen in this call",
+    "failed": "Could not share the screen",
+    "failedNext": "Try again.",
+    "noScreen": "There is no screen to share",
+    "notHere": "Screen sharing is not available here",
+    "notOnLinux": "Screen sharing is not available on Linux yet"
+  },
   "shareScreen": "Share screen",
   "sharing": {
     "both": "You and {{name}} are sharing your screens",
