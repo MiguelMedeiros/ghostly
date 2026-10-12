@@ -16,7 +16,7 @@
     "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "@ghostly/react": "*",
-    "@tauri-apps/api": "^2.12.1",
+    "@tauri-apps/api": "^2.12.2",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -31,7 +31,7 @@
     "playwright": "^1.63.0",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.3",
+    "vite": "^8.3.4",
     "vitest": "^5.0.3"
   }
 }
