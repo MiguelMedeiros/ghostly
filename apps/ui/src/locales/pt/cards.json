@@ -151,7 +151,8 @@
     "title": "Uso",
     "updatedLabel": "Atualizado",
     "used": "{{used}} de {{limit}} usados",
-    "usedLabel": "Usado"
+    "usedLabel": "Usado",
+    "wasReset": "renovou {{ago}}"
   },
   "working": {
     "label": "Trabalhando",
