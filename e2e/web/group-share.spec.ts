@@ -65,6 +65,15 @@ test("a new group opens on its link; Copy, Share and the header's Share link; jo
     const list = link.parentElement!.querySelector('[data-testid="group-member-list"]')!;
     return !!(link.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING);
   })).toBe(true);
+  // Asked from the keyboard and called off with Escape, the question gives the focus back to the button that asked,
+  // and the members stay open.
+  await panel.getByTestId("group-link-disable").focus();
+  await alice.page.keyboard.press("Enter");
+  await expect(alice.page.getByTestId("group-link-ask-dialog")).toBeVisible();
+  await alice.page.keyboard.press("Escape");
+  await expect(alice.page.getByTestId("group-link-ask-dialog")).toHaveCount(0);
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId("group-link-disable")).toBeFocused();
   // Turned off, the header's Share link turns it on again, as a new link.
   await panel.getByTestId("group-link-disable").click();
   await alice.page.getByTestId("group-link-ask-confirm").click();

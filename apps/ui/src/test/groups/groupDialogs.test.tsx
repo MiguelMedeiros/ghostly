@@ -302,10 +302,14 @@ describe("GroupLinkPanel", () => {
     expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.click(within(ask).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId(button));
-    // Escape, as the browser says it to the topmost dialog.
+    // The button that asked has the focus back, so the keyboard goes on from there: it fell to the page.
+    expect(screen.getByTestId(button)).toHaveFocus();
+    // From the keyboard: Enter on the button asks, Escape (as the browser says it to the topmost dialog) calls it off.
+    await user.keyboard("{Enter}");
+    expect(within(screen.getByTestId("group-link-ask-dialog")).getByRole("button", { name: "Cancel" })).toHaveFocus();
     act(() => { screen.getByTestId("group-link-ask-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
     expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId(button)).toHaveFocus();
     expect(engine.callsTo("enableGroupLink")).toEqual([]);
     expect(engine.callsTo("disableGroupLink")).toEqual([]);
     await user.click(screen.getByTestId(button));
