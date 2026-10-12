@@ -59,7 +59,7 @@ describe("a member back in a private group reads what it missed in the order it 
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
   });
 
-  it("the member asked first was away too: the others are told once it has nothing more, and all of it arrives", async () => {
+  it("the member asked first was away too: the others are told one after another, each asked for the rest", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
     const [alice, bob, carol, dave, eve] = peers;
     alice.online = dave.online = false;
@@ -71,8 +71,7 @@ describe("a member back in a private group reads what it missed in the order it 
     comesBack(world, dave, alice);
     const took = await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 60_000);
     expect(took).toBeLessThanOrEqual(10_000);
-    // Each member's own lines in its order, whatever the order between members.
-    for (const p of [bob, carol, eve]) expect(world.texts(dave, id).filter(t => t.startsWith(`${p.name} `))).toEqual(written.filter(t => t.startsWith(`${p.name} `)));
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
   });
 
   it("a member asked of another a moment ago, and reached since, is asked of the first member again", async () => {

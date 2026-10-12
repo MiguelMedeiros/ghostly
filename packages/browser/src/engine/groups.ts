@@ -1902,19 +1902,33 @@ export class Groups {
     return true;
   }
 
-  /** The syncs that waited for another member's answer (`holdSync`), once it has come: for what it did not hand on. */
+  /**
+   * The syncs that waited for another member's answer (`holdSync`), once it has come: for what it did not hand on.
+   * One member at a time: the first is told and asked for the others too, which wait for its answer in turn. Told
+   * together, each answered with its own messages alone, and when the member asked first had been away too (it held
+   * little of what was missed) a conversation came as one member's lines, then the next's.
+   */
   private heldSyncs(groupId: string, session: GroupSession, now: number): void {
     const held = this.syncHeld.get(groupId);
     if (!held?.size) return;
-    const edges = this.host.edges(groupId);
-    for (const [key, asked] of held) {
-      if (this.answering(groupId, asked, now)) continue;
+    const edges = this.host.edges(groupId), asked = this.relayAsked.get(groupId);
+    const due: string[] = [];
+    for (const [key, of] of held) {
+      if (this.answering(groupId, of, now)) continue;
       held.delete(key);
-      if (this.relayAsked.get(groupId)?.get(key)?.via === asked.via) this.relayAsked.get(groupId)!.delete(key);
+      if (asked?.get(key)?.via === of.via) asked.delete(key);
       const edge = edges.get(key);
-      if (!edge || !this.host.linkReady(edge) || !rosterHas(session.roster, key)) continue;
-      try { this.host.sendOnLink(edge, session.syncFrame(this.askOf(groupId, session, key))); } catch { /* it closed: it is told when it opens again */ }
+      if (edge && this.host.linkReady(edge) && rosterHas(session.roster, key)) due.push(key);
     }
+    const [next, ...rest] = due;
+    if (!next) return;
+    const ask = new Set(this.askOf(groupId, session, next));
+    for (const key of rest) {
+      ask.add(key);
+      asked?.set(key, { via: next, at: now });
+      held.set(key, { via: next, at: now });
+    }
+    try { this.host.sendOnLink(edges.get(next)!, session.syncFrame([...ask])); } catch { /* it closed: it is told when it opens again, and the others at the next tick */ }
   }
 
   /**
