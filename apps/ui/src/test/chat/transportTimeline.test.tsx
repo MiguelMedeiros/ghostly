@@ -135,8 +135,8 @@ describe("the chat's connection control and its panel", () => {
     expect(transportOptions({ availableTransports: ["webrtc/1"], peerTransports: undefined }).filter(o => !o.available).map(o => o.reason))
       .toEqual(["Iroh needs Ghostly Desktop", "HyperDHT needs Ghostly Desktop, or a HyperDHT relay in Settings"]);
     // A native adapter that could not start says so; Linux WebKitGTK has no WebRTC.
-    expect(transportOptions({ availableTransports: ["hyperdht/1"], transportErrors: { "iroh/1": "All eight native connection slots are in use." } }).map(o => o.reason))
-      .toEqual(["This app has no WebRTC", "All eight native connection slots are in use.", undefined]);
+    expect(transportOptions({ availableTransports: ["hyperdht/1"], transportErrors: { "iroh/1": "All native connection slots are in use." } }).map(o => o.reason))
+      .toEqual(["This app has no WebRTC", "All native connection slots are in use.", undefined]);
   });
 
   it("shows the live transport by its mark in the header, and its round trip on the panel's first line", () => {
