@@ -351,7 +351,7 @@ export function GroupChat() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
   const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
-  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink, t, returnFocus: optionsRef });
+  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation?.viaLink && !group.status), t, returnFocus: optionsRef });
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
   const pageShown = usePageShown();
   useEffect(() => {
@@ -457,7 +457,10 @@ export function GroupChat() {
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />;
-  const joiningByLink = group.invitation?.viaLink;
+  // A first join through a link has the page to itself (the card). Someone removed from a community who opened its link
+  // again still has the group as it was kept here: its history stays in the page, and the wait is a line above it.
+  const joiningByLink = !!group.invitation?.viaLink && !group.status;
+  const knockingAgain = !!group.invitation?.viaLink && !!group.status;
   const waitingWith = group.invitation?.waiting ?? 0;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
   // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
@@ -475,7 +478,7 @@ export function GroupChat() {
   const subtitle = joiningByLink ? (group.invitation!.admin ? t("group.chat.joining") : t("group.chat.joiningByLink"))
     : community && group.status === "active" ? (community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
-    : group.invitation ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
+    : group.invitation && !knockingAgain ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
     // Nobody else in it (just created, or everyone left): there is no one to reach, so only the count.
     : group.status === "active" ? (others.length === 0 ? count : t("group.chat.reachable", { members: count, reachable, total: others.length }))
     : outOfIt;
@@ -560,7 +563,14 @@ export function GroupChat() {
       </div>}
       {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        {error ? <Notice problem={error} className="text-xs" /> : (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
+        {error && <Notice problem={error} className="text-xs" />}
+        {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
+        {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
+          <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}</p>
+          <button data-testid="group-rejoin-cancel" onClick={() => void act(() => engine.call("declineGroupInvitation", { groupId }))}
+            className="min-h-11 shrink-0 rounded-lg px-3 text-xs text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.cancel")}</button>
+        </div>
+        : !error && (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
 
 
