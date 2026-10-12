@@ -201,6 +201,9 @@ export function CallOverlay({
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
   // Who is speaking: the contact's avatar wears a ring as wide as their voice is loud.
   const peerRing = useVoiceRing<HTMLDivElement>(remoteStream, callState === "connected" && !showRemoteVideo);
+  // And yours, beside it, in a call where no picture of you shows: your own ring, quiet while you are muted.
+  const showSelf = callState === "connected" && !showRemoteVideo && isVideoOff;
+  const selfRing = useVoiceRing<HTMLDivElement>(localStream, showSelf && !isMuted);
   // A screen in place of the camera leaves the camera off, and its button says so.
   const cameraOn = !isVideoOff && !isScreenSharing;
   // Sharing is never a surprise, to either side.
@@ -256,13 +259,23 @@ export function CallOverlay({
       
       {/* Placeholder when no remote video */}
       {!showRemoteVideo && (
-        <div className="call-peer flex flex-col items-center gap-4">
-          <div ref={peerRing} data-testid="call-peer-avatar" className="call-avatar w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
-            <span className="text-text-muted text-3xl">
-              {initial(peerName)}
-            </span>
+        <div className="call-sides flex items-end justify-center gap-10 max-w-full px-4">
+          <div className="call-peer min-w-0 flex flex-col items-center gap-4">
+            <div ref={peerRing} data-testid="call-peer-avatar" className="call-avatar shrink-0 w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
+              <span className="text-text-muted text-3xl">
+                {initial(peerName)}
+              </span>
+            </div>
+            <p className="call-name max-w-full truncate text-text-primary text-lg font-medium">{peerName}</p>
           </div>
-          <p className="call-name text-text-primary text-lg font-medium">{peerName}</p>
+          {showSelf && (
+            <div className="call-peer call-self flex flex-col items-center gap-4">
+              <div ref={selfRing} data-testid="call-self-avatar" data-muted={isMuted} className="call-avatar shrink-0 w-16 h-16 rounded-full bg-surface-hover flex items-center justify-center">
+                <span className="text-text-muted text-xl">{initial(t("calls.you"))}</span>
+              </div>
+              <p className="call-name text-text-muted text-lg">{t("calls.you")}</p>
+            </div>
+          )}
         </div>
       )}
 

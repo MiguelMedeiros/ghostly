@@ -2,7 +2,7 @@ import { expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
- * Who is speaking in a call: the contact's avatar wears a ring that follows their voice. Chromium's fake
+ * Who is speaking in a call: each side's avatar wears a ring that follows its voice. Chromium's fake
  * microphone beeps about once a second, so each side "speaks" in bursts and the ring comes and goes with them.
  */
 
@@ -75,6 +75,53 @@ test("with motion reduced the ring is steady: there while the contact speaks, ne
   const switched = await rings(bob, 2500);
   expect(switched.marked).toBeGreaterThan(0);
   expect([switched.narrowest, switched.widest]).toEqual([3, 3]);
+
+  await alice.page.getByTestId("call-hang-up").click();
+  await expect(bob.page.getByTitle("End call")).toHaveCount(0);
+});
+
+test("a voice call shows your own side too, ringed by your microphone and quiet while you are muted", { tag: ["@feature:calls.speaking", "@feature:calls.audio", "@feature:calls.mini-window"] }, async ({ peer }, testInfo) => {
+  const [alice, bob] = await Promise.all([peer("speaking-self-alice"), peer("speaking-self-bob")]);
+  await pair(alice, bob);
+  await alice.page.getByTestId("call-audio").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+  // Beside the contact, smaller: Alice, with her own microphone's ring.
+  const you = alice.page.getByTestId("call-self-avatar");
+  await expect(you).toHaveAttribute("data-speaking", "true");
+  const sizes = () => alice.page.evaluate(() => ["call-peer-avatar", "call-self-avatar"].map((id) => Math.round(document.querySelector(`[data-testid=${id}]`)!.getBoundingClientRect().width)));
+  expect(await sizes()).toEqual([96, 64]);
+  await alice.page.screenshot({ path: testInfo.outputPath("both.png") });
+
+  // Muted, her ring is gone for good, and Bob's side of her is quiet too; his own goes on.
+  await alice.page.getByTestId("call-mute").click();
+  await expect(you).toHaveAttribute("data-muted", "true");
+  await expect(you).not.toHaveAttribute("data-speaking");
+  await expect(bob.page.getByTestId("call-self-avatar")).toHaveAttribute("data-speaking", "true");
+  await alice.page.getByTestId("call-mute").click();
+  await expect(you).toHaveAttribute("data-speaking", "true");
+
+  // The small window holds both, inside its box.
+  await alice.page.getByTestId("call-minimize").click();
+  await expect(alice.page.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+  expect(await sizes()).toEqual([44, 32]);
+  await expect(you).toHaveAttribute("data-speaking", "true");
+  const inside = await alice.page.evaluate(() => {
+    const box = document.querySelector("[data-testid=call-window]")!.getBoundingClientRect();
+    return [...document.querySelectorAll(".call-peer")].every((side) => {
+      const at = side.getBoundingClientRect();
+      return at.left >= box.left && at.right <= box.right && at.top >= box.top && at.bottom <= box.bottom;
+    });
+  });
+  expect(inside).toBe(true);
+  await alice.page.screenshot({ path: testInfo.outputPath("both-small.png") });
+
+  // With a camera on, your picture stands for you: no avatar of yours.
+  await alice.page.getByTestId("call-minimize").click();
+  await alice.page.getByTestId("call-camera").click();
+  await expect(alice.page.getByTestId("call-self-view")).toBeVisible();
+  await expect(you).toHaveCount(0);
 
   await alice.page.getByTestId("call-hang-up").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
