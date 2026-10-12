@@ -668,20 +668,46 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.decline(groupId);
     const group = this.stored.get(groupId);
     if (!group?.invitation) throw new Error("No invitation to decline");
-    try { this.host.sendOnLink(group.invitation.linkId, { t: "group-decline", g: groupId }); } catch { /* they will notice when nobody accepts */ }
-    await this.dropInvitation(group);
+    const linkId = group.invitation.linkId;
+    // The inviter's chat is down (its app is closed, say): the answer is owed, and said when that chat is next up.
+    let owed: StoredGroup["declined"];
+    try { this.host.sendOnLink(linkId, { t: "group-decline", g: groupId }); } catch { owed = { at: Date.now(), linkId }; }
+    await this.dropInvitation(group, owed);
   }
 
-  /** An invitation goes from the list: declined here, or taken back by who sent it. */
-  private async dropInvitation(group: StoredGroup): Promise<void> {
+  /** An invitation goes from the list: declined here (`owed`: the answer, when it could not be sent), or taken back by who sent it. */
+  private async dropInvitation(group: StoredGroup, owed?: StoredGroup["declined"]): Promise<void> {
     // Removed, then invited again: the answer is to the invitation only; the removed group and its history stay.
     const previous = group.previous;
-    if (!previous) return this.forget(group.id);
+    if (!previous) {
+      await this.forget(group.id);
+      if (!owed) return;
+      const tombstone: StoredGroup = { id: group.id, createdAt: group.createdAt, declined: owed };
+      this.stored.set(group.id, tombstone);
+      await this.store.putGroup(tombstone);
+      return;
+    }
+    if (owed) previous.declined = owed; else delete previous.declined;
     this.acceptSaid.delete(group.id);
     this.stored.set(group.id, previous);
     if (previous.state) this.attach(previous.state);
     await this.store.putGroup(previous);
     this.host.emit();
+  }
+
+  /** Invitee side: a decline its inviter's chat was down for is said once that chat is up, or dropped after `LEFT_KEPT_MS`. */
+  private async declineOwed(group: StoredGroup, now: number): Promise<void> {
+    const { at, linkId } = group.declined!;
+    if (now - at <= LEFT_KEPT_MS) {
+      if (!this.host.linkReady(linkId)) return;
+      try { this.host.sendOnLink(linkId, { t: "group-decline", g: group.id }); } catch { return; }
+    }
+    if (this.stored.get(group.id) !== group) return;
+    delete group.declined;
+    // Only the answer was kept: nothing of the invitation stays. A group I was removed from stays as it was.
+    if (group.state) return this.store.putGroup(group);
+    this.stored.delete(group.id);
+    await this.store.deleteGroup(group.id);
   }
 
   /**
@@ -1101,6 +1127,7 @@ export class Groups {
           if (now - group.left.at > LEFT_KEPT_MS) await this.forget(group.id);
           continue;
         }
+        if (group.declined) { await this.declineOwed(group, now); if (!group.state) continue; }
         if (group.invitation?.entry && !group.state) {
           const waited = now - group.createdAt, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
           // Once the admin's app is on the entry session, knocking only spends the relays' budget its signaling needs.
