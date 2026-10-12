@@ -1,5 +1,5 @@
 import {
-  DHT_POLL_INTERVALS, ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
+  turnInstance, DHT_POLL_INTERVALS, ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
   enrollCancelFrame, enrollCancelReason, enrollDigits, enrollDoneFrame, enrollGrantFrame, enrollHelloFrame, enrollProofFrame, firstDeviceSetSecret, fromBase64Url,
   nextTurnPosition, publicKeyFromZ32, randomBytes, readDeviceInvite, readEnrollGrant, readEnrollHello, signTurnPacket, toBase64Url, turnKeys, turnName, verifyEnrollProof,
   type DeviceFrame, type DeviceInviteRefusal, type DeviceKind, type EnrollCancelReason, type EnrollNetwork, type EnrollSlot, type LinkParams, type NativeEndpoint, type NativeTransport,
@@ -420,7 +420,8 @@ export class EnrollInviter extends Enrollment {
       if (read.result !== "none") { await this.fail("elsewhere", "failed", joiner.name, true); return; }
       const keys = turnKeys(this.d);
       const packet = await signTurnPacket(keys, {
-        turn: granted.turn, rev: 0, author: 0, active: 0, instance: randomBytes(8),
+        // States no verifier: the device state may not hold the profile's yet; the engine states it right after (`stateVerifier`).
+        turn: granted.turn, rev: 0, author: 0, active: 0, instance: turnInstance(),
         slots: granted.slots.map((slot) => slot && { key: slot.key, name: slot.name }),
       }, (bytes) => this.key.sign(bytes));
       this.crash("inviter:before-write");

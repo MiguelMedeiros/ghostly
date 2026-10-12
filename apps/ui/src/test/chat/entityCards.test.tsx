@@ -181,6 +181,78 @@ describe("group cards", () => {
     expect(screen.getByTestId("where")).toHaveTextContent(`/group/${g}`);
     expect(engine.callsTo("joinGroupByLink")).toEqual([]);
   });
+
+  it("lets someone removed from a community join again through the link, and never says they are in it", async () => {
+    for (const [status, statusReason, says] of [
+      ["removed", "You were removed from this group", "You were removed from this group"],
+      ["lost", "Two members let people in at the same moment and yours did not count. Asking to be let in again…", "Two members let people in at once. Asking to be let in again…"],
+    ] as const) {
+      const link = encodeCommunityLink({ g, host });
+      const { user, engine, unmount } = bubble(link);
+      engine.update({ groups: [groupView({ id: g, name: "Book club", profile: "community", status, statusReason, canSend: false })] });
+      engine.on("joinGroupByLink", () => ({ groupId: g }));
+      const before = engine.callsTo("joinGroupByLink").length;
+      const card = screen.getByTestId("entity-group");
+      await waitFor(() => expect(card).toHaveAttribute("data-status", status));
+      expect(card).not.toHaveAttribute("data-member");
+      expect(card).toHaveTextContent("Book club");
+      expect(card).not.toHaveTextContent("You are in this group.");
+      expect(within(card).getByTestId("entity-group-out")).toHaveTextContent(says);
+      expect(within(card).getByTestId("entity-group-open")).toBeVisible();
+      expect(within(card).getByTestId("entity-group-join")).toHaveTextContent("Join again");
+      await user.click(within(card).getByTestId("entity-group-join"));
+      expect(engine.callsTo("joinGroupByLink").slice(before)).toEqual([{ link }]);
+      await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/group/${g}`));
+      unmount();
+    }
+  });
+
+  it("tells someone out of a private group whose history is kept what to do, with no join the engine would refuse", async () => {
+    for (const [status, statusReason, says] of [
+      ["removed", "You were removed from this group", "You were removed from this group"],
+      ["forked", "The membership history forked", "Group changes are paused"],
+    ] as const) {
+      const { user, engine, unmount } = bubble(encodeGroupEntryLink({ g, host }));
+      engine.update({ groups: [groupView({ id: g, name: "Book club", status, statusReason, canSend: false })] });
+      const card = screen.getByTestId("entity-group");
+      await waitFor(() => expect(card).toHaveAttribute("data-status", status));
+      expect(card).not.toHaveAttribute("data-member");
+      expect(card).not.toHaveTextContent("You are in this group.");
+      expect(within(card).getByTestId("entity-group-out")).toHaveTextContent(says);
+      expect(within(card).getByTestId("entity-group-next")).toHaveTextContent("Delete from this device");
+      expect(within(card).queryByTestId("entity-group-join")).toBeNull();
+      expect(within(card).getByTestId("entity-group-copy")).toBeVisible();
+      await user.click(within(card).getByTestId("entity-group-open"));
+      expect(screen.getByTestId("where")).toHaveTextContent(`/group/${g}`);
+      expect(engine.callsTo("joinGroupByLink")).toEqual([]);
+      unmount();
+    }
+  });
+
+  it("keeps the kept history of a forked community: its card opens it and offers no join", async () => {
+    const { engine } = bubble(encodeCommunityLink({ g, host }));
+    engine.update({ groups: [groupView({ id: g, name: "Book club", profile: "community", status: "forked", statusReason: "The membership history forked", canSend: false })] });
+    const card = screen.getByTestId("entity-group");
+    await waitFor(() => expect(card).toHaveAttribute("data-status", "forked"));
+    expect(card).not.toHaveTextContent("You are in this group.");
+    expect(within(card).getByTestId("entity-group-out")).toHaveTextContent("Group changes are paused. The admin must re-form the group.");
+    expect(within(card).queryByTestId("entity-group-join")).toBeNull();
+    expect(within(card).queryByTestId("entity-group-next")).toBeNull();
+    expect(within(card).getByTestId("entity-group-open")).toBeVisible();
+  });
+
+  it("offers a plain join for a group this profile left", async () => {
+    const link = encodeGroupEntryLink({ g, host });
+    const { user, engine } = bubble(link);
+    engine.update({ groups: [groupView({ id: g, name: "Book club", status: "left", statusReason: "You left this group", canSend: false })] });
+    engine.on("joinGroupByLink", () => ({ groupId: g }));
+    const card = screen.getByTestId("entity-group");
+    await waitFor(() => expect(card).toHaveAttribute("data-status", "left"));
+    expect(card).not.toHaveTextContent("You are in this group.");
+    expect(within(card).queryByTestId("entity-group-open")).toBeNull();
+    await user.click(within(card).getByTestId("entity-group-join"));
+    expect(engine.callsTo("joinGroupByLink")).toEqual([{ link }]);
+  });
 });
 
 describe("Nostr cards", () => {

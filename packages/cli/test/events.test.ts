@@ -153,6 +153,25 @@ describe("the event stream", () => {
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
 
+  it("notes what it reported with relaxed transactions: a message's delivery states cost the daemon no disk sync each", async () => {
+    const { h } = await hub("relaxed.jsonl");
+    const db = (h as unknown as { db: IDBDatabase }).db;
+    const transaction = vi.spyOn(db, "transaction");
+    h.baseline(state([link("c1")]), new Map([["c1", []]]));
+    for (const delivery of ["sending", "sent", "delivered"] as const)
+      h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "me_1", { sender: "me", delivery })] });
+    const writes = transaction.mock.calls.filter(([, mode]) => mode === "readwrite");
+    expect(writes.length).toBe(4);
+    expect(writes.map(([, , options]) => options)).toEqual(writes.map(() => ({ durability: "relaxed" })));
+    transaction.mockRestore();
+
+    // Still read back by the next run: nothing is reported twice.
+    await new Promise((r) => setTimeout(r, 50));
+    const second = await hub("relaxed.jsonl");
+    second.h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "me_1", { sender: "me", delivery: "delivered" })]]]));
+    expect(second.events).toEqual([]);
+  });
+
   it("after a restart: seq goes on, only what is new is reported, and the journal replays", async () => {
     const first = await hub("b.jsonl");
     first.h.baseline(state([link("c1")]), new Map([["c1", []]]));
@@ -235,6 +254,31 @@ describe("the event stream", () => {
     h.sink.post({ kind: "messages", linkId: "group:g1", messages: [] });
     h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "y", { member: "k1" })], deleted: [] });
     expect(events.map((e) => e.id)).toEqual(["group.message:g1:x", "group.message:g1:y"]);
+  });
+
+  it("reads a large seen set at start in two requests, without a cursor step per row", async () => {
+    const history = (chat: string) => Array.from({ length: 2_000 }, (_, i) => message(chat, `m${i}`, i % 2 ? { sender: "me", delivery: "delivered" } : {}));
+    const first = await hub("large.jsonl");
+    first.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", history("c1")], ["c2", history("c2")]]));
+    // The seen set is written behind the baseline: a read queued after it runs once those rows are in.
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("large.jsonl");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const store = db.transaction("seen").objectStore("seen");
+    const proto = Object.getPrototypeOf(store) as IDBObjectStore;
+    expect(await new Promise<number>((resolve) => { const request = store.count(); request.onsuccess = () => resolve(request.result); })).toBeGreaterThanOrEqual(4_000);
+    db.close();
+    const cursors = vi.spyOn(proto, "openCursor");
+    const requests = [vi.spyOn(proto, "getAllKeys"), vi.spyOn(proto, "getAll"), vi.spyOn(proto, "get")];
+    const later = await hub("large.jsonl");
+    expect(cursors).not.toHaveBeenCalled();
+    expect(requests.reduce((n, spy) => n + spy.mock.calls.length, 0)).toBe(2);
+    vi.restoreAllMocks();
+    // Every row is back under its own chat and message: nothing is reported twice, a delivery change and a new message are.
+    later.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", history("c1")], ["c2", [...history("c2").slice(0, 1_999), message("c2", "m1999", { sender: "me", delivery: "failed" }), message("c2", "fresh")]]]));
+    expect(later.events.map((e) => e.id)).toEqual(["message.delivery:c2:m1999:failed", "message.received:c2:fresh"]);
   });
 
   it("says when the journal no longer holds what a listener asks for", async () => {

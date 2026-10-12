@@ -6,7 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import {
   createRelayPayload, firstDeviceSetSecret, fromBase64Url, signRelayPayload, identityFromSeed, measureRecords, nextTurnPosition, openTurnValue, readTurnBody, readTurnPacket, sealTurnBody, signTurnBody,
-  signTurnPacket, turnKeys, turnName, turnPacket, turnPayloadSequence, turnSequence, utf8Encode, MAX_DNS_PACKET_BYTES, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN,
+  signTurnPacket, turnInstance, turnKeys, turnName, turnPacket, turnPayloadSequence, turnSequence, turnStatedVerifier, turnVerifierMark, utf8Encode, MAX_DNS_PACKET_BYTES, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN,
   TURN_BODY_BYTES, TURN_LABEL, TURN_MAX, TURN_NO_ACTIVE, TURN_REV_LIMIT, TURN_SEALED_BYTES, TurnRecordError, type TurnFields,
 } from "../src/index";
 import { buildTurnVectors, devices, signerOf, vectorKeys, VECTOR_D, type TurnVectors } from "./turnVectors";
@@ -239,5 +239,48 @@ describe("the next record's place", () => {
     expect(nextTurnPosition(10, 4, 2, 2n ** 60n)).toBeNull();
     expect(nextTurnPosition(TURN_MAX, TURN_REV_LIMIT - 1, 2, 0)).toBeNull();
     expect(nextTurnPosition(TURN_MAX, TURN_REV_LIMIT - 2, 2, 0)).toEqual({ turn: TURN_MAX, rev: TURN_REV_LIMIT - 1, raised: false });
+  });
+});
+
+describe("the verifier mark in a record's instance", () => {
+  const verifier = { setup: "c2V0dXA", record: "cmVjb3Jk" }, other = { setup: "c2V0dXA", record: "b3RoZXI" };
+
+  it("is three bytes of a hash over the verifier's two fields, and a profile with none has a mark of its own", () => {
+    const mark = turnVerifierMark(verifier);
+    expect(bytesToHex(mark)).toBe(bytesToHex(sha256(utf8Encode("ghostly-turn-verifier/1\nc2V0dXA\ncmVjb3Jk")).slice(0, 3)));
+    expect(mark).toHaveLength(3);
+    expect(bytesToHex(turnVerifierMark(other))).not.toBe(bytesToHex(mark));
+    expect(bytesToHex(turnVerifierMark(null))).toBe(bytesToHex(sha256(utf8Encode("ghostly-turn-verifier/1\n\n")).slice(0, 3)));
+    expect(bytesToHex(turnVerifierMark(null))).not.toBe(bytesToHex(mark));
+    // Where the two fields meet is part of it.
+    expect(bytesToHex(turnVerifierMark({ setup: "ab", record: "c" }))).not.toBe(bytesToHex(turnVerifierMark({ setup: "a", record: "bc" })));
+  });
+
+  it("an instance states it after three random bytes, and reads back; one that states none never carries the marker", () => {
+    const mark = turnVerifierMark(verifier);
+    const instance = turnInstance(mark, (length) => new Uint8Array(length).fill(0xaa));
+    expect(bytesToHex(instance)).toBe(`aaaaaa6776${bytesToHex(mark)}`);
+    expect(turnStatedVerifier(instance)).toEqual(mark);
+    expect(bytesToHex(turnInstance(mark).subarray(0, 3))).not.toBe(bytesToHex(turnInstance(mark).subarray(0, 3)));
+    // 8 random bytes of an app from before, and what this one writes where it has no verifier at hand.
+    expect(turnStatedVerifier(new Uint8Array(8).fill(7))).toBeNull();
+    expect(turnStatedVerifier(new Uint8Array(7))).toBeNull();
+    const chance = (length: number) => Uint8Array.of(1, 2, 3, 0x67, 0x76, 4, 5, 6).slice(0, length);
+    expect(turnStatedVerifier(chance(8))).not.toBeNull();
+    expect(turnStatedVerifier(turnInstance(null, chance))).toBeNull();
+    expect(turnStatedVerifier(turnInstance())).toBeNull();
+    expect(() => turnInstance(new Uint8Array(4))).toThrow(/3 bytes/);
+  });
+
+  it("the record keeps its version and its length: it reads as every record does, with the mark in it", async () => {
+    const keys = vectorKeys();
+    const [desktop, phone] = devices();
+    const slots = [{ key: desktop.publicKey, name: "Desktop" }, { key: phone.publicKey, name: "Phone" }, null, null];
+    const packet = await signTurnPacket(keys, { turn: 9, rev: 2, author: 0, active: 0, slots, instance: turnInstance(turnVerifierMark(verifier)) }, signerOf(desktop));
+    const read = readTurnPacket(keys, packet);
+    if (read.kind !== "valid") throw new Error(read.kind);
+    expect(read.record.body).toHaveLength(TURN_BODY_BYTES);
+    expect(read.record.body[0]).toBe(1);
+    expect(turnStatedVerifier(read.record.instance)).toEqual(turnVerifierMark(verifier));
   });
 });

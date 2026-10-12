@@ -28,8 +28,11 @@ export class NativeWorld {
   latencyMs = 60;
   dialMs = 400;
   dialFailMs = 5_000;
-  /** Descriptors name an endpoint by a 64-hex key, as the real adapters do (a capability record or `_tr` carries only those). */
-  hexIds = false;
+  /**
+   * Descriptors name an endpoint by a 64-hex key, as the real adapters do: what a capability record or `_tr` carries, and
+   * the only kind a link keeps of what its contact tells. Off, they name it by `name:transport` (a dial by hand).
+   */
+  hexIds = true;
   /**
    * Apps whose dials never reach the endpoint they dial, which fail after `dialFailMs` (a CLI daemon back after a kill,
    * whose HyperDHT dial did not reach its contact on the loopback testnet: CI run 36741701666).
@@ -52,11 +55,18 @@ export class NativeWorld {
   private entries = new Map<string, Entry>();
   private identities = new Map<string, string>();
 
-  /** The endpoint an app named `name` runs for `transport`; a restarted app gets a new one under the same id. */
-  endpoint(transport: NativeTransport, name: string): NativeEndpoint {
+  /** The 64-hex key of the endpoint an app named `name` runs for `transport`, the same across its restarts. */
+  key(transport: NativeTransport, name: string): string {
     const id = `${name}:${transport}`;
     const identity = this.identities.get(id) ?? hex(32);
     this.identities.set(id, identity);
+    return identity;
+  }
+
+  /** The endpoint an app named `name` runs for `transport`; a restarted app gets a new one under the same id. */
+  endpoint(transport: NativeTransport, name: string): NativeEndpoint {
+    const id = `${name}:${transport}`;
+    const identity = this.key(transport, name);
     const entry: Entry = { name, identity, closed: false, ends: [], endpoint: null as unknown as NativeEndpoint };
     const key = this.hexIds ? identity : id;
     const descriptor = transport === "hyperdht/1" ? { publicKey: key } : { id: key, relay: "https://relay.test./", addresses: [] };

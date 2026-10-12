@@ -85,6 +85,8 @@ export const GROUP_LIMITS = {
   catchUpSlice: CATCH_UP_SLICE,
   /** Between two slices, when the member's app cannot say it handled one (`handled` resolves `false`). */
   catchUpPauseMs: CATCH_UP_PAUSE_MS,
+  /** A received message is in the saved state within this long (`persistSoon`): a burst of them is one save, not one each. */
+  saveWithinMs: 1000,
 } as const;
 
 /** What every member should know about who can read what, in the words the apps show. */
@@ -182,7 +184,11 @@ export interface GroupState {
  * `completes`: this message was delivered before from a copy another member handed on without its author's whole
  * signature (its text only); this is the whole one, with the mentions, reply and hop count its author put there.
  */
-export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta; completes?: true }
+/**
+ * `frame`: the frame the message came in, as it is kept to hand on to a member who missed it (only its author's own
+ * fields, signed by its author); only with a whole copy. An app keeps it with the message it stores.
+ */
+export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta; completes?: true; frame?: GroupMessageFrame }
 
 export interface GroupSessionHooks {
   save(state: GroupState): Promise<void>;
@@ -303,7 +309,8 @@ function readFirstPlace(o: unknown, epoch: number): { e: number; n: number } | n
 const ownKey = (f: { e: number; n: number }) => `${f.e}:${f.n}`;
 
 /** What a frame weighs in a log, roughly: its boxes plus the fixed fields around them. */
-const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + (f.fl?.c.length ?? 0) + 400;
+/** What a kept frame counts for against `GROUP_LIMITS.relayBytes`. */
+export const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + (f.fl?.c.length ?? 0) + 400;
 
 /** Only the fields an edit frame has, as `clean` does for a message. */
 const cleanEdit = (f: GroupEditFrame): GroupEditFrame => ({ t: GROUP_EDIT_FRAME, g: f.g, e: f.e, s: f.s, n: f.n, v: f.v, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig });
@@ -387,6 +394,8 @@ export class GroupSession {
   private pendingMeta: { from: string; frame: unknown } | undefined;
   /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
   private passOn: GroupEdgeFrame[] | null = null;
+  /** Set while a save of what received messages changed is due (`persistSoon`). */
+  private saveTimer: ReturnType<typeof setTimeout> | undefined;
   /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
   /** Catch-up answers still going out, a slice at a time (`handOut`). */
@@ -521,11 +530,14 @@ export class GroupSession {
     return Number.isSafeInteger(floor) && floor > 0 ? floor : 0;
   }
 
-  /** How many messages, per sender, are known to be missing in the current epoch. */
-  missing(sender: string): number {
+  /**
+   * How many messages, per sender, are known to be missing in the current epoch. `past`: only the numbers above it,
+   * for a caller that knows nobody holds the ones up to it any more.
+   */
+  missing(sender: string, past = -1): number {
     const entry = this.state.seen[sender]?.[this.epoch];
     if (!entry) return 0;
-    const lowest = Math.max(0, entry.high - GROUP_LIMITS.window + 1);
+    const lowest = Math.max(0, entry.high - GROUP_LIMITS.window + 1, past + 1);
     return Math.max(0, entry.high - lowest + 1 - (1 + entry.window.filter(n => n >= lowest).length));
   }
 
@@ -538,8 +550,9 @@ export class GroupSession {
     const out = new Map<string, string>();
     for (const [sender, epochs] of Object.entries(this.state.seen)) {
       if (sender === this.myKey || !rosterHas(this.roster, sender)) continue;
-      const marks = Object.entries(epochs).filter(([, entry]) => this.gaps(entry).length)
-        .map(([e, entry]) => `${e}:${entry.high}:${entry.window.length}`);
+      // The numbers themselves: what the author writes next arrives, and changes nothing of what is missing.
+      const marks = Object.entries(epochs).map(([e, entry]) => [e, this.gaps(entry)] as const).filter(([, gaps]) => gaps.length)
+        .map(([e, gaps]) => `${e}:${gaps.join(".")}`);
       if (marks.length) out.set(sender, marks.join(","));
     }
     return out;
@@ -567,7 +580,26 @@ export class GroupSession {
     this.queue = operation.then(() => {}, () => {});
     return operation;
   }
-  private persist(): Promise<void> { return this.hooks.save(structuredClone(this.state)); }
+  private persist(): Promise<void> {
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
+    return this.hooks.save(structuredClone(this.state));
+  }
+  /**
+   * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message changes (what was seen, what is kept to hand
+   * on): the state holds the whole hand-on log, and a member back in a busy group wrote all of it once per message.
+   * The message itself is stored before (`hooks.message`). An app killed before the save takes those frames again when
+   * it syncs: its store has the messages already, and the state then catches up.
+   */
+  private persistSoon(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      // Between two frames, never in the middle of one being handled.
+      void this.serialize(() => this.hooks.save(structuredClone(this.state))).catch(() => {});
+    }, GROUP_LIMITS.saveWithinMs);
+  }
+  /** Writes what is waiting to be saved now (before a restart, in tests). */
+  flush(): Promise<void> { return this.serialize(async () => { if (this.saveTimer) await this.persist(); }); }
   private secret(epoch: number): Uint8Array | undefined {
     const s = this.state.secrets[epoch];
     return s ? fromBase64Url(s) : undefined;
@@ -1111,7 +1143,7 @@ export class GroupSession {
       // I read the first one: kept and passed on for those who could not, not shown twice.
       this.markSeen(raw);
       this.keep(clean(raw));
-      await this.persist();
+      this.persistSoon();
       if (rosterHas(this.roster, raw.s)) this.took(clean(raw));
       return;
     }
@@ -1125,7 +1157,7 @@ export class GroupSession {
     const card = this.openCard(key, raw);
     const file = this.openFile(key, raw);
     const completes = whole && this.provisional.delete(id);
-    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), ...(completes ? { completes: true as const } : {}) });
+    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), ...(completes ? { completes: true as const } : {}), ...(whole ? { frame: clean(raw) } : {}) });
     if (!whole) {
       this.provisional.add(id);
       if (this.provisional.size > GROUP_LIMITS.provisional) this.provisional.delete(this.provisional.values().next().value!);
@@ -1138,7 +1170,7 @@ export class GroupSession {
     // The first one, should it come too (I was in its epoch): a duplicate.
     if (firstFrame && rosterHas(this.state.chain[firstFrame.e]?.m ?? [], this.myKey)) this.markSeen(firstFrame);
     this.keep(clean(raw));
-    await this.persist();
+    this.persistSoon();
     // Passed on only while its author is a member: someone removed is not carried for, even for epochs it was in.
     if (rosterHas(this.roster, raw.s)) this.took(clean(raw));
   }

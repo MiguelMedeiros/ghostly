@@ -29,6 +29,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The Ghostly peer did not start. Reopen the extension to retry.", "apps/extension/src/background.ts"],
   ["The membership history forked. Membership changes are halted; the admin must re-form the group.", "packages/core/src/groupSession.ts", "Membership changes are halted; the admin must re-form the group."],
   ["The membership history forked", "packages/browser/src/engine/groups.ts"],
+  // What every call outside LIMITED_MODE_METHODS is answered with in limited mode (engine/server.ts): a file, a group, a device action.
+  ["Ghostly could not check which device is active yet. This works once it can.", "packages/browser/src/engine/node.ts"],
   ["Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Native adapter could not start. Reopen this chat to retry.", "packages/browser/src/engine/node.ts"],
@@ -49,7 +51,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app cannot take calls", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated Ghostly for calls", `${CORE}/ghostlink.ts`],
   ["Calls are not available in this app", `${CORE}/ghostlink.ts`],
-  ["All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "packages/browser/src/engine/node.ts"],
+  ["All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "packages/browser/src/engine/node.ts"],
   ["Could not reach the HyperDHT relay", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["The HyperDHT relay did not answer", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["The HyperDHT relay closed the connection", `${BROWSER}/platform/hyperdhtRelay.ts`],
@@ -423,6 +425,12 @@ describe("errors in the app's language", () => {
     expect(errorText("Clipboard unavailable", pt)).toBe("Não foi possível ler a área de transferência. Anexe com +.");
     expect(errorText("Could not read the file: Permission denied (os error 13)", pt)).toBe("Não foi possível ler o arquivo colado. Anexe com +.");
     expect(knownErrorParts("Could not read the file: Permission denied (os error 13)", pt)?.detail).toBe("Could not read the file: Permission denied (os error 13)");
+  });
+
+  it("an action refused in limited mode says why and what to do, in the language", () => {
+    const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
+    expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
+    expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {

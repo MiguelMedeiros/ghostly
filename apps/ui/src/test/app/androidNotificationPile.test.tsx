@@ -106,3 +106,33 @@ describe("Android: one notification per chat", () => {
     expect(posted()[3]).not.toMatch(/chat-1|call/);
   });
 });
+
+/*
+ * A Linux desktop keeps a list of notifications too. Each burst of a chat's messages used to add one, and none was
+ * taken back when the chat was read in the app. The Linux app now does as the Android app.
+ */
+describe("Linux: one notification per chat", () => {
+  it("a chat's bursts share one notification, which reading the chat takes away; on macOS each keeps its own", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15");
+    const os = vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+    await showPrivateNotification("message:link-a:m1", "New message", "chat-1", true);
+    await showPrivateNotification("message:link-a:m2", "New message", "chat-1", true);
+    await showPrivateNotification("message:group:g1:m1", "New message", "group:g1", true);
+    const [tag, again, group] = posted();
+    expect(again).toBe(tag);
+    expect(group).not.toBe(tag);
+    expect(tag).not.toMatch(/chat-1|link-a|message/);
+    clearChatNotification("chat-1");
+    expect(cleared()).toEqual([tag]);
+    await showPrivateNotification("message:link-a:m3", "New message", "chat-1", true);
+    expect(posted()[3]).not.toBe(tag);
+
+    // macOS takes its own away: there a notification stays its message's, and nothing is asked to go.
+    os.mockReturnValue("MacIntel");
+    await showPrivateNotification("message:link-b:m1", "New message", "chat-2", true);
+    await showPrivateNotification("message:link-b:m2", "New message", "chat-2", true);
+    expect(posted()[5]).not.toBe(posted()[4]);
+    clearChatNotification("chat-2");
+    expect(cleared()).toEqual([tag]);
+  });
+});

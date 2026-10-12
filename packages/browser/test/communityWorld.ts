@@ -123,6 +123,12 @@ export class CommunityWorld {
   redialSeen = false;
   /** Loses frames on the way (a test says which): the network is not perfect. */
   drop: ((from: Peer, to: Peer, frame: Record<string, unknown>) => boolean) | null = null;
+  /**
+   * How many frames from one peer reach another at a time (a test says whose; 0 for all at once, as without it): the
+   * rest wait their turn while the other links go on, as a long answer does on a slow connection.
+   */
+  slow: ((from: Peer, to: Peer) => number) | null = null;
+  private readonly slowed = new Map<string, { per: number; frames: (() => void)[] }>();
   private pending: Promise<unknown>[] = [];
 
   constructor(private readonly timings: CommunityTimings = { ...COMMUNITY_TIMINGS, hubJitterMs: 0 }, readonly network: NetworkModel | null = null, private readonly random: () => number = Math.random) {}
@@ -169,7 +175,12 @@ export class CommunityWorld {
         // An app from before hubs drops the frames it does not know (its session has no case for them).
         if (there.peer.legacy && (copy.t === "group-bye" || copy.t === "group-reach" || copy.t === "group-reacted")) return;
         if (this.drop?.(peer, there.peer, copy)) return;
-        this.pending.push(edge.kind === "edge" ? there.peer.groups.handleEdgeFrame(edge.g, edge.me, copy) : there.peer.groups.handleContactFrame(there.linkId, copy));
+        const deliver = () => { this.pending.push(edge.kind === "edge" ? there.peer.groups.handleEdgeFrame(edge.g, edge.me, copy) : there.peer.groups.handleContactFrame(there.linkId, copy)); };
+        const per = this.slow?.(peer, there.peer) ?? 0, way = `${peer.name}>${there.peer.name}`;
+        if (per <= 0 && !this.slowed.get(way)?.frames.length) { deliver(); return; }
+        const queue = this.slowed.get(way) ?? { per: Math.max(per, 1), frames: [] };
+        this.slowed.set(way, queue);
+        queue.frames.push(deliver);
       },
       // Version 4 (hubs) only between two apps that announce it.
       linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
@@ -219,6 +230,7 @@ export class CommunityWorld {
         return peer.online ? structuredClone(store.get(key) ?? null) : null;
       },
       storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
+      forgetFrame: async (linkId, id) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) delete row.frame; },
       emit: () => {},
       myNick: () => peer.nick,
       staysOnline: () => !!peer.staysOnline,
@@ -349,6 +361,8 @@ export class CommunityWorld {
   async settle(): Promise<void> {
     for (let i = 0; i < 500; i++) {
       this.announce();
+      // A slow way's next frames, in the order they were sent.
+      for (const queue of this.slowed.values()) for (const deliver of queue.frames.splice(0, queue.per)) deliver();
       const batch = this.pending.splice(0);
       if (!batch.length) {
         // What the engines handed on (payments) may send more.
@@ -371,6 +385,7 @@ export class CommunityWorld {
    * quit, with nothing of the last run's memory; its links start over as `reopen` says.
    */
   async restart(peer: Peer): Promise<void> {
+    await peer.groups.flush();
     peer.groups = new Groups(peer.host, peer.store, undefined, this.timings, this.random);
     await peer.groups.load();
     this.reopen(peer);

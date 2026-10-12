@@ -129,6 +129,11 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
   const distance = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
   /** A list not on screen (a chat kept loaded for a call) has no size: nothing about it says where the view is. */
   const hidden = (el: HTMLElement) => el.clientHeight === 0;
+  /**
+   * The list went off screen since the view was last put in its place. Back on screen, Chromium has it where it was;
+   * WebKit starts it at the top again and says so with a scroll event, before the list's size reaches `settle`.
+   */
+  const away = useRef(false);
 
   /** The first row not wholly above the view, and where it is. Rows are in order, so it is a binary search. */
   const capture = useCallback((el: HTMLElement) => {
@@ -158,7 +163,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
    */
   const settle = useCallback(() => {
     const el = list.current;
-    if (!el || !hasRows.current || hidden(el)) return;
+    if (!el || !hasRows.current) return;
+    if (hidden(el)) { away.current = true; return; }
+    away.current = false;
     if (atBottom.current) {
       el.scrollTop = el.scrollHeight;
     } else if (anchor.current) {
@@ -299,12 +306,16 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     /** The list's size at its last scroll event. */
     let lastSize = sizeOf();
     const onScroll = () => {
-      if (hidden(el)) return;
+      if (hidden(el)) { away.current = true; return; }
       const size = sizeOf();
       const resized = size !== lastSize;
       lastSize = size;
       // Not moved since it was last set or seen: content grew or shrank under the view, and no hand scrolled it.
       if (Math.abs(el.scrollTop - lastTop.current) < 1) { settle(); return; }
+      const hand = pressed.current || performance.now() - handAt.current < HAND_MS;
+      // Back on screen (a chat kept loaded for a call or a mini-app, shown again) and moved with no hand on it: the
+      // browser started it at the top again. Back where it was: at its bottom, or on its message.
+      if (away.current && !hand) { settle(); return; }
       if (jumping.current) {
         const row = anchor.current && rowById(el, anchor.current.id);
         const landed = !row || Math.abs(row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current!.offset) < 1;
@@ -317,7 +328,6 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       // Moved a little short of the bottom with no hand on it: the browser pulled it back while something under it was
       // measured one size and drawn another in the same moment (the composer measuring its text grows the list for an
       // instant). Nothing reports that, and the view would stay short of the last message: back to the bottom.
-      const hand = pressed.current || performance.now() - handAt.current < HAND_MS;
       if (atBottom.current && !hand && d <= NEAR_BOTTOM_PX) { following.current = false; settle(); return; }
       // The list itself changed size (a phone turned on its side, a window resized): the browser moved it to keep what
       // was on screen, before the resize reaches `settle`. Not a hand's: at the bottom it stays there, scrolled up it

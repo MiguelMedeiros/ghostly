@@ -341,6 +341,10 @@ describe("group session", () => {
     await mesh.open(alice, bob);
     expect(mesh.texts(bob)).toHaveLength(GROUP_LIMITS.outlog);
     expect(bob.missing(alice.myKey)).toBe(5);
+    // A caller that knows nobody holds the numbers up to one counts only those above it.
+    expect(bob.missing(alice.myKey, 2)).toBe(2);
+    expect(bob.missing(alice.myKey, 4)).toBe(0);
+    expect(bob.missing(alice.myKey, 1_000)).toBe(0);
     // Frames far ahead of the chain are refused; frames one epoch ahead wait, up to a bound.
     const far = { ...alice.state.sent[0], e: alice.epoch + GROUP_LIMITS.secrets + 1 };
     await bob.handle(alice.myKey, far);
@@ -387,6 +391,7 @@ describe("group session", () => {
     const alice = mesh.add(GroupSession.create("Ghosts"));
     const bob = await admit(mesh, alice, "Bob");
     await alice.sendText("first"); await mesh.settle();
+    await bob.flush();
     const restored = new Mesh();
     const alice2 = restored.add(clone(mesh.saved.get(alice.myKey)!)), bob2 = restored.add(clone(mesh.saved.get(bob.myKey)!));
     expect(bob2.epoch).toBe(1); expect(bob2.readableEpochs).toEqual([1]);

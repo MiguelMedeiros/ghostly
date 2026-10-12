@@ -184,6 +184,24 @@ async function blockMedia(p: Peer): Promise<void> {
   });
 }
 
+test("on an installed iPhone a call's notice at the top of the chat is below the status bar, inside the screen", { tag: ["@feature:calls.media-blocked", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { mobile: true, viewport: { width: 375, height: 740 } })]);
+  await linkLegacy(alice, bob);
+  await connect(alice, bob);
+  // An iPhone's status bar and Dynamic Island (Chromium's DevTools protocol): the installed app's page runs under them.
+  const cdp = await bob.page.context().newCDPSession(bob.page);
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 62, right: 0, bottom: 34, left: 0 } });
+  await blockMedia(bob);
+  await bob.page.getByTitle("Audio call").click();
+  const notice = bob.page.getByTestId("call-media-problem");
+  await expect(notice).toBeVisible();
+  // It was 12px from the top of the page, behind the clock.
+  await expect.poll(async () => (await notice.boundingBox())!.y).toBeGreaterThanOrEqual(62);
+  const box = (await notice.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(15.5);
+  expect(box.x + box.width).toBeLessThanOrEqual(375 - 15.5);
+});
+
 test("a microphone that is blocked says so, and the caller stops ringing", { tag: ["@feature:calls.media-blocked"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await blockMedia(bob);

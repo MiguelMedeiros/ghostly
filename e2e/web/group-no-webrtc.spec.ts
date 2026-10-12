@@ -1,5 +1,6 @@
 import { endpoints } from "../infra/env.mjs";
 import { expect, openProfilePage, test, type Peer, type PeerOptions } from "../support/fixtures";
+import { HeadlessBot } from "../support/headless";
 import { pair } from "../support/paired";
 
 // A group of three where one member's app has no WebRTC at all, as Ghostly Desktop on Linux (WebKitGTK has none): its
@@ -149,4 +150,47 @@ test("a member with no WebRTC makes a private group of its contacts, and all thr
   for (const p of [linux, bob, carol]) await expect(p.page.getByTestId("group-members")).toContainText("2 of 2 reachable", { timeout: 180_000 });
   await expect(linux.page.getByTestId("group-connection-options")).toHaveAttribute("data-transport", "iroh/1", { timeout: 120_000 });
   await everyoneReadsEveryone([linux, bob, carol]);
+});
+
+test("a phone in a private group with six bots that have no WebRTC reaches every one of them over Iroh", {
+  tag: ["@feature:groups.native-links", "@feature:headless.groups", "@feature:transport.iroh-web"],
+}, async ({ peer, relay }) => {
+  test.setTimeout(20 * 60_000);
+  const url = await relay.listen();
+  // Six CLIs with WebRTC off (a team of agents on Linux servers): every link of the group is a native one, on the
+  // phone and on each bot. With four listeners for group links, two bots waited "for a free connection on this device".
+  const bots = Array.from({ length: 6 }, () => new HeadlessBot({ GHOSTLY_WEBRTC: "0" }));
+  type Shown = { status?: string; members?: { me: boolean; online: boolean }[] };
+  const everyoneOnline = (bot: HeadlessBot, group: string, members: number) => expect.poll(async () => {
+    const shown = await bot.run("group", "show", group) as Shown;
+    return shown.status === "active" && shown.members?.length === members && shown.members.every((m) => m.me || m.online);
+  }, { timeout: 300_000, intervals: [3_000], message: `${members} members, each one reached` }).toBe(true);
+  try {
+    await Promise.all(bots.map((bot, i) => bot.start(url, `Agent ${i + 1}`)));
+    const phone = await peer("phone", { mobile: true, irohRelay: endpoints.irohRelay });
+    await trace(phone);
+    const group = (await bots[0].run("group", "create", "Team", "--mesh")).group as string;
+    const { link } = await bots[0].run("group", "link", group) as { link: string };
+    for (const [i, bot] of bots.slice(1).entries()) {
+      await bot.run("group", "join", link);
+      await everyoneOnline(bots[0], group, i + 2);
+    }
+    await phone.page.goto(`/#/join/${link.includes("#/join/") ? link.slice(link.indexOf("#/join/") + "#/join/".length) : link}`);
+    await expect(groupChat(phone)).toHaveAttribute("data-status", "active", { timeout: 240_000 });
+
+    // The phone reaches all six, each over Iroh, and no row waits for a connection.
+    await expect(phone.page.getByTestId("group-members")).toContainText("6 of 6 reachable", { timeout: 300_000 });
+    await phone.page.getByTestId("group-members").click();
+    const rows = phone.page.getByTestId("group-member");
+    await expect(rows).toHaveCount(7);
+    await expect(rows.filter({ hasText: "Connected · Iroh" })).toHaveCount(6, { timeout: 60_000 });
+    await expect(rows.filter({ hasText: "Waiting for a free connection" })).toHaveCount(0);
+    // Each bot reaches the phone and the five others too: its own links are native ones as well.
+    for (const bot of bots) await everyoneOnline(bot, group, 7);
+  } catch (error) {
+    for (const bot of bots) await bot.attachLogs(test.info());
+    throw error;
+  } finally {
+    await Promise.all(bots.map((bot) => bot.stop()));
+  }
 });

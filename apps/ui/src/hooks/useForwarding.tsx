@@ -1,7 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { ForwardDialog } from "../components/chat/ForwardDialog";
+import { focusInPlace } from "../lib/focus";
 import { FORWARD_MAX_MESSAGES, canForward } from "../lib/forward";
+import { touchOnly } from "../lib/touchOnly";
 import type { ChatMessage } from "../lib/types";
 
 /** What a chat's rows get from forwarding: Forward and Select in their ⋮, or a checkbox while messages are chosen. */
@@ -34,6 +36,32 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, forwarding]);
 
+  // The choice over (✕, Escape, the last one taken off, a forward that went): the bar and the rows' checkboxes go, and
+  // a focus that was on one of them is left on the page, so the next Tab starts from its top. It goes to the message
+  // field that comes back where the bar was; on a touch screen (the keyboard would come up) or where the field takes
+  // no text, to the messages. A focus the person moved elsewhere stays there.
+  const barRef = useRef<HTMLDivElement>(null);
+  const column = useRef<HTMLElement | null>(null);
+  const chose = useRef(false);
+  const selecting = !!selected;
+  useLayoutEffect(() => { if (barRef.current) column.current = barRef.current.parentElement; });
+  useEffect(() => {
+    if (selecting) { chose.current = true; return; }
+    if (!chose.current) return;
+    chose.current = false;
+    const active = document.activeElement, root = column.current;
+    if (!root?.isConnected || (active && active !== document.body)) return;
+    const field = touchOnly() ? null : root.querySelector<HTMLTextAreaElement>("textarea:not(:disabled)");
+    if (field) { focusInPlace(field); return; }
+    const list = root.querySelector<HTMLElement>("[data-message-list]");
+    if (!list) return;
+    if (!list.hasAttribute("tabindex")) {
+      list.tabIndex = -1;
+      list.addEventListener("blur", () => list.removeAttribute("tabindex"), { once: true });
+    }
+    list.focus({ preventScroll: true });
+  }, [selecting]);
+
   const toggle = (id: string) => setSelected(now => {
     if (!now) return [id];
     if (now.includes(id)) { const rest = now.filter(x => x !== id); return rest.length ? rest : null; }
@@ -50,7 +78,7 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
 
   const count = selected?.length ?? 0;
   const bar = selected && (
-    <div data-testid="select-bar" role="toolbar" aria-label={t("chat.forward.selected", { count: String(count) })}
+    <div ref={barRef} data-testid="select-bar" role="toolbar" aria-label={t("chat.forward.selected", { count: String(count) })}
       className="flex items-center gap-3 px-4 py-2 min-h-[62px] bg-panel-header border-t border-border">
       <button type="button" data-testid="select-cancel" onClick={() => setSelected(null)} title={t("common.cancel")} aria-label={t("common.cancel")}
         className="p-2 rounded-full text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
@@ -67,5 +95,5 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
   const dialog = from && forwarding && (
     <ForwardDialog from={from} messages={forwarding} onClose={() => setForwarding(null)} onSent={() => setSelected(null)} />
   );
-  return { rowProps, selecting: !!selected, bar, dialog };
+  return { rowProps, selecting, bar, dialog };
 }

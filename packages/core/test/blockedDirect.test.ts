@@ -31,7 +31,7 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
     pairing: { credentials: { seedB64: side.seedB64, peerKey: peerKeyOf(contact.side) }, pinPeer: async () => {}, trustOnFirstUse: true },
     dht: { state: emptyDhtDeliveryState(), save: async () => {} },
     // The contact's Iroh as its capability record says it: reached through a relay, no direct address.
-    native: { peerDescriptors: { "iroh/1": { id: `${contact.name}:iroh/1`, relay: "https://relay.test./", addresses: [] } }, peerTransports: ["webrtc/1", "iroh/1"], peerFallback: true, automatic: true },
+    native: { peerDescriptors: { "iroh/1": { id: world.native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] } }, peerTransports: ["webrtc/1", "iroh/1"], peerFallback: true, automatic: true },
     resume: "webrtc/1",
     transport: world.pkarr.transport(),
     pollIntervals: RELAY_POLL_INTERVALS,

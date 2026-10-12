@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { CONTACT_KEY } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -129,6 +130,19 @@ export function readCursor(path: string | undefined): number | undefined {
   if (!path || !existsSync(path)) return undefined;
   const value = Number(readFileSync(path, "utf8").trim());
   return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Whether a cursor can be kept at `path`, asked before anything starts: its folder is there and takes a file. Before, a
+ * folder that was not there was found at the first event: the listener ran, said "event N failed: ENOENT" for each one
+ * and never wrote the cursor, so the next start began at the journal's end and skipped what came while it was down.
+ * Throws what the file system says (`asCliError` names the path and the code: not_found, refused).
+ */
+export function checkCursor(path: string | undefined): void {
+  if (!path) return;
+  const folder = dirname(resolve(path));
+  if (!statSync(folder).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
+  accessSync(folder, constants.W_OK | constants.X_OK);
 }
 
 function writeCursor(path: string, seq: number): void {

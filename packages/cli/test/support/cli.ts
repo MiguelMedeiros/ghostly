@@ -55,8 +55,11 @@ export class Running {
   readonly lines: Record<string, unknown>[] = [];
   readonly child: ChildProcess;
   stderr = "";
+  /** What it runs and its pid: what a test says of one that did not stop in time. */
+  readonly name: string;
   constructor(args: string[], env: NodeJS.ProcessEnv = {}, bin = BIN) {
     this.child = spawn(process.execPath, [bin, ...args], { env: testEnv(env), stdio: ["ignore", "pipe", "pipe"] });
+    this.name = `ghostly ${args.join(" ")} (pid ${this.child.pid})`;
     createInterface({ input: this.child.stdout! }).on("line", (line) => { try { this.lines.push(JSON.parse(line)); } catch { /* not JSON */ } });
     this.child.stderr!.on("data", (d) => (this.stderr += d));
   }
@@ -66,20 +69,27 @@ export class Running {
       const found = this.lines.find(match);
       if (found) return found;
       if (this.child.exitCode !== null) throw new Error(`exited ${this.child.exitCode}: ${this.stderr}`);
+      if (this.child.signalCode !== null) throw new Error(`ended by ${this.child.signalCode}: ${this.stderr}`);
       if (Date.now() > until) throw new Error(`not seen in ${ms} ms; lines: ${JSON.stringify(this.lines).slice(0, 2000)}\n${this.stderr}`);
       await new Promise((r) => setTimeout(r, 100));
     }
   }
   /** Its exit code once it is gone: another process can see it end a moment before this one hears of it. */
   exited(ms = 10_000): Promise<number | null> {
-    if (this.child.exitCode !== null) return Promise.resolve(this.child.exitCode);
+    if (this.gone) return Promise.resolve(this.child.exitCode);
     return new Promise((done, fail) => {
       const timer = setTimeout(() => fail(new Error(`still running after ${ms} ms`)), ms);
       this.child.once("exit", (code) => { clearTimeout(timer); done(code); });
     });
   }
+  /**
+   * Gone by its own exit or by a signal. One a signal ended has no exit code, only the signal's name: a stop that
+   * looked at the code alone waited for an `exit` that had already come, for good (a `listen` that printed a replayed
+   * event before it had its SIGTERM handler, stopped by its test and then again by the file's `afterAll`).
+   */
+  private get gone(): boolean { return this.child.exitCode !== null || this.child.signalCode !== null; }
   stop(): Promise<number | null> {
-    if (this.child.exitCode !== null) return Promise.resolve(this.child.exitCode);
+    if (this.gone) return Promise.resolve(this.child.exitCode);
     return new Promise((done) => { this.child.once("exit", (code) => done(code)); this.child.kill("SIGTERM"); setTimeout(() => this.child.kill("SIGKILL"), 20_000).unref(); });
   }
 }

@@ -39,7 +39,7 @@
   /* Its words ("Test money"): that yellow on a dark page, a darker one on a light page, where the yellow reads at
      about 2:1 (html[data-theme="light"] below). A wallet card is dark in every theme and keeps the yellow. */
   --color-test-money-ink: var(--theme-test-money-ink, #e0a800);
-  /* Words that warn without alarm (a bot's quota running low): amber on a dark page, a darker amber on a light one. */
+  /* Words that warn without alarm (a bot's quota running low, a blocked task): amber on a dark page, a darker amber on a light one. */
   --color-warn-ink: var(--theme-warn-ink, #f5a524);
   --color-text-primary: var(--theme-text-primary);
   --color-text-secondary: var(--theme-text-secondary);
@@ -500,13 +500,40 @@ html[data-standalone="true"] {
   height: 15px;
 }
 
+/* The small window's state line ("Audio call" and the clock) starts after the corner button (30 px at 8 px) instead
+   of being centred over the whole width: at the window's narrowest (190 px, where a phone opens it) "Chamada de áudio
+   00:05" began behind the button. The line is one row of a wrapping flex box with the clock placed first, so when the
+   words do not fit beside it they go to a second row, which is cut off, and the clock stays; row-reverse puts the
+   words back before the clock for the eye. */
 .call-mini .call-top {
   top: 12px;
+  left: 42px;
+  right: 6px;
 }
 
 .call-mini .call-top p {
+  display: flex;
+  flex-flow: row-reverse wrap;
+  justify-content: center;
+  column-gap: 6px;
+  height: 20px;
+  overflow: hidden;
   font-size: 12px;
+  line-height: 20px;
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+
+.call-mini .call-top p > span {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-mini .call-top p > span:last-child {
+  order: -1;
 }
 
 .call-mini .call-controls {
@@ -843,6 +870,19 @@ html .toast-place[data-at="top"] {
 html .toast-place.toast-place-page[data-at="top"] {
   bottom: auto;
   top: 0.75rem;
+}
+
+/* A notice at the top of the window (a call that waits for the contact, a link that could not be used): in the middle,
+   as wide as its words up to the window less 1rem a side (a fixed box at 50% with no width is laid out in the half
+   that is left to its right), and below the status bar an installed iPhone app draws under. */
+.top-notice {
+  position: fixed;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  left: 50%;
+  translate: -50% 0;
+  z-index: 60;
+  width: max-content;
+  max-width: calc(100% - 2rem);
 }
 
 .animate-pulse-dot {

@@ -126,6 +126,41 @@ describe("a community member removed while its app was closed", { timeout: 120_0
     expect(dave.messages.filter(m => m.event === "joined" && m.text === "You joined again")).toHaveLength(1);
   });
 
+  it("knocking to get back in, it is still listed as the group it kept; giving up stops the knock and keeps it", async () => {
+    const { world, admin, bob, carol, dave, id, link, daveKey } = await removedWhileAway();
+    await world.restart(dave);
+    await world.until(() => world.view(dave, id)?.status === "removed", 90_000);
+    const before = world.view(dave, id)!;
+    // Nobody at the door: every member's app is closed when he opens the link.
+    for (const p of [admin, bob, carol]) p.online = false;
+    await world.run(5_000);
+    await dave.groups.joinByLink(link);
+    await world.run(10 * 60_000);
+    // Still the group he was removed from, with who was in it and what was said, and knocking beside that.
+    expect(world.view(dave, id)).toMatchObject({ status: "removed", statusReason: "You were removed from this group", canSend: false, name: "Open door",
+      invitation: { viaLink: true, accepted: true, stage: "knocked" } });
+    expect(world.view(dave, id)!.members.map(m => m.key)).toEqual(before.members.map(m => m.key));
+    expect(world.texts(dave, id)).toEqual(["dave, while a member"]);
+
+    // Giving up is an answer to the knock only: it stops, and the removed group stays as it was.
+    await dave.groups.decline(id);
+    expect(world.view(dave, id)).toMatchObject({ status: "removed", canSend: false });
+    expect(world.view(dave, id)!.invitation).toBeUndefined();
+    expect((await dave.store.getGroups())[0].joining).toBeUndefined();
+    expect([...dave.links.values()].filter(e => e.kind === "guest")).toEqual([]);
+    expect(world.texts(dave, id)).toEqual(["dave, while a member"]);
+    await world.run(60_000);
+    expect((await dave.store.getGroups())[0].joining).toBeUndefined();
+    // Nothing left to give up; and the link lets him in again once somebody is there.
+    await expect(dave.groups.decline(id)).rejects.toThrow("No invitation to decline");
+    for (const p of [admin, bob, carol]) p.online = true;
+    await dave.groups.joinByLink(link);
+    await world.until(() => world.member(dave, id), 5 * 60_000);
+    expect(world.view(dave, id)?.myKey).toBe(daveKey);
+    expect(world.view(dave, id)!.invitation).toBeUndefined();
+    expect(world.texts(dave, id)).toContain("dave, while a member");
+  });
+
   it("opening the link before it was told lets it in again all the same", async () => {
     const { world, admin, dave, id, link, daveKey } = await removedWhileAway();
     // The hubs' farewell never reaches him: his app still says he is a member when he opens the link.

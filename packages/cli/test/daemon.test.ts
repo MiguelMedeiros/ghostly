@@ -1,7 +1,7 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:net";
+import { createServer, type AddressInfo, type Server } from "node:net";
 import { createInterface } from "node:readline";
-import type { Server as HttpServer } from "node:http";
+import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
 import { createProfile, lockOwner, profilePaths } from "../src/profiles";
@@ -136,6 +136,33 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       expect(existsSync(profilePaths(hung, "default").lock)).toBe(false);
     } finally {
       await daemon.stop();
+    }
+  });
+
+  it("a daemon whose output nobody reads any more (the process that started it died) still answers and stops on SIGTERM", async () => {
+    // A relay that hangs up on every request: after three the daemon says on stderr that it leaves it alone.
+    let asked = 0;
+    const dead = createHttpServer((request) => { asked++; request.socket.destroy(); });
+    await new Promise<void>((listening) => dead.listen(0, "127.0.0.1", listening));
+    const deaf = home("deaf"), deafEnv = { ...env, GHOSTLY_PKARR_RELAYS: `http://127.0.0.1:${(dead.address() as AddressInfo).port}` };
+    const daemon = new Running(["--home", deaf, "daemon"], deafEnv);
+    try {
+      await daemon.waitFor((l) => l.daemon === "ready");
+      // The read end of its stderr closes, as when its parent is killed: what it writes there fails from now on.
+      daemon.child.stderr!.destroy();
+      // An invite to publish: what makes the daemon ask its relay. A daemon that turns in circles answers no command.
+      const asks = (...args: string[]) => Promise.race([ghostly(["--home", deaf, ...args], { env: deafEnv }), new Promise<never>((_, late) => setTimeout(() => late(new Error(`no answer to ${args.join(" ")} in 15 s`)), 15_000))]);
+      ok(await asks("invite", "create", "--label", "nobody"));
+      const until = Date.now() + 30_000;
+      while (asked < 3 && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(asked).toBeGreaterThanOrEqual(3);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(ok(await asks("status")).mode).toBe("daemon");
+      daemon.child.kill("SIGTERM");
+      expect(await daemon.exited(10_000)).toBe(0);
+    } finally {
+      daemon.child.kill("SIGKILL");
+      dead.close();
     }
   });
 });

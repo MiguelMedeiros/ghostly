@@ -187,7 +187,7 @@
     "invited": "Invitato…",
     "makeAdmin": "Cedi admin",
     "missing": "{{count}} mancanti",
-    "missingHint": "Messaggi di questa epoca che nessuno ha potuto recuperare",
+    "missingHint": "Messaggi di questa epoca non ancora arrivati",
     "needsBothHint": "I gruppi richiedono entrambe le app connesse e aggiornate",
     "needsUpdate": "Serve un Ghostly aggiornato",
     "noContacts": "Tutti i contatti associati sono già dentro, oppure non ne hai ancora.",

@@ -13,8 +13,8 @@ import { RESEND_POLICY } from "./outbox";
  * the group's (`send`): a private group's `group-edit` frames over the edges, a community's application frame.
  *
  * A group has no receipts: my edit is pending only until it was said to the group, at most `EDIT_SEND_LIMIT` per window
- * per group (a bot rewriting a status says only its latest text). A private group's member whose edge was down hears my
- * latest edits again when it opens (`resend`); a community's members catch up from each other.
+ * per group (a bot rewriting a status says only its latest text). A private group's member whose edge was down hears
+ * every edit of mine it has not heard on that edge when it opens (`resend`); a community's members catch up from each other.
  */
 
 export interface GroupEditsHost {
@@ -31,18 +31,30 @@ export interface GroupEditsHost {
   membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean; admin?: boolean } | undefined;
   /** Says an edit to the group (a private group's: to member `to` alone, when given). An error when it could not go now. */
   send(groupId: string, edit: GroupEdit, to?: string): Promise<string | null>;
+  /**
+   * The open edge of a private group to a member, as what tells one connection from the next; undefined while it is
+   * down. `resend` says nothing to an edge that is down and goes on only while it is the same. Not given: always up.
+   */
+  edge?(groupId: string, member: string): unknown;
   now?(): number;
 }
 
 /** What `edit` answers: `refused` when it is not something to edit (the page says so and keeps the edit open). */
 export interface GroupEditResult { error: string | null; refused?: boolean; messageId?: string }
 
-/** A member's latest edits said again on an edge that opens: below what a receiver takes in one window. */
+/** My edits said again on an edge in one window (`GROUP_EDIT_RESEND_WINDOW_MS`): below what a receiver takes in one. */
 export const GROUP_EDIT_RESEND = 16;
+/** A second past the receiver's window, so one window's edits have left it on the member's side whatever the edge's delay. */
+export const GROUP_EDIT_RESEND_WINDOW_MS = EDIT_RATE_WINDOW_MS + 1_000;
+/** An edge that opens for the first time since the app started hears my newest edits again, this many messages at most. */
+export const GROUP_EDIT_CATCH_UP = 256;
+/** Members' edits past what a window takes, kept per group until it has room: as many as a community's store hands back. */
+export const GROUP_EDITS_HELD = 256;
 /** An edit that could not go (no epoch key yet) is tried again after this long. */
 const RETRY_MS = 10_000;
 
 const chatOf = (groupId: string) => `group:${groupId}`;
+const resendKey = (groupId: string, member: string) => `${groupId}\n${member}`;
 
 export class GroupEdits {
   private readonly now: () => number;
@@ -51,10 +63,23 @@ export class GroupEdits {
   private readonly cards: CardEditPacer;
   private readonly sendPace = new Map<string, RateWindow>();
   private readonly receivePace = new Map<string, RateWindow>();
+  /** Per group, per member (`group\nmember`): its edits past the window, by message, waiting for room (`hold`). */
+  private readonly held = new Map<string, Map<string, Map<string, GroupEdit>>>();
+  private readonly heldTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly flushing = new Map<string, Promise<void>>();
   /** Per group: my rows known to have an edit to say, each with when it was last told (`edit`), by `tick`. */
   private readonly known = new Map<string, Map<string, number>>();
+  /**
+   * Per group and member (`resendKey`): the last edit of mine said on its edge, in the order `resend` says them. What
+   * comes after it is what the member has not heard there. Not kept across a restart.
+   */
+  private readonly heard = new Map<string, { at: number; id: string }>();
+  /** The connection `resend` last spoke on, per group and member: a new one hears my latest edits again. */
+  private readonly resentOn = new Map<string, unknown>();
+  private readonly resendPace = new Map<string, RateWindow>();
+  private readonly resendTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly resending = new Map<string, Promise<void>>();
   private tick = 0;
   /**
    * The groups whose history was read for the rows with an edit to say: `known` has them all, and from then on those
@@ -181,7 +206,8 @@ export class GroupEdits {
   /**
    * An edit from a member, authenticated as `sender` by the group. Believed only while the sender is in the group (a
    * removed member's edits are dropped) and only of the sender's own message; the highest number wins. One of a message
-   * not here yet waits a minute for it. Past `EDIT_RECEIVE_LIMIT` a window from one member, the rest are dropped.
+   * not here yet waits a minute for it. Past `EDIT_RECEIVE_LIMIT` a window from one member, the rest wait for the next
+   * window (`hold`): a catch-up hands back every edit of an author at once, and one dropped is never handed again.
    */
   async receive(groupId: string, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const membership = this.host.membership(groupId);
@@ -189,7 +215,58 @@ export class GroupEdits {
     const key = `${groupId}\n${sender}`;
     let pace = this.receivePace.get(key);
     if (!pace) this.receivePace.set(key, pace = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS, this.now));
-    if (!pace.take()) return "dropped";
+    // Behind those that wait already, so a member's edits are taken in the order they came.
+    if (this.held.get(groupId)?.has(key) || !pace.take()) return this.hold(groupId, sender, edit, pace);
+    return this.take(groupId, membership, sender, edit);
+  }
+
+  /**
+   * An edit past what a member's window takes: kept, the highest number per message, `GROUP_EDITS_HELD` messages a
+   * group at most (the oldest go first), and taken when the window has room. The work stays what the window allows.
+   */
+  private hold(groupId: string, sender: string, edit: GroupEdit, pace: RateWindow): "waiting" | "dropped" {
+    const key = `${groupId}\n${sender}`;
+    let group = this.held.get(groupId);
+    if (!group) this.held.set(groupId, group = new Map());
+    let waiting = group.get(key);
+    if (!waiting) group.set(key, waiting = new Map());
+    const known = waiting.get(edit.id);
+    if (known && known.e >= edit.e) return "dropped";
+    waiting.delete(edit.id);
+    waiting.set(edit.id, edit);
+    let count = 0;
+    for (const member of group.values()) count += member.size;
+    for (const [member, edits] of group) {
+      if (count <= GROUP_EDITS_HELD) break;
+      while (count > GROUP_EDITS_HELD && edits.size) { edits.delete(edits.keys().next().value!); count--; }
+      if (!edits.size && member !== key) group.delete(member);
+    }
+    if (!this.heldTimers.has(key) && !this.stopped) this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(groupId, sender).catch(() => {}); }, Math.max(50, pace.wait())));
+    return waiting.has(edit.id) ? "waiting" : "dropped";
+  }
+
+  /** The window of a member has room again: its edits that waited are taken, oldest first, as many as it allows. */
+  private async takeHeld(groupId: string, sender: string): Promise<void> {
+    const key = `${groupId}\n${sender}`;
+    this.heldTimers.delete(key);
+    const group = this.held.get(groupId), waiting = group?.get(key), pace = this.receivePace.get(key);
+    if (this.stopped || !group || !waiting || !pace) return;
+    for (const [id, edit] of [...waiting]) {
+      const membership = this.host.membership(groupId);
+      // Out of the group meanwhile (the member, or me): nothing of it is believed.
+      if (!membership?.members.has(sender)) { waiting.clear(); break; }
+      if (!pace.take()) break;
+      // Unless a higher one took its place while the last was applied.
+      if (waiting.get(id) !== edit) continue;
+      waiting.delete(id);
+      await this.take(groupId, membership, sender, edit).catch(() => {});
+    }
+    if (waiting.size) { if (!this.heldTimers.has(key) && !this.stopped) this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(groupId, sender).catch(() => {}); }, Math.max(50, pace.wait()))); return; }
+    if (group.get(key) === waiting) group.delete(key);
+    if (!group.size) this.held.delete(groupId);
+  }
+
+  private async take(groupId: string, membership: { me: string }, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const chat = chatOf(groupId);
     const message = await this.find(chat, edit.id);
     if (!message) { this.buffer.hold(chat, { ...edit, sender }); return "waiting"; }
@@ -224,14 +301,61 @@ export class GroupEdits {
     return "applied";
   }
 
-  /** An edge of a private group opened: the member at its other end hears my latest edits again, in case it missed them. */
-  async resend(groupId: string, to: string): Promise<void> {
-    const chat = chatOf(groupId);
+  /**
+   * An edge of a private group opened: the member at its other end hears the edits of mine it has not heard on that
+   * edge, the latest of each message, oldest first. `GROUP_EDIT_RESEND` go a window and the rest a window later each,
+   * while the edge is the same: a member away while I closed forty task cards reads them all as closed, not the latest
+   * sixteen. Nothing known of what it heard (the first time since the app started): my newest `GROUP_EDIT_CATCH_UP`.
+   * A new connection hears my latest `GROUP_EDIT_RESEND` again whatever it heard: one may have come before its message
+   * and been dropped. Called again while the edge is the same, it goes on from where it was.
+   */
+  resend(groupId: string, to: string): Promise<void> {
+    const key = resendKey(groupId, to);
+    const run = (this.resending.get(key) ?? Promise.resolve()).then(() => this.resendNow(groupId, to));
+    const settled = run.catch(() => {}).finally(() => { if (this.resending.get(key) === settled) this.resending.delete(key); });
+    this.resending.set(key, settled);
+    return run;
+  }
+
+  private async resendNow(groupId: string, to: string): Promise<void> {
+    const key = resendKey(groupId, to), chat = chatOf(groupId);
+    clearTimeout(this.resendTimers.get(key));
+    this.resendTimers.delete(key);
+    const open = () => this.host.edge ? this.host.edge(groupId, to) : true;
+    const edge = open(), membership = this.host.membership(groupId);
+    if (this.stopped || edge === undefined || !membership || membership.community || !membership.members.has(to)) return;
     const mine = (await (this.host.history ? this.host.history(chat) : this.host.messages(chat)))
       .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
-      .sort((a, b) => b.edit!.at - a.edit!.at).slice(0, GROUP_EDIT_RESEND).reverse();
-    // One that cannot go (its epoch's key is gone) does not hold the others back.
-    for (const m of mine) await this.host.send(groupId, { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) }, to);
+      .sort((a, b) => a.edit!.at - b.edit!.at || (a.id < b.id ? -1 : 1));
+    const last = this.heard.get(key);
+    const after = (m: StoredMessage) => !last || m.edit!.at > last.at || (m.edit!.at === last.at && m.id > last.id);
+    const unheard = last ? mine.filter(after).length : Math.min(mine.length, GROUP_EDIT_CATCH_UP);
+    const again = this.resentOn.get(key) === edge ? 0 : Math.min(mine.length, GROUP_EDIT_RESEND);
+    this.resentOn.set(key, edge);
+    const due = mine.slice(mine.length - Math.max(unheard, again));
+    let pace = this.resendPace.get(key);
+    if (!pace) this.resendPace.set(key, pace = new RateWindow(GROUP_EDIT_RESEND, GROUP_EDIT_RESEND_WINDOW_MS, this.now));
+    for (const m of due) {
+      if (this.stopped || open() !== edge) return;
+      if (!pace.take()) {
+        this.resendTimers.set(key, setTimeout(() => { void this.resend(groupId, to).catch(() => {}); }, Math.max(50, pace.wait())));
+        return;
+      }
+      // One that cannot go (its epoch's key is gone) does not hold the others back.
+      await this.host.send(groupId, { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) }, to);
+      // Heard only when the edge that took it is still the one that was open.
+      if (open() !== edge) return;
+      if (after(m)) this.heard.set(key, { at: m.edit!.at, id: m.id });
+    }
+  }
+
+  /** A group is forgotten, or the app stops: what was known of its members' edges goes with it. */
+  private dropResends(groupId?: string): void {
+    const of = (key: string) => groupId === undefined || key.startsWith(`${groupId}\n`);
+    for (const [key, timer] of this.resendTimers) if (of(key)) { clearTimeout(timer); this.resendTimers.delete(key); }
+    for (const key of [...this.heard.keys()]) if (of(key)) this.heard.delete(key);
+    for (const key of [...this.resendPace.keys()]) if (of(key)) this.resendPace.delete(key);
+    for (const key of [...this.resentOn.keys()]) if (of(key)) this.resentOn.delete(key);
   }
 
   forget(groupId: string): void {
@@ -239,6 +363,8 @@ export class GroupEdits {
     this.timers.delete(groupId);
     this.known.delete(groupId);
     this.learnt.delete(groupId);
+    this.dropResends(groupId);
+    this.dropHeld(groupId);
     this.buffer.forget(chatOf(groupId));
   }
 
@@ -247,5 +373,12 @@ export class GroupEdits {
     this.cards.stop();
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.dropResends();
+    this.dropHeld();
+  }
+
+  private dropHeld(groupId?: string): void {
+    for (const [key, timer] of this.heldTimers) if (groupId === undefined || key.startsWith(`${groupId}\n`)) { clearTimeout(timer); this.heldTimers.delete(key); }
+    if (groupId === undefined) this.held.clear(); else this.held.delete(groupId);
   }
 }

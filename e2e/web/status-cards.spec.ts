@@ -1,5 +1,6 @@
 import { pasteInvite } from "../support/clipboard";
 import type { Locator, Page } from "@playwright/test";
+import { linkTrace, watchLink, type EngineHost } from "../support/callTrace";
 import { chat, expect, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
@@ -136,10 +137,13 @@ test("in a group, each bot's tasks are listed under its name", { tag: ["@feature
   test.setTimeout(8 * 60_000);
   const url = await relay.listen();
   const [coordinator, hermes] = [new HeadlessBot(), new HeadlessBot()];
+  let watched: EngineHost | null = null;
   try {
     await Promise.all([coordinator.start(url, "Coordinator"), hermes.start(url, "Hermes One")]);
     const person = await peer("cards-group-person");
     const page = person.page;
+    watched = { kind: "web", ...person };
+    await watchLink(watched);
 
     // The coordinator makes a private group and its link; Hermes and the person come in through it.
     const created = await coordinator.run("group", "create", "Sala de Máquinas", "--mesh");
@@ -195,6 +199,11 @@ test("in a group, each bot's tasks are listed under its name", { tag: ["@feature
     await page.keyboard.press("Escape");
     await expect(room.locator('[data-testid="status-card"][data-card-id="relay"]')).toHaveAttribute("data-status", "done", { timeout: 60_000 });
     await expect(page.getByTestId("chat-tasks-count")).toHaveText("1");
+  } catch (error) {
+    // Each side of an edge that never came up: the bots' link traces, and the page's.
+    for (const bot of [coordinator, hermes]) await bot.attachLogs(test.info());
+    if (watched) await test.info().attach("person-link-trace.txt", { body: await linkTrace(watched).catch((e) => `(no trace: ${e})`), contentType: "text/plain" });
+    throw error;
   } finally {
     await Promise.all([coordinator.stop(), hermes.stop()]);
   }

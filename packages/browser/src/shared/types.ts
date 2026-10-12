@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -181,6 +181,12 @@ export interface StoredGroup {
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /**
+   * I declined an invitation while its inviter's chat (`linkId`) was down: the answer is said when that chat is up, or
+   * dropped once `at` is a week old. Alone when nothing else of the group is kept; beside `state` when the invitation
+   * was to a group I was removed from, which stays.
+   */
+  declined?: { at: number; linkId: string };
+  /**
    * On the admin's side: members I removed while they could not be told (their edge was down, and no contact chat
    * carried the notice), by member key. `e`: the epoch of the commit that removed them; `at`: when. The edge to each
    * stays until it opens and that commit goes over it (`told`, the first time), or `at` is a week old: a member removed
@@ -281,8 +287,10 @@ export interface GroupView {
   /**
    * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
+   * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
+   * while that chat was up: the answer is offered again.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -864,6 +872,12 @@ export interface StoredMessage {
   mentions?: GroupMention[];
   /** A group message someone else sent that names me (or everyone). */
   mentioned?: true;
+  /**
+   * A private group's message from another member: the frame it came in (sealed, signed by its author), kept on the
+   * group's newest rows to hand on to members who were away (`GROUP_LIMITS.relay`, WISP 902 § Catch-up). The engine's
+   * own: a row goes to a page without it (`withoutFrame`).
+   */
+  frame?: GroupMessageFrame;
   /** How this message travelled, as the engine saw it go or come (the message's details view). */
   details?: MessageDetails;
   /** A link preview that came with the text (WISP 401 § Link previews): made by the sender's app, never fetched here. */

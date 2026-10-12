@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { identityFromSeed, readTurnPacket, sign, signTurnPacket, signTurnRelease, toBase64Url, turnKeys, TURN_SETTLE_MS, type Identity, type TurnRecord } from "@ghostly/core";
+import { identityFromSeed, readTurnPacket, sign, signTurnPacket, signTurnRelease, toBase64Url, turnInstance, turnKeys, turnStatedVerifier, turnVerifierMark, TURN_SETTLE_MS, type Identity, type TurnRecord } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import { TurnKeeper, takeoverTurn, type TurnStore } from "../src/devices/turn";
-import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget } from "../src/devices/takeover";
+import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget, verifierStands } from "../src/devices/takeover";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 // covers: devices.takeover, devices.turn.keeper
 
@@ -39,6 +39,11 @@ beforeEach(() => { clock.t = 9_000_000; clock.onSleep = undefined; });
 async function packet(turn: number, rev: number, author: number): Promise<Uint8Array> {
   return signTurnPacket(keys, { turn, rev, author, active: author, slots: slots(), instance: new Uint8Array(8).fill(author + 1) }, (bytes) => sign(bytes, devices[author].seed));
 }
+/** The desktop's record as an app that states the profile's verifier writes it (null: the profile has none). */
+async function stating(turn: number, rev: number, author: number, verifier: typeof VERIFIER | null): Promise<Uint8Array> {
+  return signTurnPacket(keys, { turn, rev, author, active: author, slots: slots(), instance: turnInstance(turnVerifierMark(verifier)) }, (bytes) => sign(bytes, devices[author].seed));
+}
+const CHANGED = { v: 1 as const, setup: "bmV3LXNldHVw", record: "bmV3LXJlY29yZA" };
 const opened = (payload: Uint8Array | null): TurnRecord => {
   const read = readTurnPacket(keys, payload!);
   if (read.kind !== "valid") throw new Error(read.kind);
@@ -205,6 +210,76 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     const old = await device(network, 1, "standby", { verifier: undefined });
     await expect(forceTakeover(ports(old.store, old.keeper), { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-no-password");
     expect(network.calls).toEqual([]);
+  });
+
+  it("the lock password changed on the active device: a standby that reads so does not take over with the password it still checks", async () => {
+    const phone = await device(network, 1, "standby");
+    // The desktop changed the lock password after the phone last held the profile, and its record says which verifier stands.
+    const now = await stating(N, 1, 0, CHANGED);
+    network.seed(now);
+    const refusal = await forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" }).catch((error) => error);
+    expect(refusal).toBeInstanceOf(TakeoverRefusal);
+    expect((refusal as TakeoverRefusal).reason).toBe("changed");
+    expect((refusal as TakeoverRefusal).message).toMatch(/^takeover-changed: .*Desktop/);
+    // Nothing was written: the desktop's record stands, and the phone is what it was.
+    expect(network.puts()).toEqual([]);
+    expect(network.source("dht").held).toEqual(now);
+    expect(phone.store.record.state).toBe("standby");
+    expect(phone.store.record.handoff).toBeUndefined();
+  });
+
+  it("the same when the record went from every source after the standby stored it, and when the profile has no verifier any more", async () => {
+    // Stored at an earlier read; nothing is on the network now.
+    const stored = await stating(N, 1, 0, CHANGED);
+    const phone = await device(network, 1, "standby", { rev: 1, turnPacket: toBase64Url(stored) });
+    await expect(forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-changed");
+    expect(network.puts()).toEqual([]);
+    // Making the new verifier failed on the desktop: it states that it has none, which is not the phone's either.
+    const laptop = await device(network, 2, "standby");
+    network.seed(await stating(N, 2, 0, null));
+    await expect(forceTakeover(ports(laptop.store, laptop.keeper), { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-changed");
+    expect(network.puts()).toEqual([]);
+  });
+
+  it("a standby whose verifier is the one the record states takes over, and its own record states it too", async () => {
+    const phone = await device(network, 1, "standby");
+    network.seed(await stating(N, 1, 0, VERIFIER));
+    const outcome = await forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" });
+    expect(outcome.kind).toBe("start");
+    const record = opened(network.source("dht").held);
+    expect({ turn: record.turn, author: record.author }).toEqual({ turn: N + 1, author: 1 });
+    expect(turnStatedVerifier(record.instance)).toEqual(turnVerifierMark(VERIFIER));
+  });
+
+  it("a record that states no verifier (an app from before wrote it) leaves the standby with the one it has", async () => {
+    const phone = await device(network, 1, "standby");
+    const old = await packet(N, 1, 0);
+    expect(turnStatedVerifier(opened(old).instance)).toBeNull();
+    network.seed(old);
+    expect((await forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" })).kind).toBe("start");
+  });
+
+  it("a device replaced by a takeover it did not want takes the turn back, whatever the device that replaced it states", async () => {
+    const desktop = await device(network, 0, "superseded", { activeSlot: 1 });
+    network.seed(await stating(N + 7, 0, 1, CHANGED));
+    const outcome = await forceTakeover(ports(desktop.store, desktop.keeper), { password: PASSWORD, name: "Phone" });
+    expect(outcome.kind).toBe("start");
+    expect(opened(network.source("dht").held)).toMatchObject({ turn: N + 8, author: 0 });
+  });
+
+  it("which record holds a standby to the stated verifier", async () => {
+    const standby = (await device(network, 1, "standby")).store.record;
+    const other = opened(await stating(N, 1, 0, CHANGED)), same = opened(await stating(N, 1, 0, VERIFIER)), none = opened(await stating(N, 1, 0, null));
+    expect(verifierStands(standby, other)).toBe(false);
+    expect(verifierStands(standby, none)).toBe(false);
+    expect(verifierStands(standby, same)).toBe(true);
+    expect(verifierStands(standby, opened(await packet(N, 1, 0)))).toBe(true);
+    expect(verifierStands(standby, null)).toBe(true);
+    // Its own last record (it released, and the taker has not written yet) says nothing new to it.
+    expect(verifierStands(standby, opened(await stating(N, 3, 1, CHANGED)))).toBe(true);
+    // A copy restored from a backup has no verifier to hold against anything; a replaced device is not held to it.
+    expect(verifierStands({ ...standby, copy: "restored", verifier: undefined }, other)).toBe(true);
+    expect(verifierStands({ ...standby, state: "superseded" }, other)).toBe(true);
   });
 
   it("the name of the device that stops must be typed", async () => {

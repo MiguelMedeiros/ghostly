@@ -331,8 +331,10 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);
-    await node(ctx).retryMessage({ linkId: link.id, messageId: str(params, "message", true) });
-    return { chat: link.id, messageId: params.message };
+    const messageId = str(params, "message", true);
+    if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    await node(ctx).retryMessage({ linkId: link.id, messageId });
+    return { chat: link.id, messageId };
   },
   async "chat.delete"(ctx, params) {
     const link = chatOf(ctx, params);

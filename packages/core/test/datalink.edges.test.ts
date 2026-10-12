@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { ANSWER_REFUSED_REDIALS, DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, STALLED_EVIDENCE_MS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_FUTURE_MS, RTC_SIGNAL_MAX_AGE_MS, offerIsFresh, parseRtcSignal, type RtcSignal, type SignalSight } from "../src/signal";
 
@@ -491,6 +491,44 @@ describe("DataLink failures and teardown", () => {
     vi.advanceTimersByTime(1_000);
     await refuse("throws");
     expect(onAnswerReplaced).toHaveBeenCalledTimes(ANSWER_REFUSED_REDIALS + 1);
+  });
+
+  // libdatachannel's race on a loaded core refused them all, and the next offer waited the caller's backoff, three
+  // minutes, while the answerer was there (meshSignals on CI, 2026-10-11). The caller hears it once they run out.
+  it("says when its answers were refused more times in a row than it offers again at once for", async () => {
+    const onAnswersRefused = vi.fn(), onAnswerReplaced = vi.fn();
+    const a = link("aaaa", "bbbb", (pc) => (pc.failRemote = true), { onAnswerReplaced, onAnswersRefused });
+    const refuse = async () => {
+      await a.dl.connect();
+      const offer = parseRtcSignal(a.lastSignal())!;
+      await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: offer.ts + 1, s: "active" }), o: offer.ts }));
+      vi.advanceTimersByTime(1_000);
+    };
+    for (let n = 1; n <= ANSWER_REFUSED_REDIALS; n++) await refuse();
+    expect(onAnswerReplaced).toHaveBeenCalledTimes(ANSWER_REFUSED_REDIALS);
+    expect(onAnswersRefused).not.toHaveBeenCalled();
+    await refuse();
+    expect(onAnswersRefused).toHaveBeenCalledOnce();
+    expect(onAnswerReplaced).toHaveBeenCalledTimes(ANSWER_REFUSED_REDIALS);
+  });
+
+  it("traces an answer it drops as not for its offer, once each", async () => {
+    const trace: string[] = [];
+    (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace = true;
+    const debug = vi.spyOn(console, "debug").mockImplementation((line: string) => void trace.push(line));
+    onTestFinished(() => { debug.mockRestore(); delete (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace; });
+    const a = link("aaaa", "bbbb");
+    await a.dl.connect();
+    const offer = parseRtcSignal(a.lastSignal())!;
+    // The answer to an offer it made before this one (given up when that answer was refused).
+    const stale = JSON.stringify({ ...offerFrom({ t: "a", ts: offer.ts + 1, s: "active" }), o: offer.ts - 5 });
+    await a.dl.handleSignal(stale);
+    await a.dl.handleSignal(stale);
+    expect(a.dl.state).toBe("offering");
+    const dropped = trace.filter((line) => line.includes('"answer-dropped"'));
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toContain('"state":"offering"');
+    expect(dropped[0]).toContain('"offerMs":-5');
   });
 
   it("gives up on a connection that does not open in time", async () => {

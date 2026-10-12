@@ -621,6 +621,68 @@ describe("the chat timeline's scrolling", () => {
 });
 
 /**
+ * A chat kept loaded while another one is on screen (it is on a call, or a mini-app runs in it), then shown again.
+ * Chromium brings its list back where it was, with no event. WebKit (Safari, the macOS and Linux apps) brings it back
+ * at the top and says so with a scroll event, at the list's full size, before anything says the size changed.
+ */
+describe("a list off screen and back, as WebKit brings it", () => {
+  const awayAndBack = () => {
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(0);
+    resized();
+    height.mockRestore();
+    scrollTo(0);
+    resized();
+  };
+
+  it("left at its bottom, it is back at its bottom, and is still remembered there", () => {
+    const rows = theirs(0, 20);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    expect(list().scrollTop).toBe(700);
+    awayAndBack();
+    expect(list().scrollTop).toBe(700);
+    expect(pill()).toBeNull();
+    // What came while it was back keeps it at the bottom, and so does opening it again later.
+    rerender(<Timeline rows={[...rows, ...theirs(20, 1)]} />);
+    expect(list().scrollTop).toBe(750);
+    rerender(<Timeline chat="chat-2" rows={theirs(100, 12)} />);
+    rerender(<Timeline rows={[...rows, ...theirs(20, 1)]} />);
+    expect(list().scrollTop).toBe(750);
+  });
+
+  it("left scrolled up, it is back on the same message", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    scrollTo(130);
+    awayAndBack();
+    expect(topOf("peer_2")).toBe(-30);
+    expect(list().scrollTop).toBe(130);
+  });
+
+  it("a long chat is back on its last rows: none older come into the page", () => {
+    renderApp(<WindowTimeline rows={theirs(0, 1_000)} />);
+    awayAndBack();
+    expect(rowsIn(list()).length).toBe(OPEN_ROWS);
+    expect(list().scrollTop).toBe(OPEN_ROWS * ROW - VIEW);
+    expect(pill()).toBeNull();
+  });
+
+  it("back on screen, a hand's scroll is still the hand's", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    awayAndBack();
+    scrollTo(200);
+    expect(list().scrollTop).toBe(200);
+    // Off screen again and back where it was (Chromium): the same.
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(0);
+    resized();
+    height.mockRestore();
+    resized();
+    expect(list().scrollTop).toBe(200);
+    scrollTo(700);
+    scrollTo(450);
+    expect(list().scrollTop).toBe(450);
+  });
+});
+
+/**
  * Where a chat was left, when the rows it opens with are not its own yet. The group page stays mounted from one group to
  * the next, so for one render the next group opens on the last one's rows; a history can also come in two goes.
  */

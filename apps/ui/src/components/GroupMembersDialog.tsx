@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -35,8 +35,6 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const id = useId();
   const { t, language } = useI18n();
   const contactName = (link: LinkView) => link.label || link.peerNick || t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
-  const hubLabels = { auto: t("group.hubs.auto"), pin: t("group.hubs.pin"), exclude: t("group.hubs.exclude") };
-  const hubRoles = HUB_ROLES.map(value => ({ value, label: hubLabels[value] }));
   const state = useSyncExternalStore(subscribe, snapshot);
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
@@ -61,6 +59,11 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     setBusy(key); setError(null);
     try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); } finally { setBusy(null); }
   };
+  // For the rows, which are drawn again only when what they show changed: the same function from one state to the next.
+  const runNow = useRef(run);
+  runNow.current = run;
+  const groupId = live.id;
+  const setHub = useCallback((key: string, role: HubRole) => void runNow.current(key, () => engine.call("setGroupHub", { groupId, key, role: role === "auto" ? null : role })), [groupId]);
   // The name being typed, while the admin renames the group; null otherwise. The engine cleans it and says what it refuses.
   const [naming, setNaming] = useState<string | null>(null);
   const rename = async () => {
@@ -84,6 +87,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const linked = live.members.some(m => m.edge?.state === "open");
   const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && linked && m.edge?.state !== "open";
   const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
+  // What each row says of its member's edge, as of this draw ("3 min ago" in the interface's language).
+  const now = Date.now(), since = agoIn(language);
+  const hubChoice = live.profile === "mesh" && live.members.length > MESH_HUBS.threshold;
   // The member whose name or picture was tapped in the chat: their row, in sight and marked.
   const list = useRef<HTMLUListElement>(null);
   useEffect(() => {
@@ -128,35 +134,13 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     </div>
     {live.status === "active" && (live.isAdmin || (live.profile === "community" && live.entryLink)) && <GroupLinkPanel group={live} />}
     <ul ref={list} className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
-      {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={m.key === focusKey || undefined}
-        className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${m.key === focusKey ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
-        {/* A community member my app holds no edge with is reached through the hubs: not "not reachable", and nothing says whether their app is open. */}
-        {viaHubs(m) ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
-          : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />}
-        <MemberAvatar src={photoOf(m)} name={m.me ? state?.settings.nick || memberName(m, t) : memberName(m, t)} />
-        {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
-        <span className="contact-row min-w-[8.5rem] flex-1">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={contactKey(m.key)} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
-            {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
-          {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, Date.now(), t, agoIn(language))}</span>}
-        </span>
-        {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
-        {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
-        {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-amber-500">{t("group.members.missing", { count: m.missing })}</span>}
-        {live.isAdmin && !m.me && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1">
-          {live.profile === "mesh" && live.members.length > MESH_HUBS.threshold && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy !== null}
-            value={m.hubRole ?? "auto"} options={hubRoles}
-            onChange={role => void run(m.key, () => engine.call("setGroupHub", { groupId: live.id, key: m.key, role: role === "auto" ? null : role }))} />}
-          <button disabled={busy !== null} onClick={() => setPromoting(m)} data-testid="group-make-admin"
-            className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">{t("group.members.makeAdmin")}</button>
-          <button disabled={busy !== null} onClick={() => setRemoving(m)} data-testid="group-remove-member"
-            className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
-        </span>}
-      </li>)}
+      {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? state?.settings.nick : undefined}
+        peerKey={m.me ? undefined : contactKey(m.key)} status={m.me ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
+        tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
     </ul>
     {live.isAdmin && live.status === "active" && live.profile !== "community" && <div className="mt-4">
       <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.members.invite")}</h3>
-      {/* Unanswered invitations hold a seat (they last until the app restarts), so a full group says how many of its 32 are only invited. */}
+      {/* Unanswered invitations hold a seat (until they are answered, a week at most), so a full group says how many of its 32 are only invited. */}
       {full && <p data-testid="group-invite-full" className="mt-1 text-sm text-text-muted">{live.invited.length > 0
         ? t("group.members.fullInvited", { max: MAX_GROUP_MEMBERS, invited: live.invited.length }) : t("group.link.full", { count: MAX_GROUP_MEMBERS })}</p>}
       {contacts.length === 0 && <p className="mt-1 text-sm text-text-muted">{t("group.members.noContacts")}</p>}
@@ -181,6 +165,69 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);
 }
+
+type HubRole = typeof HUB_ROLES[number];
+
+interface MemberRowProps {
+  member: GroupMemberView;
+  /** The member the chat opened the list for. */
+  focused: boolean;
+  /** Reached through the hubs (a community): no edge of mine to speak of. */
+  viaHub: boolean;
+  photo?: string;
+  /** My own name, for my row's initial. */
+  myNick?: string;
+  /** The contact this member also is, for their identities' marks. */
+  peerKey?: string;
+  /** What their edge says, in a few words. */
+  status: string;
+  /** What the admin can do about them: nothing, hand over and remove, and with hubs their role as one. */
+  tools: "" | "admin" | "hubs";
+  /** Something is being done in the dialog: nothing else starts. */
+  busy: boolean;
+  onHub(key: string, role: HubRole): void;
+  onPromote(member: GroupMemberView): void;
+  onRemove(member: GroupMemberView): void;
+}
+
+/** The same row: the member reads the same (a new object in every state of the engine), and nothing else changed. */
+function sameRow(a: MemberRowProps, b: MemberRowProps): boolean {
+  const { member: was, ...before } = a, { member: is, ...after } = b;
+  return (Object.keys(after) as (keyof typeof after)[]).every(key => before[key] === after[key]) && (was === is || JSON.stringify(was) === JSON.stringify(is));
+}
+
+/**
+ * One member of the list. Drawn again only when what it shows changed: a community has up to 256 of them, and the
+ * engine sends a state up to 20 times a second, most of which change no member.
+ */
+const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, myNick, peerKey, status, tools, busy, onHub, onPromote, onRemove }: MemberRowProps) {
+  const { t } = useI18n();
+  const hubLabels = { auto: t("group.hubs.auto"), pin: t("group.hubs.pin"), exclude: t("group.hubs.exclude") };
+  return <li data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={focused || undefined}
+    className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${focused ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
+    {/* A community member my app holds no edge with is reached through the hubs: not "not reachable", and nothing says whether their app is open. */}
+    {viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
+      : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />}
+    <MemberAvatar src={photo} name={myNick || memberName(m, t)} />
+    {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
+    <span className="contact-row min-w-[8.5rem] flex-1">
+      <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={peerKey} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
+        {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
+      {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{status}</span>}
+    </span>
+    {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
+    {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
+    {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-warn-ink">{t("group.members.missing", { count: m.missing })}</span>}
+    {tools && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1">
+      {tools === "hubs" && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy}
+        value={m.hubRole ?? "auto"} options={HUB_ROLES.map(value => ({ value, label: hubLabels[value] }))} onChange={role => onHub(m.key, role)} />}
+      <button disabled={busy} onClick={() => onPromote(m)} data-testid="group-make-admin"
+        className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">{t("group.members.makeAdmin")}</button>
+      <button disabled={busy} onClick={() => onRemove(m)} data-testid="group-remove-member"
+        className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
+    </span>}
+  </li>;
+}, sameRow);
 
 /** A member's avatar in the list: their picture, which opens large, or their initial (drawn by CSS, so it is not read out). */
 function MemberAvatar({ src, name }: { src?: string; name: string }) {

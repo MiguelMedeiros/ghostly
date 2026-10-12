@@ -11,8 +11,8 @@ import { BUNDLE_URL, FakeNet, STORE_URL, appRows, apps, bundle, bundleIds, empty
 // covers: apps.engine.storage, apps.engine.installed
 
 /*
- * Each app's own storage (WISP 1200 § Permissions: 5 MiB per app and per chat, keys of 256 bytes, JSON values of 64 KiB),
- * uninstall, the database step that adds the apps' stores, what a backup carries, and the engine's flag.
+ * Each app's own storage (WISP 1200 § Permissions: 5 MiB per app and per chat, keys of 256 bytes, JSON values of 64 KiB,
+ * 128 bytes counted for each key beside its own bytes), uninstall, the database step that adds the apps' stores, what a backup carries, and the engine's flag.
  */
 
 let net: FakeNet;
@@ -77,7 +77,7 @@ describe("storage", () => {
     let used = 0, n = 0;
     for (; ; n++) {
       const key = `k${String(n).padStart(3, "0")}`;
-      const size = key.length + APP_STORAGE_LIMITS.valueBytes;
+      const size = APP_STORAGE_LIMITS.rowBytes + key.length + APP_STORAGE_LIMITS.valueBytes;
       if (used + size > APP_STORAGE_LIMITS.scopeBytes) break;
       await store.storageSet({ ref, scope: "chat-1", key, value });
       used += size;
@@ -100,11 +100,65 @@ describe("storage", () => {
     const value = "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2);
     const writes = Array.from({ length: 90 }, (_, i) => store.storageSet({ ref: app.ref, scope: "chat-1", key: `k${String(i).padStart(3, "0")}`, value }).then(() => "ok", (e: Error) => e.message.split(":")[0]));
     const results = await Promise.all(writes);
-    const fit = Math.floor(APP_STORAGE_LIMITS.scopeBytes / (4 + APP_STORAGE_LIMITS.valueBytes));
+    const fit = Math.floor(APP_STORAGE_LIMITS.scopeBytes / (APP_STORAGE_LIMITS.rowBytes + 4 + APP_STORAGE_LIMITS.valueBytes));
     expect(results.filter((r) => r === "ok")).toHaveLength(fit);
     expect(results.filter((r) => r === "full")).toHaveLength(90 - fit);
-    const total = (await storageRows() as { size: number }[]).reduce((sum, r) => sum + r.size, 0);
+    const total = (await storageRows() as { size: number }[]).reduce((sum, r) => sum + APP_STORAGE_LIMITS.rowBytes + r.size, 0);
     expect(total).toBeLessThanOrEqual(APP_STORAGE_LIMITS.scopeBytes);
+  });
+
+  /**
+   * Rows as `storageSet` writes them, put straight in the store: `big` values of 64 KiB under keys `b00`, `b01`…, which
+   * take most of a scope in a few rows, then `small` values of one byte under keys `k0000`, `k0001`…
+   */
+  async function seed(ref: string, scope: string, { big, small = 0 }: { big: number; small?: number }): Promise<void> {
+    const value = JSON.stringify("x".repeat(APP_STORAGE_LIMITS.valueBytes - 2));
+    const tx = (await openDb()).transaction(STORES.appStorage, "readwrite");
+    for (let i = 0; i < big; i++) tx.objectStore(STORES.appStorage).put({ ref, scope, key: `b${String(i).padStart(2, "0")}`, value, size: 3 + APP_STORAGE_LIMITS.valueBytes });
+    for (let i = 0; i < small; i++) tx.objectStore(STORES.appStorage).put({ ref, scope, key: `k${String(i).padStart(4, "0")}`, value: "1", size: 6 });
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+  }
+
+  it("each key counts 128 bytes beside its own and its value's: the room left takes hundreds of one-byte values, not thousands", async () => {
+    const { app } = await installed();
+    const { ref } = app;
+    // 79 values of 64 KiB leave 55,187 bytes of the 5 MiB (65,299 before a key counted 128 bytes).
+    const big = 79;
+    await seed(ref, "chat-1", { big });
+    const left = APP_STORAGE_LIMITS.scopeBytes - big * (APP_STORAGE_LIMITS.rowBytes + 3 + APP_STORAGE_LIMITS.valueBytes);
+    // A key of 5 bytes and a value of 1: 6 bytes of the app's, and about 140 on the device.
+    const fit = Math.floor(left / (APP_STORAGE_LIMITS.rowBytes + 6));
+    expect(fit).toBe(411);
+    // A fresh engine counts the rows it finds the same way.
+    const store = apps(net);
+    const results: string[] = [];
+    for (let i = 0; i < fit + 20; i++) results.push(await store.storageSet({ ref, scope: "chat-1", key: `k${String(i).padStart(4, "0")}`, value: 1 }).then(() => "ok", (e: Error) => e.message.split(":")[0]));
+    expect(results.filter((r) => r === "ok")).toHaveLength(fit);
+    expect(results.slice(fit)).toEqual(Array.from({ length: 20 }, () => "full"));
+    // A delete gives back the key's 128 bytes with its own.
+    await store.storageDelete({ ref, scope: "chat-1", key: "k0000" });
+    await store.storageSet({ ref, scope: "chat-1", key: "k9999", value: 1 });
+    await expect(store.storageSet({ ref, scope: "chat-1", key: "k0000", value: 1 })).rejects.toThrow(/^full/);
+    expect(await store.storageKeys({ ref, scope: "chat-1" })).toHaveLength(big + fit);
+  });
+
+  it("a scope filled before keys counted 128 bytes takes no new key, and still rewrites and deletes the ones it has", async () => {
+    const { app } = await installed();
+    const { ref } = app;
+    // 5,181,181 bytes as they were counted, under the 5 MiB; 5,268,093 as they are now, over it.
+    await seed(ref, "chat-1", { big: 79, small: 600 });
+    const store = apps(net);
+    await expect(store.storageSet({ ref, scope: "chat-1", key: "new", value: 1 })).rejects.toThrow(/^full/);
+    await store.storageSet({ ref, scope: "chat-1", key: "k0000", value: 2 });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: "k0000" })).toEqual({ value: 2 });
+    await expect(store.storageSet({ ref, scope: "chat-1", key: "k0000", value: 10 }), "a rewrite that grows").rejects.toThrow(/^full/);
+    await store.storageDelete({ ref, scope: "chat-1", key: "k0001" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: "k0001" })).toBeNull();
+    await expect(store.storageSet({ ref, scope: "chat-1", key: "new", value: 1 }), "still over after one delete").rejects.toThrow(/^full/);
+    // Another chat has its own count, and a smaller value makes room in this one.
+    await store.storageSet({ ref, scope: "chat-2", key: "new", value: 1 });
+    await store.storageSet({ ref, scope: "chat-1", key: "b00", value: "smaller" });
+    await store.storageSet({ ref, scope: "chat-1", key: "new", value: 1 });
   });
 
   it("exports every scope as the WISP's file", async () => {

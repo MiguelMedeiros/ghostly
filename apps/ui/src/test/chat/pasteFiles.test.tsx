@@ -439,4 +439,31 @@ describe("pastedFiles and the names of pasted pictures", () => {
       input.remove();
     } finally { stop(); }
   });
+
+  it("a drag that only names its files or a link by address does not open them in place of the app either", () => {
+    // WebKitGTK shows a file manager's drag as `text/uri-list` with no files; a link dragged from a browser has one too.
+    const named = () => ({ dataTransfer: transfer({ types: ["text/uri-list"], html: "<a href='file:///photo.png'>photo.png</a>" }) });
+    const stop = guardFileDrops(window);
+    try {
+      const over = createEvent.dragOver(document.body, named());
+      fireEvent(document.body, over);
+      expect(over.defaultPrevented).toBe(true);
+      expect((over as DragEvent).dataTransfer?.dropEffect).toBe("none");
+      expect(fireEvent.drop(document.body, named())).toBe(false);
+      // A link dropped into a text field is its text, and a file field takes its own drop.
+      for (const field of [document.createElement("textarea"), Object.assign(document.createElement("input"), { type: "file" })]) {
+        document.body.appendChild(field);
+        expect(fireEvent.dragOver(field, named())).toBe(true);
+        expect(fireEvent.drop(field, named())).toBe(true);
+        field.remove();
+      }
+      // A drop something on the page took is left to it.
+      const taker = document.body.appendChild(document.createElement("div"));
+      taker.addEventListener("drop", (e) => e.preventDefault());
+      const taken = createEvent.drop(taker, named());
+      fireEvent(taker, taken);
+      expect(taken.defaultPrevented).toBe(true);
+      taker.remove();
+    } finally { stop(); }
+  });
 });

@@ -110,11 +110,29 @@ beforeAll(async () => {
   }
 }, 60_000);
 
+/**
+ * Stops everything, and names what did not stop. A daemon gives its clean stop 20 s and then leaves (`stopper`, in
+ * main.ts), and `Running.stop` kills at 20 s too, so each is gone by then on a loaded runner as well; the testnet's
+ * nodes close after them. Each has its own wait inside the hook's 60 s: this hook ran out its 30 s once on CI with
+ * every test green, and "Hook timed out" said nothing of which process it waited for.
+ */
 afterAll(async () => {
-  await Promise.all(running.map((r) => r.stop()));
-  await dht?.destroy();
+  const began = Date.now();
+  const late: string[] = [];
+  const stopped = async (name: string, ms: number, work: Promise<unknown>): Promise<void> => {
+    const started = Date.now();
+    let timer: NodeJS.Timeout | undefined;
+    const inTime = await Promise.race([work.then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), ms); })]);
+    clearTimeout(timer);
+    const took = Date.now() - started;
+    if (!inTime) late.push(`${name} had not stopped after ${took} ms`);
+    else if (took > 5_000) console.log(`GROUP_COMPAT slow stop: ${name} took ${took} ms`);
+  };
+  await Promise.all(running.map((r) => stopped(r.name, 25_000, r.stop())));
+  if (dht) await stopped("the HyperDHT testnet", 20_000, dht.destroy());
   for (const relay of relays) relay.server.close();
-}, 30_000);
+  if (late.length) expect.fail(`${late.join("\n")}\n${steps(began)}`);
+}, 60_000);
 
 describe(`a community between this CLI and ${OLD_BIN ? "an older release" : "one from before native group links"}`, { timeout: 900_000 }, () => {
   it("this CLI has WebRTC (libdatachannel): its group links stay on it with an app that has it too", async () => {

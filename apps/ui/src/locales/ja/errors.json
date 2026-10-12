@@ -1,6 +1,7 @@
 {
   "app": {
     "installUpdates": "このアプリはアップデートをインストールできません",
+    "limitedNext": "確認できると使えるようになります。接続を確認してください。",
     "localAddress": "そのローカルアドレスに接続するには、Ghostly への許可が必要です",
     "lostPeer": "Ghostly のピアとの接続が失われました",
     "pickCard": "先に Lightning カードを選んでください",

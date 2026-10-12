@@ -1,4 +1,4 @@
-import {formatPaymentAmount} from '@ghostly/core';
+import {formatPaymentAmount,walletNetworkOf} from '@ghostly/core';
 import type {WalletInstanceView, WalletNetwork, WalletPlatform, WalletState} from '../lib/platform';
 import type {WalletCard,WalletRail} from './walletCardTypes';
 import type {Translate} from '../contexts/I18nContext';
@@ -40,11 +40,14 @@ export function lightningNetworkFor(state:WalletState|null|undefined,chain?:stri
 /**
  * One network's wallets, as the cards read them: that network's own views, else (an older engine) the flat state.
  * `card`: `lightning` is that Lightning card's, as a platform bound to it (`wallet.forLightning`) sees it.
+ * The payments are that network's too: the profile keeps one list for both, and a card of real money that listed a
+ * test payment ("1,000 TEST-USDT · confirmed" under the Mainnet USDT card) read as real money moved.
  */
 export const networkState=(state:WalletState,network:WalletNetwork,card?:string):WalletState=>{
  const here=state.networks?.[network];
  const lightning=card?here?.lightnings?.find(c=>c.card===card)??here?.lightning:here?.lightning??state.lightning;
- return {...state,...here,lightning,mode:network};
+ const intents=state.intents?.filter(i=>walletNetworkOf(i.network)===network);
+ return {...state,...here,lightning,mode:network,...(intents&&{intents})};
 };
 /**
  * The Lightning cards of a network that can pay an invoice, in the deck's order, and the one to start on: the first

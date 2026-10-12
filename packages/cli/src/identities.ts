@@ -132,14 +132,18 @@ export const IDENTITY_METHODS: Record<string, Method> = {
 
   async "identity.cancel"(ctx, params) {
     const draftId = str(params, "draft", true);
-    drafts.delete(draftId);
+    // As `identity.complete` says it: a draft that is not here was never made, is done, or is another daemon's.
+    if (!drafts.delete(draftId)) throw new CliError("not_found", "No such draft here: it is kept by the daemon that made it, for an hour");
     await node(ctx).cancelIdentityProof({ draftId });
     return { cancelled: draftId };
   },
 
   async "identity.remove"(ctx, params) {
-    await node(ctx).removeIdentityProof({ id: str(params, "id", true) });
-    return { removed: str(params, "id", true) };
+    const id = str(params, "id", true);
+    // The engine removes nothing for an id it does not know, and says nothing.
+    if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+    await node(ctx).removeIdentityProof({ id });
+    return { removed: id };
   },
 
   async "identity.share"(ctx, params) {
@@ -150,8 +154,10 @@ export const IDENTITY_METHODS: Record<string, Method> = {
 
   async "identity.withdraw"(ctx, params) {
     const link = chatOf(ctx, params);
-    await node(ctx).withdrawIdentityProof({ linkId: link.id, id: str(params, "id", true) });
-    return { chat: link.id, withdrawn: str(params, "id", true) };
+    const id = str(params, "id", true);
+    if (!link.identities?.shared.some((s) => s.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} shared in this chat (ghostly identity contact ${link.id})`);
+    await node(ctx).withdrawIdentityProof({ linkId: link.id, id });
+    return { chat: link.id, withdrawn: id };
   },
 
   /** What a contact shared in a chat, as this device checked it, and what this side shares there. */

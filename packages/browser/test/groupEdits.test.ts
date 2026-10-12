@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, createIdentity, parseCommunityEdit, type GroupEdit } from "@ghostly/core";
-import { GROUP_EDIT_RESEND, GroupEdits, type GroupEditsHost } from "../src/engine/groupEdits";
+import { GROUP_EDITS_HELD, GROUP_EDIT_CATCH_UP, GROUP_EDIT_RESEND, GROUP_EDIT_RESEND_WINDOW_MS, GroupEdits, type GroupEditsHost } from "../src/engine/groupEdits";
 import type { StoredMessage } from "../src/shared/types";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.edit, groups.protocol.edits
@@ -34,15 +34,16 @@ describe("GroupEdits on its own", () => {
 
   function setup(messages: StoredMessage[], members = [me, bob, carol]) {
     const sent: { edit: GroupEdit; to?: string }[] = [];
-    let clock = 1_000_000;
+    let clock = 1_000_000, connection = {};
     const edits = new GroupEdits({
       ...rows(messages),
       changed: () => {},
       membership: () => ({ me, members: new Set(members), community: false, admin: true }),
       send: async (_g, edit, to) => { sent.push({ edit, ...(to && { to }) }); return null; },
+      edge: () => connection,
       now: () => clock,
     });
-    return { edits, sent, messages, tick: (ms: number) => { clock += ms; } };
+    return { edits, sent, messages, tick: (ms: number) => { clock += ms; }, reconnect: () => { connection = {}; } };
   }
 
   it("takes a member's card updates at most once a second, the highest of a burst last, and a card message past a text's hundred", async () => {
@@ -191,12 +192,41 @@ describe("GroupEdits on its own", () => {
     expect(messages[0]).toMatchObject({ text: "early", edit: { seq: 1 } });
   });
 
-  it("takes at most EDIT_RECEIVE_LIMIT edits a window from one member", async () => {
-    const { edits } = setup([bobs(0)]);
+  it("takes at most EDIT_RECEIVE_LIMIT edits a window from one member; the rest wait for the next, the highest of a message", async () => {
+    vi.useFakeTimers();
+    const { edits, messages, tick } = setup([bobs(0), bobs(1)]);
     const results = [];
-    for (let e = 1; e <= EDIT_RECEIVE_LIMIT + 1; e++) results.push(await edits.receive("g1", bob, { id: bobs(0).id, e, ts: e, m: `v${e}` }));
-    expect(results.at(-2)).toBe("applied");
-    expect(results.at(-1)).toBe("dropped");
+    for (let e = 1; e <= EDIT_RECEIVE_LIMIT; e++) results.push(await edits.receive("g1", bob, { id: bobs(0).id, e, ts: e, m: `v${e}` }));
+    expect(results.at(-1)).toBe("applied");
+    // Past the window: kept, not applied, and a lower number of a message that waits is dropped.
+    expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 41, ts: 41, m: "v41" })).toBe("waiting");
+    expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 40, ts: 40, m: "v40" })).toBe("dropped");
+    expect(await edits.receive("g1", bob, { id: bobs(1).id, e: 1, ts: 42, m: "other" })).toBe("waiting");
+    expect(messages.map(m => m.text)).toEqual([`v${EDIT_RECEIVE_LIMIT}`, "bob 1"]);
+    tick(10_000); await vi.advanceTimersByTimeAsync(10_000);
+    expect(messages.map(m => m.text)).toEqual(["v41", "other"]);
+    // Nothing waits any more: the next is taken at once.
+    expect(await edits.receive("g1", bob, { id: bobs(1).id, e: 2, ts: 43, m: "at once" })).toBe("applied");
+    edits.stop();
+  });
+
+  it("holds GROUP_EDITS_HELD edits a group at most, the oldest going first, and none of a member who left meanwhile", async () => {
+    vi.useFakeTimers();
+    const rowsOfBob = Array.from({ length: GROUP_EDITS_HELD + 2 }, (_, n) => bobs(n));
+    const members = [me, bob, carol];
+    const { edits, messages, tick } = setup(rowsOfBob, members);
+    for (let e = 1; e <= EDIT_RECEIVE_LIMIT; e++) await edits.receive("g1", bob, { id: bobs(0).id, e, ts: e, m: `v${e}` });
+    for (let n = 0; n < GROUP_EDITS_HELD + 2; n++) await edits.receive("g1", bob, { id: bobs(n).id, e: 50, ts: 50, m: `held ${n}` });
+    for (let window = 0; window < GROUP_EDITS_HELD / EDIT_RECEIVE_LIMIT + 2; window++) { tick(10_000); await vi.advanceTimersByTimeAsync(10_000); }
+    // The first two that waited made room for the last two.
+    expect(messages.filter(m => m.text.startsWith("held")).map(m => m.text)).toEqual(Array.from({ length: GROUP_EDITS_HELD }, (_, n) => `held ${n + 2}`));
+    // Bob is removed while his edits wait: none of them is believed.
+    for (let e = 51; e <= 50 + EDIT_RECEIVE_LIMIT; e++) await edits.receive("g1", bob, { id: bobs(2).id, e, ts: e, m: `w${e}` });
+    expect(await edits.receive("g1", bob, { id: bobs(3).id, e: 99, ts: 99, m: "after he left" })).toBe("waiting");
+    members.splice(members.indexOf(bob), 1);
+    tick(10_000); await vi.advanceTimersByTimeAsync(10_000);
+    expect(messages[3].text).toBe("held 3");
+    edits.stop();
   });
 
   it("an edit that names me marks the message, but is never a new mention", async () => {
@@ -205,13 +235,83 @@ describe("GroupEdits on its own", () => {
     expect(messages[0]).toMatchObject({ mentions: [{ k: me, o: 3, l: 3 }], mentioned: true });
   });
 
-  it("an edge that opens hears my latest edits again, the newest GROUP_EDIT_RESEND", async () => {
-    const messages = Array.from({ length: GROUP_EDIT_RESEND + 2 }, (_, n) => ({ ...mine(n), edit: { seq: 1, at: n, history: [] } }));
-    const { edits, sent } = setup([...messages, mine(99)]);
-    await edits.resend("g1", carol);
-    expect(sent).toHaveLength(GROUP_EDIT_RESEND);
-    expect(sent.every(s => s.to === carol)).toBe(true);
-    expect(sent[0].edit.id).toBe(messages[2].id);
+  describe("an edge that opens", () => {
+    const edited = (n: number, count: number) => Array.from({ length: count }, (_, i) => ({ ...mine(n + i), edit: { seq: 1, at: n + i, history: [] } }));
+    const ids = (sent: { edit: GroupEdit }[]) => sent.map(s => s.edit.id);
+
+    it("hears every edit of mine it has not heard, oldest first, GROUP_EDIT_RESEND a window", async () => {
+      vi.useFakeTimers();
+      const messages = edited(0, 2 * GROUP_EDIT_RESEND + 8);
+      const { edits, sent, tick, reconnect } = setup([...messages, mine(99)]);
+      await edits.resend("g1", carol);
+      expect(ids(sent)).toEqual(messages.slice(0, GROUP_EDIT_RESEND).map(m => m.id));
+      expect(sent.every(s => s.to === carol)).toBe(true);
+      // Within the window nothing more goes, however often the edge says it opened.
+      tick(GROUP_EDIT_RESEND_WINDOW_MS - 1);
+      await edits.resend("g1", carol);
+      expect(sent).toHaveLength(GROUP_EDIT_RESEND);
+      // The rest follow by themselves, a window at a time.
+      tick(1); await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS);
+      expect(sent).toHaveLength(2 * GROUP_EDIT_RESEND);
+      tick(GROUP_EDIT_RESEND_WINDOW_MS); await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS);
+      expect(ids(sent)).toEqual(messages.map(m => m.id));
+      // All heard: the same connection hears only what I edited since.
+      tick(GROUP_EDIT_RESEND_WINDOW_MS);
+      await edits.resend("g1", carol);
+      expect(sent).toHaveLength(messages.length);
+      await edits.edit("g1", mine(99).id, "edited since");
+      await edits.flush("g1");
+      sent.length = 0;
+      await edits.resend("g1", carol);
+      expect(ids(sent)).toEqual([mine(99).id]);
+      // A new connection hears my latest GROUP_EDIT_RESEND again, heard or not: one may have come before its message.
+      tick(GROUP_EDIT_RESEND_WINDOW_MS); reconnect(); sent.length = 0;
+      await edits.resend("g1", carol);
+      expect(ids(sent)).toEqual([...messages.slice(-(GROUP_EDIT_RESEND - 1)).map(m => m.id), mine(99).id]);
+      // Another member's edge is its own: Bob has heard nothing yet.
+      sent.length = 0;
+      await edits.resend("g1", bob);
+      expect(ids(sent.filter(s => s.to === bob))).toEqual(messages.slice(0, GROUP_EDIT_RESEND).map(m => m.id));
+      edits.stop();
+    });
+
+    it("hears my newest GROUP_EDIT_CATCH_UP at most when nothing is known of what it heard", async () => {
+      vi.useFakeTimers();
+      const messages = edited(0, GROUP_EDIT_CATCH_UP + 5);
+      const { edits, sent, tick } = setup(messages);
+      await edits.resend("g1", carol);
+      for (let window = 0; window < GROUP_EDIT_CATCH_UP / GROUP_EDIT_RESEND + 2; window++) { tick(GROUP_EDIT_RESEND_WINDOW_MS); await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS); }
+      expect(ids(sent)).toEqual(messages.slice(5).map(m => m.id));
+      edits.stop();
+    });
+
+    it("is told nothing while it is down, and goes on from where it was when it opens again", async () => {
+      vi.useFakeTimers();
+      const messages = edited(0, GROUP_EDIT_RESEND + 4);
+      const sent: string[] = [], up: { edge?: object } = {};
+      let clock = 1_000_000;
+      const edits = new GroupEdits({
+        ...rows(messages), changed: () => {}, now: () => clock,
+        membership: () => ({ me, members: new Set([me, bob, carol]), community: false }),
+        // The edge closes under the third edit: it went nowhere.
+        send: async (_g, edit) => { sent.push(edit.id); if (sent.length === 3) up.edge = undefined; return null; },
+        edge: () => up.edge,
+      });
+      await edits.resend("g1", carol);
+      expect(sent).toHaveLength(0);
+      up.edge = {};
+      await edits.resend("g1", carol);
+      expect(sent).toEqual(messages.slice(0, 3).map(m => m.id));
+      // A new connection: from the one that was lost on, and no timer of the old one says anything.
+      clock += GROUP_EDIT_RESEND_WINDOW_MS; await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS);
+      expect(sent).toHaveLength(3);
+      up.edge = {};
+      await edits.resend("g1", carol);
+      expect(sent.slice(3)).toEqual(messages.slice(2, 2 + GROUP_EDIT_RESEND).map(m => m.id));
+      clock += GROUP_EDIT_RESEND_WINDOW_MS; await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS);
+      expect(sent.slice(3)).toEqual(messages.slice(2).map(m => m.id));
+      edits.stop();
+    });
   });
 });
 
@@ -233,6 +333,8 @@ function member(world: CommunityWorld, name: string, old = false): { peer: Peer;
       return view?.status === "active" && view.myKey ? { me: view.myKey, members: new Set(view.members.map(m => m.key)), community: view.profile === "community" } : undefined;
     },
     send: (groupId, edit, to) => peer.groups.sendEdit(groupId, edit, to),
+    // As the engine does: the edge to a member while it is up.
+    edge: (groupId, to) => { const linkId = peer.host.edges(groupId).get(to); return linkId && peer.host.linkReady(linkId) ? linkId : undefined; },
     now: () => world.now,
   });
   return { peer, edits };
@@ -311,6 +413,78 @@ describe("edits on headless peers", { timeout: 120_000 }, () => {
     carol.peer.online = true;
     await world.until(() => bob.peer.groups.taken(id, alone) > 0, 3 * 60_000);
     await world.until(() => textOf(carol.peer, alone) === "anyone there?", 60_000);
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it("a private group: a member back after the author closed forty task cards reads every one of them as done", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Machines", "mesh");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id) && world.view(m.peer, id)!.members.length === 3), 10 * 60_000);
+    await world.until(() => [alice, bob, carol].every(m => world.view(m.peer, id)!.members.filter(x => !x.me).every(x => x.online)), 5 * 60_000);
+    const card = (n: number, status: "running" | "done") => ({ kind: "task" as const, id: `task-${n}`, title: `Task ${n}`, status });
+    const cards: string[] = [];
+    for (let n = 0; n < 40; n++) {
+      cards.push((await bob.peer.groups.send(id, `🔄 Task ${n}`, [], undefined, undefined, card(n, "running"))).messageId!);
+      await world.run(1_000);
+    }
+    const statusOf = (peer: Peer, messageId: string) => peer.messages.find(m => m.id === messageId)?.card?.status;
+    await world.until(() => cards.every(c => statusOf(carol.peer, c) === "running"), 60_000);
+    // Carol's phone is away while Bob closes every card: one edit each, said to the edges that are up at Bob's pace.
+    carol.peer.online = false;
+    await world.run(5_000);
+    for (let n = 0; n < 40; n++) expect(await bob.edits.edit(id, cards[n], `✅ Task ${n}`, [], card(n, "done"))).toMatchObject({ error: null });
+    const carolKey = world.view(carol.peer, id)!.myKey!;
+    // Bob's timers, by the world's clock: his edits that wait for the pace, and what an open edge still has to hear.
+    const turn = async () => { await world.run(1_000); await bob.edits.flush(id); await bob.edits.resend(id, carolKey); };
+    for (let waited = 0; !cards.every(c => statusOf(alice.peer, c) === "done"); waited++) { expect(waited).toBeLessThan(120); await turn(); }
+    expect(cards.filter(c => statusOf(carol.peer, c) === "done")).toHaveLength(0);
+    carol.peer.online = true;
+    // Forty is more than one window carries (GROUP_EDIT_RESEND): the rest follow, a window at a time, none left out.
+    for (let waited = 0; !cards.every(c => statusOf(carol.peer, c) === "done"); waited++) {
+      if (waited >= 300) throw new Error(`Carol reads ${cards.filter(c => statusOf(carol.peer, c) === "done").length} of 40 cards as done`);
+      await turn();
+    }
+    expect(carol.peer.messages.filter(m => !m.event)).toHaveLength(40);
+    // An edit takes no number of its own: nothing of Bob's reads as missing at Carol.
+    expect(world.view(carol.peer, id)!.members.find(m => m.key === world.view(bob.peer, id)!.myKey)).toMatchObject({ missing: 0 });
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it("a community: a member back after the author closed forty task cards reads every one of them as done", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Machines");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id)), 10 * 60_000);
+    await world.run(20_000);
+    const card = (n: number, status: "running" | "done") => ({ kind: "task" as const, id: `task-${n}`, title: `Task ${n}`, status });
+    const cards: string[] = [];
+    for (let n = 0; n < 40; n++) {
+      cards.push((await bob.peer.groups.send(id, `🔄 Task ${n}`, [], undefined, undefined, card(n, "running"))).messageId!);
+      await world.run(1_000);
+    }
+    const statusOf = (peer: Peer, messageId: string) => peer.messages.find(m => m.id === messageId)?.card?.status;
+    await world.until(() => cards.every(c => statusOf(carol.peer, c) === "running"), 60_000);
+    carol.peer.online = false;
+    await world.run(5_000);
+    for (let n = 0; n < 40; n++) expect(await bob.edits.edit(id, cards[n], `✅ Task ${n}`, [], card(n, "done"))).toMatchObject({ error: null });
+    // The engines' timers by the world's clock: Bob's edits that wait for his pace, Carol's that wait for her window.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const turn = async () => { await world.run(1_000); await vi.advanceTimersByTimeAsync(1_000); await bob.edits.flush(id); };
+      for (let waited = 0; !cards.every(c => statusOf(alice.peer, c) === "done"); waited++) { expect(waited).toBeLessThan(120); await turn(); }
+      carol.peer.online = true;
+      // The catch-up hands back forty edits of Bob at once: thirty in her window, the ten others in the next.
+      for (let waited = 0; !cards.every(c => statusOf(carol.peer, c) === "done"); waited++) {
+        if (waited >= 300) throw new Error(`Carol reads ${cards.filter(c => statusOf(carol.peer, c) === "done").length} of 40 cards as done`);
+        await turn();
+      }
+      expect(carol.peer.messages.filter(m => !m.event)).toHaveLength(40);
+    } finally { vi.useRealTimers(); }
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
 });

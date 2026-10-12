@@ -8,7 +8,7 @@ import type { CallRate, PlaybackQueue } from "./pcm";
 /**
  * A call's media on Node (WISP 601, WISP 1100 § Calls): libdatachannel (node-datachannel, the same native module
  * the CLI's chats use) runs ICE, DTLS-SRTP and RTP; Opus is libopus built to WebAssembly (opusscript). Audio only:
- * a call's video section is answered and nothing is sent or read on it.
+ * a call's video section is answered closed (`vr: 0`), and nothing is sent or read on it.
  */
 export interface CallStack {
   ndc: typeof import("node-datachannel");
@@ -97,6 +97,14 @@ let refuseAnswers = Number(process.env.GHOSTLY_CALL_REFUSE_ANSWERS) || 0;
 /** How long a description waits for its candidates: a server reflexive one and a little after it, or this long. */
 const GATHER_MS = 5000;
 const SETTLE_MS = 400;
+/**
+ * With a candidate in (a host one comes in milliseconds), the server reflexive one is waited for this long at most,
+ * not the whole of `GATHER_MS`: a STUN server that answers does in tens of milliseconds, and one that never does (UDP
+ * to it blocked, as on many office, school and hotel networks) made every call ring 5 s late and connect 5 s after
+ * the answer. The apps' calls and the chats' data link bound theirs the same way (`HOST_GATHER_MS`,
+ * `OFFER_HOST_GATHER_MS`).
+ */
+export const HOST_GATHER_MS = 2000;
 
 /**
  * One call's peer connection. Its SDP never travels: the compact signal does (`local`), and each side rebuilds the
@@ -159,10 +167,11 @@ export class CallMedia {
       audioSection.addSSRC(ssrc, "ghostly", "stream", "audio0");
       const track = pc.addTrack(audioSection);
       // The contact's offer always has a video section (the apps open one for a camera or a screen later): it is
-      // answered, and whatever comes on it is dropped as it comes (libdatachannel keeps what nobody reads).
+      // answered closed, and the answer says so (`vr: 0` below), so the contact's app sends no picture on it. An app
+      // that does not know `vr` sends one all the same: it is dropped as it comes (libdatachannel keeps what nobody reads).
       let videoTrack: Track | null = null;
       if (offer?.m?.includes("v")) {
-        const video = new ndc.Video(String(offer.m.indexOf("v")), "RecvOnly");
+        const video = new ndc.Video(String(offer.m.indexOf("v")), "Inactive");
         video.addVP8Codec(offer.vp ?? 96);
         videoTrack = pc.addTrack(video);
         videoTrack.onMessage(() => {});
@@ -179,6 +188,8 @@ export class CallMedia {
       const local: Partial<CallSignal> = { ...params, ss: [ssrc] };
       // An answer lists the offer's sections, video too: the rebuilt SDP must have as many as the offer.
       if (offer?.m) local.m = [...offer.m];
+      // No picture is taken here, and none is sent: the contact's app rebuilds the video section closed (WISP 601).
+      if (videoTrack) local.vr = 0;
       const listeners: ((packet: Buffer) => void)[] = [];
       track.onMessage((packet) => { for (const listener of listeners) listener(packet); });
       const audio = new CallAudio({
@@ -245,13 +256,18 @@ function mdnsNote(signal: CallSignal, log: (line: string) => void): void {
   }
 }
 
-/** Resolves once the local description has its candidates (see GATHER_MS). */
-function gathering(pc: PeerConnection): Promise<void> {
+/** Resolves once the local description has its candidates (see GATHER_MS and HOST_GATHER_MS). */
+export function gathering(pc: Pick<PeerConnection, "onGatheringStateChange" | "onLocalCandidate">): Promise<void> {
   return new Promise((resolve) => {
     let settle: ReturnType<typeof setTimeout> | null = null;
-    const done = () => { clearTimeout(cap); if (settle) clearTimeout(settle); resolve(); };
+    let any = false;
+    const done = () => { clearTimeout(cap); clearTimeout(bounded); if (settle) clearTimeout(settle); resolve(); };
     const cap = setTimeout(done, GATHER_MS);
+    const bounded = setTimeout(() => { if (any) done(); }, HOST_GATHER_MS);
     pc.onGatheringStateChange((state) => { if (state === "complete") done(); });
-    pc.onLocalCandidate((candidate) => { if (!settle && / typ srflx/.test(candidate)) settle = setTimeout(done, SETTLE_MS); });
+    pc.onLocalCandidate((candidate) => {
+      any = true;
+      if (!settle && / typ srflx/.test(candidate)) settle = setTimeout(done, SETTLE_MS);
+    });
   });
 }

@@ -10,7 +10,7 @@ import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { keepServing, openHost, serve, type Host } from "./host";
-import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
+import { allowlist, checkCursor, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { format } from "node:util";
 import { backupFileProtection, restoreProfile } from "./backup";
@@ -460,6 +460,8 @@ async function listenCommand(argv: string[]): Promise<void> {
     exec: { type: "string", description: "" }, webhook: { type: "string", description: "" }, print: { type: "boolean", description: "" },
     from: { type: "list", description: "" }, group: { type: "list", description: "" }, turns: { type: "boolean", description: "" },
   });
+  // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
+  noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
   const g = globals(parsed);
   pretty = false; // one event per line
   if (parsed.options.webhook) checkWebhook(String(parsed.options.webhook));
@@ -468,6 +470,8 @@ async function listenCommand(argv: string[]): Promise<void> {
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
   const cursor = parsed.options.cursor as string | undefined;
+  // Before the profile opens: a cursor that cannot be written is no per-event warning.
+  checkCursor(cursor);
   let since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
   let handle: ((event: GhostlyEvent) => void) | null = null;
   const start = async (call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>) => {

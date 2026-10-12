@@ -305,3 +305,24 @@ describe("what a card can spend", () => {
     expect(spendable("usdt", at("testnet", { usdt: usdtReady({ locked: true }) }))).toBeUndefined();
   });
 });
+
+describe("a network's payments", () => {
+  // Miguel, 2026-10-12: the Mainnet USDT card listed "1,000 TEST-USDT · confirmed", the Testnet wallet's payments.
+  const intent = (id: string, network: string, asset: string, method = "usdt") =>
+    ({ id, method, network, provider: "0xToken", asset, unit: asset, decimals: 6, payee: "0xabc", amount: 1_000_000_000, fee: 0, feeCap: 0, createdAt: 1, state: "settled" }) as unknown as NonNullable<WalletState["intents"]>[number];
+  const state = walletView({
+    networks: { mainnet: on({ usdt: usdtReady({ network: "ethereum", chainId: 1 }) }), testnet: on({ usdt: usdtReady() }) },
+    intents: [intent("real", "ethereum", "USDT"), intent("test", "sepolia", "TEST-USDT"), intent("local", "evm-local", "TEST-USDT"), intent("ark-real", "bitcoin", "BTC", "arkade"), intent("ark-test", "mutinynet", "BTC", "arkade")],
+  }) as WalletState;
+
+  it("are that network's alone: a card of real money lists no test payment, and the reverse", () => {
+    expect(networkState(state, "mainnet").intents!.map((i) => i.id)).toEqual(["real", "ark-real"]);
+    expect(networkState(state, "testnet").intents!.map((i) => i.id)).toEqual(["test", "local", "ark-test"]);
+    // The profile's own list is whole: what removes a wallet counts from it.
+    expect(state.intents).toHaveLength(5);
+  });
+
+  it("stay absent for a state with none", () => {
+    expect(networkState(walletView({}) as WalletState, "mainnet").intents ?? []).toEqual([]);
+  });
+});
