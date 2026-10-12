@@ -111,7 +111,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
 
   // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
   const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
-  if (snapshotFound) restore(classes, raw._databases, deserialize(readFileSync(snapshotPath)) as Snapshot, (a, b) => factory.cmp(a, b));
+  if (snapshotFound) restore(classes, raw._databases, deserialize(readFileSync(snapshotPath)) as Snapshot, keyOrder((a, b) => factory.cmp(a, b)));
   if (journalFound) replay(raw._databases, readFileSync(journalPath));
   restoring = false;
   if (journalFound || !snapshotFound) await writeSnapshot();
@@ -346,6 +346,35 @@ function dropIndexEntriesByRecord(classes: RawClasses, cmp: (a: Key, b: Key) => 
     }
     return dropped;
   };
+}
+
+/**
+ * `cmp` for keys that are stored already (a record's, an index entry's): numbers, strings and arrays of them are
+ * ordered here, as IndexedDB orders them (a number before a string before an array; strings by code unit; arrays item
+ * by item, then the shorter first). Anything else (a date, bytes, a value that is no key) is left to `cmp`, which
+ * checks and copies both keys at every call: on the way back from a snapshot that was a third of a large store's time.
+ */
+export function keyOrder(cmp: (a: Key, b: Key) => number): (a: Key, b: Key) => number {
+  const order = (a: Key, b: Key): number => {
+    const first = typeof a, second = typeof b;
+    if (first === "number" && second === "number") return a === b ? 0 : (a as number) > (b as number) ? 1 : (a as number) < (b as number) ? -1 : cmp(a, b);
+    if (first === "string" && second === "string") return a === b ? 0 : (a as string) > (b as string) ? 1 : -1;
+    if (first === "number" && second === "string") return -1;
+    if (first === "string" && second === "number") return 1;
+    if (Array.isArray(a)) {
+      if (second === "number" || second === "string") return 1;
+      if (!Array.isArray(b)) return cmp(a, b);
+      const length = Math.min(a.length, b.length);
+      for (let at = 0; at < length; at++) {
+        const item = order(a[at], b[at]);
+        if (item !== 0) return item;
+      }
+      return a.length === b.length ? 0 : a.length > b.length ? 1 : -1;
+    }
+    if (Array.isArray(b) && (first === "number" || first === "string")) return -1;
+    return cmp(a, b);
+  };
+  return order;
 }
 
 /**
