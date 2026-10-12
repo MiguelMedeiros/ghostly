@@ -14,13 +14,17 @@ interface CallButtonsProps {
  */
 export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
   const { t } = useI18n();
+  // `aria-disabled` during a call, not `disabled`: a disabled button gives up the keyboard focus, and the call that
+  // ends has nowhere to give it back.
+  const off = "aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:text-text-secondary aria-disabled:hover:bg-transparent";
   return (
     <>
       {/* Audio call button */}
       <button
-        onClick={() => onCall(false)}
-        disabled={!!blocked || busy}
-        className="p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+        onClick={() => { if (!busy) onCall(false); }}
+        disabled={!!blocked}
+        aria-disabled={busy || undefined}
+        className={`p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${off}`}
         title={blocked ?? t("calls.audio")}
         aria-label={t("calls.audio")}
         data-testid="call-audio"
@@ -40,9 +44,10 @@ export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
       </button>
       {/* Video call button */}
       <button
-        onClick={() => onCall(true)}
-        disabled={!!blocked || busy}
-        className="p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+        onClick={() => { if (!busy) onCall(true); }}
+        disabled={!!blocked}
+        aria-disabled={busy || undefined}
+        className={`p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${off}`}
         title={blocked ?? t("calls.video")}
         aria-label={t("calls.video")}
         data-testid="call-video"
