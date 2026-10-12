@@ -58,13 +58,18 @@ test("the negotiation loop keeps one height through its four scenarios", async (
 });
 
 test("a link to the section after the loop lands on its heading", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto("/developers", { waitUntil: "networkidle" });
+  // Once React runs (the desktop chevron, hidden here, is disabled until then): before that the loop cannot play,
+  // and a jump made while the page is still as tall as it is without scripts lands somewhere else.
+  await expect(page.locator(".nav-open-more")).toBeEnabled({ timeout: 45_000 });
   // From the top of the page, as a link to the anchor does: the smooth scroll passes over the loop.
   await page.evaluate(() => {
     location.hash = "path";
   });
   const top = () => page.locator("#path").evaluate((el) => Math.round(el.getBoundingClientRect().top));
-  // The scroll has come to rest: the same place twice, half a second apart, away from where it began.
+  // The scroll has come to rest: the same place twice, half a second apart, away from where it began. On a busy
+  // machine one reading alone can take seconds, the loop having begun to play.
   let last = await top();
   await expect
     .poll(async () => {
@@ -72,7 +77,7 @@ test("a link to the section after the loop lands on its heading", async ({ page 
       const rested = now === last && now < 812;
       last = now;
       return rested;
-    }, { intervals: [500] })
+    }, { intervals: [500], timeout: 30_000 })
     .toBe(true);
   // Under the 64 px nav, not above the screen's top.
   expect(last).toBeGreaterThanOrEqual(64);
