@@ -206,6 +206,15 @@ export function queuedAt(events, fallback) {
   return times.sort().at(-1) ?? fallback;
 }
 
+/**
+ * When a pull request's head was last vouched for: the latest time it got `queue`, the reviewer's label. Given to one
+ * that has `queue`, `queue:priority` changes its place only; its time counts only for one in line by it alone.
+ */
+export function vouchedAt(events, labels, fallback) {
+  if (!inLine(labels)) return fallback;
+  return queuedAt(labels.includes(LABEL.queue) ? events.filter((e) => e.label?.name === LABEL.queue) : events, fallback);
+}
+
 /** The line: `queue:priority` first, then by the time each joined, then by number. */
 export function order(prs) {
   const at = (p) => Date.parse(p.queuedAt) || 0;
@@ -410,12 +419,12 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
     // Written before the latest `queue` (taken off and added again): it speaks for an earlier head, and the label
     // added since vouches for the one it was added on. It is rewritten (or deleted) like any position comment.
-    const relabeled = inLine(p.labels) ? queuedAt(events, null) : null;
+    const relabeled = vouchedAt(events, p.labels, null);
     if (p.sticky && relabeled && Date.parse(p.sticky.updated_at ?? p.sticky.created_at) < Date.parse(relabeled)) [p.stale, p.sticky] = [p.sticky, undefined];
     p.alone = aloneMark(p.sticky);
     // No position comment records the queued head yet: tell it by time, the head's first CI against the label.
     if (!p.sticky && inLine(p.labels)) {
-      p.labeledAt = queuedAt(events, null);
+      p.labeledAt = vouchedAt(events, p.labels, null);
       p.pushedAt = await gh.headPushedAt(p.sha);
     }
   }
