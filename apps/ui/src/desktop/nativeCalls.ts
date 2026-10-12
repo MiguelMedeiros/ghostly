@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { RTC_CONFIG, type CallMedia } from "@ghostly/core";
 import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, type DeviceSource } from "../lib/mediaDevices";
+import { setCallLevels, type LevelSource } from "../lib/voiceLevels";
 
 /**
  * Calls on Ghostly Desktop for Linux. WebKitGTK is built without WebRTC by Ubuntu, Debian and Fedora alike, so
@@ -199,6 +200,9 @@ function microphone(device: string | null = null): MediaStreamTrack {
   const context = new AudioContext();
   const track = context.createMediaStreamDestination().stream.getAudioTracks()[0];
   reporting(track, device);
+  // Who is speaking: the page hears neither side, so the call this track is sent on says both levels.
+  const side = (of: "mic" | "peer"): LevelSource => (heard) => callOf.get(track)?.listen(of, heard) ?? (() => {});
+  setCallLevels(track, { own: side("mic"), peer: side("peer") });
   const enabled = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, "enabled")!;
   Object.defineProperty(track, "enabled", {
     configurable: true,
@@ -258,6 +262,9 @@ export class NativePeerConnection extends EventTarget {
   private heldState: string | null = null;
   private readonly audio: Lane;
   private readonly video: Lane;
+  /** How loud each side is, as Rust last said: our microphone (silence while muted) and the peer's sound. */
+  private readonly levels = { mic: 0, peer: 0 };
+  private readonly listeners = { mic: new Set<(level: number) => void>(), peer: new Set<(level: number) => void>() };
 
   constructor(private readonly config: RTCConfiguration) {
     super();
@@ -449,18 +456,35 @@ export class NativePeerConnection extends EventTarget {
     if (this.started && !this.closed) await invoke("native_call_mute", { id: this.id, muted }).catch(() => {});
   }
 
+  /** Hears how loud a side of the call is, 0 to 1: now, and each time Rust says it changed. Returns what stops it. */
+  listen(side: "mic" | "peer", heard: (level: number) => void): () => void {
+    this.listeners[side].add(heard);
+    heard(this.levels[side]);
+    return () => { this.listeners[side].delete(heard); };
+  }
+
   private heard(bytes: Uint8Array): void {
     if (this.closed) return;
     if (isJpeg(bytes)) {
       this.remote.show(bytes);
       return;
     }
-    let ice: unknown;
+    let said: { ice?: unknown; levels?: unknown };
     try {
-      ice = (JSON.parse(new TextDecoder().decode(bytes)) as { ice?: unknown }).ice;
+      said = JSON.parse(new TextDecoder().decode(bytes)) as typeof said;
     } catch {
       return;
     }
+    if (said.levels && typeof said.levels === "object") {
+      for (const side of ["mic", "peer"] as const) {
+        const level = (said.levels as Record<string, unknown>)[side];
+        if (typeof level !== "number") continue;
+        this.levels[side] = Math.min(1, Math.max(0, level));
+        for (const heard of this.listeners[side]) heard(this.levels[side]);
+      }
+      return;
+    }
+    const ice = said.ice;
     if (typeof ice !== "string") return;
     if (this.describing) this.heldState = ice;
     else this.relay(ice);

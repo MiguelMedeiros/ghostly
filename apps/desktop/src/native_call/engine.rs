@@ -184,11 +184,18 @@ const SAID_AT_MOST: u64 = 8;
 
 /// Logs a playing pipeline's errors and warnings. Nothing else reads its bus once it plays, so a decoder that
 /// cannot negotiate or a camera that fails a moment later stopped without a word. Everything stays on the bus
-/// (`start` reads the error that kept a pipeline from starting).
-fn watch(pipeline: &gst::Pipeline, what: &'static str) {
+/// (`start` reads the error that kept a pipeline from starting). `heard` gets what a `level` in it reads
+/// ([`loudness`]); those messages leave the bus, or it would fill with twelve a second.
+fn watch(pipeline: &gst::Pipeline, what: &'static str, heard: Option<Heard>) {
     let Some(bus) = pipeline.bus() else { return };
     let said = AtomicU64::new(0);
     bus.set_sync_handler(move |_, message| {
+        if let Some(heard) = &heard {
+            if let Some(level) = loudness(message) {
+                heard(level);
+                return gst::BusSyncReply::Drop;
+            }
+        }
         let (level, error, debug) = match message.view() {
             gst::MessageView::Error(e) => ("error", e.error().to_string(), e.debug()),
             gst::MessageView::Warning(w) => ("warning", w.error().to_string(), w.debug()),
@@ -330,7 +337,7 @@ impl Camera {
         target: &Arc<Mutex<Option<gst_app::AppSrc>>>,
         preview: &Sink,
     ) -> Result<(), String> {
-        watch(pipeline, "the camera");
+        watch(pipeline, "the camera", None);
         let to = target.clone();
         element::<gst_app::AppSink>(pipeline, "out")?.set_callbacks(
             gst_app::AppSinkCallbacks::builder()
@@ -379,6 +386,9 @@ impl Drop for Camera {
     }
 }
 
+/// Reads how loud a call's sound is where it passes, every 80 ms as Settings' meter does ([`watch`] hears it).
+const LEVEL: &str = "level interval=80000000 post-messages=true";
+
 /// A microphone's loudness for Settings' meter: `level` reports it every 80 ms, and nothing goes anywhere else.
 const METER: &str = "{device} ! queue ! audioconvert ! audioresample ! audio/x-raw,channels=1 \
      ! level interval=80000000 post-messages=true ! fakesink sync=false async=false";
@@ -390,6 +400,24 @@ pub fn meter_level(rms_db: f64) -> f64 {
         return 0.0;
     }
     (10f64.powf(rms_db / 20.0) * 4.0).min(1.0)
+}
+
+/// Where a `level` reading goes: how loud, 0 to 1.
+type Heard = Arc<dyn Fn(f64) + Send + Sync>;
+
+/// How loud the sound passing a `level` element is, from the message it posts ([`meter_level`] of its loudest
+/// channel). None for any other message.
+fn loudness(message: &gst::Message) -> Option<f64> {
+    let gst::MessageView::Element(element) = message.view() else {
+        return None;
+    };
+    let reading = element.structure().filter(|s| s.name() == "level")?;
+    let rms = reading.get::<gst::glib::ValueArray>("rms").ok()?;
+    let loudest = rms
+        .iter()
+        .filter_map(|v| v.get::<f64>().ok())
+        .fold(f64::NEG_INFINITY, f64::max);
+    Some(meter_level(loudest))
 }
 
 /// A microphone open for Settings' meter, until dropped.
@@ -417,21 +445,14 @@ impl Meter {
                     .bus()
                     .ok_or("No bus")?
                     .set_sync_handler(move |_, message| {
-                        let gst::MessageView::Element(element) = message.view() else {
+                        let Some(level) = loudness(message) else {
                             return gst::BusSyncReply::Pass;
                         };
-                        let Some(reading) = element.structure().filter(|s| s.name() == "level")
-                        else {
-                            return gst::BusSyncReply::Pass;
-                        };
-                        if let Ok(rms) = reading.get::<gst::glib::ValueArray>("rms") {
-                            let loudest = rms
-                                .iter()
-                                .filter_map(|v| v.get::<f64>().ok())
-                                .fold(f64::NEG_INFINITY, f64::max);
-                            let level = serde_json::json!({ "level": meter_level(loudest) });
-                            levels(level.to_string().into_bytes());
-                        }
+                        levels(
+                            serde_json::json!({ "level": level })
+                                .to_string()
+                                .into_bytes(),
+                        );
                         gst::BusSyncReply::Drop
                     });
                 Ok(())
@@ -549,6 +570,24 @@ impl Shared {
         *current = state.to_string();
         crate::diagnostics::log(&format!("native call: {state}"));
         (self.events)(serde_json::json!({ "ice": state }).to_string().into_bytes());
+    }
+
+    /// Where a side's loudness goes on its way to the page, for who is speaking: `{"levels":{"mic":0.4}}`, 0 to 1
+    /// as Settings' meter reads it. `side` is "mic" for what the microphone sends (silence while muted) and
+    /// "peer" for the peer's sound. A level is said when it changes, so silence is said once.
+    fn hears(self: &Arc<Self>, side: &'static str) -> Heard {
+        let shared = self.clone();
+        let last = AtomicU64::new(u64::MAX);
+        Arc::new(move |level: f64| {
+            let hundredths = (level * 100.0).round() as u64;
+            if last.swap(hundredths, Ordering::Relaxed) == hundredths
+                || shared.closed.load(Ordering::Relaxed)
+            {
+                return;
+            }
+            let levels = serde_json::json!({ "levels": { side: hundredths as f64 / 100.0 } });
+            (shared.events)(levels.to_string().into_bytes());
+        })
     }
 
     /// Media arrived, so the call is up, whatever ICE has managed to say.
@@ -707,7 +746,7 @@ fn receiver(
             "appsrc name=rtp is-live=true format=time do-timestamp=true \
              caps=\"application/x-rtp,media=(string)audio,clock-rate=(int)48000,encoding-name=(string)OPUS,payload=(int){payload_type}\" \
              ! rtpjitterbuffer latency=60 ! rtpopusdepay ! opusdec plc=true name=decoder \
-             ! audioconvert ! audioresample ! {{device}}"
+             ! {LEVEL} ! audioconvert ! audioresample ! {{device}}"
         )
     };
     let ready = |pipeline: &gst::Pipeline| receiving(shared, pipeline, video, &decoded, &keyframes);
@@ -789,14 +828,11 @@ fn receiving(
     decoded: &Arc<AtomicBool>,
     keyframes: &mpsc::UnboundedSender<()>,
 ) -> Result<(), String> {
-    watch(
-        pipeline,
-        if video {
-            "the peer's video"
-        } else {
-            "the peer's sound"
-        },
-    );
+    if video {
+        watch(pipeline, "the peer's video", None);
+    } else {
+        watch(pipeline, "the peer's sound", Some(shared.hears("peer")));
+    }
     let src: gst_app::AppSrc = element(pipeline, "rtp")?;
     let counting = shared.clone();
     let decoder: gst::Element = element(pipeline, "decoder")?;
@@ -1081,9 +1117,10 @@ fn writer(out: Outgoing, payload_type: u8, sent: impl Fn() + Send + 'static) -> 
     tx
 }
 
-/// The microphone to Opus, for the audio track's writer.
+/// The microphone to Opus, for the audio track's writer. Its loudness is read after the mute ([`LEVEL`]).
 const MICROPHONE: &str = "{device} ! queue ! audioconvert ! audioresample ! volume name=mic \
-     ! audio/x-raw,rate=48000,channels=1 ! opusenc bitrate=32000 frame-size=20 \
+     ! audio/x-raw,rate=48000,channels=1 ! level interval=80000000 post-messages=true \
+     ! opusenc bitrate=32000 frame-size=20 \
      ! appsink name=opus sync=false async=false max-buffers=50 drop=true";
 
 /// The microphone a call sends, playing.
@@ -1099,6 +1136,8 @@ struct Voice {
     frames: Frames,
     current: Arc<AtomicU64>,
     muted: AtomicBool,
+    /// Where each microphone's loudness goes.
+    heard: Heard,
 }
 
 impl Voice {
@@ -1114,7 +1153,7 @@ impl Voice {
             wanted,
             default,
             |p| {
-                watch(p, "the microphone");
+                watch(p, "the microphone", Some(self.heard.clone()));
                 element::<gst::Element>(p, "mic")?.set_property("mute", muted);
                 let current = self.current.clone();
                 feed(
@@ -1159,8 +1198,8 @@ pub struct Devices {
 impl Call {
     /// The pipelines playing and the peer connection ready to offer or answer. `fake`: a test tone and nothing
     /// played by default ([`fake_media`]; a device chosen by name is used all the same). `servers`: the profile's
-    /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server. `events` hears the ICE state (JSON)
-    /// and each picture that arrives (JPEG).
+    /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server. `events` hears the ICE state and
+    /// each side's loudness (JSON, [`Shared::hears`]), and each picture that arrives (JPEG).
     pub async fn new(
         opus_pt: u8,
         vp8_pt: u8,
@@ -1239,6 +1278,7 @@ impl Call {
             }),
             current: Arc::default(),
             muted: AtomicBool::new(false),
+            heard: shared.hears("mic"),
         };
         let counted = shared.clone();
         let pictures = writer(video, vp8_pt, move || {
@@ -1256,7 +1296,7 @@ impl Call {
                 Duration::from_secs(1) / FPS,
                 || true,
             );
-            watch(&send, "the video encoder");
+            watch(&send, "the video encoder", None);
             start(&send, "The video")?;
             match voice.open(devices.microphone.as_deref()) {
                 Ok(microphone) => Ok((send, microphone)),
@@ -1546,7 +1586,7 @@ impl Call {
 
 #[cfg(test)]
 mod tests {
-    // covers: calls.linux-native, calls.reconnect
+    // covers: calls.linux-native, calls.reconnect, calls.speaking
     use super::*;
 
     #[test]
@@ -1864,13 +1904,15 @@ mod tests {
         }
         let frames = Arc::new(AtomicU64::new(0));
         let seen = frames.clone();
+        let (a_levels, b_levels) = (Levels::default(), Levels::default());
+        let (a_told, b_told) = (a_levels.clone(), b_levels.clone());
         let a = Call::new(
             OPUS_PT,
             VP8_PT,
             true,
             Devices::default(),
             &[],
-            Arc::new(|_| {}),
+            Arc::new(move |bytes: Vec<u8>| a_told.heard(&bytes)),
         )
         .await
         .unwrap();
@@ -1893,6 +1935,7 @@ mod tests {
                 if bytes.starts_with(&[0xff, 0xd8]) {
                     seen.fetch_add(1, Ordering::Relaxed);
                 }
+                b_told.heard(&bytes);
             }),
         )
         .await
@@ -1911,6 +1954,21 @@ mod tests {
             30,
             || a.stats().audio_received > 20 && b.stats().audio_received > 20,
             stats,
+        )
+        .await;
+        // Who is speaking: each page is told how loud its microphone is and how loud the peer's sound, the test
+        // tone both ways (0.57 on the meter, about that once through Opus).
+        let levels = || format!("a {} b {}", a_levels.said(), b_levels.said());
+        let tone = |level: f64| (level - 0.566).abs() < 0.12;
+        until(
+            "both pages are told the levels",
+            30,
+            || {
+                [&a_levels, &b_levels]
+                    .iter()
+                    .all(|told| tone(told.of("mic")) && tone(told.of("peer")))
+            },
+            levels,
         )
         .await;
         until(
@@ -1949,6 +2007,15 @@ mod tests {
         // The microphone and the speaker change mid-call: to devices that are not there, so the defaults again,
         // relaunched. The sound goes on both ways, and a muted microphone stays muted.
         a.set_muted(true);
+        // Muted, the microphone reads silence, and so does the peer of it; the other way goes on.
+        until(
+            "a muted microphone is silence on both pages",
+            30,
+            || a_levels.of("mic") == 0.0 && b_levels.of("peer") < 0.02,
+            levels,
+        )
+        .await;
+        assert!(tone(b_levels.of("mic")), "{}", levels());
         let (heard, sent) = (b.stats().audio_received, a.stats().audio_sent);
         let used = tokio::task::block_in_place(|| a.set_microphone(Some("No such microphone")));
         assert_eq!(used, Ok(None));
@@ -1968,6 +2035,13 @@ mod tests {
             stats,
         )
         .await;
+        until(
+            "the new microphone's level is told",
+            30,
+            || tone(a_levels.of("mic")) && tone(b_levels.of("peer")),
+            levels,
+        )
+        .await;
         let heard = a.stats().audio_received;
         tokio::task::block_in_place(|| a.set_speaker(Some("No such speaker".into()))).unwrap();
         until(
@@ -1980,6 +2054,33 @@ mod tests {
         assert_eq!(a.stats().speaker, None, "{}", stats());
         a.close().await;
         b.close().await;
+    }
+
+    /// The last level a call told its page for each side (`{"levels":{"mic":0.4}}`).
+    #[derive(Clone, Default)]
+    struct Levels(Arc<Mutex<std::collections::BTreeMap<String, f64>>>);
+
+    impl Levels {
+        fn heard(&self, bytes: &[u8]) {
+            let Ok(said) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+                return;
+            };
+            for (side, level) in said["levels"].as_object().into_iter().flatten() {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .insert(side.clone(), level.as_f64().unwrap());
+            }
+        }
+
+        /// A side's level, -1 when none was told yet.
+        fn of(&self, side: &str) -> f64 {
+            self.0.lock().unwrap().get(side).copied().unwrap_or(-1.0)
+        }
+
+        fn said(&self) -> String {
+            format!("{:?}", self.0.lock().unwrap())
+        }
     }
 
     /// The ICE user name of a description.
