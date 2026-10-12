@@ -41,7 +41,8 @@ permissions: {}
 jobs:
   bases:
     name: Bases with a train
-    # A pull request's CI ending can turn a batch or a queued pull request green; CI on a push already ran this. A run
+    # A pull request's CI ending can turn a batch or a queued pull request green; CI on a push already ran this. Which
+    # pull request it ended on is read below (`List the bases`): one that is not in line starts no train. A run
     # that was cancelled says nothing (a newer push, leaving draft, or the train's own cancel of a boarded pull request's
     # run): the train reads it as not finished, and the run that replaced it wakes the train when it ends. A label
     # matters only when it puts a pull request in line: `queue:conflict` and `queue:failed` are the train's own, on one
@@ -90,10 +91,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BASE: ${{ inputs.base }}
+          # The head commit of the CI run that woke this run, when one did. Most CI runs end on a pull request that is
+          # not in line (a draft still worked on, a ready one before `queue`): the train can do nothing with those, so
+          # only the bases where this commit is the head of a queued pull request or of a batch are listed, and with
+          # none the train job is skipped. A head pushed after `queue` waits for its own CI run, or the schedule.
+          WOKEN: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
         # The assignment on its own line, so a failing --list-bases fails this step (inside `echo` it would not).
         run: |
           if [[ -n "$BASE" ]]; then
             bases=$(jq -cn --arg b "$BASE" '[$b]')
+          elif [[ -n "$WOKEN" ]]; then
+            bases=$(node tools/scripts/merge-train.mjs --list-bases --woken "$WOKEN")
           else
             bases=$(node tools/scripts/merge-train.mjs --list-bases)
           fi
