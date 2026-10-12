@@ -185,7 +185,7 @@ A scheduled Claude Code agent reviews the repository a few times a week. Each ru
 
 1. reads this file, runs `node tools/scripts/security-scan.mjs`, and reviews what changed since the last run plus one area in depth (rotating);
 2. fixes what it can prove, with a test, on a `claude/security-auto-<date>` branch that also bumps the patch version and adds a changelog entry;
-3. `security-autorelease.yml` then checks the branch (`tools/scripts/autorelease-gate.mjs`: no CI or release changes, no new dependencies, size cap, one patch bump, one release per 20 h, CI and Security green), fast-forwards main to it (no pull request), tags it and publishes the release;
+3. `security-autorelease.yml` then checks the branch (`tools/scripts/autorelease-gate.mjs`: nothing of `dev` that `main` does not have, no CI or release changes, no new dependencies, size cap, one patch bump, one release per 20 h, CI and Security green), fast-forwards main to it (no pull request), tags it and publishes the release;
 4. anything it cannot fix safely is added here as **open**, in the shape described under [Disclosure](#disclosure-nothing-unfixed-is-described-in-public), and the reproduction goes into a **draft security advisory**, never into an issue or pull request.
 
 When the gate refuses a run (the 20 h window, a change outside its limits, a red check), the fix does **not** become a public pull request describing the flaw. It waits for the next window, or goes through a draft advisory and its private fork and is released from there. A run that opens a public branch or pull request must not say what the flaw lets an attacker do until the release carrying the fix is out.
