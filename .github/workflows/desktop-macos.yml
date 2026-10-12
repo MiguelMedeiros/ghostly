@@ -71,8 +71,9 @@ jobs:
             ${{ runner.os }}-cargo-desktop-macos-${{ github.repository }}-
 
       # The dependencies compiled (target/), which were most of the build's 3 to 4 minutes. The repository's cache is
-      # full (10 GB), so only a push to dev saves them, once per Cargo.lock and toolchain, without Ghostly's own
-      # crates; a pull request restores dev's and never writes one of its own.
+      # full (10 GB), so only dev saves them (a push, or the nightly run: a push whose tree a pull request already
+      # tested skips this job), once per Cargo.lock and toolchain, without Ghostly's own crates; a pull request
+      # restores dev's and never writes one of its own.
       - name: Restore compiled dependencies
         id: target-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -108,7 +109,7 @@ jobs:
 
       - name: Leave Ghostly's own crates out of the saved dependencies
         id: prune
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.target-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.target-cache.outputs.cache-hit != 'true' && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/dev' }}
         run: |
           rm -rf target/debug/bundle target/debug/incremental
           find target/debug target/debug/deps target/debug/.fingerprint target/debug/build -maxdepth 1 -name '*ghostly*' -exec rm -rf {} +

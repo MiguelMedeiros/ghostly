@@ -659,7 +659,7 @@ pub struct StreamOpened {
 }
 
 /// A URL to play a stored file from, and the token that closes it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_bytes_stream_open<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     space: String,
@@ -691,7 +691,7 @@ pub fn file_bytes_stream_open<R: tauri::Runtime>(
 }
 
 /// The file stops being served under this token.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_bytes_stream_close<R: tauri::Runtime>(app: tauri::AppHandle<R>, token: String) {
     use tauri::Manager;
     if let Some(grants) = app.try_state::<StreamGrants>() {
