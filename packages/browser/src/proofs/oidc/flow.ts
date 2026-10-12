@@ -32,7 +32,8 @@ export interface OidcRequest {
   verifier?: string;
 }
 
-const STATE = /^(?:d\.\d{1,5}\.)?[A-Za-z0-9_-]{43}$/;
+/** Optional platform prefix (desktop `d.<port>.`, Android deep link `a.`), then 32 random bytes. */
+const STATE = /^(?:d\.\d{1,5}\.|a\.)?[A-Za-z0-9_-]{43}$/;
 
 export function scopeFor(provider: OidcProvider, reveal: OidcReveal[]): { scope: string; claims?: string } {
   const scopes = provider.id === 'apple' ? [] : ['openid'];
