@@ -317,6 +317,14 @@ export const MESH_GOSSIP_MS = 60_000;
  * next ones this long after, not at the next gossip turn: within the 8 syncs a minute a member answers.
  */
 export const MESH_GAP_AGAIN_MS = 10_000;
+/**
+ * A member whose messages were just asked of another (`Groups.askOf`) is told where I am only once that one's answer
+ * has come: no message from it for this long, or `MESH_SYNC_HOLD_MAX_MS` after it was asked. Told at once, its own
+ * answer raced the other's, which holds the same messages among everyone's in the order they were written, and a
+ * member back in a group of five read each member's lines apart, the newest above older ones (WISP 902 § Catch-up).
+ */
+export const MESH_SYNC_HOLD_MS = 1_500;
+export const MESH_SYNC_HOLD_MAX_MS = 10_000;
 /** What a mesh member asked others for, for one reachable member some of whose messages never reached it (`Groups.gapsOf`). */
 interface GapAsk { mark: string; of: Set<string>; noticed?: number; at?: number; last?: { via: string; at: number; asked: Record<string, number[]> } }
 /** Where a member's gossip turns start among the members it is connected to: a number of its own, from its key. */
@@ -410,6 +418,13 @@ export class Groups {
    * time, not of everyone whose edge opens, so a member coming back is not sent the same messages by every other.
    */
   private readonly relayAsked = new Map<string, Map<string, { via: string; at: number }>>();
+  /**
+   * Per mesh group, the members whose edge opened while their messages were being handed on by another (`holdSync`):
+   * whom, and when it was asked. Their sync goes once that answer has come.
+   */
+  private readonly syncHeld = new Map<string, Map<string, { via: string; at: number }>>();
+  /** Per mesh group and member, when a message last came over its edge (its own, or one it handed on). */
+  private readonly lastHanded = new Map<string, Map<string, number>>();
   private readonly lastGossip = new Map<string, number>();
   /**
    * Per mesh group, each reachable member some of whose messages never reached me (`GroupSession.lacking`): what was
@@ -1069,6 +1084,8 @@ export class Groups {
     this.welcomed.delete(groupId);
     this.lingering.delete(groupId);
     this.relayAsked.delete(groupId);
+    this.syncHeld.delete(groupId);
+    this.lastHanded.delete(groupId);
     this.hubs.forget(groupId);
     this.removedAt.delete(groupId);
     this.lastGossip.delete(groupId);
@@ -1633,6 +1650,12 @@ export class Groups {
       return;
     }
     const taken = await session.handle(peerKey, frame);
+    // A message over this edge: what this member was asked for may still be coming (`holdSync`).
+    if (taken.some(f => f.t === "group-msg")) {
+      let handed = this.lastHanded.get(groupId);
+      if (!handed) this.lastHanded.set(groupId, (handed = new Map()));
+      handed.set(peerKey, this.now());
+    }
     // As a hub, what was new here goes on to the other edges (WISP 902 · Group Mesh § Hubs).
     if (taken.length) this.hubs.passOn(groupId, session, peerKey, taken);
   }
@@ -1697,7 +1720,10 @@ export class Groups {
     // Whether its app takes part in hubs: one that does not keeps edges with the hubs (WISP 902 · Group Mesh § Hubs).
     const legacy = this.hubs.enabled && this.hubs.edgeReady(groupId, session, group, peerKey, this.host.linkReady(linkId, GROUP_VERSION_HUBS), this.now());
     if (large || legacy) void this.store.putGroup(group).catch(() => {});
-    try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
+    // Its messages were just asked of another member: it hears where I am once that answer has come (`holdSync`).
+    if (!this.holdSync(groupId, peerKey)) {
+      try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
+    }
     // The admin was away when a member's signed leave went round the hubs: it hears it now.
     if (peerKey === session.admin) { try { for (const bye of session.byesHeld()) this.host.sendOnLink(linkId, bye); } catch { /* next time it opens */ } }
     // The edge carries everything from here on: the entry session of my admission, and the admin's note of mine, go.
@@ -1819,6 +1845,44 @@ export class Groups {
     // What this sync asks for is the gossip turn's job too: the next one waits.
     if (out.length) this.lastGossip.set(groupId, now);
     return out;
+  }
+
+  /**
+   * Whether the answer of the member asked for someone's messages may still be coming: its edge up, asked under
+   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message from it (or the asking) under `MESH_SYNC_HOLD_MS` ago.
+   */
+  private answering(groupId: string, { via, at }: { via: string; at: number }, now: number): boolean {
+    const edge = this.host.edges(groupId).get(via);
+    if (!edge || !this.host.linkReady(edge) || now - at >= MESH_SYNC_HOLD_MAX_MS) return false;
+    return now - Math.max(at, this.lastHanded.get(groupId)?.get(via) ?? 0) < MESH_SYNC_HOLD_MS;
+  }
+
+  /**
+   * Whether the sync to a member whose edge just opened waits (`heldSyncs` sends it): its messages were asked of
+   * another member a moment ago, and that answer holds them among everyone's in the order they were written. Its own
+   * answer now would bring the same messages on their own, ahead of or behind the others' lines.
+   */
+  private holdSync(groupId: string, peerKey: string): boolean {
+    const asked = this.relayAsked.get(groupId)?.get(peerKey);
+    if (!asked || asked.via === peerKey || !this.answering(groupId, asked, this.now())) { this.syncHeld.get(groupId)?.delete(peerKey); return false; }
+    let held = this.syncHeld.get(groupId);
+    if (!held) this.syncHeld.set(groupId, (held = new Map()));
+    held.set(peerKey, { ...asked });
+    return true;
+  }
+
+  /** The syncs that waited for another member's answer (`holdSync`), once it has come: for what it did not hand on. */
+  private heldSyncs(groupId: string, session: GroupSession, now: number): void {
+    const held = this.syncHeld.get(groupId);
+    if (!held?.size) return;
+    const edges = this.host.edges(groupId);
+    for (const [key, asked] of held) {
+      if (this.answering(groupId, asked, now)) continue;
+      held.delete(key);
+      const edge = edges.get(key);
+      if (!edge || !this.host.linkReady(edge) || !rosterHas(session.roster, key)) continue;
+      try { this.host.sendOnLink(edge, session.syncFrame(this.askOf(groupId, session, key))); } catch { /* it closed: it is told when it opens again */ }
+    }
   }
 
   /**
@@ -1952,6 +2016,7 @@ export class Groups {
       // What I wrote while behind on the chain, for the members let in meanwhile (WISP 902 § Catch-up).
       void session.reseal().catch(() => {});
       this.farewellsTick(groupId, session, now);
+      this.heldSyncs(groupId, session, now);
       if (reconcile) {
         const edges = this.host.edges(groupId);
         // A large group's edges follow its hubs, every tick (`hubsTick`).
