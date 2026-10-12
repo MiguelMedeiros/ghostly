@@ -1,0 +1,1 @@
+"Built-in apps" now says what the person sees: a built-in app's row with the installed ones on the Apps page and in a chat's Apps, its first open through the install screen with "Allow and open" and a line that nothing is downloaded, and Remove on a row never opened. The section's last paragraph lists what is built for release 1.3.

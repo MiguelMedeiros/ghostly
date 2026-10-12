@@ -23,6 +23,16 @@
     "updateWaits": "الإصدار {{version}} جاهز.",
     "version": "الإصدار {{version}}"
   },
+  "builtIn": {
+    "allow": "اسمح",
+    "allowOpen": "اسمح وافتح",
+    "carried": "يأتي مع Ghostly. لا يُنزَّل شيء.",
+    "carriedInfo": "هذه النسخة جزء من Ghostly الذي تستخدمه. تأتي التحديثات من ناشره أو من متاجرك، التي ترى عندها عنوان IP الخاص بك.",
+    "hint": "يأتي مع Ghostly",
+    "openNamed": "فتح {{title}}",
+    "remove": "إزالة",
+    "removeNamed": "إزالة {{title}}"
+  },
   "card": {
     "ask": "اطلب من {{name}} رابطًا له",
     "contactCannot": "تطبيق {{name}} لا يشغّل التطبيقات بعد",

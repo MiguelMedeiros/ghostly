@@ -10,6 +10,19 @@ const files = import.meta.glob<string>("../../assets/apps/*.ghostlyapp", { eager
 /** By app name: the file is src/assets/apps/<name>.ghostlyapp. */
 const CARRIED: ReadonlyMap<string, string> = new Map(Object.entries(files).map(([path, url]) => [path.slice(path.lastIndexOf("/") + 1, -".ghostlyapp".length), url]));
 
+/**
+ * What a host gives its engine (`NodeOptions.builtInApp`). In the e2e suite's build (VITE_APPS_TEST, fixed when the
+ * build is made) built-in apps are off, so the specs written for an empty Apps page and for the suite's own test-signed
+ * Chess see what they expect; a spec about built-in apps sets `localStorage["ghostly-test-built-in-apps"] = "on"` before
+ * the page loads. Read once.
+ */
+export function builtInAppOption(): { builtInApp?: typeof readBuiltInApp } {
+  if (import.meta.env.VITE_APPS_TEST === "1") {
+    try { if (localStorage.getItem("ghostly-test-built-in-apps") !== "on") return {}; } catch { return {}; }
+  }
+  return { builtInApp: readBuiltInApp };
+}
+
 /** The engine's `builtInApp`: the carried bundle of this app, from this client's own files. */
 export async function readBuiltInApp(app: { name: string }): Promise<Uint8Array> {
   const url = CARRIED.get(app.name);

@@ -23,6 +23,16 @@
     "updateWaits": "La versión {{version}} está lista.",
     "version": "Versión {{version}}"
   },
+  "builtIn": {
+    "allow": "Permitir",
+    "allowOpen": "Permitir y abrir",
+    "carried": "Viene con Ghostly. No se descarga nada.",
+    "carriedInfo": "Esta copia forma parte del Ghostly que estás usando. Las actualizaciones vienen de su editor o de tus tiendas, que entonces ven tu dirección IP.",
+    "hint": "Viene con Ghostly",
+    "openNamed": "Abrir {{title}}",
+    "remove": "Quitar",
+    "removeNamed": "Quitar {{title}}"
+  },
   "card": {
     "ask": "Pide a {{name}} un enlace",
     "contactCannot": "La app de {{name}} aún no ejecuta apps",

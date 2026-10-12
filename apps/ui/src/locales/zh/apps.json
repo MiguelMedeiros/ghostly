@@ -23,6 +23,16 @@
     "updateWaits": "版本 {{version}} 已就绪。",
     "version": "版本 {{version}}"
   },
+  "builtIn": {
+    "allow": "允许",
+    "allowOpen": "允许并打开",
+    "carried": "随 Ghostly 提供，无需下载。",
+    "carriedInfo": "此副本是你正在使用的 Ghostly 的一部分。更新来自其发布者或你的商店，届时它们会看到你的 IP 地址。",
+    "hint": "随 Ghostly 提供",
+    "openNamed": "打开 {{title}}",
+    "remove": "移除",
+    "removeNamed": "移除 {{title}}"
+  },
   "card": {
     "ask": "向 {{name}} 要一个链接",
     "contactCannot": "{{name}} 的应用还不能运行小应用",

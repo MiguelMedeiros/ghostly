@@ -23,6 +23,16 @@
     "updateWaits": "バージョン {{version}} の準備ができました。",
     "version": "バージョン {{version}}"
   },
+  "builtIn": {
+    "allow": "許可",
+    "allowOpen": "許可して開く",
+    "carried": "Ghostly に付属しています。ダウンロードはありません。",
+    "carriedInfo": "このコピーはお使いの Ghostly の一部です。更新は発行者またはあなたのストアから届き、その際にあなたの IP アドレスが伝わります。",
+    "hint": "Ghostly に付属",
+    "openNamed": "{{title}} を開く",
+    "remove": "削除",
+    "removeNamed": "{{title}} を削除"
+  },
   "card": {
     "ask": "{{name}} にリンクを頼む",
     "contactCannot": "{{name}} のアプリはまだアプリを実行できません",

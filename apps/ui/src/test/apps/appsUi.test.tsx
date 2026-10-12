@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
-import type { AppPreview, InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../../components/MessageBubble";
 import { MessageInput } from "../../components/MessageInput";
@@ -22,7 +22,7 @@ import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: apps.page, apps.chat.card
+// covers: apps.page, apps.chat.card, apps.built-in
 
 // The runner page's header, asked once by the real check: answered here, never fetched in a test.
 vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
@@ -263,7 +263,8 @@ describe("with the apps flag on", () => {
     expect(within(card).getByTestId("app-card-check")).toHaveTextContent("Not checked yet");
     expect(screen.queryByTestId("app-card-waiting")).not.toBeInTheDocument();
     // Only the local list of installed apps: no preview, no fetch.
-    await waitFor(() => expect(appCalls()).toEqual(["appList"]));
+    // The installed apps and the built-in ones offered here: two reads of the engine's own records, no request.
+    await waitFor(() => expect(appCalls()).toEqual(["appBuiltIns", "appList"]));
     expect(fetches).toEqual([]);
 
     await user.click(within(card).getByTestId("app-card-install"));
@@ -712,3 +713,78 @@ describe("with the apps flag on", () => {
   });
 });
 
+describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
+  beforeEach(appsOn);
+
+  const offer: BuiltInAppOffer = { ref: REF, publisher: KEY, name: "chess", fingerprint: "yz7m oxuc bd4u 8aqt", digest: DIGEST, url: URL_, title: "Chess", tagline: "Play chess with a contact" };
+  /** The engine's two lists, as it keeps them: offered until installed or removed. */
+  function engineWith(state: { installed: boolean; removed: boolean }) {
+    return fakeEngine.on("appList", () => (state.installed ? [installed({ permissions: ["chat", "name"] })] : []))
+      .on("appBuiltIns", () => (state.installed || state.removed ? [] : [offer]))
+      .on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appPreview", () => preview({ carried: true, asks: ["chat", "name"], manifest: { ...preview().manifest, permissions: ["chat", "name"] } }))
+      .on("appInstall", () => { state.installed = true; return installed({ permissions: ["chat", "name"] }); })
+      .on("appUninstall", () => { state.removed = true; });
+  }
+
+  it("shows under Installed before anything of it is installed; Open asks what it may do, says nothing is downloaded, and Allow and open installs it", async () => {
+    engineWith({ installed: false, removed: false });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("built-in-app");
+    expect(row).toHaveTextContent("Chess");
+    expect(within(row).getByTestId("built-in-app-hint")).toHaveTextContent("Play chess with a contact · Comes with Ghostly");
+    expect(screen.queryByTestId("apps-none")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument();
+    // Listing it read nothing of the app: no preview, no install.
+    expect(appCalls()).not.toContain("appPreview");
+
+    await user.click(within(row).getByRole("button", { name: "Open Chess" }));
+    const screenOf = await screen.findByTestId("app-install");
+    expect(fakeEngine.callsTo("appPreview")).toEqual([{ builtIn: REF }]);
+    await within(screenOf).findByTestId("app-carried-line");
+    expect(within(screenOf).getByTestId("app-carried-line")).toHaveTextContent("Comes with Ghostly. Nothing is downloaded.");
+    expect(within(screenOf).queryByTestId("app-ip-line")).not.toBeInTheDocument();
+    expect(screenOf).toHaveTextContent("Talk to the same app on your contact's side");
+    expect(screenOf).toHaveTextContent("See your name in this chat");
+    expect(within(screenOf).getByTestId("app-install-confirm")).toHaveTextContent("Allow and open");
+    expect(fakeEngine.callsTo("appInstall")).toEqual([]);
+
+    await user.click(within(screenOf).getByTestId("app-install-confirm"));
+    await waitFor(() => expect(fakeEngine.callsTo("appInstall")).toEqual([{ digest: DIGEST, grant: ["chat", "name"] }]));
+    // Installed: its own row now, and (an app that runs in a chat) the question of which chat.
+    expect(await screen.findByTestId("installed-app")).toHaveTextContent("Chess");
+    expect(screen.queryByTestId("built-in-app")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("app-chat-picker")).toBeInTheDocument();
+    expect(fetches).toEqual([]);
+  });
+
+  it("Cancel on its first open installs nothing, and it stays offered", async () => {
+    engineWith({ installed: false, removed: false });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("built-in-app-open"));
+    const screenOf = await screen.findByTestId("app-install");
+    await within(screenOf).findByTestId("app-install-confirm");
+    await user.click(within(screenOf).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("app-install")).not.toBeInTheDocument();
+    expect(fakeEngine.callsTo("appInstall")).toEqual([]);
+    expect(screen.getByTestId("built-in-app")).toBeInTheDocument();
+  });
+
+  it("Remove takes it off the list for good, and the focus goes to Add", async () => {
+    engineWith({ installed: false, removed: false });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("built-in-app");
+    await user.click(within(row).getByRole("button", { name: "Remove Chess" }));
+    await waitFor(() => expect(fakeEngine.callsTo("appUninstall")).toEqual([{ ref: REF }]));
+    await waitFor(() => expect(screen.queryByTestId("built-in-app")).not.toBeInTheDocument());
+    expect(await screen.findByTestId("apps-none")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
+  });
+
+  it("an engine from before built-in apps offers none, and the page is as it was", async () => {
+    fakeEngine.on("appList", () => []).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    expect(await screen.findByTestId("apps-none")).toBeInTheDocument();
+    expect(screen.queryByTestId("built-in-app")).not.toBeInTheDocument();
+  });
+});
