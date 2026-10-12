@@ -784,6 +784,16 @@ export class GhostlyNode implements EngineImplementation {
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
+  /**
+   * The reviews whose outcome is still open (submitted, unknown), by id: what the payment poll asks about, so that it
+   * does not read every review ever made every 10 s. `null` until the store was read once. An id is only ever added
+   * from a read of the store or a change of a review, and leaves when the poll finds its review ended or gone.
+   */
+  private openReviews: Set<string> | null = null;
+  private noteOpenReviews(reviews: readonly PaymentReview[]): void {
+    const open = this.openReviews ??= new Set();
+    for (const review of reviews) if (review.state === "submitted" || review.state === "unknown") open.add(review.id);
+  }
   /** Every minute, the reviews no Approve can send any more are cancelled (dropStaleReviews). */
   private staleReviewTimer?: ReturnType<typeof setInterval>;
   /** Group links: admins read knocks, joiners knock (WISP 902 § Entry link). */
@@ -860,6 +870,7 @@ export class GhostlyNode implements EngineImplementation {
       return new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).reconcile(review,prepared as CashuPrepared,persist);
     },
   }], (review) => {
+    if (this.openReviews) this.noteOpenReviews([review]);
     if (review.state === "settled") this.feedback("confirmed", review.id);
     if (review.state === "failed") this.cueFeedback({ cue: "failed", key: review.id }, this.chatOf(review.linkId));
     void this.refreshWallet();
@@ -1513,7 +1524,10 @@ export class GhostlyNode implements EngineImplementation {
     }
     const wallets = this.withHomes(walletInstances(networks));
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
-    this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents: (await intentRepository.list()).map((saved) => saved.review), setup: this.walletSetup.view() };
+    const intents = (await intentRepository.list()).map((saved) => saved.review);
+    // A review written past the coordinator (a wallet's backup restores its own) reaches the poll from here.
+    this.noteOpenReviews(intents);
+    this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents, setup: this.walletSetup.view() };
     this.announcePaymentNetworks(wallets);
     for (const tx of everything) {
       const fresh = !this.walletFeedbackIds.has(tx.id);
@@ -1570,10 +1584,15 @@ export class GhostlyNode implements EngineImplementation {
   private async pollPaymentStatus():Promise<void> {
     if(this.shuttingDown)return;
     try {
-      for(const {review} of await intentRepository.list()){
+      // The whole store once, when nothing has read it yet; after that, the open reviews alone.
+      if(!this.openReviews)this.noteOpenReviews((await intentRepository.list()).map((saved)=>saved.review));
+      const open=this.openReviews!;
+      for(const id of [...open]){
+        const review=(await intentRepository.get(id))?.review;
+        if(!review || !["submitted","unknown"].includes(review.state)){open.delete(id);continue;}
         // Each through its own network's wallet, once that one is open.
         const network=walletNetworkOf(review.network);
-        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallets[network].adapter) || (review.method==="bark" && !this.barkWallets[network].adapter) || (review.method==="spark" && !this.sparkWallets[network].adapter) || (review.method==="usdt" && !this.usdtWallets[network].adapter) || (review.method==="bitcoin" && !this.bitcoins[network].sources.active) || (review.method==="fedimint" && !this.fedimintWallets[network].federation(review.provider)))continue;
+        if((review.method==="arkade" && !this.arkWallets[network].adapter) || (review.method==="bark" && !this.barkWallets[network].adapter) || (review.method==="spark" && !this.sparkWallets[network].adapter) || (review.method==="usdt" && !this.usdtWallets[network].adapter) || (review.method==="bitcoin" && !this.bitcoins[network].sources.active) || (review.method==="fedimint" && !this.fedimintWallets[network].federation(review.provider)))continue;
         await this.reconcilePayment({id:review.id}).catch(()=>{});
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
