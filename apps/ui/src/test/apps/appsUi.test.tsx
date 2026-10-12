@@ -770,6 +770,46 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(screen.getByTestId("built-in-app")).toBeInTheDocument();
   });
 
+  it("carries no stranger's warning on a profile that never read a store: not on its first open, its row or its details", async () => {
+    // As the engine says it of a new profile: no curated store lists it (none was read), and the client's list pins it.
+    let have = false;
+    fakeEngine.on("appList", () => (have ? [installed({ builtIn: true })] : [])).on("appBuiltIns", () => (have ? [] : [offer]))
+      .on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appPreview", () => preview({ carried: true })).on("appInstall", () => { have = true; return installed({ builtIn: true }); });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("built-in-app-open"));
+    const screenOf = await screen.findByTestId("app-install");
+    const name = await within(screenOf).findByTestId("app-publisher-name");
+    expect(name).toHaveTextContent("Publisher");
+    expect(name).not.toHaveClass("text-test-money-ink");
+    expect(within(screenOf).getByTestId("app-publisher")).toHaveTextContent("yz7m oxuc bd4u 8aqt");
+    expect(screenOf).not.toHaveTextContent("Unknown publisher");
+    expect(screenOf).not.toHaveTextContent("Not in any of your stores");
+    expect(within(screenOf).queryByTestId("app-store-line")).not.toBeInTheDocument();
+
+    await user.click(within(screenOf).getByTestId("app-install-confirm"));
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent(/^Play chess with a contact$/);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(within(row).getByRole("button", { name: "Chess: details" }));
+    const details = await screen.findByTestId("app-details");
+    expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Publisher");
+    expect(within(details).getByTestId("app-store-line")).toHaveTextContent("Comes with Ghostly");
+    expect(details).not.toHaveTextContent("Unknown publisher");
+    expect(details).not.toHaveTextContent("Not in any of your stores");
+  });
+
+  it("a later version of it, which the client's list does not pin, is a stranger's again", async () => {
+    fakeEngine.on("appList", () => [installed()]).on("appBuiltIns", () => []).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Play chess with a contact · Unknown publisher");
+    await user.click(within(row).getByRole("button", { name: "Chess: details" }));
+    const details = await screen.findByTestId("app-details");
+    expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Unknown publisher");
+    expect(within(details).getByTestId("app-store-line")).toHaveTextContent("Not in any of your stores");
+  });
+
   it("Remove takes it off the list for good, and the focus goes to Add", async () => {
     engineWith({ installed: false, removed: false });
     const { user } = renderApp(<Apps />, { route: "/apps" });

@@ -253,6 +253,24 @@ describe("opened from the build", () => {
     expect(net.requests).toEqual([PINNED_URL]);
   });
 
+  it("installed at the version the list pins, it is marked built-in; a later version, or an app not on the list, is not", async () => {
+    const v1 = await bundle();
+    const v2 = await bundle({ sequence: 2 });
+    carried = v1.bytes;
+    const store = apps(net, { readBuiltIn, builtIns: [chess(v1.digest)] });
+    const installed = await store.install({ digest: (await store.preview({ builtIn: REF })).digest, grant: ["chat"] });
+    // No store was ever read: no curated store lists it, and the client's own list is what vouches for it.
+    expect(installed).toMatchObject({ unknownPublisher: true, listedBy: [], builtIn: true });
+    expect((await store.list())[0]).toMatchObject({ ref: REF, builtIn: true });
+    // The same app in a build whose list does not name it.
+    expect((await apps(net).list())[0]!.builtIn).toBeUndefined();
+
+    net.put(BUNDLE_URL, v2.bytes);
+    const updated = await store.install({ digest: (await store.preview({ url: BUNDLE_URL })).digest, grant: ["chat"] });
+    expect(updated).toMatchObject({ digest: v2.digest, unknownPublisher: true });
+    expect(updated.builtIn).toBeUndefined();
+  });
+
   it("a restored profile's built-in app takes its files from the build, with no request", async () => {
     const v1 = await bundle();
     carried = v1.bytes;

@@ -31,7 +31,8 @@ function appHint(app: InstalledAppView, t: Translate): { text: string; tone: "mu
   if (app.run.status === "revoked" || app.run.status === "removed") return { text: t("apps.app.stopped"), tone: "danger" };
   if (app.run.status === "needs-files") return { text: t("apps.app.needsFiles"), tone: "warning" };
   if (app.pending) return { text: t("apps.app.updateAsks"), tone: "warning" };
-  if (app.unknownPublisher) return { text: `${app.tagline} · ${t("apps.install.unknownPublisher")}`, tone: "muted" };
+  // The version this client's own list pins is no stranger's (WISP 1200 § Built-in apps).
+  if (app.unknownPublisher && !app.builtIn) return { text: `${app.tagline} · ${t("apps.install.unknownPublisher")}`, tone: "muted" };
   return { text: app.tagline, tone: "muted" };
 }
 

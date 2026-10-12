@@ -37,11 +37,19 @@ function hostOf(url: string): string {
 }
 
 /** Where the app stands with the person's stores: "In <store>", "Found by <index>", "Not in any of your stores". */
-function storeLines(listedBy: readonly AppListedBy[], t: Translate): string[] {
+function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: BuiltIn): string[] {
   const curated = listedBy.filter((s) => s.kind === "curated");
   if (curated.length) return curated.map((s) => t("apps.install.inStore", { name: s.name }));
-  return [...listedBy.map((s) => t("apps.install.foundBy", { name: s.name })), t("apps.install.notListed")];
+  const found = listedBy.map((s) => t("apps.install.foundBy", { name: s.name }));
+  if (builtIn) return builtIn === "installed" ? [...found, t("apps.builtIn.hint")] : found;
+  return [...found, t("apps.install.notListed")];
 }
+
+/**
+ * The version this client's own list pins (WISP 1200 § Built-in apps): the client vouches for it, so it carries no
+ * stranger's warning. `carried`: the install screen, which says "Comes with Ghostly" on its privacy line already.
+ */
+type BuiltIn = "carried" | "installed";
 
 /** Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. */
 function runLine(run: AppRunStatus, t: Translate): string | null {
@@ -57,8 +65,9 @@ function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?
 }
 
 /** The publisher and the stores, as a person checks them. */
-function Publisher({ fingerprint, unknown, listedBy, sentBy }: { fingerprint: string; unknown: boolean; listedBy: readonly AppListedBy[]; sentBy?: string }) {
+function Publisher({ fingerprint, unknown: unlisted, listedBy, sentBy, builtIn }: { fingerprint: string; unknown: boolean; listedBy: readonly AppListedBy[]; sentBy?: string; builtIn?: BuiltIn }) {
   const { t } = useI18n();
+  const unknown = unlisted && !builtIn;
   const [open, setOpen] = useState(false);
   const id = useId();
   return (
@@ -71,7 +80,7 @@ function Publisher({ fingerprint, unknown, listedBy, sentBy }: { fingerprint: st
         <span className="ms-auto"><Fingerprint value={fingerprint} /></span>
       </div>
       {unknown && open && <p id={id} className="text-xs text-text-secondary">{t("apps.install.unknownPublisherInfo")}</p>}
-      {storeLines(listedBy, t).map((line) => <Line key={line} testId="app-store-line">{line}</Line>)}
+      {storeLines(listedBy, t, builtIn).map((line) => <Line key={line} testId="app-store-line">{line}</Line>)}
       {sentBy && <Line testId="app-sent-by">{t("apps.install.sentBy", { name: sentBy })}</Line>}
     </div>
   );
@@ -240,7 +249,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {!preview && !error && <p className="text-sm text-text-muted" data-testid="app-install-checking">{t("apps.install.fetching")}</p>}
       {preview && (
         <>
-          <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} />
+          <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} builtIn={preview.carried && "carried"} />
           {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{preview.manifest.description}</p>}
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
@@ -306,7 +315,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   return (
     <Shell titleId={titleId} onClose={onClose} testId="app-details">
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
-      <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} />
+      <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
       {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
       {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation", { sequence: String(app.equivocation.sequence) })}</Line>}
