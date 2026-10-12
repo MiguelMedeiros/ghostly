@@ -13,7 +13,7 @@ async function setName(peer: Peer, name: string): Promise<void> {
   await expect(peer.page.getByTitle("New Chat")).toBeVisible();
 }
 
-test("on a phone the admin's members list shows each member's name", { tag: ["@feature:groups.remove-member", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+test("on a phone the admin's members list shows each member's name", { tag: ["@feature:groups.remove-member", "@feature:app.mobile-layout"] }, async ({ peer }, testInfo) => {
   test.setTimeout(5 * 60_000);
   const [admin, member] = await Promise.all([peer("names-admin", { mobile: true, viewport: { width: 375, height: 812 } }), peer("names-member")]);
   await setName(member, "Beatriz Albuquerque");
@@ -49,4 +49,11 @@ test("on a phone the admin's members list shows each member's name", { tag: ["@f
     for (const other of above) expect(box!.y).toBeGreaterThanOrEqual(other!.y + other!.height);
   }
   expect(disableBox!.x - (resetBox!.x + resetBox!.width)).toBeGreaterThanOrEqual(8);
+  // Share, Copy and Show QR are a thumb's height too (they were 24 to 28 px), and stay inside the dialog.
+  for (const box of above) {
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x).toBeGreaterThanOrEqual(dialogBox!.x);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+  }
+  await testInfo.attach("members-link-panel-375", { body: await admin.page.screenshot(), contentType: "image/png" });
 });
