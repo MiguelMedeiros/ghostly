@@ -75,6 +75,8 @@ const PROBE = "__ghostly_storage_probe__";
 
 export interface PersistentIndexedDb {
   readonly factory: IDBFactory;
+  /** A journal was found at open: the process before this one did not close the store (killed, a power cut). */
+  readonly recovered: boolean;
   /** Waits for writes that carried a Blob (read asynchronously) to reach the disk. */
   flush(): Promise<void>;
   /** Folds the journal into a fresh snapshot. */
@@ -259,6 +261,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
 
   return {
     factory,
+    recovered: journalFound,
     flush: () => queue,
     compact: () => enqueue(writeSnapshot),
     async close() {
