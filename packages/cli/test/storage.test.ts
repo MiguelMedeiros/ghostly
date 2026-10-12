@@ -1,6 +1,7 @@
 import { appendFileSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { serialize } from "node:v8";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.storage
@@ -472,4 +473,116 @@ describe("persistent IndexedDB", () => {
     expect(await read(messages().count())).toBe(19_981);
     expect(took).toBeLessThan(1500);
   }, 60_000);
+  /** A journal as a killed process leaves it: one entry per transaction, each a list of ops. */
+  function journalOf(...entries: unknown[][]): Buffer {
+    return Buffer.concat(entries.map((ops) => { const body = serialize(ops); const header = Buffer.alloc(4); header.writeUInt32BE(body.length); return Buffer.concat([header, body]); }));
+  }
+
+  it("brings the indexes in step with what a journal changed: overwrites, deletes, a range, a clear, a unique key that moved", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const first = await indexed(store.factory);
+    await tx(first, ["messages", "proofs", "notes"], (s) => {
+      for (let i = 0; i < 40; i++) s.messages.put({ linkId: `chat-${i % 4}`, id: `m${i}`, timestamp: i, ...(i % 5 === 0 && { card: { kind: "task" } }) });
+      for (let i = 1; i <= 4; i++) s.proofs.put({ secret: `s${i}`, amount: i });
+      s.notes.put({ owner: "ana", tags: ["a", "b"] });
+      s.notes.put({ owner: "bob", tags: ["b"] });
+    });
+    first.close();
+    await store.close();
+
+    const put = (storeName: string, key: unknown, value: unknown) => ({ db: "ghostly", store: storeName, kind: "put", key, value });
+    const gone = (storeName: string, key: unknown) => ({ db: "ghostly", store: storeName, kind: "delete", key });
+    writeFileSync(join(dir, "journal.bin"), journalOf(
+      // A message written again with another time and a card, twice; one removed; one removed and written back.
+      [put("messages", ["chat-1", "m1"], { linkId: "chat-1", id: "m1", timestamp: 500, card: { kind: "poll" } })],
+      [put("messages", ["chat-1", "m1"], { linkId: "chat-1", id: "m1", timestamp: 600, card: { kind: "poll" } }), gone("messages", ["chat-0", "m0"])],
+      [gone("messages", ["chat-2", "m2"]), put("messages", ["chat-2", "m2"], { linkId: "chat-2", id: "m2", timestamp: 2, text: "back" })],
+      // A whole chat removed by range, then one new message in it; a key that was never there removed.
+      [gone("messages", { __ghostlyRange: { lower: ["chat-3", ""], upper: ["chat-3", "\uffff"], lowerOpen: false, upperOpen: false } }), gone("messages", ["nobody", "x"])],
+      [put("messages", ["chat-3", "new"], { linkId: "chat-3", id: "new", timestamp: 9 })],
+      // A unique key that moves from one proof to another, and a store cleared and filled again.
+      [gone("proofs", "s1"), put("proofs", "s9", { secret: "s9", amount: 1 }), put("proofs", "s2", { secret: "s2", amount: 20 })],
+      [{ db: "ghostly", store: "notes", kind: "clear" }, put("notes", 7, { owner: "cid", tags: ["c", "a"] })],
+    ));
+
+    const second = await db(await open(dir), "ghostly", 2);
+    const messages = () => second.transaction("messages").objectStore("messages");
+    const all = await read(messages().getAll()) as { linkId: string; id: string; timestamp: number; card?: { kind: string } }[];
+    expect(all).toHaveLength(40 - 1 - 10 + 1);
+    // Every index says what a walk of the store says, and nothing else.
+    for (const chat of ["chat-0", "chat-1", "chat-2", "chat-3", "nobody"]) {
+      const held = all.filter((m) => m.linkId === chat);
+      expect(await read(messages().index("byLink").getAll(chat))).toEqual(held);
+      expect(await read(messages().index("byLinkTime").getAll(IDBKeyRange.bound([chat, -Infinity], [chat, Infinity])))).toEqual([...held].sort((a, b) => a.timestamp - b.timestamp));
+    }
+    expect(await read(messages().index("byLink").count())).toBe(all.length);
+    expect(await read(messages().index("byLinkTime").count())).toBe(all.length);
+    expect(await read(messages().index("byCard").getAllKeys("poll"))).toEqual([["chat-1", "m1"]]);
+    expect(await read(messages().index("byCard").count())).toBe(all.filter((m) => m.card).length);
+    const proofs = () => second.transaction("proofs").objectStore("proofs").index("byAmount");
+    expect(await read(proofs().getAllKeys())).toEqual(["s9", "s3", "s4", "s2"]);
+    expect(((await read(proofs().get(1))) as { secret: string }).secret).toBe("s9");
+    const notes = () => second.transaction("notes").objectStore("notes");
+    expect(await read(notes().index("byTag").getAllKeys())).toEqual([7, 7]);
+    expect(await read(notes().index("byTag").count("b"))).toBe(0);
+    expect(await read(notes().index("byOwner").getAllKeys())).toEqual([7]);
+    // And the store takes writes as before: the unique key is free where it left, taken where it went.
+    await tx(second, ["proofs"], (s) => { s.proofs.put({ secret: "s10", amount: 2 }); });
+    await expect(tx(second, ["proofs"], (s) => { s.proofs.add({ secret: "s11", amount: 1 }); })).rejects.toBeDefined();
+  });
+
+  it("replays a journal the snapshot already holds (killed between the two): rows that are there, a unique key that moved", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const first = await indexed(store.factory);
+    await tx(first, ["proofs", "messages"], (s) => {
+      s.proofs.put({ secret: "s9", amount: 1 });
+      s.messages.put({ linkId: "a", id: "2", timestamp: 2 });
+    });
+    first.close();
+    await store.close();
+    // The snapshot is the state after these: s1 held the amount, then s9 took it; a message came and went.
+    writeFileSync(join(dir, "journal.bin"), journalOf(
+      [{ db: "ghostly", store: "proofs", kind: "put", key: "s1", value: { secret: "s1", amount: 1 } }, { db: "ghostly", store: "messages", kind: "put", key: ["a", "1"], value: { linkId: "a", id: "1", timestamp: 1 } }],
+      [{ db: "ghostly", store: "proofs", kind: "delete", key: "s1" }, { db: "ghostly", store: "proofs", kind: "put", key: "s9", value: { secret: "s9", amount: 1 } }],
+      [{ db: "ghostly", store: "messages", kind: "delete", key: ["a", "1"] }, { db: "ghostly", store: "messages", kind: "put", key: ["a", "2"], value: { linkId: "a", id: "2", timestamp: 2 } }],
+    ));
+    const second = await db(await open(dir), "ghostly", 2);
+    expect(await read(second.transaction("proofs").objectStore("proofs").index("byAmount").getAllKeys())).toEqual(["s9"]);
+    expect(await read(second.transaction("messages").objectStore("messages").index("byLinkTime").getAllKeys())).toEqual([["a", "2"]]);
+    expect(await read(second.transaction("messages").objectStore("messages").index("byLink").count())).toBe(1);
+  });
+
+  it("replays a journal of one message in the time of one message, however many the store holds", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const first = await indexed(store.factory);
+    for (let from = 0; from < 60_000; from += 5000) {
+      await tx(first, ["messages"], (s) => {
+        for (let i = from; i < from + 5000; i++) s.messages.put({ linkId: `chat-${i % 10}`, id: `m${i}`, timestamp: i, text: "x".repeat(40) });
+      });
+    }
+    first.close();
+    await store.close();
+    // The same start twice: a journal that touches a store with no index, then one that touches the messages. The
+    // indexes of every message were built again for the second, once each: about as long as the start itself.
+    const start = async (journal: Buffer) => {
+      writeFileSync(join(dir, "journal.bin"), journal);
+      const started = performance.now();
+      const opened = await openPersistentIndexedDb(dir);
+      const took = performance.now() - started;
+      await opened.close();
+      return took;
+    };
+    const setting = journalOf([{ db: "ghostly", store: "settings", kind: "put", key: "name", value: "Alice" }]);
+    const message = journalOf([{ db: "ghostly", store: "messages", kind: "put", key: ["chat-1", "m1"], value: { linkId: "chat-1", id: "m1", timestamp: 1, text: "edited" } }]);
+    await start(setting);
+    const plain = Math.min(await start(setting), await start(setting));
+    const touched = Math.min(await start(message), await start(message));
+    const d = await db(await open(dir), "ghostly", 2);
+    expect(await read(d.transaction("messages").objectStore("messages").index("byLinkTime").count())).toBe(60_000);
+    expect(((await read(d.transaction("messages").objectStore("messages").index("byLink").get("chat-1"))) as { text: string }).text).toBe("edited");
+    expect(touched).toBeLessThan(plain * 1.25 + 30);
+  }, 120_000);
 });
