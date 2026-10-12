@@ -3305,7 +3305,7 @@ export class GhostlyNode implements EngineImplementation {
           // A receipt marks the row and notes its time in one write. As `db.updateDelivery`: a row with no delivery
           // state gets none, and one already delivered keeps its mark and the time of its first receipt.
           if (delivery === "delivered") await db.patchMessage(linkId, id, message => message.delivery === "delivered" ? null
-            : { ...(message.delivery && { ...extra, delivery, deliveryError: error }), details: { ...message.details, receiptAt: Date.now() } });
+            : { ...(message.delivery && { ...extra, delivery, deliveryError: error }), details: { ...message.details, receiptAt: Date.now() } }, true);
           else await db.updateDelivery(linkId, id, delivery, error, extra);
           if (delivery === "sent" || delivery === "delivered") {
             const message = await db.getMessage(linkId, id);
@@ -3395,7 +3395,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** Adds to a message's details record, whatever the row's delivery state. Nothing is pushed for it: the view asks. */
   private noteDetails(linkId: string, id: string, change: (details: MessageDetails, message: StoredMessage) => MessageDetails): Promise<void> {
-    return db.patchMessage(linkId, id, message => ({ details: change(message.details ?? {}, message) })).then(() => {}, () => {});
+    return db.patchMessage(linkId, id, message => ({ details: change(message.details ?? {}, message) }), true).then(() => {}, () => {});
   }
 
   /** One send of a text on its details: the path, the frame and its size, and the DHT envelope when that was the way. */
