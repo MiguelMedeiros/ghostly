@@ -53,7 +53,7 @@ import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseRe
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
-import { FILE_FRAMES, decodeFileData } from "./chatFiles";
+import { FILE_FRAMES, decodeFileData, encodeFileData } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
@@ -3196,6 +3196,18 @@ export class GhostLink {
   sendFilesFrame(frame: Record<string, unknown>): boolean {
     if (!this.supportsLargeFiles || !this.channel) return false;
     try { this.channel.send(JSON.stringify(frame)); return true; } catch { return false; }
+  }
+  /**
+   * A file's bytes to the contact, on the open session: one binary message while both sides agreed `files/4` on it,
+   * the `pf-data` frame with them as base64url text otherwise (WISP 501 § files/4). The form is chosen for each chunk,
+   * so a transfer follows the session it is on. False when files/3 cannot flow now, or the channel has no room.
+   */
+  sendFileData(id: string, offset: number, data: Uint8Array): boolean {
+    if (!this.supportsLargeFiles || !this.channel) return false;
+    try {
+      this.channel.send(this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) }));
+      return true;
+    } catch { return false; }
   }
   /**
    * Resolves once the open session can take another files/3 data frame; undefined when it can now. A channel with a send budget (native and

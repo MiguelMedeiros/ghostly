@@ -26,6 +26,8 @@ export interface FileDeskDeps {
   /** Sends a files/3 frame on the chat's open session; false when there is none. */
   send(linkId: string, frame: Record<string, unknown>): boolean;
   /** Resolves once the chat's open session can take another data frame (its send budget has room). */
+  /** A file's bytes on the chat's session, in the form it agreed (`GhostLink.sendFileData`). Absent: `pf-data` frames through `send`. */
+  sendData?(linkId: string, id: string, offset: number, data: Uint8Array): boolean;
   writable?(linkId: string): Promise<void> | undefined;
   /** Bytes the contact sent that are stored here without asking (files/2 included): the budget files/3 fills. */
   receivedBytes(linkId: string): number;
@@ -111,6 +113,7 @@ export class FileDesk {
       openSource: (record) => this.openSource(linkId, record),
       changed: (record, transferred, progress) => this.changed(linkId, record, transferred, progress),
       room: async () => (await fileBytes()).room(),
+      ...(this.deps.sendData && { sendData: (id: string, offset: number, data: Uint8Array) => this.deps.sendData!(linkId, id, offset, data) }),
       writable: () => this.deps.writable?.(linkId),
     });
     this.chats.set(linkId, made);

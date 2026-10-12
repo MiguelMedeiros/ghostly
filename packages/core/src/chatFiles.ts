@@ -164,6 +164,11 @@ export interface ChatFilesHost {
   /** Sends a frame on the open session; false when there is none. */
   send(frame: Record<string, unknown>): boolean;
   /**
+   * Sends a file's bytes at `offset` in the form the open session agreed (WISP 501 § files/4): a binary message, or
+   * the `pf-data` frame; false when there is no session or it has no room. A host without it gets `pf-data` through `send`.
+   */
+  sendData?(id: string, offset: number, data: Uint8Array): boolean;
+  /**
    * A new offer from the contact: take it, ask the person, or refuse it. `again`: a file taken here without asking
    * that ended (failed, or stopped by the sender) and is offered again; it counts against the same limits as a new one.
    */
@@ -337,6 +342,11 @@ export class ChatFiles {
     return this.attached && this.host.send(frame);
   }
 
+  private sendData(id: string, offset: number, data: Uint8Array): boolean {
+    if (!this.host.sendData) return this.send({ t: "pf-data", id, offset, data: toBase64Url(data) });
+    return this.attached && this.host.sendData(id, offset, data);
+  }
+
   /** A session that agreed files/3 is open: say what fits here, then offer again what is not finished. */
   attach(): void {
     this.attached = true;
@@ -475,7 +485,7 @@ export class ChatFiles {
           this.end(entry, "failed", "Your contact asked for the same part of this file too many times");
           break;
         }
-        if (!this.send({ t: "pf-data", id: entry.record.id, offset, data: toBase64Url(chunk) })) { refused = true; break; }
+        if (!this.sendData(entry.record.id, offset, chunk)) { refused = true; break; }
         out.next = offset + chunk.length;
         out.sent += chunk.length;
       }
