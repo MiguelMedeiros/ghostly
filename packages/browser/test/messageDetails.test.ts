@@ -125,11 +125,14 @@ describe("a text over the live link", () => {
 describe("a text's row on its way out", () => {
   it("is written once for each thing that happens to it: stored, gone, sent, delivered", async () => {
     const t = await setup();
-    const written: string[] = [];
+    const written: string[] = [], durability: string[] = [];
     const original = IDBObjectStore.prototype.put;
     const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore["put"]>) {
       const row = args[0] as { sender?: string; delivery?: string; details?: MessageDetails };
-      if (this.name === "messages" && row.sender === "me") written.push(`${row.delivery}${row.details?.sentAt ? "+went" : ""}${row.details?.receiptAt ? "+receipt" : ""}`);
+      if (this.name === "messages" && row.sender === "me") {
+        written.push(`${row.delivery}${row.details?.sentAt ? "+went" : ""}${row.details?.receiptAt ? "+receipt" : ""}`);
+        durability.push(this.transaction.durability);
+      }
       return original.apply(this, args);
     });
     cleanup.push(async () => { put.mockRestore(); });
@@ -137,6 +140,9 @@ describe("a text's row on its way out", () => {
     await vi.waitFor(async () => expect((await t.messages()).find(m => m.sender === "me")?.details?.receiptAt).toBeDefined());
     // Before: `sending` twice more (marked again as it went) and `delivered` twice (the mark, then the receipt's time).
     expect(written).toEqual(["sending", "sending+went", "sent+went", "delivered+went+receipt"]);
+    // Only the message itself waits for the disk. Its notes and marks are relaxed: lost to a power cut, the row reads
+    // `sending` again, and the outbox sends it once more under the same id.
+    expect(durability).toEqual(["default", "relaxed", "relaxed", "relaxed"]);
   }, 20_000);
 });
 
