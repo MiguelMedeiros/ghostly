@@ -643,6 +643,20 @@ export class Groups {
     this.host.emit();
   }
 
+  /**
+   * Admin side: the invitations still unanswered are taken back, each over the contact chat it went on, when the group
+   * goes from this app or the role from me: nobody here could let them in. A chat that is down hears it as the answer
+   * to its accept. Entry sessions are not told: they close with the group, or the new admin answers the next knock.
+   */
+  private takeBack(groupId: string, group?: StoredGroup): void {
+    const entries = new Set(this.host.entries(groupId).values());
+    for (const linkId of this.invited.get(groupId) ?? []) {
+      if (!entries.has(linkId)) { try { this.host.sendOnLink(linkId, { t: "group-decline", g: groupId }); } catch { /* its accept is refused */ } }
+    }
+    this.invited.delete(groupId);
+    if (group) delete group.invited;
+  }
+
   /** Admin side: a contact chat answered its invitation (accepted or declined); false when it had none. */
   private answered(group: StoredGroup, linkId: string): boolean {
     const had = !!this.invited.get(group.id)?.delete(linkId);
@@ -844,8 +858,7 @@ export class Groups {
     // before anyone is told, so the admin's answer cannot arrive before it and be undone by it.
     group.left = { at: Date.now(), admin, ...(hubs.length ? { hubs } : {}), ...(bye ? { bye } : {}) };
     delete group.entry;
-    delete group.invited;
-    this.invited.delete(groupId);
+    this.takeBack(groupId, group);
     this.pendingEntries.delete(groupId);
     this.welcomed.delete(groupId);
     this.lingering.delete(groupId);
@@ -982,7 +995,16 @@ export class Groups {
     void this.store.putGroup(group).catch(() => {});
   }
 
-  makeAdmin(groupId: string, key: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.makeAdmin(groupId, key) : this.session(groupId).transferAdmin(key); }
+  async makeAdmin(groupId: string, key: string): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.makeAdmin(groupId, key);
+    await this.session(groupId).transferAdmin(key);
+    const group = this.stored.get(groupId);
+    if (!group || !this.invited.get(groupId)?.size) return;
+    // The new admin never invited them, and I can let nobody in any more.
+    this.takeBack(groupId, group);
+    await this.store.putGroup(group);
+    this.host.emit();
+  }
   /**
    * The admin pins a member of a private group as a hub, excludes one from being a hub, or leaves it to the member's
    * app (`null`): said in the group's metadata, which every member keeps (WISP 902 · Group Mesh § Hubs).
@@ -1014,7 +1036,7 @@ export class Groups {
     if (session?.status === "active") { try { await this.leave(groupId); } catch (e) { if (session.isAdmin && session.others.length) throw e; } }
     this.sessions.delete(groupId);
     this.stored.delete(groupId);
-    this.invited.delete(groupId);
+    this.takeBack(groupId);
     this.acceptSaid.delete(groupId);
     this.lastRoster.delete(groupId);
     this.lastTold.delete(groupId);
