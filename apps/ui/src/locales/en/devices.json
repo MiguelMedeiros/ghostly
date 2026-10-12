@@ -336,6 +336,8 @@
     "checking": "Checking which device is active · about 30 seconds",
     "confirm": "Type {{device}} to confirm",
     "fail": {
+      "changed": "The lock password was changed after this device last had the profile",
+      "changedNext": "Choose Use here and type the new password.",
       "lockedOut": "Too many tries. Try again later.",
       "name": "Type the name of the device that stops.",
       "noCopy": "This device has no copy of the profile",

@@ -36,7 +36,7 @@ describe("paired profile policy boundaries", () => {
     const onPairingState = vi.fn();
     const link = new GhostLink({ params: { ...createLink().mine, profile: "paired-chat/1" },
       pairing: { credentials: { seedB64: createIdentity().seedB64 }, pinPeer: vi.fn() },
-      native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": {} }, peerTransports: ["iroh/1", "webrtc/1"] },
+      native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": { id: "ab".repeat(32), relay: null, addresses: ["127.0.0.1:1"] } }, peerTransports: ["iroh/1", "webrtc/1"] },
       transport: { publish: vi.fn(), resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) },
       createPeerConnection: () => { throw new Error("No new dial expected"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
       events: { onPairingState },
@@ -101,7 +101,7 @@ describe("paired profile policy boundaries", () => {
     const onPairingState = vi.fn(), onDhtDelivery = vi.fn();
     const link = new GhostLink({ params, pairing: { credentials, pinPeer: vi.fn() },
       dht: { state: { sequence: 0, peerSequence: 0, peerMode: "stream" }, save: vi.fn(async () => {}) },
-      native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": {} }, peerTransports: ["iroh/1"] },
+      native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": { id: "ab".repeat(32), relay: null, addresses: ["127.0.0.1:1"] } }, peerTransports: ["iroh/1"] },
       transport: { publish: vi.fn(), resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) },
       rtcAvailable: false, createPeerConnection: () => { throw new Error("no WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
       events: { onPairingState, onDhtDelivery },
@@ -151,7 +151,7 @@ describe("paired profile policy boundaries", () => {
     const onPairingState = vi.fn(), onDhtDelivery = vi.fn();
     const link = new GhostLink({ params, pairing: { credentials, pinPeer: vi.fn() },
       dht: { state: { sequence: 0, peerSequence: 0, peerMode: "stream" }, save: vi.fn(async () => {}) },
-      native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": {} }, peerTransports: ["iroh/1"] },
+      native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": { id: "ab".repeat(32), relay: null, addresses: ["127.0.0.1:1"] } }, peerTransports: ["iroh/1"] },
       transport: { publish: vi.fn(), resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) },
       rtcAvailable: false, createPeerConnection: () => { throw new Error("no WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
       events: { onPairingState, onDhtDelivery },
@@ -212,7 +212,7 @@ it.each([false, true])("new DHT-only invites never dial or advertise streams (fa
   const link = new GhostLink({ params: { ...createLink().mine, profile: "paired-chat/1", deliveryMode: "dht" },
     pairing: { credentials: { seedB64: createIdentity().seedB64 }, pinPeer: vi.fn() },
     dht: { save: vi.fn(async () => {}) },
-    native: { preferred: "iroh/1", fallback, peerDescriptors: { "iroh/1": {} }, peerTransports: ["iroh/1"] },
+    native: { preferred: "iroh/1", fallback, peerDescriptors: { "iroh/1": { id: "ab".repeat(32), relay: null, addresses: ["127.0.0.1:1"] } }, peerTransports: ["iroh/1"] },
     transport: { publish, resolve, describe: () => ({ protocol: "fixture", relays: [] }) },
     createPeerConnection: rtc, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
   });

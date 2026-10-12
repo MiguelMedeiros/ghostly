@@ -9,7 +9,7 @@ import type { HoldStore } from "../src/backup/storage";
 import { buttonPress, buttonsState } from "../src/shared/buttons";
 import { withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
-import { FakeNativeNet } from "./helpers/fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.buttons.wire
 
 /**
@@ -42,7 +42,7 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } }, ...(hold && { hold: { ...emptyHoldState(), enabled: true, peerAllows: true } }) });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") }, ...(hold && { hold: { ...emptyHoldState(), enabled: true, peerAllows: true } }) });
   for (const row of rows) await db.putMessage({ ...row, linkId: id });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const onMessages = vi.fn<(linkId: string, messages: StoredMessage[]) => void>();
@@ -54,7 +54,7 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     editSupport: true, statusCardSupport: contactButtons, buttonsSupport: contactButtons, holdSupport: !!hold,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); }, onMessageEdit: edit => { contactEdits.push(edit); return confirmEdits; },

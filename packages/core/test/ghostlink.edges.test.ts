@@ -18,6 +18,9 @@ type Side = Partial<Omit<GhostLinkOptions, "params" | "transport" | "events">> &
 type Frame = string | Uint8Array | Record<string, unknown> | unknown[];
 type Internal = { attach(channel: FrameChannel): void; channel: FrameChannel | null };
 
+/** Iroh descriptors in the shape the adapter makes: a link keeps no other of what its contact tells. */
+const IROH_N = { id: "aa".repeat(32), relay: null, addresses: ["127.0.0.1:1"] };
+const IROH_B = { id: "bb".repeat(32), relay: null, addresses: ["127.0.0.1:1"] };
 const live: GhostLink[] = [];
 afterEach(async () => {
   vi.useRealTimers();
@@ -536,10 +539,26 @@ describe("what a paired peer says about itself", () => {
     for (const descriptors of [undefined, "iroh", { "iroh/1": "x".repeat(5000) }]) t.toB({ t: "paired-adapters", descriptors });
     await t.settle("b");
     expect(onTransportDiscovery).not.toHaveBeenCalled();
-    t.toB({ t: "paired-adapters", descriptors: { "iroh/1": { node: "n" }, "evil/9": { x: 1 }, "hyperdht/1": null } });
+    t.toB({ t: "paired-adapters", descriptors: { "iroh/1": IROH_N, "evil/9": { x: 1 }, "hyperdht/1": null } });
     await t.settle("b");
     expect(onTransportDiscovery).toHaveBeenCalledOnce();
-    expect(onTransportDiscovery.mock.calls[0]).toEqual([{ "iroh/1": { node: "n" } }, ["webrtc/1"], true]);
+    expect(onTransportDiscovery.mock.calls[0]).toEqual([{ "iroh/1": IROH_N }, ["webrtc/1"], true]);
+  });
+
+  it("keeps of the peer's adapters only descriptors in the shape an adapter makes, as its capability record is read", async () => {
+    const onTransportDiscovery = vi.fn(async () => {});
+    const t = linkedPair([{}, { events: { onTransportDiscovery } }]);
+    await t.ready();
+    onTransportDiscovery.mockClear();
+    t.toB({ t: "paired-adapters", descriptors: {
+      "iroh/1": { id: 42, relay: "http://192.168.1.10:8080/x" }, "hyperdht/1": { publicKey: "not a key", relay: "ftp://relay.test" } } });
+    await t.settle("b");
+    expect(onTransportDiscovery.mock.calls[0]).toEqual([{}, ["webrtc/1"], true]);
+    // One bad descriptor does not take the good one with it, and a field no adapter makes is not kept.
+    t.toB({ t: "paired-adapters", descriptors: {
+      "iroh/1": { ...IROH_N, relay: "http://192.168.1.10:8080/x" }, "hyperdht/1": { publicKey: "cd".repeat(32), relayed: true, relay: "wss://relay.test/", more: { x: 1 } } } });
+    await t.settle("b");
+    expect(onTransportDiscovery.mock.calls[1]).toEqual([{ "hyperdht/1": { publicKey: "cd".repeat(32), relayed: true, relay: "wss://relay.test/" } }, ["webrtc/1"], true]);
   });
 
   it("ignores ICE signaling on the session while no transport change is pending", async () => {
@@ -992,7 +1011,7 @@ describe("legacy data link frames", () => {
 describe("native transports", () => {
   const binding: NativeBinding = { transport: "iroh/1", context: "c".repeat(64), identities: ["a".repeat(64), "b".repeat(64)] };
   const endpoint = (connect: NativeEndpoint["connect"] = vi.fn()) =>
-    ({ transport: "iroh/1" as const, descriptor: { node: "n" }, onConnection: null, onDescriptor: null, connect, close: vi.fn(async () => {}) }) as unknown as NativeEndpoint & { onConnection: (c: BoundChannel) => void };
+    ({ transport: "iroh/1" as const, descriptor: IROH_N, onConnection: null, onDescriptor: null, connect, close: vi.fn(async () => {}) }) as unknown as NativeEndpoint & { onConnection: (c: BoundChannel) => void };
   const irohFirst: Side = { native: { preferred: "iroh/1", fallback: true } };
 
   function nativePair(dialer?: NativeEndpoint["connect"]) {
@@ -1057,26 +1076,33 @@ describe("native transports", () => {
   it("dials the contact's remembered native transport and resolves once the session is open", async () => {
     const invitation = createLink();
     const [ca, cb] = createChannelPair();
-    const a = makeLink(invitation.mine, { native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": { node: "b" } }, peerTransports: ["iroh/1"] } });
+    const a = makeLink(invitation.mine, { native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": IROH_B }, peerTransports: ["iroh/1"] } });
     const b = makeLink(invitation.invite, irohFirst);
     const dial = vi.fn(async () => ({ channel: ca, binding }));
     a.registerEndpoint(endpoint(dial));
     const eb = endpoint();
     b.registerEndpoint(eb);
     const connecting = a.connect();
-    await vi.waitFor(() => expect(dial).toHaveBeenCalledWith({ node: "b" }));
+    await vi.waitFor(() => expect(dial).toHaveBeenCalledWith(IROH_B));
     eb.onConnection({ channel: cb, binding });
     await expect(connecting).resolves.toBeUndefined();
     expect(a.canReleaseEndpoint("iroh/1")).toBe(false);
   });
 
   it("reports a native dial that fails, and one with no known address for the contact", async () => {
-    const failing = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: false, peerDescriptors: { "iroh/1": {} }, peerTransports: ["iroh/1"] } });
+    const failing = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: false, peerDescriptors: { "iroh/1": IROH_N }, peerTransports: ["iroh/1"] } });
     failing.registerEndpoint(endpoint(vi.fn(async () => { throw new Error("iroh: no route"); })));
     await expect(failing.connect()).rejects.toThrow("iroh: no route");
     const unknown = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: false, peerTransports: ["iroh/1"] } });
     unknown.registerEndpoint(endpoint());
     await expect(unknown.connect()).rejects.toThrow(/Peer native address unavailable/);
+    // A descriptor kept from before they were checked, in no shape an adapter makes: not dialled, as one never told.
+    const dial = vi.fn();
+    const kept = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: false, peerTransports: ["iroh/1"],
+      peerDescriptors: { "iroh/1": { id: "aa".repeat(32), relay: "http://192.168.1.10:8080/x", addresses: [] } } } });
+    kept.registerEndpoint(endpoint(dial));
+    await expect(kept.connect()).rejects.toThrow(/Peer native address unavailable/);
+    expect(dial).not.toHaveBeenCalled();
   });
 });
 
@@ -1091,7 +1117,7 @@ describe("changing transport on an open session", () => {
       makeLink(invitation.mine, { native: { preferred: "webrtc/1", fallback: true }, events: { onMessage: vi.fn(), onPairingState: onPairingStateA } }),
       makeLink(invitation.invite, { native: { preferred: "webrtc/1", fallback: true }, events: { onMessage: vi.fn(), onPairingState: onPairingStateB } }),
     ];
-    const endpoints = links.map(() => ({ transport: "iroh/1" as const, descriptor: { node: "n" }, onConnection: null, onDescriptor: null,
+    const endpoints = links.map(() => ({ transport: "iroh/1" as const, descriptor: IROH_N, onConnection: null, onDescriptor: null,
       close: vi.fn(async () => {}) })) as unknown as (NativeEndpoint & { onConnection: (c: BoundChannel) => void })[];
     const dials = [vi.fn(), vi.fn()];
     endpoints.forEach((endpoint, i) => {
@@ -1146,7 +1172,7 @@ describe("changing transport on an open session", () => {
       (link as unknown as { options: GhostLinkOptions }).options.pairing!.credentials.seedB64 = seeds[i];
       return link;
     });
-    const endpoints = links.map(() => ({ transport: "iroh/1" as const, descriptor: { node: "n" }, onConnection: null, onDescriptor: null,
+    const endpoints = links.map(() => ({ transport: "iroh/1" as const, descriptor: IROH_N, onConnection: null, onDescriptor: null,
       connect: vi.fn(), close: vi.fn(async () => {}) })) as unknown as (NativeEndpoint & { onConnection: (c: BoundChannel) => void })[];
     endpoints.forEach((endpoint, i) => links[i].registerEndpoint(endpoint));
     const [ca, cb] = createChannelPair();

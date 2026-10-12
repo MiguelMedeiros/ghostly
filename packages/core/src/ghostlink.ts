@@ -6,7 +6,7 @@ import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64, publicKeyFromZ32 } from "./identity";
-import { TRANSPORTS, irohRelayUrl, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { TRANSPORTS, irohRelayUrl, checkedDescriptors, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { dialDescriptors, encodePacketTransports, parsePacketTransports } from "./capsRecord";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
@@ -967,7 +967,7 @@ export class GhostLink {
       },
     }) : null;
     this.streamWasBlocked = this.streamBlocked;
-    this.peerDescriptors = options.native?.peerDescriptors ?? {};
+    this.peerDescriptors = checkedDescriptors(options.native?.peerDescriptors);
     this.peerTransports = options.native?.peerTransports;
     this.saidTransports = !!options.packetTransports && !!options.packetTransportsSaid;
     this.peerPacketSaid = !!options.packetTransports && !!options.native?.peerTransports;
@@ -3803,11 +3803,7 @@ export class GhostLink {
           if (frame?.t === "paired-reconnect-ack") { this.switchAck?.(); return; }
           if (frame?.t === "paired-adapters") {
             if (!frame.descriptors || typeof frame.descriptors !== "object" || JSON.stringify(frame.descriptors).length > 4096) return;
-            const descriptors: TransportDescriptors = {};
-            for (const transport of ["iroh/1", "hyperdht/1"] as const) {
-              const value = (frame.descriptors as TransportDescriptors)[transport];
-              if (value) descriptors[transport] = value;
-            }
+            const descriptors = checkedDescriptors(frame.descriptors);
             const transports = [...(this.paired?.peerTransports ?? [])] as PairedTransport[];
             const fallback = this.paired?.peerAllowsFallback ?? false;
             await this.options.events?.onTransportDiscovery?.(descriptors, transports, fallback);

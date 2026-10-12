@@ -41,12 +41,28 @@ export const NET_RUNNER_CSP =
   "img-src data: blob: https:; media-src data: blob: https:; font-src data: https:; connect-src https: wss:; frame-src 'none'; " +
   "worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
+/**
+ * What every location sends as Cross-Origin-Opener-Policy (each location of nginx.conf has the same): a page of another
+ * site that opens one of the app's addresses with `window.open` keeps no handle on that window, so it can neither
+ * point it elsewhere later nor post to it. `allow-popups`, as the windows the app opens itself (identity sign-in, Pubky
+ * Passport) stay its own.
+ */
+export const OPENER_POLICY = "same-origin-allow-popups";
+
+/**
+ * The one page served without it: where an identity sign-in returns, inside the popup the app opened. With the header
+ * the browser would cut that window from the app when the provider's page hands over to this one, and the app could
+ * no longer close it (packages/browser/src/proofs/oidc/popup.ts).
+ */
+export const OPENER_KEPT_PATH = "/oidc-callback.html";
+
 /** What the runner's location sends: its own policy, and the headers every other location sends (not the page's policy). */
 export const RUNNER_HEADERS: Readonly<Record<string, string>> = {
   "Content-Security-Policy": RUNNER_CSP,
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Cross-Origin-Opener-Policy": OPENER_POLICY,
   // A header, not a <meta>: the runner's own head is gone once it writes the app's entry.
   "X-DNS-Prefetch-Control": "off",
   "Cache-Control": "no-cache",
@@ -58,10 +74,13 @@ export const NET_RUNNER_HEADERS: Readonly<Record<string, string>> = { ...RUNNER_
 /**
  * The runner's headers from Vite's own servers too: `vite preview` serves the build the e2e suites test, and sends no
  * header of its own, so without this every app would refuse to start there (the runner checks its opaque origin).
+ * Every other answer gets the opener policy, the one header of the page that the suites test in a real browser, but
+ * the sign-in's return page (as in nginx.conf).
  */
 export function runnerHeaders(): Plugin {
   const add = (request: { url?: string }, response: { setHeader(name: string, value: string): unknown }, next: () => void) => {
     const path = request.url?.split(/[?#]/)[0];
+    if (path !== OPENER_KEPT_PATH) response.setHeader("Cross-Origin-Opener-Policy", OPENER_POLICY);
     // Both runners get the header; the unguarded one exists only in an e2e build (a 404 elsewhere).
     if (path === RUNNER_PATH || path === UNGUARDED_RUNNER_PATH) for (const [name, value] of Object.entries(RUNNER_HEADERS)) response.setHeader(name, value);
     // The network runner is the same file under its own policy (nginx.conf does the same).

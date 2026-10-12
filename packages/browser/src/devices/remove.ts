@@ -1,5 +1,5 @@
 import {
-  bytesEqual, classifyTurnRead, fromBase64Url, newDeviceSetSecret, randomBytes, readTurnPacket, setUpdateFrame, signTombstone, signTurnPacket, toBase64Url, turnKeys,
+  turnInstance, turnVerifierMark, bytesEqual, classifyTurnRead, fromBase64Url, newDeviceSetSecret, randomBytes, readTurnPacket, setUpdateFrame, signTombstone, signTurnPacket, toBase64Url, turnKeys,
   type DeviceFrame, type Signer, type TurnKeys, type TurnNetwork, type TurnSourcePut,
 } from "@ghostly/core";
 import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, type DeviceSlot, type EarlierDeviceSet } from "./state";
@@ -92,7 +92,7 @@ export async function planSetMove(record: DeviceRecord | null, signer: Signer, o
   // The first record at the new address: this device active, in its own slot, at the turn it holds. No release: a
   // reader that holds no record of a set takes its first valid record as current.
   const turn = record.turn;
-  const packet = await signTurnPacket(newKeys, { turn, rev: FIRST_REV, author: record.ownSlot, active: record.ownSlot, slots: turnSlots, instance: random(8) }, sign);
+  const packet = await signTurnPacket(newKeys, { turn, rev: FIRST_REV, author: record.ownSlot, active: record.ownSlot, slots: turnSlots, instance: turnInstance(turnVerifierMark(record.verifier ?? null), random) }, sign);
   const update = { d, set: turnSlots, turn, rev: FIRST_REV };
   // The frame carries this device's last record at the old address: a device that stays and did not see the turn handed
   // to this device reads there only the tombstone now, and checks the release in this record instead (`setUpdate.ts`).

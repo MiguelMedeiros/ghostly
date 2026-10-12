@@ -120,7 +120,7 @@ import { amendDevice, enrollDevice, forgetDevice, moveDevice, readDeviceRecord }
 import { HandoffGiver, type BusyReport, type HandoffStay, type HandoffView } from "../devices/handoff";
 import { WALLET_SDK_PINS, handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
-import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
+import { handoffPakeReady, isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity, openTurnKeeper } from "../devices/setup";
 import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
 import { newDeviceSecretDue } from "../devices/rotate";
@@ -5654,8 +5654,10 @@ export class GhostlyNode implements EngineImplementation {
     if (this.options.singleDevice) return;
     const record = await readDeviceRecord(databaseName()).catch(() => null);
     if (!record || record.state !== "active") return;
-    const verifier = await this.handoffVerifier().catch(() => null);
-    if (verifier && JSON.stringify(verifier) !== JSON.stringify(record.verifier)) await amendDevice(databaseName(), { verifier });
+    // The record holds what the settings hold, and nothing once they hold none: a verifier left here would go on
+    // checking a password the person changed. Settings that cannot be read change nothing (the caller drops the error).
+    const verifier = await this.handoffVerifier();
+    if (verifier ? JSON.stringify(verifier) !== JSON.stringify(record.verifier) : record.verifier) await amendDevice(databaseName(), { verifier: verifier ?? undefined });
   }
 
   /**
@@ -5739,7 +5741,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.syncDeviceVerifier().catch(() => {});
     const keeper = await this.deviceLinks.turnKeeper();
     const outcome = await keeper?.check(false);
-    if (outcome?.kind === "go-on" && !outcome.restricted) this.noteGoodTurn();
+    if (outcome?.kind === "go-on" && !outcome.restricted) { this.noteGoodTurn(); await keeper?.stateVerifier().catch(() => null); }
     // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
     if (outcome?.kind === "gated" && !this.shuttingDown) {
       const record = await readDeviceRecord(databaseName());
@@ -5781,7 +5783,7 @@ export class GhostlyNode implements EngineImplementation {
     if (knownDeviceGate()?.state !== "active") return;
     const outcome = await links.checkTurn(false).catch(() => null);
     if (this.shuttingDown || this.gatedOut) return;
-    if (outcome?.kind === "go-on" && !outcome.restricted) this.noteGoodTurn();
+    if (outcome?.kind === "go-on" && !outcome.restricted) { this.noteGoodTurn(); await this.stateDeviceVerifier(); }
     if (outcome?.kind === "gated") {
       const record = await readDeviceRecord(databaseName()).catch(() => null);
       if (record) await this.stopReplaced(viewOf(record));
@@ -6094,19 +6096,55 @@ export class GhostlyNode implements EngineImplementation {
     if (this.options.singleDevice) return;
     if (typeof password !== "string" || !password) throw new Error("A password is needed");
     const stored = await this.handoffVerifier();
+    const active = knownDeviceGate()?.state === "active";
+    // Whether the proof can be made or checked at all now: when it cannot, "wrong password" and "could not check" must
+    // not be taken for one another.
+    const ready = await handoffPakeReady().then(() => true, () => false);
+    if (stored && !ready) {
+      // A password that changes while nothing can check or make its proof: the old verifier must not go on checking
+      // the old one. The password typed again unchanged (Add a device): the verifier that checks it stays.
+      if (password !== current) await this.dropHandoffVerifier();
+      throw new Error("The password proof could not be loaded");
+    }
     // A verifier is replaced only by someone who knows the password it checks: proven here, the same way a pull does.
     // Only a profile on several devices has pulls to protect; one on a single device (Add a device not done yet) may set it afresh.
-    if (stored && knownDeviceGate()?.state === "active" && !(await provesHandoffPassword(stored, typeof current === "string" ? current : ""))) throw new Error("handoff-password: The current password is wrong.");
+    if (stored && active && !(await provesHandoffPassword(stored, typeof current === "string" ? current : ""))) throw new Error("handoff-password: The current password is wrong.");
+    // The password the stored verifier already checks (Add a device asks for the lock password again): kept as it is.
+    // A new one for the same password would be another verifier to every standby, which then could not check this
+    // password for a forced takeover (WISP 06 § Forced takeover).
+    if (stored && await provesHandoffPassword(stored, password)) {
+      await this.syncDeviceVerifier().catch(() => {});
+      await this.stateDeviceVerifier();
+      return;
+    }
     try {
       const verifier = await makeHandoffVerifier(password);
       await wrap((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
       await this.syncDeviceVerifier().catch(() => {});
+      await this.stateDeviceVerifier();
     } catch (error) {
       // The old verifier must not go on checking a password the person changed: none, until one is made (a pull is
       // refused meanwhile; a push still works).
-      await wrap((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
+      await this.dropHandoffVerifier();
       throw error;
     }
+  }
+
+  /** The profile has no verifier any more: its settings, the device state, and what the turn record states. */
+  private async dropHandoffVerifier(): Promise<void> {
+    await wrap((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
+    await this.syncDeviceVerifier().catch(() => {});
+    await this.stateDeviceVerifier();
+  }
+
+  /**
+   * The turn record states which verifier the profile has now (WISP 06 § Record, the verifier mark), so a standby that
+   * keeps an older one does not take over with the password it checks. Asked after the device state took the
+   * verifier: at start, at each change, and after a good read of the turn (a change made offline is stated then).
+   */
+  private async stateDeviceVerifier(): Promise<void> {
+    if (this.options.singleDevice || this.shuttingDown || this.gatedOut) return;
+    try { await (await this.deviceLinks?.turnKeeper())?.stateVerifier(); } catch { /* stated at the next good read, or at the next start */ }
   }
 
   /**
@@ -6201,8 +6239,9 @@ export class GhostlyNode implements EngineImplementation {
     const breezDatabases = [...new Set(plan.wallets.flatMap((w) => (w.route === "moves" && w.breez && breez.has(w.id) ? [breez.get(w.id)!] : [])))];
     // The password proof's verifier goes beside the state: a standby checks a forced takeover's password with it,
     // without opening its frozen copy (WISP 06 § Forced takeover).
-    const verifier = await this.handoffVerifier().catch(() => null);
-    await moveDevice(profile, "releasing", { ...patch, ...(verifier ? { verifier } : {}), breezDatabases: breezDatabases.length ? breezDatabases : undefined });
+    // A profile with none leaves none: what the record held before is not the profile's any more.
+    const verifier = await this.handoffVerifier().then((value) => ({ verifier: value ?? undefined }), () => ({}));
+    await moveDevice(profile, "releasing", { ...patch, ...verifier, breezDatabases: breezDatabases.length ? breezDatabases : undefined });
     this.events.onDeviceGate?.({ state: "releasing", reload: true });
   }
 
