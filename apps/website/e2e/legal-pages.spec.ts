@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { axe } from "./axe";
 
 // /terms and /privacy: they render with their titles, the footer and the sitemap list them, and the site sets no
 // cookie and loads nothing from an analytics or font service (the privacy policy says so).
@@ -35,7 +36,18 @@ for (const path of ["/terms", "/privacy"]) {
   });
 }
 
-test("the footer links both pages",async ({ page }) => {
+// Every text of the two pages reads at AA contrast, the quiet "Last updated" line too, on a wide screen and on a phone.
+for (const path of ["/terms", "/privacy"]) {
+  test(`${path}: axe finds nothing serious, wide or on a phone`, async ({ page }) => {
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 812 });
+      await page.goto(path, { waitUntil: "networkidle" });
+      expect(await axe(page), `${path} at ${width}px`).toEqual([]);
+    }
+  });
+}
+
+test("the footer links both pages", async ({ page }) => {
   await page.goto("/privacy");
   const footer = page.locator("footer");
   await expect(footer.getByRole("link", { name: "Privacy", exact: true })).toHaveAttribute("href", "/privacy");

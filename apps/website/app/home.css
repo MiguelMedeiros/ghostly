@@ -239,7 +239,9 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
 }
 /* Phones only (the wide picture names its slabs itself): the layer legend sits in the sheet
    under the copy, two or three names per row, so the sheet stays about 330px tall and the
-   whole stack of slabs remains in view above it. */
+   whole stack of slabs remains in view above it. An entry lights as its slab arrives (--on, from 0.25 to 1,
+   OpenScene.tsx): the swatch fades in and the name goes from --dim to the text colour, so a name that still waits
+   reads at AA contrast. */
 .open-legend {
   display: flex;
   flex-wrap: wrap;
@@ -251,6 +253,7 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   display: flex;
   align-items: center;
   gap: 10px;
+  color: color-mix(in srgb, var(--text) calc(var(--on, 1) * 100%), var(--dim));
 }
 .open-legend li span {
   width: 14px;
@@ -258,6 +261,7 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   border-radius: 2px;
   background: var(--c);
   flex: none;
+  opacity: var(--on, 1);
 }
 
 /* ── Reveal ── */

@@ -32,7 +32,7 @@ export async function LegalPage({
           <h1 className="text-4xl md:text-5xl font-bold mb-3 bg-gradient-to-r from-cyan-400 to-cyan-300 bg-clip-text text-transparent">
             {title}
           </h1>
-          <p className="text-gray-500 mb-12 font-mono text-sm">Last updated: {updated}</p>
+          <p className="dim mb-12 font-mono text-sm">Last updated: {updated}</p>
           <div className="text-lg text-gray-300 leading-relaxed mb-12 space-y-4">{lead}</div>
           {children}
         </div>
