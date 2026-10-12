@@ -285,17 +285,83 @@ describe("the reactions store", () => {
   });
 
   it("takes at most REACTION_LIMITS.receive a window from one group member", async () => {
-    const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
-    const rows = [row({ id: `${ana}:0:1`, member: ana, text: "hello group" })];
-    const { reactions, tick } = memory(rows);
-    const outcomes: string[] = [];
-    for (let n = 1; n <= REACTION_LIMITS.receive + 5; n++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "👍", n }));
-    expect(outcomes.filter(o => o === "applied")).toHaveLength(REACTION_LIMITS.receive);
-    expect(outcomes.slice(-5)).toEqual(Array(5).fill("dropped"));
-    // Another member has a window of its own, and the window passes.
-    expect(await reactions.receive("group:g", ana, { id: `${ana}:0:1`, e: "😂", n: 1 })).toBe("applied");
-    tick(REACTION_LIMITS.windowMs);
-    expect(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "🙏", n: 100 })).toBe("applied");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      const rows = [row({ id: `${ana}:0:1`, member: ana, text: "hello group" })];
+      const { reactions, tick } = memory(rows);
+      const outcomes: string[] = [];
+      for (let n = 1; n <= REACTION_LIMITS.receive + 5; n++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "👍", n }));
+      expect(outcomes.filter(o => o === "applied")).toHaveLength(REACTION_LIMITS.receive);
+      // Past the window they wait for the next one, and nothing more is written in this one.
+      expect(outcomes.slice(-5)).toEqual(Array(5).fill("waiting"));
+      expect(rows[0].reactions?.[bo]).toMatchObject({ n: REACTION_LIMITS.receive });
+      // Another member has a window of its own, and the window passes.
+      expect(await reactions.receive("group:g", ana, { id: `${ana}:0:1`, e: "😂", n: 1 })).toBe("applied");
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows[0].reactions?.[bo]).toMatchObject({ e: "👍", n: REACTION_LIMITS.receive + 5 });
+      expect(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "🙏", n: 100 })).toBe("applied");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a group member's reactions past the window are kept for the next one, the newest per message: a catch-up's burst loses none", async () => {
+    // A community's catch-up hands back every reaction a member made while this one was away, at once, and a frame it
+    // handed is never handed again: the ten past the thirty a window takes were dropped for good.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      const rows = Array.from({ length: 40 }, (_, i) => row({ id: `${ana}:0:${i}`, member: ana, text: `message ${i}` }));
+      const { reactions, tick } = memory(rows);
+      const outcomes: string[] = [];
+      for (let i = 0; i < 40; i++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:${i}`, e: "👍", n: i + 1 }));
+      expect(outcomes.slice(0, REACTION_LIMITS.receive)).toEqual(Array(REACTION_LIMITS.receive).fill("applied"));
+      expect(outcomes.slice(REACTION_LIMITS.receive)).toEqual(Array(10).fill("waiting"));
+      expect(rows.filter(r => r.reactions?.[bo])).toHaveLength(REACTION_LIMITS.receive);
+      // A newer one for a message that waits takes its place; an older one changes nothing.
+      expect(await reactions.receive("group:g", bo, { id: `${ana}:0:39`, e: "😂", n: 100 })).toBe("waiting");
+      expect(await reactions.receive("group:g", bo, { id: `${ana}:0:39`, e: "🙏", n: 50 })).toBe("stale");
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows.filter(r => r.reactions?.[bo])).toHaveLength(40);
+      expect(rows[39].reactions?.[bo]).toMatchObject({ e: "😂", n: 100 });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps REACTION_LIMITS.held reactions past the window per group, drops a member's once it is out of the group, and nothing after a stop", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const [ana, bo, cy] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      const count = REACTION_LIMITS.receive + REACTION_LIMITS.held + 5;
+      const rows = Array.from({ length: count }, (_, i) => row({ id: `${ana}:0:${i}`, member: ana, text: `message ${i}` }));
+      const { reactions, host, tick } = memory(rows);
+      const members = new Set([ana, bo, cy]);
+      Object.assign(host, { believed: (_chat: string, by: string) => members.has(by) });
+      const outcomes: string[] = [];
+      for (let i = 0; i < count; i++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:${i}`, e: "👍", n: i + 1 }));
+      expect(outcomes.filter(o => o === "waiting")).toHaveLength(REACTION_LIMITS.held + 5);
+      // The oldest that waited made room for the newest: a window later, 30 more are shown and the rest still wait.
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows.filter(r => r.reactions?.[bo])).toHaveLength(2 * REACTION_LIMITS.receive);
+      expect(rows[REACTION_LIMITS.receive].reactions, "the oldest five past the room are gone").toBeUndefined();
+      expect(rows[REACTION_LIMITS.receive + 5].reactions?.[bo]).toMatchObject({ n: REACTION_LIMITS.receive + 6 });
+      // Removed meanwhile: what waited from that member is not shown.
+      members.delete(bo);
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows.filter(r => r.reactions?.[bo])).toHaveLength(2 * REACTION_LIMITS.receive);
+      expect(vi.getTimerCount()).toBe(0);
+      // Stopped with some waiting: no timer is left and nothing more is written.
+      for (let i = 0; i < REACTION_LIMITS.receive + 3; i++) await reactions.receive("group:g", cy, { id: `${ana}:0:${i}`, e: "😮", n: i + 1 });
+      expect(vi.getTimerCount()).toBe(1);
+      reactions.stop();
+      expect(vi.getTimerCount()).toBe(0);
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows.filter(r => r.reactions?.[cy])).toHaveLength(REACTION_LIMITS.receive);
+    } finally { vi.useRealTimers(); }
   });
 
   it("keeps one reaction per member per message in a group, by member key", async () => {

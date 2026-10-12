@@ -1178,6 +1178,11 @@ export class GhostlyNode implements EngineImplementation {
     },
     // Someone reacted to a message of mine: a quiet notice, never a message's sound or an unread count.
     notify: (chat, key) => this.feedback("reaction", `${chat}:${key}`, chat),
+    // A group member's reaction that waited for its window: still a member, as `receiveGroupReaction` asked when it came.
+    believed: (chat, by) => {
+      const membership = this.membership(chat.slice("group:".length));
+      return !!membership?.members.has(by) && by !== membership.me;
+    },
   });
 
   /**
@@ -2075,6 +2080,7 @@ export class GhostlyNode implements EngineImplementation {
     this.publicActivity.clear();
     for (const queue of this.editQueues.values()) queue.stop();
     this.groupEdits.stop();
+    this.reactions.stop();
     this.cardEdits.stop();
     // What is still being written is waited for, side by side: the stop takes as long as the slowest, not their sum.
     await Promise.allSettled([
