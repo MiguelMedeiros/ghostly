@@ -25,6 +25,9 @@ function newestMessages(index: IDBIndex, query: IDBKeyRange, count: number): Pro
   });
 }
 
+/** A write that waits for no disk sync of its own (in a browser, the engine's default already; on Node, the CLI's store). */
+const RELAXED: IDBTransactionOptions = { durability: "relaxed" };
+
 /**
  * Durable local state of the browser peer. Identity seeds live here the same
  * way Desktop keeps them in its WebView storage: local to this profile, never
@@ -210,7 +213,9 @@ export const db = {
     await wrap((await store(STORES.messages, "readwrite")).put(message));
   },
   async updateDelivery(linkId: string, id: string, delivery: NonNullable<StoredMessage["delivery"]>, deliveryError?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>): Promise<void> {
-    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+    // `sent` and `delivered` are relaxed (written, with no disk sync of their own): a mark lost to a power cut is made
+    // again, the outbox sends what is not `delivered` once more under the same id and the receipt comes back.
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite", delivery === "sent" || delivery === "delivered" ? RELAXED : undefined);
     const messages = tx.objectStore(STORES.messages);
     const request = messages.get([linkId, id]);
     request.onsuccess = () => {
@@ -233,10 +238,11 @@ export const db = {
   /**
    * Changes one message row in place, in one transaction: `change` sees the row as stored and gives the fields to
    * set (`null`: leave it). A row that is not there is not made. Used for what the delivery states do not carry
-   * (the message's details record), on rows in any state.
+   * (the message's details record), on rows in any state. `relaxed`: for what can be made again or is only a note
+   * (a receipt's mark, the details record), written with no disk sync of its own.
    */
-  async patchMessage(linkId: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage | undefined> {
-    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+  async patchMessage(linkId: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null, relaxed = false): Promise<StoredMessage | undefined> {
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite", relaxed ? RELAXED : undefined);
     const messages = tx.objectStore(STORES.messages);
     const request = messages.get([linkId, id]);
     let result: StoredMessage | undefined;
