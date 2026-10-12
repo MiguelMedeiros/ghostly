@@ -1310,6 +1310,10 @@ export class GhostlyNode implements EngineImplementation {
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     linkHandled: linkId => this.links.get(linkId)?.link?.handled() ?? Promise.resolve(false),
     linkOpen: linkId => !!this.links.get(linkId)?.link?.isDataLinkOpen,
+    loaded: (groupId, history) => {
+      const note = latestReaction(history);
+      if (note) this.reactionNotes.set(`group:${groupId}`, note);
+    },
     myNick: () => this.sharedNick,
     // A copy started from older state sends above the copy it replaced, and manages no group until told to (WISP 06).
     seqFloor: () => this.counterFloor,
@@ -1742,17 +1746,14 @@ export class GhostlyNode implements EngineImplementation {
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
       const note = latestReaction(messages);
       if (note) this.reactionNotes.set(stored.id, note);
-      if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
+      if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover(messages);
     }
     this.transfersRestored = true;
     for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
     // Groups know their edges from the links above, and may add or drop some before anything dials.
+    // Each group's latest reaction is noted from the history its load reads (`loaded`).
     await this.groups.load(this.limitedMode);
     this.groupsLoaded = true;
-    for (const group of this.groups.views()) {
-      const note = latestReaction(await db.getMessages(`group:${group.id}`));
-      if (note) this.reactionNotes.set(`group:${group.id}`, note);
-    }
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
     // Each link derives its keys and seals its capability record as it starts: 50 chats and 20 groups in one task held
