@@ -6,7 +6,7 @@
 | Status | Draft |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
-| Implementation | Every chat session: `files/3` (any size, consent, resume) and `files/2` for older apps; WebRTC and supported native adapters |
+| Implementation | Every chat session: `files/3` (any size, consent, resume), `files/4` (its bytes as binary messages, on WebRTC sessions) and `files/2` for older apps; WebRTC and supported native adapters |
 | Summary | How files travel in every chat: negotiated, chunk by chunk, with integrity checks. |
 | Availability | Available |
 
@@ -56,6 +56,26 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 - **Storage.** Received bytes go to storage as they arrive and are read back in ranges, so no file is held whole in memory (browsers: the origin-private file system, IndexedDB pieces where it is missing; Desktop: files in the app's data folder). There is no size limit but the receiver's space and safe integers (2^53 - 1 bytes).
 
 Implemented in [`chatFiles.ts`](../../packages/core/src/chatFiles.ts) (protocol) and [`fileDesk.ts`](../../packages/browser/src/engine/fileDesk.ts) (the app's records, storage and messages).
+
+## files/4: a file's bytes as bytes (revision 2026-10-12)
+
+`files/3` writes a file's bytes as base64url text inside a JSON frame, so a 16 KiB chunk is a 21,935-byte frame and a 200 MiB file is 267.8 MiB of frames: a third more than the file, on every transport, relayed ones included. `files/4` sends the same chunk as one binary message of the session ([100](100-transports.md#text-and-binary-messages-revision-2026-10-12)): 16,416 bytes with a 22-character id, 0.2% more than the file. Nothing else changes: every other frame, every rule and every limit above is `files/3`'s.
+
+- **Agreed like `files/3`.** `files/4` is a session capability of its own in `paired-capabilities`. An app that lists it lists `files/3` too, and it is on only while both sides list both on the current session. An app lists it only on a session whose adapter carries binary messages at its end: a WebRTC session does; an Iroh or HyperDHT session does not yet ([102](102-iroh.md), [103](103-hyperdht.md)), so files there stay on base64, as they do with any app that does not list `files/4`.
+- **The data message.** One binary message, at most 16,458 bytes:
+
+  | Bytes | Field | Value |
+  |---|---|---|
+  | 1 | kind | `0x04` |
+  | 1 | id length | 8 to 64 |
+  | id length | `id` | The sender's id for the file, in ASCII (`[A-Za-z0-9_-]`) |
+  | 8 | `offset` | Unsigned, big endian; at most 2^53 - 1 |
+  | 1 to 16,384 | data | The file's bytes from `offset`, as they are |
+
+  It means what `pf-data {id, offset, data}` means, and every rule that names a data frame (flow, confirming, resume, what is sent again and its bound, backpressure) counts it the same way, by its bytes of data.
+- **Sender.** For each chunk, a sender sends the binary message when `files/4` is on for the open session at that moment, and the `pf-data` frame otherwise. A transfer under way follows the session: after a transport switch or a reconnection it goes on in whichever form the new session agreed, from the offset the receiver accepts.
+- **Receiver.** An app that lists `files/4` takes a file's data in either form, at any time, for the same transfer. A binary message that is malformed (shorter than its header and one byte, another kind, an id length or an id outside the above, an offset past 2^53 - 1, more than 16,384 bytes of data), that names no transfer under way, or that comes while `files/4` is not on, is dropped as a malformed frame is: it ends neither the transfer nor the session, and the resume rules bring the bytes again.
+- **Not covered.** `files/2`, held files ([404](404-store-and-forward.md)) and a file's offer said on the DHT floor are unchanged. A group's file session ([503](503-group-files.md)) stays on `files/3` frames until 503 says otherwise.
 
 ## files/2 framing
 
