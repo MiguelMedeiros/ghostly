@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { Link } from "react-router-dom";
 import { useOptionalI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
@@ -27,27 +27,29 @@ export function AppBrand({ onHome }: AppBrandProps) {
   const moves = !useSettings().settings.reduceMotion && !systemReducesMotion();
   const root = useRef<HTMLDivElement>(null);
   const [play, setPlay] = useState<Play | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const busy = useCallback((motion: BrandMotion, on: BrandCue) => {
-    setPlay({ motion, on });
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setPlay(null), BRAND_BUSY[motion][on]);
-  }, []);
+  // The logo rests when its motion ends. The timer goes with the list: left running after the list is gone, it set
+  // state on nothing (and, after a test file's teardown, failed the run). An effect of `play`, so a list whose effects
+  // run again (StrictMode) starts it again instead of staying busy for good.
+  useEffect(() => {
+    if (!play) return;
+    const timer = setTimeout(() => setPlay(null), BRAND_BUSY[play.motion][play.on]);
+    return () => clearTimeout(timer);
+  }, [play]);
 
   // Before the first paint, so the letters don't show and then vanish to come in.
   useLayoutEffect(() => {
     if (!firstOpen() || !moves || !root.current) return;
     const motion = takeBrandTurn();
     playBrandMotion(root.current, motion, "open");
-    busy(motion, "open");
-  }, [moves, busy]);
+    setPlay({ motion, on: "open" });
+  }, [moves]);
 
   const hover = (e: PointerEvent<HTMLDivElement>) => {
     if (e.pointerType !== "mouse" || play || !moves || !root.current) return;
     const motion = takeBrandTurn();
     playBrandMotion(root.current, motion, "hover");
-    busy(motion, "hover");
+    setPlay({ motion, on: "hover" });
   };
 
   return (
