@@ -260,7 +260,7 @@ describe("the event stream", () => {
     const history = (chat: string) => Array.from({ length: 2_000 }, (_, i) => message(chat, `m${i}`, i % 2 ? { sender: "me", delivery: "delivered" } : {}));
     const first = await hub("large.jsonl");
     first.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", history("c1")], ["c2", history("c2")]]));
-    // The seen set is written behind the baseline: an empty transaction after it ends once those rows are in.
+    // The seen set is written behind the baseline: a read queued after it runs once those rows are in.
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open("large.jsonl");
       request.onsuccess = () => resolve(request.result);
