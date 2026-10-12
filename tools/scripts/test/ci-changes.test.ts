@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, WEBSITE_INPUTS, covers, plan } from "../ci-changes.mjs";
+import { PACKAGES_READ_FROM_SITE, TESTED_PAGES, WEBSITE_INPUTS, covers, plan, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -127,5 +127,84 @@ describe("plan", () => {
 
   it("the Desktop workflow is not the site", () => {
     expect(plan([".github/workflows/desktop-macos.yml"], ready)).toMatchObject({ website: false, app: true });
+  });
+});
+
+describe("a push to dev whose tree a pull request already tested", () => {
+  it("runs only Tauri Backend, which saves the Cargo cache, and CI Success accepts that plan", () => {
+    expect(plan(null, { draft: false, tested: true })).toMatchObject({ rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested: true });
+    expect(plan(null, { draft: false }).tested).toBe(false);
+    const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+    expect(ci).toContain('if [[ "$DRAFT" != "true" && "$TESTED" != "true" && ( "$FULL" != "true"');
+    expect(ci).toContain('if [[ "$TESTED" == "true" && "$PUSH_TO_DEV" != "true" ]]; then');
+  });
+
+  // dev's new commit, its tree, and the batch's head that holds that tree (tested at 20:54, landed at 21:01).
+  const sha = "c".repeat(40);
+  const tree = "t".repeat(40);
+  const head = "h".repeat(40);
+  const run = (over: object = {}) => ({ id: 7, html_url: "https://github.com/o/r/actions/runs/7", head_sha: head, head_commit: { tree_id: tree }, created_at: "2026-10-12T20:54:22Z", ...over });
+  const landed = (date: string) => ({ commit: { committer: { date } } });
+  const fake = ({ runs = [[run()]], jobs = [{ name: "CI Success", conclusion: "success" }], compare = { ahead_by: 2, commits: [landed("2026-10-12T21:00:50Z"), landed("2026-10-12T21:01:05Z")] } }: { runs?: object[][]; jobs?: object[]; compare?: object } = {}) => {
+    const asked: string[] = [];
+    const api = async (path: string) => {
+      asked.push(path);
+      const page = /[?&]page=(\d+)/.exec(path);
+      if (page) return { workflow_runs: runs[Number(page[1]) - 1] ?? [] };
+      if (path.startsWith("actions/runs/")) return { jobs };
+      if (path.startsWith("compare/")) return compare;
+      throw new Error(path);
+    };
+    return { api, asked };
+  };
+
+  it("finds the green run whose head holds the same tree", async () => {
+    const { api, asked } = fake();
+    expect(await testedAs({ sha, tree, api })).toBe("https://github.com/o/r/actions/runs/7");
+    expect(asked).toContain(`compare/${head}...${sha}`);
+    expect(asked[0]).toContain("event=pull_request&status=success");
+  });
+
+  it("does not take a run of another tree", async () => {
+    const { api } = fake({ runs: [[run({ head_commit: { tree_id: "x".repeat(40) } })]] });
+    expect(await testedAs({ sha, tree, api })).toBe(null);
+  });
+
+  it("does not take a draft's green run: only CI Success counts", async () => {
+    const { api } = fake({ jobs: [{ name: "CI Success (draft)", conclusion: "success" }] });
+    expect(await testedAs({ sha, tree, api })).toBe(null);
+  });
+
+  it("does not take a run that started when dev already held a commit its head lacks (it tested their merge)", async () => {
+    const { api } = fake({ compare: { ahead_by: 2, commits: [landed("2026-10-12T20:50:00Z"), landed("2026-10-12T21:01:05Z")] } });
+    expect(await testedAs({ sha, tree, api })).toBe(null);
+  });
+
+  it("does not take a run when the commits its head lacks are too many to list", async () => {
+    const { api } = fake({ compare: { ahead_by: 300, commits: [landed("2026-10-12T21:01:05Z")] } });
+    expect(await testedAs({ sha, tree, api })).toBe(null);
+  });
+
+  it("takes the next match when the newest one does not count", async () => {
+    const other = run({ id: 8, html_url: "https://github.com/o/r/actions/runs/8", head_sha: "g".repeat(40) });
+    const calls: string[] = [];
+    const api = async (path: string) => {
+      calls.push(path);
+      if (path.startsWith("actions/workflows/")) return { workflow_runs: [run(), other] };
+      if (path === "actions/runs/7/jobs?per_page=100") return { jobs: [{ name: "CI Success", conclusion: "failure" }] };
+      if (path.startsWith("actions/runs/")) return { jobs: [{ name: "CI Success", conclusion: "success" }] };
+      return { ahead_by: 1, commits: [landed("2026-10-12T21:01:05Z")] };
+    };
+    expect(await testedAs({ sha, tree, api })).toBe("https://github.com/o/r/actions/runs/8");
+  });
+
+  it("reads at most TESTED_PAGES pages, and stops at a short one", async () => {
+    const full = Array.from({ length: 100 }, (_, i) => run({ id: i, head_commit: { tree_id: "x".repeat(40) } }));
+    const many = fake({ runs: Array.from({ length: TESTED_PAGES + 2 }, () => full) });
+    expect(await testedAs({ sha, tree, api: many.api })).toBe(null);
+    expect(many.asked).toHaveLength(TESTED_PAGES);
+    const short = fake({ runs: [[run({ head_commit: { tree_id: "x".repeat(40) } })], full] });
+    expect(await testedAs({ sha, tree, api: short.api })).toBe(null);
+    expect(short.asked).toHaveLength(1);
   });
 });
