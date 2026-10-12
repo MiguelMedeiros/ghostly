@@ -1,6 +1,6 @@
 import {
   APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
-  appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation,
+  appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation,
   readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
   type AppStoreRead,
@@ -9,7 +9,7 @@ import {
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
-import { DEFAULT_APP_STORES } from "./appDefaults";
+import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
 
 /*
  * The engine's app store (WISP 1200 § Updates and rollback, § Stores, § Permissions): the mini-apps installed in this
@@ -26,6 +26,9 @@ import { DEFAULT_APP_STORES } from "./appDefaults";
  * - Nothing installs before the person saw the checked bundle: `preview` fetches, checks and keeps it in memory,
  *   `install` stores it. An update that adds permissions waits for the person (`acceptUpdate`); a lower `sequence` is
  *   never installed; the same `sequence` with another digest is refused and marked.
+ * - An app that comes with Ghostly (`BUILT_IN_APPS`, WISP 1200 § Built-in apps) is offered, not installed: no record, no
+ *   file and no permission until the person opens it and allows what it asks. Once the person removes it, a mark in the
+ *   settings store (`BUILT_IN_APPS_KEY`) keeps it from being offered again; installing it clears the mark.
  */
 
 /** The scope of an app opened alone, outside every chat. Other scopes are the link ids of 1:1 chats. */
@@ -229,6 +232,8 @@ export interface AppsHost {
   online(): boolean;
   now?: () => number;
   defaults?: readonly { url: string; key: string }[];
+  /** The apps that come with this build (`BUILT_IN_APPS` when absent). */
+  builtIns?: readonly BuiltInApp[];
   /** After every update check (the scheduled one included): the pages read the installed apps again. */
   checked?(results: AppCheckResult[]): void;
 }
@@ -250,6 +255,52 @@ function listingUrls(urls: readonly string[]): string[] {
 /** An error whose message starts with its code (`<code>: words`), as it crosses the engine's RPC. */
 function fail(code: string, words: string): never {
   throw new Error(`${code}: ${words}`);
+}
+
+/**
+ * The key, in `STORES.settings`, of what the person did about the apps that come with Ghostly (one of
+ * `PROFILE_SETTINGS_KEYS`: "Clear all data" drops it, and the profile is offered them as a new one is).
+ */
+export const BUILT_IN_APPS_KEY = "appBuiltIns";
+/** The built-in apps the person removed, by reference, and when (WISP 1200 § Built-in apps: removing sticks). */
+export interface BuiltInAppMarks { removed: Record<string, number> }
+/** A built-in app this profile is offered: one the person has neither installed nor removed. Nothing of it is stored. */
+export interface BuiltInAppOffer { ref: string; publisher: string; name: string; fingerprint: string; digest: string; url: string }
+
+/** The marks as kept, read with nothing taken on trust: a record that is not one is no mark. */
+function builtInMarks(kept: unknown): BuiltInAppMarks {
+  const removed: Record<string, number> = {};
+  const held = (kept as { removed?: unknown } | null | undefined)?.removed;
+  if (held && typeof held === "object") for (const [ref, at] of Object.entries(held)) if (isAppRef(ref) && typeof at === "number") removed[ref] = at;
+  return { removed };
+}
+
+/** Queues, on the settings store of an open transaction, a change of the built-in apps' marks. */
+function markBuiltIns(settings: IDBObjectStore, change: (marks: BuiltInAppMarks) => void): void {
+  const read = settings.get(BUILT_IN_APPS_KEY);
+  read.onsuccess = () => {
+    const marks = builtInMarks(read.result);
+    change(marks);
+    settings.put(marks, BUILT_IN_APPS_KEY);
+  };
+}
+
+const builtInRef = (app: BuiltInApp) => appRef(app.publisher, app.name);
+
+/**
+ * The entries of the built-in list this profile is offered (WISP 1200 § Built-in apps): each reference once, not
+ * installed (`installed`, by reference) and not removed by the person. An entry that is not a whole one (its key, its
+ * name, its digest, a URL off the list of `appFetch.ts`) is skipped, as a build with no bundle for it would be.
+ */
+export function builtInsDue(list: readonly BuiltInApp[], installed: ReadonlySet<string>, marks: BuiltInAppMarks): BuiltInApp[] {
+  const due = new Map<string, BuiltInApp>();
+  for (const app of list) {
+    if (!isAppKey(app.publisher) || !isAppHash(app.digest) || !isAppFetchUrl(app.url)) continue;
+    const ref = builtInRef(app);
+    if (!isAppRef(ref) || due.has(ref) || installed.has(ref) || marks.removed[ref] !== undefined) continue;
+    due.set(ref, app);
+  }
+  return [...due.values()];
 }
 
 /**
@@ -423,6 +474,27 @@ export class Apps {
   private async installedOrFail(ref: unknown): Promise<InstalledApp> {
     if (!isAppRef(ref)) fail("bad-ref", "Not an app reference");
     return (await this.app(ref)) ?? fail("not-installed", "This app is not installed");
+  }
+
+  /** The built-in list's entry of this reference, if it has one. */
+  private builtIn(ref: string): BuiltInApp | undefined {
+    return (this.host.builtIns ?? BUILT_IN_APPS).find((app) => builtInRef(app) === ref);
+  }
+  private async builtInMarks(): Promise<BuiltInAppMarks> {
+    return builtInMarks(await wrap((await store(STORES.settings, "readonly")).get(BUILT_IN_APPS_KEY)));
+  }
+
+  /**
+   * The built-in apps this profile is offered (WISP 1200 § Built-in apps): shown with the installed ones, with nothing
+   * stored and nothing granted. Opening one is an install like any other, from the bundle the build carries.
+   */
+  async builtIns(): Promise<BuiltInAppOffer[]> {
+    const list = this.host.builtIns ?? BUILT_IN_APPS;
+    if (!list.length) return [];
+    const [installed, marks] = await Promise.all([this.installed(), this.builtInMarks()]);
+    return builtInsDue(list, new Set(installed.map((a) => a.ref)), marks).map((app) => ({
+      ref: builtInRef(app), publisher: app.publisher, name: app.name, fingerprint: appFingerprint(app.publisher), digest: app.digest, url: app.url,
+    }));
   }
 
   /**
@@ -940,6 +1012,8 @@ export class Apps {
     // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
     const next = this.versionRecord(installed, bundle, kind, from, fromStore);
     await this.putApp(next);
+    // The person installed a built-in app they had removed (from a store, a link or a card): it is theirs again.
+    if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
     if (installed && installed.digest !== digest) await this.removeBundle(installed.bytes, installed.digest);
     if (installed?.pending && next.pending?.digest !== installed.pending.digest && installed.pending.digest !== digest) await this.removeBundle(installed.pending.bytes, installed.pending.digest);
     this.staged.delete(digest);
@@ -1257,18 +1331,31 @@ export class Apps {
 
   /**
    * Uninstalls an app: its bundle (and a waiting update's), its record and its storage in every scope. The person chose
-   * it, after the offer of an export (`exportData`).
+   * it, after the offer of an export (`exportData`). A built-in app is marked removed in the same transaction, and one
+   * the person never opened is only marked: no start and no update offers it again (WISP 1200 § Built-in apps).
    */
   async uninstall({ ref }: { ref: string }): Promise<void> {
-    const app = await this.installedOrFail(ref);
-    const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage], "readwrite");
-    tx.objectStore(STORES.apps).delete(app.ref);
-    tx.objectStore(STORES.appStorage).delete(rowsOf(app.ref));
-    try { await done(tx); } finally { this.held.delete(app.ref); }
-    for (const key of [...this.usage.keys()]) if (key.startsWith(`${app.ref}\0`)) this.usage.delete(key);
-    this.started.delete(app.ref);
+    if (!isAppRef(ref)) fail("bad-ref", "Not an app reference");
+    const app = await this.app(ref);
+    const builtIn = this.builtIn(ref) !== undefined;
+    if (!app && !builtIn) fail("not-installed", "This app is not installed");
+    const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage, ...(builtIn ? [STORES.settings] : [])], "readwrite");
+    tx.objectStore(STORES.apps).delete(ref);
+    tx.objectStore(STORES.appStorage).delete(rowsOf(ref));
+    if (builtIn) markBuiltIns(tx.objectStore(STORES.settings), (marks) => { marks.removed[ref] ??= this.now(); });
+    try { await done(tx); } finally { this.held.delete(ref); }
+    for (const key of [...this.usage.keys()]) if (key.startsWith(`${ref}\0`)) this.usage.delete(key);
+    this.started.delete(ref);
+    if (!app) return;
     await this.removeBundle(app.bytes, app.digest);
     if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);
+  }
+  /** Takes the "removed by the person" mark off a built-in app, if it has one. */
+  private async keepBuiltIn(ref: string): Promise<void> {
+    if ((await this.builtInMarks()).removed[ref] === undefined) return;
+    const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+    markBuiltIns(tx.objectStore(STORES.settings), (marks) => { delete marks.removed[ref]; });
+    await done(tx);
   }
 
   // ---------- storage ----------

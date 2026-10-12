@@ -97,7 +97,7 @@ export async function emptyProfile(): Promise<void> {
 }
 
 export function apps(net: FakeNet, host: Partial<AppsHost> = {}): Apps {
-  return new Apps({ fetch: boundedAppFetch({ fetcher: net.fetch }), isChat: (scope) => scope === "chat-1" || scope === "chat-2", online: () => true, now: () => NOW_MS, defaults: [], ...host });
+  return new Apps({ fetch: boundedAppFetch({ fetcher: net.fetch }), isChat: (scope) => scope === "chat-1" || scope === "chat-2", online: () => true, now: () => NOW_MS, defaults: [], builtIns: [], ...host });
 }
 
 export async function rows(name: string): Promise<unknown[]> {

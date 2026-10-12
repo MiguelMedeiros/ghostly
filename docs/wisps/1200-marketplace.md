@@ -70,6 +70,19 @@ Taken when the owner accepted this WISP for release 1.2. Where one changes an an
 | Network access for apps | A permission of phase 1, **`internet`**: an app that declares it, and that the person approves at install, reaches HTTPS and WSS servers of its choosing; an app without it has no network, as before ([Permissions](#permissions)) |
 | Safari and the iPhone's web app | **Not restricted**: Apps work there as everywhere. Their install screen says that, in this browser, an app can contact other servers even without `internet` (`<link rel=preconnect>`, which no policy governs in WebKit; [Threats](#threats)) |
 
+## Decisions taken by the owner (2026-10-12)
+
+Taken for release 1.3, so that a person finds Ghostly's own apps without a trip to the store ([Built-in apps](#built-in-apps)).
+
+| Question | Decision |
+|---|---|
+| Ghostly's own apps | Chess, and each app Ghostly makes after it, **comes with the client** and shows under Installed |
+| Where the bytes come from | The app's signed bundle ships **inside the client**, pinned by its digest and checked like any install. It needs no network. A newer version reaches it the usual way, by a higher `sequence` |
+| Permissions | **Asked at the first open, never granted silently**: the install screen's permission sheet, once |
+| Which apps | A **short list in the client**: publisher key, name and pinned digest. Never "everything in the official store" |
+| Removing | **Sticks.** No start and no update brings a removed app back. Installing it again is the person's choice |
+| Existing profiles | Offered the built-in apps **once**, unless the app is installed already or was removed |
+
 ## What exists today (evidence)
 
 Each fact was checked against the file it names on `dev` on 2026-10-02, or measured in the reviews of 2026-10-03. Where one is wrong, the section that cites it must change.
@@ -283,7 +296,7 @@ A client stores, per installed app, the publisher key, the highest `sequence` it
 - **Where the client looks:** the manifest's `sources` and the person's stores (for an app installed from a store, that store's listing only). Never at the contact who sent the app.
 - **When:** only once at least one app is installed: at start and every 24 hours, and when the person opens the Apps page. A person with no app installed makes no request to any store or source, so the preloaded store does not see every client's address each day. Browsing the store list is a request the person makes.
 - **Freeze** (every source serves an old version) is partly covered: a store index expires, so a frozen store is noticed; a frozen publisher repository is not, until a phase 2 publisher record (a Pkarr record under the publisher key naming each app's latest `sequence`).
-- **Uninstall** removes the files and the app's storage after offering an export of that storage.
+- **Uninstall** removes the files and the app's storage after offering an export of that storage. A [built-in app](#built-in-apps) is also marked removed, so it does not come back.
 
 **Where installed apps live (phase 1).** Bundles are kept by digest in the client's file-bytes storage, the same store as chat files ([501](501-paired-files.md)); the installed list (reference, `sequence`, digest, permissions, stores added) and each app's storage, keyed by (app reference, scope), go in the profile's database. **Export** is a JSON file `{"ghostlyAppData": 1, "app": "<ref>", "scope": "<local chat id, or alone>", "entries": {...}}`. A **backup** ([05](05-backups.md)) carries the installed list, the stores and the app storage, not the bundles: a restored profile fetches each bundle again by digest from its `sources` or stores, and shows "Needs its files" until one answers. A **device handoff** ([06](06-devices.md)) moves the same state, and the bundles as files by digest, which the handoff already skips when the taking device holds them.
 
@@ -503,6 +516,22 @@ For people there is **one concept, "Stores"**: a list on the Apps page, the defa
 | Default store | Cannot be removed | Preloaded, removable |
 
 **If GitHub takes a repository down, or is blocked:** installed apps keep working (the client runs its stored copy, nothing phones home); updates come from any other `urls` or `sources` entry (for an app installed from a store, its listing's other `urls`, such as the commit-pinned jsDelivr copy); new installs come from jsDelivr's commit-pinned copy, any other host, or a bundle a contact sends. The digest makes every source equal, and a chat needs no web host at all.
+
+### Built-in apps
+
+A built-in app is an app like any other: the bundle its publisher signed, checked the same way, run in the same sandbox, updated by the same rule. Two things differ: the first copy comes with the client, and the person does not have to look for it. Release 1.3 has one, Chess.
+
+**The list.** The client carries a short list (`BUILT_IN_APPS`). Each entry is the app's publisher key and name (its reference), the digest of the bundle this build carries, and the public URL that bundle is published at, on a host of [Stores](#stores). The list is part of the client's source, so adding an app is a reviewed change of Ghostly. A store cannot add one, and being listed in the official store gives an app no such standing. An entry that is not whole (a bad key, name or digest, a URL off the hosts list) is skipped.
+
+**The bundle.** The build carries the bundle as a file of the client: a static file of the web app, a file of the Desktop application. The client reads it only when it is first needed, never at start, and checks it whole, as it checks a fetched one: the publisher's signature, every file's hash, a digest equal to the pinned one and a reference equal to the entry's. A file that fails any of these is not an app. Reading it asks no server anything beyond the client's own files.
+
+**Offered, not installed.** Until the person opens it, a built-in app has no record, no stored file and no permission. It is drawn with the installed apps from the list. The first time it is opened, from the Apps page, a chat's + menu or a contact's card, the person sees the install screen's permission sheet with what the app asks and one button. Allowing installs it, exactly as an install from a store does, and nothing is granted before that ([Permissions](#permissions)). The installed record names the entry's public URL as where the app came from: that is the URL a card sent to a contact names, and where its revocations are read. It is installed with no store pinned, so it updates as an app added by its URL does ([Updates and rollback](#updates-and-rollback)): to a valid version with a higher `sequence`, from its sources or any of the person's stores, even after the person removed the official store.
+
+**Removing sticks.** Uninstalling a built-in app, opened or not, marks its reference "removed by the person" in the profile's database, in the same step as the uninstall. A marked app is not offered again: not at a start, not by a later build that carries a newer bundle, not by an update. The mark goes when the person installs the app themselves, from a store, a link or a card, and comes back if they remove it again. A backup carries the marks. "Clear all data" drops them with the installed apps, and the profile is then offered the built-in apps as a new one is.
+
+**Existing profiles** need no step of their own: a profile is offered each built-in app it has neither installed nor removed, so a profile from before release 1.3 sees Chess once, and one that has Chess installed keeps its own.
+
+Built so far: the list, the offer rule and the marks, in the engine (`packages/browser/src/engine/apps.ts`, `appDefaults.ts`), with an empty list. The bundle in the build and the screens come next in release 1.3.
 
 ### Apps sent in a chat
 
@@ -827,7 +856,7 @@ Phase 1 has no payments, no reviews, no themes, no per-site network permission (
 
 | Phase | What it gives |
 |---|---|
-| 1.2.x, 1.3 | The SDK's commit-reveal helper, and `ghostly catalog submit` (`ghostly app init` and the app types are in release 1.2). Apps in the extension, after a test submission passes the Chrome Web Store review. A bundle sent as a file over `files/3`. The `store` card. The crawler and the default index (1.3) |
+| 1.2.x, 1.3 | The SDK's commit-reveal helper, and `ghostly catalog submit` (`ghostly app init` and the app types are in release 1.2). Apps in the extension, after a test submission passes the Chrome Web Store review. A bundle sent as a file over `files/3`. The `store` card. The crawler and the default index (1.3). [Built-in apps](#built-in-apps), Chess first (1.3) |
 | 2 | Real-time games: the `realtime` permission, the unordered mode on `apps/1` over WebRTC, 64 MiB bundles ([proposal](#phase-2-proposal-real-time-apps-game-data-and-apps-in-groups), with its order of work and its questions for the owner). Bots on the other side of `apps/1` (`ghostly app serve`, `app.message` events, `ghostly app send`) and the `cards` permission. Themes as typed values. Paid apps on Testnet, then Mainnet when the owner says. Licences, reviews and reports, and an optional indexer service with search. Key rotation with a pinned recovery key. The publisher's Pkarr record. The `network` permission as an exact list of sites. Apps in groups |
 | 3 | Bots for the CLI as signed packages under an operating-system sandbox. A frame in the chat on Desktop once tested. Package sources over peer-to-peer content addressing |
 | Research | A permissioned host for adapter plugins (WebAssembly components get only the capabilities the host gives them, [component model](https://component-model.bytecodealliance.org/)); process isolation for apps; a transparency log for publisher keys; reproducible-build checks by stores |
