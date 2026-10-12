@@ -88,6 +88,18 @@ describe("Sidebar: groups in the chat list", () => {
     expect(within(row()).queryByTestId("group-decline")).not.toBeInTheDocument();
   });
 
+  it("offers the answer again for an accept the inviter's app never answered", async () => {
+    const { user, engine } = sidebar([invitation({ accepted: true, unanswered: true })]);
+    expect(row()).toHaveTextContent("No answer from the inviter's app. Accept again, or decline.");
+    expect(row()).not.toHaveTextContent("Joining…");
+    engine.on("acceptGroupInvitation", () => undefined);
+    engine.on("declineGroupInvitation", () => undefined);
+    await user.click(within(row()).getByTestId("group-accept"));
+    await user.click(within(row()).getByTestId("group-decline"));
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+  });
+
   it("counts a group's members, and says why a group I am out of is over", () => {
     sidebar([
       groupView({ id: "g-active", name: "Climbing", status: "active", members: [member("a"), member("b")] }),
