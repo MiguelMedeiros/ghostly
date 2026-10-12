@@ -127,9 +127,18 @@ function Permissions({ asks, update }: { asks: readonly string[]; update: boolea
  * the host the bundle comes from; for an app without `internet`, that its publisher may still learn the address. On
  * the web in WebKit (Safari, every browser on iPhone and iPad), one more line: any app can reach other servers there.
  */
-function Privacy({ from, internet }: { from?: string; internet: boolean }) {
+function Privacy({ from, internet, carried }: { from?: string; internet: boolean; carried?: boolean }) {
   const { t } = useI18n();
   const offline = internet ? "" : ` ${t("apps.install.ipInfoOffline")}`;
+  // Read from this copy of Ghostly (WISP 1200 § Built-in apps): no host saw anything, whatever URL it is published at.
+  if (carried) {
+    return (
+      <div className="space-y-2" data-testid="app-privacy">
+        <InfoLine testId="app-carried-line" info={t("apps.builtIn.carriedInfo")}>{t("apps.builtIn.carried")}</InfoLine>
+        {webKitAppLeak() && <InfoLine testId="app-webkit-line" info={t("apps.install.webkitInfo")}>{t("apps.install.webkit")}</InfoLine>}
+      </div>
+    );
+  }
   // Lines far enough apart that each ⓘ's tap area (wider than the icon) stays off the other's: 20 px apart, pressing
   // the IP line's ⓘ opened Safari's line.
   return (
@@ -235,7 +244,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{preview.manifest.description}</p>}
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
-          <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} />
+          <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} carried={preview.carried} />
         </>
       )}
       {error && <ErrorLine error={error} testId="app-install-error" />}
@@ -243,7 +252,10 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
         <Button onClick={onClose}>{t("common.cancel")}</Button>
         {preview && !blocked && (
           <Button variant="primary" data-testid="app-install-confirm" disabled={busy} onClick={() => void install()}>
-            {preview.install === "update" ? t("apps.install.update") : openAfter ? t("apps.install.installOpen") : t("apps.install.install")}
+            {preview.install === "update" ? t("apps.install.update")
+              // A built-in app is already here: the button allows what it asks, it downloads nothing.
+              : preview.carried ? t(openAfter ? "apps.builtIn.allowOpen" : "apps.builtIn.allow")
+                : openAfter ? t("apps.install.installOpen") : t("apps.install.install")}
           </Button>
         )}
       </div>

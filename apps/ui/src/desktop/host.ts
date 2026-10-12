@@ -53,7 +53,7 @@ import { setWindowThemeSink } from "../lib/windowTheme";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
-import { readBuiltInApp } from "../lib/apps/builtIns";
+import { builtInAppOption } from "../lib/apps/builtIns";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -317,8 +317,8 @@ export function desktopApps(runsApps: boolean) {
   if (!runsApps) return { host: {}, node: { apps: false } };
   return {
     host: { appRunner: "ghostly-app://localhost/", appNetRunner: "ghostly-app://localhost/", appRunnerServed: true },
-    // The apps that come with Ghostly are files of the application (`readBuiltInApp`).
-    node: { builtInApp: readBuiltInApp, ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {}) },
+    // The apps that come with Ghostly are files of the application (`builtInAppOption`).
+    node: { ...builtInAppOption(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {}) },
   };
 }
 

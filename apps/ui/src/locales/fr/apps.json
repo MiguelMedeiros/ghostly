@@ -23,6 +23,16 @@
     "updateWaits": "La version {{version}} est prête.",
     "version": "Version {{version}}"
   },
+  "builtIn": {
+    "allow": "Autoriser",
+    "allowOpen": "Autoriser et ouvrir",
+    "carried": "Fournie avec Ghostly. Rien n'est téléchargé.",
+    "carriedInfo": "Cette copie fait partie du Ghostly que vous utilisez. Les mises à jour viennent de son éditeur ou de vos boutiques, qui voient alors votre adresse IP.",
+    "hint": "Fournie avec Ghostly",
+    "openNamed": "Ouvrir {{title}}",
+    "remove": "Retirer",
+    "removeNamed": "Retirer {{title}}"
+  },
   "card": {
     "ask": "Demandez un lien à {{name}}",
     "contactCannot": "L'app de {{name}} ne lance pas encore d'apps",

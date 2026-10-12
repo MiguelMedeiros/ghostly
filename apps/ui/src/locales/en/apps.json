@@ -23,6 +23,16 @@
     "updateWaits": "Version {{version}} is ready.",
     "version": "Version {{version}}"
   },
+  "builtIn": {
+    "allow": "Allow",
+    "allowOpen": "Allow and open",
+    "carried": "Comes with Ghostly. Nothing is downloaded.",
+    "carriedInfo": "This copy is part of the Ghostly you are running. Updates come from its publisher or your stores, which then learn your IP address.",
+    "hint": "Comes with Ghostly",
+    "openNamed": "Open {{title}}",
+    "remove": "Remove",
+    "removeNamed": "Remove {{title}}"
+  },
   "card": {
     "ask": "Ask {{name}} for a link to it",
     "contactCannot": "{{name}}'s app can't run apps yet",
