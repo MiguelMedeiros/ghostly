@@ -1,5 +1,5 @@
 import { screen, within } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
@@ -38,7 +38,21 @@ describe("the chat header's call buttons", () => {
     }
 
     rerender(<CallButtons blocked={null} busy onCall={vi.fn()} />);
-    for (const id of ["call-audio", "call-video"]) expect(screen.getByTestId(id)).toBeDisabled();
+    for (const id of ["call-audio", "call-video"]) expect(screen.getByTestId(id)).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("keep the keyboard focus during a call, and start no second one", async () => {
+    const onCall = vi.fn();
+    const { user, rerender } = renderApp(<CallButtons blocked={null} busy={false} onCall={onCall} />);
+    screen.getByTestId("call-audio").focus();
+    rerender(<CallButtons blocked={null} busy onCall={onCall} />);
+
+    // Off to a screen reader and to a press, yet still the focused button: a disabled one would drop the focus to the page.
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+    for (const id of ["call-audio", "call-video"]) expect(screen.getByTestId(id)).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByTestId("call-video"));
+    expect(onCall).not.toHaveBeenCalled();
   });
 });
 
@@ -66,6 +80,19 @@ function overlay(props: Partial<OverlayProps> = {}) {
     />,
   );
   return { ...view, onToggleScreenShare, window: () => screen.getByTestId("call-window") };
+}
+
+/** A chat as the keys see it: the header's call buttons, the message field, and the call over them once it is on. */
+function ChatWithCall() {
+  const [on, setOn] = useState(false);
+  return (
+    <>
+      <CallButtons blocked={null} busy={on} onCall={() => setOn(true)} />
+      <textarea aria-label="Message" />
+      {on && <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff canSendVideo remoteHasVideo={false}
+        callStartedAt={Date.now()} peerName="Ana" onHangUp={() => setOn(false)} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} />}
+    </>
+  );
 }
 
 describe("sharing the screen from inside a call", () => {
@@ -176,6 +203,52 @@ describe("a call for a screen reader and the keys", () => {
     unmount();
     expect(before).toHaveFocus();
     before.remove();
+  });
+
+  it("started from the keyboard, takes the focus whole-screen, keeps Tab off the chat behind it, and gives the focus back to its button when it ends", async () => {
+    const { user } = renderApp(<ChatWithCall />);
+    await user.tab();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    const call = screen.getByRole("dialog", { name: "Ana" });
+    expect(call).toBe(screen.getByTestId("call-window"));
+    expect(call).toHaveFocus();
+    // Round the call's own buttons, both ways, never to the message field under it.
+    const stops = ["call-minimize", "call-mute", "call-camera", "call-hang-up"];
+    for (const id of [...stops, stops[0]]) {
+      await user.tab();
+      expect(screen.getByTestId(id)).toHaveFocus();
+    }
+    await user.tab({ shift: true });
+    expect(screen.getByTestId("call-hang-up")).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+  });
+
+  it("in its small window leaves the focus and Tab to the chat, and takes them when it goes whole-screen", async () => {
+    localStorage.setItem("ghostly_call_mini", "1");
+    const { user } = renderApp(<ChatWithCall />);
+    await user.tab();
+    await user.keyboard("{Enter}");
+
+    const call = screen.getByTestId("call-window");
+    expect(call).toHaveAttribute("data-mini", "true");
+    expect(call).not.toHaveAttribute("role");
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+    await user.tab();
+    await user.tab();
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+
+    // Whole-screen from its own button: the focus stays on that button, and the keys are the call's from there.
+    await user.click(screen.getByTestId("call-minimize"));
+    expect(call).toHaveAttribute("data-mini", "false");
+    expect(screen.getByTestId("call-minimize")).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(screen.getByTestId("call-hang-up")).toHaveFocus();
+    localStorage.removeItem("ghostly_call_mini");
   });
 
   it("says the call's state in words as it moves on, never the running clock", () => {
