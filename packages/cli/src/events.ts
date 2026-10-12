@@ -53,6 +53,8 @@ export class EventHub {
   /** `file.*` events whose message was not seen yet: they wait for it a moment (the engine stores it right after). */
   private pendingFiles = new Map<string, { timer: ReturnType<typeof setTimeout>; emits: ((messageId: string | null) => void)[] }>();
   private baselined = false;
+  /** Chats and groups whose history the baseline did not read whole, and how to read it: until a file event needs it. */
+  private unread = new Map<string, (chat: string) => Promise<readonly StoredMessage[]>>();
   /**
    * Whether the seen set notes mentions (`+m`): false on a set written before it did, whose mentions were reported with
    * their `group.message` already. Its first baseline then notes them without a `group.mentioned` each.
@@ -105,9 +107,12 @@ export class EventHub {
    * missing from the seen set are news (they came while no process derived events, a crash), except on a first
    * run, which only learns the history that was already there.
    */
-  baseline(state: EngineState, histories: Map<string, readonly StoredMessage[]>): void {
+  baseline(state: EngineState, histories: Map<string, readonly StoredMessage[]>, rest?: { newest: Map<string, readonly StoredMessage[]>; whole: (chat: string) => Promise<readonly StoredMessage[]> }): void {
     this.stateChanged(state);
     for (const [chat, messages] of histories) this.messages(chat, messages);
+    // `rest.newest`: chats and groups in step (`inStep`), only their newest messages read. Nothing in them is news;
+    // a file of an older message is looked up when an event needs it (`rest.whole` reads the history then).
+    for (const [chat, messages] of rest?.newest ?? []) { this.messages(chat, messages, []); this.unread.set(chat, rest!.whole); }
     this.baselined = true;
     this.firstRun = false;
     if (this.seen.get(FORMAT)?.get(MENTIONS_NOTED) !== "yes") {
@@ -115,6 +120,24 @@ export class EventHub {
       this.persist(FORMAT, [[MENTIONS_NOTED, "yes"]]);
     }
     this.mentionsNoted = true;
+  }
+
+  /**
+   * Whether these messages of a chat or group (its newest) are all as the seen set has them, reactions included: there
+   * is then nothing to report of them. Never on a first run, nor on a seen set from before it noted mentions: those
+   * take the whole history once.
+   */
+  inStep(chat: string, messages: readonly StoredMessage[]): boolean {
+    if (this.firstRun || !this.mentionsNoted) return false;
+    const known = this.seen.get(chat), reactions = this.seen.get(`reactions:${chat}`);
+    return messages.every((message) => {
+      const before = known?.get(message.id);
+      let state = stateOf(message);
+      // As `messages` reads it: a mention reported stays reported.
+      if (before !== undefined && mentionedIn(before) && !mentionedIn(state)) state = withFlag(state, MENTIONED);
+      if (before !== state) return false;
+      return Object.entries(message.reactions ?? {}).every(([by, r]) => reactions?.get(`${message.id}|${by}`) === String(r.n));
+    });
   }
 
   onEvent(listener: Listener): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -272,7 +295,7 @@ export class EventHub {
         const key = `file.stage:${id}:${transfer.stage}:${this.now()}`, stage = { stage: transfer.stage, ...(transfer.pausedBy ? { pausedBy: transfer.pausedBy } : {}) };
         emit = (messageId) => this.emit("file.stage", key, { ...fields, messageId, ...stage });
       }
-      if (emit) this.fileEvent(id, emit);
+      if (emit) this.fileEvent(id, emit, chat ?? (group ? `group:${group}` : null));
     }
     this.state = state;
     for (const listener of this.stateListeners) {
@@ -295,7 +318,7 @@ export class EventHub {
    * A `file.*` event names the message that carries the file. The engine can say where a transfer stands before it
    * stores that message: the event then waits for it, up to 2 s, and goes with `messageId: null` after that.
    */
-  private fileEvent(fileId: string, emit: (messageId: string | null) => void): void {
+  private fileEvent(fileId: string, emit: (messageId: string | null) => void, chat: string | null): void {
     const pending = this.pendingFiles.get(fileId);
     const messageId = this.fileMessages.get(fileId);
     if (messageId && !pending) { emit(messageId); return; }
@@ -303,6 +326,17 @@ export class EventHub {
     const timer = setTimeout(() => this.flushFile(fileId, null), FILE_MESSAGE_WAIT_MS);
     timer.unref?.();
     this.pendingFiles.set(fileId, { timer, emits: [emit] });
+    // A file of a message older than the ones the baseline read: the history is read now, once, for all its files.
+    const read = chat === null ? undefined : this.unread.get(chat);
+    if (!read) return;
+    this.unread.delete(chat!);
+    void read(chat!).then((messages) => {
+      for (const message of messages) {
+        if (!message.file || this.fileMessages.has(message.file.id)) continue;
+        this.fileMessages.set(message.file.id, message.id);
+        this.flushFile(message.file.id, message.id);
+      }
+    }).catch(() => { /* the file's event goes without its message, as one whose message never came */ });
   }
 
   private flushFile(fileId: string, messageId: string | null): void {

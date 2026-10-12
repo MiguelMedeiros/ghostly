@@ -122,6 +122,17 @@ describe("what changed in a history", () => {
     expect(late.history()).toEqual([{ kind: "messages", linkId: "chat", messages: fake.stored.get("chat") }]);
   });
 
+  it("says whether a history changed since the engine was made, or since a mark", () => {
+    const server = new EngineServer();
+    const events = fake.nodes.at(-1)!.events;
+    expect(server.historyChanged("chat")).toBe(false);
+    events.onMessageChanges!("chat", { messages: [row("chat", "a")], deleted: [] });
+    const mark = server.historyMark;
+    expect([server.historyChanged("chat"), server.historyChanged("chat", mark), server.historyChanged("group:g")]).toEqual([true, false, false]);
+    events.onMessages("group:g", [row("group:g", "x")]);
+    expect([server.historyChanged("chat", mark), server.historyChanged("group:g", mark)]).toEqual([false, true]);
+  });
+
   it("sends a whole history to every client as before when the peer sends one", async () => {
     const server = new EngineServer();
     const page = client();
