@@ -672,7 +672,10 @@ export class ChatFiles {
     if (record.state !== "active" || !incoming.target) return;
     incoming.heardAt = this.now();
     const { offset, data } = frame;
-    if (!isInt(offset) || typeof data !== "string" || !data.length || data.length > Math.ceil(FILE_LIMITS.chunkBytes * 4 / 3) || !DATA.test(data)) return;
+    // The bytes themselves when they came as a binary message (files/4), base64url text in a `pf-data` frame.
+    const binary = data instanceof Uint8Array;
+    if (!isInt(offset) || !(binary || typeof data === "string") || !data.length) return;
+    if (!binary && (data.length > Math.ceil(FILE_LIMITS.chunkBytes * 4 / 3) || !DATA.test(data))) return;
     if (offset < incoming.written) {
       // Sent again (a resync): already taken. Said again only once everything is stored.
       if (incoming.stored === incoming.written) this.send({ t: "pf-got", id: record.id, offset: incoming.stored });
@@ -683,7 +686,7 @@ export class ChatFiles {
       if (incoming.gapAt !== incoming.written) { incoming.gapAt = incoming.written; this.send({ t: "pf-accept", id: record.id, offset: incoming.written }); }
       return;
     }
-    const bytes = fromBase64Url(data);
+    const bytes = binary ? data : fromBase64Url(data);
     if (!bytes.length || bytes.length > FILE_LIMITS.chunkBytes || offset + bytes.length > record.file.size) return;
     incoming.written += bytes.length;
     const target = incoming.target;

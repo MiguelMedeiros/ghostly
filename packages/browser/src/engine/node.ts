@@ -6711,6 +6711,8 @@ export class GhostlyNode implements EngineImplementation {
       callsSupport: this.options.callsSupport ?? typeof RTCPeerConnection !== "undefined",
       callsMissing: this.options.callsUnavailable,
       largeFilesSupport: true,
+      // 1:1 chats only for now: a group's file session stays on files/3 frames (WISP 503).
+      binaryFilesSupport: true,
       // 1:1 chats only: group edges (startEdge) never offer it.
       typingSupport: true,
       reactionsSupport: this.options.reactions !== false,
