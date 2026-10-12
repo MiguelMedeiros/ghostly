@@ -374,6 +374,59 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(view(bob, groupId).invitation).toBeUndefined();
   });
 
+  it("an accept the inviter's app cannot honour is refused, and the invitation goes: the group deleted, the role handed on", async () => {
+    // Deleted (alone in it) before the answer: the invitation outlived its group.
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const gone = await alice.create("Ghosts", "mesh");
+    await alice.invite(gone, "chat-ab"); await world.settle();
+    await alice.forget(gone); world.drop();
+    expect(view(bob, gone).invitation).toMatchObject({ accepted: false });
+    await bob.accept(gone); await world.settle();
+    expect(bob.views()).toEqual([]);
+
+    // The role handed on before the answer: the old admin can let nobody in, and the new one never invited this chat.
+    const { world: w, alice: admin, others: [next], groupId, key } = await groupOf(["bob"]);
+    const carol = w.add("carol");
+    w.chats.set("chat-ac", ["alice", "carol"]);
+    await admin.invite(groupId, "chat-ac"); await w.settle();
+    // Carol's chat is down while it happens: nothing reaches her before she answers.
+    w.chats.delete("chat-ac");
+    await admin.makeAdmin(groupId, key(next)); await w.settle();
+    w.chats.set("chat-ac", ["alice", "carol"]);
+    expect(view(carol, groupId).invitation).toMatchObject({ accepted: false });
+    await carol.accept(groupId); await w.settle();
+    expect(carol.views()).toEqual([]);
+    expect(view(admin, groupId).members).toHaveLength(2);
+  });
+
+  it("an accept said twice by the member it let in is not refused; one for a group never heard of is", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    const sent = vi.spyOn((alice as unknown as { host: GroupsHost }).host, "sendOnLink");
+    const refusals = () => sent.mock.calls.filter(([, frame]) => (frame as { t?: string }).t === "group-decline").length;
+    await bob.accept(groupId);
+    const said = identityFromSeedB64(world.peers.get("bob")!.store.groups.get(groupId)!.invitation!.seedB64!).pubKeyZ32;
+    await world.settle(); await world.meet();
+    expect(view(bob, groupId).status).toBe("active");
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: said });
+    expect(refusals()).toBe(0);
+    // Another key over the same chat, a malformed one, and a group this app does not hold.
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: "nope" });
+    expect(refusals()).toBe(0);
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: createIdentity().pubKeyZ32 });
+    expect(refusals()).toBe(1);
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: "A".repeat(22), key: createIdentity().pubKeyZ32 });
+    expect(refusals()).toBe(2);
+    await world.settle();
+    expect(view(bob, groupId).status).toBe("active");
+    expect(view(alice, groupId).members).toHaveLength(2);
+  });
+
   it("accepting needs the inviter connected", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
