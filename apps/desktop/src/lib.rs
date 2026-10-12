@@ -40,6 +40,7 @@ mod microphone;
 #[cfg(mobile)]
 mod mobile;
 mod native_call;
+mod navigation;
 mod notifications;
 mod oidc;
 mod paired_transport;
@@ -293,6 +294,8 @@ pub fn run() {
         .manage(android::Incoming::default());
 
     builder
+        // The Ghostly window stays on the app's own pages, whatever is dropped on it.
+        .plugin(navigation::guard())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
