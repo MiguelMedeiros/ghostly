@@ -279,6 +279,7 @@ describe("what a member hands on cannot take a message's place", { timeout: 60_0
     await mesh.open(bob2, carol);
     expect(copies()).toHaveLength(1);
     expect(copies()[0]).toMatchObject({ completes: true, mentions: [{ k: bob.myKey, o: 0, l: 4 }] });
+    await bob2.flush();
     expect(mesh.saved.get(bob.myKey)!.provisional ?? []).toEqual([]);
   });
 

@@ -391,6 +391,7 @@ describe("group session", () => {
     const alice = mesh.add(GroupSession.create("Ghosts"));
     const bob = await admit(mesh, alice, "Bob");
     await alice.sendText("first"); await mesh.settle();
+    await bob.flush();
     const restored = new Mesh();
     const alice2 = restored.add(clone(mesh.saved.get(alice.myKey)!)), bob2 = restored.add(clone(mesh.saved.get(bob.myKey)!));
     expect(bob2.epoch).toBe(1); expect(bob2.readableEpochs).toEqual([1]);
