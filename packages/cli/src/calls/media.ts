@@ -97,6 +97,14 @@ let refuseAnswers = Number(process.env.GHOSTLY_CALL_REFUSE_ANSWERS) || 0;
 /** How long a description waits for its candidates: a server reflexive one and a little after it, or this long. */
 const GATHER_MS = 5000;
 const SETTLE_MS = 400;
+/**
+ * With a candidate in (a host one comes in milliseconds), the server reflexive one is waited for this long at most,
+ * not the whole of `GATHER_MS`: a STUN server that answers does in tens of milliseconds, and one that never does (UDP
+ * to it blocked, as on many office, school and hotel networks) made every call ring 5 s late and connect 5 s after
+ * the answer. The apps' calls and the chats' data link bound theirs the same way (`HOST_GATHER_MS`,
+ * `OFFER_HOST_GATHER_MS`).
+ */
+export const HOST_GATHER_MS = 2000;
 
 /**
  * One call's peer connection. Its SDP never travels: the compact signal does (`local`), and each side rebuilds the
@@ -245,13 +253,18 @@ function mdnsNote(signal: CallSignal, log: (line: string) => void): void {
   }
 }
 
-/** Resolves once the local description has its candidates (see GATHER_MS). */
-function gathering(pc: PeerConnection): Promise<void> {
+/** Resolves once the local description has its candidates (see GATHER_MS and HOST_GATHER_MS). */
+export function gathering(pc: Pick<PeerConnection, "onGatheringStateChange" | "onLocalCandidate">): Promise<void> {
   return new Promise((resolve) => {
     let settle: ReturnType<typeof setTimeout> | null = null;
-    const done = () => { clearTimeout(cap); if (settle) clearTimeout(settle); resolve(); };
+    let any = false;
+    const done = () => { clearTimeout(cap); clearTimeout(bounded); if (settle) clearTimeout(settle); resolve(); };
     const cap = setTimeout(done, GATHER_MS);
+    const bounded = setTimeout(() => { if (any) done(); }, HOST_GATHER_MS);
     pc.onGatheringStateChange((state) => { if (state === "complete") done(); });
-    pc.onLocalCandidate((candidate) => { if (!settle && / typ srflx/.test(candidate)) settle = setTimeout(done, SETTLE_MS); });
+    pc.onLocalCandidate((candidate) => {
+      any = true;
+      if (!settle && / typ srflx/.test(candidate)) settle = setTimeout(done, SETTLE_MS);
+    });
   });
 }
