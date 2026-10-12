@@ -460,6 +460,7 @@
     "notAddress": "Não é um endereço de relay: {{address}}",
     "useHttps": "Use https:// no endereço do relay: {{address}}"
   },
+  "startAgain": "Começar de novo",
   "transport": {
     "adapterFailed": "Não iniciou. Reabra esta conversa para tentar de novo.",
     "allowAnotherNext": "Permita outro transporte ou ligue a Alternativa.",

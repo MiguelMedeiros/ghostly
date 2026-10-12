@@ -54,6 +54,9 @@ impl Route {
         for socket in self.sockets {
             let _ = self.events.send(json!({"type":"closed", "id":socket}));
         }
+        // The page does not ask whether its endpoint is still there: it is told, here, whether the runtime died,
+        // dropped the endpoint, or the page itself stopped it (which it then ignores).
+        let _ = self.events.send(json!({"type":"stopped"}));
     }
 }
 
@@ -98,6 +101,12 @@ fn packaged<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(PathBuf, Pa
 }
 
 impl HyperState {
+    /// The Ghostly window's page starts (`TransportState::page_started` says when and why): the endpoints the page
+    /// before it held are stopped, as `paired_hyperdht_stop` stops one. One still starting ends as "stopped".
+    pub fn page_started(&self) {
+        self.peers.lock().unwrap().clear();
+    }
+
     /// Starts the runtime. Called with the slot locked, so two endpoints
     /// starting at once never start two.
     fn spawn(&self, program: (PathBuf, PathBuf)) -> Result<Runtime, String> {
@@ -815,6 +824,7 @@ mod runtime_tests {
             next(&mut page_a).await,
             json!({"type":"closed", "id":connection})
         );
+        assert_eq!(next(&mut page_a).await, json!({"type":"stopped"}));
         let closed = next(&mut page_b).await;
         assert_eq!(
             (&closed["type"], &closed["id"]),
@@ -852,6 +862,37 @@ mod runtime_tests {
         assert_eq!(spawned(&app), 1);
     }
 
+    /// A page that starts finds its eight places free: the endpoints the page before it left running are stopped
+    /// in the runtime too, which leaves with the last of them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_page_that_starts_stops_what_the_page_before_it_left_running() {
+        let app = app();
+        let left = futures_util::future::join_all((1..=8).map(|byte| start(&app, byte))).await;
+        assert!(left.iter().all(Result::is_ok));
+        let runtime = pid(&app).await.unwrap();
+        assert_eq!(
+            start(&app, 9).await.err().unwrap(),
+            "Native endpoint limit reached"
+        );
+
+        app.state::<HyperState>().page_started();
+
+        for endpoint in left {
+            assert_eq!(
+                paired_hyperdht_address(app.state(), endpoint.unwrap().id).unwrap_err(),
+                "HyperDHT endpoint closed"
+            );
+        }
+        until("the runtime leaving", || !alive(runtime)).await;
+        assert_eq!(pid(&app).await, None);
+        let again = futures_util::future::join_all((11..=18).map(|byte| start(&app, byte))).await;
+        assert!(
+            again.iter().all(Result::is_ok),
+            "{:?}",
+            again.iter().find(|r| r.is_err())
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_runtime_that_died_takes_its_endpoints_and_is_started_again_once() {
         let app = app();
@@ -870,10 +911,18 @@ mod runtime_tests {
             .args(["-9", &first.to_string()])
             .status()
             .unwrap();
-        // Its page learns the connection is gone, and the endpoints are closed.
+        // Its page learns the connection is gone and then, without asking, that its endpoint is; and the
+        // endpoints are closed.
+        let died = std::time::Instant::now();
         assert_eq!(
             next(&mut page).await,
             json!({"type":"closed", "id":connection})
+        );
+        assert_eq!(next(&mut page).await, json!({"type":"stopped"}));
+        assert!(
+            died.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            died.elapsed()
         );
         until("both endpoints closing", || {
             [a.id, b.id]

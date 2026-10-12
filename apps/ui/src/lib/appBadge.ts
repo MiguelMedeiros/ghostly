@@ -50,6 +50,27 @@ export function badgeCount(sessions: readonly ChatSession[], groups: readonly Ba
   return count;
 }
 
+/** What a folder's badge says: how many, and grey when all of it is in muted chats. Undefined: nothing unread. */
+export interface FolderUnread {
+  count: number;
+  muted: boolean;
+}
+
+/**
+ * A folder's unread, from its chats and groups (the one open is left out, as its row leaves it out). It counts what
+ * the app's icon counts (`badgeCount`): each unmuted chat's unread messages, and one for each unmuted group with
+ * something new, a mention getting through a group's mute. When only muted chats have something unread, their sum is
+ * shown instead, in grey, as a muted chat's own count is.
+ */
+export function folderUnread(sessions: readonly ChatSession[], groups: readonly BadgeGroup[], now = Date.now()): FolderUnread | undefined {
+  const loud = badgeCount(sessions, groups, now);
+  if (loud > 0) return { count: loud, muted: false };
+  let quiet = 0;
+  for (const session of sessions) quiet += getUnreadCount(session);
+  for (const group of groups) if (!group.invitation && groupUnreadAt(group) > groupReadAt(group.id)) quiet += 1;
+  return quiet > 0 ? { count: quiet, muted: true } : undefined;
+}
+
 export interface BadgeNavigator {
   setAppBadge?: (count?: number) => Promise<void>;
   clearAppBadge?: () => Promise<void>;

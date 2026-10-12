@@ -32,9 +32,8 @@ describe("the note that direct connections are blocked on this network", () => {
     await view.user.click(more);
     expect(more).toHaveAttribute("aria-expanded", "true");
     const story = within(note).getByTestId("connection-direct-blocked-text");
-    expect(story).toHaveTextContent("the app cannot tell which");
     expect(story).toHaveTextContent("never what they say");
-    expect(story).toHaveTextContent("goes away when a direct connection works or the network changes");
+    expect(story).toHaveTextContent("This clears when a direct connection works");
 
     // The network changed, or a direct connection worked: the note goes by itself.
     act(() => view.engine.update({ transport: web, links: [relayed] }));
@@ -59,7 +58,7 @@ describe("the note that direct connections are blocked on this network", () => {
     expect(row).toHaveTextContent("Direct connections blocked");
     expect(row).toHaveTextContent(HINT);
     await view.user.click(within(row).getByTestId("row-info"));
-    expect(within(row).getByTestId("row-info-text")).toHaveTextContent("Calls need a direct path or a TURN server");
+    expect(within(row).getByTestId("row-info-text")).toHaveTextContent("Calls need a TURN server");
     act(() => view.engine.update({ transport: web, settings: { relays: RELAYS } }));
     expect(screen.queryByTestId("network-direct-blocked")).toBeNull();
   });

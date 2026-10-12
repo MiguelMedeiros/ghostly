@@ -28,5 +28,9 @@
     "sharedOne": "已与 1 位联系人共享",
     "stopped": "已停止"
   },
+  "window": {
+    "failed": "请求失败。",
+    "unreachable": "无法访问此服务。服务仅在其幽灵在线时存在。"
+  },
   "yourApps": "你的应用"
 }

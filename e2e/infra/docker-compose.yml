@@ -97,6 +97,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d nbxplorer"]
       interval: 2s
       retries: 30
+      # A loaded host can take ~1 min for the first-boot initdb; failures in this window don't count.
+      start_period: 60s
 
   ark-nbxplorer:
     image: nicolasdorier/nbxplorer:2.6.7
@@ -394,6 +396,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
       interval: 2s
       retries: 30
+      # A loaded host can take ~1 min for the first-boot initdb; failures in this window don't count.
+      start_period: 60s
   pubky-testnet:
     image: synonymsoft/homeserver-testnet:v0.12.0
     container_name: ghostly-e2e-pubky-testnet

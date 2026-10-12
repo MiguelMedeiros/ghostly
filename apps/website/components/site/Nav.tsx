@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PageLink } from "@/components/site/IntentLink";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "./Brand";
@@ -57,6 +58,20 @@ export function Nav({ apps = false }: { apps?: boolean }) {
     e.preventDefault();
     el.open = false;
     el.querySelector("summary")?.focus();
+  };
+
+  // The sheet covers the page, so the focus must not go behind it: when it moves out (Tab past the last entry), the
+  // sheet closes. A blur with nowhere to go (a tap on the sheet's own background, another window) leaves it open.
+  const onMenuBlur = (e: React.FocusEvent<HTMLDetailsElement>) => {
+    const el = menu.current;
+    if (!el?.open || !e.relatedTarget || el.contains(e.relatedTarget)) return;
+    el.open = false;
+  };
+
+  // A tap on any entry closes the sheet. The path does not change for the entry of the page already open, or for a
+  // section of it ("How it works" on the home page), so the effect above never runs for those.
+  const onSheetClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (menu.current && (e.target as Element).closest("a")) menu.current.open = false;
   };
 
   const items = () => [...(ways.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
@@ -121,9 +136,9 @@ export function Nav({ apps = false }: { apps?: boolean }) {
         </Link>
         <nav className="nav-links" aria-label="Main">
           {links.map((l) => (
-            <Link key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
+            <PageLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
               {l.label}
-            </Link>
+            </PageLink>
           ))}
         </nav>
         <div className="nav-end">
@@ -161,23 +176,23 @@ export function Nav({ apps = false }: { apps?: boolean }) {
               </div>
             )}
           </div>
-          <details className="nav-menu" ref={menu} onKeyDown={onMenuKeyDown}>
+          <details className="nav-menu" ref={menu} onKeyDown={onMenuKeyDown} onBlur={onMenuBlur}>
             <summary aria-label={t.menu}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
               </svg>
             </summary>
-            <div className="nav-sheet">
+            <div className="nav-sheet" onClick={onSheetClick}>
               {links.map((l) => (
-                <Link key={l.href} href={l.href}>
+                <PageLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
                   {l.label}
-                </Link>
+                </PageLink>
               ))}
               <span className="nav-sheet-rule" aria-hidden="true" />
               <a className="nav-sheet-way" href={APP_URL}>
                 {t.web.label} ↗
               </a>
-              <Link className="nav-sheet-way" href={DOWNLOAD_HREF} onClick={() => menu.current && (menu.current.open = false)}>
+              <Link className="nav-sheet-way" href={DOWNLOAD_HREF}>
                 {t.download.label}
               </Link>
             </div>

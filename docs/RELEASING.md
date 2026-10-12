@@ -136,6 +136,6 @@ A fix for a security flaw in a released version never goes through a public issu
 
 ## Security patch releases
 
-The security routine pushes its fixes to a `claude/security-auto-*` branch with the patch version already bumped. Once CI passes there, `security-autorelease.yml` (which runs from the default branch, `dev`) checks the branch with `main`'s `tools/scripts/autorelease-gate.mjs`, fast-forwards `main` to it, tags it, runs the `Release` workflow with `publish: true` and marks the release Latest. The repository variable `SECURITY_AUTORELEASE` chooses what may ship this way: `all` (the default), `deps` or `off`. See [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
+The security routine pushes its fixes to a `claude/security-auto-*` branch with the patch version already bumped. Once CI passes there, `security-autorelease.yml` (which runs from the default branch, `dev`) checks the branch with `main`'s `tools/scripts/autorelease-gate.mjs`, fast-forwards `main` to it, tags it, runs the `Release` workflow with `publish: true` and marks the release Latest. The gate refuses a branch that holds commits of `dev` that `main` does not have (one rebased onto `dev`, or cut from it): only what the routine put on top of `main` ships. The repository variable `SECURITY_AUTORELEASE` chooses what may ship this way: `all` (the default), `deps` or `off`. See [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
 
 After one, merge `main` back into `dev`, and deploy (step 5).

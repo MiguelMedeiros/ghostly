@@ -55,6 +55,8 @@ const ATTEMPTS_KEY = "ghostly_lock_attempts";
 /** Failures allowed before the wait starts; then it doubles from 1 s, up to 5 minutes. */
 const FREE_ATTEMPTS = 3;
 const MAX_DELAY_MS = 5 * 60_000;
+/** The longest wait between two looks at the clock while unlocked (see `checkIdle`). */
+const LOCK_CHECK_MS = 30_000;
 
 interface Attempts {
   failures: number;
@@ -97,6 +99,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   }, []);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
+  const checkIdleRef = useRef<() => void>(() => {});
 
   const lock = useCallback(() => {
     if (settings.lockScreen.enabled && settings.lockScreen.passwordHash) {
@@ -140,28 +143,34 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     [settings.lockScreen.passwordHash, updateLockScreen]
   );
 
-  const resetTimer = useCallback(() => {
-    lastActivityRef.current = Date.now();
+  const timeoutMs = settings.lockScreen.timeoutMinutes * 60 * 1000;
+
+  // The time away is read from the clock, not left to one timer: a timer's clock stands still while the device sleeps
+  // (a phone with the screen off, a suspended laptop), so a timer alone would bring the app back unlocked after hours
+  // away. Locks when the time since the last activity is up; otherwise looks again when it would be, and at least
+  // every LOCK_CHECK_MS, which is how long a device that woke with nobody touching it may stay unlocked.
+  const checkIdle = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    if (
-      settings.lockScreen.enabled &&
-      settings.lockScreen.passwordHash &&
-      !isLocked
-    ) {
-      timerRef.current = setTimeout(() => {
-        lock();
-      }, settings.lockScreen.timeoutMinutes * 60 * 1000);
+    if (!settings.lockScreen.enabled || !settings.lockScreen.passwordHash || isLocked) return;
+    const now = Date.now();
+    // A clock set back must not make the wait longer than the chosen time.
+    if (lastActivityRef.current > now) lastActivityRef.current = now;
+    const left = lastActivityRef.current + timeoutMs - now;
+    if (!(left > 0)) {
+      lock();
+      return;
     }
-  }, [
-    settings.lockScreen.enabled,
-    settings.lockScreen.passwordHash,
-    settings.lockScreen.timeoutMinutes,
-    isLocked,
-    lock,
-  ]);
+    timerRef.current = setTimeout(() => checkIdleRef.current(), Math.min(left, LOCK_CHECK_MS));
+  }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash, timeoutMs, isLocked, lock]);
+  checkIdleRef.current = checkIdle;
+
+  const resetTimer = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    checkIdle();
+  }, [checkIdle]);
 
   useEffect(() => {
     if (!settings.lockScreen.enabled || !settings.lockScreen.passwordHash) {
@@ -170,16 +179,22 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // The first touch after too long away locks; it does not start the time again with the chats on screen.
     const handleActivity = () => {
-      if (!isLocked) {
-        resetTimer();
-      }
+      if (isLocked) return;
+      if (Date.now() - lastActivityRef.current < timeoutMs) lastActivityRef.current = Date.now();
+      checkIdle();
     };
+    // Coming back (the Android app says so through `visibilitychange`, `followAppVisibility`) is not activity.
+    const handleReturn = () => checkIdle();
 
     const events = ["mousedown", "keydown", "touchstart", "mousemove"];
     events.forEach((event) => {
       window.addEventListener(event, handleActivity, { passive: true });
     });
+    const returns = ["focus", "pageshow"];
+    returns.forEach((event) => window.addEventListener(event, handleReturn));
+    document.addEventListener("visibilitychange", handleReturn);
 
     resetTimer();
 
@@ -187,6 +202,8 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
       events.forEach((event) => {
         window.removeEventListener(event, handleActivity);
       });
+      returns.forEach((event) => window.removeEventListener(event, handleReturn));
+      document.removeEventListener("visibilitychange", handleReturn);
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -194,7 +211,9 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   }, [
     settings.lockScreen.enabled,
     settings.lockScreen.passwordHash,
+    timeoutMs,
     isLocked,
+    checkIdle,
     resetTimer,
   ]);
 

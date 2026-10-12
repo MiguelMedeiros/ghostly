@@ -6,6 +6,7 @@ import { store, STORES, transact, wrap } from "../../shared/idb";
 import type { WalletMode } from "../../shared/mints";
 import { BARK_NETWORKS, BarkAdapter, barkDatabase, serverInfo, type BarkConfig, type BarkExpiry } from "./bark";
 import { loadBarkSdk, type BarkNetwork, type BarkSdk } from "./barkSdk";
+import { RETIRE_READ_MS } from "./arkWallet";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
@@ -283,9 +284,23 @@ export class BarkWallet {
   private async retirable(refusal: string): Promise<StoredBark> {
     const saved = this.saved!;
     if ((await intentRepository.list()).some((i) => this.ours(i))) throw new Error(refusal);
-    if (this.adapter) { const b = await this.gate.within(this.adapter.balance()); if (b.spendableSats + b.pendingInRoundSats + b.pendingBoardSats + b.pendingExitSats + b.pendingLightningSendSats + b.claimableLightningReceiveSats > 0) throw new Error(refusal); }
+    if (this.adapter && await this.gate.within(this.held(this.adapter)) > 0) throw new Error(refusal);
     await this.lock();
     return saved;
+  }
+  /**
+   * What the wallet holds, asked of its server: spendable, on its way in and on its way out. A test network's server
+   * that stopped answering must not hold the wallet on it (one that never answered does not either): past
+   * RETIRE_READ_MS the last reading stands, whose three sums are those same six parts. Mainnet waits for its
+   * server's own word.
+   */
+  private held(adapter: BarkAdapter): Promise<number> {
+    const asked = adapter.balance().then((b) => b.spendableSats + b.pendingInRoundSats + b.pendingBoardSats + b.pendingExitSats + b.pendingLightningSendSats + b.claimableLightningReceiveSats);
+    if (this.network !== "testnet") return asked;
+    return new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(this.view.balance + (this.view.pending ?? 0) + (this.view.exiting ?? 0)), RETIRE_READ_MS);
+      asked.then(resolve, reject).finally(() => clearTimeout(timer));
+    });
   }
   /** A payment of this wallet's network (the other network's wallet has its own). */
   private ours(intent: SavedIntent) { return intent.review.method === "bark" && barkMode(intent.review.network as BarkNetwork) === this.network; }

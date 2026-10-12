@@ -311,6 +311,10 @@ export class CallManager {
     this.callable(call.chat);
     call.rate = rateOf(options.rate, call.rate);
     const stack = await this.stack();
+    // The call may have ended (the contact hung up, the offer went stale) or been answered by another command while
+    // the stack loaded: an ended call opens nothing, and a call is answered once.
+    if (call.ended) throw new CliError("unavailable", "The call ended before it was answered");
+    if (call.state !== "ringing") throw new CliError("refused", "That call is not ringing here");
     // Answered: no longer missed if it goes stale; the media has its own time to connect.
     call.state = "connecting";
     this.disarm(call);
@@ -384,12 +388,17 @@ export class CallManager {
     return call;
   }
 
-  /** The call's socket (open from now on: a program may connect before the media is up) and its media. */
+  /**
+   * The call's socket (open from now on: a program may connect before the media is up) and its media. A call that
+   * ended while its socket opened closes it here: `end` found none to close, and nothing lists the call any more.
+   */
   private async attach(call: Call, create: (options: MediaOptions) => Promise<CallMedia>): Promise<void> {
     const queue = (call.queue = new PlaybackQueue(call.rate));
-    call.socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id), call.rate, {
+    const socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id), call.rate, {
       onAudio: (chunk) => queue.push(chunk),
     });
+    if (call.ended) { await socket.close(); return; }
+    call.socket = socket;
     await this.connect(call, create);
   }
 
@@ -398,6 +407,8 @@ export class CallManager {
    * the call ended, or asked for a newer connection, while this one was made: then it is closed.
    */
   private async connect(call: Call, create: (options: MediaOptions) => Promise<CallMedia>): Promise<boolean> {
+    // No connection is made for a call that is over (it ended while the stack loaded or its socket opened).
+    if (call.ended) return false;
     const attempt = ++call.attempt;
     call.media?.close();
     call.media = null;

@@ -3,6 +3,7 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
+import { DEVICE_SET_EVENT } from "./devices";
 
 /*
  * "Keep this computer awake" (WISP 06 § User experience, Profile, Devices): on a Desktop with a standby device, a switch
@@ -14,7 +15,7 @@ import type { HandoffView } from "@ghostly/browser/devices/handoff";
 
 const KEY = "ghostly_keep_awake";
 const EVENT = "ghostly-keep-awake";
-/** How often the device set and the handoff are looked at again. */
+/** How often the device set and the handoff are looked at again, in a profile that has a device set. */
 const CHECK_EVERY_MS = 5_000;
 
 const host = () => { try { return getBrowserHost(); } catch { return null; } };
@@ -71,13 +72,31 @@ export function useComputerAwake(): void {
   useEffect(() => {
     if (!supported) return;
     let live = true;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    // The page read a device set since this started: an answer of `single` asked for before it is out of date.
+    let hasSet = false;
+    const stop = () => { clearInterval(timer); timer = undefined; };
     const check = async () => {
       const [set, handoff] = await Promise.all([engine.call("deviceSet").catch(() => null), engine.call("deviceHandoffView").catch(() => null)]);
-      if (live) setWanted(keepAwakeWanted(setting, set, handoff));
+      if (!live) return;
+      setWanted(keepAwakeWanted(setting, set, handoff));
+      // A profile on this device only has no standby and no handoff: nothing is looked at again until it gets a device set.
+      if (set?.state === "single" && !hasSet) stop();
     };
-    void check();
-    const timer = setInterval(() => void check(), CHECK_EVERY_MS);
-    return () => { live = false; clearInterval(timer); };
+    const start = () => {
+      if (timer !== undefined) return;
+      void check();
+      timer = setInterval(() => void check(), CHECK_EVERY_MS);
+    };
+    // A device added here: Profile, Devices reads the set (`useDeviceSet`), and the checks start again.
+    const seen = (event: Event) => {
+      if ((event as CustomEvent<DeviceSetView>).detail?.state === "single") return;
+      hasSet = true;
+      start();
+    };
+    start();
+    window.addEventListener(DEVICE_SET_EVENT, seen);
+    return () => { live = false; stop(); window.removeEventListener(DEVICE_SET_EVENT, seen); };
   }, [supported, setting]);
   useEffect(() => {
     if (!supported) return;

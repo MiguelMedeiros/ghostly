@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
+import { forgetPictureLinks } from "../../lib/pictureLink";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
@@ -24,6 +27,8 @@ function bubble(patch: Partial<ChatMessage> = {}, props: Partial<Parameters<type
 const image = (container: HTMLElement) => container.querySelector("img");
 
 describe("MessageBubble: pictures", () => {
+  beforeEach(() => forgetPictureLinks());
+
   it.each([
     ["an inline PNG", PNG],
     ["an inline JPEG", "data:image/jpeg;base64,/9j/4AAQSkZJRg=="],
@@ -82,15 +87,20 @@ describe("MessageBubble: pictures", () => {
     expect(image(container)).toBeNull();
     const reveal = screen.getByTestId("image-reveal");
     expect(reveal).toHaveTextContent("Show picture · cdn.example.com");
+    // Asked for: the app reads it, and the page never names the contact's address in an <img>.
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
     await user.click(reveal);
-    expect(image(container)).toHaveAttribute("src", url);
+    expect(fetched).toHaveBeenCalledWith(url, expect.anything());
+    expect(image(container)).toBeNull();
+    expect(screen.getByTestId("picture-link-reading")).toBeInTheDocument();
     expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
   });
 
-  it("loads my own pictures from anywhere", () => {
+  it("reads my own pictures from anywhere, with no click", () => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
     const url = "https://cdn.example.com/photos/cat.png";
-    const { container } = bubble({ text: url, sender: "me" });
-    expect(image(container)).toHaveAttribute("src", url);
+    bubble({ text: url, sender: "me" });
+    expect(fetched).toHaveBeenCalledWith(url, expect.anything());
     expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
   });
 
@@ -115,6 +125,90 @@ describe("MessageBubble: pictures", () => {
     fireEvent.error(image(container)!);
     expect(image(container)).toBeNull();
     expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+  });
+});
+
+/**
+ * A browser draws an `<img>` only from an address the shell's Content-Security-Policy lets load, and each shell has
+ * its own. The test builds have none (`vite preview` sends no header, happy-dom loads nothing), so only reading the
+ * policies tells whether the picture a bubble shows can be seen in a real app.
+ */
+describe("MessageBubble: a picture link under each shell's img-src", () => {
+  const root = (path: string) => readFileSync(join(import.meta.dirname, "../../../../..", path), "utf8");
+  const policies: Record<string, () => string> = {
+    web: () => /Content-Security-Policy "([^"]+)"/.exec(root("apps/web/nginx-headers.conf"))![1]!,
+    extension: () => (JSON.parse(root("apps/extension/public/manifest.json")) as { content_security_policy: { extension_pages: string } }).content_security_policy.extension_pages,
+    desktop: () => (JSON.parse(root("apps/desktop/tauri.conf.json")) as { app: { security: { csp: string } } }).app.security.csp,
+  };
+  /** Whether `policy` lets an `<img>` load `src`: a scheme it names (`data:`, `blob:`), or the origin of a host it names. */
+  const loads = (policy: string, src: string) => {
+    const sources = policy.split(";").map(part => part.trim().split(/\s+/)).find(([name]) => name === "img-src")?.slice(1) ?? [];
+    return sources.some(source => (source.endsWith(":") ? src.startsWith(source) : source.startsWith("https://") && new URL(src).origin === source));
+  };
+  const PNG_BYTES = Uint8Array.from(atob(PNG.slice(PNG.indexOf(",") + 1)), c => c.charCodeAt(0));
+  const answer = (bytes: Uint8Array, type = "image/png") => new Response(bytes as BodyInit, { status: 200, headers: { "content-type": type } });
+
+  beforeEach(() => {
+    forgetPictureLinks();
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:http://localhost/picture-1");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  });
+
+  it("reads the policies as a browser does", () => {
+    expect(loads("default-src 'self'; img-src 'self' data: blob: https://media.giphy.com", "blob:http://localhost/1")).toBe(true);
+    expect(loads("default-src 'self'; img-src 'self' data: blob: https://media.giphy.com", "https://media.giphy.com/media/a/giphy.gif")).toBe(true);
+    expect(loads("default-src 'self'; img-src 'self' data: blob: https://media.giphy.com", "https://cdn.example.com/cat.png")).toBe(false);
+  });
+
+  it.each(Object.keys(policies))("%s: the picture shown after Show picture is one its policy lets load", async (shell) => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const url = "https://cdn.example.com/photos/cat.png";
+    const { user } = bubble({ text: url });
+    expect(fetched).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("image-reveal"));
+    const src = (await screen.findByTestId("picture-link")).getAttribute("src")!;
+    expect(loads(policies[shell]!(), src), `${shell} img-src lets ${src} load`).toBe(true);
+    // The site is asked once, with no cookies and no referrer.
+    expect(fetched).toHaveBeenCalledTimes(1);
+    expect(fetched.mock.calls[0]![0]).toBe(url);
+    expect(fetched.mock.calls[0]![1]).toMatchObject({ credentials: "omit", referrerPolicy: "no-referrer" });
+  });
+
+  it.each(Object.keys(policies))("%s: my own picture link shows a picture its policy lets load", async (shell) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    bubble({ text: "https://cdn.example.com/photos/cat.png", sender: "me" });
+    const src = (await screen.findByTestId("picture-link")).getAttribute("src")!;
+    expect(loads(policies[shell]!(), src), `${shell} img-src lets ${src} load`).toBe(true);
+  });
+
+  it.each(Object.keys(policies))("%s: the pictures that show by themselves are ones its policy lets load", (shell) => {
+    for (const url of [PNG, "https://media2.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif", "https://web.archive.org/web/http://geocities.com/ghost/0.gif"]) {
+      const { container, unmount } = bubble({ text: url });
+      expect(loads(policies[shell]!(), image(container)!.getAttribute("src")!), `${shell} img-src lets ${url.slice(0, 40)} load`).toBe(true);
+      unmount();
+    }
+  });
+
+  it.each([
+    ["the site cannot be read (no CORS header, or it is down)", async () => { throw new TypeError("Failed to fetch"); }],
+    ["the site answers 404", async () => new Response("", { status: 404 })],
+    ["what comes is not a picture, whatever the site calls it", async () => answer(new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>"), "image/png")],
+  ])("falls back to the address as a link when %s", async (_, respond) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(respond);
+    const url = "https://cdn.example.com/photos/cat.png";
+    const { user, container } = bubble({ text: url });
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(image(container)).toBeNull();
+  });
+
+  it("never asks an address on this machine or the local network", async () => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const url = "https://192.168.1.1/cat.png";
+    const { user } = bubble({ text: url });
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByRole("link", { name: url })).toBeInTheDocument();
+    expect(fetched).not.toHaveBeenCalled();
   });
 });
 

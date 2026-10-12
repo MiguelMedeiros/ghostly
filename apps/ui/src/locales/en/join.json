@@ -24,6 +24,7 @@
   "scan": "Scan QR",
   "submit": "Join chat",
   "title": "Join a chat or group",
+  "tooManyLinks": "Too many invite links opened. Delete a chat that got no answer, or paste the invite in Join.",
   "typo": "This code has a typo. Check it, or ask for the code again.",
   "update": "This invite was made by a newer Ghostly. Update to join."
 }

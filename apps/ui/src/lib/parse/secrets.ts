@@ -30,15 +30,28 @@ const SECRET_CONTEXT = /priv(?:ate)?[\s_-]*key|secret|seed|mnemonic|nsec|xprv|\b
 const CONTEXT_REACH = 48;
 const CASHU_TOKEN = /\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
 
+/**
+ * Characters that take no room on screen: format characters (zero-width space, soft hyphen, word joiner, the joiners,
+ * direction marks), control characters that are not white space, variation selectors, the grapheme joiner and the
+ * Hangul fillers. A page, a PDF or a terminal puts some of them into long strings as places to break a line.
+ */
+const INVISIBLE = /(?![\t\n\v\f\r\x85])[\p{Cc}\p{Cf}]|\u034f|[\u115f\u1160\u3164\uffa0]|[\ufe00-\ufe0f]|[\u{e0100}-\u{e01ef}]/gu;
+
 const base58check = createBase58check(sha256);
 
-/** The first secret in `text`, keys and seeds before ecash; null for anything else. */
+/**
+ * The first secret in `text`, keys and seeds before ecash; null for anything else. The text is read as it is and as
+ * it reads without its invisible characters: a key with one inside is whole again once the reader takes it out.
+ */
 export function findSecret(text: string): SecretFinding | null {
-  if (hasMnemonic(text)) return { kind: "mnemonic" };
-  if (NSEC.test(text)) return { kind: "nsec" };
-  if (EXTENDED_PRIVATE.test(text) || hasWif(text)) return { kind: "bitcoin-key" };
-  if (hasHexSecret(text)) return { kind: "hex-key" };
-  return findCashu(text);
+  const visible = text.replace(INVISIBLE, "");
+  const readings = visible === text ? [text] : [text, visible];
+  if (readings.some(hasMnemonic)) return { kind: "mnemonic" };
+  if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
+  if (readings.some((reading) => EXTENDED_PRIVATE.test(reading) || hasWif(reading))) return { kind: "bitcoin-key" };
+  if (readings.some(hasHexSecret)) return { kind: "hex-key" };
+  const tokens = readings.map(findCashu);
+  return tokens.find((found) => found?.kind === "cashu" && found.amount !== null) ?? tokens.find((found) => found) ?? null;
 }
 
 /**

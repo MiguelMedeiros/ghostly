@@ -460,6 +460,7 @@
     "notAddress": "リレーのアドレスではありません：{{address}}",
     "useHttps": "https:// のリレーアドレスを使ってください：{{address}}"
   },
+  "startAgain": "最初からやり直す",
   "transport": {
     "adapterFailed": "開始できませんでした。このチャットを開き直して再試行してください。",
     "allowAnotherNext": "別のトランスポートを許可するか、フォールバックをオンにしてください。",

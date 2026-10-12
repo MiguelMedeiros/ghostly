@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, classify, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -56,8 +56,8 @@ const PUSH_PROFILE = pushScopeProfile(worker.registration.scope);
 
 worker.addEventListener("install", (event) => {
   if (PUSH_PROFILE !== null) return;
-  // `reload`: past the browser's HTTP cache, so the shell is this deploy's and not an older copy.
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(__SW_PRECACHE__.map((path) => new Request(path, { cache: "reload" })))));
+  // The page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(__SW_PRECACHE__.map((path) => new Request(path, { cache: precacheMode(path) })))));
 });
 
 worker.addEventListener("activate", (event) => {
@@ -77,12 +77,14 @@ async function fromCache(key: string, request: Request): Promise<Response> {
 }
 
 /** A build file that was not precached: kept once fetched. Only whole, same-origin answers. */
-async function asset(key: string, request: Request): Promise<Response> {
+async function asset(key: string, request: Request, event: ExtendableEvent): Promise<Response> {
   const cache = await caches.open(CACHE);
   const cached = await cache.match(key);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response.ok && response.status === 200 && response.type === "basic") await cache.put(key, response.clone()).catch(() => {});
+  // Answered at once and stored behind it: `put` settles with the last byte, and these are the wasm modules (2 to
+  // 12 MiB) the page compiles while they arrive.
+  if (response.ok && response.status === 200 && response.type === "basic") event.waitUntil(cache.put(key, response.clone()).catch(() => {}));
   return response;
 }
 
@@ -159,7 +161,7 @@ worker.addEventListener("fetch", (event) => {
   const key = new URL(request.url).pathname;
   if (route === "shell") event.respondWith(fromCache("/", request));
   else if (route === "precache") event.respondWith(fromCache(key, request));
-  else event.respondWith(asset(key, request));
+  else event.respondWith(asset(key, request, event));
 });
 
 // ---------- wake-up push ----------

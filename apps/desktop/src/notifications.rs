@@ -4,19 +4,21 @@
 
 /// Where a click on a notification goes: the main window hears `notification-open` with the notification's id,
 /// and finds the chat it was about (it never leaves the page). Elsewhere the plugin reports no clicks.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const OPEN_EVENT: &str = "notification-open";
 
-/// Set up at launch: macOS tells us about clicks on our notifications.
+/// Set up at launch: macOS tells us about clicks on our notifications, and Linux's notifications are shown from here.
 pub fn install(app: &tauri::AppHandle) {
     #[cfg(target_os = "macos")]
     mac::install(app);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    linux::install(app);
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let _ = app;
 }
 
 /// Brings the main window forward and names the notification clicked.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn opened(app: &tauri::AppHandle, id: String) {
     use tauri::{Emitter, Manager};
     if let Some(window) = app.get_webview_window("main") {
@@ -102,7 +104,14 @@ pub async fn native_private_notification(id: String, body: String) -> Result<boo
         crate::android::notify(&id, &body).await?;
         Ok(true)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    // Linux: false with no notification server on the session bus, and the plugin tries.
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(move || linux::show(&id, &body))
+            .await
+            .map_err(|_| "Notification delivery unavailable".to_string())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "linux")))]
     {
         let _ = (id, body);
         Ok(false)
@@ -303,6 +312,292 @@ mod mac {
     }
 }
 
+/// Linux: our notifications go to the desktop's notification server (org.freedesktop.Notifications) from here, with
+/// a `default` action, so a click on one reaches the app. The plugin offers no action, and a click only closed it.
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::collections::{HashMap, VecDeque};
+    use std::sync::{Arc, Mutex, OnceLock};
+    use zbus::blocking::{Connection, MessageIterator};
+    use zbus::zvariant::Value;
+
+    const SERVER: &str = "org.freedesktop.Notifications";
+    const PATH: &str = "/org/freedesktop/Notifications";
+    /// The newest few, as the page keeps (lib/notifications.ts): an older one's click only closes it.
+    const KEPT: usize = 64;
+
+    /// One connection for every notification, and one thread that hears their clicks.
+    pub(super) struct Notifier {
+        connection: Connection,
+        /// Our notifications not yet closed: the server's id and ours, oldest first.
+        shown: Arc<Mutex<VecDeque<(u32, String)>>>,
+    }
+
+    impl Notifier {
+        /// `open` hears our id of each notification clicked.
+        pub(super) fn new(
+            connection: Connection,
+            open: impl Fn(String) + Send + 'static,
+        ) -> zbus::Result<Self> {
+            // Subscribed before the first notification is shown, so no click comes before the listener.
+            let rule = zbus::MatchRule::builder()
+                .msg_type(zbus::message::Type::Signal)
+                // Only from the notification server: another process's signal opens nothing.
+                .sender(SERVER)?
+                .interface(SERVER)?
+                .path(PATH)?
+                .build();
+            let signals = MessageIterator::for_match_rule(rule, &connection, None)?;
+            let shown: Arc<Mutex<VecDeque<(u32, String)>>> = Arc::default();
+            let heard = Arc::clone(&shown);
+            std::thread::Builder::new()
+                .name("notification-clicks".into())
+                .spawn(move || {
+                    for signal in signals.flatten() {
+                        let header = signal.header();
+                        // Both signals start with the server's id; other apps' notifications have ids not ours.
+                        // A click on the notification's body is its `default` action.
+                        let (server_id, clicked) = match header.member().map(|m| m.as_str()) {
+                            Some("ActionInvoked") => match signal
+                                .body()
+                                .deserialize::<(u32, String)>()
+                            {
+                                Ok((server_id, action)) if action == "default" => (server_id, true),
+                                _ => continue,
+                            },
+                            Some("NotificationClosed") => {
+                                match signal.body().deserialize::<(u32, u32)>() {
+                                    Ok((server_id, _)) => (server_id, false),
+                                    Err(_) => continue,
+                                }
+                            }
+                            _ => continue,
+                        };
+                        let ours = {
+                            let mut shown = heard.lock().unwrap();
+                            shown
+                                .iter()
+                                .position(|(id, _)| *id == server_id)
+                                .and_then(|at| shown.remove(at))
+                        };
+                        if let (true, Some((_, id))) = (clicked, ours) {
+                            open(id);
+                        }
+                    }
+                })?;
+            Ok(Self { connection, shown })
+        }
+
+        pub(super) fn show(&self, id: &str, body: &str) -> zbus::Result<()> {
+            // The installed app's desktop entry and icon (Ghostly.desktop, ghostly.png); the sound stays the
+            // local audio controller's, as on macOS.
+            let hints = HashMap::from([
+                ("desktop-entry", Value::from("Ghostly")),
+                ("suppress-sound", Value::from(true)),
+            ]);
+            let actions = ["default", "Ghostly"];
+            let reply = self.connection.call_method(
+                Some(SERVER),
+                PATH,
+                Some(SERVER),
+                "Notify",
+                &(
+                    "Ghostly",
+                    0u32,
+                    "ghostly",
+                    "Ghostly",
+                    body,
+                    &actions[..],
+                    hints,
+                    -1i32,
+                ),
+            )?;
+            let server_id: u32 = reply.body().deserialize()?;
+            let mut shown = self.shown.lock().unwrap();
+            shown.push_back((server_id, id.to_string()));
+            if shown.len() > KEPT {
+                shown.pop_front();
+            }
+            Ok(())
+        }
+    }
+
+    static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+    /// Connected at the first notification; tried again at the next one while there is no session bus.
+    static NOTIFIER: Mutex<Option<Notifier>> = Mutex::new(None);
+
+    pub fn install(app: &tauri::AppHandle) {
+        let _ = APP.set(app.clone());
+    }
+
+    /// False when it could not be shown from here (no app yet, no session bus, no notification server).
+    pub fn show(id: &str, body: &str) -> bool {
+        let Some(app) = APP.get() else {
+            return false;
+        };
+        let mut notifier = NOTIFIER.lock().unwrap();
+        if notifier.is_none() {
+            let app = app.clone();
+            *notifier = Connection::session()
+                .and_then(|connection| Notifier::new(connection, move |id| super::opened(&app, id)))
+                .ok();
+        }
+        match notifier.as_ref().map(|notifier| notifier.show(id, body)) {
+            Some(Ok(())) => true,
+            // The bus answered (no notification server, or it refused): the connection is good.
+            Some(Err(zbus::Error::MethodError(..))) | None => false,
+            // A connection that broke is not kept: its listener ends with it, and the next notification connects again.
+            Some(Err(_)) => {
+                *notifier = None;
+                false
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        // covers: desktop.notifications
+        use super::*;
+        use std::io::{BufRead, BufReader};
+        use std::process::{Child, Command, Stdio};
+        use std::sync::mpsc;
+        use std::time::Duration;
+        use zbus::zvariant::OwnedValue;
+
+        /// A session bus of the test's own, gone with it.
+        struct Bus(Child, String);
+
+        impl Bus {
+            fn start() -> Self {
+                let mut daemon = Command::new("dbus-daemon")
+                    .args(["--session", "--nofork", "--print-address"])
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .expect("dbus-daemon");
+                let mut address = String::new();
+                BufReader::new(daemon.stdout.take().unwrap())
+                    .read_line(&mut address)
+                    .unwrap();
+                Bus(daemon, address.trim().to_string())
+            }
+
+            fn connect(&self) -> zbus::blocking::connection::Builder<'static> {
+                zbus::blocking::connection::Builder::address(self.1.as_str()).unwrap()
+            }
+        }
+
+        impl Drop for Bus {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        type Notified = (
+            String,
+            String,
+            String,
+            Vec<String>,
+            HashMap<String, OwnedValue>,
+        );
+
+        /// A notification server: it numbers each notification and passes on what it was asked to show.
+        struct Server(mpsc::Sender<Notified>, u32);
+
+        #[zbus::interface(name = "org.freedesktop.Notifications")]
+        impl Server {
+            #[allow(clippy::too_many_arguments)]
+            fn notify(
+                &mut self,
+                app_name: String,
+                _replaces_id: u32,
+                icon: String,
+                _summary: String,
+                body: String,
+                actions: Vec<String>,
+                hints: HashMap<String, OwnedValue>,
+                _timeout: i32,
+            ) -> u32 {
+                self.1 += 1;
+                let _ = self.0.send((app_name, icon, body, actions, hints));
+                self.1
+            }
+        }
+
+        /// The click the issue measured as lost: the server offers the body as the `default` action, and its
+        /// click names the notification, while another app's, a closed one and a second click open nothing.
+        #[test]
+        fn a_click_on_a_notification_names_it() {
+            let bus = Bus::start();
+            let (notified, asked) = mpsc::channel();
+            let server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Server(notified, 0))
+                .unwrap()
+                .build()
+                .unwrap();
+            let (opened, open) = mpsc::channel();
+            let notifier = Notifier::new(bus.connect().build().unwrap(), move |id| {
+                let _ = opened.send(id);
+            })
+            .unwrap();
+            notifier.show("event-1", "New message").unwrap();
+            notifier.show("event-2", "New message").unwrap();
+
+            let (app_name, icon, body, actions, hints) = asked.recv().unwrap();
+            assert_eq!(
+                (app_name.as_str(), icon.as_str(), body.as_str()),
+                ("Ghostly", "ghostly", "New message")
+            );
+            assert_eq!(actions.first().map(String::as_str), Some("default"));
+            assert_eq!(
+                String::try_from(hints["desktop-entry"].try_clone().unwrap()).unwrap(),
+                "Ghostly"
+            );
+            assert!(bool::try_from(&hints["suppress-sound"]).unwrap());
+
+            let signal = |name: &str, body: &(u32, &str)| {
+                server
+                    .emit_signal(None::<()>, PATH, SERVER, name, body)
+                    .unwrap()
+            };
+            signal("ActionInvoked", &(99, "default"));
+            // Another process on the bus plays a click on ours: not the server, so it opens nothing.
+            bus.connect()
+                .build()
+                .unwrap()
+                .emit_signal(
+                    None::<()>,
+                    PATH,
+                    SERVER,
+                    "ActionInvoked",
+                    &(1u32, "default"),
+                )
+                .unwrap();
+            signal("ActionInvoked", &(2, "reply"));
+            server
+                .emit_signal(
+                    None::<()>,
+                    PATH,
+                    SERVER,
+                    "NotificationClosed",
+                    &(1u32, 2u32),
+                )
+                .unwrap();
+            signal("ActionInvoked", &(1, "default"));
+            signal("ActionInvoked", &(2, "default"));
+            assert_eq!(
+                open.recv_timeout(Duration::from_secs(10)).unwrap(),
+                "event-2"
+            );
+            signal("ActionInvoked", &(2, "default"));
+            assert!(open.recv_timeout(Duration::from_millis(500)).is_err());
+        }
+    }
+}
+
 #[cfg(test)]
 mod settings_tests {
     // covers: desktop.notifications
@@ -345,7 +640,7 @@ mod settings_tests {
     }
 }
 
-/// Off macOS the notification plugin decides, and nothing is shown from here.
+/// Off macOS the notification plugin decides, and nothing is shown from here (on Linux, before the app is set up).
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     #[tokio::test]

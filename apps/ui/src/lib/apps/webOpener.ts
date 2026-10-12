@@ -61,8 +61,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
       let running: RunningApp | null = null;
       let takenDown: AppTakedown | null = null;
       const unregister = registerRunningApp({
-        ref, runAnyway: options?.runAnyway === true,
+        ref, digest: entry.digest, runAnyway: options?.runAnyway === true,
         takeDown: (takedown) => { takenDown = takedown; running?.stop(); },
+        stop: () => running?.stop(),
       });
       running = startApp({
         container: slot, host, launch, view,
@@ -124,8 +125,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     };
     let takenDown: AppTakedown | null = null;
     const unregister = registerRunningApp({
-      ref, runAnyway: options?.runAnyway === true,
+      ref, digest: entry.digest, runAnyway: options?.runAnyway === true,
       takeDown: (takedown) => { takenDown = takedown; running.stop(); },
+      stop: () => running.stop(),
     });
     const running = startApp({
       container: box, host, launch, view,

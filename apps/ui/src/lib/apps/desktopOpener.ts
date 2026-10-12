@@ -95,7 +95,7 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     });
     let timer: ReturnType<typeof setTimeout> | null = null;
     // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
-    const unregister = registerRunningApp({ ref, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped") });
+    const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });
     const broker = createBroker({
       host,
       launch: { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null },

@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { callApi, redactSettings, SETTABLE } from "./api";
+import { callApi, hideStateSecrets, SETTABLE } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
@@ -128,7 +128,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, nick"],
+  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret]", "Any call of the app's engine, with its own parameters", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets") }],
   ["engine --list", "The engine's calls"],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -163,6 +163,13 @@ function help(): string {
   ].join("\n");
 }
 
+/** What `ghostly help help` answers. */
+const HELP_USAGE = [
+  "Usage: ghostly help [<command>...]", "",
+  "  Help for every command, or for one command or a group of them (also ghostly <command> --help)", "",
+  "Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h",
+].join("\n");
+
 /** Every command's help row: usage, summary and, for the table and text commands, their options. */
 function helpRows(): { usage: string; summary: string; options?: Record<string, OptionSpec> }[] {
   return [
@@ -187,6 +194,8 @@ function commandWords(usage: string): string[] {
  * options; for a group (`ghostly help file`), the group's commands.
  */
 export function commandHelp(words: readonly string[]): string {
+  // `help` is no command of the tables: its own usage, rather than "Unknown command: help".
+  if (words[0] === "help") return HELP_USAGE;
   const named = (list: readonly string[]) => helpRows().filter((row) => { const own = commandWords(row.usage); return list.every((word, i) => own[i] === word); });
   // Arguments after the command's words (`ghostly send bob hi --help`) are not part of its name.
   let rows = named(words);
@@ -363,23 +372,34 @@ async function daemonCommand(argv: string[]): Promise<void> {
   }
   if (sub === "stop") {
     knownProfile(g);
+    const stopFor = seconds(parsed, 20);
     const client = await connectDaemon(g.paths.socket);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
-    print({ stopped: true, pid: await stopDaemon(g, client, Number(parsed.options.timeout) || 20) });
+    print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
     return;
   }
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
+    const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
     const client = await connectDaemon(g.paths.socket);
     const before = client ? (await client.call("status").catch(() => null) as { version?: string } | null)?.version ?? null : null;
-    const stopped = client ? await stopDaemon(g, client, Number(parsed.options.timeout) || 20) : null;
-    const started = await startDetached(g, Number(parsed.options.timeout) || 60);
+    const stopped = client ? await stopDaemon(g, client, stopFor) : null;
+    const started = await startDetached(g, startFor);
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
   if (sub) throw new CliError("usage", "ghostly daemon [--detach] | daemon status | daemon stop | daemon restart");
+  const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g); return; }
-  print(await startDetached(g, Number(parsed.options.timeout) || 60));
+  print(await startDetached(g, startFor));
+}
+
+/** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
+function seconds(parsed: Parsed, fallback: number): number {
+  const value = parsed.options.timeout;
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !(value > 0)) throw new CliError("usage", "--timeout takes a number of seconds above 0");
+  return value;
 }
 
 /**
@@ -424,6 +444,10 @@ async function startDetached(g: Globals, seconds: number) {
   }
   if (!client) {
     heldBy(g, child.pid); // another process took the profile between the check and the child's start
+    // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
+    if (child.exitCode === null && child.pid !== undefined && processAlive(child.pid)) {
+      throw new CliError("timeout", `The daemon (process ${child.pid}) is still starting; ghostly daemon status shows when it is up`, { pid: child.pid, log: g.paths.log });
+    }
     throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
   }
   client.close();
@@ -521,9 +545,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
   let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal }));
   if (method === "getState" && !showSecret && result && typeof result === "object") {
-    const state = result as { settings: Parameters<typeof redactSettings>[0]; groups?: { entryLink?: string }[] };
-    // A group's entry link lets anyone join: hidden like the settings' secrets.
-    result = { ...state, settings: redactSettings(state.settings), ...(state.groups ? { groups: state.groups.map((g) => (g.entryLink ? { ...g, entryLink: "<hidden>" } : g)) } : {}) };
+    result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
   }
   print(result);
 }
@@ -706,7 +728,12 @@ export async function main(input: string[]): Promise<number> {
   // Global options alone (`ghostly --pretty`, `ghostly -p bot`) name no command: lifted, one of them comes first.
   const helpFor = argv.length === 0 || globalOption(argv[0]) ? [] : helpAsked(argv);
   if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help()) + "\n"); return 0; }
-  if (argv[0] === "--version" || argv[0] === "version") { print({ version: VERSION }); return 0; }
+  if (argv[0] === "--version" || argv[0] === "version") {
+    // Global options come after the command once lifted: `--pretty` indents this answer too.
+    pretty = argv.slice(1).some((word) => word === "--pretty" || word === "--pretty=true");
+    print({ version: VERSION });
+    return 0;
+  }
   const [first, second] = argv;
   const two = second && !second.startsWith("-") ? `${first} ${second}` : "";
   // A command is one its table lists itself: every object has `constructor` and `toString`, which are no commands.

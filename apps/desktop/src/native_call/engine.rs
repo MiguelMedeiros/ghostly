@@ -53,6 +53,8 @@ const FPS: u32 = 15;
 /// What the page gets to show, at most: the size and rate of the JPEGs.
 const SHOWN_MAX: u32 = 960;
 const SHOWN_FPS: u32 = 15;
+/// How long before it is due a picture is shown all the same ([`due`]).
+const SHOWN_EARLY: Duration = Duration::from_millis(8);
 /// The browsers' own STUN server (RTC_CONFIG), for the server reflexive candidate.
 const STUN: &str = "stun:stun.l.google.com:19302";
 /// How long its name may take to resolve before webrtc-rs is left to resolve it ([`gather::stun_urls`]).
@@ -697,9 +699,8 @@ fn receiver(
             "appsrc name=rtp is-live=true format=time do-timestamp=true \
              caps=\"application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(string)VP8,payload=(int){payload_type}\" \
              ! rtpjitterbuffer latency=100 ! rtpvp8depay request-keyframe=true wait-for-keyframe=true ! vp8dec name=decoder \
-             ! videoconvert ! videoscale ! video/x-raw,width=[2,{SHOWN_MAX}],height=[2,{SHOWN_MAX}],pixel-aspect-ratio=1/1 \
-             ! jpegenc quality=70 \
-             ! appsink name=picture sync=false async=false max-buffers=2 drop=true"
+             ! {}",
+            shown()
         )
     } else {
         format!(
@@ -731,6 +732,53 @@ fn receiver(
         ready,
     )?;
     Ok((element(&pipeline, "rtp")?, pipeline, device))
+}
+
+/// What makes the pictures the element named `decoder` gives into JPEGs for the page ([`show`]).
+fn shown() -> String {
+    format!(
+        "videoconvert ! videoscale ! video/x-raw,width=[2,{SHOWN_MAX}],height=[2,{SHOWN_MAX}],pixel-aspect-ratio=1/1 \
+         ! jpegenc name=jpeg quality=70 \
+         ! appsink name=picture sync=false async=false max-buffers=2 drop=true"
+    )
+}
+
+/// Whether the page is shown a picture that comes `now`, `next` being when one is due (none before the first).
+/// The one after is due a fifteenth of a second after this one was, not after it came: at 30 a second every
+/// second picture comes right when one is due, a hair early half the time, and counting from when it came showed
+/// 12 a second, in gaps of 66 and 100 ms. SHOWN_EARLY is that hair; half the gap of 60 a second, so those are
+/// never taken a picture early. After a pause the count starts again, rather than catch up.
+fn due(next: &mut Option<Instant>, now: Instant) -> bool {
+    let every = Duration::from_secs(1) / SHOWN_FPS;
+    *next = Some(match *next {
+        Some(at) if now + SHOWN_EARLY < at => return false,
+        Some(at) if now < at + every => at + every,
+        _ => now + every,
+    });
+    true
+}
+
+/// The peer's pictures to the page, as JPEGs: at most SHOWN_FPS a second (videorate's drop-only asserts on 1.20
+/// here). The others are left out as they leave the decoder, before any is scaled or made a JPEG: a browser
+/// sends 30 a second.
+fn show(pipeline: &gst::Pipeline, page: Sink) -> Result<(), String> {
+    let next = Mutex::new(None::<Instant>);
+    element::<gst::Element>(pipeline, "decoder")?
+        .static_pad("src")
+        .ok_or("No decoder output")?
+        .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+            if due(&mut next.lock().unwrap(), Instant::now()) {
+                gst::PadProbeReturn::Ok
+            } else {
+                gst::PadProbeReturn::Drop
+            }
+        });
+    each_buffer(&element(pipeline, "picture")?, move |buffer| {
+        if let Some(jpeg) = bytes_of(buffer) {
+            page(jpeg);
+        }
+    });
+    Ok(())
 }
 
 /// Counts what a receiving pipeline decodes and, for pictures, sends them to the page and asks for keyframes.
@@ -774,19 +822,7 @@ fn receiving(
             gst::PadProbeReturn::Ok
         });
     if video {
-        // At most SHOWN_FPS pictures a second go to the page (videorate's drop-only asserts on 1.20 here).
-        let (events, last) = (shared.events.clone(), Mutex::new(None::<Instant>));
-        each_buffer(&element(pipeline, "picture")?, move |buffer| {
-            let mut last = last.lock().unwrap();
-            let now = Instant::now();
-            if last.is_some_and(|at| now - at < Duration::from_secs(1) / SHOWN_FPS) {
-                return;
-            }
-            *last = Some(now);
-            if let Some(jpeg) = bytes_of(buffer) {
-                events(jpeg);
-            }
-        });
+        show(pipeline, shared.events.clone())?;
         // The depayloader lost a frame and wants a keyframe: that goes to the sender as a PLI.
         let keyframes = keyframes.clone();
         src.static_pad("src").ok_or("No RTP output")?.add_probe(
@@ -1614,6 +1650,197 @@ mod tests {
             started.elapsed() >= Duration::from_millis(900),
             "the tone lasted {:?}",
             started.elapsed()
+        );
+    }
+
+    /// A peer's pictures faster than the page is shown them (a browser sends 30 a second): the ones left out are
+    /// left out as they are decoded, so none is made a JPEG for nothing. 60 pictures as fast as they come stand
+    /// for the peer's.
+    #[test]
+    fn a_picture_the_page_is_not_shown_is_never_made_a_jpeg() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let pipeline = launch(&format!(
+            "videotestsrc num-buffers=60 ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 \
+             ! identity name=decoder ! {}",
+            shown()
+        ))
+        .unwrap();
+        let (decoded, encoded, pictures) = (
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(0)),
+        );
+        let count = |name: &str, pad: &str, into: &Arc<AtomicU64>| {
+            let into = into.clone();
+            element::<gst::Element>(&pipeline, name)
+                .unwrap()
+                .static_pad(pad)
+                .unwrap()
+                .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                    into.fetch_add(1, Ordering::Relaxed);
+                    gst::PadProbeReturn::Ok
+                });
+        };
+        // Before `show` adds anything of its own: every picture the decoder gives is counted.
+        count("decoder", "src", &decoded);
+        count("jpeg", "sink", &encoded);
+        let seen = pictures.clone();
+        show(
+            &pipeline,
+            Arc::new(move |jpeg: Vec<u8>| {
+                assert!(jpeg.starts_with(&[0xff, 0xd8]));
+                seen.fetch_add(1, Ordering::Relaxed);
+            }),
+        )
+        .unwrap();
+        let started = Instant::now();
+        start(&pipeline, "The picture").unwrap();
+        let ended = pipeline.bus().unwrap().timed_pop_filtered(
+            gst::ClockTime::from_seconds(60),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        );
+        let took = started.elapsed();
+        stop(pipeline);
+        assert!(
+            matches!(
+                ended.as_ref().map(|m| m.view()),
+                Some(gst::MessageView::Eos(_))
+            ),
+            "{ended:?}"
+        );
+        let (decoded, encoded, pictures) = (
+            decoded.load(Ordering::Relaxed),
+            encoded.load(Ordering::Relaxed),
+            pictures.load(Ordering::Relaxed),
+        );
+        assert_eq!(decoded, 60);
+        // The first one, then one for each fifteenth of a second gone by (the last may be a hair early).
+        let most = 1 + (took + SHOWN_EARLY).as_millis() as u64 * u64::from(SHOWN_FPS) / 1000;
+        assert!(
+            (1..=most).contains(&pictures),
+            "{pictures} pictures shown in {took:?}"
+        );
+        assert_eq!(
+            encoded, pictures,
+            "{encoded} JPEGs made for {pictures} shown"
+        );
+    }
+
+    /// How many of 4 s of pictures `gap_us` apart the page is shown, each coming up to `jitter_us` early or late,
+    /// and the longest and shortest time between two of them (ms).
+    fn shown_of(gap_us: u64, jitter_us: u64) -> (usize, u128, u128) {
+        let started = Instant::now();
+        let mut next = None;
+        let mut passed = Vec::new();
+        for n in 0..4_000_000 / gap_us {
+            // Early, on time, late, on time: the same every run.
+            let off = [0, jitter_us, 2 * jitter_us, jitter_us][n as usize % 4];
+            let now = started + Duration::from_micros(n * gap_us + off);
+            if due(&mut next, now) {
+                passed.push(now);
+            }
+        }
+        let gaps = passed
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).as_millis());
+        (
+            passed.len(),
+            gaps.clone().max().unwrap(),
+            gaps.min().unwrap(),
+        )
+    }
+
+    #[test]
+    fn the_page_is_shown_fifteen_pictures_a_second_evenly() {
+        // 30 a second: every second one, whether they come on the dot or 5 ms early and late.
+        for jitter in [0, 5_000] {
+            let (shown, longest, shortest) = shown_of(33_333, jitter);
+            assert_eq!(shown, 60, "at 30 a second, {jitter} us of jitter");
+            assert!(
+                longest <= 77 && shortest >= 56,
+                "gaps of {shortest} to {longest} ms"
+            );
+        }
+        // 60 a second: every fourth one.
+        let (shown, longest, shortest) = shown_of(16_667, 3_000);
+        assert_eq!(shown, 60);
+        assert!(
+            longest <= 73 && shortest >= 60,
+            "gaps of {shortest} to {longest} ms"
+        );
+        // 15 a second or fewer: all of them.
+        assert_eq!(shown_of(66_666, 5_000).0, 60);
+        assert_eq!(shown_of(100_000, 5_000).0, 40);
+        // 25 a second: 15, no more.
+        assert_eq!(shown_of(40_000, 0).0, 60);
+
+        // After a pause the count starts again: the pictures that follow are not let through to catch up.
+        let every = Duration::from_secs(1) / SHOWN_FPS;
+        let started = Instant::now();
+        let mut next = None;
+        assert!(due(&mut next, started));
+        let later = started + Duration::from_secs(3);
+        assert!(due(&mut next, later));
+        assert!(!due(&mut next, later + Duration::from_millis(1)));
+        assert!(!due(&mut next, later + every / 2));
+        assert!(due(&mut next, later + every));
+    }
+
+    /// A peer at 30 pictures a second, as they come in a call (a live source, 4 s of it): the page is shown every
+    /// second one, 15 a second, not the 12 that "a fifteenth of a second since the last one came" gave.
+    #[test]
+    fn a_peer_at_thirty_pictures_a_second_is_shown_fifteen() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let pipeline = launch(&format!(
+            "videotestsrc is-live=true num-buffers=120 \
+             ! video/x-raw,format=I420,width=320,height=240,framerate=30/1 ! identity name=decoder ! {}",
+            shown()
+        ))
+        .unwrap();
+        // When each picture the page is shown left the decoder.
+        let passed = Arc::new(Mutex::new(Vec::<Instant>::new()));
+        show(&pipeline, Arc::new(|_| {})).unwrap();
+        let into = passed.clone();
+        element::<gst::Element>(&pipeline, "jpeg")
+            .unwrap()
+            .static_pad("sink")
+            .unwrap()
+            .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                into.lock().unwrap().push(Instant::now());
+                gst::PadProbeReturn::Ok
+            });
+        start(&pipeline, "The picture").unwrap();
+        let ended = pipeline.bus().unwrap().timed_pop_filtered(
+            gst::ClockTime::from_seconds(60),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        );
+        stop(pipeline);
+        assert!(
+            matches!(
+                ended.as_ref().map(|m| m.view()),
+                Some(gst::MessageView::Eos(_))
+            ),
+            "{ended:?}"
+        );
+        let passed = passed.lock().unwrap();
+        let took = *passed.last().unwrap() - passed[0];
+        // Against the time they took, not a fixed number: a loaded machine gives the source's pictures late.
+        let gaps = passed.len() as u128 - 1;
+        assert!(
+            gaps * 1000 >= 14 * took.as_millis(),
+            "{} pictures shown in {took:?}",
+            passed.len()
+        );
+        assert!(
+            gaps * 1000 <= 15 * (took + SHOWN_EARLY).as_millis() + 999,
+            "{} pictures shown in {took:?}",
+            passed.len()
         );
     }
 

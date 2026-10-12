@@ -2,12 +2,11 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserContext } from "@playwright/test";
 import { answerDoh, type Zone } from "../../packages/browser/test/helpers/dohZone";
-import { endpoints } from "../infra/env.mjs";
 
 /**
  * A test domain of our own, for domain identity proofs.
  *
- * Two local servers, on two ports of the environment's range per slot (from E2E_DOMAIN_PORT, e2e/infra/env.mjs):
+ * Two local servers, each on a free port the system gives it (so any number of workers can have one at once):
  *  - a DNS-over-HTTPS responder (RFC 8484 wire format) answering from `zone`;
  *  - a web server answering `/.well-known/*` for the test domain from `files`.
  *
@@ -35,19 +34,17 @@ export interface TestDomain {
 
 const RESOLVERS = /^https:\/\/(dns\.quad9\.net|cloudflare-dns\.com|dns\.google)\/dns-query\?/;
 
-function listen(server: Server, port: number): Promise<number> {
+/** Listens on a port the system picks: a fixed one can be held by anybody (on Linux, by an outgoing connection as its local port). */
+function listen(server: Server): Promise<number> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
+    server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
   });
 }
 
-/** How many workers can each have a test domain at once: 40 slots of two ports, 47120-47199 by default. */
-export const DOMAIN_SLOTS = 40;
+const close = (server: Server) => new Promise<void>(done => { server.close(() => done()); });
 
-/** `slot` keeps parallel Playwright workers on distinct ports; `base` moves them elsewhere (the matrix has its own range). */
-export async function startTestDomain(slot = 0, base = endpoints.domainPort): Promise<TestDomain> {
-  if (slot < 0 || slot >= DOMAIN_SLOTS) throw new Error(`Test domain slot ${slot} out of 0-${DOMAIN_SLOTS - 1}`);
+export async function startTestDomain(): Promise<TestDomain> {
   const domain = `e2e-${Math.random().toString(36).slice(2, 10)}.ghostly.tools`;
   const zone: Zone = { a: { [domain]: ["203.0.113.7"] }, txt: {}, ttl: 1 };
   const files = new Map<string, string>();
@@ -71,8 +68,9 @@ export async function startTestDomain(slot = 0, base = endpoints.domainPort): Pr
     if (body === undefined) { res.writeHead(404, { "access-control-allow-origin": "*" }).end("not found"); return; }
     res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*", "cache-control": "no-store" }).end(body);
   });
-  const dohPort = await listen(doh, base + slot * 2);
-  const webPort = await listen(web, base + 1 + slot * 2);
+  const dohPort = await listen(doh);
+  // A domain that started by half leaves nothing listening.
+  const webPort = await listen(web).catch(async error => { await close(doh); throw error; });
 
   return {
     domain, zone, files, asked,
@@ -89,6 +87,6 @@ export async function startTestDomain(slot = 0, base = endpoints.domainPort): Pr
     },
     publishTxt(value) { zone.txt = { [`_ghostly.${domain}`]: [value] }; },
     unpublish() { zone.txt = {}; files.clear(); },
-    close: () => Promise.all([doh, web].map(s => new Promise<void>(r => s.close(() => r())))).then(() => undefined),
+    close: () => Promise.all([doh, web].map(close)).then(() => undefined),
   };
 }

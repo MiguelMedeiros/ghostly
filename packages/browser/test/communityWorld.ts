@@ -106,6 +106,11 @@ export class CommunityWorld {
   private sameSide(a: Peer, b: Peer): boolean { return (!this.part || this.part(a) === this.part(b)) && !this.cut?.(a, b); }
   /** Keeps the edges between two peers from coming up (their entry session still does): an edge whose signaling is slow. */
   holdEdge: ((a: Peer, b: Peer) => boolean) | null = null;
+  /**
+   * Two hubs answering one joiner run the same end of its entry session: here nobody gets through. On relays the record
+   * written last stands, and the joiner may get through to that hub (CLI daemons, 2026-10-11): a test says which.
+   */
+  entryWinner: Peer | null = null;
   /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
   failRead: ((peer: Peer, key: string) => boolean) | null = null;
   /**
@@ -242,6 +247,11 @@ export class CommunityWorld {
       if (e.kind === want && e.g === edge.g && e.me === edge.peer && e.peer === edge.me) found.push({ peer, linkId });
     }
     const same = [...this.peers.values()].flatMap(peer => [...peer.links.values()].filter(e => e.kind === edge.kind && e.g === edge.g && e.me === edge.me && e.peer === edge.peer));
+    if (this.entryWinner && edge.kind !== "edge") {
+      const winner = this.entryWinner;
+      if (edge.kind === "guest") return found.find(f => f.peer === winner) ?? (found.length === 1 ? found[0] : undefined);
+      if (same.length > 1) return [...winner.links.values()].includes(edge) && found.length === 1 ? found[0] : undefined;
+    }
     return found.length === 1 && same.length === 1 ? found[0] : undefined;
   }
 

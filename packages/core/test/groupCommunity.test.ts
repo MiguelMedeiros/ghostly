@@ -379,6 +379,81 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(bob.session.state.statusReason).toMatch(/admin signed two different changes/);
   });
 
+  it("a commit whose parent is not here waits only when the admin signed it, and for a while; one that came before its parent is still placed", async () => {
+    const net = new Net();
+    let now = 1_800_000_000_000;
+    net.now = () => now;
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol);
+    expect(bob.session.needsCatchUp).toBe(false);
+    const top = bob.session.top, roster = bob.session.roster;
+    const hash = (i: number) => i.toString(16).padStart(64, "0");
+    // A member's commits after parents nobody has: with no signature, then signed by that member.
+    const signed = (i: number) => ({ ...forge(carol, top, roster, { k: "add", s: createIdentity().pubKeyZ32 }).commit, p: hash(i) });
+    const carolSeed = identityFromSeedB64(carol.seedB64).seed;
+    for (let i = 0; i < COMMUNITY_LIMITS.pendingCommits; i++) {
+      expect(await bob.session.handle(carol.session.myKey, commitFrame(signed(i)))).toBe(false);
+      expect(await bob.session.handle(carol.session.myKey, commitFrame(signCommunity(signed(i + 1000), carolSeed)))).toBe(false);
+    }
+    expect(bob.session.needsCatchUp).toBe(false);
+    // Two real commits by the admin, the second one first: it waits, and is placed when its parent comes.
+    const first = forge(alice, top, roster, { k: "add", s: createIdentity().pubKeyZ32 });
+    const second = forge(alice, first.commit, first.roster, { k: "add", s: createIdentity().pubKeyZ32 });
+    expect(await bob.session.handle(alice.session.myKey, commitFrame(second.commit))).toBe(false);
+    expect(bob.session.needsCatchUp).toBe(true);
+    expect(await bob.session.handle(alice.session.myKey, commitFrame(first.commit))).toBe(true);
+    expect(bob.session.topHash).toBe(communityCommitHash(second.commit));
+    await net.settle();
+    // One whose parent never comes stops waiting after a while; more than there are places for, the oldest go.
+    const aliceSeed = identityFromSeedB64(alice.seedB64).seed;
+    const lost = (i: number) => signCommunity({ ...forge(alice, second.commit, second.roster, { k: "rotate" }).commit, p: hash(i) }, aliceSeed);
+    for (let i = 0; i < COMMUNITY_LIMITS.pendingCommits; i++) await bob.session.handle(alice.session.myKey, commitFrame(lost(i + 2000)));
+    const third = forge(alice, second.commit, second.roster, { k: "add", s: createIdentity().pubKeyZ32 });
+    const fourth = forge(alice, third.commit, third.roster, { k: "add", s: createIdentity().pubKeyZ32 });
+    await bob.session.handle(alice.session.myKey, commitFrame(fourth.commit));
+    await bob.session.handle(alice.session.myKey, commitFrame(third.commit));
+    expect(bob.session.topHash).toBe(communityCommitHash(fourth.commit));
+    now += COMMUNITY_LIMITS.pendingMs - 1;
+    await bob.session.handle(alice.session.myKey, commitFrame(lost(3000)));
+    const waiting = (bob.session as unknown as { pendingCommits: Map<string, unknown> }).pendingCommits;
+    expect(waiting.size).toBe(COMMUNITY_LIMITS.pendingCommits);
+    now += 1;
+    expect(bob.session.needsCatchUp).toBe(true);
+    expect([...waiting.keys()]).toEqual([hash(3000) + ":" + String(second.commit.e + 1)]);
+    now += COMMUNITY_LIMITS.pendingMs - 1;
+    void bob.session.needsCatchUp;
+    expect(waiting.size).toBe(0);
+  });
+
+  it("a secret that came before its commit is kept when others came for commits that never do", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol);
+    // What Alice says at a rotation, held back from Bob.
+    const held: unknown[] = [];
+    const handle = bob.session.handle.bind(bob.session);
+    bob.session.handle = async (_from, frame) => { held.push(frame); return false; };
+    await alice.session.rotate();
+    await net.settle();
+    bob.session.handle = handle;
+    const secrets = held.filter(f => ["group-secret", "group-secrets"].includes((f as { t: string }).t));
+    const commits = held.filter(f => (f as { t: string }).t === "group-commit");
+    expect(secrets.length).toBeGreaterThan(0);
+    expect(commits.length).toBe(1);
+    const sealed = { e: "A".repeat(43), n: "A".repeat(32), c: "A".repeat(64) };
+    const junk = (i: number) => ({ t: "group-secret", v: 2, g: bob.session.id, to: bob.session.myKey, h: i.toString(16).padStart(64, "0"), s: sealed });
+    for (let i = 0; i < COMMUNITY_LIMITS.pendingSecrets; i++) await bob.session.handle(carol.session.myKey, junk(i));
+    for (const frame of secrets) await bob.session.handle(alice.session.myKey, frame);
+    for (let i = 0; i < COMMUNITY_LIMITS.pendingSecrets - 1; i++) await bob.session.handle(carol.session.myKey, junk(i + 100));
+    await bob.session.handle(alice.session.myKey, commits[0]);
+    expect(bob.session.topHash).toBe(alice.session.topHash);
+    expect(bob.session.needsCatchUp).toBe(false);
+  });
+
   it("a shorter branch parting long ago is not followed; a longer one is, however far back it parts", async () => {
     const net = new Net();
     const alice = net.create("alice");

@@ -17,6 +17,7 @@ const wakes = ({ event_name, event }: Event) =>
   Boolean(new Function("github", "startsWith", `return (${condition.replace(/!=|==/g, (m) => `${m}=`)});`)({ event_name, event }, (s: string, p: string) => String(s).startsWith(p)));
 
 const push = (type: string): Event => ({ event_name: "push", event: { sender: { type, login: type === "Bot" ? "ghostly-merge-queue-mm[bot]" : "MiguelMedeiros" } } });
+const ci = (conclusion: string, event = "pull_request"): Event => ({ event_name: "workflow_run", event: { workflow_run: { event, conclusion } } });
 
 describe("merge-queue.yml wakes the train", () => {
   it("found the condition", () => expect(condition).toContain("github.event_name"));
@@ -30,11 +31,25 @@ describe("merge-queue.yml wakes the train", () => {
     expect(wakes({ event_name: "schedule", event: {} })).toBe(true);
     expect(wakes({ event_name: "workflow_dispatch", event: {} })).toBe(true);
     expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue" } } })).toBe(true);
-    expect(wakes({ event_name: "workflow_run", event: { workflow_run: { event: "pull_request" } } })).toBe(true);
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:priority" } } })).toBe(true);
+    expect(wakes(ci("success"))).toBe(true);
+    expect(wakes(ci("failure"))).toBe(true);
+  });
+
+  // A cancelled run reads as "pending" or "none" (ciState), never green or red: the run that replaced it wakes the
+  // train when it ends. The train's own cancels of a boarded batch's pull requests would wake it once each.
+  it("not for a pull request's CI run that was cancelled", () => {
+    expect(wakes(ci("cancelled"))).toBe(false);
+  });
+
+  it("not for the labels the train puts on a pull request it drops from the line", () => {
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:conflict" } } })).toBe(false);
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queue:failed" } } })).toBe(false);
   });
 
   it("not for another label or CI on a push", () => {
     expect(wakes({ event_name: "pull_request_target", event: { label: { name: "kind:bug" } } })).toBe(false);
-    expect(wakes({ event_name: "workflow_run", event: { workflow_run: { event: "push" } } })).toBe(false);
+    expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queued" } } })).toBe(false);
+    expect(wakes(ci("success", "push"))).toBe(false);
   });
 });

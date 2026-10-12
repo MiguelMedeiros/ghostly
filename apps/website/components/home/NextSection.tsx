@@ -1,11 +1,12 @@
 "use client";
 
-import Link from "next/link";
+import { PageLink } from "@/components/site/IntentLink";
 import { useEffect, useId, useRef, useState } from "react";
 import { Ghost } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
 import { Reveal } from "./Reveal";
-import { NEXT_VERSION } from "@/lib/status";
+import { SHOTS_VERSION } from "@/lib/release";
+import { shotSrcSet } from "@/lib/shots";
 import type { HomeCopy } from "@/content/home";
 import "@/app/next.css";
 
@@ -121,6 +122,18 @@ function cropVars(shot: Shot): React.CSSProperties {
   } as React.CSSProperties;
 }
 
+/**
+ * The width a window's picture is drawn at, for `sizes`: the window's own width (next.css: a 7/11 column of the page
+ * from 1024px, at most 590px; the page's width less the phone below that) over the share of the picture it shows.
+ */
+function shotSizes(shot: Shot): string {
+  const over = (n: number) => +(n / shot.crop.w).toFixed(1);
+  return `(min-width: 1024px) min(${over(49.3)}vw - ${over(41)}px, ${over(590)}px), (min-width: 861px) calc(${over(82)}vw - ${over(55)}px), ${over(100)}vw`;
+}
+
+/** The phone's width: 18% of the row's screens beside the window, and 58% of the row (280px at most) in its place. */
+const PHONE_SIZES = "(min-width: 1024px) min(10.8vw - 5px, 133px), (min-width: 861px) calc(18vw - 9px), min(58vw - 18px, 280px)";
+
 // Commands from docs/CLI.md; output shapes from packages/cli/README.md.
 const CLI = `$ ghostly daemon --detach
 $ ghostly invite create --label casper
@@ -147,7 +160,7 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
   const honesty = (id: string) => {
     const shot = SHOTS[id];
     if (!shot) return t.illustration;
-    return shot.from === "dev" ? t.fromDev.replace("{n}", NEXT_VERSION) : t.fromOld;
+    return shot.from === "dev" ? t.fromDev.replace("{n}", SHOTS_VERSION) : t.fromOld;
   };
 
   // The live line draws once, when the head comes into view.
@@ -212,9 +225,9 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
                 <p className="body">{item.body}</p>
                 {item.extra && <p className="note nx-note">{item.extra}</p>}
                 {"link" in item && item.link && (
-                  <Link className="link-arrow" href={item.link.href}>
+                  <PageLink className="link-arrow" href={item.link.href}>
                     {item.link.label} →
-                  </Link>
+                  </PageLink>
                 )}
               </div>
               <figure className="nx-row-media" data-phone={!!shot?.mobile}>
@@ -224,7 +237,7 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
                     {shot ? (
                       <div className="nx-screen" style={cropVars(shot)}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img className="nx-shot" src={shot.src} alt={shot.alt} loading="lazy" decoding="async" width={shot.width} height={shot.height} />
+                        <img className="nx-shot" src={shot.src} srcSet={shotSrcSet(shot.src, "desktop")} sizes={shotSizes(shot)} alt={shot.alt} loading="lazy" decoding="async" width={shot.width} height={shot.height} />
                       </div>
                     ) : item.id === "cli" && (
                       <pre className="nx-term" aria-label="Example CLI session" tabIndex={0}>
@@ -234,7 +247,7 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
                   </div>
                   {shot?.mobile && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img className="nx-row-phone" src={shot.mobile} alt="" aria-hidden="true" loading="lazy" decoding="async" width={PHONE.width} height={PHONE.height} />
+                    <img className="nx-row-phone" src={shot.mobile} srcSet={shotSrcSet(shot.mobile, "phone")} sizes={PHONE_SIZES} alt="" aria-hidden="true" loading="lazy" decoding="async" width={PHONE.width} height={PHONE.height} />
                   )}
                 </div>
                 <figcaption className="caption">{honesty(item.id)}</figcaption>

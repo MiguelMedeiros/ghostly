@@ -102,7 +102,7 @@ export function Settings() {
   const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
     updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname } =
     useSettings();
-  const { t } = useI18n();
+  const { t, languageNotLoaded, retryLanguage } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
   const install = useInstallState();
@@ -547,7 +547,13 @@ export function Settings() {
             ))}
           </div>
         </Row>
-        <Row label={t("settings.language")}>
+        <Row label={t("settings.language")}
+          hint={languageNotLoaded ? (
+            <span role="status" data-testid="settings-language-not-loaded">
+              {t("settings.languageNotLoaded", { language: LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language })}{" "}
+              <button type="button" onClick={retryLanguage} className="underline text-accent cursor-pointer">{t("settings.languageRetry")}</button>
+            </span>
+          ) : undefined}>
           <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
             options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />
         </Row>

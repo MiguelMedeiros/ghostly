@@ -460,6 +460,7 @@
     "notAddress": "ليس عنوان مرحّل: {{address}}",
     "useHttps": "استخدم https:// في عنوان المرحّل: {{address}}"
   },
+  "startAgain": "ابدأ من جديد",
   "transport": {
     "adapterFailed": "تعذر البدء. أعد فتح هذه الدردشة للمحاولة مجددًا.",
     "allowAnotherNext": "اسمح بوسيلة نقل أخرى، أو شغّل البديل.",

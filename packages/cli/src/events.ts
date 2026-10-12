@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
@@ -39,6 +40,7 @@ export class EventHub {
   private readonly listeners = new Set<Listener>();
   private readonly stateListeners = new Set<(state: EngineState) => void>();
   private readonly callListeners = new Set<(chat: string, signal: string) => void>();
+  private readonly appListeners = new Set<(chat: string, frame: AppFrameEvent) => void>();
   private seen: Seen = new Map();
   private firstRun = false;
   private chats = new Map<string, ChatShape>();
@@ -123,6 +125,8 @@ export class EventHub {
   onState(listener: (state: EngineState) => void): () => void { this.stateListeners.add(listener); return () => this.stateListeners.delete(listener); }
   /** A call signal from a contact's app, as the engine gives it. */
   onCallSignal(listener: (chat: string, signal: string) => void): () => void { this.callListeners.add(listener); return () => this.callListeners.delete(listener); }
+  /** A frame of a contact's mini-app (apps/1), as the engine gives it: the app named by its chat app id. */
+  onAppFrame(listener: (chat: string, frame: AppFrameEvent) => void): () => void { this.appListeners.add(listener); return () => this.appListeners.delete(listener); }
 
   /** Events after `since` still in the journal; a gap event first when older ones were dropped. */
   replay(since: number): GhostlyEvent[] {
@@ -166,6 +170,12 @@ export class EventHub {
       case "call-signal":
         for (const listener of this.callListeners) {
           try { listener(message.linkId, message.signal); } catch (error) { process.stderr.write(`ghostly: call error: ${error instanceof Error ? error.stack : String(error)}\n`); }
+        }
+        break;
+      // Mini-apps this profile serves as a bot (./appEvents.ts): app.opened, app.closed, app.message.
+      case "app-frame":
+        for (const listener of this.appListeners) {
+          try { listener(message.linkId, message.event); } catch (error) { process.stderr.write(`ghostly: app frame error: ${error instanceof Error ? error.stack : String(error)}\n`); }
         }
         break;
       default: break;

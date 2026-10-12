@@ -169,3 +169,11 @@ never published.
 `docker compose build` builds from the repository root (`context: ../..`) because
 the site reads `docs/` and quotes `packages/core/src`; `Dockerfile.dockerignore`
 keeps that context small.
+
+`docker compose up -d --build` serves the site on `http://127.0.0.1:3000`: this machine only, because the site is
+meant to be reached through the proxy in front of it, which gives it HTTPS. `WEBSITE_PORT` moves the port and
+keeps it local. A reverse proxy or a tunnel that comes from another address (another container, another host)
+needs `WEBSITE_BIND` in `apps/website/.env`, with the address it connects to and the port: `WEBSITE_BIND=172.17.0.1:3000`
+for a proxy in a container on Docker's default bridge, for example. `WEBSITE_BIND=0.0.0.0:3000` answers on every
+interface of the host, as the site did before; Docker opens a published port ahead of `ufw`, so close it at the
+provider's firewall when you choose that.
