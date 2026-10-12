@@ -83,10 +83,14 @@ export function GroupTypingText({ testId, typers }: { testId: string; typers: re
 export function ChatSubtitle({ peerKey, keyLabel }: { peerKey?: string; keyLabel: string }) {
   const activity = usePeerTypingActivity(peerKey);
   return (
-    <p className={`m-0 truncate text-xs max-md:text-[10px] whitespace-nowrap ${activity ? "" : "text-text-muted font-mono"}`} data-testid="chat-subtitle"
-      role="status" aria-live="polite">
-      {/* No wider than the line: a long status ends in an ellipsis at what follows it (a bot's usage meter). */}
-      {activity ? <TypingText testId="chat-typing" activity={activity} className="max-w-full" /> : keyLabel}
+    <p className={`m-0 truncate text-xs max-md:text-[10px] whitespace-nowrap ${activity ? "" : "text-text-muted font-mono"}`} data-testid="chat-subtitle">
+      {/* Only what the contact is doing is said by a screen reader. The key is there the whole time: inside the live
+          region it was read out, letter by letter, every time the contact stopped typing. */}
+      <span role="status" aria-live="polite">
+        {/* No wider than the line: a long status ends in an ellipsis at what follows it (a bot's usage meter). */}
+        {activity && <TypingText testId="chat-typing" activity={activity} className="max-w-full" />}
+      </span>
+      {!activity && keyLabel}
     </p>
   );
 }
