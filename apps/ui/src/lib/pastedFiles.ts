@@ -69,14 +69,27 @@ export function dragHasFiles(data: DataTransfer | null): boolean {
 }
 
 /**
+ * Whether a drag names what it carries by address only: a link, or files the webview does not hand
+ * over (WebKitGTK shows a file manager's drag as `text/uri-list` with no files).
+ */
+function dragNamesAddress(data: DataTransfer | null): boolean {
+  return !!data && [...(data.types ?? [])].includes("text/uri-list");
+}
+
+/**
  * Keeps a file dropped where nothing takes it from opening in place of the app (a browser tab
- * shows it, the desktop app's window would navigate to it). Where a drop is taken, its handler
- * has already said so.
+ * shows it, the desktop app's window would navigate to it), and a link or a file named by its
+ * address too. Where a drop is taken, its handler has already said so.
  */
 export function guardFileDrops(target: Window = window): () => void {
-  // A file field on the page (a backup to restore) takes its drop as the browser does.
-  const ours = (e: DragEvent) => !e.defaultPrevented && dragHasFiles(e.dataTransfer)
-    && !(e.target instanceof Element && e.target.closest("input[type='file']"));
+  const ours = (e: DragEvent) => {
+    if (e.defaultPrevented) return false;
+    const on = e.target instanceof Element ? e.target : null;
+    // A file field on the page (a backup to restore) takes its drop as the browser does.
+    if (dragHasFiles(e.dataTransfer)) return !on?.closest("input[type='file']");
+    // An address dropped into a text field is its text.
+    return dragNamesAddress(e.dataTransfer) && !on?.closest("input, textarea, [contenteditable=''], [contenteditable='true']");
+  };
   const over = (e: DragEvent) => {
     if (!ours(e)) return;
     e.preventDefault();
