@@ -184,7 +184,7 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
     <section
       ref={sectionRef}
       className="section fin"
-      id="download"
+      id="finale"
       data-state={state}
       data-shown={shown}
       data-step={step}
@@ -246,7 +246,8 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
           <GhostMark /> {t.browser.cta} <span aria-hidden="true">↗</span>
         </a>
 
-        <div className="fin-panel">
+        {/* Every "Download" link lands here, on the installers, not on the top of the section a screen above. */}
+        <div className="fin-panel" id="download">
           <div className="fin-panel-head">
             <h3 className="fin-panel-title">
               <Icon name="desktop" /> {t.desktop.title} <span className="chip">v{version}</span>

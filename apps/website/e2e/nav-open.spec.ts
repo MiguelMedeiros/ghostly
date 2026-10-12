@@ -58,6 +58,44 @@ test("Open app opens the web app; its chevron offers the web app or a download",
   await expect(page.locator("#download")).toBeInViewport();
 });
 
+// "Download" used to land on the top of the finale: the ghosts and the title, with the first installer more than a
+// screen below. It lands on the download panel, so the installers are on the first screen, on a short window too.
+for (const from of ["/developers", "/"]) {
+  test(`1280x720: Download from ${from} lands on the installers`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto(from);
+    const more = page.getByRole("button", { name: "Ways to open Ghostly" });
+    await expect(more).toBeEnabled();
+    await more.click();
+    await page.getByRole("menuitem", { name: /Download the app/ }).click();
+    await expect(page).toHaveURL(/\/#download$/);
+    await expect(page.locator(".fin-dl").first()).toBeInViewport({ ratio: 1 });
+  });
+}
+
+test("1280x720: the footer's Download lands on the installers", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/developers");
+  await page.locator('footer a[href="/#download"]').click();
+  await expect(page).toHaveURL(/\/#download$/);
+  await expect(page.locator(".fin-dl").first()).toBeInViewport({ ratio: 1 });
+});
+
+test("1280x720: the first screen's Download button lands on the installers", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await page.locator('.hero a[href="#download"]').click();
+  await expect(page.locator(".fin-dl").first()).toBeInViewport({ ratio: 1 });
+});
+
+// The anchor is the panel; the section keeps one of its own, which the story's rail uses for its last chapter.
+test("#download is the download panel inside the finale", async ({ page }) => {
+  await page.goto("/");
+  const finale = page.locator("section.fin");
+  await expect(finale).toHaveAttribute("id", "finale");
+  await expect(finale.locator("#download.fin-panel")).toHaveCount(1);
+});
+
 test("the open menu works from the keyboard", async ({ page }) => {
   await page.goto("/developers");
   const more = page.getByRole("button", { name: "Ways to open Ghostly" });
