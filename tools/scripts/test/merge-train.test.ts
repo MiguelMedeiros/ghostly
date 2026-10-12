@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -1424,6 +1424,45 @@ describe("one pull request alone", () => {
     repo.pulls.get(11)!.branch = "dev";
     await repo.run({ base: "epic/x" });
     expect(repo.pushes).toEqual([]);
+    expect(repo.members()).toEqual([11]);
+  });
+
+  it("never pushes its rebase to a branch whose pushes a workflow acts on", async () => {
+    // Every branch a workflow names under `on.push` (or under a `workflow_run` that follows such a push): CI on a push
+    // to `claude/security-auto-*` ends in security-autorelease.yml, which releases that commit.
+    const dir = resolve(import.meta.dirname, "../../../.github/workflows");
+    const named = new Set<string>();
+    for (const file of readdirSync(dir)) {
+      const text = readFileSync(resolve(dir, file), "utf8");
+      for (const m of text.matchAll(/^ {2}(?:push|workflow_run):\n(?: {4}.*\n)*? {4}branches: \[(.*)\]/gm)) for (const b of m[1].split(",")) named.add(b.trim().replace(/^"|"$/g, ""));
+    }
+    expect([...named]).toEqual(expect.arrayContaining(["main", "dev", "claude/security-auto-**", "epic/**"]));
+    for (const pattern of named) expect([pattern, canGoAlone({ fork: false, branch: pattern.replace(/\*+/, "20261008") })]).toEqual([pattern, false]);
+
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.pulls.get(11)!.branch = "claude/security-auto-20261008";
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(11)!.sha).toBe("h11"); // the routine's own commit stays the branch's head
+    expect(repo.alone(11)).toBeNull();
+    expect(repo.members()).toEqual([11]);
+    expect(r.inFlight).toBe(repo.batch()!.number);
+  });
+
+  it("stops flying alone a head it may no longer push to: the next rebase is a batch", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const head = repo.pulls.get(11)!.sha;
+    expect(repo.pushes).toEqual([`fix-11=${head}`]);
+    repo.pulls.get(11)!.branch = "claude/security-auto-20261008"; // a mark left by a train that still pushed there
+    repo.tips.dev = "dev1";
+    expect((await repo.run()).inFlight).toBeNull(); // in line like any other, until CI is green on its head
+    repo.settle();
+    await repo.run();
+    expect(repo.pushes).toHaveLength(1);
+    expect(repo.pulls.get(11)!.sha).toBe(head);
     expect(repo.members()).toEqual([11]);
   });
 

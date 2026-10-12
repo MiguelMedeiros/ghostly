@@ -298,8 +298,18 @@ export const aloneMark = (sticky) => {
   }
 };
 
-/** Whether the train may land a pull request alone: its head is a branch of this repository it may rebase and push. */
-export const canGoAlone = (p) => !p.fork && !BASE.test(p.branch) && p.branch !== "main" && !p.branch.startsWith("batch/");
+/**
+ * Branches a workflow acts on when they are pushed to, besides the train's bases (ci.yml, security.yml): a push to
+ * `claude/security-auto-*` is what security-autorelease.yml releases once its CI is green, so only the security
+ * routine's own commit may ever be that branch's head.
+ */
+const SHIPS = /^(main|master|claude\/security-auto-.*)$/;
+
+/**
+ * Whether the train may land a pull request alone: its head is a branch of this repository it may rebase and push.
+ * Never one whose pushes start more than a pull request's CI: the train's rebase holds the base's commits.
+ */
+export const canGoAlone = (p) => !p.fork && !BASE.test(p.branch) && !SHIPS.test(p.branch) && !p.branch.startsWith("batch/");
 
 /**
  * The message of the one commit a pull request becomes, as `git.build` writes it for a batch: "<title> (#n)", then one
@@ -797,7 +807,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   };
 
   if (!inFlight) {
-    const lone = line().find((p) => p.alone?.sha === p.sha);
+    // A head the train may not push to flies no further, whatever its mark says: its next rebase would be a push.
+    const lone = line().find((p) => p.alone?.sha === p.sha && canGoAlone(p));
     if (lone) inFlight = await flyAlone(lone);
   }
   while (inFlight === null || inFlight === undefined) {
