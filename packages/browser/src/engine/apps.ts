@@ -435,6 +435,8 @@ export class Apps {
   private readonly queues = new Map<string, Promise<unknown>>();
   /** The keys read of each `ref\0scope` running, and the one every call made while it runs shares after it. */
   private readonly keyReads = new Map<string, { running: Promise<string[]>; next?: Promise<string[]> }>();
+  /** Uninstalls begun per reference, for this engine's life: a storage write that waited its turn across one is refused. */
+  private readonly uninstalls = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Drops what `staged` holds past `STAGED.ms`, set while it holds anything: a closed install screen sends no call. */
   private sweep: ReturnType<typeof setTimeout> | null = null;
@@ -1510,6 +1512,11 @@ export class Apps {
     const builtIn = this.builtIn(ref) !== undefined;
     if (!app && !builtIn) fail("not-installed", "This app is not installed");
     const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage, ...(builtIn ? [STORES.settings] : [])], "readwrite");
+    // Counted with the transaction, nothing awaited between: a write that sees the old count is in an older transaction,
+    // whose row this delete takes; a later one is refused (`storageSet`). The record held goes now, so an app asked for
+    // from here on is read after this delete.
+    this.uninstalls.set(ref, (this.uninstalls.get(ref) ?? 0) + 1);
+    this.held.delete(ref);
     tx.objectStore(STORES.apps).delete(ref);
     tx.objectStore(STORES.appStorage).delete(rowsOf(ref));
     if (builtIn) markBuiltIns(tx.objectStore(STORES.settings), (marks) => { marks.removed[ref] ??= this.now(); });
@@ -1585,6 +1592,7 @@ export class Apps {
    * it, so the app can make room.
    */
   async storageSet({ ref, scope, key, value, digest }: { ref: string; scope: string; key: string; value: unknown; digest?: string }): Promise<void> {
+    const uninstalls = this.uninstalls.get(ref);
     const app = await this.runningOrFail(ref, digest);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     let text: string | undefined;
@@ -1606,6 +1614,11 @@ export class Apps {
       if (where !== APP_SCOPE_ALONE && !this.host.isChat(where)) {
         this.usage.delete(`${app.ref}\0${where}`);
         fail("bad-scope", "Not a chat of this profile");
+      }
+      // The same for the app: uninstalled since this write was asked, its rows are gone and this one would stay.
+      if (this.uninstalls.get(app.ref) !== uninstalls) {
+        this.usage.delete(`${app.ref}\0${where}`);
+        fail("not-installed", "This app is not installed");
       }
       writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
       await wrap(writing.put(counterRow(app.ref, where, next)));
