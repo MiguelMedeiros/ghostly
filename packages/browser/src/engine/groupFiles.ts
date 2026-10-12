@@ -767,8 +767,10 @@ export class GroupFileDesk {
     this.letGo();
     const active = this.servingNow();
     if (active.length >= GROUP_FILE_LIMITS.serveAtOnce) { edge.busy.add(messageId); return "busy"; }
-    // One that has all its bytes waits only for the member's word that its check passed, which may come after this want.
-    if (active.some(a => a.peer === edge.peer && a.sending)) return "busy";
+    // One place per member, whatever it confirms. One that has all its bytes, lately, waits only for the member's word
+    // that its check passed, which may come after this want: that one alone is not its place.
+    const theirs = active.filter(a => a.peer === edge.peer);
+    if (theirs.length > 1 || theirs.some(a => a.sending || this.deps.now() - a.since >= GROUP_FILE_LIMITS.doneWaitMs)) return "busy";
     const today = Math.floor(this.deps.now() / 86_400_000);
     if (this.served.day !== today) this.served = { day: today, bytes: 0 };
     const reserved = active.reduce((sum, a) => sum + a.size, 0);
@@ -777,14 +779,15 @@ export class GroupFileDesk {
 
   /**
    * Transfers served now, all groups together: to whom, what each takes of the day (its size, or what it sent when that
-   * is more), and whether bytes are still to go.
+   * is more), whether bytes are still to go, and since when it has not gone further.
    */
-  private servingNow(): { peer: string; size: number; sending: boolean }[] {
-    const active: { peer: string; size: number; sending: boolean }[] = [];
+  private servingNow(): { peer: string; size: number; sending: boolean; since: number }[] {
+    const active: { peer: string; size: number; sending: boolean; since: number }[] = [];
     for (const edge of this.edgesById.values()) for (const wire of edge.serving.keys()) {
       const record = edge.files.get("out", wire);
       if (record && !transferEnded(record)) {
-        active.push({ peer: edge.peer, size: Math.max(record.file.size, edge.files.sent(wire)), sending: record.confirmed < record.file.size });
+        active.push({ peer: edge.peer, size: Math.max(record.file.size, edge.files.sent(wire)), sending: record.confirmed < record.file.size,
+          since: edge.servedMoved.get(wire)?.at ?? this.deps.now() });
       }
     }
     return active;
@@ -802,18 +805,24 @@ export class GroupFileDesk {
 
   /**
    * Served transfers that no longer count end, their places free for others (WISP 503 § Serving limits): the asker's
-   * session closed, it is not in the roster any more, or its bytes have not moved for `wantWaitMs` (the asker has moved
-   * on by then).
+   * session closed, it is not in the roster any more, its bytes have not gone further for `wantWaitMs` (the asker has
+   * moved on by then), or it has all its bytes and the member's next want has overtaken its word for `doneWaitMs`.
    */
   private letGo(): void {
     const now = this.deps.now();
+    const theirs = new Map<string, number>();
+    for (const a of this.servingNow()) theirs.set(a.peer, (theirs.get(a.peer) ?? 0) + 1);
     for (const edge of this.edgesById.values()) for (const wire of [...edge.serving.keys()]) {
       const record = edge.files.get("out", wire);
       if (!record || transferEnded(record)) continue;
       let moved = edge.servedMoved.get(wire);
-      if (!moved || moved.confirmed !== record.confirmed) edge.servedMoved.set(wire, (moved = { confirmed: record.confirmed, at: now }));
+      if (!moved) edge.servedMoved.set(wire, (moved = { confirmed: record.confirmed, at: now }));
       const gone = !edge.files.live || !this.deps.membership(edge.groupId)?.inRoster(edge.peer);
-      if (gone || now - moved.at >= GROUP_FILE_LIMITS.wantWaitMs) edge.files.cancel("out", wire);
+      const overtaken = record.confirmed === record.file.size && theirs.get(edge.peer)! > 1 && now - moved.at >= GROUP_FILE_LIMITS.doneWaitMs;
+      if (gone || overtaken || now - moved.at >= GROUP_FILE_LIMITS.wantWaitMs) {
+        edge.files.cancel("out", wire);
+        theirs.set(edge.peer, theirs.get(edge.peer)! - 1);
+      }
     }
   }
 
@@ -936,6 +945,9 @@ export class GroupFileDesk {
   private transferChanged(edge: Edge, record: FileTransferRecord, transferred: number): void {
     if (transferEnded(record)) this.transferOver(edge, record);
     if (record.direction === "out") {
+      // Only a byte confirmed for the first time is progress: one accepted back and forth stays where it was.
+      const moved = edge.servedMoved.get(record.id);
+      if (moved && record.confirmed > moved.confirmed) edge.servedMoved.set(record.id, { confirmed: record.confirmed, at: this.deps.now() });
       if (transferEnded(record) && edge.serving.has(record.id)) {
         // What was sent to a member counts toward the day's serving, done or not, and whatever it confirmed.
         const today = Math.floor(this.deps.now() / 86_400_000);
