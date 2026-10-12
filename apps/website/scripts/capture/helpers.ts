@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import type { LocalRelay } from "../../../../e2e/support/relay";
 import { copyInvite, pasteInvite } from "../../../../e2e/support/clipboard";
 import { attachMint } from "../../../../e2e/support/mint";
-import { closeHeaderMenu, headerControl, MAINNET_SERVICES } from "../../../../e2e/support/fixtures";
+import { MAINNET_SERVICES } from "../../../../e2e/support/fixtures";
 
 /** The repository root; this file lives in apps/website/scripts/capture/. */
 export const REPO = fileURLToPath(new URL("../../../..", import.meta.url));
@@ -184,17 +184,6 @@ export async function toBottom(p: Peer) {
   await p.page.waitForTimeout(400);
 }
 
-/**
- * The chat on screen is live over WebRTC, as its connection control says (a row of ⋮ on a phone: opened for the read
- * and closed again, so the picture has no menu). A chat not live in time is only said, and the capture goes on.
- */
-export async function live(p: Peer, timeout: number): Promise<void> {
-  await headerControl(p.page, "connection-options").catch(() => {});
-  await expect(p.page.locator('[data-testid=connection-options][aria-label*="Connected · WebRTC"]')).toBeVisible({ timeout })
-    .catch(() => console.log(`  [${p.name}] not live yet`));
-  await closeHeaderMenu(p.page);
-}
-
 /** The host makes an invite, the guest pastes it; `beforeJoin` runs while the invite card is up. Resolves with the host's chat route. */
 export async function pair(host: Peer, guest: Peer, beforeJoin?: () => Promise<void>): Promise<string> {
   await home(host);
@@ -207,7 +196,10 @@ export async function pair(host: Peer, guest: Peer, beforeJoin?: () => Promise<v
   await pasteInvite(guest.page, invite);
   for (const p of [host, guest]) await expect(p.page.getByPlaceholder("Message…")).toBeEnabled({ timeout: 90_000 });
   // Live over WebRTC: receipts, names and pictures cross at once.
-  for (const p of [host, guest]) await live(p, 60_000);
+  for (const p of [host, guest]) {
+    await expect(p.page.locator('[data-testid=connection-options][aria-label*="Connected · WebRTC"]')).toBeVisible({ timeout: 60_000 })
+      .catch(() => console.log(`  [${p.name}] not live yet`));
+  }
   // Each side shows the other's name by itself once the profiles have crossed.
   await expect(host.page.getByTitle("Click to set a name")).toHaveText(guest.name, { timeout: 30_000 }).catch(() => console.log(`  [${host.name}] still no name for ${guest.name}`));
   await expect(guest.page.getByTitle("Click to set a name")).toHaveText(host.name, { timeout: 30_000 }).catch(() => console.log(`  [${guest.name}] still no name for ${host.name}`));

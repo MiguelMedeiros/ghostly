@@ -572,10 +572,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Whether the bot is working (WISP 405 § Showing a card): a line in the header that opens the Tasks panel.
   const working = useWorkingOf(params?.peerPubKeyB64);
   const [tasksOpen, setTasksOpen] = useState(false);
-  // A phone held upright: the header keeps the name, a voice call and ⋮; the connection, the video call, the bot's
+  // A phone held upright: the header keeps the name, the connection, a voice call and ⋮; the video call, the bot's
   // Tasks and the contact's identities are rows of the ⋮ menu, and the running tasks are counted on ⋮.
+  // The connection stays in the row: it is the one mark that changes by itself, and a failure has to be seen.
   const phoneHeader = usePhoneHeader();
-  const [connectionRow, setConnectionRow] = useState<HTMLElement | null>(null);
   const tasks = useMemo(() => { const entries = cardEntries(messages); return { any: entries.length > 0, active: activeTaskCount(entries) }; }, [messages]);
   useEffect(() => setTasksOpen(false), [sessionId]);
 
@@ -664,14 +664,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       )}
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
-          it needs, a voice call and ⋮, and one quiet line under the name; the connection, the video call, a bot's Tasks
+          it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
           and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
-          in the row, a little narrower than on a desktop. */}
+          in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
+          the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons. */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1 min-w-0">
           <button
             onClick={nav.up}
-            className={`md:hidden ${phoneHeader ? "w-11" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
+            className={`md:hidden ${phoneHeader ? "w-11 max-[340px]:w-9" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
             title={t("common.back")}
             data-testid="chat-back"
           >
@@ -763,7 +764,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
-            menuRow={phoneHeader ? { slot: connectionRow, onPick: closeMenu, returnFocus: optionsRef } : undefined} />
+            phone={phoneHeader} />
           <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={messages} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
@@ -811,8 +812,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                     {tasks.active ? t("cards.panel.buttonCount", { count: tasks.active }) : t("cards.panel.button")}
                   </MenuItem>
                 )}
-                {/* The connection's row: ChatConnection draws it here, with its state in words. */}
-                <div ref={setConnectionRow} className="contents" />
                 {paired && <IdentityMenuItem peerKey={params.peerPubKeyB64} name={shownName} keyLabel={truncatedPeerKey}
                   onOpen={() => { closeMenu(); setIdentityCard(undefined); setShowIdentities(true); }} />}
                 <MenuSeparator />
