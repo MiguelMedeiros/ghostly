@@ -7,7 +7,7 @@ import { forgetInstalledApps } from "../../lib/apps/installed";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: apps.chat.card
+// covers: apps.chat.card, apps.built-in
 
 // The chat's + → Apps (WISP 1200 § In a chat). A profile restored from a backup has the installed list, not the
 // bundles (§ Where installed apps live): such an app is opened like any other, and opening it fetches its files.

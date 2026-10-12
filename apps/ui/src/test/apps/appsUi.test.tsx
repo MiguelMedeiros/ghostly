@@ -22,7 +22,7 @@ import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: apps.page, apps.chat.card
+// covers: apps.page, apps.chat.card, apps.built-in
 
 // The runner page's header, asked once by the real check: answered here, never fetched in a test.
 vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
