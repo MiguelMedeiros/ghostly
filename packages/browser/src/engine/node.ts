@@ -3312,8 +3312,11 @@ export class GhostlyNode implements EngineImplementation {
       outbox = new Outbox({
         read: () => db.getMessages(linkId),
         update: async (id, delivery, error, extra) => {
-          await db.updateDelivery(linkId, id, delivery, error, extra);
-          if (delivery === "delivered") await this.noteDetails(linkId, id, details => ({ ...details, receiptAt: Date.now() }));
+          // A receipt marks the row and notes its time in one write. As `db.updateDelivery`: a row with no delivery
+          // state gets none, and one already delivered keeps its mark and the time of its first receipt.
+          if (delivery === "delivered") await db.patchMessage(linkId, id, message => message.delivery === "delivered" ? null
+            : { ...(message.delivery && { ...extra, delivery, deliveryError: error }), details: { ...message.details, receiptAt: Date.now() } });
+          else await db.updateDelivery(linkId, id, delivery, error, extra);
           if (delivery === "sent" || delivery === "delivered") {
             const message = await db.getMessage(linkId, id);
             if (message) this.messageFeedback("sent", message);
