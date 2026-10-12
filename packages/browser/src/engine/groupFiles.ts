@@ -214,7 +214,7 @@ interface Edge {
   haveAt: number;
   /** Message ids its member asked for while this device served all it serves at once: said in a `group-have` once a slot frees. */
   busy: Set<string>;
-  /** Message ids its member said it does not hold (`gone`): not asked of it again until it says it does, or the edge closes. */
+  /** Message ids its member said it does not hold (`gone`): not asked of it again until it says it does, or the edge's session closes or opens. */
   gone: Set<string>;
 }
 
@@ -441,8 +441,8 @@ export class GroupFileDesk {
   session(groupId: string, peer: string, linkId: string, open: boolean): void {
     const edge = this.edge(groupId, peer, linkId);
     if (open) edge.files.attach(); else edge.files.detach();
-    // While the edge is down its member may fetch what it did not hold: asked again once it is back.
-    if (!open) edge.gone.clear();
+    // Another session, or none: its member may have fetched since what it did not hold, and is asked again.
+    edge.gone.clear();
     if (open) this.retry(groupId);
   }
 

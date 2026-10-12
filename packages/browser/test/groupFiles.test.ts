@@ -233,17 +233,15 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     }
   });
 
-  it("a connected member that does not hold a file is asked for it once, then again when it says it holds it or its edge opens again", async () => {
+  it("a connected member that does not hold a file is asked for it once, then again when its edge opens again", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
-    carol.online = false;
     t.files.get(bob)!.settings.autoDownloads = false;
-    await t.world.run(2_000);
+    // Alice's offer to carol never comes, and she goes: carol is left with bob, who did not fetch it.
+    t.hold = (from, to, frame) => from === alice && to === carol && frame.t === "pf-offer";
     const { messageId, meta } = await t.send(alice, id, pattern(20_000, 40));
-    await t.world.until(() => !!t.got(bob, id, messageId).message?.file, 60_000);
+    await t.world.until(() => !!t.got(bob, id, messageId).message?.file && t.seen.some(s => s.from === "carol" && s.to === "alice" && s.frame.t === "group-want"), 60_000);
     alice.online = false;
-    await t.world.run(2_000);
-    t.world.reopen(carol);
     const asked = () => t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "group-want").length;
     await t.world.until(() => asked() === 1 && t.got(carol, id, messageId).transfer?.wait === "nobody", 5 * 60_000);
     expect(t.seen.filter(s => s.from === "bob" && s.to === "carol" && s.frame.t === "group-want-no").map(s => s.frame.why)).toEqual(["gone"]);
@@ -258,7 +256,8 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     await t.world.until(() => asked() === 2, 5 * 60_000);
     await t.world.run(4 * GROUP_FILE_LIMITS.wantWaitMs);
     expect(asked()).toBe(2);
-    // The author is back, bob fetches it and says so: carol, whoever she gets it from, has it.
+    // The author is back: the file comes.
+    t.hold = null;
     t.world.reopen(alice);
     await t.world.until(() => t.done(carol, id, messageId), 5 * 60_000);
     expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
