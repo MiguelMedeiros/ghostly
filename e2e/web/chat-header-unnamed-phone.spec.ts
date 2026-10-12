@@ -23,8 +23,8 @@ test("on a 320px phone an unnamed contact's name in the chat header is not cut s
   expect(measured.whole, JSON.stringify(measured)).toBeLessThanOrEqual(measured.shown);
   // The start of their key, which the chat list names them by, is on the line right under it.
   await expect(bob.page.getByTestId("chat-subtitle")).toHaveText(/^\S{6}\.\.\.\S{6}$/);
-  // Every header button is whole and on the screen.
-  for (const id of ["connection-options", "call-audio", "call-video", "chat-options"]) {
+  // Every header button is whole and on the screen: a voice call and ⋮, which has the rest on a phone.
+  for (const id of ["call-audio", "chat-options"]) {
     const box = (await bob.page.getByTestId(id).boundingBox())!;
     expect(box.x + box.width, id).toBeLessThanOrEqual(320);
   }

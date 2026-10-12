@@ -307,10 +307,12 @@ function TasksPanel({ entries, nameOf, faceOf, anchorRef, onClose, onJump }: {
  * beside it, so a bot is known at a glance. The panel is then one section per sender (a bot each, in a
  * group like "Sala de Máquinas"), those with the most tasks going first, each saying how many it has going.
  */
-export function TasksButton({ rows, nameOf, faceOf, open: openGiven, onOpenChange }: {
+export function TasksButton({ rows, nameOf, faceOf, open: openGiven, onOpenChange, returnFocus }: {
   rows: readonly CardRow[]; nameOf?: (author: string) => string; faceOf?: (author: string) => MemberFaceOf | undefined;
   /** The panel's state kept by the header, when something else there opens it too (the working line); else its own. */
   open?: boolean; onOpenChange?: (open: boolean) => void;
+  /** A phone's chat header: the button is a row of the ⋮ menu (`TasksMenuItem`), so only the panel is here, and the focus goes back to this (⋮) as it closes. */
+  returnFocus?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useI18n();
   const [openOwn, setOpenOwn] = useState(false);
@@ -330,7 +332,7 @@ export function TasksButton({ rows, nameOf, faceOf, open: openGiven, onOpenChang
   const close = () => {
     // Back to what opened it (the button, when that is gone), unless a tap outside put the focus somewhere else.
     const at = document.activeElement;
-    const back = opener.current?.isConnected ? opener.current : button.current;
+    const back = opener.current?.isConnected ? opener.current : (returnFocus ?? button).current;
     setOpen(false);
     if (!at || at === document.body || at.closest("[data-testid=chat-tasks-panel]")) back?.focus({ preventScroll: true });
   };
@@ -341,14 +343,14 @@ export function TasksButton({ rows, nameOf, faceOf, open: openGiven, onOpenChang
   const label = active ? t("cards.panel.buttonCount", { count: active }) : t("cards.panel.button");
   return (
     <div className="relative" ref={ref}>
-      <button ref={button} type="button" data-testid="chat-tasks" onClick={() => (open ? close() : setOpen(true))} aria-haspopup="dialog" aria-expanded={open} aria-label={label} title={label}
+      {!returnFocus && <button ref={button} type="button" data-testid="chat-tasks" onClick={() => (open ? close() : setOpen(true))} aria-haspopup="dialog" aria-expanded={open} aria-label={label} title={label}
         className="relative p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer">
         <svg {...icon}><path d="M9 6h11M9 12h11M9 18h11" /><path d="m3.5 6 1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17" /></svg>
         {active > 0 && (
           <span data-testid="chat-tasks-count" aria-hidden="true"
             className="absolute top-0.5 end-0.5 min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold leading-4 text-center">{active > 99 ? "99+" : active}</span>
         )}
-      </button>
+      </button>}
       {open && <TasksPanel entries={entries} nameOf={nameOf} faceOf={faceOf} anchorRef={ref} onClose={close} onJump={jump} />}
     </div>
   );

@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import { openDesktop, type DesktopApp } from "../support/desktop";
 import { setClipboard } from "../support/clipboard";
+import { closeHeaderMenu, headerControl } from "../support/fixtures";
 import { chatPane, either, go, type Actor } from "./actors";
 
 /**
@@ -95,9 +96,14 @@ export function webPerson(actor: Actor): Person {
     shows: async (text) => (await chatPane(actor).getByText(text, { exact: true }).count()) > 0,
     awaitingReceipt: async () => (await chatPane(actor).locator('[data-testid="message-delivery"][data-delivery="sent"]').count()) > 0,
     snapshot: () => page().evaluate(() => document.body.innerText),
-    connection: async () => (await page().getByTestId("connection-options").getAttribute("aria-label")) ?? "",
+    // On a phone the connection control is a row of ⋮: opened for the read, and closed after it.
+    connection: async () => {
+      const label = (await (await headerControl(page(), "connection-options")).getAttribute("aria-label")) ?? "";
+      await closeHeaderMenu(page());
+      return label;
+    },
     preferTransport: async (preferred, fallback) => {
-      await page().getByTestId("connection-options").click();
+      await (await headerControl(page(), "connection-options")).click();
       const dialog = page().getByRole("dialog", { name: "Connection options" });
       const offered: string[] = [];
       for (const name of ["WebRTC", "Iroh", "HyperDHT"]) if (await dialog.getByRole("radio", { name, exact: true }).isEnabled()) offered.push(name);

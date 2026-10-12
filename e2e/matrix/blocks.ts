@@ -9,7 +9,7 @@ import { strangerInvoice } from "../support/bolt11";
 import { callTrace, linkTrace, watchCalls, watchLink } from "../support/callTrace";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
-import { delivered, GIF, type WalletKind } from "../support/fixtures";
+import { closeHeaderMenu, delivered, GIF, headerControl, type WalletKind } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { injectNostrSigner } from "../support/nostrSigner";
@@ -76,8 +76,11 @@ async function joinWith(actor: Actor, text: string): Promise<void> {
   await actor.page.getByRole("button", { name: either("Paste from clipboard") }).click();
 }
 
-const connected = (actor: Actor, transport = "WebRTC", timeout = 180_000) =>
-  expect(actor.page.getByTestId("connection-options")).toHaveAttribute("aria-label", new RegExp(`${alternatives("Connected")} · ${transport}`), { timeout });
+/** The chat's connection control (a row of ⋮ on a phone, opened for the read and closed after it). */
+async function connected(actor: Actor, transport = "WebRTC", timeout = 180_000): Promise<void> {
+  await expect(await headerControl(actor.page, "connection-options")).toHaveAttribute("aria-label", new RegExp(`${alternatives("Connected")} · ${transport}`), { timeout });
+  await closeHeaderMenu(actor.page);
+}
 /**
  * Leaving DHT-only after the contact reloaded once took 70 s, and once more than 3 minutes, to find
  * WebRTC again. It takes seconds now (6–14 s from the first switch, measured by e2e/web/dht-back-timing.spec.ts):
@@ -158,7 +161,7 @@ async function setOnline(actor: Actor, online: boolean): Promise<void> {
 /** DHT only is one of the connection choices; off leaves it for Automatic (a browser's one transport). */
 async function dhtOnly(actor: Actor, on: boolean): Promise<void> {
   const menu = actor.page.getByTestId("connection-menu");
-  if ((await menu.getAttribute("open")) === null) await actor.page.getByTestId("connection-options").click();
+  if ((await menu.getAttribute("open")) === null) await (await headerControl(actor.page, "connection-options")).click();
   const panel = actor.page.getByRole("dialog", { name: either("Connection options") });
   const choice = panel.getByRole("radio", { name: either("DHT only") });
   const back = panel.getByRole("radio", { name: either("Automatic") }).or(panel.getByRole("radio", { name: "WebRTC", exact: true })).first();
@@ -243,7 +246,8 @@ export const delivery: Block = {
         await a.page.keyboard.press("Escape");
       }).toPass({ timeout: 60_000 });
       const back = await away(b);
-      await expect(a.page.getByTestId("connection-options")).toHaveAttribute("data-status", "Away · messages are held", { timeout: 60_000 });
+      await expect(await headerControl(a.page, "connection-options")).toHaveAttribute("data-status", "Away · messages are held", { timeout: 60_000 });
+      await closeHeaderMenu(a.page);
       // Past the 256 bytes the DHT carries: a short text would take the DHT floor (WISP 403); a longer one is held.
       const held = `held in my S3 for you ${"and more words past what the DHT carries. ".repeat(7)}`;
       await say(a, held);
@@ -258,7 +262,8 @@ export const delivery: Block = {
     }
     // Live: the stream goes when B does; what A writes meanwhile is waiting for B.
     const back = await away(b);
-    await expect(a.page.getByTestId("connection-options")).not.toHaveAttribute("aria-label", /Connected · WebRTC/, { timeout: 90_000 });
+    await expect(await headerControl(a.page, "connection-options")).not.toHaveAttribute("aria-label", /Connected · WebRTC/, { timeout: 90_000 });
+    await closeHeaderMenu(a.page);
     await say(a, "are you there?");
     await back();
     await sees(b, "are you there?");
@@ -273,7 +278,7 @@ export const transport: Block = {
   run: async ({ a, b, combo }) => {
     for (const p of [a, b]) {
       await openChat(p);
-      await p.page.getByTestId("connection-options").click();
+      await (await headerControl(p.page, "connection-options")).click();
       const dialog = p.page.getByRole("dialog", { name: either("Connection options") });
       // A browser has WebRTC only: the native transports are there, and refused.
       await expect(dialog.getByRole("radio", { name: "WebRTC", exact: true })).toBeEnabled();
