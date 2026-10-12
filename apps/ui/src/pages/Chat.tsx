@@ -247,11 +247,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Out of sight, a ringing call is a system notification too.
   useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"));
 
-  // A chat on a call is kept loaded by `App` wherever the person goes next,
-  // so the call itself — and the signaling that ends it — survives the trip.
-  useEffect(() => {
-    onCallChange(sessionId, callState !== "idle");
-  }, [onCallChange, sessionId, callState]);
   useEffect(() => () => onCallChange(sessionId, false), [onCallChange, sessionId]);
 
   const incomingHasVideo = (() => {
@@ -542,6 +537,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
 
+  // A chat on a call is kept loaded by `App` wherever the person goes next,
+  // so the call itself — and the signaling that ends it — survives the trip.
+  // So is one waking its contact for a call: the wait, and the call it places, go on there too.
+  useEffect(() => {
+    onCallChange(sessionId, callState !== "idle" || wakeCall.waking);
+  }, [onCallChange, sessionId, callState, wakeCall.waking]);
+
   // What the contact last said on the session wins over a name read out of an older message.
   const contactNick = profileNick !== undefined ? profileNick : peerNick;
   // A nickname given here wins, then the chosen identity's name, then the contact's own, then their key.
@@ -623,6 +625,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const callBlocked = webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
   const callBusy = webrtc.callState !== "idle" || wakeCall.waking;
   const startCall = (withVideo: boolean) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo));
+  // Waking the contact for a call, or why it gave up. In the chat's column while it is on screen; elsewhere over whatever
+  // is (`callLayer`), as a call's own window is, with its Cancel: the column is hidden then.
+  const wakeNotice = (wakeCall.waking || wakeCall.gaveUp) && (
+    <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
+      className="top-notice flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
+      <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
+      {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
+    </div>
+  );
 
   return (
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
@@ -633,13 +644,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <PinMoveNote text={pinNote} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && (chatApp.wide || chatApp.view === "full") ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
-      {(wakeCall.waking || wakeCall.gaveUp) && (
-        <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
-          className="top-notice flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
-          <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
-          {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
-        </div>
-      )}
+      {visible && wakeNotice}
       {/* Our call rang out (RING_MS): it ended by itself, and says why. */}
       {webrtc.noAnswer && (
         <div role="status" data-testid="call-no-answer"
@@ -1048,6 +1053,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         />,
         callLayer ?? document.body,
       )}
+
+      {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
 
       {/* Active call overlay */}
       {(webrtc.callState === "offering" ||
