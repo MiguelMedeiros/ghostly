@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type * as Desktop from "../../../../apps/ui/src/hooks/useChat";
 import {
   addMessage,
@@ -26,7 +26,13 @@ const getState = () => engine.state;
  */
 export const useChat: typeof Desktop.useChat = (params) => {
   const state = useSyncExternalStore(subscribe, getState);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sessionMessages, setMessages] = useState<ChatMessage[]>([]);
+  /**
+   * A paired chat's texts sent from this page that the engine's history has not brought back yet: shown at once as
+   * sending, even while the engine is still reading every chat's history at start. The engine stores each under the
+   * timestamp it was given (its id is the engine's own), so its row takes this one's place.
+   */
+  const [pending, setPending] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [isBurned, setIsBurned] = useState(false);
   const [incomingCallSignal, setIncomingCallSignal] = useState<string | null>(null);
@@ -58,6 +64,17 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const reload = useCallback(() => {
     if (sessionId) setMessages([...(loadSession(sessionId)?.messages ?? [])]);
   }, [sessionId]);
+
+  useEffect(() => setPending([]), [sessionId]);
+  const landed = useCallback((row: ChatMessage) => sessionMessages.some((m) => m.id.startsWith("me_") && m.timestamp === row.timestamp), [sessionMessages]);
+  // One the engine's history brought back is its row from now on.
+  useEffect(() => {
+    if (pending.some(landed)) setPending((rows) => rows.filter((row) => !landed(row)));
+  }, [pending, landed]);
+  const messages = useMemo(() => {
+    const waiting = pending.filter((row) => !landed(row));
+    return waiting.length ? [...sessionMessages, ...waiting].sort((a, b) => a.timestamp - b.timestamp) : sessionMessages;
+  }, [sessionMessages, pending, landed]);
 
   // The session exists from the moment the chat is opened, as on Desktop.
   useEffect(() => {
@@ -115,21 +132,36 @@ export const useChat: typeof Desktop.useChat = (params) => {
         const updated = addMessage(sessionId, message);
         if (updated) setMessages([...updated.messages]);
         notifySessionsChanged();
+      } else {
+        // The engine's row comes only once it has started and stored it; this one shows until then.
+        setPending((rows) => [...rows, { ...message, delivery: "sending", meta: undefined }]);
       }
-      // Typing can be faster than the peer taking the link on; `ensureLink` is idempotent.
-      const id =
-        linkIdRef.current ??
-        (seedB64 && peerPubKey && encKeyB64
-          ? (await engine.call("ensureLink", linkParams())).linkId
-          : undefined);
-      if (!id) return "Ghostly is still starting. Try again in a moment.";
-      const { error, refused } = await engine.call("sendMessage", {
-        linkId: id,
-        text: message.text,
-        timestamp: message.timestamp,
-        ...(profile && message.preview && { preview: message.preview }),
-        ...(profile && replyTo && { replyTo }),
-      });
+      // A send that stored nothing (refused, or failed before the engine kept it): its sending row goes.
+      const unsent = () => { if (profile) setPending((rows) => rows.filter((row) => row.id !== message.id)); };
+      let error: string | null, refused: boolean | undefined;
+      try {
+        // Typing can be faster than the peer taking the link on; `ensureLink` is idempotent.
+        const id =
+          linkIdRef.current ??
+          (seedB64 && peerPubKey && encKeyB64
+            ? (await engine.call("ensureLink", linkParams())).linkId
+            : undefined);
+        if (!id) {
+          unsent();
+          return "Ghostly is still starting. Try again in a moment.";
+        }
+        ({ error, refused } = await engine.call("sendMessage", {
+          linkId: id,
+          text: message.text,
+          timestamp: message.timestamp,
+          ...(profile && message.preview && { preview: message.preview }),
+          ...(profile && replyTo && { replyTo }),
+        }));
+      } catch (failure) {
+        unsent();
+        throw failure;
+      }
+      if (error) unsent();
       // Refused: the copy kept here for a legacy chat goes too, so it never shows as sent.
       if (refused && !profile) {
         const updated = deleteStoredMessage(sessionId, message.id);
