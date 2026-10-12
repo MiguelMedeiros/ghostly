@@ -52,11 +52,15 @@ function steps(since: number): string {
     let held = 0;
     // A door reads its knocks every few seconds: a read only when what it found changed.
     const lastRead = new Map<string, string>();
+    // A link waiting out its backoff says so at every look, every 2 s: once per count of failed dials (minutes of
+    // them were all of the last 150 lines, the refused answers before them cut off).
+    const lastBackoff = new Map<string, number | undefined>();
     for (const line of readFileSync(file, "utf8").split("\n")) {
       try {
-        const { t, me, g, step, ...rest } = JSON.parse(line) as { t: number; me?: string; g?: string; step: string; error?: string };
+        const { t, me, g, step, ...rest } = JSON.parse(line) as { t: number; me?: string; g?: string; step: string; error?: string; failures?: number };
         if (t < since) continue;
         if (rest.error?.includes("budget")) held++;
+        if (step === "dial-backoff" && me) { if (lastBackoff.has(me) && lastBackoff.get(me) === rest.failures) continue; lastBackoff.set(me, rest.failures); }
         if (step === "knock.read" && g) { const found = JSON.stringify(rest); if (lastRead.get(g) === found) continue; lastRead.set(g, found); }
         if (step !== "poll") lines.push(`${new Date(t).toISOString().slice(11, 23)} ${name} ${me ?? `group ${g?.slice(0, 6)}`} ${step} ${JSON.stringify(rest)}`);
       } catch { /* a partial line */ }
@@ -69,16 +73,24 @@ function steps(since: number): string {
  * Waits until `dir`'s side of the community has a group link up (`community.connected`). A member's name alone says
  * nothing about it: names also come in the link's Pkarr packet, before its session opens. With the two relays' budget
  * shared by both daemons' groups, that session took more than two minutes once on a CI runner.
+ *
+ * Six minutes: on a loaded runner libdatachannel's race refuses the dialer's answers (two in five, with both daemons
+ * on one core), and after five in a row (`ANSWER_REFUSED_REDIALS` and the first) its next offer waits the three
+ * minutes of its backoff. That offer went 229 s after the first, 1 run in 90, and the session opens a few seconds on.
+ * A sixth refused after it (1 run in 180 so) waits three minutes more, which this does not cover.
  */
 async function linked(dir: string, group: string): Promise<void> {
-  const until = Date.now() + 240_000;
+  const until = Date.now() + 360_000;
   let shown: Record<string, unknown> = {};
   while (Date.now() < until) {
     shown = ok(await as(dir, "group", "show", group));
     if (((shown.community as { connected?: number } | null)?.connected ?? 0) > 0) return;
     await new Promise((r) => setTimeout(r, 1000));
   }
-  expect.fail(`${group} on ${dir} never had a link up: ${JSON.stringify(shown)}`);
+  // The other side's view and both daemons' steps, as `member` prints: without them a run that ended here said only
+  // "connected 0 of 2 hubs", nothing of why no session opened.
+  const other = JSON.stringify((await as(dir === old ? now : old, "group", "show", group)).json);
+  expect.fail(`${group} on ${dir} never had a link up: ${JSON.stringify(shown)}\nthe other side: ${other}\n${steps(Date.now() - 370_000)}`);
 }
 
 async function hears(dir: string, from: string, group: string, text: string): Promise<void> {

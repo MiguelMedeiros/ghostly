@@ -110,6 +110,14 @@ export const REANSWERS = 2;
  * backoff (meshSignals, PR #1363). Offers through members cost no relay request; over the relays four is still a few.
  */
 export const ANSWER_REFUSED_REDIALS = 4;
+/**
+ * The same race a moment later: setRemoteDescription resolves, and the connection closes right after it (8 ms on a
+ * loaded core). A connection that ends within this long of its answer going in was refused too: no network fails one
+ * that soon (ICE gives up after tens of seconds), so it says nothing about direct connections (`DirectEvidence`).
+ * Taken for a network that lets none through, an edge between two CLIs left WebRTC for the run, and a member whose
+ * app has WebRTC alone (one from before native group links) was never reached again (groupCompat, 2026-10-12).
+ */
+const ANSWER_REFUSED_AFTER_MS = 1_000;
 /** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
 const REANSWER_MARGIN_MS = 15_000;
 
@@ -292,15 +300,20 @@ export class DataLink {
   /**
    * The attempt on this connection failed (it timed out, ICE failed or closed, its channel closed). An answer the
    * offerer may not have read yet is made again for the same offer while it still stands (`REANSWERS`); anything
-   * else goes back to idle.
+   * else goes back to idle. `byConnection`: the connection said so itself, rather than a timer of this link's.
    */
-  private failed(): void {
+  private failed(byConnection = false): void {
     // The connection failed while the answer to this side's offer was being applied: as if it was refused.
     if (this.state === "offering" && this.remoteSdp) { this.answerRefused("failed"); return; }
+    // The same when the connection ends a moment after the answer went in (`ANSWER_REFUSED_AFTER_MS`).
+    if (byConnection && this.state === "connecting" && this.myOfferTs && Date.now() - this.connectingSince < ANSWER_REFUSED_AFTER_MS) { this.answerRefused("failed"); return; }
     const answered = this.state === "connecting" ? this.answered : null;
     // How long the offerer's attempt still runs, counted on this clock from when its offer was taken (its `ts` is its clock's).
     const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.at) : 0;
-    const evidence = this.directEvidence();
+    // An answer to an offer the offerer has given up since (its packet no longer carries it: the answer was refused
+    // there, say) connected nothing because nobody was on the other end, whatever the network lets through.
+    const givenUp = !!answered && this.options.offerStanding?.(answered.offer.ts) === false;
+    const evidence = givenUp ? null : this.directEvidence();
     this.noteNoPublic(true);
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
@@ -396,14 +409,14 @@ export class DataLink {
       void tracePair(this.options.myPubKeyZ32, pc);
     });
     dc.addEventListener("close", () => {
-      if (this.pc === pc) this.failed();
+      if (this.pc === pc) this.failed(true);
     });
 
     pc.addEventListener("connectionstatechange", () => {
       if (this.pc !== pc) return;
       if (this.disconnectTimer) { clearTimeout(this.disconnectTimer); if (pc.connectionState === "connected") this.options.onDisconnected?.(false); }
       this.disconnectTimer = null;
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") this.failed();
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") this.failed(true);
       else if (pc.connectionState === "disconnected") {
         if (this.state === "open") this.options.onDisconnected?.(true);
         this.disconnectTimer = setTimeout(() => {
