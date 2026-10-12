@@ -8,7 +8,7 @@ import type { CallRate, PlaybackQueue } from "./pcm";
 /**
  * A call's media on Node (WISP 601, WISP 1100 § Calls): libdatachannel (node-datachannel, the same native module
  * the CLI's chats use) runs ICE, DTLS-SRTP and RTP; Opus is libopus built to WebAssembly (opusscript). Audio only:
- * a call's video section is answered and nothing is sent or read on it.
+ * a call's video section is answered closed (`vr: 0`), and nothing is sent or read on it.
  */
 export interface CallStack {
   ndc: typeof import("node-datachannel");
@@ -167,10 +167,11 @@ export class CallMedia {
       audioSection.addSSRC(ssrc, "ghostly", "stream", "audio0");
       const track = pc.addTrack(audioSection);
       // The contact's offer always has a video section (the apps open one for a camera or a screen later): it is
-      // answered, and whatever comes on it is dropped as it comes (libdatachannel keeps what nobody reads).
+      // answered closed, and the answer says so (`vr: 0` below), so the contact's app sends no picture on it. An app
+      // that does not know `vr` sends one all the same: it is dropped as it comes (libdatachannel keeps what nobody reads).
       let videoTrack: Track | null = null;
       if (offer?.m?.includes("v")) {
-        const video = new ndc.Video(String(offer.m.indexOf("v")), "RecvOnly");
+        const video = new ndc.Video(String(offer.m.indexOf("v")), "Inactive");
         video.addVP8Codec(offer.vp ?? 96);
         videoTrack = pc.addTrack(video);
         videoTrack.onMessage(() => {});
@@ -187,6 +188,8 @@ export class CallMedia {
       const local: Partial<CallSignal> = { ...params, ss: [ssrc] };
       // An answer lists the offer's sections, video too: the rebuilt SDP must have as many as the offer.
       if (offer?.m) local.m = [...offer.m];
+      // No picture is taken here, and none is sent: the contact's app rebuilds the video section closed (WISP 601).
+      if (videoTrack) local.vr = 0;
       const listeners: ((packet: Buffer) => void)[] = [];
       track.onMessage((packet) => { for (const listener of listeners) listener(packet); });
       const audio = new CallAudio({
