@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommunityWorld, type Peer } from "./communityWorld";
-import { MESH_SYNC_HOLD_MAX_MS } from "../src/engine/groups";
+import { MESH_SYNC_HOLD_MS } from "../src/engine/groups";
 // covers: groups.catch-up
 
 /**
@@ -45,6 +45,8 @@ function comesBack(world: CommunityWorld, back: Peer, first: Peer): void {
   world.reopen(back);
 }
 
+afterEach(() => { vi.restoreAllMocks(); });
+
 describe("a member back in a private group reads what it missed in the order it was written", { timeout: 120_000 }, () => {
   it("five members, four wrote in turn: no member's lines come ahead of their turn", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
@@ -68,7 +70,7 @@ describe("a member back in a private group reads what it missed in the order it 
     world.cut = (a, b) => (a === alice || b === alice) && a !== dave && b !== dave;
     comesBack(world, dave, alice);
     const took = await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 60_000);
-    expect(took).toBeLessThanOrEqual(MESH_SYNC_HOLD_MAX_MS);
+    expect(took).toBeLessThanOrEqual(10_000);
     // Each member's own lines in its order, whatever the order between members.
     for (const p of [bob, carol, eve]) expect(world.texts(dave, id).filter(t => t.startsWith(`${p.name} `))).toEqual(written.filter(t => t.startsWith(`${p.name} `)));
   });
@@ -91,5 +93,37 @@ describe("a member back in a private group reads what it missed in the order it 
     comesBack(world, dave, alice);
     await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 60_000);
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
+  });
+
+  it("an answer of 200 messages that takes fifty seconds: the others are told only once it has come", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve", "frank"]);
+    const [alice, bob, carol, dave, eve, frank] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    const written = await talk(world, id, [bob, carol, eve, frank], 50);
+    // Four frames a second of the clock: a phone with a long history handles a frame in hundreds of milliseconds.
+    world.slowByClock = true;
+    comesBack(world, dave, alice);
+    await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 120_000);
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
+  });
+
+  it("what the member asked first writes meanwhile is not its answer: the others are told as soon as that has come", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
+    const [alice, bob, carol, dave, eve] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    const written = await talk(world, id, [alice, bob, carol, eve], 3);
+    comesBack(world, dave, alice);
+    const back = world.now;
+    let toldNext = 0;
+    const drop = world.drop!;
+    world.drop = (from, to, frame) => { if (from === dave && to !== alice && frame.t === "group-sync") toldNext ||= world.now; return drop(from, to, frame); };
+    // From here a message carries the world's time, as the engines' clocks do: Alice writes one every second.
+    vi.spyOn(Date, "now").mockImplementation(() => world.now);
+    for (let i = 0; i < 12; i++) { await alice.groups.send(id, `alice now ${i}`); await world.run(1_000); }
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
+    expect(toldNext - back).toBeGreaterThanOrEqual(MESH_SYNC_HOLD_MS);
+    expect(toldNext - back).toBeLessThanOrEqual(5_000);
   });
 });

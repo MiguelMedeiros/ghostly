@@ -327,12 +327,16 @@ export const MESH_GOSSIP_MS = 60_000;
 export const MESH_GAP_AGAIN_MS = 10_000;
 /**
  * A member whose messages were just asked of another (`Groups.askOf`) is told where I am only once that one's answer
- * has come: no message from it for this long, or `MESH_SYNC_HOLD_MAX_MS` after it was asked. Told at once, its own
+ * has come: no message of it for this long, or `MESH_SYNC_HOLD_MAX_MS` after it was asked. Told at once, its own
  * answer raced the other's, which holds the same messages among everyone's in the order they were written, and a
  * member back in a group of five read each member's lines apart, the newest above older ones (WISP 902 § Catch-up).
+ * A message of the answer is one written before the asking: what the member writes meanwhile is no reason to wait, so
+ * the longest wait only has to cover a whole answer (the 256 messages a member keeps for the others and its own last
+ * 32) at the pace of a phone with a long history, 600 ms a frame. At ten seconds, an answer of 200 messages at four a
+ * second was cut at the 40th, and the others' newest lines landed above what was still coming.
  */
 export const MESH_SYNC_HOLD_MS = 1_500;
-export const MESH_SYNC_HOLD_MAX_MS = 10_000;
+export const MESH_SYNC_HOLD_MAX_MS = 180_000;
 /** What a mesh member asked others for, for one reachable member some of whose messages never reached it (`Groups.gapsOf`). */
 interface GapAsk { mark: string; of: Set<string>; noticed?: number; at?: number; last?: { via: string; at: number; asked: Record<string, number[]> } }
 /** Where a member's gossip turns start among the members it is connected to: a number of its own, from its key. */
@@ -1664,8 +1668,9 @@ export class Groups {
       return;
     }
     const taken = await session.handle(peerKey, frame);
-    // A message over this edge: what this member was asked for may still be coming (`holdSync`).
-    if (taken.some(f => f.t === "group-msg")) {
+    // A message over this edge written before this member was asked: its answer is still coming (`holdSync`).
+    const askedAt = this.askedAt(groupId, peerKey);
+    if (taken.some(f => f.t === "group-msg" && f.ts < askedAt)) {
       let handed = this.lastHanded.get(groupId);
       if (!handed) this.lastHanded.set(groupId, (handed = new Map()));
       handed.set(peerKey, this.now());
@@ -1861,9 +1866,16 @@ export class Groups {
     return out;
   }
 
+  /** When `via` was last asked for another member's messages (`askOf`), or 0: what it sends written before that is its answer. */
+  private askedAt(groupId: string, via: string): number {
+    let at = 0;
+    for (const asked of this.relayAsked.get(groupId)?.values() ?? []) if (asked.via === via && asked.at > at) at = asked.at;
+    return at;
+  }
+
   /**
    * Whether the answer of the member asked for someone's messages may still be coming: its edge up, asked under
-   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message from it (or the asking) under `MESH_SYNC_HOLD_MS` ago.
+   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message of its answer (or the asking) under `MESH_SYNC_HOLD_MS` ago.
    */
   private answering(groupId: string, { via, at }: { via: string; at: number }, now: number): boolean {
     const edge = this.host.edges(groupId).get(via);
