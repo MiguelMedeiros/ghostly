@@ -1,6 +1,7 @@
 {
   "app": {
     "installUpdates": "此客户端无法安装更新",
+    "limitedNext": "确认成功后即可使用。请检查你的网络连接。",
     "localAddress": "Ghostly 需要你的许可才能访问该本地地址",
     "lostPeer": "与 Ghostly 节点的连接已断开",
     "pickCard": "请先选择一张 Lightning 卡片",

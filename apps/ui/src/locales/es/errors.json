@@ -1,6 +1,7 @@
 {
   "app": {
     "installUpdates": "Esta app no puede instalar actualizaciones",
+    "limitedNext": "Volverá a funcionar cuando la comprobación funcione. Revisa tu conexión.",
     "localAddress": "Ghostly necesita tu permiso para acceder a esa dirección local",
     "lostPeer": "Se perdió el peer de Ghostly",
     "pickCard": "Elige primero una tarjeta Lightning",
