@@ -10,6 +10,7 @@ import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { handoffProfileHost, recoverHandoffPointer } from "../../ui/src/lib/handoffProfile";
 import { openProfile } from "../../ui/src/lib/profileStart";
+import { restartWhenRestored } from "../../ui/src/lib/restoredPage";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
@@ -93,6 +94,8 @@ if (gate.full) {
   askForShare();
 }
 addEventListener("pagehide", () => webHost.announceDeparture());
+// Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.
+restartWhenRestored();
 // Mini-apps (WISP 1200) open in this server's runner, once the feature is on (or in the e2e suite's build).
 if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
   setAppOpener(webOpener({
