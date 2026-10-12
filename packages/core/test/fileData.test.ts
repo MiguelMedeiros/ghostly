@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FILE_DATA_KIND, FILE_LIMITS, decodeFileData, encodeFileData } from "../src/chatFiles";
 import { toBase64Url } from "../src/bytes";
+// covers: files.large.binary
 
 const ID = "AbCdEfGh_-0123456789xy";
 const bytes = (length: number, seed = 7) => Uint8Array.from({ length }, (_, i) => (i * 31 + seed) & 0xff);

@@ -8,7 +8,7 @@ import { createLink } from "../src/invite";
 import { FILES_BINARY_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
 import { toBase64Url } from "../src/bytes";
-// covers: files.large.integrity
+// covers: files.large.binary, files.large.integrity
 
 // Two GhostLinks over an in-memory channel with a real PairedSession handshake (the harness of pairedApps.test.ts).
 // Each end says whether it carries binary messages, as a WebRTC channel does and the native ones do not.
