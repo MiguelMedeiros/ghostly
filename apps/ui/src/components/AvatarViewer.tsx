@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "../hooks/useDismiss";
+import { usePictureZoom } from "../hooks/usePictureZoom";
 import { useI18n } from "../contexts/I18nContext";
 
 /** How large a picture is drawn at most, in CSS pixels, when it arrived smaller: 2.5× a 128 px profile picture. */
@@ -16,6 +17,8 @@ const viewerWidth = (natural: number) => Math.max(natural, Math.min(natural * UP
  * phone. Escape, the close button and a click outside the picture close it, and the focus goes back to what opened
  * it. `src` is a checked data URL (the engine's `sanitizeAvatar`), drawn and never fetched. With `picture`, a picture
  * from a chat: whole, in its own shape, as large as the screen lets it (never scaled up), its file name under it.
+ * Either zooms on its own (hooks/usePictureZoom.ts): a pinch, a double tap, the wheel or `+` / `-` / `0` scale the
+ * picture, never the page, and a pinch or a drag never closes the viewer.
  */
 export function AvatarViewer({ src, name, onClose, returnFocus, picture = false }: { src: string; name: string; onClose: () => void; returnFocus?: RefObject<HTMLElement | null>; picture?: boolean }) {
   const { t } = useI18n();
@@ -23,6 +26,10 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
   const [natural, setNatural] = useState<number>();
+  const area = useRef<HTMLDivElement>(null), image = useRef<HTMLImageElement>(null);
+  const { zoom, gestured, handlers, onKey } = usePictureZoom(image, area);
+  const zoomed = zoom.scale > 1.001;
+  const zoomStyle = { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`, transformOrigin: "center", willChange: "transform" } as const;
   useEffect(() => {
     const element = dialog.current!, opener = returnFocus?.current, before = document.activeElement as HTMLElement | null;
     element.showModal();
@@ -39,20 +46,32 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
     // Escape is handled here, before the page's own handlers: a panel under the viewer (a contact's identities)
     // closes on Escape at the document, and must stay open when only the viewer goes.
     <dialog ref={dialog} tabIndex={-1} aria-labelledby={`${id}-name`} data-testid="avatar-viewer" data-kind={picture ? "picture" : "avatar"}
-      onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); } }}
+      onKeyDown={e => {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
+        else if (onKey(e)) e.preventDefault();
+      }}
       // Not on to a dialog it was opened from (the members'): React passes `cancel` and `close` up its own tree.
       onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }} onClose={e => { e.stopPropagation(); onClose(); }}
-      className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none bg-transparent p-0 text-text-primary backdrop:bg-black/75">
-      <div {...backdrop} data-testid="avatar-viewer-backdrop" className="flex h-full w-full items-center justify-center p-4 max-md:bg-sidebar-bg max-md:p-0">
+      // `touch-action: none`: a pinch here is the picture's (usePictureZoom), not the browser's zoom of the whole page.
+      style={{ touchAction: "none" }}
+      className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none overflow-hidden bg-transparent p-0 text-text-primary backdrop:bg-black/75">
+      <div ref={area} data-testid="avatar-viewer-backdrop"
+        onPointerDown={e => { handlers.onPointerDown(e); backdrop.onPointerDown(e); }}
+        onPointerMove={handlers.onPointerMove}
+        // A pinch or a drag that ends outside the picture is not a tap outside it: the viewer stays.
+        onPointerUp={e => { handlers.onPointerUp(e); if (gestured()) backdrop.onPointerCancel(); else backdrop.onPointerUp(e); }}
+        onPointerCancel={e => { handlers.onPointerCancel(e); backdrop.onPointerCancel(); }}
+        onDoubleClick={handlers.onDoubleClick}
+        className="flex h-full w-full touch-none select-none items-center justify-center p-4 max-md:bg-sidebar-bg max-md:p-0">
         <figure className="m-0 flex max-w-full flex-col items-center gap-3">
           {picture ? (
-            <img src={src} alt="" draggable={false} data-testid="avatar-viewer-image"
-              style={{ maxWidth: "calc(100vw - 2rem)", maxHeight: "calc(100dvh - 8rem)" }}
-              className="block h-auto w-auto rounded-lg object-contain shadow-2xl" />
+            <img ref={image} src={src} alt="" draggable={false} data-testid="avatar-viewer-image" data-zoom={zoom.scale.toFixed(2)}
+              style={{ maxWidth: "calc(100vw - 2rem)", maxHeight: "calc(100dvh - 8rem)", ...zoomStyle }}
+              className={`block h-auto w-auto rounded-lg object-contain shadow-2xl ${zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`} />
           ) : (
-            <img src={src} alt="" draggable={false} data-testid="avatar-viewer-image" onLoad={e => setNatural(e.currentTarget.naturalWidth || undefined)}
-              style={{ width: `min(${viewerWidth(natural ?? 128)}px, calc(100vw - 2rem), 70dvh)`, height: "auto" }}
-              className="aspect-square rounded-2xl object-cover shadow-2xl max-md:rounded-xl" />
+            <img ref={image} src={src} alt="" draggable={false} data-testid="avatar-viewer-image" data-zoom={zoom.scale.toFixed(2)} onLoad={e => setNatural(e.currentTarget.naturalWidth || undefined)}
+              style={{ width: `min(${viewerWidth(natural ?? 128)}px, calc(100vw - 2rem), 70dvh)`, height: "auto", ...zoomStyle }}
+              className={`aspect-square rounded-2xl object-cover shadow-2xl max-md:rounded-xl ${zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`} />
           )}
           <figcaption id={`${id}-name`} className="max-w-full truncate px-2 text-base font-medium text-white max-md:text-text-primary"><bdi>{name}</bdi></figcaption>
         </figure>
