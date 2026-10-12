@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_ROOM_TO_PLAY } from "@ghostly/browser/shared/fileBytes";
 import { AudioBubble } from "../../components/audio/AudioBubble";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VoiceBubble } from "../../components/voice/VoiceBubble";
@@ -273,6 +274,20 @@ describe("an audio file in the chat", () => {
     fireEvent.click(screen.getByTestId("audio-play"));
     await flush();
     expect(screen.getByTestId("audio-problem")).toHaveTextContent("Too large to play here. Download it to listen.");
+  });
+
+  it("no room on the disk for the player's copy of it: it is saved instead of played", async () => {
+    vi.spyOn(servicesPlatform!, "streamFile").mockRejectedValue(new Error(NO_ROOM_TO_PLAY));
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    const file = song();
+    show(file);
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    expect(getFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-state", "idle");
+    expect(screen.getByTestId("audio-problem")).toHaveTextContent("Not enough free disk space to play it here. Download it instead.");
+    fireEvent.click(screen.getByTestId("audio-download"));
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, file.name));
   });
 
   it("its bytes left out of a light backup, or gone: it says so, not that it is too large", async () => {

@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_ROOM_TO_PLAY } from "@ghostly/browser/shared/fileBytes";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VideoBubble } from "../../components/video/VideoBubble";
 import { videoBox } from "../../lib/videoPlayer";
@@ -369,6 +370,22 @@ describe("a video in the chat", () => {
     fireEvent.click(screen.getByTestId("video-play"));
     await flush();
     expect(screen.getByTestId("video-problem")).toHaveTextContent("Too large to play here. Download it to watch.");
+  });
+
+  it("no room on the disk for the player's copy of it: it is saved instead of played", async () => {
+    const streamFile = vi.spyOn(servicesPlatform!, "streamFile").mockRejectedValue(new Error(NO_ROOM_TO_PLAY));
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    const file = video();
+    show(file);
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(streamFile).toHaveBeenCalledWith(file.id);
+    // Not read into the page instead: the player would copy that too.
+    expect(getFile).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("video-player")).toBeNull();
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("Not enough free disk space to play it here. Download it instead.");
+    fireEvent.click(screen.getByTestId("video-download"));
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, file.name));
   });
 });
 

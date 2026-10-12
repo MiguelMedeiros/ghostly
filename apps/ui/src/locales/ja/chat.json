@@ -228,6 +228,7 @@
   "media": {
     "downloadSize": "ダウンロード {{size}}",
     "noRoom": "容量が足りません: 空き {{size}}",
+    "noRoomToPlay": "ここで再生するための空きディスク容量が足りません。ダウンロードしてください。",
     "notYet": "送信が終わると再生できます。",
     "wantsToSend": "{{name}} が送ろうとしています · 空き {{size}}"
   },
