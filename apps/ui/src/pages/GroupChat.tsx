@@ -638,11 +638,12 @@ export function GroupChat() {
       {sharing && (group.entryLink || shareShown) && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={closeShare} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setChatFolder(groupChat(groupId), undefined); setConfirmLeave(false); nav.home(); }} />}
-      {/* Deleting an active private group leaves it: said so, and refused as Leave is while nobody could become admin. */}
-      {confirmForget && group.status === "active" && group.profile !== "community" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
+      {/* Deleting an active group, private or community, leaves it: said so, and refused as Leave is while nobody could
+          become admin or take the leave. */}
+      {confirmForget && group.status === "active" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
         onConfirm={async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); setChatFolder(groupChat(groupId), undefined); setConfirmForget(false); nav.home(); }} />
       : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
-        // A community is left first: refused (nobody connected to take the leave), it stays, and the notice says why.
+        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
         onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); setChatFolder(groupChat(groupId), undefined); nav.home(); }); }} />}
     </div>
     </MemberColorsProvider>
