@@ -1,6 +1,6 @@
 import { copyInvite } from "./clipboard";
 import { pasteInvite } from "./clipboard";
-import { expect, expectConnected, headerControl, type Peer } from "./fixtures";
+import { expect, type Peer } from "./fixtures";
 /** Fresh disposable peers: first use is automatic, so this takes no comparison. */
 export async function pair(host: Peer, guest: Peer) {
   await host.page.getByTitle("New Chat").click();
@@ -8,7 +8,7 @@ export async function pair(host: Peer, guest: Peer) {
   await guest.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
   await pasteInvite(guest.page, invite);
   // The composer is open before the contact is (what is written waits, WISP 400): paired means live on both sides.
-  for (const peer of [host, guest]) await expectConnected(peer.page);
+  for (const peer of [host, guest]) await expect(peer.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
   for (const peer of [host, guest]) await expect(peer.page.getByPlaceholder("Message…")).toBeEnabled();
   // Open is not verified: neither side has been asked to compare anything.
   for (const peer of [host, guest]) await expect(peer.page.getByTestId("pair-verified")).toHaveCount(0);
@@ -16,7 +16,7 @@ export async function pair(host: Peer, guest: Peer) {
 
 /** The connection panel's Details, where verification, keys and history are: opened, with the panel. */
 export async function connectionDetails(peer: Peer): Promise<void> {
-  if ((await peer.page.getByTestId("connection-menu").getAttribute("open")) === null) await (await headerControl(peer.page, "connection-options")).click();
+  if ((await peer.page.getByTestId("connection-menu").getAttribute("open")) === null) await peer.page.getByTestId("connection-options").click();
   const more = peer.page.getByTestId("connection-details");
   if ((await more.getAttribute("open")) === null) await peer.page.getByTestId("connection-details-summary").click();
 }
