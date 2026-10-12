@@ -34,15 +34,16 @@ describe("GroupEdits on its own", () => {
 
   function setup(messages: StoredMessage[], members = [me, bob, carol]) {
     const sent: { edit: GroupEdit; to?: string }[] = [];
-    let clock = 1_000_000;
+    let clock = 1_000_000, connection = {};
     const edits = new GroupEdits({
       ...rows(messages),
       changed: () => {},
       membership: () => ({ me, members: new Set(members), community: false, admin: true }),
       send: async (_g, edit, to) => { sent.push({ edit, ...(to && { to }) }); return null; },
+      edge: () => connection,
       now: () => clock,
     });
-    return { edits, sent, messages, tick: (ms: number) => { clock += ms; } };
+    return { edits, sent, messages, tick: (ms: number) => { clock += ms; }, reconnect: () => { connection = {}; } };
   }
 
   it("takes a member's card updates at most once a second, the highest of a burst last, and a card message past a text's hundred", async () => {
@@ -212,7 +213,7 @@ describe("GroupEdits on its own", () => {
     it("hears every edit of mine it has not heard, oldest first, GROUP_EDIT_RESEND a window", async () => {
       vi.useFakeTimers();
       const messages = edited(0, 2 * GROUP_EDIT_RESEND + 8);
-      const { edits, sent, tick } = setup([...messages, mine(99)]);
+      const { edits, sent, tick, reconnect } = setup([...messages, mine(99)]);
       await edits.resend("g1", carol);
       expect(ids(sent)).toEqual(messages.slice(0, GROUP_EDIT_RESEND).map(m => m.id));
       expect(sent.every(s => s.to === carol)).toBe(true);
@@ -225,7 +226,7 @@ describe("GroupEdits on its own", () => {
       expect(sent).toHaveLength(2 * GROUP_EDIT_RESEND);
       tick(GROUP_EDIT_RESEND_WINDOW_MS); await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS);
       expect(ids(sent)).toEqual(messages.map(m => m.id));
-      // All heard: an edge that opens again hears only what I edited since.
+      // All heard: the same connection hears only what I edited since.
       tick(GROUP_EDIT_RESEND_WINDOW_MS);
       await edits.resend("g1", carol);
       expect(sent).toHaveLength(messages.length);
@@ -234,9 +235,14 @@ describe("GroupEdits on its own", () => {
       sent.length = 0;
       await edits.resend("g1", carol);
       expect(ids(sent)).toEqual([mine(99).id]);
+      // A new connection hears my latest GROUP_EDIT_RESEND again, heard or not: one may have come before its message.
+      tick(GROUP_EDIT_RESEND_WINDOW_MS); reconnect(); sent.length = 0;
+      await edits.resend("g1", carol);
+      expect(ids(sent)).toEqual([...messages.slice(-(GROUP_EDIT_RESEND - 1)).map(m => m.id), mine(99).id]);
       // Another member's edge is its own: Bob has heard nothing yet.
+      sent.length = 0;
       await edits.resend("g1", bob);
-      expect(sent.filter(s => s.to === bob)).toHaveLength(GROUP_EDIT_RESEND);
+      expect(ids(sent.filter(s => s.to === bob))).toEqual(messages.slice(0, GROUP_EDIT_RESEND).map(m => m.id));
       edits.stop();
     });
 

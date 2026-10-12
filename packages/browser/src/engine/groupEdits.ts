@@ -70,6 +70,8 @@ export class GroupEdits {
    * comes after it is what the member has not heard there. Not kept across a restart.
    */
   private readonly heard = new Map<string, { at: number; id: string }>();
+  /** The connection `resend` last spoke on, per group and member: a new one hears my latest edits again. */
+  private readonly resentOn = new Map<string, unknown>();
   private readonly resendPace = new Map<string, RateWindow>();
   private readonly resendTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly resending = new Map<string, Promise<void>>();
@@ -247,7 +249,8 @@ export class GroupEdits {
    * edge, the latest of each message, oldest first. `GROUP_EDIT_RESEND` go a window and the rest a window later each,
    * while the edge is the same: a member away while I closed forty task cards reads them all as closed, not the latest
    * sixteen. Nothing known of what it heard (the first time since the app started): my newest `GROUP_EDIT_CATCH_UP`.
-   * Called again for the same member, it goes on from where it was.
+   * A new connection hears my latest `GROUP_EDIT_RESEND` again whatever it heard: one may have come before its message
+   * and been dropped. Called again while the edge is the same, it goes on from where it was.
    */
   resend(groupId: string, to: string): Promise<void> {
     const key = resendKey(groupId, to);
@@ -268,7 +271,11 @@ export class GroupEdits {
       .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
       .sort((a, b) => a.edit!.at - b.edit!.at || (a.id < b.id ? -1 : 1));
     const last = this.heard.get(key);
-    const due = last ? mine.filter(m => m.edit!.at > last.at || (m.edit!.at === last.at && m.id > last.id)) : mine.slice(-GROUP_EDIT_CATCH_UP);
+    const after = (m: StoredMessage) => !last || m.edit!.at > last.at || (m.edit!.at === last.at && m.id > last.id);
+    const unheard = last ? mine.filter(after).length : Math.min(mine.length, GROUP_EDIT_CATCH_UP);
+    const again = this.resentOn.get(key) === edge ? 0 : Math.min(mine.length, GROUP_EDIT_RESEND);
+    this.resentOn.set(key, edge);
+    const due = mine.slice(mine.length - Math.max(unheard, again));
     let pace = this.resendPace.get(key);
     if (!pace) this.resendPace.set(key, pace = new RateWindow(GROUP_EDIT_RESEND, GROUP_EDIT_RESEND_WINDOW_MS, this.now));
     for (const m of due) {
@@ -281,7 +288,7 @@ export class GroupEdits {
       await this.host.send(groupId, { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) }, to);
       // Heard only when the edge that took it is still the one that was open.
       if (open() !== edge) return;
-      this.heard.set(key, { at: m.edit!.at, id: m.id });
+      if (after(m)) this.heard.set(key, { at: m.edit!.at, id: m.id });
     }
   }
 
@@ -291,6 +298,7 @@ export class GroupEdits {
     for (const [key, timer] of this.resendTimers) if (of(key)) { clearTimeout(timer); this.resendTimers.delete(key); }
     for (const key of [...this.heard.keys()]) if (of(key)) this.heard.delete(key);
     for (const key of [...this.resendPace.keys()]) if (of(key)) this.resendPace.delete(key);
+    for (const key of [...this.resentOn.keys()]) if (of(key)) this.resentOn.delete(key);
   }
 
   forget(groupId: string): void {

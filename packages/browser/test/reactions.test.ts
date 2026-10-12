@@ -517,7 +517,7 @@ describe("a private group's edge that opens", () => {
     const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
     const inner = node as unknown as { links: Map<string, unknown>; groups: { signReaction(): object }; resendGroupReactions(groupId: string, linkId: string): Promise<void>; groupEdits: { resend(groupId: string, to: string): Promise<void> } };
     const sent = new Map<string, unknown[]>();
-    for (let e = 0; e < 7; e++) inner.links.set(`edge-${e}`, { link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.set(`edge-${e}`, [...sent.get(`edge-${e}`) ?? [], frame.id]); } } });
+    for (let e = 0; e < 7; e++) inner.links.set(`edge-${e}`, { stored: {}, link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.set(`edge-${e}`, [...sent.get(`edge-${e}`) ?? [], frame.id]); } } });
     vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
     const reads = vi.spyOn(db, "getMessages");
     cleanup.push(() => { reads.mockRestore(); });
