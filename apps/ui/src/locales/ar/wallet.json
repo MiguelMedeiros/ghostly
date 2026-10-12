@@ -696,6 +696,10 @@
     "orTestnet": "أو أنشئ محفظة Spark على Testnet عبر جديد: تعمل على regtest، بـ sats بلا قيمة ودون مفتاح.",
     "phraseNote": "لا يحتفظ مشغّلو Spark بشيء من أموالك: تستعيد العبارة الـ sats في أي محفظة Spark. أما سجل المدفوعات فيأتي من ملف النسخة الاحتياطية.",
     "regtestLabel": "Regtest · Spark التجريبي من Breez · sats بلا قيمة",
+    "status": {
+      "failed": "فشل",
+      "pending": "قيد الانتظار"
+    },
     "to": "عنوان Spark أو فاتورة",
     "toPlaceholder": "عنوان Spark أو فاتورة ({{prefix}})",
     "tokenInvoice": "فاتورة Spark هذه لرمز مميز، لا لـ sats.",

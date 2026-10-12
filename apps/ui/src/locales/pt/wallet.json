@@ -696,6 +696,10 @@
     "orTestnet": "Ou crie uma carteira Spark na Testnet com Nova: ela roda no regtest, com sats sem valor e sem chave.",
     "phraseNote": "Os operadores da Spark não guardam nada seu: a frase traz os sats de volta em qualquer carteira Spark. O histórico de pagamentos vem do arquivo de backup.",
     "regtestLabel": "Regtest · Spark de teste da Breez · sats sem valor",
+    "status": {
+      "failed": "falhou",
+      "pending": "pendente"
+    },
     "to": "Endereço ou fatura Spark",
     "toPlaceholder": "Endereço ou fatura Spark ({{prefix}})",
     "tokenInvoice": "Essa fatura Spark é de um token, não de sats.",

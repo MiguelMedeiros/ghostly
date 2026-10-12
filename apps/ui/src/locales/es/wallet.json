@@ -696,6 +696,10 @@
     "orTestnet": "O crea una billetera Spark en Testnet con Nuevo: funciona en regtest, con sats sin valor y sin clave.",
     "phraseNote": "Los operadores de Spark no guardan nada tuyo: la frase recupera los sats en cualquier billetera Spark. El historial de pagos viene del archivo de copia.",
     "regtestLabel": "Regtest · Spark de prueba de Breez · sats sin valor",
+    "status": {
+      "failed": "fallido",
+      "pending": "pendiente"
+    },
     "to": "Dirección o factura Spark",
     "toPlaceholder": "Dirección o factura Spark ({{prefix}})",
     "tokenInvoice": "Esa factura Spark es por un token, no por sats.",

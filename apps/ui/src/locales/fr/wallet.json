@@ -696,6 +696,10 @@
     "orTestnet": "Ou créez un portefeuille Spark sur Testnet avec Nouveau : il fonctionne en regtest, avec des sats sans valeur et sans clé.",
     "phraseNote": "Les opérateurs de Spark ne détiennent rien de vous : la phrase récupère les sats dans n'importe quel portefeuille Spark. L'historique des paiements vient du fichier de sauvegarde.",
     "regtestLabel": "Regtest · Spark de test de Breez · sats sans valeur",
+    "status": {
+      "failed": "échoué",
+      "pending": "en attente"
+    },
     "to": "Adresse ou facture Spark",
     "toPlaceholder": "Adresse ou facture Spark ({{prefix}})",
     "tokenInvoice": "Cette facture Spark concerne un token, pas des sats.",

@@ -696,6 +696,10 @@
     "orTestnet": "Or create a Testnet Spark wallet with New: it runs on regtest, with worthless sats and no key.",
     "phraseNote": "Spark's operators hold nothing of yours: the phrase brings the sats back in any Spark wallet. Payment history comes from the backup file.",
     "regtestLabel": "Regtest · Breez's test Spark · worthless sats",
+    "status": {
+      "failed": "failed",
+      "pending": "pending"
+    },
     "to": "Spark address or invoice",
     "toPlaceholder": "Spark address or invoice ({{prefix}})",
     "tokenInvoice": "That Spark invoice is for a token, not sats.",
