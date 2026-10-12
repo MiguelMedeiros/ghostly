@@ -7,6 +7,7 @@ import { useI18n } from "../contexts/I18nContext";
  * A new link (`reset`) or turning the link off (`disable`), asked before it happens: either ends the link shared so
  * far for good, wherever it was posted, and nothing brings it back. The two buttons sit beside Share, Copy and Show QR.
  * It opens over the members list or the share dialog, inside it in React's tree: its Escape stops here and leaves that open.
+ * Closed, it gives the focus back to the button that opened it.
  */
 export function GroupLinkAskDialog({ kind, onClose, onConfirm }: { kind: "reset" | "disable"; onClose(): void; onConfirm(): void }) {
   const { t } = useI18n();
@@ -14,8 +15,14 @@ export function GroupLinkAskDialog({ kind, onClose, onConfirm }: { kind: "reset"
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
   const backdrop = useBackdropDismiss(onClose);
   useEffect(() => {
+    // The button that asked (New link, Turn off) has the focus back as the question closes. The browser's own return
+    // finds nothing: React has taken the dialog out by the time it is closed, and the focus fell to the page.
+    const before = document.activeElement as HTMLElement | null;
     const element = dialog.current!; element.showModal(); cancel.current?.focus();
-    return () => element.close();
+    return () => {
+      element.close();
+      if (before && before !== document.body && before.isConnected) before.focus();
+    };
   }, []);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-link-ask-dialog" data-kind={kind} className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
