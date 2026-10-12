@@ -110,7 +110,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     {qr}
     <div className="flex">{field}</div>
     <div className="flex gap-2">{shareButtonEl}{copyButton}</div>
-    <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-amber-500" : "text-text-secondary"}`}>{note}</p>
+    <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-warn-ink" : "text-text-secondary"}`}>{note}</p>
     {adminControls}
     {error && <Notice problem={error} className="text-center text-xs" />}
   </div>;
@@ -119,7 +119,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>
     <div className="mt-2 flex">{field}</div>
     <div className="mt-2 flex flex-wrap items-center gap-1.5">{shareButtonEl}{copyButton}{qrToggle}{adminControls}</div>
-    <p data-testid="group-link-note" className={`mt-2 text-xs ${full ? "text-amber-500" : "text-text-muted"}`}>{note}</p>
+    <p data-testid="group-link-note" className={`mt-2 text-xs ${full ? "text-warn-ink" : "text-text-muted"}`}>{note}</p>
     {showQr && qr}
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;

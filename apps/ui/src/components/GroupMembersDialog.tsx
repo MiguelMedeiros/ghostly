@@ -142,7 +142,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
         </span>
         {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
         {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
-        {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-amber-500">{t("group.members.missing", { count: m.missing })}</span>}
+        {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-warn-ink">{t("group.members.missing", { count: m.missing })}</span>}
         {live.isAdmin && !m.me && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1">
           {live.profile === "mesh" && live.members.length > MESH_HUBS.threshold && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy !== null}
             value={m.hubRole ?? "auto"} options={hubRoles}

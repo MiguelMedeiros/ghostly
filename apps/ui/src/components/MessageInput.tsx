@@ -705,7 +705,7 @@ export function MessageInput({
             />
             {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (
               <span data-testid="dht-byte-count" title={overSoft ? t("composer.overSoft", { bytes: softBytes }) : undefined}
-                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-amber-500" : "text-text-muted"}`}>
+                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-warn-ink" : "text-text-muted"}`}>
                 {bytes} / {softBytes} B
               </span>
             )}
