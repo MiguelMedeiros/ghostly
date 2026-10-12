@@ -2,7 +2,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { IMAGE_HOSTS, IMAGE_REDIRECTS } from "@ghostly/browser/profiles/public";
-import { NET_RUNNER_CSP, NET_RUNNER_HEADERS, RUNNER_CSP, RUNNER_HEADERS } from "../../../../web/runnerPolicy";
+import { CALLBACK_PATH } from "@ghostly/browser/proofs/oidc/popup";
+import { NET_RUNNER_CSP, NET_RUNNER_HEADERS, OPENER_KEPT_PATH, OPENER_POLICY, RUNNER_CSP, RUNNER_HEADERS } from "../../../../web/runnerPolicy";
 
 // covers: files.voice.play
 
@@ -157,6 +158,33 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
       if (/^\s*return\s/.test(location.body.trim())) continue; // a redirect, no page
       expect(location.body, location.match).toContain("include /etc/nginx/ghostly-headers.conf;");
     }
+  });
+});
+
+// covers: app.web-opener
+describe("the web app's opener policy", () => {
+  // Without it, a page of another site that opened one of the app's addresses with window.open kept a handle on that
+  // window for as long as both stayed open: it could point the window at another address later, and post to its frames.
+  const nginx = read("apps/web/nginx.conf");
+  const locations = [...nginx.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)].map(([, match, body]) => ({ match: match!.trim(), body: body! }));
+  const sent = (text: string) => [...text.matchAll(/^\s*add_header Cross-Origin-Opener-Policy "([^"]+)" always;$/gm)].map((m) => m[1]);
+  const pages = locations.filter((l) => !/^\s*return\s/.test(l.body.trim())); // a redirect, no page
+
+  it("every location that answers with a file sends it, once, but the sign-in's return page", () => {
+    expect(OPENER_POLICY).toBe("same-origin-allow-popups");
+    expect(pages.map((l) => l.match).sort()).toEqual(["/", "/assets/", "= /app-frame-net.html", "= /app-frame.html", "= /oidc-callback.html", "= /sw.js", "^~ /.well-known/"]);
+    for (const location of pages) expect(sent(location.body), location.match).toEqual(location.match === `= ${OPENER_KEPT_PATH}` ? [] : [OPENER_POLICY]);
+  });
+
+  it("is a line of each location: the shared file goes to the return page too, and nothing outside a location reaches one", () => {
+    expect(sent(read("apps/web/nginx-headers.conf"))).toEqual([]);
+    expect(nginx.replace(/location\s+[^{]+\{[^}]*\}/g, "")).not.toContain("add_header");
+  });
+
+  it("the page served without it is the one the sign-in returns to, and Vite's servers send the same on the runner", () => {
+    expect(OPENER_KEPT_PATH).toBe(CALLBACK_PATH);
+    expect(RUNNER_HEADERS["Cross-Origin-Opener-Policy"]).toBe(OPENER_POLICY);
+    expect(NET_RUNNER_HEADERS["Cross-Origin-Opener-Policy"]).toBe(OPENER_POLICY);
   });
 });
 

@@ -3,6 +3,16 @@ import type { BoundChannel, FrameChannel, NativeEndpoint, NativeTransport } from
 const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), b => b.toString(16).padStart(2, "0")).join("");
 
 /**
+ * The descriptor of the endpoint `FakeNativeNet.endpoint(transport, name)` makes when given no `kind`: named after the
+ * app, so a test can write a contact's descriptor before that endpoint exists, and in the shape the real adapters make
+ * (a 64-hex key), the only one a link keeps of what its contact tells.
+ */
+export function fakeDescriptor(transport: NativeTransport, name: string): { id: string; relay: null; addresses: string[] } | { publicKey: string } {
+  const key = Array.from(new TextEncoder().encode(`${name}:${transport}`), b => b.toString(16).padStart(2, "0")).join("").padEnd(64, "0").slice(0, 64);
+  return transport === "hyperdht/1" ? { publicKey: key } : { id: key, relay: null, addresses: ["192.0.2.1:4000"] };
+}
+
+/**
  * Iroh and HyperDHT stood in for in one process: endpoints dial each other by descriptor and get a channel pair
  * with a matching binding (a fresh exporter/handshake-hash-shaped context, the two endpoint identities), as the
  * real adapters hand over after their handshake. Frames take `latencyMs` of real time, and a frame still on its way
@@ -33,18 +43,18 @@ export class FakeNativeNet {
   }
 
   /**
-   * `kind`: how the endpoint describes itself. Absent: by name (`{ id: "<name>:<transport>" }`), for tests that hand
-   * descriptors over themselves. Otherwise as the real adapters do, so a capability record can carry it (a 64-hex Iroh
-   * endpoint id, or HyperDHT public key): `direct`, a native endpoint (an Iroh one homed on its relay, with its
+   * `kind`: how the endpoint describes itself. Absent: by name (`fakeDescriptor`), for tests that hand descriptors
+   * over themselves. Otherwise by a random key (a 64-hex Iroh endpoint id, or HyperDHT public key): `direct`, a native endpoint (an Iroh one homed on its relay, with its
    * addresses); for Iroh also `relay-only`, a browser's,
    * reachable through its relay alone (its descriptor names the relay and no address) and able to dial only a
    * descriptor that names one; and `relay-later`, the Desktop's, homed on a relay a few seconds after it binds: it
    * names none until `homeRelay()`, which then tells the owner, as the Desktop's address refresh does.
    */
   endpoint(transport: NativeTransport, name: string, kind?: "direct" | "relay-only" | "relay-later"): NativeEndpoint & { homeRelay(): void } {
-    const id = kind ? hex(32) : `${name}:${transport}`, identity = hex(32);
+    const named = fakeDescriptor(transport, name) as { id?: string; publicKey?: string };
+    const id = kind ? hex(32) : named.id ?? named.publicKey!, identity = hex(32);
     const entry = { identity, closed: false, endpoint: null as unknown as NativeEndpoint & { homeRelay(): void } };
-    const descriptor = !kind ? { id } : transport === "hyperdht/1" ? { publicKey: id }
+    const descriptor = !kind ? named : transport === "hyperdht/1" ? { publicKey: id }
       : kind === "relay-only" ? { id, relay: "https://relay.test/", addresses: [], relayed: true }
       : { id, relay: kind === "direct" ? "https://relay.test./" : null, addresses: ["192.0.2.1:4000"] };
     entry.endpoint = {
