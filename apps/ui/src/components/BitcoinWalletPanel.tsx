@@ -72,8 +72,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           <p className="text-text-primary" data-testid="bitcoin-balance">
             <span className="text-4xl font-semibold tabular-nums">{formatAmount(bt.balance ?? 0, t.language)}</span>
             <span className="text-text-muted text-sm ms-2">{unit}</span>
-            {!!bt.unconfirmed && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.bitcoin.unconfirmed", { amount: formatAmount(bt.unconfirmed, t.language), unit })}</span>}
-            {bt.network !== "bitcoin" && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.panel.testCoins", { network: bt.network ?? "" })}</span>}
+            {!!bt.unconfirmed && <span className="block text-xs text-warn-ink mt-1">{t("wallet.bitcoin.unconfirmed", { amount: formatAmount(bt.unconfirmed, t.language), unit })}</span>}
+            {bt.network !== "bitcoin" && <span className="block text-xs text-warn-ink mt-1">{t("wallet.panel.testCoins", { network: bt.network ?? "" })}</span>}
           </p>
           <Actions value={action} onChange={setAction} actions={["receive", "send", "history"]} />
           {action === "receive" && (
