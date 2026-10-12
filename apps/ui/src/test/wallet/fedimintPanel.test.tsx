@@ -1,0 +1,57 @@
+import { screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { FedimintWalletPanel } from "../../components/FedimintWalletPanel";
+import type { WalletPlatform, WalletState } from "../../lib/platform";
+import { walletView } from "../fakeEngine";
+import { renderApp } from "../render";
+
+// covers: wallet.fedimint.join, wallet.fedimint.notes
+
+/** Two federations of a Testnet wallet: Alpha has movements, Beta was just joined and has none. */
+const federation = (id: string, name: string, balance: number) => ({ id, name, balance, status: "ready" as const, lightning: true, invite: `fed1${id}`,
+  guardians: [{ id: 0, name: "g0" }], consensusVersion: "2.1", network: "regtest", modules: ["ln", "mint"] });
+const ALPHA = "a".repeat(64), BETA = "b".repeat(64);
+const state = (history: object[]) => walletView({ mode: "testnet", fedimint: { federations: [federation(ALPHA, "Alpha", 5_000), federation(BETA, "Beta", 0)], balance: 5_000, history } as never }) as WalletState;
+const MOVED = [
+  { id: "t1", federation: ALPHA, kind: "lightning-out", amount: 12_000, fee: 1_500, state: "done", createdAt: 2 },
+  { id: "t2", federation: ALPHA, kind: "notes-in", amount: 300, state: "done", createdAt: 1 },
+];
+const wallet = (calls: Partial<WalletPlatform> = {}) => calls as WalletPlatform;
+const choose = async (user: ReturnType<typeof renderApp>["user"], name: string) => {
+  await user.click(screen.getByRole("combobox", { name: "Federation" }));
+  await user.click(await screen.findByRole("option", { name: new RegExp(name) }));
+};
+
+describe("the Fedimint panel's history", () => {
+  it("says Nothing yet for a federation with no movement, whatever the others hold", async () => {
+    const { user } = renderApp(<FedimintWalletPanel wallet={wallet()} state={state(MOVED)} />);
+    await user.click(screen.getByTestId("wallet-history"));
+    expect(within(screen.getByTestId("fedimint-history")).getAllByTestId("fedimint-tx")).toHaveLength(2);
+    await choose(user, "Beta");
+    const history = screen.getByTestId("fedimint-history");
+    expect(within(history).queryAllByTestId("fedimint-tx")).toHaveLength(0);
+    expect(history).toHaveTextContent("Nothing yet.");
+  });
+
+  it("writes a row's fee as it writes its amount", async () => {
+    const { user } = renderApp(<FedimintWalletPanel wallet={wallet()} state={state(MOVED)} />);
+    await user.click(screen.getByTestId("wallet-history"));
+    expect(screen.getAllByTestId("fedimint-tx")[0]).toHaveTextContent("−12,000 (fee 1,500)");
+  });
+});
+
+describe("notes taken back in the Fedimint panel", () => {
+  it("say so under Send, and never as notes redeemed under Receive", async () => {
+    const calls = { fedimintSpendNotes: vi.fn(async () => ({ notes: "notes-out-1", operation: "op-1" })), fedimintTakeBack: vi.fn(async () => "canceled" as const) };
+    const { user } = renderApp(<FedimintWalletPanel wallet={wallet(calls)} state={state([])} />);
+    await user.click(screen.getByTestId("wallet-send"));
+    await user.type(screen.getByTestId("fedimint-send-amount"), "100");
+    await user.click(screen.getByTestId("fedimint-spend"));
+    await user.click(await screen.findByTestId("fedimint-take-back"));
+    expect(calls.fedimintTakeBack).toHaveBeenCalledWith(ALPHA, "op-1");
+    expect(await screen.findByTestId("fedimint-taken-back")).toHaveTextContent("Taken back.");
+    await user.click(screen.getByTestId("wallet-receive"));
+    expect(screen.queryByTestId("fedimint-redeemed")).toBeNull();
+    expect(screen.queryByText("Taken back.")).toBeNull();
+  });
+});
