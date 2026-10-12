@@ -21,3 +21,17 @@ export const DEFAULT_STORE_KEY: string = "y379ia3t1urwudj8o4w1qwmuwp1mcxyf956b5r
 export const DEFAULT_APP_STORES: readonly { url: string; key: string }[] = DEFAULT_STORE_KEY
   ? [{ url: DEFAULT_STORE_URL, key: DEFAULT_STORE_KEY }]
   : [];
+
+/**
+ * One app that comes with Ghostly (WISP 1200 § Built-in apps): its publisher's key and its name (its reference), the
+ * digest of the signed bundle this build carries, and the public URL that bundle is published at. The URL is what an
+ * app card sent in a chat names, and where its revocations and a restored profile's files are read: the copy in the
+ * build is never a source a contact could read.
+ */
+export interface BuiltInApp { publisher: string; name: string; digest: string; url: string }
+
+/**
+ * The apps that come with Ghostly. A short list kept here on purpose, never "everything in the official store": an
+ * entry is added with its bundle, pinned by digest, and a build with no bundle has no entry.
+ */
+export const BUILT_IN_APPS: readonly BuiltInApp[] = [];
