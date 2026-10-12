@@ -1,6 +1,7 @@
 {
   "app": {
     "installUpdates": "This client cannot install updates",
+    "limitedNext": "This works once the check does. Check your connection.",
     "localAddress": "Ghostly needs your permission to reach that local address",
     "lostPeer": "Lost the Ghostly peer",
     "pickCard": "Pick a Lightning card first",
