@@ -872,6 +872,19 @@ html .toast-place.toast-place-page[data-at="top"] {
   top: 0.75rem;
 }
 
+/* A notice at the top of the window (a call that waits for the contact, a link that could not be used): in the middle,
+   as wide as its words up to the window less 1rem a side (a fixed box at 50% with no width is laid out in the half
+   that is left to its right), and below the status bar an installed iPhone app draws under. */
+.top-notice {
+  position: fixed;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  left: 50%;
+  translate: -50% 0;
+  z-index: 60;
+  width: max-content;
+  max-width: calc(100% - 2rem);
+}
+
 .animate-pulse-dot {
   animation: pulse-dot 1.5s ease-in-out infinite;
 }
