@@ -11,9 +11,11 @@ import { REAL_MONEY_UNCONFIRMED, crossNetwork, paymentNetwork, paymentNetworksOf
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { GhostlyNode } from "../src/engine/node";
 import type { NetworkWalletsView, StoredPayment } from "../src/shared/types";
+import { invoiceFor } from "./helpers/invoice";
 // covers: wallet.instances.networks, payments.chat.networks
 
 const REAL = "https://mint.minibits.cash/Bitcoin";
+const REAL_INVOICE = invoiceFor(100), TEN_SATS = invoiceFor(10);
 const arkTarget = (network: "bitcoin" | "mutinynet", address = "tark1fresh"): PaymentTarget => ({ method: "arkade", network, provider: network === "bitcoin" ? "https://arkade.computer" : "https://mutinynet.arkade.sh", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 3_600_000 });
 
 function setup() {
@@ -55,22 +57,22 @@ beforeEach(async () => {
 describe("a payment never crosses networks", () => {
   it("a request of one network is refused by a card of the other, before anything is spent", async () => {
     const { desk, wallet, lightnings } = setup();
-    await desk.onPaymentRequest("l", { id: "real-one", timestamp: 1, amount: { value: "100", asset: "sat" }, endpoints: [[ENDPOINT.bolt11, "lnbc100"], [ENDPOINT.cashu, cashuRequestPayload([REAL])]], network: "mainnet" });
+    await desk.onPaymentRequest("l", { id: "real-one", timestamp: 1, amount: { value: "100", asset: "sat" }, endpoints: [[ENDPOINT.bolt11, REAL_INVOICE], [ENDPOINT.cashu, cashuRequestPayload([REAL])]], network: "mainnet" });
     await expect(desk.payRequest({ linkId: "l", paymentId: "real-one", network: "testnet" })).rejects.toThrow(crossNetwork("testnet", "mainnet"));
     expect(wallet.createToken).not.toHaveBeenCalled();
     expect(lightnings.testnet.pay).not.toHaveBeenCalled();
     expect(lightnings.mainnet.pay).not.toHaveBeenCalled();
     // Paid with no card named, it goes through the request's own network: Mainnet's Lightning, never Testnet's.
     await desk.payRequest({ linkId: "l", paymentId: "real-one", confirmedReal: true });
-    expect(lightnings.mainnet.quote).toHaveBeenCalledWith("lnbc100", undefined);
+    expect(lightnings.mainnet.quote).toHaveBeenCalledWith(REAL_INVOICE, undefined);
     expect(lightnings.testnet.quote).not.toHaveBeenCalled();
   });
 
   it("an incoming request keeps the network it names, else the one its mints, chain or invoice say", async () => {
     const { desk } = setup();
     const req = (id: string, endpoints: [string, string][], network?: "mainnet" | "testnet") => desk.onPaymentRequest("l", { id: `req-${id}`, timestamp: 1, amount: { value: "10", asset: "sat" }, endpoints, network });
-    await req("named", [[ENDPOINT.bolt11, "lnbc10"]], "testnet");
-    await req("test-mint", [[ENDPOINT.bolt11, "lnbc10"], [ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]]);
+    await req("named", [[ENDPOINT.bolt11, TEN_SATS]], "testnet");
+    await req("test-mint", [[ENDPOINT.bolt11, TEN_SATS], [ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]]);
     await req("real-mint", [[ENDPOINT.cashu, cashuRequestPayload([REAL])]]);
     await req("ark", [[ENDPOINT.arkade, JSON.stringify(arkTarget("mutinynet"))]]);
     expect(["named", "test-mint", "real-mint", "ark"].map((id) => desk.payment(`req-${id}`)?.network)).toEqual(["testnet", "testnet", "mainnet", "testnet"]);
