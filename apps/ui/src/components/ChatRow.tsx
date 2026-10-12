@@ -378,13 +378,25 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
  * A group (private or community), or an invitation to one, in the chat list. Drawn again only when what it shows
  * changes, as a chat's row (`ChatRow`): its time and when it was read are taken here, at each draw of the list.
  */
-export function GroupRow({ group, active, density, onOpen }: { group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void }) {
+export function GroupRow({ group, active, density, onOpen, drag }: {
+  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void;
+  /** The row can be dragged onto a folder (hooks/useRowReorder.ts). */
+  drag?: { props: Record<string, unknown>; dragging: boolean };
+}) {
   const { t, language } = useI18n();
   const latest = useRef(onOpen);
   latest.current = onOpen;
   const open = useCallback(() => latest.current(), []);
   const time = group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined;
-  return <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} />;
+  const row = <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} />;
+  if (!drag) return row;
+  // The drag is on a box around the row, so the row itself is drawn again only when the group changes.
+  return (
+    <div {...drag.props} data-testid="group-row-drag" data-dragging={drag.dragging || undefined}
+      className={`relative select-none [-webkit-touch-callout:none] ${drag.dragging ? "z-20 cursor-grabbing bg-surface-hover opacity-70 shadow-lg" : ""}`}>
+      {row}
+    </div>
+  );
 }
 
 const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt }: {
