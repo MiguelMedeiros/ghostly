@@ -201,6 +201,27 @@ describe("a usage card in the chat", () => {
     expect(forced).toEqual([]);
   });
 
+  it("a reset that has passed reads as how long ago it was, muted: the card's own and another window's", async () => {
+    const c = { ...usage({ left: 62, window: "5 h", windows: [{ window: "week", left: 80, resetsAt: NOW - 26 * HOUR }, { window: "opus", left: 12, resetsAt: NOW + 50 * HOUR }] }), resetsAt: NOW - 2 * HOUR };
+    const { user } = renderApp(<MessageBubble message={message(c)} peerPubKey="peer" />);
+    await user.click(within(screen.getByTestId("status-card")).getByTestId("status-card-toggle"));
+    const details = screen.getByTestId("usage-details");
+    // Not "03:50 PM · now", nor "resets 10:50 AM" of a time that was yesterday.
+    const own = within(details).getByTestId("usage-details-resets");
+    expect(own).toHaveTextContent("Resetsreset 2 h ago");
+    expect(own).toHaveAttribute("data-past");
+    expect(own.querySelector("dd")).toHaveClass("text-text-muted");
+    const week = within(details).getByTestId("usage-details-window-0");
+    expect(week).toHaveTextContent("week80% left · reset 1 d ago");
+    expect(week).toHaveAttribute("data-past");
+    expect(week.querySelector("dd")).toHaveClass("text-text-muted");
+    // One that is still to come says when, as before.
+    const opus = within(details).getByTestId("usage-details-window-1");
+    expect(opus).toHaveTextContent(/^opus12% left · resets \S+ \d{2}:\d{2}/);
+    expect(opus).not.toHaveAttribute("data-past");
+    expect(opus.querySelector("dd")).toHaveClass("text-text-primary");
+  });
+
   it("is no task: the Tasks button stays away, and its line elsewhere is the label and percent", () => {
     renderApp(<TasksButton rows={[{ id: "m1", card: usage(), sender: "peer", timestamp: NOW }]} />);
     expect(screen.queryByTestId("chat-tasks")).not.toBeInTheDocument();
