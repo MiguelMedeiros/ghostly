@@ -152,7 +152,7 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
 /**
  * At least how many bytes `value` takes as JSON, counted only until it passes `budget`: a string by its length (UTF-8
  * and escapes only add), anything else by its fewest. Binary data (an ArrayBuffer or a view on one) and a value too
- * deep are NOT_JSON. It looks at no more than `budget` members, so a request far over 64 KiB is refused
+ * deep, an object that is not plain, or one that throws as it is read are NOT_JSON. It looks at no more than `budget` members, so a request far over 64 KiB is refused
  * without JSON.stringify writing it whole: a 16 MiB Uint8Array took that 1.6 s on the page's thread.
  */
 function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_JSON {
@@ -165,6 +165,10 @@ function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_J
       bytes += item.length + 1;
       for (let i = 0; i < item.length && bytes <= budget; i++) if (!walk(item[i], depth + 1)) return false;
     } else if (item !== null && typeof item === "object") {
+      // Only a plain object is JSON (jsonValueOf): anything else is refused before `for...in` lists its keys, which for
+      // a String object of 10 million characters took 1.5 s on the page's thread and from 30 million threw.
+      const proto = Object.getPrototypeOf(item);
+      if (proto !== Object.prototype && proto !== null) return false;
       bytes += 2;
       for (const key in item) {
         if (bytes > budget) break;
@@ -176,7 +180,7 @@ function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_J
     } else bytes += 1;
     return true;
   };
-  return walk(value, 0) ? bytes : NOT_JSON;
+  try { return walk(value, 0) ? bytes : NOT_JSON; } catch { return NOT_JSON; }
 }
 
 class Refusal extends Error { declare message: MiniAppErrorCode }
