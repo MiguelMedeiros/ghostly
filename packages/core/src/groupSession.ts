@@ -538,8 +538,9 @@ export class GroupSession {
     const out = new Map<string, string>();
     for (const [sender, epochs] of Object.entries(this.state.seen)) {
       if (sender === this.myKey || !rosterHas(this.roster, sender)) continue;
-      const marks = Object.entries(epochs).filter(([, entry]) => this.gaps(entry).length)
-        .map(([e, entry]) => `${e}:${entry.high}:${entry.window.length}`);
+      // The numbers themselves: what the author writes next arrives, and changes nothing of what is missing.
+      const marks = Object.entries(epochs).map(([e, entry]) => [e, this.gaps(entry)] as const).filter(([, gaps]) => gaps.length)
+        .map(([e, gaps]) => `${e}:${gaps.join(".")}`);
       if (marks.length) out.set(sender, marks.join(","));
     }
     return out;

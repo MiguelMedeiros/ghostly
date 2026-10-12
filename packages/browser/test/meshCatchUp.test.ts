@@ -122,6 +122,22 @@ describe("a private group catches up a member from whoever is there", { timeout:
     expect(asks.sort()).toEqual(["bob", "carol"]);
   });
 
+  it("a member asks each other member once for messages nobody holds, though their author goes on writing", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , , dave] = peers;
+    const aliceKey = world.view(alice, id)!.myKey!;
+    const asks: string[] = [];
+    world.drop = (from, to, frame) => {
+      if (from === dave && frame.t === "group-sync" && Array.isArray(frame.ask) && frame.ask.includes(aliceKey)) asks.push(to.name);
+      return from === alice && frame.t === "group-msg" && (frame.n as number) < 10;
+    };
+    for (let i = 0; i < 12; i++) await alice.groups.send(id, `alice ${i}`);
+    // A message every twenty seconds for six gossip turns: each arrives, and none of them is one of the ten missing.
+    for (let i = 12; i < 30; i++) { await alice.groups.send(id, `alice ${i}`); await world.run(MESH_GOSSIP_MS / 3); }
+    expect(world.texts(dave, id).filter(t => t.startsWith("alice "))).toHaveLength(20);
+    expect(asks.sort()).toEqual(["bob", "carol"]);
+  });
+
   it("a member back after a while is announced once, and the others look fast for it", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "erin"], true);
     const erin = peers[4];
