@@ -222,6 +222,7 @@ describe("dragging a pinned chat in the list", () => {
     list();
     // Ana is in the folder, first in the list; Ben and Cy are the pinned chats in no folder.
     expect(names()).toEqual(["Ana", "Ben", "Cy", "Dee"]);
+    // Alone pinned in its folder, Ana has nothing to be put in order among.
     expect(rowOf("Ana")).not.toHaveAttribute("data-reorder-id");
     const ben = rowOf("Ben");
     fireEvent.pointerDown(ben, pointer("mouse", middle("Ben")));
@@ -230,6 +231,29 @@ describe("dragging a pinned chat in the list", () => {
     fireEvent.pointerUp(window, pointer("mouse", middle("Ben") + 70));
     expect(pinnedOrder()).toEqual(["a", "c", "b"]);
     await vi.waitFor(() => expect(names()).toEqual(["Ana", "Cy", "Ben", "Dee"]));
+  });
+
+  it("in a folder, its pinned chats are dragged among themselves, and the ones in no folder keep their order", async () => {
+    chats();
+    const agents = createFolder("Agents")!;
+    setChatFolder("a", agents.id);
+    setChatFolder("b", agents.id);
+    list();
+    // Ana and Ben are the folder's pinned chats, first in the list; Cy is alone pinned in no folder, so it is not dragged.
+    expect(names()).toEqual(["Ana", "Ben", "Cy", "Dee"]);
+    expect(rowOf("Ana")).toHaveAttribute("data-reorder-id", "a");
+    expect(rowOf("Ben")).toHaveAttribute("data-reorder-id", "b");
+    expect(rowOf("Cy")).not.toHaveAttribute("data-reorder-id");
+    const ana = rowOf("Ana");
+    fireEvent.pointerDown(ana, pointer("mouse", middle("Ana")));
+    // Far below: no further than the folder's last pinned chat.
+    fireEvent.pointerMove(window, pointer("mouse", 900));
+    expect(ana.style.transform).toBe(`translateY(${ROW}px)`);
+    expect(within(rowOf("Ben")).getByTestId("chat-row-drop")).toHaveAttribute("data-edge", "after");
+    expect(within(rowOf("Cy")).queryByTestId("chat-row-drop")).not.toBeInTheDocument();
+    fireEvent.pointerUp(window, pointer("mouse", 900));
+    await vi.waitFor(() => expect(names()).toEqual(["Ben", "Ana", "Cy", "Dee"]));
+    expect(pinnedOrder().filter(id => id !== "c")).toEqual(["b", "a"]);
   });
 
   it("drags up too, and back where it was changes nothing", async () => {

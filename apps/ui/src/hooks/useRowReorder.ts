@@ -95,9 +95,14 @@ export interface FolderDrops {
   onDrop(id: string, folder: string | undefined): void;
 }
 
-export function useRowReorder({ ids, enabled, onMove, folders }: {
+export function useRowReorder({ ids, enabled, onMove, folders, beside }: {
   /** The rows that can be put in another order, in the order they are drawn. */
   ids: readonly string[];
+  /**
+   * The rows a row is put in order among, itself included, in the order they are drawn: the ones of its own part of
+   * the list (its folder's pinned chats). Absent: all of `ids`, one list.
+   */
+  beside?(id: string): readonly string[];
   enabled: boolean;
   /** A row was dropped at `index` among `ids`. */
   onMove(id: string, index: number): void;
@@ -261,17 +266,20 @@ export function useRowReorder({ ids, enabled, onMove, folders }: {
   const onContextMenu = useCallback((e: MouseEvent) => { if (live.current?.touch) e.preventDefault(); }, []);
   const onDragStart = useCallback((e: DragEvent) => { e.preventDefault(); }, []);
 
+  const among = useRef(beside);
+  among.current = beside;
+  const groupOf = useCallback((id: string) => among.current?.(id) ?? ids, [ids]);
   const usable = enabled && ids.length > 1;
   const droppable = enabled ? folders?.rows : undefined;
   const rowProps = useCallback((id: string) => {
-    const reorders = usable && ids.includes(id);
+    const reorders = usable && ids.includes(id) && groupOf(id).length > 1;
     if (!reorders && !droppable?.includes(id)) return {};
     return { [reorders ? "data-reorder-id" : "data-drag-id"]: id, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart };
-  }, [usable, ids, droppable, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart]);
+  }, [usable, ids, groupOf, droppable, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart]);
 
   if (!drag || !enabled) return { rowProps };
   if (drag.target !== undefined) return { rowProps, dragging: drag.id, over: drag.target };
-  const others = ids.filter(id => id !== drag.id);
+  const others = groupOf(drag.id).filter(id => id !== drag.id);
   const drop = !usable || !ids.includes(drag.id) || drag.to === drag.from || !others.length ? undefined
     : drag.to < others.length ? { id: others[drag.to], edge: "before" as const } : { id: others[others.length - 1], edge: "after" as const };
   return { rowProps, dragging: drag.id, drop };
