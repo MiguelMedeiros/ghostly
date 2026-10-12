@@ -220,10 +220,23 @@ const RELAY_RETRY_MS = 30_000;
 /** Native listeners an app may hold per transport (the Desktop's Rust Iroh allows eight, `paired_transport.rs`). */
 const NATIVE_SLOTS = 8;
 /**
- * Of those, what a group's links (edges, entry sessions) may hold where one side has no WebRTC (WISP 902 § Transports):
- * half, so 1:1 chats keep room. It is also the group links' budget of connections on an app with no WebRTC (`peerRoom`).
+ * Iroh's listeners where it is the browser build (the web app, the extension, the CLI): Rust's eight are not its limit.
+ * Each is a WebSocket to its relay and about 0.2 MiB: a phone-sized Chromium page held 128 of them, and the public
+ * relays took sixteen started one after another, as the queue here starts them (six of sixteen started at once were
+ * refused). 1:1 chats hold eight of them at most, as before: the rest is room for group links. HyperDHT keeps eight
+ * there too: a page's listeners share one WebSocket to its relay, which drops a client past sixteen listens (device
+ * links listen there as well), and each of the CLI's is a whole DHT node.
  */
-export const GROUP_NATIVE_SLOTS = 4;
+const IROH_WEB_SLOTS = 16;
+/** Of a transport's listeners, the ones a group's links never hold: 1:1 chats keep that room. */
+const CHAT_NATIVE_SLOTS = 4;
+/**
+ * What a group's links (edges, entry sessions) may hold of a transport's listeners where one side has no WebRTC (WISP
+ * 902 § Transports). It is also the group links' budget of connections on an app with no WebRTC (`peerRoom`).
+ */
+export const GROUP_NATIVE_SLOTS = NATIVE_SLOTS - CHAT_NATIVE_SLOTS;
+/** The same, of Iroh's listeners where it is the browser build. */
+export const GROUP_IROH_WEB_SLOTS = IROH_WEB_SLOTS - CHAT_NATIVE_SLOTS;
 /** How often a group link that found no free native slot tries again. */
 const GROUP_NATIVE_RETRY_MS = 15_000;
 /** The longest a group link whose native listener failed to start waits before trying again (its wait doubles up to it). */
@@ -1204,14 +1217,16 @@ export class GhostlyNode implements EngineImplementation {
     // And only behind a good turn read under 60 seconds old: two active devices would fork the group (WISP 06).
     adminTurn: (_groupId, options) => this.confirmTurn({ within: options?.wait === false ? 0 : GhostlyNode.TURN_CONFIRM_WAIT_MS }),
     // An app with no WebRTC (the Linux Desktop) reaches members over native listeners, a few of them
-    // (`GROUP_NATIVE_SLOTS`): it does not offer to be a private group's hub, which keeps an edge with everyone.
+    // (`groupNativeSlots`): it does not offer to be a private group's hub, which keeps an edge with everyone.
     staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
     peerRoom: groupId => {
-      // With no WebRTC, a group's links are native ones, and all the groups together hold `GROUP_NATIVE_SLOTS` at most.
-      if (typeof RTCPeerConnection === "undefined" && Object.keys(this.nativeFactories).length) {
+      // With no WebRTC, a group's links are native ones, and all the groups together hold what the transport with
+      // most listeners gives them (`groupNativeSlots`): a link needs one.
+      const native = Object.keys(this.nativeFactories) as NativeTransport[];
+      if (typeof RTCPeerConnection === "undefined" && native.length) {
         let held = 0;
         for (const live of this.links.values()) if (live.stored.group && live.stored.group !== groupId && live.link) held++;
-        return Math.max(0, GROUP_NATIVE_SLOTS - held);
+        return Math.max(0, Math.max(...native.map(key => this.groupNativeSlots(key))) - held);
       }
       const budget = this.options.peerBudget;
       if (budget === undefined) return undefined;
@@ -7170,6 +7185,15 @@ export class GhostlyNode implements EngineImplementation {
     });
   }
 
+  /** The listeners this app may hold for a transport: sixteen for Iroh's browser build (`IROH_WEB_SLOTS`), eight for the others. */
+  private nativeSlots(key: NativeTransport): number {
+    return key === "iroh/1" && this.options.irohWeb ? IROH_WEB_SLOTS : NATIVE_SLOTS;
+  }
+  /** Of those, what its groups' links may hold, all groups together. */
+  private groupNativeSlots(key: NativeTransport): number {
+    return this.nativeSlots(key) - CHAT_NATIVE_SLOTS;
+  }
+
   /**
    * One transport's listener for one chat, in that transport's queue. "no-slot" when a group's link found no slot free,
    * "failed" when the listener could not start.
@@ -7184,17 +7208,20 @@ export class GhostlyNode implements EngineImplementation {
     if (link.availableTransports.includes(key)) return false;
     live.transportErrors ??= {};
     try {
-      // The native SDKs each allow eight listeners. Reclaim an idle listener
-      // only for the selected chat, never an established native connection.
+      // The native SDKs each allow eight listeners, Iroh's browser build sixteen (`nativeSlots`). Reclaim an idle
+      // listener only for the selected chat, never an established native connection.
       const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
-      // A group's links take at most half of them, and never one a chat holds: 1:1 chats keep what they had
+      const slots = this.nativeSlots(key), groups = owners.filter(other => other.stored.group).length;
+      // A group's links take all but four of them at most, and never one a chat holds: 1:1 chats keep what they had
       // before group links went native (WISP 902 § Transports). One that finds none waits for a slot.
-      if (group && (owners.length >= NATIVE_SLOTS || owners.filter(other => other.stored.group).length >= GROUP_NATIVE_SLOTS)) return "no-slot";
-      if (owners.length >= NATIVE_SLOTS) {
+      if (group && (owners.length >= slots || groups >= this.groupNativeSlots(key))) return "no-slot";
+      // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a browser).
+      const full = owners.length >= slots;
+      if (full || (!group && owners.length - groups >= NATIVE_SLOTS)) {
         const now = Date.now();
         const taking = !group && (this.activeLinkId === linkId || inUse);
         // A chat takes a slot from a group's link first, one that carries no session: the link waits for another.
-        const groupVictim = owners.filter(other => other.stored.group && other.link?.canReleaseEndpoint(key))
+        const groupVictim = !full ? undefined : owners.filter(other => other.stored.group && other.link?.canReleaseEndpoint(key))
           .sort((a, b) => (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0))[0];
         // Then from a chat that carries none, unless that chat took it from an idle session moments ago (no ping-pong).
         const victim = groupVictim ?? (taking ? owners
@@ -7218,7 +7245,7 @@ export class GhostlyNode implements EngineImplementation {
           traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId });
           // Each busy for now (dialling, switching, carrying a session): the chat on screen asks again in a moment.
           if (this.activeLinkId === linkId && !group) this.retryActiveSlot(linkId);
-          throw new Error("All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
+          throw new Error("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
         } else {
           await victim.link!.releaseEndpoint(key);
           victim.transportErrors ??= {};
@@ -7253,7 +7280,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * The order saved chats start in, which is the order they take native listeners in (`NATIVE_SLOTS` per transport):
+   * The order saved chats start in, which is the order they take native listeners in (`nativeSlots` per transport):
    * the 1:1 chats written in, or live, most recently first; group links keep their places. In the order they were
    * stored, an app with more paired chats than slots left a chat that was live a moment before with no listener, and a
    * contact with no WebRTC (the Linux Desktop) never reached it again (Omarchy, 2026-09-30: "On DHT · retrying live" for

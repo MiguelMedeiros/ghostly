@@ -1,0 +1,1 @@
+When every listener is taken: the eight listeners per transport are the 1:1 chats'; where Iroh is the browser build an app holds sixteen, the others for group links ([902](../../902-group-mesh.md#transports)). Nothing changes for a chat.
