@@ -339,6 +339,74 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(view(alice).invited).toEqual([]);
   });
 
+  it("a Decline while the inviter's chat is down is kept, and said when that chat is next up", async () => {
+    const world = new World();
+    let alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    // Alice closes her app: the chat is down when Bob answers.
+    world.chats.delete("chat-ab");
+    await bob.decline(groupId); await world.settle();
+    expect(bob.views()).toEqual([]);
+    const now = Date.now();
+    await bob.tick(now + 60_000); await world.settle();
+    // Both apps start again, and the chat comes up: the admin hears the answer and may invite again.
+    alice = await world.restart("alice"); bob = await world.restart("bob");
+    expect(view(alice, groupId).invited).toEqual(["chat-ab"]);
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await bob.tick(now + 30 * 60_000); await world.settle();
+    expect(view(alice, groupId).invited).toEqual([]);
+    expect(bob.views()).toEqual([]);
+    // Said once: nothing of the invitation is kept after.
+    expect(world.peers.get("bob")!.store.groups.size).toBe(0);
+    const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
+    await bob.tick(now + 31 * 60_000);
+    expect(sent).not.toHaveBeenCalled();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(bob, groupId).invitation).toBeDefined();
+  });
+
+  it("a Decline nobody could be told is dropped after a week, and gives way to the next invitation", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]); world.chats.set("chat-cb", ["carol", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh"), other = await carol.create("Hosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await carol.invite(other, "chat-cb"); await world.settle();
+    world.chats.delete("chat-ab"); world.chats.delete("chat-cb");
+    await bob.decline(groupId); await bob.decline(other);
+    expect(world.peers.get("bob")!.store.groups.size).toBe(2);
+    // Carol invites again before Bob's answer went: the invitation waits as any other, and no old answer follows it.
+    world.chats.set("chat-cb", ["carol", "bob"]);
+    await carol.invite(other, "chat-cb"); await world.settle();
+    expect(view(bob, other).invitation).toBeDefined();
+    const now = Date.now();
+    await bob.tick(now + 1000); await world.settle();
+    expect(view(carol, other).invited).toEqual(["chat-cb"]);
+    // Alice's chat stays down for more than a week: the answer is dropped, unsaid.
+    await bob.tick(now + 8 * 24 * 60 * 60_000);
+    expect([...world.peers.get("bob")!.store.groups.keys()]).toEqual([other]);
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await bob.tick(now + 8 * 24 * 60 * 60_000 + 1000); await world.settle();
+    expect(view(alice, groupId).invited).toEqual(["chat-ab"]);
+  });
+
+  it("a member removed and invited again who declines while the inviter's chat is down keeps the group, and says it later", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    await alice.remove(groupId, key(bob)); await world.settle();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    world.chats.delete("chat-ab");
+    await bob.decline(groupId); await world.settle();
+    expect(view(bob, groupId)).toMatchObject({ status: "removed", canSend: false });
+    expect(view(alice, groupId).invited).toEqual(["chat-ab"]);
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await bob.tick(Date.now() + 1000); await world.settle();
+    expect(view(alice, groupId).invited).toEqual([]);
+    // The removed group stays as it was, with nothing left to say.
+    expect(view(bob, groupId)).toMatchObject({ status: "removed" });
+    expect(world.peers.get("bob")!.store.groups.get(groupId)).not.toHaveProperty("declined");
+  });
+
   it("an invitation its inviter takes back goes from the list, accepted or not; nobody else's word takes it", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
