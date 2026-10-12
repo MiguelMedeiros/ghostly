@@ -210,6 +210,54 @@ describe("GroupChat: out of the group", () => {
     expect(await screen.findByText("You joined again.")).toBeInTheDocument();
   });
 
+  // Removed from a community, the link opened again and nobody there yet: the engine lists the group as it was kept,
+  // with the knock beside it.
+  const knockingAgain = (stage: GroupJoinStage = "knocked") => active({ profile: "community", status: "removed", statusReason: "You were removed from this group", canSend: false,
+    invitation: { linkId: "entry-1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage } });
+
+  it("removed from a community and knocking again: the history kept stays readable, under a line that says it waits", async () => {
+    const { user } = openGroup(knockingAgain(), [stored({ id: "g1", text: "said before I was removed" })]);
+    expect(await screen.findByText("said before I was removed")).toBeInTheDocument();
+    // No join card over the history: that is a first join's.
+    expect(screen.queryByTestId("group-joining")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-chat")).toHaveAttribute("data-status", "removed");
+    const notice = screen.getByTestId("group-notice");
+    expect(notice).toHaveTextContent("Waiting to be let in" + "It happens once a member's app is open. You can leave this page.");
+    expect(notice).not.toHaveTextContent("Open the group's link to join again");
+    // The header still says what the group is to me, not "Invitation from a contact".
+    expect(screen.getByTestId("group-members")).toHaveTextContent("You were removed from this group");
+    expect(composer()).toBeDisabled();
+    // Its menu is the group's, the search among it.
+    await user.click(screen.getByTestId("group-options"));
+    expect(screen.getByTestId("chat-search-open")).toBeInTheDocument();
+    expect(screen.getByTestId("group-forget")).toBeInTheDocument();
+  });
+
+  it("removed from a community and knocking again: says when a member is letting it in", () => {
+    openGroup(knockingAgain("answered"));
+    expect(screen.getByTestId("group-notice")).toHaveTextContent("A member is letting you in" + "A member's app saw you knock and is connecting to you. You are in in a moment.");
+  });
+
+  it("removed from a community and knocking again: Cancel joining stops the knock and keeps the group and its history", async () => {
+    const { user, engine } = openGroup(knockingAgain(), [stored({ id: "g1", text: "said before I was removed" })]);
+    engine.on("declineGroupInvitation", () => { fakeEngine.update({ groups: [{ ...knockingAgain(), invitation: undefined }] }); });
+    await user.click(within(screen.getByTestId("group-notice")).getByRole("button", { name: "Cancel joining" }));
+    expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(engine.callsTo("forgetGroup")).toEqual([]);
+    // Still on the group, as it was before the link was opened.
+    expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
+    expect(await screen.findByText("You were removed. Open the group's link to join again.")).toBeInTheDocument();
+    expect(screen.getByText("said before I was removed")).toBeInTheDocument();
+  });
+
+  it("removed from a community and knocking again: a cancel the engine refuses is said, and the knock goes on", async () => {
+    const { user, engine } = openGroup(knockingAgain());
+    engine.on("declineGroupInvitation", () => { throw new Error("No invitation to decline"); });
+    await user.click(within(screen.getByTestId("group-notice")).getByRole("button", { name: "Cancel joining" }));
+    expect(await within(screen.getByTestId("group-notice")).findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
+  });
+
   it("names the status when the engine gave no reason, in the notice too", () => {
     openGroup(active({ status: "left", canSend: false }));
     expect(screen.getByTestId("group-members")).toHaveTextContent("left");
