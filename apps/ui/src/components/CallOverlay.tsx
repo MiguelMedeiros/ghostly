@@ -6,6 +6,7 @@ import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
 import { useTabTrap } from "../hooks/useDismiss";
+import { useVoiceRing } from "../hooks/useVoiceRing";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 
@@ -198,6 +199,8 @@ export function CallOverlay({
   }[callState];
 
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
+  // Who is speaking: the contact's avatar wears a ring as wide as their voice is loud.
+  const peerRing = useVoiceRing<HTMLDivElement>(remoteStream, callState === "connected" && !showRemoteVideo);
   // A screen in place of the camera leaves the camera off, and its button says so.
   const cameraOn = !isVideoOff && !isScreenSharing;
   // Sharing is never a surprise, to either side.
@@ -254,7 +257,7 @@ export function CallOverlay({
       {/* Placeholder when no remote video */}
       {!showRemoteVideo && (
         <div className="call-peer flex flex-col items-center gap-4">
-          <div className="call-avatar w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
+          <div ref={peerRing} data-testid="call-peer-avatar" className="call-avatar w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
             <span className="text-text-muted text-3xl">
               {initial(peerName)}
             </span>
