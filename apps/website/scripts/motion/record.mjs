@@ -123,7 +123,7 @@ await clip(browser, "desktop-rail-boo", desktop, async (page) => {
   await page.waitForTimeout(1400);
 });
 await clip(browser, "desktop-finale", desktop, async (page) => {
-  await page.evaluate(() => document.getElementById("download").scrollIntoView({ block: "start", behavior: "instant" }));
+  await page.evaluate(() => document.getElementById("finale").scrollIntoView({ block: "start", behavior: "instant" }));
   await page.waitForTimeout(400);
   await page.evaluate(() => scrollBy({ top: -40, behavior: "instant" }));
   await page.waitForTimeout(15500);
@@ -199,7 +199,7 @@ await clip(browser, "phone-logo-boo", phone, async (page) => {
   await page.waitForTimeout(1400);
 });
 await clip(browser, "phone-finale", phone, async (page) => {
-  await page.evaluate(() => document.getElementById("download").scrollIntoView({ block: "start", behavior: "instant" }));
+  await page.evaluate(() => document.getElementById("finale").scrollIntoView({ block: "start", behavior: "instant" }));
   await page.waitForTimeout(14500);
 });
 

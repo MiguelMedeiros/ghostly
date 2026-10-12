@@ -40,7 +40,7 @@ export function HomePage({ version }: { version: string }) {
           { id: "next", label: t.next.eyebrow },
           { id: "space", label: t.space.eyebrow },
           { id: "open", label: t.open.eyebrow },
-          { id: "download", label: t.finale.eyebrow },
+          { id: "finale", label: t.finale.eyebrow },
         ]}
       />
       <Act
