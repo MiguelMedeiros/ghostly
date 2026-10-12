@@ -24,7 +24,18 @@ interface Stored {
   chats: Record<string, string>;
   /** The rows in no folder ("Other chats") are folded to their heading. */
   othersFolded?: boolean;
+  /**
+   * The person's own order of a part of the list, by folder id ("" for the rows in no folder): its rows (a session
+   * id, or `groupChat(id)`) top first, as the person left them by dragging. A part with none is in order of the
+   * latest message, as always.
+   */
+  orders?: Record<string, string[]>;
 }
+
+/** The rows in no folder, as `orders` names them. */
+const LOOSE = "";
+/** An order names at most this many rows: more than any list a person arranges by hand. */
+const ORDER_MAX = 2000;
 
 /** A folder's name is a short label beside a count, on a phone too. */
 export const FOLDER_NAME_MAX = 40;
@@ -55,7 +66,13 @@ function read(): Stored {
     for (const [chat, id] of Object.entries(stored?.chats && typeof stored.chats === "object" ? stored.chats : {})) {
       if (folders.some(f => f.id === id)) chats[chat] = id;
     }
-    return { folders, chats, ...(stored?.othersFolded === true && folders.length > 0 ? { othersFolded: true } : {}) };
+    const orders: Record<string, string[]> = {};
+    for (const [part, rows] of Object.entries(stored?.orders && typeof stored.orders === "object" ? stored.orders : {})) {
+      if ((part !== LOOSE && !folders.some(f => f.id === part)) || !Array.isArray(rows)) continue;
+      const kept = [...new Set(rows.filter((row): row is string => typeof row === "string" && !!row))].slice(0, ORDER_MAX);
+      if (kept.length) orders[part] = kept;
+    }
+    return { folders, chats, ...(stored?.othersFolded === true && folders.length > 0 ? { othersFolded: true } : {}), ...(folders.length > 0 && Object.keys(orders).length ? { orders } : {}) };
   } catch {
     return { folders: [], chats: {} };
   }
@@ -113,9 +130,12 @@ export function renameFolder(id: string, name: string): void {
 export function deleteFolder(id: string): void {
   const stored = read();
   if (!stored.folders.some(f => f.id === id)) return;
+  const { [id]: _order, ...orders } = stored.orders ?? {};
   write({
+    ...stored,
     folders: stored.folders.filter(f => f.id !== id),
     chats: Object.fromEntries(Object.entries(stored.chats).filter(([, folder]) => folder !== id)),
+    ...(stored.orders ? { orders } : {}),
   });
 }
 
@@ -178,6 +198,36 @@ export function movePinnedBeside(chat: string, index: number): PinnedPlace | und
   return movePinnedTo(chat, pinnedOrder().indexOf(beside[to])) && { index: to, count: beside.length };
 }
 
+/**
+ * `rows` in the person's order of their part of the list: the rows the order names, as it names them, under the rows
+ * it does not (one that came in since, which stay as they were given: the latest first). With no order: as given.
+ */
+export function inOrder<T>(rows: readonly T[], keyOf: (row: T) => string, order: readonly string[] | undefined): T[] {
+  if (!order?.length) return [...rows];
+  const place = new Map(order.map((key, index) => [key, index]));
+  const named = rows.filter(row => place.has(keyOf(row))).sort((a, b) => place.get(keyOf(a))! - place.get(keyOf(b))!);
+  return [...rows.filter(row => !place.has(keyOf(row))), ...named];
+}
+
+/** The person's order of a folder's rows (undefined: of the rows in no folder), or undefined when they never made one. */
+export function sectionOrder(folder: string | undefined): readonly string[] | undefined {
+  return read().orders?.[folder ?? LOOSE];
+}
+
+/**
+ * Keeps `rows` (every row of that part of the list, top first) as the person's order of it; an empty list forgets the
+ * order, and the part is in order of the latest message again. Only with folders, and for a folder that exists.
+ */
+export function setSectionOrder(folder: string | undefined, rows: readonly string[]): void {
+  const stored = read();
+  if (stored.folders.length === 0 || (folder !== undefined && !stored.folders.some(f => f.id === folder))) return;
+  const orders = { ...stored.orders };
+  const kept = [...new Set(rows)].slice(0, ORDER_MAX);
+  if (kept.length) orders[folder ?? LOOSE] = kept; else delete orders[folder ?? LOOSE];
+  const { orders: _was, ...rest } = stored;
+  write(Object.keys(orders).length ? { ...rest, orders } : rest);
+}
+
 /** Folds the rows in no folder to their heading, or unfolds them. Only with folders: without one there is no heading. */
 export function setOthersFolded(folded: boolean): void {
   const stored = read();
@@ -190,7 +240,7 @@ export function setOthersFolded(folded: boolean): void {
 export const OTHER_CHATS_ID = "chat-folder-others-rows";
 
 /** The folders and each chat's place, kept current: redrawn when they change here or in another page of the app. */
-export function useChatFolders(): { folders: ChatFolder[]; folderOf: (chat: string) => string | undefined; othersFolded: boolean } {
+export function useChatFolders(): { folders: ChatFolder[]; folderOf: (chat: string) => string | undefined; othersFolded: boolean; orderOf: (folder: string | undefined) => readonly string[] | undefined } {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
     window.addEventListener(FOLDERS_EVENT, redraw);
@@ -200,6 +250,6 @@ export function useChatFolders(): { folders: ChatFolder[]; folderOf: (chat: stri
       window.removeEventListener("storage", redraw);
     };
   }, []);
-  const { folders, chats, othersFolded } = read();
-  return { folders, folderOf: chat => chats[chat], othersFolded: !!othersFolded };
+  const { folders, chats, othersFolded, orders } = read();
+  return { folders, folderOf: chat => chats[chat], othersFolded: !!othersFolded, orderOf: folder => orders?.[folder ?? LOOSE] };
 }

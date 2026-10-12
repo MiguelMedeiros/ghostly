@@ -17,8 +17,11 @@ import { Menu, MenuItem, MenuSeparator } from "./Menu";
  * count beside it. The count is not in the button, so the button is named by the folder alone and described by the count.
  * Its ⋮ renames the folder, moves it among the others (`place`: where it is among how many) and deletes it.
  */
-export function ChatFolderHeader({ folder, sessions, groups, place, onToggle }: {
+export function ChatFolderHeader({ folder, sessions, groups, place, onToggle, ordered = false, onByLatest }: {
   folder: ChatFolder;
+  /** The person put its rows in their own order (by dragging): its ⋮ offers the order of the latest message back. */
+  ordered?: boolean;
+  onByLatest?(): void;
   /** The folder's chats and groups that can have something unread: all but the one open. */
   sessions: readonly ChatSession[];
   groups: readonly BadgeGroup[];
@@ -64,6 +67,7 @@ export function ChatFolderHeader({ folder, sessions, groups, place, onToggle }: 
           <MenuItem testId="chat-folder-rename" onClick={() => { closeMenu(); setAsking("name"); }}>{t("sidebar.folder.rename")}</MenuItem>
           {place.index > 0 && <MenuItem testId="chat-folder-up" onClick={() => move(-1)}>{t("chat.menu.moveUp")}</MenuItem>}
           {place.index < place.count - 1 && <MenuItem testId="chat-folder-down" onClick={() => move(1)}>{t("chat.menu.moveDown")}</MenuItem>}
+          {ordered && onByLatest && <MenuItem testId="chat-folder-by-latest" onClick={() => { closeMenu(); onByLatest(); }}>{t("sidebar.folder.byLatest")}</MenuItem>}
           <MenuSeparator />
           <MenuItem danger testId="chat-folder-delete" onClick={() => { closeMenu(); setAsking("delete"); }}>{t("sidebar.folder.delete")}</MenuItem>
         </Menu>

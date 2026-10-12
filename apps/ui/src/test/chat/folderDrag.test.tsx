@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { REORDER_HOLD_MS } from "../../hooks/useRowReorder";
-import { chatFolders, createFolder, setChatFolder, setFolderFolded, setOthersFolded } from "../../lib/chatFolders";
+import { chatFolders, createFolder, sectionOrder, setChatFolder, setFolderFolded, setOthersFolded } from "../../lib/chatFolders";
 import { groupChat } from "../../lib/chatMute";
 import { pinnedOrder, saveSession, setSessionPinned } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
@@ -60,13 +60,13 @@ describe("dragging a chat onto a folder", () => {
     const { agents, personal } = seed();
     list();
     const bob = rowOf("Bob");
-    expect(bob).toHaveAttribute("data-drag-id", "b");
+    // A row of a part with others in it is put in order among them, and may go to another part too.
+    expect(bob).toHaveAttribute("data-reorder-id", "b");
     fireEvent.pointerDown(bob, pointer("mouse", 100));
     // Over its own part of the list: nowhere else to go yet.
     over = loose();
     fireEvent.pointerMove(window, pointer("mouse", 140));
     expect(bob).toHaveAttribute("data-dragging", "true");
-    expect(bob.style.transform).toBe("translateY(40px)");
     expect(section("Personal")).not.toHaveAttribute("data-drop-over");
     expect(loose()).not.toHaveAttribute("data-drop-over");
 
@@ -120,7 +120,7 @@ describe("dragging a chat onto a folder", () => {
     setFolderFolded(agents.id, true);
     list();
     const group = screen.getByTestId("group-row-drag");
-    expect(group).toHaveAttribute("data-drag-id", groupChat("g"));
+    expect(group).toHaveAttribute("data-reorder-id", groupChat("g"));
     fireEvent.pointerDown(group, pointer("mouse", 100));
     over = within(section("Agents")).getByTestId("chat-folder-toggle");
     fireEvent.pointerMove(window, pointer("mouse", 10));
@@ -178,7 +178,7 @@ describe("dragging a chat onto a folder", () => {
     expect(folderOf("b")).toBe(personal.id);
   });
 
-  it("a pinned chat is still put in order among the pinned ones over its own rows, and goes into a folder when dropped on one", async () => {
+  it("a pinned chat dropped on a folder goes into it, and that is not an order of anything", async () => {
     const { agents } = seed();
     setSessionPinned("c", true);
     setSessionPinned("b", true);
@@ -193,7 +193,10 @@ describe("dragging a chat onto a folder", () => {
     expect(screen.queryByTestId("chat-row-drop")).not.toBeInTheDocument();
     fireEvent.pointerUp(window, pointer("mouse", 10));
     expect(folderOf("b")).toBe(agents.id);
+    // Changing folder is not putting in order: the pins are as they were, and no part got an order of its own.
     expect(pinnedOrder()).toEqual(["b", "c"]);
+    expect(sectionOrder(undefined)).toBeUndefined();
+    expect(sectionOrder(agents.id)).toBeUndefined();
   });
 
   it("with no folder, or in a search, no row is dragged anywhere", async () => {
@@ -201,13 +204,15 @@ describe("dragging a chat onto a folder", () => {
     saveSession(chat("b", "Bob", { lastSyncAt: NOW - 1000 }));
     const { user, unmount } = list();
     expect(rowOf("Alice")).not.toHaveAttribute("data-drag-id");
+    expect(rowOf("Alice")).not.toHaveAttribute("data-reorder-id");
     expect(loose()).not.toHaveAttribute("data-folder-drop");
     unmount();
     createFolder("Agents");
     list();
-    expect(rowOf("Alice")).toHaveAttribute("data-drag-id", "a");
+    expect(rowOf("Alice")).toHaveAttribute("data-reorder-id", "a");
     expect(loose()).toHaveAttribute("data-folder-drop", "");
     await user.type(screen.getByPlaceholderText("Search chats..."), "a");
+    expect(rowOf("Alice")).not.toHaveAttribute("data-reorder-id");
     expect(rowOf("Alice")).not.toHaveAttribute("data-drag-id");
   });
 });
