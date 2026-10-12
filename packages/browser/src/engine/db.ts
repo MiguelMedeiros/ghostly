@@ -218,6 +218,11 @@ export const db = {
       // Receipts are terminal; timeout/disconnect/send races cannot undo them.
       // Do not resurrect deleted messages or attach new states to old history.
       if (!message?.delivery || message.delivery === "delivered") return;
+      // What the row already says is not written again (a text going out is marked `sending` as it is stored, then
+      // again as it goes): each write is the whole row, and on Node a disk sync.
+      const same = message.delivery === delivery && message.deliveryError === deliveryError
+        && Object.entries(extra ?? {}).every(([key, value]) => message[key as keyof StoredMessage] === value);
+      if (same) return;
       messages.put({ ...message, ...extra, delivery, deliveryError });
     };
     await new Promise<void>((resolve, reject) => {
