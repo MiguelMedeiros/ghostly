@@ -152,6 +152,11 @@ export interface CommunityCommit {
   n?: string;
   /** The leaver's signature, in a `leave`. */
   ls?: string;
+  /**
+   * The leaver's signature over the admission the leave ends (`leaveStatement3`), in a `leave`. Outside the hash and
+   * the committer's signature, which an app from before computes without it: it stands by the leaver's key alone.
+   */
+  ls3?: string;
   ts: number;
   c: string;
   sig: string;
@@ -180,6 +185,26 @@ export const leaveStatement = (g: string, s: string) => utf8Encode(JSON.stringif
 export const leftStatement = (g: string, h: string, hi: Record<string, number>) =>
   utf8Encode(JSON.stringify(["ghostly-group/2 left", g, h, Object.entries(hi).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))]));
 const LEFT_EPOCH = /^\d{1,15}:[a-f0-9]{16}$/;
+/** A leave of one admission: `h` is the hash of the commit that last put `s` in the roster (its `add`, or the `create` it signed). */
+export const leaveStatement3 = (g: string, s: string, h: string) => utf8Encode(JSON.stringify(["ghostly-group/3 leave", g, s, h]));
+
+/**
+ * Whether a leave holds after `before` (the commits before it, newest first): its `ls3` names the commit that last
+ * admitted the leaver, or, from an app that signs no such statement, no earlier leave carries its `ls`. `ls` says the
+ * same for every admission of a member, so by itself it ends one admission only.
+ */
+export function leaveStands(leave: Pick<CommunityCommit, "g" | "s" | "ls" | "ls3">, before: Iterable<CommunityCommit>): boolean {
+  if (!leave.s || !leave.ls) return false;
+  let admitted = false;
+  for (const c of before) {
+    if (!admitted && ((c.k === "add" && c.s === leave.s) || (c.k === "create" && c.by === leave.s))) {
+      admitted = true;
+      if (leave.ls3 && SIG.test(leave.ls3) && verify(fromBase64Url(leave.ls3), leaveStatement3(leave.g, leave.s, communityCommitHash(c)), publicKeyFromZ32(leave.s))) return true;
+    }
+    if (c.k === "leave" && c.ls === leave.ls) return false;
+  }
+  return true;
+}
 
 /** The secret of an epoch that adds, re-roles or re-links: from the previous one and the commit. */
 export function derivedSecret(previous: Uint8Array, untaggedHash: string): Uint8Array {
@@ -201,6 +226,8 @@ function parseCommit(raw: unknown): CommunityCommit | null {
   if (c.x !== undefined) out.x = c.x as string;
   if (c.n !== undefined) out.n = c.n as string;
   if (c.ls !== undefined) out.ls = c.ls as string;
+  // Not under the commit's hash or signature: one that is not a leave's, or not a signature, is as if absent.
+  if (out.k === "leave" && typeof c.ls3 === "string" && SIG.test(c.ls3)) out.ls3 = c.ls3;
   return out;
 }
 
@@ -238,9 +265,11 @@ export function communityRoster(previous: Roster | null, c: Pick<CommunityCommit
 /**
  * One commit against its parent (null for a genesis) and the parent's roster: shape, id, link,
  * authority, roster arithmetic, roster hash and signature. The confirmation tag is checked once
- * the secret is known.
+ * the secret is known. `before`: the commits before it on its branch, newest first; given, a `leave` is held to the
+ * admission it ends (`leaveStands`). A member gives it for every commit it takes in after its own admission; the chain
+ * of a welcome is not held to it (`verifyCommunityChain`).
  */
-export function verifyCommunityCommit(raw: unknown, parent: CommunityCommit | null, parentRoster: Roster | null, groupId?: string): { commit: CommunityCommit; roster: Roster } | { error: string } {
+export function verifyCommunityCommit(raw: unknown, parent: CommunityCommit | null, parentRoster: Roster | null, groupId?: string, before?: Iterable<CommunityCommit>): { commit: CommunityCommit; roster: Roster } | { error: string } {
   const commit = parseCommit(raw);
   if (!commit) return { error: "Malformed membership commit" };
   if (groupId && commit.g !== groupId) return { error: "Commit for another group" };
@@ -257,12 +286,17 @@ export function verifyCommunityCommit(raw: unknown, parent: CommunityCommit | nu
   if (commit.k !== "leave" && commit.ls !== undefined) return { error: "Malformed membership commit" };
   const roster = communityRoster(parent ? parentRoster : null, commit);
   if (!roster) return { error: "Unauthorized or inconsistent membership change" };
+  if (commit.k === "leave" && before && !leaveStands(commit, before)) return { error: "This leave is not for the member's current admission" };
   if (rosterHash(roster) !== commit.m) return { error: "The roster hash does not match the change" };
   if (!verify(fromBase64Url(commit.sig), utf8Encode(tuple(commit)), publicKeyFromZ32(commit.by))) return { error: "Membership commit signature is invalid" };
   return { commit, roster };
 }
 
-/** A whole chain from its genesis; the rosters after each commit and the entry key at the end. */
+/**
+ * A whole chain from its genesis; the rosters after each commit and the entry key at the end. What a newcomer is
+ * handed: a `leave` in it is not held to the admission it ends, since a chain from before 2026-10-10 may hold a
+ * member's second leave under the one statement there was, and no newcomer could enter that group again.
+ */
 export function verifyCommunityChain(raw: unknown, groupId?: string): { chain: CommunityCommit[]; roster: Roster; entry: string; rosters: Roster[] } | { error: string } {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > COMMUNITY_LIMITS.chain) return { error: "Malformed membership chain" };
   const chain: CommunityCommit[] = [], rosters: Roster[] = [];
@@ -285,7 +319,7 @@ export interface CommunitySecretFrame { t: "group-secret"; v: 2; g: string; to: 
 export interface CommunitySecretsFrame { t: "group-secrets"; v: 2; g: string; secrets: { h: string; s: SealedSecret }[] }
 /** `loc`: hashes of my branch at 1, 2, 4, 8… commits back from my tip, so whoever is on another branch finds where we part. */
 export interface CommunitySyncFrame { t: "group-sync"; v: 2; g: string; e: number; h: string; loc?: string[]; have: Record<string, Record<string, number>>; secrets: string[]; mt?: string }
-export interface CommunityLeaveFrame { t: "group-leave"; v: 2; g: string; s: string; ls: string }
+export interface CommunityLeaveFrame { t: "group-leave"; v: 2; g: string; s: string; ls: string; ls3?: string }
 /**
  * The mark of a leave (`h`, the commit's full hash), signed by the member who committed it: how far it had heard the
  * leaver in each epoch. What the leaver wrote past it is not taken (WISP 903 § Leaving and removal).
@@ -346,7 +380,7 @@ export interface CommunityState {
    */
   alone?: string[];
   /** Leave requests waiting for a member to commit them. */
-  pendingLeaves: { s: string; ls: string }[];
+  pendingLeaves: { s: string; ls: string; ls3?: string }[];
   /** Leave commit (full hash) → its mark, as its committer signed it (`group-left`), oldest first. Absent in older states. */
   left?: Record<string, { hi: Record<string, number>; sig: string }>;
   /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
@@ -753,11 +787,16 @@ export class CommunitySession {
   private placeSide(commit: CommunityCommit): boolean {
     const parent = this.known.get(commit.p), parentRoster = parent ? this.rosterAt(commit.p) : undefined;
     if (!parentRoster || !parent) return false;
-    const result = verifyCommunityCommit(commit, parent, parentRoster, this.id);
+    const result = verifyCommunityCommit(commit, parent, parentRoster, this.id, this.ancestry(commit.p));
     if ("error" in result) return false;
     const h = communityCommitHash(result.commit);
     this.known.set(h, result.commit); this.rosters.set(h, result.roster);
     return true;
+  }
+
+  /** The commit `h` and those before it on its branch, newest first. */
+  private *ancestry(h: string): Generator<CommunityCommit> {
+    for (let c = this.known.get(h); c; c = this.known.get(c.p)) yield c;
   }
 
   private rosterOf(h: string): Roster | undefined { return this.rosterAt(h); }
@@ -874,7 +913,7 @@ export class CommunitySession {
     // leaves the signature out, so a copy whose signature does not hold is dropped all the same.
     const parsed = parseCommit(raw);
     if (!parsed || this.known.has(communityCommitHash(parsed))) return false;
-    const result = verifyCommunityCommit(raw, parent, parentRoster, this.id);
+    const result = verifyCommunityCommit(raw, parent, parentRoster, this.id, this.ancestry(p));
     if ("error" in result) return false;
     if (GROWS.has(result.commit.k) && !keepsRoom(result.commit.e, result.roster)) return false;
     const commit = result.commit, h = communityCommitHash(commit);
@@ -1059,14 +1098,14 @@ export class CommunitySession {
   get adminWork(): boolean { return this.hooks.adminWork?.() !== false; }
   private requireAdmin(): void { this.requireMember(); if (!this.isAdmin) throw new Error("Only the admin can do that"); }
 
-  private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string }, now: number): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
+  private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string; ls3?: string }, now: number): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
     if (!this.adminWork) throw new Error(GROUP_ADMIN_OFF_ERROR);
     if (this.hooks.adminTurn && !(await this.hooks.adminTurn())) throw engineError("groupTurnUnconfirmed");
     if (this.state.chain.length >= COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
     const parent = this.top, parentHash = this.topHash;
     const draftBase = { v: 2 as const, g: this.id, e: parent.e + 1, p: parentHash, k: kind, by: this.myKey, ...fields, ts: now };
     const roster = communityRoster(this.roster, draftBase);
-    if (!roster) throw new Error("This change is not allowed");
+    if (!roster || (kind === "leave" && !leaveStands(draftBase, this.ancestry(parentHash)))) throw new Error("This change is not allowed");
     if (GROWS.has(kind) && !keepsRoom(draftBase.e, roster)) throw new Error("This group has reached its membership history limit. Create a new group.");
     const draft: Omit<CommunityCommit, "sig" | "c"> = { ...draftBase, m: rosterHash(roster) };
     const untagged = communityUntaggedHash(draft);
@@ -1183,6 +1222,11 @@ export class CommunitySession {
       if (this.state.status !== "active") return null;
       if (this.isAdmin && this.others.length) throw new Error("Make someone else the admin before leaving");
       const frame: CommunityLeaveFrame = { t: "group-leave", v: 2, g: this.id, s: this.myKey, ls: toBase64Url(sign(leaveStatement(this.id, this.myKey), this.identity.seed)) };
+      // The admission this leave ends: an app from before reads `ls` alone, which says the same at every admission.
+      for (const c of this.ancestry(this.topHash)) if ((c.k === "add" && c.s === this.myKey) || (c.k === "create" && c.by === this.myKey)) {
+        frame.ls3 = toBase64Url(sign(leaveStatement3(this.id, this.myKey, communityCommitHash(c)), this.identity.seed));
+        break;
+      }
       this.hooks.broadcast(frame);
       this.out("left", "You left this group");
       await this.persist();
@@ -1201,7 +1245,7 @@ export class CommunitySession {
       let done = 0;
       for (const request of [...this.state.pendingLeaves]) {
         if (!rosterHas(this.roster, request.s) || request.s === this.myKey || request.s === this.admin) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request); continue; }
-        try { const { hash } = await this.commit("leave", { s: request.s, ls: request.ls }, now); this.markLeft(hash, request.s); done++; } catch { /* not allowed right now */ }
+        try { const { hash } = await this.commit("leave", { s: request.s, ls: request.ls, ...(request.ls3 ? { ls3: request.ls3 } : {}) }, now); this.markLeft(hash, request.s); done++; } catch { /* not allowed right now */ }
         this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request);
       }
       if (done) await this.persist();
@@ -1516,9 +1560,15 @@ export class CommunitySession {
   private receiveLeave(frame: Record<string, unknown>): boolean {
     const s = frame.s, ls = frame.ls;
     if (typeof s !== "string" || !MEMBER_KEY.test(s) || typeof ls !== "string" || !SIG.test(ls) || !rosterHas(this.roster, s)) return false;
-    if (this.state.pendingLeaves.some(r => r.s === s)) return false;
+    const ls3 = typeof frame.ls3 === "string" && SIG.test(frame.ls3) ? frame.ls3 : undefined;
+    // One request a member; the one that names the admission takes the place of one that does not (a hub from before passes on `ls` alone).
+    let held = this.state.pendingLeaves.find(r => r.s === s);
+    // A request kept from an earlier admission of this member (someone else committed it) is not one for this admission.
+    if (held && !leaveStands({ g: this.id, ...held }, this.ancestry(this.topHash))) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== held); held = undefined; }
+    if (held && (held.ls3 || !ls3)) return false;
     if (!verify(fromBase64Url(ls), leaveStatement(this.id, s), publicKeyFromZ32(s))) return false;
-    this.state.pendingLeaves = [...this.state.pendingLeaves, { s, ls }].slice(-COMMUNITY_LIMITS.pendingLeaves);
+    if (!leaveStands({ g: this.id, s, ls, ls3 }, this.ancestry(this.topHash))) return false;
+    this.state.pendingLeaves = [...this.state.pendingLeaves.filter(r => r !== held), { s, ls, ...(ls3 ? { ls3 } : {}) }].slice(-COMMUNITY_LIMITS.pendingLeaves);
     this.persistSoon();
     return true;
   }
