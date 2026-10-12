@@ -221,14 +221,16 @@ export function Sidebar() {
   const folderOfGroup = (g: (typeof groups)[number]) => (g.invitation || shownFolders.length === 0 ? undefined : folderOf(groupChat(g.id)));
   const looseGroups = shownGroups.filter(g => folderOfGroup(g) === undefined);
   const loose = filtered.filter(s => !filed(s.id));
-  // The pinned chats are put in order by dragging one among the others; a search shows only some of them, so not then.
-  // Those in a folder are put in order from the chat's menu: a drag stays among the rows of one parent.
-  const pinnedIds = pinnedRows(search ? [] : loose);
+  // The pinned chats are put in order by dragging one among the others of its own part of the list: those of its
+  // folder, or those in no folder. A search shows only some of them, so not then.
+  const pinnedParts = search ? [] : [pinnedRows(loose), ...shownFolders.map(folder => pinnedRows(filtered.filter(s => folderOf(s.id) === folder.id)))];
+  const pinnedIds = pinnedParts.flat();
+  const pinnedBesideRow = (id: string) => pinnedParts.find(part => part.includes(id)) ?? [];
   // With folders, the same drag puts a chat or a group in one: dropped on a folder it goes there, on the rows in no
   // folder it comes out. An invitation stays where it is answered.
   const movable = shownFolders.length > 0
     ? [...filtered.map(s => s.id), ...shownGroups.filter(g => !g.invitation).map(g => groupChat(g.id))] : [];
-  const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedBeside,
+  const reorder = useRowReorder({ ids: pinnedIds, beside: pinnedBesideRow, enabled: !search, onMove: movePinnedBeside,
     folders: { rows: movable, of: chat => (filed(chat) ? folderOf(chat) : undefined), onDrop: setChatFolder } });
   /** A part of the list a dragged row would go to is marked while the row is over it. */
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
@@ -275,7 +277,7 @@ export function Sidebar() {
         deleteLabel={t("sidebar.deleteChat")}
         usage={usageByPeer.get(session.peerPubKeyB64)}
         working={workingByPeer.get(session.peerPubKeyB64)}
-        reorder={(pinnedIds.length > 1 && pinnedIds.includes(session.id)) || movable.includes(session.id)
+        reorder={pinnedBesideRow(session.id).length > 1 || movable.includes(session.id)
           ? { props: reorder.rowProps(session.id), dragging: reorder.dragging === session.id, drop: reorder.drop?.id === session.id ? reorder.drop.edge : undefined }
           : undefined}
       />
