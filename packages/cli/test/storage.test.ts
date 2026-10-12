@@ -570,38 +570,40 @@ describe("persistent IndexedDB", () => {
     expect(await read(second.transaction("messages").objectStore("messages").index("byLink").count())).toBe(1);
   });
 
-  it("replays a journal of one message in the time of one message, however many the store holds", async () => {
+  it("replays a journal of one message at the cost of one message, however many the store holds", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
     const first = await indexed(store.factory);
-    for (let from = 0; from < 60_000; from += 5000) {
+    for (let from = 0; from < 20_000; from += 5000) {
       await tx(first, ["messages"], (s) => {
         for (let i = from; i < from + 5000; i++) s.messages.put({ linkId: `chat-${i % 10}`, id: `m${i}`, timestamp: i, text: "x".repeat(40) });
       });
     }
+    const rawStore = (first.transaction("messages").objectStore("messages") as unknown as { _rawObjectStore: { rawIndexes: Map<string, object> } })._rawObjectStore;
     first.close();
     await store.compact();
     await store.close();
     // The same start twice: a journal that touches a store with no index, then one that touches the messages. The
-    // indexes of every message were built again for the second, once each: about as long as the start itself.
+    // indexes of every message were built again for the second, once each. What is counted is the records an index is
+    // handed, not the time the start takes: two times of one run differ by more than any margin on a busy machine.
+    const indexRecord = vi.spyOn(Object.getPrototypeOf(rawStore.rawIndexes.get("byLink")) as { storeRecord(...args: unknown[]): unknown }, "storeRecord");
     const start = async (journal: Buffer) => {
       writeFileSync(join(dir, "journal.bin"), journal);
-      const started = performance.now();
-      const opened = await openPersistentIndexedDb(dir);
-      const took = performance.now() - started;
-      await opened.close();
-      return took;
+      indexRecord.mockClear();
+      await (await openPersistentIndexedDb(dir)).close();
+      return indexRecord.mock.calls.length;
     };
-    const setting = journalOf([{ db: "ghostly", store: "settings", kind: "put", key: "name", value: "Alice" }]);
-    const message = journalOf([{ db: "ghostly", store: "messages", kind: "put", key: ["chat-1", "m1"], value: { linkId: "chat-1", id: "m1", timestamp: 1, text: "edited" } }]);
-    await start(setting);
-    const plain = Math.min(await start(setting), await start(setting));
-    const touched = Math.min(await start(message), await start(message));
+    let plain: number, touched: number;
+    try {
+      plain = await start(journalOf([{ db: "ghostly", store: "settings", kind: "put", key: "name", value: "Alice" }]));
+      touched = await start(journalOf([{ db: "ghostly", store: "messages", kind: "put", key: ["chat-1", "m1"], value: { linkId: "chat-1", id: "m1", timestamp: 1, text: "edited" } }]));
+    } finally { indexRecord.mockRestore(); }
     const d = await db(await open(dir), "ghostly", 2);
-    expect(await read(d.transaction("messages").objectStore("messages").index("byLinkTime").count())).toBe(60_000);
+    expect(await read(d.transaction("messages").objectStore("messages").index("byLinkTime").count())).toBe(20_000);
     expect(((await read(d.transaction("messages").objectStore("messages").index("byLink").get("chat-1"))) as { text: string }).text).toBe("edited");
-    expect(touched).toBeLessThan(plain * 1.25 + 30);
-  }, 120_000);
+    // The message as it was leaves the two indexes that hold it and the message as it is comes into them: four records.
+    expect(touched - plain).toBeLessThanOrEqual(4);
+  }, 60_000);
   /** The profile's folder as a kill leaves it: what is on disk now, with the store still open. */
   const killed = (dir: string) => { const copy = folder(); cpSync(dir, copy, { recursive: true }); return copy; };
   /** The journal's entries, each a list of ops. */
