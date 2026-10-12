@@ -33,7 +33,7 @@ interface RawIndex {
 }
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
 interface RawRecordStore {
-  values(range?: IDBKeyRange): Iterable<RawRecord>; clear(): unknown;
+  values(): Iterable<RawRecord>; clear(): unknown;
   get(key: Key): RawRecord | undefined;
   put(record: RawRecord, noOverwrite?: boolean): RawRecord | undefined;
   delete(key: Key): RawRecord[];
@@ -114,7 +114,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
   const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
   if (snapshotFound) restore(classes, raw._databases, deserialize(readFileSync(snapshotPath)) as Snapshot, keyOrder((a, b) => factory.cmp(a, b)));
-  if (journalFound) replay(classes, raw._databases, readFileSync(journalPath), keyOrder((a, b) => factory.cmp(a, b)));
+  if (journalFound) replay(raw._databases, readFileSync(journalPath), keyOrder((a, b) => factory.cmp(a, b)));
   restoring = false;
   if (journalFound || !snapshotFound) await writeSnapshot();
 
@@ -464,8 +464,11 @@ function fill(store: RawRecordStore, sorted: RawRecord[]) {
   store.records._numTombstones = 0;
 }
 
-/** What a journal's replay changed in a store: its indexes, set aside, and each row it touched as it was before (`null`: all of them). */
-interface Touched { indexes: Map<string, RawIndex>; before: RawRecordStore | null }
+/**
+ * What a journal's replay changed in a store: its indexes, set aside, the records that left it (the ones the indexes
+ * know; `null` once it was cleared: all of them) and the records that came and stayed.
+ */
+interface Touched { indexes: Map<string, RawIndex>; was: Set<RawRecord> | null; now: Set<RawRecord> }
 
 /**
  * Replays whole entries; a torn last entry (the process died mid-write) was never acknowledged and is dropped.
@@ -476,28 +479,25 @@ interface Touched { indexes: Map<string, RawIndex>; before: RawRecordStore | nul
  * touched change in an index (what each was before goes, what it is now comes in): a journal of one message costs one
  * message, not the profile's history once per index. A store the journal cleared has its indexes built again whole.
  */
-function replay(classes: RawClasses, databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: Key, b: Key) => number) {
+function replay(databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: Key, b: Key) => number) {
   const touched = new Map<RawStore, Touched>();
-  try { replayEntries(classes, databases, journal, touched); } finally {
-    for (const [store, { indexes, before }] of touched) {
+  try { replayEntries(databases, journal, touched); } finally {
+    for (const [store, { indexes, was, now }] of touched) {
+      const records: Partial<RawRecordStore> = store.records;
+      delete records.put;
+      delete records.delete;
       store.rawIndexes = indexes;
-      const was: RawRecord[] = [], now: RawRecord[] = [];
-      for (const row of before?.values() ?? []) {
-        if (row.value) was.push(row.value as RawRecord);
-        const held = store.records.get(row.key);
-        if (held) now.push(held);
-      }
       for (const index of indexes.values()) {
-        if (!before) index.records.clear();
+        if (!was) index.records.clear();
         if (!index.initialized) continue;
-        dropEntries(index, was, cmp);
-        for (const record of before ? now : store.records.values()) if (!absent(index.keyPath, record.value)) index.storeRecord(record);
+        if (was) dropEntries(index, [...was], cmp);
+        for (const record of was ? now : store.records.values()) if (!absent(index.keyPath, record.value)) index.storeRecord(record);
       }
     }
   }
 }
 
-function replayEntries(classes: RawClasses, databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Touched>) {
+function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Touched>) {
   let offset = 0;
   while (offset + 4 <= journal.length) {
     const length = journal.readUInt32BE(offset);
@@ -509,26 +509,40 @@ function replayEntries(classes: RawClasses, databases: Map<string, RawDatabase>,
       const store = databases.get(op.db)?.rawObjectStores.get(op.store);
       if (!store) continue;
       let change = touched.get(store);
-      if (!change) {
-        touched.set(store, (change = { indexes: store.rawIndexes, before: store.rawIndexes.size ? new classes.RecordStore(true) : null }));
-        store.rawIndexes = new Map();
-      }
-      const before = change.before;
-      // The first time a row is touched, it is as the snapshot (and the indexes) had it.
-      const note = (key: Key, record: RawRecord | undefined) => { if (!before!.get(key)) before!.put({ key, value: record }); };
-      if (op.kind === "put") {
-        if (before) note(op.key, store.records.get(op.key));
-        store.storeRecord({ key: op.key, value: blobsFromDisk(op.value) }, false);
-      } else if (op.kind === "delete") {
-        const key = keyFromDisk(op.key);
-        if (before) for (const record of store.records.values(key instanceof IDBKeyRange ? key : IDBKeyRange.only(key))) note(record.key, record);
-        store.deleteRecord(key);
-      } else {
-        change.before = null;
+      if (!change) touched.set(store, (change = watch(store)));
+      if (op.kind === "put") store.storeRecord({ key: op.key, value: blobsFromDisk(op.value) }, false);
+      else if (op.kind === "delete") store.deleteRecord(keyFromDisk(op.key));
+      else {
+        change.was = null;
         store.clear();
       }
     }
   }
+}
+
+/**
+ * Sets a store's indexes aside and notes, as its records are written over and removed, which ones left and which
+ * ones came: the record store hands back what a put replaced and what a delete removed, so a row costs no lookup.
+ * A record that came and left again was never in an index.
+ */
+function watch(store: RawStore): Touched {
+  const change: Touched = { indexes: store.rawIndexes, was: store.rawIndexes.size ? new Set() : null, now: new Set() };
+  store.rawIndexes = new Map();
+  if (!change.was) return change;
+  const { put, delete: remove } = store.records;
+  const left = (record: RawRecord) => { if (!change.now.delete(record)) change.was?.add(record); };
+  store.records.put = (next, keep) => {
+    const replaced = put.call(store.records, next, keep);
+    if (replaced) left(replaced);
+    change.now.add(next);
+    return replaced;
+  };
+  store.records.delete = (key) => {
+    const removed = remove.call(store.records, key);
+    removed.forEach(left);
+    return removed;
+  };
+  return change;
 }
 
 function keyToDisk(key: Key): Key {
