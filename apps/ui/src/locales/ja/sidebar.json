@@ -5,6 +5,7 @@
   "deleteAllChats": "すべてのチャットを削除",
   "deleteChat": "チャットを削除",
   "folder": {
+    "byLatest": "最新のメッセージ順に並べる",
     "create": "作成",
     "delete": "フォルダを削除",
     "deleteBody": "中のチャットは削除されません。フォルダなしで一覧に戻ります。",

@@ -5,6 +5,7 @@
   "deleteAllChats": "Supprimer toutes les discussions",
   "deleteChat": "Supprimer la discussion",
   "folder": {
+    "byLatest": "Trier par dernier message",
     "create": "Créer",
     "delete": "Supprimer le dossier",
     "deleteBody": "Ses discussions ne sont pas supprimées. Elles reviennent dans la liste, sans dossier.",

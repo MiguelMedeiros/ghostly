@@ -381,7 +381,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
 export function GroupRow({ group, active, density, onOpen, drag }: {
   group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void;
   /** The row can be dragged onto a folder (hooks/useRowReorder.ts). */
-  drag?: { props: Record<string, unknown>; dragging: boolean };
+  drag?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
 }) {
   const { t, language } = useI18n();
   const latest = useRef(onOpen);
@@ -394,6 +394,8 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
   return (
     <div {...drag.props} data-testid="group-row-drag" data-dragging={drag.dragging || undefined}
       className={`relative select-none [-webkit-touch-callout:none] ${drag.dragging ? "z-20 cursor-grabbing bg-surface-hover opacity-70 shadow-lg" : ""}`}>
+      {drag.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={drag.drop}
+        className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 rounded-full bg-accent ${drag.drop === "before" ? "top-0" : "bottom-0"}`} />}
       {row}
     </div>
   );

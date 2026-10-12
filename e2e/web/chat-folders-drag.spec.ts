@@ -150,3 +150,45 @@ test("pinned chats are put in order by dragging inside a folder and inside Other
   await expect.poll(() => order(folder(page, "Friends"))).toHaveLength(3);
   expect((await order(folder(page, "Friends"))).filter(id => id !== a)).toEqual([c, d]);
 });
+
+test("a folder keeps the order its chats are dragged into, pinned or not, until its menu puts the latest first again", { tag: ["@feature:chats.folders"] }, async ({ peer }) => {
+  const { page } = await peer("dora", { viewport: { width: 1100, height: 800 } });
+  const sidebar = page.getByTestId("sidebar");
+  const ids: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const before = page.url();
+    await page.getByTestId("sidebar-new-chat").click();
+    await expect(page).not.toHaveURL(before);
+    ids.push(page.url().split("/chat/")[1]!);
+  }
+  const [a, b, c] = ids;
+  const row = (chat: string) => sidebar.locator(`[data-testid="chat-row"][data-chat="${chat}"]`);
+  const order = (root: Locator) => root.getByTestId("chat-row").evaluateAll(list => list.map(el => (el as HTMLElement).dataset.chat!));
+  await newFolder(page, "Friends");
+  const friends = folder(page, "Friends");
+  for (const chat of [a, b, c]) {
+    await drag(page, row(chat), friends.getByTestId("chat-folder"));
+    await page.mouse.up();
+    await expect(friends.locator(`[data-chat="${chat}"]`)).toHaveCount(1);
+  }
+  // None is pinned: the latest first.
+  await expect.poll(() => order(friends)).toEqual([c, b, a]);
+
+  // The last one, dragged above the first: the folder keeps that.
+  await drag(page, row(a), row(c));
+  const top = (await row(c).boundingBox())!;
+  await page.mouse.move(top.x + top.width / 3, top.y + 4, { steps: 4 });
+  await expect(row(c).getByTestId("chat-row-drop")).toHaveAttribute("data-edge", "before");
+  await page.mouse.up();
+  await expect.poll(() => order(friends)).toEqual([a, c, b]);
+  await page.reload();
+  await expect.poll(() => order(folder(page, "Friends"))).toEqual([a, c, b]);
+
+  // From the folder's ⋮: the latest first again, and the row is gone from the menu.
+  await folder(page, "Friends").getByTestId("chat-folder-options").click();
+  await page.getByTestId("chat-folder-by-latest").click();
+  await expect.poll(() => order(folder(page, "Friends"))).toEqual([c, b, a]);
+  await folder(page, "Friends").getByTestId("chat-folder-options").click();
+  await expect(page.getByTestId("chat-folder-options-menu")).toBeVisible();
+  await expect(page.getByTestId("chat-folder-by-latest")).toHaveCount(0);
+});

@@ -5,6 +5,7 @@
   "deleteAllChats": "Excluir todas as conversas",
   "deleteChat": "Excluir conversa",
   "folder": {
+    "byLatest": "Ordenar pela mensagem mais recente",
     "create": "Criar",
     "delete": "Excluir pasta",
     "deleteBody": "As conversas dela não são excluídas. Elas voltam para a lista, sem pasta.",

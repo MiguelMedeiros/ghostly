@@ -5,6 +5,7 @@
   "deleteAllChats": "删除所有聊天",
   "deleteChat": "删除聊天",
   "folder": {
+    "byLatest": "按最新消息排序",
     "create": "创建",
     "delete": "删除文件夹",
     "deleteBody": "其中的聊天不会被删除，它们会回到列表中，不属于任何文件夹。",

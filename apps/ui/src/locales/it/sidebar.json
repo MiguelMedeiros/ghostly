@@ -5,6 +5,7 @@
   "deleteAllChats": "Elimina tutte le chat",
   "deleteChat": "Elimina chat",
   "folder": {
+    "byLatest": "Ordina per ultimo messaggio",
     "create": "Crea",
     "delete": "Elimina cartella",
     "deleteBody": "Le sue chat non vengono eliminate. Tornano nell'elenco, senza cartella.",

@@ -1,5 +1,5 @@
 import { useI18n } from "../../contexts/I18nContext";
-import { movePinnedBeside, pinnedPlaceBeside } from "../../lib/chatFolders";
+import { folderOf, movePinnedBeside, pinnedPlaceBeside, sectionOrder } from "../../lib/chatFolders";
 import type { PinnedPlace } from "../../lib/storage";
 import { MenuItem } from "../Menu";
 
@@ -19,7 +19,8 @@ const Arrow = ({ up }: { up?: boolean }) => (
 export function PinMoveItems({ chat, onMoved }: { chat: string; onMoved(place: PinnedPlace | undefined): void }) {
   const { t } = useI18n();
   const place = pinnedPlaceBeside(chat);
-  if (!place || place.count < 2) return null;
+  // In a part of the list the person put in order by dragging, the place of a row is that order's, not the pins'.
+  if (!place || place.count < 2 || sectionOrder(folderOf(chat))?.length) return null;
   const first = place.index === 0, last = place.index === place.count - 1;
   return <>
     <MenuItem testId="chat-pin-up" disabled={first} title={first ? t("chat.menu.moveFirst") : undefined} className="disabled:opacity-40" onClick={() => onMoved(movePinnedBeside(chat, place.index - 1))} icon={<Arrow up />}>{t("chat.menu.moveUp")}</MenuItem>

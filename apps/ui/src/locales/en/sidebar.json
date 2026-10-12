@@ -5,6 +5,7 @@
   "deleteAllChats": "Delete all chats",
   "deleteChat": "Delete chat",
   "folder": {
+    "byLatest": "Order by latest message",
     "create": "Create",
     "delete": "Delete folder",
     "deleteBody": "Its chats are not deleted. They go back to the list, in no folder.",
