@@ -15,6 +15,7 @@ import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
 import { nativeCallSupport } from "./desktop/nativeCalls";
 import { setProfileBase } from "./lib/profiles";
+import { restartWhenRestored } from "./lib/restoredPage";
 import { openProfile } from "./lib/profileStart";
 import { listen } from "@tauri-apps/api/event";
 import { setAppOpener } from "./lib/apps/open";
@@ -77,6 +78,8 @@ async function boot() {
   setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
+  // Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.
+  restartWhenRestored();
   // The app is exiting (apps/desktop's lib.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
   addEventListener("ghostly-departing", () => host.announceDeparture());
 
