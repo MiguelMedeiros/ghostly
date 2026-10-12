@@ -470,7 +470,7 @@ pub async fn file_bytes_close<R: tauri::Runtime>(
     file_bytes_flush(app, space, id).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_bytes_size<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     space: String,
@@ -523,24 +523,35 @@ pub async fn file_bytes_digest<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-pub fn file_bytes_remove<R: tauri::Runtime>(
+pub async fn file_bytes_remove<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     space: String,
     id: String,
 ) -> Result<(), String> {
-    store(&app)?.remove(&space, &id)
+    let base = store(&app)?.base.clone();
+    tauri::async_runtime::spawn_blocking(move || FileStore::new(base).remove(&space, &id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
+/// A whole chat or profile can be thousands of files: unlinked off the window's thread.
 #[tauri::command]
-pub fn file_bytes_remove_where<R: tauri::Runtime>(
+pub async fn file_bytes_remove_where<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     space: String,
     prefix: String,
 ) -> Result<(), String> {
     use tauri::Manager;
-    store(&app)?.remove_where(&space, &prefix)?;
+    let base = store(&app)?.base.clone();
+    let whole_space = prefix.is_empty();
+    let folder = space.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        FileStore::new(base).remove_where(&folder, &prefix)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     // A profile's files all gone: so are the tokens that played them.
-    if prefix.is_empty() {
+    if whole_space {
         if let Some(grants) = app.try_state::<crate::file_stream::StreamGrants>() {
             grants.close_space(&space);
         }
@@ -560,7 +571,7 @@ pub async fn file_bytes_usage<R: tauri::Runtime>(
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_bytes_room<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     space: String,
@@ -931,6 +942,38 @@ mod tests {
             "{name}"
         );
         assert!(partial_path(Path::new("/")).is_err());
+    }
+
+    /// A plain sync command runs on the window's thread (the IPC arrives in the webview's callback), so a
+    /// `file_bytes_*` command that unlinks or stats files there freezes the window while it runs. Each one is
+    /// `async` or `#[tauri::command(async)]`, which runs it off that thread.
+    #[test]
+    fn no_file_bytes_command_runs_on_the_window_thread() {
+        let mut checked = 0;
+        for source in [
+            include_str!("file_store.rs"),
+            include_str!("file_stream.rs"),
+        ] {
+            let lines: Vec<&str> = source.lines().map(str::trim).collect();
+            for pair in lines.windows(2) {
+                let Some(name) = pair[1]
+                    .strip_prefix("pub fn file_bytes_")
+                    .or_else(|| pair[1].strip_prefix("pub async fn file_bytes_"))
+                else {
+                    continue;
+                };
+                if !pair[0].starts_with("#[tauri::command") {
+                    continue;
+                }
+                checked += 1;
+                assert!(
+                    pair[1].starts_with("pub async fn") || pair[0] == "#[tauri::command(async)]",
+                    "file_bytes_{} runs on the window thread",
+                    name.split(['<', '(']).next().unwrap()
+                );
+            }
+        }
+        assert!(checked >= 14, "found only {checked} file_bytes_* commands");
     }
 
     #[cfg(windows)]

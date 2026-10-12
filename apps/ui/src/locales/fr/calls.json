@@ -39,6 +39,16 @@
   "reconnecting": "Reconnexion...",
   "rejected": "Appel rejeté",
   "selfView": "Glissez pour déplacer, tirez un coin pour redimensionner, double-cliquez pour réinitialiser",
+  "share": {
+    "blocked": "Le partage d'écran est bloqué",
+    "blockedNext": "Autorisez l'enregistrement de l'écran pour cette app dans les réglages de confidentialité du système.",
+    "contactCannot": "L'app de votre contact ne peut pas afficher d'écran dans cet appel",
+    "failed": "Impossible de partager l'écran",
+    "failedNext": "Réessayez.",
+    "noScreen": "Aucun écran à partager",
+    "notHere": "Le partage d'écran n'est pas disponible ici",
+    "notOnLinux": "Le partage d'écran n'est pas encore disponible sur Linux"
+  },
   "shareScreen": "Partager l'écran",
   "sharing": {
     "both": "Vous et {{name}} partagez vos écrans",

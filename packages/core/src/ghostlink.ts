@@ -2480,6 +2480,19 @@ export class GhostLink {
     return this.transportOffer().some(t => t === "webrtc/1" ? !this.peerTransports || this.peerTransports.includes(t)
       : this.canDial(t) && !!this.peerTransports?.includes(t));
   }
+  /**
+   * Neither side can dial the other until something changes, past a first pairing: what the contact runs is known, and
+   * no transport both run has WebRTC on both sides or an endpoint up on both (this side's, and the one its record
+   * describes). A chat that gave its listener up to another (`yieldEndpoint`), or whose contact did, is so. It dials
+   * again when that changes (a listener taken back, `registerEndpoint`; the record describing one, `learnPeerTransports`),
+   * and reads at its own pace meanwhile: looks every 20 s for a dial with nothing to try, and the contact's fast looks
+   * for an offer that could not come, read its key 2.5x to 4x as often as the background pace, for good (bug hunt,
+   * 2026-10-12). A first pairing keeps both: the records are what it is reading for.
+   */
+  private nothingToDialEitherWay(): boolean {
+    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
+    return !pairing && !!this.peerTransports && !this.anythingToDial();
+  }
   private clearRace(): void {
     if (this.raceTimer) clearTimeout(this.raceTimer);
     this.raceTimer = null;
@@ -2753,8 +2766,11 @@ export class GhostLink {
       // The other side dials as soon as it sees me. A packet of its that is new to me and fresh says it just
       // (re)appeared, so its offer is a poll away; an old one (a contact online for a while, as when this app
       // starts) says nothing is coming now, and looking fast for it would only spend the relays' budget.
+      // A contact that has nothing to dial here (`nothingToDialEitherWay`) sends no offer either.
       const fresh = Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS;
-      if (fresh && presence.lastPacketAt !== this.offerAwaitedFor) { this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer(); }
+      if (fresh && presence.lastPacketAt !== this.offerAwaitedFor && !this.nothingToDialEitherWay()) {
+        this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer();
+      }
       return;
     }
     const wait = this.dialWait();
@@ -2818,6 +2834,8 @@ export class GhostLink {
     this.retryLook = null;
     const from = this.lastAutoConnectAt;
     if (!from || this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect) return;
+    // Nothing to dial: the look would only read the contact's key again (`nothingToDialEitherWay`).
+    if (this.nothingToDialEitherWay()) return;
     this.retryLook = setTimeout(() => {
       this.retryLook = null;
       if (this.lastAutoConnectAt !== from || this.stopped || this.leaving || this.yielding || this.streamBlocked || this.keyStopped || this.channel || this.dialing || this.dataLink.state !== "idle") return;

@@ -13,6 +13,7 @@ import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTimings } from "./community";
 import { MESH_HUB_TIMINGS, MeshHubs, removalEpoch, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
+import { GroupAuthorOrder } from "./groupAuthorOrder";
 import { MeshSignals } from "./meshSignals";
 import { GroupFileDesk, groupFileText, groupOfFile, type GroupFileMembership, type GroupFilesHost } from "./groupFiles";
 
@@ -116,6 +117,12 @@ export interface GroupsHost {
   forgetFrame?(linkId: string, id: string): Promise<void>;
   /** A stored message of a private group takes this frame as the one it keeps (in the place of its own, if it has one). */
   keepFrame?(linkId: string, id: string, frame: GroupMessageFrame): Promise<void>;
+  /**
+   * These stored messages are placed again below everything in the history, in this order (one not there any more is
+   * left out): a member's messages that came above an older one of theirs (`GroupAuthorOrder`). Absent: each stays
+   * where it came.
+   */
+  placeAgain?(linkId: string, ids: readonly string[]): Promise<void>;
   /** A private group's roster or my status in it changed, or I forgot it. */
   membersChanged?(groupId: string): void;
   /**
@@ -468,6 +475,8 @@ export class Groups {
   readonly communities: Communities;
   /** My messages and edits an edge of a private group took. */
   private readonly frames = new FramesTaken();
+  /** Each member's messages in the order that member wrote them, though catch-up answers race (WISP 400, requirement 10). */
+  private readonly authorOrder: GroupAuthorOrder;
   /** Hubs of the private groups past 16 members (WISP 902 · Group Mesh § Hubs). */
   private readonly hubs: MeshHubs;
   /** Groups whose edges are being reconciled because their hubs changed: one at a time. */
@@ -487,6 +496,7 @@ export class Groups {
     this.communities = new Communities(host, store, communityTimings, random);
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
+    this.authorOrder = new GroupAuthorOrder(host, MESSAGE_LINK);
     this.signals = new MeshSignals(host, { session: id => this.sessions.get(id), stored: id => this.stored.get(id), now: () => this.now() });
     const files = host.groupFiles;
     if (files) {
@@ -914,6 +924,7 @@ export class Groups {
     this.lastMessageAt.delete(groupId);
     this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
+    this.authorOrder.forget(groupId);
     await this.store.deleteGroup(groupId);
     await this.store.putGroup(group);
     // The files go with the history, not when the admin has heard: its app may be away for the week the tombstone stays.
@@ -1116,6 +1127,7 @@ export class Groups {
     this.hereHeard.delete(groupId);
     this.hereActed.delete(groupId);
     this.signals.forget(groupId);
+    this.authorOrder.forget(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     if (owed && !this.stored.has(groupId)) {
@@ -1902,19 +1914,33 @@ export class Groups {
     return true;
   }
 
-  /** The syncs that waited for another member's answer (`holdSync`), once it has come: for what it did not hand on. */
+  /**
+   * The syncs that waited for another member's answer (`holdSync`), once it has come: for what it did not hand on.
+   * One member at a time: the first is told and asked for the others too, which wait for its answer in turn. Told
+   * together, each answered with its own messages alone, and when the member asked first had been away too (it held
+   * little of what was missed) a conversation came as one member's lines, then the next's.
+   */
   private heldSyncs(groupId: string, session: GroupSession, now: number): void {
     const held = this.syncHeld.get(groupId);
     if (!held?.size) return;
-    const edges = this.host.edges(groupId);
-    for (const [key, asked] of held) {
-      if (this.answering(groupId, asked, now)) continue;
+    const edges = this.host.edges(groupId), asked = this.relayAsked.get(groupId);
+    const due: string[] = [];
+    for (const [key, of] of held) {
+      if (this.answering(groupId, of, now)) continue;
       held.delete(key);
-      if (this.relayAsked.get(groupId)?.get(key)?.via === asked.via) this.relayAsked.get(groupId)!.delete(key);
+      if (asked?.get(key)?.via === of.via) asked.delete(key);
       const edge = edges.get(key);
-      if (!edge || !this.host.linkReady(edge) || !rosterHas(session.roster, key)) continue;
-      try { this.host.sendOnLink(edge, session.syncFrame(this.askOf(groupId, session, key))); } catch { /* it closed: it is told when it opens again */ }
+      if (edge && this.host.linkReady(edge) && rosterHas(session.roster, key)) due.push(key);
     }
+    const [next, ...rest] = due;
+    if (!next) return;
+    const ask = new Set(this.askOf(groupId, session, next));
+    for (const key of rest) {
+      ask.add(key);
+      asked?.set(key, { via: next, at: now });
+      held.set(key, { via: next, at: now });
+    }
+    try { this.host.sendOnLink(edges.get(next)!, session.syncFrame([...ask])); } catch { /* it closed: it is told when it opens again, and the others at the next tick */ }
   }
 
   /**
@@ -2173,6 +2199,7 @@ export class Groups {
         const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message);
         // On its row now: new, or the whole copy of one stored before. A copy I had already changes no row.
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
+        if (!completed && stored !== false && m.sender !== session.myKey) this.authorOrder.placed(state.id, { sender: m.sender, epoch: m.epoch, seq: m.seq, id: m.id, at: this.now() });
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));

@@ -59,7 +59,7 @@ describe("a member back in a private group reads what it missed in the order it 
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
   });
 
-  it("the member asked first was away too: the others are told once it has nothing more, and all of it arrives", async () => {
+  it("the member asked first was away too: the others are told one after another, each asked for the rest", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
     const [alice, bob, carol, dave, eve] = peers;
     alice.online = dave.online = false;
@@ -71,8 +71,7 @@ describe("a member back in a private group reads what it missed in the order it 
     comesBack(world, dave, alice);
     const took = await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 60_000);
     expect(took).toBeLessThanOrEqual(10_000);
-    // Each member's own lines in its order, whatever the order between members.
-    for (const p of [bob, carol, eve]) expect(world.texts(dave, id).filter(t => t.startsWith(`${p.name} `))).toEqual(written.filter(t => t.startsWith(`${p.name} `)));
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
   });
 
   it("a member asked of another a moment ago, and reached since, is asked of the first member again", async () => {
@@ -105,6 +104,21 @@ describe("a member back in a private group reads what it missed in the order it 
     world.slowByClock = true;
     comesBack(world, dave, alice);
     await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 120_000);
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
+  });
+
+  it("one member wrote 200 and every edge opens at once: that member's lines in the order written, the newest last", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
+    const [alice, , , dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    const written: string[] = [];
+    for (let i = 1; i <= 200; i++) { written.push(`alice ${i}`); await alice.groups.send(id, `alice ${i}`); await world.run(50); }
+    // Alice's own answer brings her newest 32; the older ones come from the others, asked for 32 at a time.
+    world.slow = (_from, to) => to === dave ? 4 : 0;
+    world.reopen(dave);
+    await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 120_000);
+    await world.run(1_000);
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
   });
 

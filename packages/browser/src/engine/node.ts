@@ -1296,6 +1296,7 @@ export class GhostlyNode implements EngineImplementation {
     // A row of its own, small: written with no disk sync of its own (the frame is a copy others hold too).
     forgetFrame: async (linkId, id) => { await db.patchMessage(linkId, id, stored => stored.frame ? { frame: undefined } : null, true); },
     keepFrame: async (linkId, id, frame) => { await db.patchMessage(linkId, id, () => ({ frame }), true); },
+    placeAgain: (linkId, ids) => this.placeAgain(linkId, ids),
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
     emit: () => this.emitState(),
@@ -7531,6 +7532,22 @@ export class GhostlyNode implements EngineImplementation {
     // Mine count too, up to now: a message that comes in the millisecond I sent one goes below it.
     else this.placedAt.set(message.linkId, Math.max(last, Math.min(message.timestamp, now)));
     return message;
+  }
+
+  /**
+   * These rows, in this order, placed again below everything in their history, as if they came now: a group member's
+   * messages that came above an older one of theirs (WISP 400, requirement 10). The places are taken before anything is
+   * awaited, so a row that comes meanwhile goes below them.
+   */
+  private async placeAgain(linkId: string, ids: readonly string[]): Promise<void> {
+    const places = ids.map(id => {
+      const timestamp = arrivalKey(Date.now(), this.placedAt.get(linkId));
+      this.placedAt.set(linkId, timestamp);
+      return { id, timestamp };
+    });
+    const moved: string[] = [];
+    for (const { id, timestamp } of places) if (await db.patchMessage(linkId, id, () => ({ timestamp }))) moved.push(id);
+    if (moved.length) await this.messagesChanged(linkId, moved);
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }

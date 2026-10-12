@@ -40,5 +40,5 @@ test("/apps loads no app's page until the reader points at or focuses its card",
   await expect.poll(() => seen.has(second)).toBe(true);
 
   await cards.nth(0).click();
-  await expect(page).toHaveURL(new RegExp(`${first.replace(/\./g, "\\.")}$`));
+  await expect(page).toHaveURL((url) => url.pathname === first);
 });
