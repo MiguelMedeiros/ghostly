@@ -187,7 +187,7 @@
     "invited": "已邀请…",
     "makeAdmin": "转让管理员",
     "missing": "缺少 {{count}} 条",
-    "missingHint": "本纪元中无人能恢复的消息",
+    "missingHint": "本纪元中尚未收到的消息",
     "needsBothHint": "群组需要双方应用都已连接且为最新版本",
     "needsUpdate": "需要更新 Ghostly",
     "noContacts": "所有已配对的联系人都已在群里，或者你还没有联系人。",

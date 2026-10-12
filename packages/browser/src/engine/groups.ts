@@ -318,7 +318,7 @@ export const MESH_GOSSIP_MS = 60_000;
  */
 export const MESH_GAP_AGAIN_MS = 10_000;
 /** What a mesh member asked others for, for one reachable member some of whose messages never reached it (`Groups.gapsOf`). */
-interface GapAsk { mark: string; of: Set<string>; noticed?: number; last?: { via: string; at: number; asked: Record<string, number[]> } }
+interface GapAsk { mark: string; of: Set<string>; noticed?: number; at?: number; last?: { via: string; at: number; asked: Record<string, number[]> } }
 /** Where a member's gossip turns start among the members it is connected to: a number of its own, from its key. */
 const gossipStart = (key: string) => { let n = 0; for (let i = 0; i < key.length; i++) n = (n * 31 + key.charCodeAt(i)) >>> 0; return n; };
 /** How often the edges a mesh roster asks for are checked against the ones that exist (one that failed to open is tried again). */
@@ -417,6 +417,11 @@ export class Groups {
    * holds any more are not asked for every gossip turn. `last`: the latest ask, its member and the numbers it named.
    */
   private readonly gapsAsked = new Map<string, Map<string, GapAsk>>();
+  /**
+   * Per mesh group and member, per epoch: the number up to which nobody holds what never reached me (`gapsSettle`).
+   * The member list stops counting those; they are still asked of a member that connects later.
+   */
+  private readonly gapsGone = new Map<string, Map<string, Record<string, number>>>();
   /** Per mesh group, when `gapsAgain` last looked: every half `MESH_GAP_AGAIN_MS`, not every tick. */
   private readonly gapsLooked = new Map<string, number>();
   /** Per mesh group: member key → since when its edge to me is down, and when someone last told me it is here. */
@@ -560,7 +565,7 @@ export class Groups {
           const direct = key === session.myKey || (!!edge && this.host.linkReady(edge)), viaHub = !direct && onHubs && this.hubs.viaHub(group.id, session, key, now);
           const hubRole = policy.pin.includes(key) ? "pin" as const : policy.no.includes(key) ? "exclude" as const : undefined;
           return { key, role, me: key === session.myKey, nick: key === session.myKey ? undefined : (edge && this.host.edgeNick(edge)) || nicks[key],
-            online: direct || viaHub, ...(viaHub ? { viaHub } : {}), ...(hubKeys.has(key) ? { hub: true } : {}), ...(hubRole ? { hubRole } : {}), missing: session.missing(key) };
+            online: direct || viaHub, ...(viaHub ? { viaHub } : {}), ...(hubKeys.has(key) ? { hub: true } : {}), ...(hubRole ? { hubRole } : {}), missing: session.missing(key, this.gapsGone.get(group.id)?.get(key)?.[session.epoch]) };
         }) };
     }).sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
   }
@@ -1065,6 +1070,7 @@ export class Groups {
     this.removedAt.delete(groupId);
     this.lastGossip.delete(groupId);
     this.gapsAsked.delete(groupId);
+    this.gapsGone.delete(groupId);
     this.gapsLooked.delete(groupId);
     this.typings.forget(groupId);
     for (const key of this.pinPaces.keys()) if (key.startsWith(`${groupId}\n`)) this.pinPaces.delete(key);
@@ -1804,7 +1810,9 @@ export class Groups {
       asked.set(key, { via, at: now });
       out.push(key);
     }
-    out.push(...this.gapsOf(groupId, session, via, session.lacking()));
+    const lacking = session.lacking();
+    out.push(...this.gapsOf(groupId, session, via, lacking));
+    this.ownGap(groupId, via, lacking);
     // What this sync asks for is the gossip turn's job too: the next one waits.
     if (out.length) this.lastGossip.set(groupId, now);
     return out;
@@ -1832,11 +1840,55 @@ export class Groups {
       if (!entry || entry.mark !== mark) tried.set(key, (entry = { mark, of: new Set(), noticed: entry?.noticed, last: entry?.last }));
       if (entry.of.has(via)) continue;
       entry.of.add(via);
+      entry.at = now;
       entry.last = { via, at: now, asked: session.missOf(key) };
       asked.set(key, { via, at: now });
       out.push(key);
     }
     return out;
+  }
+
+  /**
+   * Whether a sync to `via` asks it for its own messages that never reached me, for the first time since what is
+   * missing changed: any sync names them (`miss`), and an author answers from its own log (`GROUP_LIMITS.outlog`).
+   */
+  private ownGap(groupId: string, via: string, lacking: Map<string, string>): boolean {
+    const mark = lacking.get(via);
+    if (mark === undefined) return false;
+    let tried = this.gapsAsked.get(groupId);
+    if (!tried) this.gapsAsked.set(groupId, (tried = new Map()));
+    let entry = tried.get(via);
+    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed, last: entry?.last }));
+    if (entry.of.has(via)) return false;
+    entry.of.add(via);
+    entry.at = this.now();
+    return true;
+  }
+
+  /**
+   * Messages nobody holds any more: every connected member, their author included, was asked for the same missing
+   * numbers `MESH_GAP_AGAIN_MS` ago or more and none arrived. An author keeps its last 32 and the others the group's
+   * last 256 (WISP 902 § Bounds), so what a sync names and nobody hands on is gone, and so is what is below it (logs
+   * drop the oldest first). The member list counted them until the next epoch, as if they were still on their way.
+   */
+  private gapsSettle(groupId: string, session: GroupSession, now: number, connected: readonly string[], lacking: Map<string, string>): void {
+    const tried = this.gapsAsked.get(groupId);
+    if (!tried) return;
+    let changed = false;
+    for (const [key, mark] of lacking) {
+      const entry = tried.get(key);
+      if (!entry || entry.mark !== mark || entry.at === undefined || now - entry.at < MESH_GAP_AGAIN_MS) continue;
+      if (!connected.includes(key) || !connected.every(member => entry.of.has(member))) continue;
+      let gone = this.gapsGone.get(groupId);
+      if (!gone) this.gapsGone.set(groupId, (gone = new Map()));
+      const upTo = { ...gone.get(key) };
+      for (const [e, numbers] of Object.entries(session.missOf(key))) {
+        const top = Math.max(...numbers);
+        if (top > (upTo[e] ?? -1)) { upTo[e] = top; changed = true; }
+      }
+      gone.set(key, upTo);
+    }
+    if (changed) this.host.emit();
   }
 
   /**
@@ -1854,6 +1906,7 @@ export class Groups {
     if (!lacking.size && !tried?.size) return;
     if (!tried) this.gapsAsked.set(groupId, (tried = new Map()));
     for (const key of tried.keys()) if (!lacking.has(key)) tried.delete(key);
+    this.gapsSettle(groupId, session, now, connected, lacking);
     const edges = this.host.edges(groupId), again = new Map<string, string[]>(), fresh = new Map<string, string>();
     const up = (key: string) => { const edge = edges.get(key); return !!edge && this.host.linkReady(edge); };
     for (const [key, mark] of lacking) {
@@ -1868,7 +1921,7 @@ export class Groups {
     const asked = this.relayAsked.get(groupId);
     for (const [via, keys] of again) {
       for (const key of keys) {
-        tried.set(key, { mark: lacking.get(key)!, of: new Set([via]), last: { via, at: now, asked: session.missOf(key) } });
+        tried.set(key, { mark: lacking.get(key)!, of: new Set([via]), at: now, last: { via, at: now, asked: session.missOf(key) } });
         asked?.set(key, { via, at: now });
       }
       try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
@@ -1919,7 +1972,8 @@ export class Groups {
       this.relayAsked.set(groupId, asked);
       for (const key of away) asked.set(key, { via, at: now });
       const ask = [...away, ...this.gapsOf(groupId, session, via, lacking)];
-      if (!ask.length) continue;
+      // An author is asked for its own with no `ask`: the sync alone names what is missing.
+      if (!this.ownGap(groupId, via, lacking) && !ask.length) continue;
       try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(ask)); } catch { /* it closed: the next turn asks another */ }
     }
   }

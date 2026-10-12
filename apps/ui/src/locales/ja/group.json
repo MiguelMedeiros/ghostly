@@ -187,7 +187,7 @@
     "invited": "招待済み…",
     "makeAdmin": "管理者を譲る",
     "missing": "{{count}} 件欠落",
-    "missingHint": "このエポックで誰も復元できなかったメッセージ",
+    "missingHint": "このエポックでまだ届いていないメッセージ",
     "needsBothHint": "グループには双方のアプリが接続済みで最新である必要があります",
     "needsUpdate": "Ghostly の更新が必要です",
     "noContacts": "ペアリング済みの連絡先は全員参加済みか、まだ連絡先がありません。",
