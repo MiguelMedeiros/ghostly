@@ -202,7 +202,8 @@ describe("a usage card in the chat", () => {
   });
 
   it("a reset that has passed reads as how long ago it was, muted: the card's own and another window's", async () => {
-    const c = { ...usage({ left: 62, window: "5 h", windows: [{ window: "week", left: 80, resetsAt: NOW - 26 * HOUR }, { window: "opus", left: 12, resetsAt: NOW + 50 * HOUR }] }), resetsAt: NOW - 2 * HOUR };
+    const c = { ...usage({ left: 62, window: "5 h", windows: [{ window: "week", left: 80, resetsAt: NOW - 26 * HOUR }, { window: "opus", left: 12, resetsAt: NOW + 50 * HOUR }] }), resetsAt: NOW - 2.5 * HOUR };
+    // Half hours from an edge: the clock ticks by the minute, and "2 h ago" sharp may still read "1 h ago".
     const { user } = renderApp(<MessageBubble message={message(c)} peerPubKey="peer" />);
     await user.click(within(screen.getByTestId("status-card")).getByTestId("status-card-toggle"));
     const details = screen.getByTestId("usage-details");
