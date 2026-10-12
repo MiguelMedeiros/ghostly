@@ -460,6 +460,8 @@ async function listenCommand(argv: string[]): Promise<void> {
     exec: { type: "string", description: "" }, webhook: { type: "string", description: "" }, print: { type: "boolean", description: "" },
     from: { type: "list", description: "" }, group: { type: "list", description: "" }, turns: { type: "boolean", description: "" },
   });
+  // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
+  noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
   const g = globals(parsed);
   pretty = false; // one event per line
   if (parsed.options.webhook) checkWebhook(String(parsed.options.webhook));
