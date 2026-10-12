@@ -308,6 +308,17 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MP4).");
   });
 
+  it("a right-click on the playing video opens no engine menu, so its stream's address is never offered to copy", async () => {
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "http://127.0.0.1:4100/token-5", release: vi.fn() });
+    show(video({ size: 20 * MB }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const streamed = screen.getByTestId("video-player");
+    expect(streamed.getAttribute("src")).toBe("http://127.0.0.1:4100/token-5");
+    // fireEvent returns false when the default (the engine's own menu) was prevented.
+    expect(fireEvent.contextMenu(streamed)).toBe(false);
+  });
+
   it("a refused stream fires error and rejects its play: it plays from its bytes, with no \"can't play\"", async () => {
     const release = vi.fn();
     vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/token-5", release });
