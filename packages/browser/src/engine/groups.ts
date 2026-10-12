@@ -1874,7 +1874,12 @@ export class Groups {
    */
   private holdSync(groupId: string, peerKey: string): boolean {
     const asked = this.relayAsked.get(groupId)?.get(peerKey);
-    if (!asked || asked.via === peerKey || !this.answering(groupId, asked, this.now())) { this.syncHeld.get(groupId)?.delete(peerKey); return false; }
+    if (!asked || asked.via === peerKey || !this.answering(groupId, asked, this.now())) {
+      this.syncHeld.get(groupId)?.delete(peerKey);
+      // Reached again: what was asked for it while it was unreachable is over, and the next time it is, it is asked for anew.
+      this.relayAsked.get(groupId)?.delete(peerKey);
+      return false;
+    }
     let held = this.syncHeld.get(groupId);
     if (!held) this.syncHeld.set(groupId, (held = new Map()));
     held.set(peerKey, { ...asked });
@@ -1889,6 +1894,7 @@ export class Groups {
     for (const [key, asked] of held) {
       if (this.answering(groupId, asked, now)) continue;
       held.delete(key);
+      if (this.relayAsked.get(groupId)?.get(key)?.via === asked.via) this.relayAsked.get(groupId)!.delete(key);
       const edge = edges.get(key);
       if (!edge || !this.host.linkReady(edge) || !rosterHas(session.roster, key)) continue;
       try { this.host.sendOnLink(edge, session.syncFrame(this.askOf(groupId, session, key))); } catch { /* it closed: it is told when it opens again */ }

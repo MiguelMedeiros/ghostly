@@ -72,4 +72,24 @@ describe("a member back in a private group reads what it missed in the order it 
     // Each member's own lines in its order, whatever the order between members.
     for (const p of [bob, carol, eve]) expect(world.texts(dave, id).filter(t => t.startsWith(`${p.name} `))).toEqual(written.filter(t => t.startsWith(`${p.name} `)));
   });
+
+  it("a member asked of another a moment ago, and reached since, is asked of the first member again", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
+    const [alice, bob, carol, dave, eve] = peers;
+    // Dave opens while Eve is away, and asks Alice, the first member it reaches, for her messages; then she is back.
+    eve.online = dave.online = false;
+    await world.run(2_000);
+    comesBack(world, dave, alice);
+    await world.run(5_000);
+    world.reopen(eve);
+    await world.run(5_000);
+    expect(world.view(dave, id)!.members.every(m => m.online)).toBe(true);
+    // Under a minute later Dave is away, and back: what was asked for Eve then says nothing of what she wrote since.
+    dave.online = false;
+    await world.run(2_000);
+    const written = await talk(world, id, [alice, bob, carol, eve], 3);
+    comesBack(world, dave, alice);
+    await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 60_000);
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
+  });
 });
