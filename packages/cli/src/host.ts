@@ -125,12 +125,21 @@ let guarded = false;
 /**
  * A daemon says an error nobody caught (with its stack, on stderr: the daemon's log when detached) and keeps serving:
  * one request gone wrong must not take the profile offline. One-shot commands do not call this; they still fail loudly.
+ *
+ * `outputs`: what it writes to. A write there that fails (a pipe whose reader is gone: the process that started the
+ * daemon died) is dropped, not an error nobody caught: saying it would be one more failed write, and the next, with
+ * no turn left for anything else (a full core, and no stop on SIGTERM).
  */
-export function keepServing(proc: Pick<NodeJS.Process, "on"> = process, write: (text: string) => void = (text) => { process.stderr.write(text); }): void {
+export function keepServing(
+  proc: Pick<NodeJS.Process, "on"> = process,
+  write: (text: string) => void = (text) => { process.stderr.write(text); },
+  outputs: Pick<NodeJS.WriteStream, "on">[] = proc === process ? [process.stdout, process.stderr] : [],
+): void {
   if (proc === process) { if (guarded) return; guarded = true; }
   const log = (what: string) => (error: unknown) => {
     try { write(`ghostly: ${what}, the daemon keeps serving: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); } catch { /* stderr is gone */ }
   };
+  for (const output of outputs) output.on("error", () => { /* nobody reads it any more */ });
   proc.on("unhandledRejection", log("unhandled rejection"));
   proc.on("uncaughtException", log("uncaught exception"));
 }
