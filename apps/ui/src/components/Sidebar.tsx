@@ -3,8 +3,8 @@ import { DeleteChatDialog } from "./DeleteChatDialog";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { ChatRow, GroupRow } from "./ChatRow";
-import { ChatFolderHeader } from "./ChatFolderHeader";
-import { createFolder, folderChatsId, movePinnedBeside, setChatFolder, setFolderFolded, useChatFolders } from "../lib/chatFolders";
+import { ChatFolderHeader, OtherChatsHeader } from "./ChatFolderHeader";
+import { OTHER_CHATS_ID, createFolder, folderChatsId, movePinnedBeside, setChatFolder, setFolderFolded, setOthersFolded, useChatFolders } from "../lib/chatFolders";
 import { FolderNameDialog } from "./chat/ChatFolderDialogs";
 import { FolderIcon } from "./chat/ChatFolderMenu";
 import { groupChat } from "../lib/chatMute";
@@ -211,8 +211,10 @@ export function Sidebar() {
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
-  const { folders, folderOf } = useChatFolders();
+  const { folders, folderOf, othersFolded } = useChatFolders();
   const shownFolders = search ? [] : folders;
+  // "Other chats" folds like a folder, once there is one. A search shows everything it finds.
+  const looseFolded = shownFolders.length > 0 && othersFolded;
   const filed = (chat: string) => shownFolders.length > 0 && folderOf(chat) !== undefined;
   // The chats and groups in no folder: all of them while there are no folders, where the list is as it always was.
   // An invitation to a group is answered from its row: it stays in sight, in no folder, whatever folder the group was in.
@@ -222,10 +224,18 @@ export function Sidebar() {
   // The pinned chats are put in order by dragging one among the others; a search shows only some of them, so not then.
   // Those in a folder are put in order from the chat's menu: a drag stays among the rows of one parent.
   const pinnedIds = pinnedRows(search ? [] : loose);
-  const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedBeside });
+  // With folders, the same drag puts a chat or a group in one: dropped on a folder it goes there, on the rows in no
+  // folder it comes out. An invitation stays where it is answered.
+  const movable = shownFolders.length > 0
+    ? [...filtered.map(s => s.id), ...shownGroups.filter(g => !g.invitation).map(g => groupChat(g.id))] : [];
+  const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedBeside,
+    folders: { rows: movable, of: chat => (filed(chat) ? folderOf(chat) : undefined), onDrop: setChatFolder } });
+  /** A part of the list a dragged row would go to is marked while the row is over it. */
+  const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
 
   const groupRow = (group: (typeof groups)[number]) => (
-    <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }} />
+    <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }}
+      drag={movable.includes(groupChat(group.id)) ? { props: reorder.rowProps(groupChat(group.id)), dragging: reorder.dragging === groupChat(group.id) } : undefined} />
   );
   const chatRow = (session: ChatSession) => {
     const lastMsg = session.messages[session.messages.length - 1];
@@ -265,7 +275,7 @@ export function Sidebar() {
         deleteLabel={t("sidebar.deleteChat")}
         usage={usageByPeer.get(session.peerPubKeyB64)}
         working={workingByPeer.get(session.peerPubKeyB64)}
-        reorder={pinnedIds.length > 1 && pinnedIds.includes(session.id)
+        reorder={(pinnedIds.length > 1 && pinnedIds.includes(session.id)) || movable.includes(session.id)
           ? { props: reorder.rowProps(session.id), dragging: reorder.dragging === session.id, drop: reorder.drop?.id === session.id ? reorder.drop.edge : undefined }
           : undefined}
       />
@@ -345,12 +355,12 @@ export function Sidebar() {
       <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
 
       {/* Chat List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" data-drag-scroll="">
         {shownFolders.map((folder, index) => {
           const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
           const itsChats = filtered.filter(s => folderOf(s.id) === folder.id);
           return (
-            <div key={folder.id} role="group" aria-label={folder.name} data-testid="chat-folder-section">
+            <div key={folder.id} role="group" aria-label={folder.name} data-testid="chat-folder-section" data-folder-drop={folder.id} data-drop-over={reorder.over === folder.id || undefined} className={dropMark(folder.id).trim() || undefined}>
               <ChatFolderHeader folder={folder} sessions={itsChats.filter(s => s.id !== activeSessionId)} groups={itsGroups.filter(g => g.id !== activeGroupId)} place={{ index, count: shownFolders.length }}
                 onToggle={() => setFolderFolded(folder.id, !folder.folded)} />
               {!folder.folded && <div id={folderChatsId(folder.id)} data-testid="chat-folder-chats">
@@ -361,10 +371,21 @@ export function Sidebar() {
             </div>
           );
         })}
-        {shownFolders.length > 0 && (looseGroups.length > 0 || loose.length > 0) && (
-          <p data-testid="chat-folder-others" className="m-0 flex h-11 items-center border-b border-border/40 px-3 text-[13px] font-semibold text-text-secondary">{t("sidebar.folder.others")}</p>
-        )}
-        {looseGroups.map(groupRow)}
+        {/* The chats and groups in no folder. With folders it is where a dragged row comes out of one: its heading
+            shows while a row is in the hand even when nothing is in it yet. */}
+        <div data-testid="chat-folder-loose" {...(shownFolders.length > 0 && { "data-folder-drop": "", "data-drop-over": reorder.over === null || undefined })} className={dropMark(null).trim() || undefined}>
+          {shownFolders.length > 0 && (looseGroups.length > 0 || loose.length > 0 || reorder.dragging !== undefined) && (
+            <OtherChatsHeader folded={looseFolded} sessions={loose.filter(s => s.id !== activeSessionId)} groups={looseGroups.filter(g => g.id !== activeGroupId && !g.invitation)}
+              onToggle={() => setOthersFolded(!looseFolded)} />
+          )}
+          {/* An invitation to a group is answered from its row: it stays in sight, folded or not. */}
+          {looseFolded ? looseGroups.filter(g => g.invitation).map(groupRow) : (
+            <div id={OTHER_CHATS_ID} data-testid="chat-folder-others-rows">
+              {looseGroups.map(groupRow)}
+              {loose.map(chatRow)}
+            </div>
+          )}
+        </div>
         {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && shownFolders.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center">
             <div className="text-text-muted mb-4 animate-ghost-boo">
@@ -391,8 +412,6 @@ export function Sidebar() {
             <p className="text-text-muted text-sm">{t("sidebar.noResults")}</p>
           </div>
         )}
-
-        {loose.map(chatRow)}
       </div>
 
       {confirmDeleteId && <DeleteChatDialog

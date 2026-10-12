@@ -22,6 +22,8 @@ interface Stored {
   folders: ChatFolder[];
   /** By chat as the mute store names it: a session id, or `groupChat(id)`. */
   chats: Record<string, string>;
+  /** The rows in no folder ("Other chats") are folded to their heading. */
+  othersFolded?: boolean;
 }
 
 /** A folder's name is a short label beside a count, on a phone too. */
@@ -53,7 +55,7 @@ function read(): Stored {
     for (const [chat, id] of Object.entries(stored?.chats && typeof stored.chats === "object" ? stored.chats : {})) {
       if (folders.some(f => f.id === id)) chats[chat] = id;
     }
-    return { folders, chats };
+    return { folders, chats, ...(stored?.othersFolded === true && folders.length > 0 ? { othersFolded: true } : {}) };
   } catch {
     return { folders: [], chats: {} };
   }
@@ -176,8 +178,19 @@ export function movePinnedBeside(chat: string, index: number): PinnedPlace | und
   return movePinnedTo(chat, pinnedOrder().indexOf(beside[to])) && { index: to, count: beside.length };
 }
 
+/** Folds the rows in no folder to their heading, or unfolds them. Only with folders: without one there is no heading. */
+export function setOthersFolded(folded: boolean): void {
+  const stored = read();
+  if (stored.folders.length === 0 || !!stored.othersFolded === folded) return;
+  const { othersFolded: _was, ...rest } = stored;
+  write(folded ? { ...rest, othersFolded: true } : rest);
+}
+
+/** The id of the rows in no folder in the page: what the "Other chats" heading's button controls. */
+export const OTHER_CHATS_ID = "chat-folder-others-rows";
+
 /** The folders and each chat's place, kept current: redrawn when they change here or in another page of the app. */
-export function useChatFolders(): { folders: ChatFolder[]; folderOf: (chat: string) => string | undefined } {
+export function useChatFolders(): { folders: ChatFolder[]; folderOf: (chat: string) => string | undefined; othersFolded: boolean } {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
     window.addEventListener(FOLDERS_EVENT, redraw);
@@ -187,6 +200,6 @@ export function useChatFolders(): { folders: ChatFolder[]; folderOf: (chat: stri
       window.removeEventListener("storage", redraw);
     };
   }, []);
-  const { folders, chats } = read();
-  return { folders, folderOf: chat => chats[chat] };
+  const { folders, chats, othersFolded } = read();
+  return { folders, folderOf: chat => chats[chat], othersFolded: !!othersFolded };
 }
