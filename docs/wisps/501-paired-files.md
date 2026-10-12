@@ -59,7 +59,7 @@ Implemented in [`chatFiles.ts`](../../packages/core/src/chatFiles.ts) (protocol)
 
 ## files/4: a file's bytes as bytes (revision 2026-10-12)
 
-`files/3` writes a file's bytes as base64url text inside a JSON frame, so a 16 KiB chunk is a 21,935-byte frame and a 200 MiB file is 267.8 MiB of frames: a third more than the file, on every transport, relayed ones included. `files/4` sends the same chunk as one binary message of the session ([100](100-transports.md#text-and-binary-messages-revision-2026-10-12)): 16,416 bytes with a 22-character id, 0.2% more than the file. Nothing else changes: every other frame, every rule and every limit above is `files/3`'s.
+`files/3` writes a file's bytes as base64url text inside a JSON frame, so with a 22-character id a 16 KiB chunk is a 21,920-byte frame and a 200 MiB file is 267.6 MiB of frames: a third more than the file, on every transport, relayed ones included. `files/4` sends the same chunk as one binary message of the session ([100](100-transports.md#text-and-binary-messages-revision-2026-10-12)): 16,416 bytes, 200.4 MiB for that file, 0.2% more than it. Nothing else changes: every other frame, every rule and every limit above is `files/3`'s.
 
 - **Agreed like `files/3`.** `files/4` is a session capability of its own in `paired-capabilities`. An app that lists it lists `files/3` too, and it is on only while both sides list both on the current session. An app lists it only on a session whose adapter carries binary messages at its end: a WebRTC session does; an Iroh or HyperDHT session does not yet ([102](102-iroh.md), [103](103-hyperdht.md)), so files there stay on base64, as they do with any app that does not list `files/4`.
 - **The data message.** One binary message, at most 16,458 bytes:
