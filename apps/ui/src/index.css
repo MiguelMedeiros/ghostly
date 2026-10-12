@@ -500,13 +500,40 @@ html[data-standalone="true"] {
   height: 15px;
 }
 
+/* The small window's state line ("Audio call" and the clock) starts after the corner button (30 px at 8 px) instead
+   of being centred over the whole width: at the window's narrowest (190 px, where a phone opens it) "Chamada de áudio
+   00:05" began behind the button. The line is one row of a wrapping flex box with the clock placed first, so when the
+   words do not fit beside it they go to a second row, which is cut off, and the clock stays; row-reverse puts the
+   words back before the clock for the eye. */
 .call-mini .call-top {
   top: 12px;
+  left: 42px;
+  right: 6px;
 }
 
 .call-mini .call-top p {
+  display: flex;
+  flex-flow: row-reverse wrap;
+  justify-content: center;
+  column-gap: 6px;
+  height: 20px;
+  overflow: hidden;
   font-size: 12px;
+  line-height: 20px;
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+
+.call-mini .call-top p > span {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-mini .call-top p > span:last-child {
+  order: -1;
 }
 
 .call-mini .call-controls {
