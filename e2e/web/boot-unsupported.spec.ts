@@ -18,6 +18,8 @@ import type { LocalRelay } from "../support/relay";
 
 const ANDROID_WEBVIEW = "Mozilla/5.0 (Linux; Android 9; SM-G960F Build/PPR1.180610.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.159 Mobile Safari/537.36";
 
+const IPHONE_CHROME = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/155.0.0.0 Mobile/15E148 Safari/604.1";
+
 const remove = (owner: string, name: string) => `try { delete ${owner}.${name}; Object.defineProperty(${owner}, "${name}", { value: undefined, configurable: true, writable: true }); } catch (e) {}`;
 const denied = `new DOMException("denied", "SecurityError")`;
 const getterThrows = (owner: string, name: string) => `Object.defineProperty(${owner}, "${name}", { get() { throw ${denied}; }, configurable: true });`;
@@ -135,6 +137,19 @@ test("the cannot-run screen speaks the profile's language, and its details hold 
   expect(details).toContain("locks=no");
   expect(details).toContain("browser: ");
   expect(details).not.toContain("not-for-the-report");
+  await context.close();
+});
+
+test("an iPhone that looks to be in Lockdown Mode is told so, and how to exclude the site", tags, async ({ browser, relay, baseURL }) => {
+  // What the friend's iPhone reported (Chrome on iOS 26, all WebKit): no IndexedDB, Web Locks, WebAssembly or WebRTC.
+  const lockdown = remove("window", "indexedDB") + remove("Navigator.prototype", "locks") + remove("window", "WebAssembly") + remove("window", "RTCPeerConnection") + remove("window", "webkitRTCPeerConnection");
+  const { page, context } = await open(browser, relay, baseURL, lockdown, { userAgent: IPHONE_CHROME });
+  await expect(page.getByTestId("unsupported-browser")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("unsupported-lockdown")).toContainText("Lockdown Mode looks to be on");
+  await expect(page.getByTestId("unsupported-browser")).not.toContainText("open Ghostly in another one");
+  await page.getByRole("button", { name: "How to turn it off for this site" }).click();
+  await expect(page.getByText(/Website Settings/)).toBeVisible();
+  await expect(page.getByTestId("unsupported-details")).toHaveValue(/missing: indexedDB, locks/);
   await context.close();
 });
 
