@@ -29,6 +29,7 @@
     "inviterAway": "{{contact}} ainda não está conectado. Tente de novo em instantes.",
     "inviterAwayUnknown": "O contato que convidou você ainda não está conectado. Tente de novo em instantes.",
     "letting": "Um membro está deixando você entrar…",
+    "unanswered": "O app de quem convidou não respondeu. Aceite de novo, ou recuse.",
     "waitingAdmin": "Aguardando o app do admin…",
     "waitingIn": "Aguardando para entrar…"
   },

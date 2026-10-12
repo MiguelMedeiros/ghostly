@@ -368,7 +368,7 @@ export class Groups {
   /** Contacts (chat ids, kept in `StoredGroup.invited`) and entry sessions I invited to each group, until they answer. */
   private readonly invited = new Map<string, Set<string>>();
   /** Invitee side: when my accept of each invitation was last said, how many times since the inviter's chat came up, and whether it was down. */
-  private readonly acceptSaid = new Map<string, { at: number; n: number; down?: boolean }>();
+  private readonly acceptSaid = new Map<string, { at: number; n: number; down?: boolean; unanswered?: boolean }>();
   private readonly lastRoster = new Map<string, Roster>();
   /** Each group's status and newest commit as its history last said them: a line per change of either, never one again. */
   private readonly lastTold = new Map<string, { status: GroupSession["status"]; top: GroupSession["top"] }>();
@@ -540,6 +540,7 @@ export class Groups {
         const invitation = group.invitation!;
         return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
           invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
+            ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}),
             ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
       }
       const nicks = session.state.nicks;
@@ -1227,9 +1228,15 @@ export class Groups {
   private acceptAgain(group: StoredGroup, now: number): void {
     const invitation = group.invitation!, said = this.acceptSaid.get(group.id) ?? { at: 0, n: 0 };
     if (!this.host.linkReady(invitation.linkId)) { if (!said.down) this.acceptSaid.set(group.id, { ...said, n: 0, down: true }); return; }
+    // Said all those times to a chat that is up, and nothing back, not even a refusal (an inviter's app from before
+    // answers nothing when it cannot let me in): the row offers the answer again, in place of "Joining…" for good.
+    if (said.n >= ACCEPT_AGAINS && !said.down && !said.unanswered && !invitation.entry && now - said.at >= ACCEPT_AGAIN_MS) {
+      this.acceptSaid.set(group.id, { ...said, unanswered: true });
+      this.host.emit();
+    }
     if (said.n >= ACCEPT_AGAINS || (!said.down && now - said.at < ACCEPT_AGAIN_MS)) return;
     try { this.host.sendOnLink(invitation.linkId, { t: "group-accept", g: group.id, key: identityFromSeedB64(invitation.seedB64!).pubKeyZ32 }); } catch { return; }
-    this.acceptSaid.set(group.id, { at: now, n: said.n + 1 });
+    this.acceptSaid.set(group.id, { at: now, n: said.n + 1, ...(said.unanswered && { unanswered: true }) });
   }
 
   /** An entry session came up with groups on both sides: the admin's side invites over it. */

@@ -287,8 +287,10 @@ export interface GroupView {
   /**
    * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
+   * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
+   * while that chat was up: the answer is offered again.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */

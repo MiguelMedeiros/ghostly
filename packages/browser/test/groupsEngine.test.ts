@@ -626,6 +626,35 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(accepts()).toBe(before);
   });
 
+  it("an accept said as often as it is, with the chat up and nothing back, offers the answer again", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    const emitted = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "emit");
+    await bob.accept(groupId); world.drop();
+    const now = Date.now();
+    // An inviter's app from before answers nothing when it cannot let me in: every accept is lost here.
+    for (let i = 1; i <= 5; i++) { await bob.tick(now + i * 60_000); world.drop(); }
+    expect(view(bob, groupId).invitation).toMatchObject({ accepted: true });
+    expect(view(bob, groupId).invitation!.unanswered).toBeUndefined();
+    emitted.mockClear();
+    await bob.tick(now + 6 * 60_000); world.drop();
+    expect(view(bob, groupId).invitation).toMatchObject({ accepted: true, unanswered: true });
+    expect(emitted).toHaveBeenCalledTimes(1);
+    // It stays said while the chat is down and up again, and nothing is told twice.
+    world.chats.delete("chat-ab"); await bob.tick(now + 7 * 60_000);
+    world.chats.set("chat-ab", ["alice", "bob"]); await bob.tick(now + 8 * 60_000); world.drop();
+    expect(view(bob, groupId).invitation).toMatchObject({ unanswered: true });
+    expect(emitted).toHaveBeenCalledTimes(1);
+    // Accept again: joining once more, and this time the admin hears it.
+    await bob.accept(groupId);
+    expect(view(bob, groupId).invitation!.unanswered).toBeUndefined();
+    await world.settle(); await world.meet();
+    expect(view(bob, groupId).status).toBe("active");
+  });
+
   it("a new invitation from the admin, on the same chat, replaces one accepted and never answered", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
