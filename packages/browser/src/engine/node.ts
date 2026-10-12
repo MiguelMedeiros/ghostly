@@ -1294,6 +1294,7 @@ export class GhostlyNode implements EngineImplementation {
     completeMessage: message => this.completeGroupMessage(message),
     // A row of its own, small: written with no disk sync of its own (the frame is a copy others hold too).
     forgetFrame: async (linkId, id) => { await db.patchMessage(linkId, id, stored => stored.frame ? { frame: undefined } : null, true); },
+    keepFrame: async (linkId, id, frame) => { await db.patchMessage(linkId, id, () => ({ frame }), true); },
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
     emit: () => this.emitState(),

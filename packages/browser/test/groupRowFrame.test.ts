@@ -75,6 +75,40 @@ describe("a private group's message keeps the frame it came in", { timeout: 120_
   });
 });
 
+describe("a private group's record carries none of the frames handed on", { timeout: 120_000 }, () => {
+  it("fifty messages received write a record that stays small, and their frames on fifty rows", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob"]);
+    const [alice, bob] = peers;
+    const sizes: number[] = [];
+    const put = bob.store.putGroup.bind(bob.store);
+    bob.store.putGroup = async group => { if (group.id === id) sizes.push(JSON.stringify(group).length); await put(group); };
+    for (let i = 0; i < 50; i++) { await alice.groups.send(id, `line ${i} ${"x".repeat(200)}`); await world.settle(); await bob.groups.flush(); }
+    const stored = (await bob.store.getGroups()).find(g => g.id === id)!;
+    expect(stored.state!.relay ?? []).toEqual([]);
+    expect(said(bob, id).filter(m => m.frame)).toHaveLength(50);
+    // Fifty frames of some 700 bytes were 35 KiB in the record, written again for each message.
+    expect(sizes.length).toBeGreaterThanOrEqual(50);
+    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThan(4_000);
+  });
+
+  it("a member whose app started again hands on what it had received to one who was away", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol"]);
+    const [alice, bob, carol] = peers;
+    carol.online = false;
+    await world.run(2_000);
+    for (let i = 0; i < 5; i++) await bob.groups.send(id, `bob ${i}`);
+    await world.run(2_000);
+    expect(said(alice, id).filter(m => m.frame)).toHaveLength(5);
+    // Bob goes; Alice's app starts again; Carol comes back and only Alice is there to tell her.
+    bob.online = false;
+    await world.restart(alice);
+    await world.run(2_000);
+    world.reopen(carol);
+    await world.until(() => world.texts(carol, id).filter(t => t.startsWith("bob ")).length === 5, 5 * 60_000);
+    expect(world.texts(carol, id).filter(t => t.startsWith("bob "))).toEqual([0, 1, 2, 3, 4].map(i => `bob ${i}`));
+  });
+});
+
 describe("a page never gets a row's frame", () => {
   const fixture = { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "fixture", relays: [] }) };
   const servers: EngineServer[] = [];
