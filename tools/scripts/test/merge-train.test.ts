@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
 
-type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
+type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const red = [{ name: "CI Success", status: "completed", conclusion: "failure", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const running = [{ name: "CI Success", status: "in_progress", conclusion: null, started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -106,7 +106,7 @@ function fakeRepo() {
     deleteBranch: async () => {},
     createPull: async ({ base, head, title, body }: { base: string; head: string; title: string; body: string }) => {
       const number = next++;
-      pulls.set(number, { number, title, body, draft: false, sha: built.get(head)!, branch: head, fork: false, labels: [], createdAt: "", open: true, base });
+      pulls.set(number, { number, title, body, draft: false, sha: built.get(head)!, branch: head, fork: false, labels: [], createdAt: "", open: true, base, author: "train" });
       return { number };
     },
     /** A pull request's commits: a batch's are the ones the train built (one per member), with their trees. */
@@ -291,12 +291,17 @@ describe("the line", () => {
     expect(readState(body)).toMatchObject({ baseSha: "abc", prs: [{ number: 1, sha: "s1" }] });
   });
 
-  it("counts as a batch only a pull request from this repository on a batch/<base>- branch", () => {
-    const body = batchBody("dev", "abc", "b1", [], []);
-    expect(isBatch({ fork: false, branch: "batch/dev-1", body }, "dev")).toBe(true);
-    expect(isBatch({ fork: true, branch: "batch/dev-1", body }, "dev")).toBe(false);
-    expect(isBatch({ fork: false, branch: "dev", body }, "dev")).toBe(false);
-    expect(isBatch({ fork: false, branch: "batch/epic/x-1", body }, "dev")).toBe(false);
+  it("counts as a batch only a pull request the train opened from this repository on a batch/<base>- branch", () => {
+    const body = batchBody("dev", "abc", "b1", [{ number: 1, sha: "s1", title: "one" }], []);
+    const own = { fork: false, branch: "batch/dev-1", body, author: "train" };
+    expect(isBatch(own, "dev", "train")).toBe(true);
+    expect(isBatch({ ...own, fork: true }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, branch: "dev" }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, branch: "batch/epic/x-1" }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, author: "stranger" }, "dev", "train")).toBe(false);
+    expect(isBatch(own, "dev", undefined)).toBe(false);
+    // The train never opens a batch of nobody.
+    expect(isBatch({ ...own, body: batchBody("dev", "abc", "b1", [], []) }, "dev", "train")).toBe(false);
   });
 });
 
@@ -544,6 +549,23 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual([]);
     expect(r.closed).toEqual([]);
     expect(deleted).toEqual([]);
+  });
+
+  it("never merges a batch branch of this repository that another login opened, nor lets it retire the train's", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const real = (await repo.run()).inFlight;
+    const mark = (prs: object[]) => `<!-- merge-train:batch ${JSON.stringify({ base: "dev", baseSha: "dev0", head: "evil", prs, next: [] })} -->`;
+    const forged = { title: "x", draft: false, sha: "evil", fork: false, labels: [], createdAt: "", open: true, base: "dev" };
+    repo.pulls.set(1, { ...forged, number: 1, body: mark([]), branch: "batch/dev-20261008", author: "stranger" });
+    repo.pulls.set(2, { ...forged, number: 2, body: mark([{ number: 11, sha: "h11" }]), branch: "batch/dev-20261009", author: "stranger" });
+    repo.runs.set("evil", green);
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toEqual([]);
+    expect(r.inFlight).toBe(real);
+    expect(repo.pulls.get(1)!.open && repo.pulls.get(2)!.open).toBe(true);
   });
 
   it("closes a batch whose branch got a commit the train did not build", async () => {
