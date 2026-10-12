@@ -1,7 +1,7 @@
 import { copyInvite } from "../support/clipboard";
 import { manualFallback } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
-import { chooseDhtOnly, expect, headerControl, openProfilePage, test } from "../support/fixtures";
+import { chooseDhtOnly, expect, openProfilePage, test } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { LocalRelay } from "../support/relay";
 
@@ -129,13 +129,13 @@ test("mobile keeps its footer and compact header, with multiline text and QR ins
   await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
   await expect(a.page.getByTestId("account-bar")).toHaveCount(0);
   await a.page.getByPlaceholder("Message…").fill("Line one\nLine two");
-  // Only a voice call and ⋮ beside the name (chat-header-phone.spec.ts), and nothing past the edge; the connection is a row of ⋮.
+  // Only the connection, a voice call and ⋮ beside the name (chat-header-phone.spec.ts), and nothing past the edge; a video call is a row of ⋮.
   const more=a.page.getByTestId("chat-options").filter({visible:true}); await expect(more).toBeVisible();
-  for (const id of ["connection-options","call-video"]) await expect(a.page.getByTestId(id),id).toHaveCount(0);
-  const moreBox=(await more.boundingBox())!, call=(await a.page.getByTestId("call-audio").boundingBox())!;
-  for (const box of [call,moreBox]) { expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x+box.width).toBeLessThanOrEqual(390); }
+  await expect(a.page.getByTestId("call-video")).toHaveCount(0);
+  const connection=a.page.getByTestId("connection-options"); await expect(connection).toBeVisible();
+  for (const control of [connection,a.page.getByTestId("call-audio"),more]) { const box=(await control.boundingBox())!; expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x+box.width).toBeLessThanOrEqual(390); }
   expect(await more.evaluate(el=>{const h=el.closest(".header-safe")!;return h.scrollWidth<=h.clientWidth;})).toBe(true);
-  await (await headerControl(a.page,"connection-options")).click();await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
+  await connection.click();await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
   const menu=await a.page.getByRole("dialog",{name:"Connection options"}).boundingBox(); expect(menu!.x).toBeGreaterThanOrEqual(0); expect(menu!.x+menu!.width).toBeLessThanOrEqual(390);
   await a.page.screenshot({path:testInfo.outputPath("mobile-menu.png")});
   await a.page.keyboard.press("Escape"); await expect(a.page.getByPlaceholder("Message…")).toHaveValue("Line one\nLine two");
@@ -180,8 +180,7 @@ test("home actions have equal sizes and enabled controls signal clicks", { tag: 
     const close = p.page.getByRole("button", {name:"Close join", exact:true});
     await expect(close).toHaveCSS("cursor", "pointer"); await close.click();
     await create.click();
-    // On a phone the connection is a row of ⋮.
-    const menu = await headerControl(p.page, "connection-options");
+    const menu = p.page.getByTestId("connection-options");
     await expect(menu).toHaveCSS("cursor", "pointer"); await menu.click();
     await expect(p.page.getByRole("radio", {name:"DHT only", exact:true})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"WebRTC", exact:true})).toHaveCSS("cursor", "pointer");
