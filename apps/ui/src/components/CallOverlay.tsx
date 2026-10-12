@@ -10,6 +10,7 @@ import { useVoiceRing } from "../hooks/useVoiceRing";
 import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
+import { errorText } from "../lib/errorText";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -24,9 +25,12 @@ interface CallOverlayProps {
   canSendVideo?: boolean;
   /** The share button works: that lane, in a browser that can capture the screen. */
   canShareScreen?: boolean;
-  /** The share button shows, turned off, with this reason: the screen could be captured, but this call cannot carry it. */
+  /**
+   * The share button shows, turned off, with this reason: the screen could be captured, but this call cannot carry it.
+   * In English, as the call hook and the Desktop media layer say it; shown in the app's language (lib/errorText.ts).
+   */
   screenShareUnavailable?: string | null;
-  /** Why sharing the screen just failed. */
+  /** Why sharing the screen just failed, in English as the call hook says it; shown in the app's language. */
   screenShareError?: string | null;
   /** The peer is sending a picture. */
   remoteHasVideo: boolean;
@@ -340,7 +344,7 @@ export function CallOverlay({
       {screenShareError && (
         <p role="alert" data-testid="share-screen-error"
           className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
-          {screenShareError}
+          {errorText(screenShareError, t)}
         </p>
       )}
 
@@ -453,7 +457,7 @@ export function CallOverlay({
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white enabled:hover:bg-white/20"
             }`}
-            title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ?? t("calls.shareScreen")}
+            title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ? errorText(screenShareUnavailable, t) : t("calls.shareScreen")}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="4" width="20" height="13" rx="2" />
