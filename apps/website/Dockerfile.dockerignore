@@ -4,6 +4,10 @@
 !docs
 !packages/core/src
 !packages/cli/SKILL.md
+!packages/cli/README.md
+!packages/browser/src/proofs/PROOFS.md
+!packages/browser/src/engine/paymentAdapters/PROVIDERS.md
+!e2e/README.md
 !.github/CONTRIBUTING.md
 !.github/SECURITY.md
 apps/website/node_modules
