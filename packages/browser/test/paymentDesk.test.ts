@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ENDPOINT, ONCHAIN_PROVIDER, cashuRequestPayload, engineText, type GhostLink, type PaymentRequest, type PaymentReview, type PaymentTarget } from "@ghostly/core";
+import { ENDPOINT, ONCHAIN_PROVIDER, cashuRequestPayload, engineError, engineText, type GhostLink, type PaymentRequest, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import { PaymentDesk, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
 import { CashuAdapter } from "../src/engine/paymentAdapters/cashu";
 import { SwapUnsettledError, type CashuPrepared, type CashuWallet } from "../src/engine/wallet";
@@ -416,6 +416,26 @@ describe("ecash arriving", () => {
       { id: "p3", ok: false, error: "Unsupported payment method" },
     ]);
     expect(texts().slice(0, 2)).toEqual(["Could not receive 100 sats: Unsupported payment method", "Could not receive a payment: Unsupported amount"]);
+  });
+
+  it("the same spent ecash sent again under new ids is refused each time, and said once in its chat", async () => {
+    const { desk, wallet, sent, host } = setup();
+    wallet.receiveToken.mockRejectedValue(engineError("ecashAlreadySpent"));
+    for (let i = 0; i < 5; i++) await desk.onPayment("l", cashuPayment(`p${i}`, { timestamp: 100 + i }));
+    await desk.onPayment("l", cashuPayment("q", { timestamp: 200, endpoint: [ENDPOINT.cashu, "cashuBother"] }));
+    await desk.onPayment("m", cashuPayment("r", { timestamp: 300 }));
+    expect(sent.filter((s) => s.kind === "res").map((s) => s.frame.ok), "the contact is told every time").toEqual(Array(7).fill(false));
+    const lines = host.storeMessage.mock.calls.map(([m]) => `${m.linkId}:${m.id}`);
+    expect(lines, "every line of one token in one chat has one id: stored once").toHaveLength(7);
+    expect(new Set(lines).size, "one per token and chat").toBe(3);
+  });
+
+  it("a refusal for anything but spent ecash keeps a line per payment", async () => {
+    const { desk, wallet, host } = setup();
+    wallet.receiveToken.mockRejectedValue(new Error("Ecash from mint.example is not accepted"));
+    await desk.onPayment("l", cashuPayment("p1", { timestamp: 1 }));
+    await desk.onPayment("l", cashuPayment("p2", { timestamp: 2 }));
+    expect(host.storeMessage.mock.calls.map(([m]) => m.id)).toEqual(["peer_1_refused", "peer_2_refused"]);
   });
 
   it("settles our request only in full, from a mint it named, and only when it came through this chat", async () => {
