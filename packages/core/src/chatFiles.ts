@@ -237,6 +237,44 @@ interface Entry {
 const key = (direction: "in" | "out", id: string) => `${direction}:${id}`;
 const isInt = (value: unknown, max = Number.MAX_SAFE_INTEGER): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= max;
 
+/**
+ * files/4 (WISP 501 § files/4): a chunk as one binary message of the session, in place of the base64url text of a
+ * `pf-data` frame, which is a third more than the bytes it carries:
+ *
+ *   kind 0x04 (1) | id length (1) | id (ASCII) | offset (8, big endian) | data (1 to `FILE_LIMITS.chunkBytes`)
+ */
+export const FILE_DATA_KIND = 0x04;
+const FILE_DATA_OFFSET_BYTES = 8;
+
+/** The binary message for the bytes of file `id` at `offset`. Throws on what no receiver would take. */
+export function encodeFileData(id: string, offset: number, data: Uint8Array): Uint8Array {
+  if (!ID.test(id) || !isInt(offset) || !data.length || data.length > FILE_LIMITS.chunkBytes) throw new Error("Invalid file data");
+  const head = 2 + id.length;
+  const out = new Uint8Array(head + FILE_DATA_OFFSET_BYTES + data.length);
+  out[0] = FILE_DATA_KIND;
+  out[1] = id.length;
+  for (let i = 0; i < id.length; i++) out[2 + i] = id.charCodeAt(i);
+  const view = new DataView(out.buffer);
+  view.setUint32(head, Math.floor(offset / 2 ** 32));
+  view.setUint32(head + 4, offset % 2 ** 32);
+  out.set(data, head + FILE_DATA_OFFSET_BYTES);
+  return out;
+}
+
+/** What a binary message from the contact says, or null when it is not a well-formed file data message. `data` is a view of `message`. */
+export function decodeFileData(message: Uint8Array): { id: string; offset: number; data: Uint8Array } | null {
+  if (message.length < 2 || message[0] !== FILE_DATA_KIND) return null;
+  const head = 2 + message[1], body = head + FILE_DATA_OFFSET_BYTES;
+  if (message.length <= body || message.length - body > FILE_LIMITS.chunkBytes) return null;
+  const id = String.fromCharCode(...message.subarray(2, head));
+  if (!ID.test(id)) return null;
+  const view = new DataView(message.buffer, message.byteOffset, message.byteLength);
+  const high = view.getUint32(head);
+  // Past 2^53 - 1 an offset is no longer a whole number here.
+  if (high > 0x1fffff) return null;
+  return { id, offset: high * 2 ** 32 + view.getUint32(head + 4), data: message.subarray(body) };
+}
+
 /** What a refusal means to the sender's person. */
 export function refusalText(why: string, room?: number): { state: TransferState; error: string } {
   switch (why) {
