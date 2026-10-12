@@ -355,7 +355,7 @@ export function Sidebar() {
       <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
 
       {/* Chat List */}
-      <div className="flex-1 overflow-y-auto" data-drag-scroll="">
+      <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="">
         {shownFolders.map((folder, index) => {
           const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
           const itsChats = filtered.filter(s => folderOf(s.id) === folder.id);
