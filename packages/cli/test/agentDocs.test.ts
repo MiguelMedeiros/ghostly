@@ -39,7 +39,9 @@ function invocations(line: string): string[] {
     .map(([, rest]) => rest.split(/[,.] |\s#|\|\||\||;|&&|\)/)[0].trim());
 }
 
-describe("what an agent is taught", async () => {
+// The first document's test starts one `ghostly help <command>` for each command it names (the next ones reuse what it
+// read): 25 s of the default 30 on a busy 4-core host, and past it with a little more load.
+describe("what an agent is taught", { timeout: 180_000 }, async () => {
   const listing = (await ghostly(["help"])).stdout;
   const names = new Set(listing.split("\n").filter((l) => l.startsWith("  ") && WORD.test(l.trim().split(" ")[0])).map((l) => commandWords(l.trim())).filter(Boolean));
   names.add("help"); // `ghostly help <command>`
