@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { IntentLink } from "@/components/site/IntentLink";
 import { Shell } from "@/components/site/Shell";
 import { APP_URL, SUBMIT_URL, apps as t } from "@/content/apps";
 import { appFingerprint } from "@/lib/store-core/appStatements";
@@ -48,14 +48,14 @@ export function AppsPage({ store, readAt }: { store: StoreView; readAt: number }
               <ul className="ap-grid">
                 {store.apps.map((app) => (
                   <li key={app.slug}>
-                    <Link className="ap-card" href={`/apps/${app.slug}`}>
+                    <IntentLink className="ap-card" href={`/apps/${app.slug}`}>
                       <AppIcon app={app} size={56} />
                       <span className="ap-card-text">
                         <span className="ap-card-title">{app.title}</span>
                         <span className="ap-card-tagline">{app.tagline}</span>
                         <span className="ap-card-meta mono">{[app.category, app.developer].filter(Boolean).join(" · ")}</span>
                       </span>
-                    </Link>
+                    </IntentLink>
                   </li>
                 ))}
               </ul>
