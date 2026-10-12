@@ -56,6 +56,9 @@ test("Chess is on the Apps page of a new profile; its first open asks what it ma
   const screen = ana.page.getByTestId("app-install");
   await expect(screen.getByTestId("app-carried-line")).toHaveText("Comes with Ghostly. Nothing is downloaded.");
   await expect(screen.getByTestId("app-ip-line")).toHaveCount(0);
+  // No store was read on this profile, and the build's own list vouches for it: no stranger's warning.
+  await expect(screen.getByTestId("app-publisher-name")).toHaveText("Publisher");
+  await expect(screen.getByTestId("app-store-line")).toHaveCount(0);
   await expect(screen.getByTestId("app-permissions")).toContainText("Talk to the same app on your contact's side");
   await expect(screen.getByTestId("app-permissions")).toContainText("See your name in this chat");
   await expect(screen.getByTestId("app-install-confirm")).toHaveText("Allow and open");
@@ -73,7 +76,11 @@ test("Chess is on the Apps page of a new profile; its first open asks what it ma
   await expect(picker).toBeHidden();
 
   // Uninstalled by the person: not offered again, on this page or after the app starts again.
+  await expect(ana.page.getByTestId("installed-app-hint")).not.toContainText("Unknown publisher");
   await ana.page.getByTestId("installed-app").getByRole("button", { name: "Chess: details" }).click();
+  const details = ana.page.getByTestId("app-details");
+  await expect(details.getByTestId("app-publisher-name")).toHaveText("Publisher");
+  await expect(details.getByTestId("app-store-line")).toHaveText("Comes with Ghostly");
   await ana.page.getByTestId("app-uninstall-open").click();
   await ana.page.getByTestId("app-uninstall-confirm").click();
   await expect(ana.page.getByTestId("apps-none")).toBeVisible();

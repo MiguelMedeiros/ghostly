@@ -158,6 +158,8 @@ export interface InstalledAppView {
   listedBy: AppListedBy[];
   /** No curated store of the person's lists it (phase 1 has no publisher proofs). */
   unknownPublisher: boolean;
+  /** The installed version is the one this client's own list pins (a built-in app): the client vouches for it itself. */
+  builtIn?: true;
   pending?: { sequence: number; version: string; added: AppPermission[] };
   equivocation?: { sequence: number; at: number };
   checkedAt?: number;
@@ -1374,6 +1376,7 @@ export class Apps {
       from: app.from, icon: manifest.files.some((f) => f.path === "icon.png"),
       installedAt: app.installedAt, updatedAt: app.updatedAt,
       run: await this.runCheckOf(app, stores), listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      ...(this.builtIn(app.ref)?.digest === app.digest && { builtIn: true as const }),
       ...(app.pending && { pending: { sequence: app.pending.sequence, version: app.pending.manifest.version, added: [...app.pending.added] } }),
       ...(app.equivocation && { equivocation: { sequence: app.equivocation.sequence, at: app.equivocation.at } }),
       ...(app.checkedAt !== undefined && { checkedAt: app.checkedAt }),
