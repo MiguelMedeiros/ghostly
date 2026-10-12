@@ -326,18 +326,25 @@ mod linux {
     use std::collections::{HashMap, VecDeque};
     use std::sync::{Arc, Mutex, OnceLock};
     use zbus::blocking::{Connection, MessageIterator};
+    use zbus::names::OwnedUniqueName;
     use zbus::zvariant::Value;
 
     const SERVER: &str = "org.freedesktop.Notifications";
     const PATH: &str = "/org/freedesktop/Notifications";
+    /// The bus itself, which tells who owns a name.
+    const BUS: &str = "org.freedesktop.DBus";
     /// The newest few, as the page keeps (lib/notifications.ts): an older one's click only closes it.
     const KEPT: usize = 64;
+
+    /// A notification of ours: the server that showed it (its unique name on the bus), its id there and ours.
+    /// A server that restarts numbers from 1 again, under another unique name.
+    type Shown = (Option<OwnedUniqueName>, u32, String);
 
     /// One connection for every notification, and one thread that hears their clicks.
     pub(super) struct Notifier {
         connection: Connection,
-        /// Our notifications not yet closed: the server's id and ours, oldest first.
-        shown: Arc<Mutex<VecDeque<(u32, String)>>>,
+        /// Our notifications not yet closed, oldest first.
+        shown: Arc<Mutex<VecDeque<Shown>>>,
     }
 
     impl Notifier {
@@ -355,14 +362,15 @@ mod linux {
                 .path(PATH)?
                 .build();
             let signals = MessageIterator::for_match_rule(rule, &connection, None)?;
-            let shown: Arc<Mutex<VecDeque<(u32, String)>>> = Arc::default();
+            let shown: Arc<Mutex<VecDeque<Shown>>> = Arc::default();
             let heard = Arc::clone(&shown);
             std::thread::Builder::new()
                 .name("notification-clicks".into())
                 .spawn(move || {
                     for signal in signals.flatten() {
                         let header = signal.header();
-                        // Both signals start with the server's id; other apps' notifications have ids not ours.
+                        // Both signals start with the server's id; other apps' notifications have ids not ours,
+                        // and so has every notification of a server that started after ours was shown.
                         // A click on the notification's body is its `default` action.
                         let (server_id, clicked) = match header.member().map(|m| m.as_str()) {
                             Some("ActionInvoked") => match signal
@@ -384,10 +392,12 @@ mod linux {
                             let mut shown = heard.lock().unwrap();
                             shown
                                 .iter()
-                                .position(|(id, _)| *id == server_id)
+                                .position(|(server, id, _)| {
+                                    *id == server_id && server.as_deref() == header.sender()
+                                })
                                 .and_then(|at| shown.remove(at))
                         };
-                        if let (true, Some((_, id))) = (clicked, ours) {
+                        if let (true, Some((_, _, id))) = (clicked, ours) {
                             open(id);
                         }
                     }
@@ -395,13 +405,26 @@ mod linux {
             Ok(Self { connection, shown })
         }
 
-        /// The server's id of our notification `id`, while it is shown.
+        /// The server's id of our notification `id`, while it is shown, and by the server there is now: the
+        /// number a server that is gone gave it is another app's notification by now, or nobody's.
         fn server_id(&self, id: &str) -> Option<u32> {
-            let shown = self.shown.lock().unwrap();
-            shown
-                .iter()
-                .find(|(_, ours)| ours == id)
-                .map(|(server_id, _)| *server_id)
+            let (shown_by, server_id) = {
+                let shown = self.shown.lock().unwrap();
+                let (shown_by, server_id, _) = shown.iter().find(|(_, _, ours)| ours == id)?;
+                (shown_by.clone()?, *server_id)
+            };
+            let owner = self
+                .connection
+                .call_method(
+                    Some(BUS),
+                    "/org/freedesktop/DBus",
+                    Some(BUS),
+                    "GetNameOwner",
+                    &SERVER,
+                )
+                .ok()?;
+            let owner: OwnedUniqueName = owner.body().deserialize().ok()?;
+            (owner == shown_by).then_some(server_id)
         }
 
         /// Shown again under the same `id` (a chat's next messages), it takes the place of the one still there.
@@ -431,10 +454,14 @@ mod linux {
                 ),
             )?;
             let server_id: u32 = reply.body().deserialize()?;
+            let server = reply.header().sender().map(|name| name.to_owned().into());
             let mut shown = self.shown.lock().unwrap();
+            // A server that is gone closes nothing: what it showed is forgotten at the next one's first.
             // Newest last, and once: the one it replaced is this one now.
-            shown.retain(|(theirs, ours)| *theirs != server_id && ours != id);
-            shown.push_back((server_id, id.to_string()));
+            shown.retain(|(shown_by, theirs, ours)| {
+                *shown_by == server && *theirs != server_id && ours != id
+            });
+            shown.push_back((server, server_id, id.to_string()));
             if shown.len() > KEPT {
                 shown.pop_front();
             }
@@ -443,10 +470,11 @@ mod linux {
 
         /// Takes our notification `id` back from the server; nothing when it is gone already.
         pub(super) fn clear(&self, id: &str) -> zbus::Result<()> {
-            let Some(server_id) = self.server_id(id) else {
+            let server_id = self.server_id(id);
+            self.shown.lock().unwrap().retain(|(_, _, ours)| ours != id);
+            let Some(server_id) = server_id else {
                 return Ok(());
             };
-            self.shown.lock().unwrap().retain(|(_, ours)| ours != id);
             self.connection
                 .call_method(
                     Some(SERVER),
@@ -723,6 +751,96 @@ mod linux {
             );
             signal("ActionInvoked", &(2, "default"));
             assert!(open.recv_timeout(Duration::from_millis(500)).is_err());
+        }
+
+        /// A server that restarts (mako, dunst, a reloaded shell) numbers from 1 again: a click on its number 2,
+        /// another app's now, opens nothing, and ours shown since then still open.
+        #[test]
+        fn a_restarted_server_s_numbers_are_not_ours() {
+            let bus = Bus::start();
+            let serve = || {
+                let (notified, _asked) = mpsc::channel();
+                bus.connect()
+                    .name(SERVER)
+                    .unwrap()
+                    .serve_at(PATH, Server(notified, 0))
+                    .unwrap()
+                    .build()
+                    .unwrap()
+            };
+            let server = serve();
+            let (opened, open) = mpsc::channel();
+            let notifier = Notifier::new(bus.connect().build().unwrap(), move |id| {
+                let _ = opened.send(id);
+            })
+            .unwrap();
+            notifier.show("event-1", "New message").unwrap();
+            notifier.show("event-2", "New message").unwrap();
+
+            // It dies with no NotificationClosed.
+            drop(server);
+            let server = serve();
+            let click = |id: u32| {
+                server
+                    .emit_signal(None::<()>, PATH, SERVER, "ActionInvoked", &(id, "default"))
+                    .unwrap()
+            };
+            click(2);
+            notifier.show("event-3", "New message").unwrap();
+            click(1);
+            assert_eq!(
+                open.recv_timeout(Duration::from_secs(10)).unwrap(),
+                "event-3"
+            );
+            assert!(open.recv_timeout(Duration::from_millis(500)).is_err());
+        }
+
+        /// The same numbers are never sent back to the new server: a chat's next burst replaces none of another
+        /// app's notifications there, and a chat read closes none.
+        #[test]
+        fn a_restarted_server_keeps_the_other_apps_notifications() {
+            let bus = Bus::start();
+            let serve = |listed: &Arc<Mutex<Vec<(u32, String)>>>| {
+                bus.connect()
+                    .name(SERVER)
+                    .unwrap()
+                    .serve_at(PATH, Listing(Arc::clone(listed), 0))
+                    .unwrap()
+                    .build()
+                    .unwrap()
+            };
+            let server = serve(&Arc::default());
+            let notifier = Notifier::new(bus.connect().build().unwrap(), |_| {}).unwrap();
+            notifier.show("chat-a", "first burst").unwrap();
+            notifier.show("chat-b", "another chat").unwrap();
+
+            drop(server);
+            let listed: Arc<Mutex<Vec<(u32, String)>>> = Arc::default();
+            let _server = serve(&listed);
+            let other = bus.connect().build().unwrap();
+            for body in ["its first", "its second"] {
+                let (actions, hints) = (Vec::<String>::new(), HashMap::<String, OwnedValue>::new());
+                other
+                    .call_method(
+                        Some(SERVER),
+                        PATH,
+                        Some(SERVER),
+                        "Notify",
+                        &("Other", 0u32, "", "Other", body, actions, hints, -1i32),
+                    )
+                    .unwrap();
+            }
+
+            notifier.clear("chat-b").unwrap();
+            notifier.show("chat-a", "second burst").unwrap();
+            assert_eq!(
+                listed.lock().unwrap().clone(),
+                [
+                    (1, "its first".to_string()),
+                    (2, "its second".to_string()),
+                    (3, "second burst".to_string())
+                ]
+            );
         }
     }
 }
