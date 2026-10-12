@@ -339,6 +339,41 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(view(alice).invited).toEqual([]);
   });
 
+  it("an invitation its inviter takes back goes from the list, accepted or not; nobody else's word takes it", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]); world.chats.set("chat-bc", ["bob", "carol"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    // Another contact's chat, and an entry session's id, say nothing about Alice's invitation.
+    await bob.handleContactFrame("chat-bc", { t: "group-decline", g: groupId });
+    expect(view(bob, groupId).invitation).toMatchObject({ linkId: "chat-ab", accepted: false });
+    await bob.handleContactFrame("chat-ab", { t: "group-decline", g: groupId });
+    expect(bob.views()).toEqual([]);
+    expect(world.peers.get("bob")!.store.groups.size).toBe(0);
+    // Accepted and never answered: the row said "Joining…" for good. Taken back, it goes too, and no accept follows.
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); world.drop();
+    expect(view(bob, groupId).invitation).toMatchObject({ accepted: true });
+    await bob.handleContactFrame("chat-ab", { t: "group-decline", g: groupId });
+    expect(bob.views()).toEqual([]);
+    const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
+    await bob.tick(Date.now() + 120_000);
+    expect(sent).not.toHaveBeenCalled();
+    void carol;
+  });
+
+  it("an invitation taken back from a member removed and invited again leaves the group it kept", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    await alice.remove(groupId, key(bob)); await world.settle();
+    expect(view(bob, groupId).status).toBe("removed");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(bob, groupId).invitation).toBeDefined();
+    await bob.handleContactFrame("chat-ab", { t: "group-decline", g: groupId });
+    expect(view(bob, groupId)).toMatchObject({ status: "removed" });
+    expect(view(bob, groupId).invitation).toBeUndefined();
+  });
+
   it("accepting needs the inviter connected", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");

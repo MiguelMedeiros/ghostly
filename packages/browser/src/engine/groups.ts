@@ -669,10 +669,16 @@ export class Groups {
     const group = this.stored.get(groupId);
     if (!group?.invitation) throw new Error("No invitation to decline");
     try { this.host.sendOnLink(group.invitation.linkId, { t: "group-decline", g: groupId }); } catch { /* they will notice when nobody accepts */ }
+    await this.dropInvitation(group);
+  }
+
+  /** An invitation goes from the list: declined here, or taken back by who sent it. */
+  private async dropInvitation(group: StoredGroup): Promise<void> {
     // Removed, then invited again: the answer is to the invitation only; the removed group and its history stay.
     const previous = group.previous;
-    if (!previous) return this.forget(groupId);
-    this.stored.set(groupId, previous);
+    if (!previous) return this.forget(group.id);
+    this.acceptSaid.delete(group.id);
+    this.stored.set(group.id, previous);
     if (previous.state) this.attach(previous.state);
     await this.store.putGroup(previous);
     this.host.emit();
@@ -1382,6 +1388,10 @@ export class Groups {
         return;
       }
       case "group-decline": {
+        // From the contact that invited me, over the chat its invitation came on: taken back (the group is gone from
+        // its app, or it is not the admin any more). It goes from the list, accepted already or not.
+        const mine = this.stored.get(g);
+        if (mine?.invitation && !mine.invitation.entry && !mine.state && mine.invitation.linkId === linkId) { await this.dropInvitation(mine); return; }
         const entryPeer = this.hostEntry(g, linkId);
         if (entryPeer) { this.pendingEntries.get(g)?.delete(entryPeer); await this.host.closeEdge(linkId); }
         const group = this.stored.get(g);
