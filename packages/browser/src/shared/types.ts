@@ -181,6 +181,12 @@ export interface StoredGroup {
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /**
+   * I declined an invitation while its inviter's chat (`linkId`) was down: the answer is said when that chat is up, or
+   * dropped once `at` is a week old. Alone when nothing else of the group is kept; beside `state` when the invitation
+   * was to a group I was removed from, which stays.
+   */
+  declined?: { at: number; linkId: string };
+  /**
    * On the admin's side: members I removed while they could not be told (their edge was down, and no contact chat
    * carried the notice), by member key. `e`: the epoch of the commit that removed them; `at`: when. The edge to each
    * stays until it opens and that commit goes over it (`told`, the first time), or `at` is a week old: a member removed
