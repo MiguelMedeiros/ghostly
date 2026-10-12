@@ -9,6 +9,17 @@ const remoteSize = (peer: Peer) =>
     return video ? `${video.videoWidth}x${video.videoHeight}` : "none";
   });
 
+/**
+ * Shape of the picture this peer receives: its width over its height, 0 for none. It tells the camera from the screen
+ * where the size cannot: a busy browser sends the same picture smaller (a 640x480 camera as 480x360 or 320x240), and
+ * goes on doing so for a while after a screen share.
+ */
+const remoteShape = (peer: Peer) =>
+  peer.page.evaluate(() => {
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=remote-video]");
+    return video?.videoHeight ? Math.round((10 * video.videoWidth) / video.videoHeight) / 10 : 0;
+  });
+
 /** The browser's own "Stop sharing" (a bar the page cannot reach): the shared track ends and fires `ended`, as it does there. */
 const stopFromBrowser = (peer: Peer) =>
   peer.page.evaluate(() => {
@@ -38,7 +49,7 @@ test("video call: camera, mute, screen share, hang up", { tag: ["@feature:calls.
   for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
 
   await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
-  const camera = await remoteSize(bob);
+  const camera = await remoteShape(bob);
 
   await alice.page.getByTitle("Mute", { exact: true }).click();
   await expect(alice.page.getByTitle("Unmute", { exact: true })).toBeVisible();
@@ -52,18 +63,18 @@ test("video call: camera, mute, screen share, hang up", { tag: ["@feature:calls.
   await expect(alice.page.getByTestId("share-screen")).toHaveAttribute("title", "Stop sharing");
   await expect(alice.page.getByTestId("call-sharing")).toHaveText("You're sharing your screen");
   await expect(bob.page.getByTestId("call-sharing")).toHaveText(/is sharing their screen$/);
-  await expect.poll(() => remoteSize(bob)).not.toBe(camera);
+  await expect.poll(() => remoteShape(bob)).not.toBe(camera);
   // Stopping goes back to the camera it replaced, and the notice goes on both sides.
   await alice.page.getByTestId("share-screen").click();
-  await expect.poll(() => remoteSize(bob)).toBe(camera);
+  await expect.poll(() => remoteShape(bob)).toBe(camera);
   for (const p of [alice, bob]) await expect(p.page.getByTestId("call-sharing")).toHaveCount(0);
   await expect(alice.page.getByTitle("Turn camera off")).toBeVisible();
 
   // The browser's own "Stop sharing" does the same.
   await alice.page.getByTestId("share-screen").click();
-  await expect.poll(() => remoteSize(bob)).not.toBe(camera);
+  await expect.poll(() => remoteShape(bob)).not.toBe(camera);
   await stopFromBrowser(alice);
-  await expect.poll(() => remoteSize(bob)).toBe(camera);
+  await expect.poll(() => remoteShape(bob)).toBe(camera);
   await expect(alice.page.getByTestId("share-screen")).toHaveAttribute("title", "Share screen");
 
   await alice.page.getByTitle("End call").click();
@@ -173,16 +184,16 @@ test("an audio call grows a camera and a screen, without calling again", { tag: 
   await expect(alice.page.getByTitle("Turn camera off")).toBeVisible();
   await expect(bob.page.getByTestId("remote-video")).toBeVisible();
   await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
-  const camera = await remoteSize(bob);
+  const camera = await remoteShape(bob);
   // It only goes one way until Bob turns his own on.
   await expect(alice.page.getByTestId("remote-video")).toBeHidden();
 
   // A screen rides the same section, and stopping goes back to the camera it replaced.
   await alice.page.getByTestId("share-screen").click();
   await expect(alice.page.getByTestId("share-screen")).toHaveAttribute("title", "Stop sharing");
-  await expect.poll(() => remoteSize(bob)).not.toBe(camera);
+  await expect.poll(() => remoteShape(bob)).not.toBe(camera);
   await alice.page.getByTestId("share-screen").click();
-  await expect.poll(() => remoteSize(bob)).toBe(camera);
+  await expect.poll(() => remoteShape(bob)).toBe(camera);
 
   // The side that answered kept its half of the section open too.
   await bob.page.getByTitle("Turn camera on").click();
