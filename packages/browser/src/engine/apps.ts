@@ -1168,8 +1168,9 @@ export class Apps {
       // in that store's listing and takes only the digest it lists: a newer version at the publisher's sources, or at a
       // listing URL that moved on (a repository's HEAD), waits until the store lists it.
       const pinned = app.store;
-      // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept.
-      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string] }>();
+      // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept;
+      // `holds`: what a source's peek showed it holds.
+      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string]; holds?: AppVersion }>();
       const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
       for (const s of stores) {
         if (pinned !== undefined && s.key !== pinned) continue;
@@ -1187,7 +1188,7 @@ export class Apps {
           if (candidates.has(url)) continue;
           try {
             const peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }));
-            if (peek && newer(peek)) candidates.set(url, {});
+            if (peek && newer(peek)) candidates.set(url, { holds: peek });
           } catch { /* this source does not answer now */ }
         }
       }
@@ -1199,6 +1200,7 @@ export class Apps {
         // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
         // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
         // index lists the same.
+        let holds = want.holds;
         if (want.peek) {
           let peek: ReturnType<typeof peekAppManifest>;
           try { peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true })); } catch { continue; }
@@ -1206,7 +1208,12 @@ export class Apps {
             if (want.miss) this.listingMisses.set(...want.miss);
             continue;
           }
+          holds = peek;
         }
+        // A version a store of the person's removed, or its publisher revoked, is not taken: known from the peek, so it is
+        // not read whole at every check to be refused again. One under a number held is still read: it marks the app.
+        const twin = holds && (holds.sequence === app.sequence || holds.sequence === app.pending?.sequence);
+        if (holds && !twin && this.runStatus(holds, this.storeViews(stores), app.revocations).status !== "ok") continue;
         let fetched: { bundle: AppBundle; bytes: Uint8Array };
         try { fetched = await this.fetchBundle(url); } catch { continue; }
         const { bundle, bytes } = fetched;
