@@ -13,40 +13,46 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("the negotiation loop keeps one height through its four scenarios", async ({ page }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(150_000);
   await page.goto("/developers");
   const ng = page.locator(".ng");
   await ng.evaluate((el) => {
     document.documentElement.style.scrollBehavior = "auto";
     el.scrollIntoView({ block: "start" });
   });
-  // The loop starts from the first scenario once it is on screen.
-  await expect(ng.locator(".ng-tab").first()).toHaveAttribute("aria-pressed", "true");
+  // The loop starts from the first scenario once it is on screen and the page's script has run: the server's page
+  // shows the second one as a still, and on a busy machine the script comes more than five seconds after the load.
+  await expect(ng.locator(".ng-tab").first()).toHaveAttribute("aria-pressed", "true", { timeout: 45_000 });
 
-  // One full loop (4 x 7.6 s) and a little more, read at every frame: the loop's height, where the next section
-  // starts under it, and which scenario plays.
+  // One full loop and a little more, read at every frame: the loop's height, where the next section starts under
+  // it, and which scenario plays. It ends where the loop says it is (back in the first scenario, past its first
+  // phase), not after a time: a scenario is 7.6 s on a free machine and longer on a busy one.
   const seen = await page.evaluate(
     () =>
-      new Promise<{ heights: number[]; below: number[]; scenarios: number[] }>((resolve) => {
+      new Promise<{ heights: number[]; below: number[]; scenarios: number[]; again: boolean }>((resolve) => {
         const el = document.querySelector(".ng")!;
         const next = document.querySelector("#path")!;
         const tabs = [...el.querySelectorAll(".ng-tab")];
         const heights = new Set<number>();
         const below = new Set<number>();
         const scenarios = new Set<number>();
-        const end = performance.now() + 32_000;
+        const giveUp = performance.now() + 90_000;
         const frame = () => {
           const box = el.getBoundingClientRect();
           heights.add(Math.round(box.height));
           below.add(Math.round(next.getBoundingClientRect().top - box.top));
-          scenarios.add(tabs.findIndex((tab) => tab.getAttribute("aria-pressed") === "true"));
-          if (performance.now() < end) requestAnimationFrame(frame);
-          else resolve({ heights: [...heights], below: [...below], scenarios: [...scenarios].sort() });
+          const scenario = tabs.findIndex((tab) => tab.getAttribute("aria-pressed") === "true");
+          scenarios.add(scenario);
+          const phase = el.querySelectorAll(".ng-scene:not([data-sizer]) .ng-step-dots [data-on]").length;
+          const again = scenarios.size === tabs.length && scenario === 0 && phase > 1;
+          if (!again && performance.now() < giveUp) requestAnimationFrame(frame);
+          else resolve({ heights: [...heights], below: [...below], scenarios: [...scenarios].sort(), again });
         };
         frame();
       }),
   );
   expect(seen.scenarios).toEqual([0, 1, 2, 3]);
+  expect(seen.again, "the loop came back to its first scenario").toBe(true);
   expect(seen.heights).toHaveLength(1);
   expect(seen.below).toHaveLength(1);
 });
