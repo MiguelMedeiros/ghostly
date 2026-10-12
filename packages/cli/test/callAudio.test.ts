@@ -1,6 +1,7 @@
+import { createSocket } from "node:dgram";
 import { describe, expect, it, vi } from "vitest";
 import { CallAudio, type RtpTrack } from "../src/calls/audio";
-import { callIceServers, loadCallStack, type CallStack } from "../src/calls/media";
+import { callIceServers, CallMedia, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter, sequenceDelta, TICKS_PER_FRAME, type RtpPacket } from "../src/calls/rtp";
 import { dominantHz, level, tone } from "./support/tone";
@@ -129,6 +130,83 @@ describe("a call's ICE servers", () => {
       { hostname: "relay.example.org", port: 5349, username: "u", password: "p", relayType: "TurnTls" },
       "stun:stun.example.org:3478",
     ]);
+  });
+});
+
+describe("a call's candidates", () => {
+  it("go out with the host ones after a short wait when the STUN server never answers, not after the whole 5 s", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    // A STUN server that swallows every request, as on a network that blocks UDP to it (many offices and hotels).
+    const silent = createSocket("udp4");
+    let asked = 0;
+    silent.on("message", () => { asked++; });
+    await new Promise<void>((bound) => silent.bind(0, "127.0.0.1", bound));
+    const before = { bind: process.env.GHOSTLY_CALL_BIND, stun: process.env.GHOSTLY_STUN };
+    process.env.GHOSTLY_CALL_BIND = "127.0.0.1";
+    process.env.GHOSTLY_STUN = "0";
+    let media: CallMedia | undefined;
+    try {
+      const started = Date.now();
+      media = await CallMedia.offer(stack, { rate: 48000, onFrame: () => {}, onState: () => {}, iceServers: [{ urls: `stun:127.0.0.1:${silent.address().port}` }] });
+      const took = Date.now() - started;
+      expect(asked, "the STUN server was asked").toBeGreaterThan(0);
+      expect(media.local.c?.length, "the offer has its host candidate").toBeGreaterThan(0);
+      expect(took, "it did wait for an answer").toBeGreaterThanOrEqual(HOST_GATHER_MS - 100);
+      expect(took, "but not the whole cap").toBeLessThan(HOST_GATHER_MS + 1500);
+    } finally {
+      media?.close();
+      silent.close();
+      for (const [name, value] of [["GHOSTLY_CALL_BIND", before.bind], ["GHOSTLY_STUN", before.stun]] as const) {
+        if (value === undefined) delete process.env[name]; else process.env[name] = value;
+      }
+    }
+  }, 20_000);
+
+  it("wait a moment after a server reflexive one, end at once when gathering completes, and up to 5 s for a first one", async () => {
+    vi.useFakeTimers();
+    try {
+      /** A connection whose candidates and gathering state come when the test says, and when its wait ended. */
+      const waiting = () => {
+        let candidate: (line: string) => void = () => {}, state: (state: string) => void = () => {};
+        const started = Date.now();
+        let ended: number | null = null;
+        void gathering({ onLocalCandidate: (cb) => { candidate = cb as typeof candidate; }, onGatheringStateChange: (cb) => { state = cb as typeof state; } }).then(() => { ended = Date.now() - started; });
+        return { candidate: (line: string) => candidate(line), state: (s: string) => state(s), ended: () => ended };
+      };
+      const host = "a=candidate:1 1 UDP 2122317823 192.168.1.20 50000 typ host", srflx = "a=candidate:2 1 UDP 1686109951 203.0.113.7 50000 typ srflx raddr 192.168.1.20 rport 50000";
+
+      // The STUN server answers: the reflexive candidate, and 400 ms for what comes with it.
+      const answered = waiting();
+      answered.candidate(host);
+      await vi.advanceTimersByTimeAsync(30);
+      answered.candidate(srflx);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(answered.ended()).toBe(430);
+
+      // It never answers: the host candidate goes after the bounded wait.
+      const silent = waiting();
+      silent.candidate(host);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(silent.ended()).toBe(HOST_GATHER_MS);
+
+      // Gathering completes (no server to ask): at once.
+      const complete = waiting();
+      complete.candidate(host);
+      await vi.advanceTimersByTimeAsync(5);
+      complete.state("complete");
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(complete.ended()).toBe(5);
+
+      // Not one candidate yet when the bounded wait ends: the cap, as before.
+      const late = waiting();
+      await vi.advanceTimersByTimeAsync(HOST_GATHER_MS + 500);
+      late.candidate(host);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(late.ended()).toBe(5000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
