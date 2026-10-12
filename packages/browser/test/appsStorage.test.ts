@@ -357,6 +357,28 @@ describe("uninstall", () => {
     expect((await ownRows()).map((r) => r.scope)).toEqual(["chat-2"]);
   });
 
+  it("an app uninstalled while it is writing keeps none of its rows: a write still waiting is refused, a reinstall starts empty", async () => {
+    for (const burst of [5, 20, 50]) {
+      await emptyProfile();
+      const { store, app } = await installed();
+      const { ref } = app;
+      await store.storageSet({ ref, scope: "chat-1", key: "before", value: 1 });
+      const writes = Array.from({ length: burst }, (_, i) => store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: i }).then(() => "ok", (e: Error) => e.message.split(":")[0]));
+      await writes[0];
+      await store.uninstall({ ref });
+      const results = await Promise.all(writes);
+      expect(await storageRows(), `burst of ${burst}`).toEqual([]);
+      expect(results[0]).toBe("ok");
+      expect(results.at(-1), `burst of ${burst}: the last write waited past the uninstall`).toBe("not-installed");
+      expect(new Set(results)).toEqual(new Set(["ok", "not-installed"]));
+      await store.preview({ url: BUNDLE_URL });
+      await store.install({ digest: app.digest, grant: ["chat"] });
+      expect(await store.storageKeys({ ref, scope: "chat-1" }), `burst of ${burst}`).toEqual([]);
+      // The count starts again with the new install: a full 64 KiB value fits.
+      await store.storageSet({ ref, scope: "chat-1", key: "big", value: "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2) });
+    }
+  });
+
   it("a chat deleted while its app is writing keeps none of that app's rows: a write still waiting is refused", async () => {
     for (const burst of [5, 20, 50]) {
       await emptyProfile();
