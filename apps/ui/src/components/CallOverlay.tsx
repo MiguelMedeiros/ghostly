@@ -7,6 +7,7 @@ import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
 import { useTabTrap } from "../hooks/useDismiss";
 import { useVoiceRing } from "../hooks/useVoiceRing";
+import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 
@@ -200,10 +201,12 @@ export function CallOverlay({
 
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
   // Who is speaking: the contact's avatar wears a ring as wide as their voice is loud.
-  const peerRing = useVoiceRing<HTMLDivElement>(remoteStream, callState === "connected" && !showRemoteVideo);
+  // A Linux Desktop call keeps its sound in Rust: the page hears neither side, and the call says both levels.
+  const told = callLevels(localStream);
+  const peerRing = useVoiceRing<HTMLDivElement>(remoteStream, callState === "connected" && !showRemoteVideo, told?.peer);
   // And yours, beside it, in a call where no picture of you shows: your own ring, quiet while you are muted.
   const showSelf = callState === "connected" && !showRemoteVideo && isVideoOff;
-  const selfRing = useVoiceRing<HTMLDivElement>(localStream, showSelf && !isMuted);
+  const selfRing = useVoiceRing<HTMLDivElement>(localStream, showSelf && !isMuted, told?.own);
   // A screen in place of the camera leaves the camera off, and its button says so.
   const cameraOn = !isVideoOff && !isScreenSharing;
   // Sharing is never a surprise, to either side.
