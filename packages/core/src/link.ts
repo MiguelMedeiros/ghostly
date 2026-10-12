@@ -207,6 +207,8 @@ export class LinkSession {
   private pollAgain = false;
   private publishing: Promise<void> | null = null;
   private publishAgain = false;
+  /** What waits to go out is the presence heartbeat alone (`PRESENCE_HEARTBEAT`): nothing in the packet changed. */
+  private upkeepOnly = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
@@ -449,13 +451,14 @@ export class LinkSession {
     }
     this.lastActivity = Date.now();
     this.sentBuffer = [...this.sentBuffer, { t: timestamp, m: text }];
+    this.upkeepOnly = false;
     try {
       const kept = await this.publishOnce(true);
       if (kept === 0) return "Message could not be published — DHT payload limit exceeded.";
     } catch (error) {
       // The message stays in the buffer; keep trying instead of losing it.
       if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
-      this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), this.retryDelay(error));
+      this.publishRetryTimer = setTimeout(() => void this.publish(true).catch(() => {}), this.retryDelay(error));
       // Not an error for the sender: it is queued, and the connection status shows the trouble (a wait for the
       // relays' budget is none).
       if (!isDiscoveryBudgetError(error)) this.events.onStatus?.("error");
@@ -526,14 +529,19 @@ export class LinkSession {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = setTimeout(() => {
       if (!this.running) return;
-      if (this.getServices() !== undefined) void this.publish().catch(() => {});
+      if (this.getServices() !== undefined) void this.publish(true).catch(() => {});
       this.scheduleHeartbeat();
     }, PRESENCE_HEARTBEAT);
   }
 
-  /** Coalesces publishes: at most one in flight and one queued behind it. */
-  private publish(): Promise<void> {
+  /**
+   * Coalesces publishes: at most one in flight and one queued behind it. `upkeep`: nothing new to say (the heartbeat, a
+   * retry of what waits): with nothing else asked for since, the packet goes as upkeep (`publishOnce`).
+   */
+  private publish(upkeep = false): Promise<void> {
     if (this.silent) return Promise.resolve();
+    if (!upkeep) this.upkeepOnly = false;
+    else if (!this.publishing && !this.publishRetryTimer) this.upkeepOnly = true;
     if (this.publishing) {
       this.publishAgain = true;
       return this.publishing;
@@ -544,14 +552,14 @@ export class LinkSession {
       try {
         do {
           this.publishAgain = false;
-          await this.publishOnce(this.running);
+          await this.publishOnce(this.running, this.upkeepOnly);
         } while (this.publishAgain && this.running);
       } catch (error) {
         // A signal that is not published is a call that never rings: try again. Held back by the relays' request
         // budget, it goes as soon as the budget frees a request, and nothing is wrong meanwhile.
         if (this.running) {
           if (!isDiscoveryBudgetError(error)) this.discoveryResult("publish", error);
-          this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), this.retryDelay(error));
+          this.publishRetryTimer = setTimeout(() => void this.publish(true).catch(() => {}), this.retryDelay(error));
         }
         throw error;
       } finally {
@@ -561,7 +569,7 @@ export class LinkSession {
     return this.publishing;
   }
 
-  private async publishOnce(advertise: boolean): Promise<number> {
+  private async publishOnce(advertise: boolean, upkeep = false): Promise<number> {
     const rtcSignal = advertise ? this.rtcSignal : null;
     const built = buildLinkRecords(
       this.identity.pubKeyZ32,
@@ -580,7 +588,11 @@ export class LinkSession {
     try {
       // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`). Written while this
       // link watches for a contact that went away, the packet is what that contact, back, looks for first (`watch`).
-      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true } : undefined;
+      // The heartbeat of a chat whose data link is up is upkeep nobody waits on: a background write, from the share the
+      // relays' budget keeps for those, so it never takes a request a group's door or edges need. As a chat's write,
+      // the budget refusing it held the groups back for its reserve: a daemon with 30 live chats sat at the budget
+      // while idle, and people joining its group by link waited 80 s to 9 min (bug hunt, 2026-10-08).
+      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true } : upkeep && this.connected ? { background: true } : undefined;
       await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);

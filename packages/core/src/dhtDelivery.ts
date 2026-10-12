@@ -602,7 +602,8 @@ export class DhtDelivery {
     // envelope stays in the mailbox until the next one, and every publication spends a request on each relay.
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
     const reseal = this.resealDue;
-    if (!force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal && this.controlDue > now) return;
+    const keepAlive = !force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal;
+    if (keepAlive && this.controlDue > now) return;
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
@@ -622,7 +623,9 @@ export class DhtDelivery {
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }) });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
-    try { await this.options.transport.publish(identity, records); }
+    // Only the keep-alive is due while layer 1 carries the chat: upkeep nobody waits on, a background write (as the
+    // link's heartbeat, `LinkSession.publishOnce`), so a profile's live chats never take the requests its groups need.
+    try { await this.options.transport.publish(identity, records, keepAlive && this.live ? { background: true } : undefined); }
     catch (error) {
       this.reactionsDue ||= reactionsWereDue;
       if (isDiscoveryBudgetError(error)) await this.heldBack(error, now, before, pending, receipt);

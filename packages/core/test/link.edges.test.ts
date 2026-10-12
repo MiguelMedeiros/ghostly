@@ -18,7 +18,7 @@ import {
   type LinkSessionOptions,
 } from "../src/link";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
-import type { PkarrTransport } from "../src/transport";
+import { DiscoveryBudgetError, type PkarrTransport } from "../src/transport";
 
 // covers: chat.legacy.send, core.records, chat.paired.clock-skew, app.clock-off
 
@@ -279,6 +279,33 @@ describe("LinkSession presence and signals", () => {
     services = undefined;
     await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
     expect(a.transport.publish.mock.calls.length).toBe(before + 1);
+    await a.s.stop(false);
+  });
+
+  it("republishes presence in the background while the data link is up, and as a chat's write otherwise or with something new", async () => {
+    // A profile's live chats must not take the relays' requests its groups need (a daemon with 30 live chats, 2026-10-08).
+    const { a } = pair({ getServices: () => [] });
+    a.s.start();
+    await settle();
+    const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
+    a.s.setDataLinkOpen(true);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(lastPublish()).toEqual({ background: true });
+    // Held back by the budget, it goes again in the background.
+    a.transport.failPublish = new DiscoveryBudgetError(1_000);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    a.transport.failPublish = null;
+    const held = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(a.transport.publish.mock.calls.length).toBeGreaterThan(held);
+    expect(lastPublish()).toEqual({ background: true });
+    // A change to say is not upkeep.
+    await a.s.refreshAdvertisement();
+    expect(lastPublish()).toBeUndefined();
+    // Nor is the heartbeat once the data link is down: the contact may be looking for this side.
+    a.s.setDataLinkOpen(false);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(lastPublish()).toBeUndefined();
     await a.s.stop(false);
   });
 

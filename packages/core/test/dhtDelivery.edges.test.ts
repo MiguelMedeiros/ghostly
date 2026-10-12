@@ -772,6 +772,27 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("keeps its mailbox alive in the background while live; a text, or the keep-alive once layer 1 is lost, is no background write", async () => {
+    // A profile's live chats must not take the relays' requests its groups need (a daemon with 30 live chats, 2026-10-08).
+    const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode: "stream" }, bobCredentials: pinned() });
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    h.bob.setLive(true); await vi.advanceTimersByTimeAsync(0);
+    const lastOptions = () => (h.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
+    const live = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS + 1_000);
+    expect(h.transport.publish.mock.calls.length - live, "the keep-alive went").toBeGreaterThan(0);
+    expect(lastOptions()).toEqual({ background: true });
+    expect(await h.bob.send("hello", Date.now(), ID)).toBeNull();
+    expect(lastOptions(), "a text is what the contact waits for").toBeUndefined();
+    await h.bob.acknowledge(ID);
+    h.bob.setLive(false); await vi.advanceTimersByTimeAsync(0);
+    const dropped = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(h.transport.publish.mock.calls.length - dropped, "the keep-alive went").toBeGreaterThan(0);
+    expect(lastOptions()).toBeUndefined();
+    await h.bob.stop();
+  });
+
   it("tells its capability-record revision in the envelope and reports the contact's", async () => {
     const revs: number[] = [];
     const h = setup({ mode: "dht", capsRev: 7, peerCapsRev: rev => revs.push(rev) }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
