@@ -148,7 +148,10 @@ export async function requestNotifications():Promise<NoticePermission>{
  * In the Android app a chat has one notification: its next message replaces it (with no new heads-up,
  * GhostlyHostPlugin.kt `setOnlyAlertOnce`), and reading the chat takes it away. Android keeps an app's notifications
  * until they are tapped or swiped, and shows none past 50. Its tag is random, kept here: it never names the chat.
+ * The Linux app does the same: a Linux desktop keeps a list of notifications too (GNOME, KDE, swaync), and the app
+ * replaces and closes its own there (apps/desktop notifications.rs).
  */
+const oneNoticePerChat=()=>androidApp() || (native() && /Linux/i.test(platform()));
 const chatTags=new Map<string,string>();
 function chatTag(chat:string):string{
   let tag=chatTags.get(chat);
@@ -159,7 +162,7 @@ function chatTag(chat:string):string{
   }
   return tag;
 }
-/** The chat was read in the app: its notification goes, in the Android app (elsewhere they close by themselves). */
+/** The chat was read in the app: its notification goes, in the Android and Linux apps (elsewhere they close by themselves). */
 export function clearChatNotification(chat:string):void{
   const tag=chatTags.get(chat);
   if(!tag) return;
@@ -169,11 +172,11 @@ export function clearChatNotification(chat:string):void{
 }
 /**
  * `chat`: the chat a click opens (a session id, or `group:<id>`); it and `event`, the page's id for the notification,
- * stay in this page. `perChat`: a chat's messages, one notification for the chat in the Android app.
+ * stay in this page. `perChat`: a chat's messages, one notification for the chat in the Android and Linux apps.
  */
 export async function showPrivateNotification(event:string,body:string,chat?:string,perChat=false):Promise<void>{
   if(await notificationPermission()!=="granted") return;
-  const id=chat && perChat && androidApp()?chatTag(chat):noticeId(event);
+  const id=chat && perChat && oneNoticePerChat()?chatTag(chat):noticeId(event);
   if(chat){
     // Newest last, so a chat's notification, posted again, is not the first to be forgotten.
     chats.delete(id);
