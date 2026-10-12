@@ -343,7 +343,7 @@ export class GroupFileDesk {
 
   /**
    * An error when this group took as many announcements of mine as it takes in a minute, or as its members take from
-   * one member in `announceWindowMs` (past that they would get the text, not the file); null when one may go now.
+   * one member in `announceWindowMs` (past that they would not fetch the file by themselves); null when one may go now.
    */
   mayAnnounce(groupId: string): string | null {
     const wait = Math.max(...this.sentPaces(groupId).map(pace => pace.wait()));
@@ -360,9 +360,9 @@ export class GroupFileDesk {
   notSent(groupId: string, meta: GroupFileMeta): void { this.own.delete(`${groupId}\n${meta.d}`); }
 
   /**
-   * A message of the group announces a file (mine, or a member's): the file its row shows, or none when the member
-   * announced more than the group takes (its text shows). A member's is kept here unfetched, and fetched now when it is
-   * one this device takes by itself. The same message again (a catch-up, a whole copy) is the same file.
+   * A message of the group announces a file (mine, or a member's): the file its row shows. A member's is kept here
+   * unfetched, and fetched now when it is one this device takes by itself and the member announced no more than the
+   * group fetches that way. The same message again (a catch-up, a whole copy) is the same file.
    */
   async announced(groupId: string, m: { id: string; sender: string; file: GroupFileMeta }, me: string): Promise<MessageFile | undefined> {
     const known = this.byMessage.get(`${groupId}\n${m.id}`);
@@ -379,10 +379,11 @@ export class GroupFileDesk {
       this.queueHave(kept);
       return messageFile(kept);
     }
-    // More from one member than a group takes: past it, the text shows and nothing is fetched (WISP 503, Pace).
-    if (!this.pace(this.takenPace, `${groupId}\n${m.sender}`, GROUP_FILE_LIMITS.announceTaken, GROUP_FILE_LIMITS.announceWindowMs).take()) return undefined;
+    // More from one member than a group fetches by itself: past it, the file is kept and waits for a Download (WISP 503,
+    // Pace). Counted as they come, so a catch-up of files sent over hours is one burst: none of them is lost to it.
+    const paced = this.pace(this.takenPace, `${groupId}\n${m.sender}`, GROUP_FILE_LIMITS.announceTaken, GROUP_FILE_LIMITS.announceWindowMs).take();
     const id = groupFileId(groupId, "in");
-    const auto = this.deps.settings().autoDownloads && fetchesByItself(m.file, this.keptAutomatically(groupId));
+    const auto = paced && this.deps.settings().autoDownloads && fetchesByItself(m.file, this.keptAutomatically(groupId));
     const holders = this.ahead.get(`${groupId}\n${m.id}`) ?? [];
     this.ahead.delete(`${groupId}\n${m.id}`);
     const kept: Kept = { id, groupId, message: m.id, author: m.sender, meta: m.file, mine: false, auto, asked: false, held: false, holders, damaged: new Set() };
