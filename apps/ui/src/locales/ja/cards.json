@@ -151,7 +151,8 @@
     "title": "使用量",
     "updatedLabel": "更新",
     "used": "{{limit}} 中 {{used}} 使用",
-    "usedLabel": "使用済み"
+    "usedLabel": "使用済み",
+    "wasReset": "{{ago}}にリセット済み"
   },
   "working": {
     "label": "作業中",

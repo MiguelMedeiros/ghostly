@@ -151,7 +151,8 @@
     "title": "用量",
     "updatedLabel": "更新于",
     "used": "已用 {{used}} / {{limit}}",
-    "usedLabel": "已用"
+    "usedLabel": "已用",
+    "wasReset": "{{ago}}已重置"
   },
   "working": {
     "label": "工作中",
