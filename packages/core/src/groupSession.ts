@@ -521,11 +521,14 @@ export class GroupSession {
     return Number.isSafeInteger(floor) && floor > 0 ? floor : 0;
   }
 
-  /** How many messages, per sender, are known to be missing in the current epoch. */
-  missing(sender: string): number {
+  /**
+   * How many messages, per sender, are known to be missing in the current epoch. `past`: only the numbers above it,
+   * for a caller that knows nobody holds the ones up to it any more.
+   */
+  missing(sender: string, past = -1): number {
     const entry = this.state.seen[sender]?.[this.epoch];
     if (!entry) return 0;
-    const lowest = Math.max(0, entry.high - GROUP_LIMITS.window + 1);
+    const lowest = Math.max(0, entry.high - GROUP_LIMITS.window + 1, past + 1);
     return Math.max(0, entry.high - lowest + 1 - (1 + entry.window.filter(n => n >= lowest).length));
   }
 
