@@ -694,31 +694,28 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.decline(groupId);
     const group = this.stored.get(groupId);
     if (!group?.invitation) throw new Error("No invitation to decline");
-    const linkId = group.invitation.linkId;
-    // The inviter's chat is down (its app is closed, say): the answer is owed, and said when that chat is next up.
-    let owed: StoredGroup["declined"];
-    try { this.host.sendOnLink(linkId, { t: "group-decline", g: groupId }); } catch { owed = { at: Date.now(), linkId }; }
-    await this.dropInvitation(group, owed);
+    // Nothing to keep: deleting it is what says no (`forget`).
+    if (!group.previous) return this.forget(groupId);
+    await this.dropInvitation(group, this.sayDecline(groupId, group.invitation.linkId));
   }
 
   /** An invitation goes from the list: declined here (`owed`: the answer, when it could not be sent), or taken back by who sent it. */
   private async dropInvitation(group: StoredGroup, owed?: StoredGroup["declined"]): Promise<void> {
     // Removed, then invited again: the answer is to the invitation only; the removed group and its history stay.
     const previous = group.previous;
-    if (!previous) {
-      await this.forget(group.id);
-      if (!owed) return;
-      const tombstone: StoredGroup = { id: group.id, createdAt: group.createdAt, declined: owed };
-      this.stored.set(group.id, tombstone);
-      await this.store.putGroup(tombstone);
-      return;
-    }
+    // Taken back with nothing to keep: who took it back is owed no answer.
+    if (!previous) return this.forget(group.id, false);
     if (owed) previous.declined = owed; else delete previous.declined;
     this.acceptSaid.delete(group.id);
     this.stored.set(group.id, previous);
     if (previous.state) this.attach(previous.state);
     await this.store.putGroup(previous);
     this.host.emit();
+  }
+
+  /** Invitee side: says no to an invitation. With the inviter's chat down (its app is closed, say), returns the answer owed, said when that chat is next up. */
+  private sayDecline(groupId: string, linkId: string): StoredGroup["declined"] {
+    try { this.host.sendOnLink(linkId, { t: "group-decline", g: groupId }); return undefined; } catch { return { at: Date.now(), linkId }; }
   }
 
   /** Invitee side: a decline its inviter's chat was down for is said once that chat is up, or dropped after `LEFT_KEPT_MS`. */
@@ -1038,7 +1035,8 @@ export class Groups {
     await this.session(groupId).rename(name);
   }
 
-  async forget(groupId: string): Promise<void> {
+  /** `answer`: false when an invitation goes because its inviter took it back, so no decline is said for it. */
+  async forget(groupId: string, answer = true): Promise<void> {
     // A community I am active in is left first (the request to the hubs, an admin's role handed on), or the others keep
     // me as a member, and as their admin, for good: refused when nothing is connected to carry it, as Leave is.
     if (this.isCommunity(groupId)) return this.communities.leave(groupId);
@@ -1046,6 +1044,9 @@ export class Groups {
     // Deleting an active group leaves it. An admin with members who cannot hand the role on is refused, as Leave is:
     // gone with the role, the group would have no admin for good. Anyone else's failed goodbye does not keep it here.
     if (session?.status === "active") { try { await this.leave(groupId); } catch (e) { if (session.isAdmin && session.others.length) throw e; } }
+    // An invitation a contact sent goes with a decline, answered or not, or its inviter counts me as invited for good.
+    const gone = this.stored.get(groupId), invitation = answer && gone?.invitation && !gone.invitation.entry ? gone.invitation : undefined;
+    const owed = invitation && this.sayDecline(groupId, invitation.linkId);
     this.sessions.delete(groupId);
     this.stored.delete(groupId);
     this.takeBack(groupId);
@@ -1073,6 +1074,11 @@ export class Groups {
     this.signals.forget(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
+    if (owed && !this.stored.has(groupId)) {
+      const tombstone: StoredGroup = { id: groupId, createdAt: gone!.createdAt, declined: owed };
+      this.stored.set(groupId, tombstone);
+      await this.store.putGroup(tombstone);
+    }
     await this.files?.drop(groupId);
     this.host.historyGone?.(groupId);
     this.host.membersChanged?.(groupId);
