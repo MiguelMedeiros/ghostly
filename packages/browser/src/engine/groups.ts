@@ -215,8 +215,8 @@ export function eventTime(taken: Map<string, Set<number>>, groupId: string, time
 export const arrivalNow = (tick: number): number => Math.max(tick, Date.now());
 /**
  * Keeps on the group's record when a member's message came, where that is later than what it holds: the record is
- * saved with the session right after (a message taken moves its state), so a message handed to me late still makes
- * the group unread after the app starts again. Read from the history alone, by its own time, it sorted among what I
+ * saved with the session soon after (a message taken moves its state, saved within `GROUP_LIMITS.saveWithinMs` and when
+ * the app stops), so a message handed to me late still makes the group unread after the app starts again. Read from the history alone, by its own time, it sorted among what I
  * had read and the mark was gone on the next start.
  */
 export function noteCame(group: Pick<StoredGroup, "came"> | undefined, came: number, peer: boolean, mentioned: boolean): void {
@@ -474,6 +474,9 @@ export class Groups {
       this.communities.files = this.files;
     }
   }
+
+  /** Writes what the private groups' sessions still have to save (`GROUP_LIMITS.saveWithinMs`): the app is stopping. */
+  async flush(): Promise<void> { await Promise.allSettled([...this.sessions.values()].map(session => session.flush())); }
 
   /** `asItIs`: a copy that must stay as it was stored (limited mode, WISP 06), so nothing left over is cleared from it. */
   async load(asItIs = false): Promise<void> {
@@ -2014,7 +2017,8 @@ export class Groups {
       adminTurn: () => this.host.adminTurn?.(state.id) ?? Promise.resolve(true),
       save: async next => {
         const group = this.stored.get(state.id);
-        if (!group) return;
+        // A save that was due when the group was forgotten (`GROUP_LIMITS.saveWithinMs`) is not one of the group joined again.
+        if (!group || this.sessions.get(state.id) !== session) return;
         group.state = next;
         await this.store.putGroup(group);
       },

@@ -371,6 +371,7 @@ export class CommunityWorld {
    * quit, with nothing of the last run's memory; its links start over as `reopen` says.
    */
   async restart(peer: Peer): Promise<void> {
+    await peer.groups.flush();
     peer.groups = new Groups(peer.host, peer.store, undefined, this.timings, this.random);
     await peer.groups.load();
     this.reopen(peer);

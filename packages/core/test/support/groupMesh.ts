@@ -10,6 +10,8 @@ export class Mesh {
   readonly inbox = new Map<string, GroupIncomingMessage[]>();
   readonly edits = new Map<string, GroupIncomingEdit[]>();
   readonly saved = new Map<string, GroupState>();
+  /** How many times each member's state was saved. */
+  readonly saves = new Map<string, number>();
   readonly sentFrames: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
   readonly changes = new Map<string, number>();
   /** The sessions' clock (`hooks.clock`) when set; the wall clock otherwise. */
@@ -21,7 +23,7 @@ export class Mesh {
   isOpen(a: string, b: string): boolean { return !this.closed.has(this.edge(a, b)); }
   add(state: GroupState, name?: string): GroupSession {
     const session: GroupSession = new GroupSession(state, {
-      save: async s => { this.saved.set(session.myKey, s); },
+      save: async s => { this.saved.set(session.myKey, s); this.saves.set(session.myKey, (this.saves.get(session.myKey) ?? 0) + 1); },
       clock: () => this.clock ?? Date.now(),
       send: (to, frame) => {
         this.sentFrames.push({ from: session.myKey, to, frame: clone(frame) });

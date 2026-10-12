@@ -2086,6 +2086,8 @@ export class GhostlyNode implements EngineImplementation {
     await Promise.allSettled([
       linksStopped,
       links?.stop(),
+      // What the last messages of the private groups changed, due within a second: written now, not after the stop.
+      this.groups.flush(),
       ...WALLET_NETWORKS.flatMap((network) => [this.arkWallets, this.barkWallets, this.fedimintWallets, this.sparkWallets, this.usdtWallets, this.lightnings, this.bitcoins]
         .map((wallets) => wallets[network].stop())),
       // The Cashu wallet too: its polls would otherwise go on writing after the stop.
