@@ -3,11 +3,11 @@ import { connect, Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { heardCallSignal } from "@ghostly/core";
+import { buildSdpFromSignal, heardCallSignal, parseCallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { AudioSocket, audioSocketPath } from "../src/calls/audioSocket";
 import { CallManager, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
-import { loadCallStack, type CallStack } from "../src/calls/media";
+import { CallMedia, loadCallStack, type CallStack } from "../src/calls/media";
 import { dominantHz, level, tone } from "./support/tone";
 // covers: headless.calls
 
@@ -265,6 +265,37 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "hangup" });
     expect(a.calls.list()).toEqual([]);
     expect(existsSync(placed.audio.socket)).toBe(false);
+  });
+
+  it("answers an app's video call saying it takes no picture (`vr: 0`), so the app sends none; a call with no video section says nothing", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    const stack = await loadCallStack() as CallStack;
+    // An app's offer of a video call: an audio and a video section on one connection, its camera on.
+    const app = await CallMedia.offer(stack, { rate: 48000, onFrame: () => {}, onState: () => {} });
+    try {
+      const offer = { t: "o", ts: Date.now(), ...app.local, m: ["a", "v"], ss: [app.local.ss![0], 4242], v: 1, k: "c" };
+      b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify(offer), Date.now()));
+      expect(await until(() => b.events.find((e) => e.type === "call.incoming"))).toMatchObject({ video: true, auto: true });
+      const answer = JSON.parse((await until(() => signalsOf(b, "a")[0]))!);
+      expect(answer).toMatchObject({ o: offer.ts, m: ["a", "v"], v: 0, vr: 0 });
+      // What the app rebuilds from it: the video section is there, and closed.
+      const rebuilt = buildSdpFromSignal(parseCallSignal(JSON.stringify(answer))!);
+      expect(rebuilt.slice(rebuilt.indexOf("m=video"))).toContain("\r\na=inactive\r\n");
+      expect(rebuilt.slice(0, rebuilt.indexOf("m=video"))).toContain("\r\na=sendrecv\r\n");
+      b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify({ t: "h", ts: Date.now() + 1 }), Date.now()));
+      await until(() => b.events.find((e) => e.type === "call.ended"));
+    } finally {
+      app.close();
+    }
+
+    // The CLI's own call has an audio section alone: nothing to close, on the offer or on its answer.
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+    expect(JSON.parse(signalsOf(a, "o")[0]!)).not.toHaveProperty("vr");
+    expect(JSON.parse(signalsOf(b, "a")[1]!)).not.toHaveProperty("vr");
+    await a.calls.hangup("chat-ab");
+    await until(() => b.events.filter((e) => e.type === "call.ended").length === 2);
   });
 
   it("does not say it restarts ICE (libdatachannel cannot), and a restart offer changes nothing: no ring, no answer, the call goes on", async () => {
