@@ -96,6 +96,8 @@ it("a backup without a passphrase is made only when asked for by name, says so, 
 it("a backup an older CLI made (version 1) still restores", async () => {
   const dir = home("backup-v1");
   ok(await ghostly(["--home", dir, "profile", "set", "--name", "Old bot"]));
+  // A close may leave the store's last rows in its journal: a backup folds them into the snapshot, as that CLI's close did.
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "folded.ghostly-backup")], { env: PASS }));
   // As the CLI wrote it until now: the store and every file as base64 in one sealed JSON document.
   const store = readFileSync(join(dir, "profiles", "default", "db", "snapshot.bin")).toString("base64");
   const payload = { format: "ghostly-cli-profile/1", createdAt: 1, store, files: [{ path: "ghostly/chat-in-a", data: pattern(3000, 3).toString("base64") }] };

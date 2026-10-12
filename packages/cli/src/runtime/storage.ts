@@ -1,4 +1,5 @@
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
@@ -13,8 +14,12 @@ import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
  *   before the transaction's `complete` event reaches the engine (a Cashu proof saved is a proof on disk); one opened
  *   with `durability: "relaxed"` is appended at once and synced with the next one, or within a second;
  * - a schema change (an upgrade, a deleted database) writes a whole new `snapshot.bin` instead;
- * - at start the snapshot is loaded, the journal replayed, and both folded into a fresh snapshot (with no journal, the
- *   snapshot stays as it is).
+ * - at start the snapshot is loaded and the journal replayed. A short journal that is whole stays as it is, and so
+ *   does the snapshot; a long one, or one whose last entry was cut short, is folded into a fresh snapshot first;
+ * - a close leaves a short journal too, with a mark at its end that says the store was closed: the rows are on disk
+ *   already, and writing the whole snapshot again for them cost a second or more of every command on a large profile;
+ * - a journal begins by naming the snapshot it follows: one found beside another snapshot is in that snapshot already
+ *   (the process died between writing the snapshot and removing the journal), and is not replayed over it.
  *
  * Only one process may hold a profile's store: the caller takes the profile lock first (see `profiles.ts`).
  * fake-indexeddb is pinned: this reaches into its raw classes, and `storage.test.ts` checks them.
@@ -59,12 +64,22 @@ interface RawClasses {
 
 interface SnapshotIndex { name: string; keyPath: string | string[]; multiEntry: boolean; unique: boolean }
 interface SnapshotStore { name: string; keyPath: string | string[] | null; autoIncrement: boolean; keyGenerator: number | null; indexes: SnapshotIndex[]; records: [Key, unknown][] }
-interface Snapshot { format: 1; databases: { name: string; version: number; stores: SnapshotStore[] }[] }
+/** `journal`: the name a journal that follows this snapshot begins with (absent in one an older version wrote). */
+interface Snapshot { format: 1; journal?: string; databases: { name: string; version: number; stores: SnapshotStore[] }[] }
 
 const SNAPSHOT = "snapshot.bin";
 const JOURNAL = "journal.bin";
 /** A journal past this is folded into the snapshot at the next quiet moment. */
 const COMPACT_BYTES = 32 * 1024 * 1024;
+/** A journal up to this is kept at close and at start: replaying it costs less than writing the snapshot again. */
+const KEEP_BYTES = 1024 * 1024;
+/**
+ * The database a journal's close mark names. No profile has it, so a replay skips the mark (an older version's too:
+ * it skips an op whose store it does not find).
+ */
+const CLOSED = "__ghostly_closed__";
+/** The database a journal's first entry names, with the snapshot the journal follows: skipped by a replay as the mark is. */
+const FOLLOWS = "__ghostly_journal__";
 /** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
 const CLOSE_WAIT_MS = 5_000;
 /** How long a relaxed transaction's entry may wait for a sync when no other transaction brings one. */
@@ -75,13 +90,13 @@ const PROBE = "__ghostly_storage_probe__";
 
 export interface PersistentIndexedDb {
   readonly factory: IDBFactory;
-  /** A journal was found at open: the process before this one did not close the store (killed, a power cut). */
+  /** The journal found at open did not end with a close mark: the process before this one did not close the store (killed, a power cut). */
   readonly recovered: boolean;
   /** Waits for writes that carried a Blob (read asynchronously) to reach the disk. */
   flush(): Promise<void>;
   /** Folds the journal into a fresh snapshot. */
   compact(): Promise<void>;
-  /** Flushes, compacts, and stops writing: the process is about to leave. */
+  /** Flushes, marks the journal closed (or folds it, once it is long), and stops writing: the process is about to leave. */
   close(): Promise<void>;
   /** Bytes of the journal now, for tests and `ghostly status`. */
   journalBytes(): number;
@@ -104,6 +119,8 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   let queue: Promise<void> = Promise.resolve();
   let queued = 0;
   let schemaDirty = false;
+  /** A write to the journal or the snapshot failed: what is held is not all on disk, and only a whole snapshot makes it so. */
+  let unsaved = false;
   /** Set while the journal holds relaxed entries no sync has covered yet. */
   let relaxed: ReturnType<typeof setTimeout> | null = null;
   const pending = new WeakMap<unknown[], Op[]>();
@@ -113,10 +130,24 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
 
   // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
   const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
-  if (snapshotFound) restore(classes, raw._databases, deserialize(readFileSync(snapshotPath)) as Snapshot, keyOrder((a, b) => factory.cmp(a, b)));
-  if (journalFound) replay(raw._databases, readFileSync(journalPath), keyOrder((a, b) => factory.cmp(a, b)));
+  const saved = snapshotFound ? (deserialize(readFileSync(snapshotPath)) as Snapshot) : null;
+  if (saved) restore(classes, raw._databases, saved, keyOrder((a, b) => factory.cmp(a, b)));
+  /** The name of the snapshot on disk, which its journal begins with. */
+  let snapshotName = saved?.journal;
+  let journal = journalFound ? readFileSync(journalPath) : null;
+  const named = journal ? follows(journal) : undefined;
+  // A journal that names another snapshot is in this one already: replayed, it would put back rows as they were before
+  // what came between (an upgrade that rewrote them). The process that left it died while it folded.
+  const folded = named !== undefined && snapshotName !== undefined && named !== snapshotName;
+  if (folded) { rmSync(journalPath, { force: true }); journal = null; }
+  const replayed = journal ? replay(raw._databases, journal, keyOrder((a, b) => factory.cmp(a, b))) : { end: 0, closed: !folded };
   restoring = false;
-  if (journalFound || !snapshotFound) await writeSnapshot();
+  /** Whether the journal on disk says the store is closed: nothing was written since its mark, or there is none. */
+  let marked = replayed.closed;
+  // A journal cut short is never appended to: what came after the torn bytes could not be read back. Nor one that
+  // does not name this snapshot (an older version's).
+  const kept = !!journal && named !== undefined && named === snapshotName && replayed.end === journal.length && journal.length <= KEEP_BYTES;
+  if ((journal && !kept) || !snapshotFound) await writeSnapshot();
 
   // Record what each read-write transaction does, keyed by its rollback log (one array per transaction).
   const storeProto = classes.ObjectStore.prototype as RawStore;
@@ -188,6 +219,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   }
 
   function failed(error: unknown) {
+    unsaved = true;
     process.stderr.write(`ghostly: storage write failed: ${error instanceof Error ? error.message : String(error)}\n`);
   }
 
@@ -198,10 +230,18 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
    */
   function writeEntry(entry: Buffer, lazy = false) {
     if (!writing) return;
-    journalFd ??= openSync(journalPath, "a", 0o600);
-    const header = Buffer.alloc(4);
-    header.writeUInt32BE(entry.length);
-    writeSync(journalFd, Buffer.concat([header, entry]));
+    try {
+      if (journalFd === null) {
+        journalFd = openSync(journalPath, "a", 0o600);
+        if (snapshotName !== undefined && fstatSync(journalFd).size === 0) writeAll(journalFd, framed(serialize([{ db: FOLLOWS, store: "", kind: "clear", snapshot: snapshotName }])));
+      }
+      marked = false;
+      writeAll(journalFd, framed(entry));
+    } catch (error) {
+      // What this entry said is held but not on disk, and what is appended behind a cut entry is not read back.
+      unsaved = true;
+      throw error;
+    }
     if (lazy) relaxed ??= setTimeout(() => { try { sync(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
     else sync();
     if (statSync(journalPath).size > COMPACT_BYTES) void enqueue(writeSnapshot);
@@ -213,8 +253,17 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   }
 
   async function writeSnapshot() {
+    const dirty = schemaDirty;
     schemaDirty = false;
-    const snapshot: Snapshot = { format: 1, databases: [] };
+    try { await snapshotToDisk(); } catch (error) {
+      schemaDirty ||= dirty;
+      throw error;
+    }
+  }
+
+  async function snapshotToDisk() {
+    const name = randomBytes(8).toString("hex");
+    const snapshot: Snapshot = { format: 1, journal: name, databases: [] };
     for (const db of raw._databases.values()) {
       if (db.name === PROBE) continue;
       const stores: SnapshotStore[] = [];
@@ -232,12 +281,27 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     }
     const temporary = snapshotPath + ".tmp";
     const fd = openSync(temporary, "w", 0o600);
-    try { writeSync(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
+    try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
     renameSync(temporary, snapshotPath);
+    snapshotName = name;
+    unsaved = false;
     // The snapshot holds what the journal's entries said, the relaxed ones too.
     if (relaxed) { clearTimeout(relaxed); relaxed = null; }
     if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
     rmSync(journalPath, { force: true });
+    marked = true;
+  }
+
+  /** What `close` leaves: a short journal with the mark at its end, synced (its relaxed entries too), or a fresh snapshot. */
+  async function leave() {
+    if (schemaDirty || unsaved || journalBytes() > KEEP_BYTES) return writeSnapshot();
+    if (marked) return;
+    writeEntry(serialize([{ db: CLOSED, store: "", kind: "clear" }] satisfies Op[]));
+    marked = true;
+  }
+
+  function journalBytes() {
+    return existsSync(journalPath) ? statSync(journalPath).size : 0;
   }
 
   /**
@@ -261,17 +325,43 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
 
   return {
     factory,
-    recovered: journalFound,
+    recovered: !replayed.closed,
     flush: () => queue,
-    compact: () => enqueue(writeSnapshot),
+    async compact() {
+      // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
+      let thrown: { error: unknown } | null = null;
+      await enqueue(() => writeSnapshot().catch((error: unknown) => { thrown = { error }; throw error; }));
+      if (thrown) throw (thrown as { error: unknown }).error;
+    },
     async close() {
       await settled();
-      await enqueue(writeSnapshot);
+      await enqueue(leave);
       writing = false;
       if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
     },
-    journalBytes: () => (existsSync(journalPath) ? statSync(journalPath).size : 0),
+    journalBytes,
   };
+}
+
+/** Writes every byte: one write may take only a part (a disk nearly full). */
+function writeAll(fd: number, bytes: Buffer) {
+  for (let at = 0; at < bytes.length; ) at += writeSync(fd, bytes, at);
+}
+
+/** A journal entry as it is on disk: its length, then its bytes. */
+function framed(entry: Buffer): Buffer {
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(entry.length);
+  return Buffer.concat([header, entry]);
+}
+
+/** The snapshot a journal says it follows, in its first entry; none in an older version's journal, or an empty one. */
+function follows(journal: Buffer): string | undefined {
+  if (journal.length < 4 || 4 + journal.readUInt32BE(0) > journal.length) return undefined;
+  try {
+    const [op] = deserialize(journal.subarray(4, 4 + journal.readUInt32BE(0))) as (Op & { snapshot?: string })[];
+    return op?.db === FOLLOWS ? op.snapshot : undefined;
+  } catch { return undefined; }
 }
 
 /** fake-indexeddb's raw classes, from a throwaway database (they are not exported). */
@@ -470,6 +560,9 @@ function fill(store: RawRecordStore, sorted: RawRecord[]) {
  */
 interface Touched { indexes: Map<string, RawIndex>; was: Set<RawRecord> | null; now: Set<RawRecord> }
 
+/** Where the journal's whole entries end, and whether the last thing in it is a close mark. */
+interface Replayed { end: number; closed: boolean }
+
 /**
  * Replays whole entries; a torn last entry (the process died mid-write) was never acknowledged and is dropped.
  *
@@ -479,9 +572,9 @@ interface Touched { indexes: Map<string, RawIndex>; was: Set<RawRecord> | null; 
  * touched change in an index (what each was before goes, what it is now comes in): a journal of one message costs one
  * message, not the profile's history once per index. A store the journal cleared has its indexes built again whole.
  */
-function replay(databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: Key, b: Key) => number) {
+function replay(databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: Key, b: Key) => number): Replayed {
   const touched = new Map<RawStore, Touched>();
-  try { replayEntries(databases, journal, touched); } finally {
+  try { return replayEntries(databases, journal, touched); } finally {
     for (const [store, { indexes, was, now }] of touched) {
       const records: Partial<RawRecordStore> = store.records;
       delete records.put;
@@ -497,14 +590,15 @@ function replay(databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: K
   }
 }
 
-function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Touched>) {
-  let offset = 0;
+function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Touched>): Replayed {
+  let offset = 0, closed = false;
   while (offset + 4 <= journal.length) {
     const length = journal.readUInt32BE(offset);
     if (offset + 4 + length > journal.length) break;
     let ops: Op[];
     try { ops = deserialize(journal.subarray(offset + 4, offset + 4 + length)) as Op[]; } catch { break; }
     offset += 4 + length;
+    closed = ops.some((op) => op.db === CLOSED);
     for (const op of ops) {
       const store = databases.get(op.db)?.rawObjectStores.get(op.store);
       if (!store) continue;
@@ -518,6 +612,7 @@ function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, tou
       }
     }
   }
+  return { end: offset, closed: closed && offset === journal.length };
 }
 
 /**

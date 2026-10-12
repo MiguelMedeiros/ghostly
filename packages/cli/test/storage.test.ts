@@ -1,7 +1,7 @@
-import { appendFileSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { serialize } from "node:v8";
+import { deserialize, serialize } from "node:v8";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.storage
@@ -10,8 +10,20 @@ import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../
 const syncs = vi.hoisted(() => ({ count: 0 }));
 vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
-  return { ...fs, fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); } };
+  return {
+    ...fs,
+    fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); },
+    renameSync: (from: string, to: string) => { if (faults.rename) throw new Error("ENOSPC: no space left on device"); fs.renameSync(from, to); },
+    writeSync: (fd: number, bytes: Buffer, at = 0) => {
+      if (!faults.short || bytes.length - at < 2) return fs.writeSync(fd, bytes, at);
+      faults.short = false;
+      return fs.writeSync(fd, bytes, at, (bytes.length - at) >> 1);
+    },
+  };
 });
+
+/** What the disk does wrong when a test asks: a rename that fails, one write that takes only half of its bytes. */
+const faults = vi.hoisted(() => ({ rename: false, short: false }));
 
 const opened: PersistentIndexedDb[] = [];
 // A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
@@ -222,17 +234,18 @@ describe("persistent IndexedDB", () => {
     expect(await read(again.transaction("groups").objectStore("groups").get("g"))).toEqual({ id: "g" });
   });
 
-  it("folds the journal into the snapshot on close, owner-only files", async () => {
+  it("folds the journal into the snapshot when asked, owner-only files", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
     const first = await db(store.factory);
     await tx(first, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
     expect(store.journalBytes()).toBeGreaterThan(0);
     expect(statSync(join(dir, "journal.bin")).mode & 0o777).toBe(0o600);
-    await store.close();
+    await store.compact();
     expect(store.journalBytes()).toBe(0);
     expect(statSync(join(dir, "snapshot.bin")).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
+    await store.close();
   });
 
   it("keeps on close a write nobody waited for: the transaction made in the turn the process leaves", async () => {
@@ -275,6 +288,7 @@ describe("persistent IndexedDB", () => {
       for (let i = 0; i < 50; i++) s.proofs.put({ secret: `s${i}`, amount: 50 - i });
       for (let i = 0; i < 3; i++) s.log.add({ i });
     });
+    await store.compact();
     await store.close();
 
     const probe = await db(new (await import("fake-indexeddb")).IDBFactory());
@@ -489,6 +503,7 @@ describe("persistent IndexedDB", () => {
       s.notes.put({ owner: "bob", tags: ["b"] });
     });
     first.close();
+    await store.compact();
     await store.close();
 
     const put = (storeName: string, key: unknown, value: unknown) => ({ db: "ghostly", store: storeName, kind: "put", key, value });
@@ -541,6 +556,7 @@ describe("persistent IndexedDB", () => {
       s.messages.put({ linkId: "a", id: "2", timestamp: 2 });
     });
     first.close();
+    await store.compact();
     await store.close();
     // The snapshot is the state after these: s1 held the amount, then s9 took it; a message came and went.
     writeFileSync(join(dir, "journal.bin"), journalOf(
@@ -564,6 +580,7 @@ describe("persistent IndexedDB", () => {
       });
     }
     first.close();
+    await store.compact();
     await store.close();
     // The same start twice: a journal that touches a store with no index, then one that touches the messages. The
     // indexes of every message were built again for the second, once each: about as long as the start itself.
@@ -585,4 +602,243 @@ describe("persistent IndexedDB", () => {
     expect(((await read(d.transaction("messages").objectStore("messages").index("byLink").get("chat-1"))) as { text: string }).text).toBe("edited");
     expect(touched).toBeLessThan(plain * 1.25 + 30);
   }, 120_000);
+  /** The profile's folder as a kill leaves it: what is on disk now, with the store still open. */
+  const killed = (dir: string) => { const copy = folder(); cpSync(dir, copy, { recursive: true }); return copy; };
+  /** The journal's entries, each a list of ops. */
+  function entriesOf(dir: string): { db: string; store: string; kind: string }[][] {
+    const journal = readFileSync(join(dir, "journal.bin")), entries = [];
+    for (let at = 0; at < journal.length; at += 4 + journal.readUInt32BE(at)) entries.push(deserialize(journal.subarray(at + 4, at + 4 + journal.readUInt32BE(at))));
+    return entries;
+  }
+  const count = (d: IDBDatabase, index = "byLink") => read(d.transaction("messages").objectStore("messages").index(index).count());
+
+  it("leaves a short journal at close and at the next start: the snapshot is not written again for a few rows", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    const d = await db(first.factory);
+    await first.flush();
+    const snapshot = () => statSync(join(dir, "snapshot.bin")).mtimeMs;
+    const written = snapshot();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    // A relaxed entry waits for a sync: the close brings it, one sync for the entry and the mark.
+    const relaxed = d.transaction("settings", "readwrite", { durability: "relaxed" });
+    relaxed.objectStore("settings").put("seen", "m1");
+    await new Promise<void>((resolve) => { relaxed.oncomplete = () => resolve(); });
+    const before = syncs.count;
+    await first.close();
+    expect(syncs.count - before).toBe(1);
+    expect(snapshot()).toBe(written);
+    expect(first.journalBytes()).toBeGreaterThan(0);
+    expect(statSync(join(dir, "journal.bin")).mode & 0o777).toBe(0o600);
+    // The mark names a database no profile has: a version that knows nothing of it finds no store for it, and skips it.
+    expect(entriesOf(dir).at(-1)).toEqual([{ db: "__ghostly_closed__", store: "", kind: "clear" }]);
+
+    const second = await openPersistentIndexedDb(dir);
+    expect(second.recovered).toBe(false);
+    expect(snapshot()).toBe(written);
+    const again = await db(second.factory);
+    expect(await count(again)).toBe(1);
+    expect(await read(again.transaction("settings").objectStore("settings").get("m1"))).toBe("seen");
+    await tx(again, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "2" }); s.messages.delete(["a", "1"]); });
+    await second.close();
+    expect(snapshot()).toBe(written);
+
+    const third = await openPersistentIndexedDb(dir);
+    opened.push(third);
+    expect(third.recovered).toBe(false);
+    expect(await read((await db(third.factory)).transaction("messages").objectStore("messages").index("byLink").getAllKeys())).toEqual([["a", "2"]]);
+  });
+
+  it("writes nothing at close when nothing was written since the journal's mark", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    await tx(await db(first.factory), ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    await first.close();
+    const journal = readFileSync(join(dir, "journal.bin"));
+
+    const second = await openPersistentIndexedDb(dir);
+    expect(await count(await db(second.factory))).toBe(1);
+    const before = syncs.count;
+    await second.close();
+    expect(syncs.count - before).toBe(0);
+    expect(readFileSync(join(dir, "journal.bin")).equals(journal)).toBe(true);
+    // Nor with no journal at all: a store that was folded and only read.
+    const third = await openPersistentIndexedDb(dir);
+    await third.compact();
+    await third.close();
+    const fourth = await openPersistentIndexedDb(dir);
+    expect(fourth.recovered).toBe(false);
+    const folded = syncs.count;
+    await fourth.close();
+    expect(syncs.count - folded).toBe(0);
+    expect(fourth.journalBytes()).toBe(0);
+  });
+
+  it("says a store was not closed when its journal has no mark at its end, until the next close", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    opened.push(first);
+    const d = await db(first.factory);
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    // Killed after its first write, with the journal never closed.
+    const afterOne = killed(dir);
+    await first.close();
+    const reopened = await openPersistentIndexedDb(dir);
+    opened.push(reopened);
+    await tx(await db(reopened.factory), ["messages"], (s) => { s.messages.put({ linkId: "a", id: "2" }); });
+    // Killed after a write that came behind an older close mark: the mark is not the journal's end any more.
+    const afterMark = killed(dir);
+
+    for (const [copy, rows] of [[afterOne, 1], [afterMark, 2]] as const) {
+      const written = statSync(join(copy, "snapshot.bin")).mtimeMs;
+      const second = await openPersistentIndexedDb(copy);
+      expect(second.recovered).toBe(true);
+      expect(await count(await db(second.factory))).toBe(rows);
+      // Whole and short: the journal stays, and this close marks it.
+      expect(statSync(join(copy, "snapshot.bin")).mtimeMs).toBe(written);
+      expect(second.journalBytes()).toBeGreaterThan(0);
+      await second.close();
+      const third = await openPersistentIndexedDb(copy);
+      expect(third.recovered).toBe(false);
+      expect(await count(await db(third.factory))).toBe(rows);
+      await third.close();
+    }
+  });
+
+  it("folds a journal cut short before anything is appended to it: what is written after a torn entry is read back", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    await tx(await db(first.factory), ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    await first.close();
+    // Killed while it wrote an entry, and killed while it wrote the close mark itself.
+    const tornEntry = killed(dir), tornMark = killed(dir);
+    const header = Buffer.alloc(4); header.writeUInt32BE(1000);
+    appendFileSync(join(tornEntry, "journal.bin"), Buffer.concat([header, Buffer.from("partial")]));
+    truncateSync(join(tornMark, "journal.bin"), statSync(join(tornMark, "journal.bin")).size - 3);
+
+    for (const copy of [tornEntry, tornMark]) {
+      const second = await openPersistentIndexedDb(copy);
+      opened.push(second);
+      expect(second.recovered).toBe(true);
+      expect(second.journalBytes()).toBe(0);
+      await tx(await db(second.factory), ["messages"], (s) => { s.messages.put({ linkId: "a", id: "2" }); });
+      // Killed again: the new entry is the first thing in its journal, not something behind torn bytes.
+      const third = await openPersistentIndexedDb(killed(copy));
+      expect(third.recovered).toBe(true);
+      expect(await count(await db(third.factory))).toBe(2);
+      await third.close();
+    }
+  });
+
+  it("folds a journal past a megabyte, at close and at a start that finds one", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    opened.push(first);
+    const d = await db(first.factory);
+    for (let i = 0; i < 6; i++) await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: `m${i}`, text: "x".repeat(200_000) }); });
+    expect(first.journalBytes()).toBeGreaterThan(1024 * 1024);
+    const long = killed(dir);
+    await first.close();
+    expect(first.journalBytes()).toBe(0);
+
+    const second = await openPersistentIndexedDb(long);
+    expect(second.recovered).toBe(true);
+    expect(second.journalBytes()).toBe(0);
+    expect(await count(await db(second.factory))).toBe(6);
+    await second.close();
+    for (const folderOf of [dir, long]) {
+      const third = await openPersistentIndexedDb(folderOf);
+      expect(third.recovered).toBe(false);
+      expect(await count(await db(third.factory))).toBe(6);
+      await third.close();
+    }
+  });
+  it("does not replay a journal over a snapshot that holds it already: one that names another snapshot is left out", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    await tx(await db(first.factory), ["settings"], (s) => { s.settings.put("v1", "kept"); s.settings.put("v1", "spent"); });
+    await first.close();
+    const journal = readFileSync(join(dir, "journal.bin"));
+    // The next process rewrites one row and removes the other (as an upgrade does), and folds.
+    const second = await openPersistentIndexedDb(dir);
+    await tx(await db(second.factory), ["settings"], (s) => { s.settings.put("v2", "kept"); s.settings.delete("spent"); });
+    await second.compact();
+    await second.close();
+    // Killed between the snapshot's rename and the journal's unlink: the new snapshot, with the journal it folded.
+    writeFileSync(join(dir, "journal.bin"), journal);
+
+    const third = await openPersistentIndexedDb(dir);
+    expect(third.recovered).toBe(true);
+    expect(third.journalBytes()).toBe(0);
+    const settings = (await db(third.factory)).transaction("settings").objectStore("settings");
+    expect(await read(settings.get("kept"))).toBe("v2");
+    expect(await read(settings.get("spent"))).toBeUndefined();
+    await third.close();
+    const fourth = await openPersistentIndexedDb(dir);
+    expect(fourth.recovered).toBe(false);
+    await fourth.close();
+  });
+
+  it("folds a journal that names no snapshot (an older version's), and keeps the next one", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    (await db(first.factory)).close();
+    await first.close();
+    writeFileSync(join(dir, "journal.bin"), journalOf([{ db: "ghostly", store: "settings", kind: "put", key: "name", value: "Alice" }]));
+    const second = await openPersistentIndexedDb(dir);
+    expect(second.recovered).toBe(true);
+    expect(second.journalBytes()).toBe(0);
+    const d = await db(second.factory);
+    expect(await read(d.transaction("settings").objectStore("settings").get("name"))).toBe("Alice");
+    await tx(d, ["settings"], (s) => { s.settings.put("Bob", "name"); });
+    await second.close();
+    expect(entriesOf(dir)[0]).toMatchObject([{ db: "__ghostly_journal__", kind: "clear" }]);
+    const written = statSync(join(dir, "snapshot.bin")).mtimeMs;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const third = await openPersistentIndexedDb(dir);
+    expect(statSync(join(dir, "snapshot.bin")).mtimeMs).toBe(written);
+    expect(await read((await db(third.factory)).transaction("settings").objectStore("settings").get("name"))).toBe("Bob");
+    await third.close();
+  });
+
+  it("writes the whole store at close after a write that failed: what is held reaches the disk", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const dir = folder();
+      const first = await openPersistentIndexedDb(dir);
+      // The snapshot of a new database's stores cannot be written (a full disk): rows for stores no snapshot has.
+      faults.rename = true;
+      const d = await db(first.factory);
+      await first.flush();
+      faults.rename = false;
+      expect(stderr.mock.calls.join("")).toContain("storage write failed");
+      await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); s.messages.put({ linkId: "a", id: "2" }); });
+      await first.close();
+      expect(first.journalBytes()).toBe(0);
+      const second = await openPersistentIndexedDb(dir);
+      expect(await count(await db(second.factory))).toBe(2);
+      // And a fold someone asked for says that it failed: a backup does not copy an older snapshot as if it were whole.
+      faults.rename = true;
+      await expect(second.compact()).rejects.toThrow("ENOSPC");
+      faults.rename = false;
+      await second.close();
+    } finally { faults.rename = false; stderr.mockRestore(); }
+  });
+
+  it("writes a journal entry whole when the disk takes it in parts: the entries behind it are read back", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    opened.push(first);
+    const d = await db(first.factory);
+    await first.flush();
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    faults.short = true;
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "2" }); });
+    expect(faults.short).toBe(false);
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "3" }); });
+    const second = await openPersistentIndexedDb(killed(dir));
+    expect(await count(await db(second.factory))).toBe(3);
+    await second.close();
+  });
 });
