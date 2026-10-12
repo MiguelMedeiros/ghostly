@@ -44,7 +44,7 @@ describe("a private group's record is written once for the messages that come to
     await pause(GROUP_LIMITS.saveWithinMs + 200);
     expect(seen.count).toBeLessThan(20);
     const stored = (await carol.store.getGroups()).find(g => g.id === id)!;
-    expect(stored.state!.relay).toHaveLength(60);
+    expect(Object.values(stored.state!.seen).map(epochs => Math.max(...Object.values(epochs).map(e => e.high))).sort()).toEqual([29, 29]);
   });
 
   it("an app that quits right after the messages has them in its record, and takes none again", async () => {
@@ -55,7 +55,7 @@ describe("a private group's record is written once for the messages that come to
     expect(world.texts(bob, id).filter(t => t.startsWith("line "))).toHaveLength(5);
     await world.restart(bob);
     const stored = (await bob.store.getGroups()).find(g => g.id === id)!;
-    expect(stored.state!.relay).toHaveLength(5);
+    expect(Object.values(stored.state!.seen).map(epochs => Math.max(...Object.values(epochs).map(e => e.high)))).toEqual([4]);
     await world.run(5_000);
     expect(world.texts(bob, id).filter(t => t.startsWith("line "))).toHaveLength(5);
   });

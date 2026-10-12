@@ -231,6 +231,7 @@ export class CommunityWorld {
       },
       storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
       forgetFrame: async (linkId, id) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) delete row.frame; },
+      keepFrame: async (linkId, id, frame) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) row.frame = frame; },
       emit: () => {},
       myNick: () => peer.nick,
       staysOnline: () => !!peer.staysOnline,
