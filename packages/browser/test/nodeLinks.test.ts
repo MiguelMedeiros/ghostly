@@ -814,6 +814,36 @@ describe("files sent to a contact", () => {
     expect(link.sendFile).not.toHaveBeenCalled();
   });
 
+  it("a session that opens sends what waited for it by reading those messages, not the chat's whole history", async () => {
+    const chat = row();
+    await db.putLink(chat);
+    const request = (n: number) => ({ linkId: chat.id, id: `me_${n}`, text: `⚡ Requested ${n} sats`, sender: "me" as const, timestamp: n, via: "datalink" as const,
+      paymentId: `p${n}`, delivery: "waiting" as const, deliveryError: "Sent when you are live." });
+    // One that waited when the app started, two written in this run (one of them deleted since).
+    await db.addMessage(request(3));
+    const { node, events: pages, linkOf } = await started();
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign(pages, { onMessageChanges: vi.fn() });
+    await node["storeMessage"](request(4));
+    await node["storeMessage"](request(5));
+    await db.deleteMessage(chat.id, "me_5");
+    Object.assign(linkOf(chat.id), { supportsPayments: true });
+    const history = vi.spyOn(db, "getMessages"), rows = vi.spyOn(db, "getMessage");
+    await node["sendWaiting"](chat.id);
+    expect(history).not.toHaveBeenCalled();
+    expect(rows).toHaveBeenCalledWith(chat.id, "me_5");
+    for (const id of ["me_3", "me_4"]) {
+      const sent = (await db.getMessage(chat.id, id))!;
+      expect(sent.delivery, id).toBeUndefined();
+      expect(sent.details?.sentAt, id).toBeTypeOf("number");
+    }
+    // Gone: the next session has nothing to look for.
+    rows.mockClear();
+    await node["sendWaiting"](chat.id);
+    expect(history).not.toHaveBeenCalled();
+    expect(rows).not.toHaveBeenCalled();
+  });
+
   it("fails visibly when offline, for an id not of this chat, a peer without files, or bytes that are gone", async () => {
     const chat = row(), away = row();
     const { node, linkOf } = await started(chat, away);
