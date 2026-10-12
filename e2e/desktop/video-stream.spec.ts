@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { makeBigVideo } from "../support/bigVideo";
@@ -61,6 +61,39 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
     // way the seek read past 80 MB.
     if (!loopback) expect(Math.max(...served.map((request) => request.body))).toBeLessThanOrEqual(MAX_BODY);
     expect(served.some((request) => request.status === 206 && Number(/^bytes=(\d+)/.exec(request.range)?.[1] ?? 0) > 80 * 1024 * 1024)).toBe(true);
+  } finally {
+    await removeFromApp(app, PLACE);
+    await stop();
+    await new Promise((done) => (server ? server.close(done) : done(null)));
+    home.remove();
+    rmSync(DIR, { recursive: true, force: true });
+  }
+});
+
+// WebKitGTK copies a file it plays over HTTP whole into /var/tmp, even paused, and again on each play. A file that would
+// not fit there with 500 MiB to spare is not served: the app offers to save it (`file_bytes_stream_open` in
+// apps/desktop/src/file_stream.rs). GHOSTLY_STREAM_TMP_FREE stands in for the disk's free space: one byte short.
+test("on Linux a file /var/tmp has no room to copy as it plays is refused, to be saved instead", { tag: ["@feature:files.video.stream"] }, async () => {
+  test.skip(process.platform !== "linux" || DRIVEN, "only Linux's WebKitGTK copies a played file to /var/tmp");
+  mkdirSync(DIR, { recursive: true });
+  const home = desktopHome("stream-room");
+  const size = 4 * 1024 * 1024;
+  const path = `${DIR}/room.bin`;
+  writeFileSync(path, Buffer.alloc(size, 7));
+  const { app, stop } = await openDesktop({ home: home.dir, env: { GHOSTLY_STREAM_TMP_FREE: String(size + 500 * 1024 * 1024 - 1) } });
+  let server: Server | null = null;
+  try {
+    await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
+    const piecesPort = await freePort();
+    server = await servePieces(path, piecesPort);
+    await storeInApp(app, piecesPort, size, PLACE);
+    const opened = await app.executeAsync<{ url?: string; error?: string }>(
+      `const [space, id, done] = arguments;
+       window.__TAURI_INTERNALS__.invoke("file_bytes_stream_open", { space, id, mime: "video/mp4" })
+         .then(({ url }) => done({ url }), (e) => done({ error: String(e && e.message || e) }));`,
+      PLACE.space, PLACE.id,
+    );
+    expect(opened).toEqual({ error: "no_room_to_play" });
   } finally {
     await removeFromApp(app, PLACE);
     await stop();
