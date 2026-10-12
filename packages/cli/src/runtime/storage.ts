@@ -33,7 +33,7 @@ interface RawIndex {
 }
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
 interface RawRecordStore {
-  values(): Iterable<RawRecord>; clear(): unknown;
+  values(range?: IDBKeyRange): Iterable<RawRecord>; clear(): unknown;
   get(key: Key): RawRecord | undefined;
   put(record: RawRecord, noOverwrite?: boolean): RawRecord | undefined;
   delete(key: Key): RawRecord[];
@@ -114,7 +114,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
   const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
   if (snapshotFound) restore(classes, raw._databases, deserialize(readFileSync(snapshotPath)) as Snapshot, keyOrder((a, b) => factory.cmp(a, b)));
-  if (journalFound) replay(raw._databases, readFileSync(journalPath));
+  if (journalFound) replay(classes, raw._databases, readFileSync(journalPath), keyOrder((a, b) => factory.cmp(a, b)));
   restoring = false;
   if (journalFound || !snapshotFound) await writeSnapshot();
 
@@ -337,18 +337,23 @@ function dropIndexEntriesByRecord(classes: RawClasses, cmp: (a: Key, b: Key) => 
     let index: RawIndex | undefined;
     if (gone) for (const candidate of gone.indexes.values()) if (candidate.records === this) index = candidate;
     if (!gone || !index) return deleteByValue.call(this, key);
-    const dropped: RawRecord[] = [];
-    for (const entry of indexEntries(index, gone.records, cmp)) {
-      // A unique index finds an entry by its key alone: it may be another record's (a put the index refused).
-      if (this.keysAreUnique) {
-        const held = this.get(entry.key);
-        if (!held || cmp(held.value, entry.value) !== 0) continue;
-      }
-      this.records.delete(entry);
-      dropped.push(entry);
-    }
-    return dropped;
+    return dropEntries(index, gone.records, cmp);
   };
+}
+
+/** Drops from an index the entries of records that left its store, and gives back the ones it dropped. */
+function dropEntries(index: RawIndex, records: RawRecord[], cmp: (a: Key, b: Key) => number): RawRecord[] {
+  const dropped: RawRecord[] = [];
+  for (const entry of indexEntries(index, records, cmp)) {
+    // A unique index finds an entry by its key alone: it may be another record's (a put the index refused).
+    if (index.records.keysAreUnique) {
+      const held = index.records.get(entry.key);
+      if (!held || cmp(held.value, entry.value) !== 0) continue;
+    }
+    index.records.records.delete(entry);
+    dropped.push(entry);
+  }
+  return dropped;
 }
 
 /**
@@ -459,28 +464,40 @@ function fill(store: RawRecordStore, sorted: RawRecord[]) {
   store.records._numTombstones = 0;
 }
 
+/** What a journal's replay changed in a store: its indexes, set aside, and each row it touched as it was before (`null`: all of them). */
+interface Touched { indexes: Map<string, RawIndex>; before: RawRecordStore | null }
+
 /**
  * Replays whole entries; a torn last entry (the process died mid-write) was never acknowledged and is dropped.
  *
- * A store's indexes are set aside while its ops replay and rebuilt once at the end: fake-indexeddb drops an
+ * A store's indexes are set aside while its ops replay and brought in step once at the end: fake-indexeddb drops an
  * overwritten or deleted record from an index by walking every record of it, so a crash after a busy chat took
- * tens of seconds to minutes to start, one write at a time against the whole profile.
+ * tens of seconds to minutes to start, one write at a time against the whole profile. Only the rows the journal
+ * touched change in an index (what each was before goes, what it is now comes in): a journal of one message costs one
+ * message, not the profile's history once per index. A store the journal cleared has its indexes built again whole.
  */
-function replay(databases: Map<string, RawDatabase>, journal: Buffer) {
-  const touched = new Map<RawStore, Map<string, RawIndex>>();
-  try { replayEntries(databases, journal, touched); } finally {
-    for (const [store, indexes] of touched) {
+function replay(classes: RawClasses, databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: Key, b: Key) => number) {
+  const touched = new Map<RawStore, Touched>();
+  try { replayEntries(classes, databases, journal, touched); } finally {
+    for (const [store, { indexes, before }] of touched) {
       store.rawIndexes = indexes;
+      const was: RawRecord[] = [], now: RawRecord[] = [];
+      for (const row of before?.values() ?? []) {
+        if (row.value) was.push(row.value as RawRecord);
+        const held = store.records.get(row.key);
+        if (held) now.push(held);
+      }
       for (const index of indexes.values()) {
-        index.records.clear();
+        if (!before) index.records.clear();
         if (!index.initialized) continue;
-        for (const record of store.records.values()) index.storeRecord(record);
+        dropEntries(index, was, cmp);
+        for (const record of before ? now : store.records.values()) if (!absent(index.keyPath, record.value)) index.storeRecord(record);
       }
     }
   }
 }
 
-function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Map<string, RawIndex>>) {
+function replayEntries(classes: RawClasses, databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Touched>) {
   let offset = 0;
   while (offset + 4 <= journal.length) {
     const length = journal.readUInt32BE(offset);
@@ -491,10 +508,25 @@ function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, tou
     for (const op of ops) {
       const store = databases.get(op.db)?.rawObjectStores.get(op.store);
       if (!store) continue;
-      if (!touched.has(store)) { touched.set(store, store.rawIndexes); store.rawIndexes = new Map(); }
-      if (op.kind === "put") store.storeRecord({ key: op.key, value: blobsFromDisk(op.value) }, false);
-      else if (op.kind === "delete") store.deleteRecord(keyFromDisk(op.key));
-      else store.clear();
+      let change = touched.get(store);
+      if (!change) {
+        touched.set(store, (change = { indexes: store.rawIndexes, before: store.rawIndexes.size ? new classes.RecordStore(true) : null }));
+        store.rawIndexes = new Map();
+      }
+      const before = change.before;
+      // The first time a row is touched, it is as the snapshot (and the indexes) had it.
+      const note = (key: Key, record: RawRecord | undefined) => { if (before && !before.get(key)) before.put({ key, value: record }); };
+      if (op.kind === "put") {
+        note(op.key, store.records.get(op.key));
+        store.storeRecord({ key: op.key, value: blobsFromDisk(op.value) }, false);
+      } else if (op.kind === "delete") {
+        const key = keyFromDisk(op.key);
+        if (before) for (const record of store.records.values(key instanceof IDBKeyRange ? key : IDBKeyRange.only(key))) note(record.key, record);
+        store.deleteRecord(key);
+      } else {
+        change.before = null;
+        store.clear();
+      }
     }
   }
 }
