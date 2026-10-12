@@ -722,13 +722,14 @@ export class GroupFileDesk {
 
   /**
    * Says on an edge which files this device holds, as many frames as the edge takes now (`haveFrames` in
-   * `haveWindowMs`); the ids past that wait for the next tick with room.
+   * `haveWindowMs`); the ids past that, and those of a frame that could not go, wait for the next tick with room.
    */
   private sendHave(edge: Edge, ids: string[]): void {
+    for (const id of ids) edge.have.add(id);
     for (let i = 0; i < ids.length; i += GROUP_FILE_LIMITS.haveIds) {
       const frame = ids.slice(i, i + GROUP_FILE_LIMITS.haveIds);
-      if (!edge.haveSent.take()) return;
-      if (!this.deps.send(edge.linkId, { t: GROUP_HAVE_FRAME, g: edge.groupId, ids: frame })) return;
+      if (edge.haveSent.wait() || !this.deps.send(edge.linkId, { t: GROUP_HAVE_FRAME, g: edge.groupId, ids: frame })) return;
+      edge.haveSent.take();
       for (const id of frame) edge.have.delete(id);
     }
   }
