@@ -12,6 +12,7 @@
     "inviterAway": "{{contact}} 尚未连接。请稍后重试。",
     "inviterAwayUnknown": "邀请你的联系人尚未连接。请稍后重试。",
     "letting": "有成员正在让你加入…",
+    "unanswered": "邀请人的应用没有回应。请再次接受，或拒绝。",
     "waitingAdmin": "正在等待管理员的应用…",
     "waitingIn": "等待被允许加入…"
   },

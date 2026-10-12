@@ -417,7 +417,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   };
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
   const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
-      : invitation.accepted ? t("group.chat.joining") : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members: members(invitation.members) }) : t("sidebar.group.invitedByUnknown", { members: members(invitation.members) }))
+      : invitation.unanswered ? t("sidebar.group.unanswered") : invitation.accepted ? t("group.chat.joining") : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members: members(invitation.members) }) : t("sidebar.group.invitedByUnknown", { members: members(invitation.members) }))
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
@@ -446,7 +446,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
             <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label={t("sidebar.unread")} role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
           </span>}
         />
-        {invitation && !invitation.accepted && <div className="mt-1.5 flex gap-2">
+        {invitation && (!invitation.accepted || invitation.unanswered) && <div className="mt-1.5 flex gap-2">
           <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("chat.file.accept")}</button>
           <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }} className="rounded-lg px-3 py-1 text-xs text-text-secondary hover:bg-surface-hover disabled:opacity-40">{t("chat.file.decline")}</button>
         </div>}
