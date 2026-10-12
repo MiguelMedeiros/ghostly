@@ -102,6 +102,13 @@ export const SIGNALING_ALLOWANCE_SHARE = 1 / 5;
  * groups'. A private group's admin that had just let members in and seen them restart had spent its minute in 30 s;
  * a member back then, with no other member online to carry its offer, had it read only when the minute freed: 18 to
  * 42 s later, one round in four of the member-back runs (2026-10-03).
+ *
+ * It is also theirs whatever the chats do: while the edges' signaling has had fewer than that many requests on a relay
+ * in the last minute, neither the limit, nor the chats' own allowance past it, nor their reserve (`CHAT_RESERVE`) holds
+ * it back. Its reads leave the last of it to a write there too. A daemon with 30 chats and 5 groups, back after a
+ * restart, had its chats signal for 332 s: they kept their reserve, their allowance took what the limit left, and the
+ * edges got nothing. By then their attempts had failed and backed off, and the group members were reachable again 13
+ * to 25 min after the restart (CLI bug hunt, 2026-10-08).
  */
 export const GROUP_SIGNALING_ALLOWANCE_SHARE = 2 / 15;
 /** Past the limit, a group's reads within its allowance go no more often than this on a relay. */
@@ -275,6 +282,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentWatch = new Map<string, number[]>();
   /** Groups' reads past the limit on each relay in the last `GROUP_OVER_PACE_MS` (`GROUP_SIGNALING_ALLOWANCE_SHARE`). */
   private readonly spentGroupOver = new Map<string, number[]>();
+  /** Group edges' signaling requests on each relay in the last minute: their floor (`GROUP_SIGNALING_ALLOWANCE_SHARE`). */
+  private readonly spentGroupSignal = new Map<string, number[]>();
   /**
    * Per key a group reads (not in the background), when a read of it last went out and when it last asked: whose turn
    * it is under the watch share (`WATCH_SHARE`) and while the groups' reads are rationed (`GROUP_RATION_WINDOW_MS`).
@@ -870,6 +879,7 @@ export class RelayTransport implements PkarrTransport {
     }
     if (writer) this.writeWaiting.delete(`${writer} ${relay}`);
     if (isGroupSignal(who) && !who.write && this.spent.get(relay)!.length >= this.limitOf(relay)) this.spentGroupOver.get(relay)!.push(now);
+    if (isGroupSignal(who)) this.spentGroupSignal.get(relay)!.push(now);
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
     if (isGroupUrgentRead(who)) this.spentGroupUrgent.get(relay)!.push(now);
@@ -901,7 +911,11 @@ export class RelayTransport implements PkarrTransport {
     // A group edge's, for a member that may be back, by a smaller one, its reads one at a time past the limit.
     const share = isChatSignal(who) ? SIGNALING_ALLOWANCE_SHARE : isGroupSignal(who) ? GROUP_SIGNALING_ALLOWANCE_SHARE : 0;
     const allowance = share ? Math.max(0, Math.floor(limit * share) - (who.write ? 0 : 1)) : 0;
-    let wait = over(recent, limit + allowance);
+    // The edges' signaling has its allowance whatever the chats spend: the limit and the chats' reserve wait for it.
+    const groupSignaled = (this.spentGroupSignal.get(relay) ?? []).filter((at) => now - at < 60_000);
+    this.spentGroupSignal.set(relay, groupSignaled);
+    const groupFloor = isGroupSignal(who) && groupSignaled.length < allowance;
+    let wait = groupFloor ? 0 : over(recent, limit + allowance);
     const groupOver = (this.spentGroupOver.get(relay) ?? []).filter((at) => now - at < GROUP_OVER_PACE_MS);
     this.spentGroupOver.set(relay, groupOver);
     if (isGroupSignal(who) && !who.write && recent.length >= limit && groupOver.length > 0) wait = Math.max(wait, groupOver[groupOver.length - 1] + GROUP_OVER_PACE_MS - now);
@@ -937,7 +951,7 @@ export class RelayTransport implements PkarrTransport {
       if (rationed.length >= most) wait = Math.max(wait, rationed[rationed.length - most] + GROUP_RATION_WINDOW_MS - now);
       if (this.readsAhead(key, now) > 0) wait = Math.max(wait, TURN_WAIT_MS);
     }
-    if (who.group) {
+    if (who.group && !groupFloor) {
       const reserved = this.chatReservedFor(relay, now);
       if (reserved > 0) wait = Math.max(wait, Math.min(reserved, over(recent, limit - this.reserveOf(relay))));
     }
