@@ -475,6 +475,9 @@ export class Groups {
     }
   }
 
+  /** Writes what the private groups' sessions still have to save (`GROUP_LIMITS.saveWithinMs`): the app is stopping. */
+  async flush(): Promise<void> { await Promise.allSettled([...this.sessions.values()].map(session => session.flush())); }
+
   /** `asItIs`: a copy that must stay as it was stored (limited mode, WISP 06), so nothing left over is cleared from it. */
   async load(asItIs = false): Promise<void> {
     const all = await this.store.getGroups();
@@ -2014,7 +2017,8 @@ export class Groups {
       adminTurn: () => this.host.adminTurn?.(state.id) ?? Promise.resolve(true),
       save: async next => {
         const group = this.stored.get(state.id);
-        if (!group) return;
+        // A save that was due when the group was forgotten (`GROUP_LIMITS.saveWithinMs`) is not one of the group joined again.
+        if (!group || this.sessions.get(state.id) !== session) return;
         group.state = next;
         await this.store.putGroup(group);
       },
