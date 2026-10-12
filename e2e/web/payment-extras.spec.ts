@@ -47,7 +47,12 @@ async function prepareSend(p: Peer, sats: number, memo?: string) {
   if (memo) await composer.getByPlaceholder("What for? (optional)").fill(memo);
   await p.page.getByTestId("payment-send").click();
   const review = composer.getByTestId("payment-review");
-  await expect(review).toBeVisible();
+  // A review that never comes says what the sheet shows in its place (an error, Send still preparing, no sheet at all):
+  // the round's log is all that is kept of a failure.
+  await expect(review).toBeVisible().catch(async (error: Error) => {
+    const shown = await composer.innerText({ timeout: 2_000 }).catch(() => "no payment sheet on the page");
+    throw new Error(`${error.message}\n\nIn place of the review, ${p.name}'s payment sheet shows: ${shown.replace(/\s+/g, " ").trim()}`, { cause: error });
+  });
   return review;
 }
 
