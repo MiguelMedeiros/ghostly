@@ -4,6 +4,115 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.2.3
+
+### Security
+
+- Devices: after you change your lock password, your other devices no longer accept the old one for "My other device is lost or broken". A device that last had the profile before the change says the password was changed; choose Use here on it, with the new password. Adding a device with your current password no longer changes anything for the devices you already have.
+- Chats: the Iroh and HyperDHT addresses a contact's app gives during a session now pass the same checks as the ones in its published record before Ghostly keeps or dials them (a well-formed key, an https or wss relay, a bounded list). An address that does not is ignored.
+- Web app: every address of app.ghostly.tools, not only its pages, cuts the link to a site that opened it in a new window, so that site can no longer send the window somewhere else later.
+- Desktop: the Ghostly window stays on the app's own pages. A file or a link dropped on it, or anything else, can no longer load another page in its place under Ghostly's name.
+
+### Fixed
+
+**Groups**
+
+- A group member's connection whose answers WebRTC refused several times in a row (a race in the WebRTC library on a busy machine) is tried again after a few seconds, then over Iroh or HyperDHT, instead of waiting three minutes. Before, a member let in to a group could wait from 30 s to several minutes before it reached another member. Seen between headless Ghostly on CI.
+- Someone removed from a community who opens its link to get back in is still listed with the group as they kept it (who was in it, its status) while they wait to be let in, and `ghostly group decline` then stops asking and keeps the group and its history. Before, the group was listed as a bare invitation while waiting, and the only ways to stop were to leave or delete it, which removed the history.
+- Removed from a community and waiting to be let in again through its link, you still read the history you kept: the wait is a line above it ("Waiting to be let in"), and Cancel joining there only stops asking. Before, a join card covered the history for as long as nobody answered, and Cancel joining deleted the group and its history from the device without asking.
+- Back in a private group twice within a minute (a phone that slept, woke and slept again), you read what one of the members wrote meanwhile in its place among the others' messages. Their messages could come in on their own, out of turn.
+- Back in a private group after a while, you read what the others wrote meanwhile in the order they wrote it, the newest message last. With several members writing, each member's messages came in on their own and out of turn, and the newest ones sat above older ones, out of sight on a phone until you scrolled up.
+- Declining a group invitation while the person who invited you has Ghostly closed now reaches them when they are back. Before, the answer was lost: in their Members list you stayed "Invited…" for good, they could not invite you again, and you held one of the group's 32 places.
+- A member of a private group who was away while someone edited many messages (a bot closing dozens of task cards) now gets every one of those edits when it is back, not only that member's latest sixteen: cards that were closed no longer stay as running on its Tasks board.
+- A member of a community who was away while someone edited more than thirty messages (a bot closing dozens of task cards) now gets every one of those edits when it is back: the ones past thirty in ten seconds wait a moment instead of being dropped, so closed cards no longer stay as running on its Tasks board.
+- A member back from away gets every file a member sent to the group meanwhile. Past the first 30 from one member, the files showed as a line of text asking to update Ghostly, with no file and no Download. Now each one is a file with a Download.
+- In a group, messages of a member that never arrived and that nobody holds any more are asked of each connected member once, as meant: they were asked for again every time their author wrote something new, a minute apart, for as long as the group was busy.
+- "Delete from this device" on a group invitation now tells the person who invited you that you are not joining, as Decline does. Before, they were told nothing: you stayed "Invited…" in their Members list for good and held one of the group's 32 places.
+- An invitation to a private group accepted after the group was deleted, or after whoever sent it stopped being its admin, no longer says "Joining…" for good: the inviter's app answers that it cannot let you in, and the invitation goes from your list.
+- An invitation to a private group you accepted, whose inviter's app never answers, offers Accept and Decline again after a few minutes and says the app did not answer, instead of "Joining…" with nothing to tap.
+- An invitation to a private group goes from the invited person's list when whoever sent it deletes or leaves the group, or makes someone else its admin, instead of staying there with Accept and Decline that lead nowhere.
+- A contact you invited to a private group who has not answered in a week no longer stays "Invited…": the Invite button comes back, and the invitation stops holding one of the group's 32 places. Before, an invitation whose answer never reached you stayed pending for good.
+- Cancel or Escape on a group link's "Make a new link?" or "Turn the link off?" question puts the keyboard focus back on the button that asked (New link, Turn off). It fell to the page, so the next Tab started from the top.
+- On a phone the Members dialog's Share, Copy and Show QR for the group's link are a thumb's height (44 px), as New link and Turn off beside them already were. They were 24 to 28 px tall.
+- The open Members list of a large group or community no longer draws every member's row again each time anything changes in the app. A row is drawn again only when its own member changed (their name, their connection, their role). Before, with 256 members the whole list was drawn again on every change, up to 20 times a second.
+- A private group no longer writes its whole record to the device for every message received. Messages that arrive together (someone back in a busy group taking 250 of them, a lively conversation) are now one write a second at most: the record holds the last 256 messages kept for members who were away, 100 to 260 KiB each time, so a catch-up wrote tens of megabytes and held the CLI for seconds.
+- A group's member list no longer keeps "N missing" beside a member for messages nobody holds any more (a member keeps its own last 32 and the group's last 256): once every connected member was asked for them and none had them, they stop being counted. The count stayed until the group's members changed, as if those messages were still on their way.
+- Web app, extension and CLI: a group member reached over Iroh no longer waits for "a free connection on this device" once four others are. These apps now hold up to twelve Iroh connections for group members (four before, a limit that belongs to the Desktop app only), so in a group with five or more members that connect this way, every one is connected and none gets its messages late through the others.
+- Opening the app after some time away from a community no longer loses reactions. When one member had reacted more than 30 times meanwhile, only the first 30 were shown and the rest never appeared on that device, so people saw different reactions on the same messages. The rest now show a few seconds later.
+- An open group or community with many members and a long history no longer works its whole history over each time anything changes in the app (a message in another chat, a connection coming up). Before, every such change named every member again for every message: with 256 members and 12,000 messages the open page lost about 50 ms to it, up to 20 times a second.
+- An app with many live chats no longer spends the relays' requests that its groups need on keeping those chats up: with 30 live chats, people joining a group by its link waited from over a minute to nine minutes to get in.
+
+**Apps**
+
+- An app's newer version that a store of yours removed, or that its publisher revoked, is no longer downloaded again each time the Apps page opens. Ghostly reads its first 64 KiB to see which version it is and stops there.
+- An app can no longer keep far more on the device than the 5 MiB per chat it is allowed. Only the bytes of its keys and values were counted, not the roughly 140 bytes each key costs to keep, so an app that stored very many tiny values could take over 100 MiB in one chat before it was told its storage was full. Each key now counts 128 bytes more, which keeps what an app takes close to its 5 MiB. An app's data already on the device is kept as it is.
+
+**Chat**
+
+- Task cards: on a light theme, a blocked task's "Blocked" is written in a darker amber that can be read (4.5:1 or more, it was about 2:1), on its card in the chat, in the Tasks panel and on the Tasks board. The mark of a pull request whose checks are pending gets the same ink.
+- In Safari and the macOS and Linux apps, a chat kept open in the background (on a call, or with an app running in it) is where you left it when you come back to it, at its last message or on the message you were reading, instead of far up its history.
+- On Desktop and Android, opening a chat no longer reads every file in it that is not a picture (up to 64 MB each) into memory. Such a file shows its Save button from whether it is on the device, and none of its bytes are read until it is saved.
+- A message sent right after the app opens shows at once as sending, instead of seconds later once the app has read every chat's history.
+- With many saved chats, opening the app no longer spends its relay requests looking every few seconds for contacts who have been away for a long time. A message sent right after opening, and the app's own records, now go out in the first seconds instead of a minute later.
+- Ending a choice of messages to forward (Cancel, Escape, or the forward itself) from the keyboard or with a screen reader leaves the focus on the message field that comes back, or on the messages on a touch screen. It used to drop the focus to the page, and Tab started again from the top.
+- A chat that goes live no longer reads its whole history to find the files and payment requests that waited for it: they are known from the start of the app, then kept as they are written, and read one by one.
+- A screen reader says what a contact is doing ("typing…", a bot's status) and nothing more: it used to read out the contact's key each time they stopped typing, and in a group the member count each time someone stopped.
+- A bot's usage card, in its details: a window whose reset has passed says how long ago it reset ("reset 1 d ago"), muted. It said "resets 10:50 AM" of a time that was yesterday, and the card's own Resets row said "03:50 PM · now".
+
+**Calls**
+
+- A video call to a bot (a contact on the headless Ghostly) no longer uploads your camera. The bot shows no picture, but the app sent it the whole call, about 20 times the data of the voice; the same for a camera or a screen turned on during the call. You still see your own picture.
+- A call started with the keyboard keeps the focus. The whole-screen call takes it when it opens and Tab stays on the call's own buttons; it used to walk nine controls of the chat hidden behind the call first. When the call ends, the focus is back on the Audio call or Video call button that started it, instead of at the top of the page.
+- In a call with a contact on the command line (a bot, an agent) or on an older app, the call window now says "Reconnecting..." as soon as the connection is lost. It kept saying the call was connected, with the clock running, for about 30 seconds, and then the call just ended.
+- On a phone, the notices at the top of a chat during a call ("Waking Ana for the call…" with its Cancel, "No answer") are as wide as their words, up to the screen. They used to be squeezed into half the screen, on three or four short lines. In the app installed on an iPhone, these and the other notices at the top of the window (a blocked microphone, "Your phone paused the mic", a link that could not be used) now sit below the status bar instead of behind the clock.
+- The "Incoming call" notification now goes away when the call is answered, declined or given up by the caller (Linux, Android and the browser extension). Before, it stayed in the notification list and still said a call was coming in.
+- On a phone, the small call window's state line no longer runs under its corner button. In Portuguese "Chamada de áudio 00:05" started behind the button, which covered its first letter; the line now starts after the button, and when the window is too narrow for the words it keeps the clock.
+
+**CLI**
+
+- A call from or to the CLI on a network where the STUN server does not answer (UDP to it blocked, as in many offices and hotels) rings after 2 seconds and connects 2 seconds after the answer, not 5 and 5. `call start` returns that much sooner.
+- A `ghostly daemon` whose output nobody reads any more (the process that started it was killed, or the pipe it wrote to closed) no longer takes a full processor core and stops on SIGTERM again. It used to report each failed write with another write that failed, without end, and answered no command.
+- `ghostly listen --cursor <file>` whose folder does not exist, or cannot be written, is refused at once (`not_found`, exit 3, or `refused`, exit 1), before the profile is opened. Before, it started and ran: each event printed "event N failed: ENOENT" on stderr, the cursor was never written, and the next start skipped what came while it was down.
+- `ghostly listen` refuses words it does not take (`ghostly listen bob`, `ghostly listen message.received`) with "Too many arguments" and its usage, exit 2, as the other commands do. It started a listener of every chat's events.
+- `ghostly service enable`, `service remove`, `service share`, `identity remove`, `identity withdraw`, `identity cancel` and `message retry` answer `not_found` (exit 3) for a service, an identity proof, a draft or a message that does not exist, naming it and where to look (`No service "nope" (ghostly service list)`). Before, each answered as done with exit 0: a mistyped service id read `"shared": true` with a contact.
+- Without a daemon, `ghostly chat remove <chat> --yes` on a profile's only chat really removes it: it answered `{"removed":…}` and the chat, its keys and its whole history were still there for the next command. The same for `service add` on a profile with no chat, and for `chat rename`, `message delete` and the `service` commands while the relays cannot be reached: what a command answers is on disk before it leaves.
+- The CLI starts faster on a profile with a long history: it reads its record of the messages already reported in two requests instead of one step per message. With 100,000 stored messages that step took about 2 seconds of every `ghostly daemon` start, and of every command run without a daemon; it now takes about a tenth of that.
+
+**Everywhere**
+
+- A group's link in a chat no longer says "You are in this group." when you were removed from it. The card now says why you are out. For a community group it offers "Join again"; for a private group whose messages are still on the device it says to delete the group from the device first, since its link is refused until then. A group you left offers "Join group" again.
+- A profile with two devices opened with "Start anyway": what it cannot do yet (send or download a file, create or join a group, remove or move a device) says why in your language, and to check your connection. It was one English sentence in all eight.
+- On Linux, a file dragged from a file manager onto the Ghostly window no longer opens in place of the app. The window used to show the picture, the text or the folder's listing instead of your chats. A link dragged onto the app, from a browser for example, is left out the same way on every platform; dropped into a text field it is still its text.
+- Going Back to Ghostly after its window or tab showed another page starts the app again. The page that came back used to be the one that had left: it had said goodbye to your contacts, so no chat went live again and messages stopped arriving until the app was closed and opened.
+- Light theme: the warning lines outside the notices read at 4.5:1 or more instead of pale yellow at about 2:1. A public DID's "Public to everyone, forever", the wallets' test-coin, unconfirmed and fee lines, a full group's link note, the message size counter and an identity about to expire.
+
+**Desktop**
+
+- Linux: after the desktop's notification server restarts (mako, dunst, swaync, a reloaded shell), a click on another app's notification no longer brings Ghostly forward and opens one of its chats.
+- On Linux, a chat's new messages now share one notification, which goes away once you read the chat in the app. Before, each burst of messages added another one to the desktop's notification list, and they all stayed there after the chat was read.
+
+**Wallets**
+
+- With a long history of reviewed payments, the check that runs every 10 seconds for payments still on their way no longer reads every payment ever reviewed: it reads the ones whose outcome is still open, usually none. At 2,000 reviewed payments that was about 9 MiB read from the database every 10 seconds while the app sat idle.
+- A wallet card lists only its own network's payments: the Mainnet USDT card no longer shows the Testnet wallet's ("1,000 TEST-USDT · confirmed"), and the same for Ark, Bark, Spark and on-chain.
+
+**Website**
+
+- `ghostly.tools/apps` loads an app's page only when you point at, focus or touch its card. Before, every card on the screen asked the server for its page as the list opened, one request for each app. A click still opens the page at once.
+
+### For developers
+
+- Call signals: an offer or an answer may say `vr: 0`, "this side takes no picture". The other side's app then closes its half of the video lane and uploads no camera or screen on it. Older apps ignore the field (WISP 601, PROTOCOL §4.4).
+- A private group's message from another member is stored with the frame it came in (`StoredMessage.frame`, on the group's newest 256 rows at most), ready to be handed on to a member who was away. The engine keeps it to itself: histories, pages of them and changes reach a page or the CLI without it. No new store and no database version change.
+- The website's Docker image builds again: its build context now holds the four Markdown files outside `docs/` that a WISP links to (the CLI reference, the proofs and providers lists, the e2e guide). Since the check that refuses a link to a missing file, the image failed to build while CI, which has the whole repository, stayed green. A test now compares the WISPs' links with the image's context.
+
+**CLI**
+
+- A daemon (or a command run without one) that starts after a crash no longer builds the indexes of every stored row again for each store its last writes touched: it brings them in step for the rows those writes changed. With 60,000 stored messages, a start after a kill that had one message to recover spent about 5.5 s on that.
+- A daemon no longer waits for the disk each time it notes an event it reported. A text sent cost nine disk syncs, three of them for these notes, each holding every other chat, the socket API and `listen` for milliseconds; the notes now go to disk with the next write, or within a second. After a power cut, an event of the last second may be reported again.
+- A daemon waits for the disk once per text it sends, where it waited nine times, and once per text it receives, where it waited twice. Each wait holds every other chat, the socket API and `listen`: about 13 of the 15 ms of a `chat.send` on a fast disk, and 100 ms on a disk that takes 10 ms per sync. The message itself is still on disk before the send answers. Its `sent` and `delivered` marks and its details go with the next write, or within a second; after a power cut a mark of the last second is made again when the daemon starts, by sending the message once more under the same id.
+- A profile's store comes back from disk faster at each start of a daemon or of a command run without one: its keys are put in order directly, where each comparison went through a check and a copy of both keys. With 100,000 stored messages that is 0.85 s instead of 1.4 s.
+
 ## 1.2.2
 
 ### Fixed
