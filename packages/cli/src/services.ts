@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, node, num, state, str, type Method } from "./apiKit";
+import { bool, chatOf, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -179,6 +179,16 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
   }
 }
 
+/**
+ * The service a command names, by its id: one of this profile's. The engine changes nothing for an id it does not
+ * know and says nothing, so a mistyped id read as done ("shared": true, with a contact).
+ */
+function serviceOf(ctx: ApiContext, params: Params): string {
+  const serviceId = str(params, "service", true);
+  if (!state(ctx).services.some((s) => s.id === serviceId)) throw new CliError("not_found", `No service ${JSON.stringify(serviceId)} (ghostly service list)`);
+  return serviceId;
+}
+
 export const SERVICE_METHODS: Record<string, Method> = {
   async "service.list"(ctx) {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
@@ -191,18 +201,21 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return node(ctx).addService({ name: str(params, "name", true), target });
   },
   async "service.remove"(ctx, params) {
-    await node(ctx).removeService({ serviceId: str(params, "service", true) });
-    return { removed: str(params, "service", true) };
+    const serviceId = serviceOf(ctx, params);
+    await node(ctx).removeService({ serviceId });
+    return { removed: serviceId };
   },
   async "service.enable"(ctx, params) {
-    await node(ctx).setServiceEnabled({ serviceId: str(params, "service", true), enabled: !bool(params, "off") });
-    return { service: str(params, "service", true), enabled: !bool(params, "off") };
+    const serviceId = serviceOf(ctx, params);
+    await node(ctx).setServiceEnabled({ serviceId, enabled: !bool(params, "off") });
+    return { service: serviceId, enabled: !bool(params, "off") };
   },
   async "service.share"(ctx, params) {
     const link = chatOf(ctx, params);
     const shared = !bool(params, "off");
-    await node(ctx).setServiceShared({ serviceId: str(params, "service", true), peerPubKeyZ32: link.peerPubKeyZ32, shared });
-    return { service: str(params, "service", true), chat: link.id, shared };
+    const serviceId = serviceOf(ctx, params);
+    await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });
+    return { service: serviceId, chat: link.id, shared };
   },
   /** What a contact shares with this profile (while its app is live). */
   async "service.peer"(ctx, params) {
