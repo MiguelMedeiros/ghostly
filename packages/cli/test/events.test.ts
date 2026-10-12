@@ -187,6 +187,30 @@ describe("the event stream", () => {
     expect(second.h.replay(2)).toEqual([]);
   });
 
+  it("tells a chat in step by its newest messages alone: nothing of them is news, and what changes next is", async () => {
+    const old = message("c1", "m1"), mine = message("c1", "me_2", { sender: "me", delivery: "delivered", reactions: { peer: { e: "👍", n: 1, at: 1 } } }), last = message("c1", "m3");
+    const first = await hub("step.jsonl");
+    // A first run takes the whole history, however it looks.
+    expect(first.h.inStep("c1", [mine, last])).toBe(false);
+    first.h.baseline(state([link("c1")]), new Map([["c1", [old, mine, last]]]));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const second = await hub("step.jsonl");
+    expect(second.h.inStep("c1", [mine, last])).toBe(true);
+    // One not reported yet, a delivery, an edit or a reaction that changed since: the whole history is due.
+    expect(second.h.inStep("c1", [last, message("c1", "m4")])).toBe(false);
+    expect(second.h.inStep("c1", [{ ...mine, delivery: "failed" }, last])).toBe(false);
+    expect(second.h.inStep("c1", [mine, { ...last, edit: { seq: 1, at: 5, history: [] } }])).toBe(false);
+    expect(second.h.inStep("c1", [{ ...mine, reactions: { peer: { e: "", n: 2, at: 2 } } }, last])).toBe(false);
+    expect(second.h.inStep("c2", [message("c2", "x")])).toBe(false);
+
+    second.h.baseline(state([link("c1")]), new Map(), { newest: new Map([["c1", [mine, last]]]), whole: async () => [old, mine, last] });
+    expect(second.events).toEqual([]);
+    // The message the baseline did not read is still known: its edit is an edit, a new message is news, and nothing is deleted.
+    second.h.sink.post({ kind: "message-changes", linkId: "c1", messages: [{ ...old, edit: { seq: 1, at: 5, history: [] } }, message("c1", "m4")], deleted: [] });
+    expect(second.events.map((e) => e.id)).toEqual(["message.edited:c1:m1:1", "message.received:c1:m4"]);
+  });
+
   it("reports group messages, mentions included", async () => {
     const { h, events } = await hub("c.jsonl");
     h.baseline(state([], [{ id: "g1", name: "G", members: [], isAdmin: false, canSend: true, lastMessageAt: 0, profile: "community", invited: [], memberLinks: {}, createdAt: 1 }]), new Map([["group:g1", []]]));
@@ -304,6 +328,23 @@ describe("the event stream", () => {
       h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "peer_v", { file: voice }), message("c1", "me_9", { sender: "me", delivery: "sent", file: { id: "c1-out-w", name: "a", size: 9, mime: "text/plain" } })] });
       expect(events.slice(2).map((e) => [e.type, e.messageId ?? (e.message as { id: string }).id])).toEqual([["message.sent", "me_9"], ["file.failed", "me_9"]]);
       expect(events[3]).toMatchObject({ chat: "c1", file: "c1-out-w", error: "Cancelled", retry: true });
+    });
+
+    it("a file of a message older than the baseline read names its message: the history is read then, once", async () => {
+      const older = message("c1", "peer_v", { file: voice }), other = message("c1", "peer_w", { file: { ...voice, id: "c1-in-w" } }), last = message("c1", "m9");
+      const first = await hub("f4.jsonl");
+      first.h.baseline(state([link("c1")]), new Map([["c1", [older, other, last]]]));
+      await new Promise((r) => setTimeout(r, 50));
+
+      const { h, events } = await hub("f4.jsonl");
+      const whole = vi.fn(async () => [older, other, last]);
+      h.baseline(state([link("c1")]), new Map(), { newest: new Map([["c1", [last]]]), whole });
+      expect(whole).not.toHaveBeenCalled();
+      h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" } }) });
+      await vi.waitFor(() => expect(events.map((e) => [e.type, e.file, e.messageId])).toEqual([["file.done", "c1-in-v", "peer_v"]]));
+      h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" }, "c1-in-w": { state: "failed", transferred: 5, size: 900, direction: "in", error: "Cancelled" } }) });
+      expect(events.map((e) => [e.type, e.file, e.messageId])).toEqual([["file.done", "c1-in-v", "peer_v"], ["file.failed", "c1-in-w", "peer_w"]]);
+      expect(whole.mock.calls).toEqual([["c1"]]);
     });
 
     it("a file event whose message never comes goes after a moment, with messageId null", async () => {
