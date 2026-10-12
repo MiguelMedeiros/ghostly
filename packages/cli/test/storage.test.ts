@@ -187,6 +187,25 @@ describe("persistent IndexedDB", () => {
     expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
 
+  it("keeps on close a write nobody waited for: the transaction made in the turn the process leaves", async () => {
+    // The engine writes a removed chat, a new name or a service with `void db.…`. fake-indexeddb runs a transaction on
+    // a later turn of the event loop: a one-shot command closed in the same turn, and its answer was never on disk.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const first = await db(store.factory);
+    await tx(first, ["settings"], (s) => { s.settings.put("bob", "name"); s.settings.put("a secret", "history"); });
+    first.transaction(["settings"], "readwrite").objectStore("settings").put("Alice", "name");
+    // One that begins when another ends, as a chat's messages go after its row.
+    void tx(first, ["settings"], (s) => { s.settings.delete("history"); }).then(() => { first.transaction(["settings"], "readwrite").objectStore("settings").put(true, "gone"); });
+    await store.close();
+
+    const second = await db(await open(dir));
+    const settings = () => second.transaction("settings").objectStore("settings");
+    expect(await read(settings().get("name"))).toBe("Alice");
+    expect(await read(settings().get("history"))).toBeUndefined();
+    expect(await read(settings().get("gone"))).toBe(true);
+  });
+
   it("brings a large store back from its snapshot in bulk, not record by record, and keeps it usable", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
