@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { error, ghostly, home, ok } from "./support/cli";
+import { error, ghostly, home, ok, Running } from "./support/cli";
 
 // covers: headless.cli
 
@@ -27,6 +27,18 @@ describe("extra words", { timeout: 60_000 }, () => {
       expect(error(await ghostly(["--home", dir, ...args]), "usage", 2).message, args.join(" ")).toBe(`Too many arguments: ghostly ${usage}`);
     }
     expect(ok(await ghostly(["--home", dir, "profile", "list"])).profiles).toContainEqual({ name: "other", current: true, running: false });
+  });
+
+  it("`listen bob` is one too: no listener of every chat starts for a word that was meant as a filter", async () => {
+    const dir = home("extra-listen");
+    ok(await ghostly(["--home", dir, "profile", "create", "my", "--use"]));
+    for (const words of [["bob"], ["message.received"], ["--print", "extra", "words"]]) {
+      const listen = new Running(["--home", dir, "listen", ...words]);
+      try {
+        expect(await listen.exited(30_000), words.join(" ")).toBe(2);
+        expect(listen.lines).toEqual([{ error: { code: "usage", message: "Too many arguments: ghostly listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]" } }]);
+      } finally { await listen.stop(); }
+    }
   });
 
   it("a global option before the command adds none: `--name --` after it is still the name", async () => {
