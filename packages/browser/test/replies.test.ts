@@ -5,7 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { groupReply, pairedWireReply, receivedPairedReply, replyRef } from "../src/shared/replies";
 import type { StoredMessage } from "../src/shared/types";
-import { FakeNativeNet } from "./helpers/fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.replies.wire, groups.protocol.replies
 
 /**
@@ -28,7 +28,7 @@ async function setup() {
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
@@ -37,7 +37,7 @@ async function setup() {
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); } },
   });

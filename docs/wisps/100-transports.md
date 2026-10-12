@@ -23,6 +23,8 @@ Every 1:1 chat of [400](400-chat.md) has two layers. Layer 0 is the DHT: the ren
 
 Each side's candidates come from its layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)) before any stream exists, and from the transcript-bound `pair-offer` once a session is ready ([401](401-paired-chat.md)). The record carries, per native transport, a minimal descriptor that is enough to dial: the Iroh endpoint id, the HyperDHT public key. Before revision 0.2, native descriptors were exchanged only inside an authenticated WebRTC session, so two desktops whose WebRTC never connected never tried Iroh or HyperDHT. With descriptors on layer 0 they do: two Linux Desktops with no WebRTC go live on Iroh or HyperDHT from each other's record (end-to-end tested).
 
+A descriptor told on a session (the session policy's, an older app's adapter list) carries more than the record's: an Iroh one also lists the endpoint's direct socket addresses, at most eight, and either may say `"relayed": true`. A reader keeps it only in that shape: a key of 64 hex characters, a relay by the record's rule ([03](03-capabilities.md#layer-0-capability-record): `https` or `wss`, plain `http`/`ws` on loopback only), addresses that are an IP address and a port. A descriptor that is anything else is left out as one never told, the rest of the policy stands, and a field the reader does not know is not kept. The same holds for a descriptor an app kept from an earlier session.
+
 ### Upgrade
 
 Once the contact is pinned, and unless either side is `dht-chosen`:
