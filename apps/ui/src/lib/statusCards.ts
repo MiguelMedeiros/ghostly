@@ -128,12 +128,12 @@ export function activeTaskCount(entries: readonly CardEntry[]): number {
 
 /**
  * A status's dot, bar and word: the accent while it runs, success with ✓ when done, red with ✕ when it failed, amber
- * when blocked, muted while queued or once cancelled.
+ * when blocked (the word in the warn ink, which a light theme darkens to 4.5:1), muted while queued or once cancelled.
  */
 export const STATUS_TONE: Record<TaskStatus, { dot: string; bar: string; label: string; mark?: string }> = {
   queued: { dot: "bg-text-muted", bar: "bg-text-muted", label: "text-text-primary/65" },
   running: { dot: "bg-accent", bar: "bg-accent", label: "text-accent" },
-  blocked: { dot: "bg-amber-500", bar: "bg-amber-500", label: "text-amber-500" },
+  blocked: { dot: "bg-amber-500", bar: "bg-amber-500", label: "text-warn-ink" },
   done: { dot: "bg-success", bar: "bg-success", label: "text-success", mark: "✓" },
   failed: { dot: "bg-danger", bar: "bg-danger", label: "text-danger-ink", mark: "✕" },
   cancelled: { dot: "bg-text-muted", bar: "bg-text-muted", label: "text-text-primary/65" },
