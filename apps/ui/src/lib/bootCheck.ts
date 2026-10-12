@@ -66,6 +66,38 @@ export async function missingEssentials({ indexedDbWaitMs = INDEXED_DB_WAIT_MS }
   return missing;
 }
 
+/** What a browser offers beyond the essentials that tells Lockdown Mode apart: its name, WebAssembly, WebRTC. */
+export interface BrowserTraits {
+  userAgent: string;
+  webAssembly: boolean;
+  webRTC: boolean;
+}
+
+/** An Apple WebKit browser: every browser on an iPhone or iPad (Chrome and Brave too), and Safari on a Mac. */
+function appleWebKit(userAgent: string): boolean {
+  if (!/AppleWebKit/.test(userAgent)) return false;
+  if (/iPhone|iPad|iPod/.test(userAgent)) return true;
+  return /Macintosh/.test(userAgent) && !/Chrome|Chromium|Edg\/|Firefox|OPR\//.test(userAgent);
+}
+
+/**
+ * Lockdown Mode on Apple devices turns off, in WebKit, IndexedDB, Web Locks, WebAssembly and WebRTC together: a
+ * browser that lacks all four is most likely in it, and changing browser does not help on an iPhone (all are
+ * WebKit). Excluding the site does. Anything less than all four is the plain report.
+ */
+export function lockdownLikely(missing: readonly Essential[], traits: BrowserTraits): boolean {
+  return appleWebKit(traits.userAgent) && missing.includes("indexedDB") && missing.includes("locks") && !traits.webAssembly && !traits.webRTC;
+}
+
+/** This browser's traits, read without touching anything. */
+export function browserTraits(): BrowserTraits {
+  const read = (check: () => unknown) => { try { return !!check(); } catch { return false; } };
+  let userAgent = "";
+  try { userAgent = navigator.userAgent; } catch { /* no name */ }
+  const scope = globalThis as { WebAssembly?: unknown; RTCPeerConnection?: unknown };
+  return { userAgent, webAssembly: read(() => scope.WebAssembly), webRTC: read(() => scope.RTCPeerConnection) };
+}
+
 /** What the boot guard (apps/web/public/boot-guard.js) offers the page; absent everywhere else. */
 interface BootGuard {
   details(): string;

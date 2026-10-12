@@ -1,6 +1,10 @@
 {
   "copied": "Copiato",
   "copy": "Copia dettagli",
+  "lockdown": "La modalità di isolamento sembra attiva, e spegne ciò di cui Ghostly ha bisogno. Disattivala per questo sito, poi ricarica.",
+  "lockdownHow": "Come disattivarla per questo sito",
+  "lockdownOtherBrowser": "Altri browser su iPhone o iPad: Impostazioni › Privacy e sicurezza › Modalità di isolamento › Configura navigazione web, e disattivala per quel browser.",
+  "lockdownSafari": "Safari: tocca aA nella barra degli indirizzi, poi Impostazioni sito web, e disattiva la modalità di isolamento (su un Mac: Safari › Impostazioni per questo sito web).",
   "missingCrypto": "Web Crypto è disattivato. Funziona solo su un indirizzo sicuro (https).",
   "missingIndexedDB": "IndexedDB è disattivato o bloccato, quindi chat e chiavi non possono essere salvate.",
   "missingLocks": "Manca Web Locks, quindi Ghostly non può assicurarsi di girare una volta sola.",
