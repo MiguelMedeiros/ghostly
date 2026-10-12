@@ -1,4 +1,4 @@
-import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_DATED_BACK_MS, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, sanitizeFileName, sanitizeMime, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
+import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_DATED_BACK_MS, HOLD_LIMITS, HoldKeys, HoldRefusedError, isHoldUrl, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, sanitizeFileName, sanitizeMime, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
@@ -30,6 +30,8 @@ export interface HoldHost {
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
   changed(): void;
   fetch?: typeof fetch;
+  /** Plain HTTP to this machine is a storage address too: the e2e suite's local server. Off in every shipped app. */
+  loopbackStorage?: () => boolean;
   now?: () => number;
   /** How long an item is held, when a test shortens it; never longer than the profile's seven days. */
   ttlMs?: () => number | undefined;
@@ -404,7 +406,7 @@ export class HoldEngine {
       if (isDiscoveryBudgetError(error)) { this.lastPoll.delete(linkId); this.retrySoon(budgetRetryMs(error, 1_000, TICK_MS)); return; }
       this.errors.set(linkId, `Could not read the contact's pointer: ${error instanceof Error ? error.message : String(error)}`); this.host.changed(); return;
     }
-    const pointer = packet ? keys.readPointer(packet) : null;
+    const pointer = packet ? keys.readPointer(packet, this.host.loopbackStorage?.()) : null;
     if (!pointer) return;
     let hold = this.state(linkId);
     if (pointer.rev < hold.peerPointerRev) return;
@@ -425,12 +427,12 @@ export class HoldEngine {
     if (!pointer.manifestUrl || pointer.expires <= now) { this.errors.set(linkId, "The contact holds items for you, but their address expired. They are handed out again when the contact is next online."); this.host.changed(); return; }
     let entries: ReturnType<typeof readManifest>, mailbox: string;
     try {
-      const manifest = keys.open(await this.fetchBytes(pointer.manifestUrl, HOLD_LIMITS.maxManifestBytes), { maxBytes: HOLD_LIMITS.maxManifestBytes, now });
+      const manifest = keys.open(await this.fetchBytes(pointer.manifestUrl, HOLD_LIMITS.maxManifestBytes), { maxBytes: HOLD_LIMITS.maxManifestBytes, now, loopback: this.host.loopbackStorage?.() });
       if (manifest.header.kind !== "manifest") throw new HoldRefusedError("format", "Not a manifest");
       mailbox = manifest.header.mailbox;
       // In the order the contact held them, whatever order the manifest lists them in: they take their places in the
       // history as they are stored here.
-      entries = readManifest(manifest.header.meta).filter(([seq]) => seq > this.state(linkId).inSeq).sort((a, b) => a[0] - b[0]);
+      entries = readManifest(manifest.header.meta, this.host.loopbackStorage?.()).filter(([seq]) => seq > this.state(linkId).inSeq).sort((a, b) => a[0] - b[0]);
     } catch (error) {
       if (error instanceof HoldRefusedError) { await this.save(linkId, { ...this.state(linkId), refused: this.state(linkId).refused + 1 }); this.errors.set(linkId, `Refused what the contact's storage offered: ${error.message}`); }
       else this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
@@ -512,8 +514,11 @@ export class HoldEngine {
   }
 
   private async readBytes(url: string, max: number, signal: AbortSignal): Promise<Uint8Array> {
+    // The contact named this address: checked where it is used as well as where it was read, and no redirect is
+    // followed (one would lead anywhere, this machine and its network included; a presigned address has none).
+    if (!isHoldUrl(url, this.host.loopbackStorage?.())) throw new Error("The storage address is not one this app reads");
     const doFetch = this.host.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
-    const response = await doFetch(url, { cache: "no-store", credentials: "omit", signal });
+    const response = await doFetch(url, { cache: "no-store", credentials: "omit", redirect: "error", signal });
     if (!response.ok) throw new Error(`The storage answered ${response.status}`);
     const declared = Number(response.headers.get("content-length"));
     if (declared > max) throw new HoldRefusedError("size", "The held item is larger than the manifest said");

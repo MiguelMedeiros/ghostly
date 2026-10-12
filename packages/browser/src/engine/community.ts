@@ -169,6 +169,17 @@ const FAREWELL_RETRY_MS = 60_000;
 const FAREWELL_TOLD_MS = 10 * 60_000;
 const FAREWELL_SAY_MS = 10_000;
 /**
+ * A key asking in my lobby that no commit I hold names may be a member let in by a commit I have not heard yet: a hub
+ * keeps an edge to it for a moment, on which it says where it is and takes commits (`wantAhead`). At most `AHEAD_EDGES`
+ * at a time, each awaited `AHEAD_WAIT_MS` and closed `AHEAD_LINGER_MS` after it came up unless a commit named the key
+ * by then; the same key is not waited for again for a while (longer once its edge was up).
+ */
+const AHEAD_EDGES = 4;
+const AHEAD_WAIT_MS = 2 * 60_000;
+const AHEAD_LINGER_MS = 20_000;
+const AHEAD_RETRY_MS = 60_000;
+const AHEAD_HEARD_MS = 10 * 60_000;
+/**
  * A key asking from before the commit that took it out was there and was sent that commit: not waited for. The two
  * times are two devices' clocks (the asker's, the commit's signer's), so "before" allows this much between them:
  * a returning member whose clock runs behind the admin's is told all the same.
@@ -284,6 +295,9 @@ interface Live {
   farewells: Map<string, { since: number; told?: number }>;
   farewellQuiet: Map<string, number>;
   farewellSaid: Map<string, number>;
+  /** As a hub: keys no commit I hold names that I keep an edge to for a moment (since when, up since when); keys not waited for until. */
+  ahead: Map<string, { since: number; up?: number }>;
+  aheadQuiet: Map<string, number>;
   hubsMemo?: { beacon: Hub[]; top: object; leaves: object; hubs: Hub[] };
 }
 
@@ -632,7 +646,7 @@ export class Communities {
       if (live.session.status !== "active") {
         // Out (removed while a hub, say one that came back believing it was a member): no hub and no door any more.
         if (live.hub) { live.hub = false; await this.closeEntries(group.id); await this.publishBeacon(group.id, live, now, false).catch(() => {}); }
-        live.farewells.clear();
+        live.farewells.clear(); live.ahead.clear();
         await this.reconcile(group.id, live, now);
         continue;
       }
@@ -753,6 +767,7 @@ export class Communities {
       if (this.leftItself(live, h.key) ? h.ts - FAREWELL_SKEW_MS > out : h.ts + FAREWELL_SKEW_MS > out) this.wantFarewell(groupId, live, h.key, now);
     }
     this.endFarewells(live, now);
+    this.endAhead(groupId, live, now);
     if (live.hub) {
       // Letting someone in: the budget goes to that session first, the lobby waits.
       const busy = this.admitting(groupId, live, now);
@@ -922,7 +937,7 @@ export class Communities {
     // And whoever is listed is a hub, not a member of mine (a member that became one). Only on a beacon read lately.
     if (now - live.beaconAt <= 2 * this.timings.beaconReadMs) {
       const hubs = new Set(freshHubs(this.hubs(live), now).map(h => h.key));
-      for (const [key, id] of edges) if (!hubs.has(key) && !live.members.has(key) && this.host.linkReady(id, 2) && !this.gone(live, key)) live.members.set(key, now);
+      for (const [key, id] of edges) if (!hubs.has(key) && !live.members.has(key) && this.host.linkReady(id, 2) && rosterHas(live.session.roster, key) && !this.gone(live, key)) live.members.set(key, now);
       for (const key of [...live.members.keys()]) if (hubs.has(key)) live.members.delete(key);
     }
     for (const [key, since] of live.members) {
@@ -1055,16 +1070,21 @@ export class Communities {
     return false;
   }
 
-  /** A frame goes on an edge to a member; to someone the chain took out, only the commit that took it out. */
-  private mayHear(live: Live | undefined, key: string, frame: object): boolean {
-    if (!live?.session.wasRemoved(key)) return true;
+  /**
+   * A frame goes on an edge to a member; to someone the chain took out, only the commit that took it out. What the
+   * group says (`said`: a frame of mine for everyone, or one a hub relays) goes to the members of the roster only:
+   * a key no commit names hears none of it, and one let in on a branch that lost hears the commits.
+   */
+  private mayHear(live: Live | undefined, key: string, frame: object, said = false): boolean {
     const f = frame as { t?: unknown; commit?: { k?: unknown; s?: unknown } };
-    return f.t === "group-commit" && (f.commit?.k === "remove" || f.commit?.k === "leave") && f.commit.s === key;
+    if (live?.session.wasRemoved(key)) return f.t === "group-commit" && (f.commit?.k === "remove" || f.commit?.k === "leave") && f.commit.s === key;
+    if (!live || !said || rosterHas(live.session.roster, key)) return true;
+    return f.t === "group-commit" && live.session.isRecentMember(key);
   }
-  /** The edges of the group that may hear `frame`. */
+  /** The edges of the group that may hear `frame`, said to everyone. */
   private hearers(groupId: string, frame: object): [string, string][] {
     const live = this.live.get(groupId);
-    return [...this.host.edges(groupId)].filter(([key]) => this.mayHear(live, key, frame));
+    return [...this.host.edges(groupId)].filter(([key]) => this.mayHear(live, key, frame, true));
   }
 
   /** As a hub: someone the chain took out is asking (in my lobby, or listing itself as a hub). An edge to tell it, within bounds. */
@@ -1085,6 +1105,36 @@ export class Communities {
     }
     for (const [key, until] of live.farewellQuiet) if (until <= now) live.farewellQuiet.delete(key);
     for (const [key, at] of live.farewellSaid) if (now - at >= FAREWELL_SAY_MS) live.farewellSaid.delete(key);
+  }
+
+  /**
+   * As a hub: a key no commit I hold names is asking in my lobby. It may be a member ahead of me on the roster, who needs
+   * the edge for me to find out (its answer to my `group-sync` carries the commit); or nobody, since whoever was once
+   * given the group's rendezvous secret can write a key there. An edge, within bounds, that is no member's: it takes
+   * no place among my members, and nothing the group says goes on it (`mayHear`).
+   */
+  private wantAhead(groupId: string, live: Live, key: string, now: number): void {
+    if (live.ahead.has(key) || now < (live.aheadQuiet.get(key) ?? 0)) return;
+    if (live.ahead.size >= AHEAD_EDGES || this.capacity(groupId, live, now) <= 0) return;
+    live.ahead.set(key, { since: now });
+    if (!this.host.edges(groupId).has(key)) live.expect.add(key);
+  }
+
+  /** Those edges end: a commit named the key (a member of mine now, or out), it never came, or its moment is over; and a hub no more keeps none. */
+  private endAhead(groupId: string, live: Live, now: number): void {
+    const edges = this.host.edges(groupId);
+    for (const [key, a] of live.ahead) {
+      const member = rosterHas(live.session.roster, key), named = member || live.session.wasRemoved(key);
+      if (!named && live.hub) {
+        const id = edges.get(key);
+        if (!a.up && id && this.host.linkReady(id, 2)) a.up = now;
+        if (a.up ? now - a.up < AHEAD_LINGER_MS : now - a.since < AHEAD_WAIT_MS) continue;
+      }
+      live.ahead.delete(key);
+      if (!named) live.aheadQuiet.set(key, now + (a.up ? AHEAD_HEARD_MS : AHEAD_RETRY_MS));
+      else if (member && live.hub && live.members.size < this.capacity(groupId, live, now)) live.members.set(key, now);
+    }
+    for (const [key, until] of live.aheadQuiet) if (until <= now) live.aheadQuiet.delete(key);
   }
 
   /**
@@ -1143,11 +1193,12 @@ export class Communities {
     const keys = lobbyKeys(live.session.state.rv, groupId, live.session.myKey);
     const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true, true).catch(() => null)) ?? []);
     for (const { key, ts } of entries) {
-      // Anyone the chain did not take out: a member whose admission lost a race, or who is ahead of me on the
-      // roster, needs the edge to find out. The session hands nothing to someone who is not a member.
+      // A member of the roster gets its edge. A key no commit names may be a member ahead of me on the roster, or one
+      // whose admission lost a race, and needs an edge to find out: for a moment, and no member's (`wantAhead`).
       if (now - ts > COMMUNITY_TOPOLOGY.lobbyFreshMs || key === live.session.myKey) continue;
       // Someone the chain took out, asking as a member would: it does not know. Told, and nothing more (`wantFarewell`).
       if (live.session.wasRemoved(key)) { if (ts + FAREWELL_SKEW_MS > (live.session.outAt(key) ?? Infinity)) this.wantFarewell(groupId, live, key, now); continue; }
+      if (!rosterHas(live.session.roster, key)) { this.wantAhead(groupId, live, key, now); continue; }
       // Someone is asking: not the moment to step down.
       live.emptySince = now;
       if (!live.members.has(key) && live.members.size >= this.capacity(groupId, live, now)) continue;
@@ -1171,6 +1222,7 @@ export class Communities {
         for (const h of freshHubs(this.hubs(live), now)) if (h.key !== s.myKey && !this.hubDead(groupId, live, h, now)) wanted.add(h.key);
         for (const key of live.members.keys()) wanted.add(key);
         for (const key of live.farewells.keys()) wanted.add(key);
+        for (const key of live.ahead.keys()) wanted.add(key);
       } else for (const key of live.myHubs) wanted.add(key);
       // An edge that is up stays while its other end still counts on it, or was a hub a moment ago:
       // one reading of the beacon that missed a hub must not cut the group in two.
@@ -1542,6 +1594,10 @@ export class Communities {
     // Someone the chain took out is not heard, nor relayed for: what they have to say ended with them. One that says
     // where it is does not know it is out (it was away): it is told so, with the commit that did it, and nothing more.
     if (live.session.wasRemoved(peerKey)) { if (f.t === "group-sync" && live.session.isMember) this.sayFarewell(groupId, live, peerKey, f); return; }
+    // A key no commit I hold names (asking in my lobby, or listed as a hub) may be a member ahead of me: what brings
+    // me up to date is taken (commits and secrets; a message waits for them), and nothing else it says is heard.
+    const named = live.session.isRecentMember(peerKey);
+    if (!named && f.t !== "group-commit" && f.t !== "group-msg" && f.t !== "group-secrets" && !(f.t === "group-secret" && f.to === live.session.myKey)) return;
     // Addressed to someone else: a hub routes it, whoever it is for.
     if ((f.t === "group-secret" || f.t === "group-entry") && typeof f.to === "string" && f.to !== live.session.myKey) {
       if (!live.hub) return;
@@ -1597,7 +1653,7 @@ export class Communities {
   edgeReady(groupId: string, peerKey: string, linkId: string): void {
     const live = this.live.get(groupId);
     if (!live || live.session.wasRemoved(peerKey)) return;
-    if (live.hub && !this.peerIsHub(live, peerKey)) live.members.set(peerKey, this.now());
+    if (live.hub && !this.peerIsHub(live, peerKey) && rosterHas(live.session.roster, peerKey)) live.members.set(peerKey, this.now());
     this.sendTo(linkId, live.session.syncFrame());
     this.host.emit();
   }
@@ -1674,7 +1730,7 @@ export class Communities {
     this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], hubClocks: new HubClocks(() => session.myKey, HUB_CLOCK_READ_GAP_MS), head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),
-      farewells: new Map(), farewellQuiet: new Map(), farewellSaid: new Map(),
+      farewells: new Map(), farewellQuiet: new Map(), farewellSaid: new Map(), ahead: new Map(), aheadQuiet: new Map(),
       knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,
       lastRoster: session.roster, lastStatus: session.status, relayed: new Set() });
   }

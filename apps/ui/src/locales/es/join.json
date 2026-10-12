@@ -24,6 +24,7 @@
   "scan": "Escanear QR",
   "submit": "Unirse",
   "title": "Unirse a un chat",
+  "tooManyLinks": "Demasiados enlaces de invitación abiertos. Elimina un chat que no tuvo respuesta o pega la invitación en Unirse.",
   "typo": "Este código tiene una errata. Revísalo o pide el código de nuevo.",
   "update": "Esta invitación la creó un Ghostly más reciente. Actualiza para unirte."
 }

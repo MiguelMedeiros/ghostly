@@ -106,6 +106,66 @@ describe("what the guard asks about", () => {
   });
 });
 
+describe("a secret with characters that take no room on screen inside it", () => {
+  // What a page, a PDF or a terminal leaves in a long string, and what a reader takes out in one step.
+  const MARKS: [string, string][] = [
+    ["a zero-width space", "\u200b"],
+    ["a soft hyphen", "\u00ad"],
+    ["a word joiner", "\u2060"],
+    ["a zero-width joiner", "\u200d"],
+    ["a byte order mark", "\ufeff"],
+    ["a control character", "\u0001"],
+    ["a variation selector", "\ufe0f"],
+  ];
+  /** `text` with `mark` after every `every` characters of it. */
+  const broken = (text: string, mark: string, every = 8) => text.match(new RegExp(`.{1,${every}}`, "gs"))!.join(mark);
+
+  describe.each(MARKS)("%s", (_, mark) => {
+    it.each([
+      ["an nsec", broken(NSEC, mark), "nsec"],
+      ["an nsec in a sentence", `here is my key ${broken(NSEC, mark, 30)} ok`, "nsec"],
+      ["a compressed WIF", broken(WIF.compressed, mark), "bitcoin-key"],
+      ["an uncompressed WIF", `import this: ${broken(WIF.uncompressed, mark, 25)}`, "bitcoin-key"],
+      ["an xprv", broken(XPRV, mark), "bitcoin-key"],
+      ["an xprv with one mark in its prefix", `xp${mark}rv${XPRV.slice(4)}`, "bitcoin-key"],
+      ["64 hex digits beside \"private key\"", `private key: ${broken(HEX, mark)}`, "hex-key"],
+      ["128 hex digits beside \"seed\"", `seed ${broken("ab".repeat(64), mark, 50)}`, "hex-key"],
+      ["64 hex digits beside a broken \"secret\"", `${HEX} is the sec${mark}ret`, "hex-key"],
+      ["a seed with marks inside its words", broken(MNEMONICS[0], mark, 3), "mnemonic"],
+      ["a seed with marks for spaces", MNEMONICS[1].split(" ").join(mark), "mnemonic"],
+    ])("%s", (_, text, kind) => expect(findSecret(text)).toEqual({ kind }));
+
+    it("a Cashu token, with its amount still decoded here", () => {
+      expect(findSecret(broken(CASHU_B_21, mark))).toEqual({ kind: "cashu", amount: 21, unit: "sat" });
+      expect(findSecret(`for you cas${mark}huA${cashuA([100], "usd").slice(6)} thanks`)).toEqual({ kind: "cashu", amount: 100, unit: "usd" });
+      expect(findSecret(`${cashuA([4])}${mark}`)).toEqual({ kind: "cashu", amount: 4, unit: "sat" });
+    });
+
+    it("what is not a secret is still not one", () => {
+      for (const text of [
+        broken("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", mark),
+        `txid ${broken("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b", mark)}`,
+        broken(NPUB, mark),
+        broken(XPUB, mark),
+        broken(INVOICE, mark),
+        broken(INVITE, mark),
+        broken("The secret to good coffee is fresh beans and patience.", mark),
+        broken("legal winner thank year wave sausage worth useful legal winner thank", mark, 3),
+      ]) expect(findSecret(text)).toBeNull();
+    });
+  });
+
+  it("the finding never carries the text", () => {
+    for (const text of [NSEC, XPRV, `seed ${HEX}`, CASHU_B_21]) expect(JSON.stringify(findSecret(broken(text, "\u200b")))).not.toContain(text.slice(-6));
+  });
+
+  it("a line break inside a string is not taken out: it shows", () => {
+    expect(findSecret(broken(NSEC, "\n"))).toBeNull();
+    expect(findSecret(`sha256\n${HEX}\nseed`)).toEqual({ kind: "hex-key" }); // as before: the word is close by
+    expect(findSecret(`${HEX}\u200b\nabc`)).toBeNull();
+  });
+});
+
 describe("what it lets through", () => {
   it.each([
     "hey, are you around later?",
@@ -181,6 +241,8 @@ describe("how long it takes", () => {
     ["base58", "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2 ".repeat(500).slice(0, MAX)],
     ["WIF-shaped words", `${WIF.compressed.slice(0, -1)}X `.repeat(400).slice(0, MAX)],
     ["cashu-shaped text", `cashuB${"A".repeat(MAX)}`.slice(0, MAX)],
+    ["hex with a zero-width space every few digits", "abcdef01\u200b".repeat(MAX / 9)],
+    ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
   });

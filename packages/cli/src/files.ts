@@ -213,15 +213,16 @@ export const FILE_METHODS: Record<string, Method> = {
   /**
    * files/3: answer an offer, or pause, resume or cancel a transfer, either way; `resend` a file sent from here that
    * stopped moving (or failed), `request` again one that stopped arriving. Without a chat, the file's id names it.
-   * A group's file (WISP 503) takes `accept` (download one this device did not fetch by itself) and `request`.
+   * A group's file (WISP 503) takes `accept` (download one this device did not fetch by itself), `request`, and `cancel`,
+   * `decline`, `pause` and `resume` for one that is coming.
    */
   async "file.action"(ctx, params) {
     const fileId = str(params, "file", true);
     const { linkId, where } = fileChat(ctx, params, fileId);
     const action = oneOf(params, "action", ACTIONS, "accept");
     if ("group" in where) {
-      if (action !== "accept" && action !== "request") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
-      if (state(ctx).transfers[fileId]?.state === "done") throw new CliError("refused", "Nothing to ask for: the file is all here");
+      if (action === "resend") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
+      if (state(ctx).transfers[fileId]?.state === "done") throw new CliError("refused", action === "accept" || action === "request" || action === "resume" ? "Nothing to ask for: the file is all here" : "Nothing to stop: the file is all here");
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
     }

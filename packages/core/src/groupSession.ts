@@ -891,7 +891,7 @@ export class GroupSession {
       if (!validEditText(text)) return { error: text ? "Message exceeds 16 KiB" : "An edit cannot be empty" };
       const secret = this.secret(ref.e);
       if (!secret) return { error: "This message is too old to edit: its epoch's key is gone" };
-      const named = validMentions(wireMentions(edit.mentions ?? []), text, rosterAdmin(commit.m) === this.myKey);
+      const named = validMentions(wireMentions(edit.mentions ?? []), text, rosterAdmin(commit.m) === this.myKey && this.isAdmin);
       const plain = JSON.stringify({ text, ...(named.length ? { m: named } : {}), ...(edit.card ? { sc: edit.card } : {}) });
       if (utf8Encode(plain).length > MAX_EDIT_PLAIN) return { error: "Message exceeds 16 KiB" };
       // The message, and each copy of it said again under a later epoch (`resealBehind`): a member let in meanwhile can
@@ -1117,8 +1117,9 @@ export class GroupSession {
     }
     // (Shown already from a copy handed on stripped, under its own id: the whole one completes that one.)
     const id = first && !this.provisional.has(own) ? groupMessageId(raw.s, first.e, first.n) : own;
-    // Everyone is named only by the admin of the message's epoch; a box that does not open is no mentions, not no message.
-    const mentions = this.openMentions(key, raw, text, rosterAdmin(commit.m) === raw.s);
+    // Everyone is named only by the admin of the message's epoch who is the admin still: a member who handed the role on
+    // names no one under an epoch from before. A box that does not open is no mentions, not no message.
+    const mentions = this.openMentions(key, raw, text, rosterAdmin(commit.m) === raw.s && this.admin === raw.s);
     const reply = this.openReply(key, raw);
     const forwarded = readForwarded(raw.f);
     const card = this.openCard(key, raw);
@@ -1161,7 +1162,7 @@ export class GroupSession {
     let body: { text?: unknown; m?: unknown; sc?: unknown };
     try { body = JSON.parse(plain) as typeof body; } catch { return; }
     if (!body || typeof body !== "object" || !validEditText(body.text)) return;
-    const k = validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s);
+    const k = validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s && this.admin === raw.s);
     // A card that does not hold is left out; an edit numbered past a text's bound stands only with one.
     const sc = body.sc === undefined ? undefined : readStatusCard(body.sc);
     if (!validEditNumber(raw.v) && !sc) return;

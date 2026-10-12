@@ -36,12 +36,16 @@ export function takedownText(title: string, takedown: AppTakedown, t: Translate)
   return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: takedown.store });
 }
 
-/** An app running now, as its opener registered it: its ref, whether the person chose Run anyway, and how to stop it. */
+/** An app running now, as its opener registered it: its ref, the version it runs, whether the person chose Run anyway, and how to stop it. */
 export interface RunningAppEntry {
   ref: string;
+  /** The digest its entry had: the installed one may be another by now. */
+  digest: string;
   runAnyway: boolean;
   /** Stops the app and says why where it ran. */
   takeDown(takedown: AppTakedown): void;
+  /** Stops the app and says nothing: the person uninstalled it. */
+  stop(): void;
 }
 
 const running = new Set<RunningAppEntry>();
@@ -57,13 +61,19 @@ export function appsRunning(): boolean {
   return running.size > 0;
 }
 
+type RunOf = { status: string; by?: readonly { name: string }[] };
+
 /**
  * After the installed apps were read again (an update check, the scheduled one included): every running app whose
- * version is revoked, or removed by a store without Run anyway, is stopped, and says why.
+ * version is revoked, or removed by a store without Run anyway, is stopped, and says why. The version is the one that
+ * runs: after an update, `stopped` holds what the engine found of the one it started with. One no longer
+ * installed (the person uninstalled it, on this page or another) is stopped too.
  */
-export function stopTakenDown(apps: readonly { ref: string; run: { status: string; by?: readonly { name: string }[] } }[]): void {
+export function stopTakenDown(apps: readonly { ref: string; digest: string; run: RunOf; stopped?: readonly { digest: string; run: RunOf }[] }[]): void {
   for (const entry of [...running]) {
-    const run = apps.find((app) => app.ref === entry.ref)?.run;
+    const app = apps.find((a) => a.ref === entry.ref);
+    if (!app) { entry.stop(); continue; }
+    const run = app.digest === entry.digest ? app.run : app.stopped?.find((v) => v.digest === entry.digest)?.run;
     if (run?.status === "revoked") entry.takeDown({ why: "revoked" });
     else if (run?.status === "removed" && !entry.runAnyway) entry.takeDown({ why: "removed", store: run.by?.[0]?.name ?? "" });
   }

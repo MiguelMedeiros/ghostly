@@ -128,7 +128,7 @@ function listedBundle(
 }
 
 /**
- * Checks the index (size, canonical JSON, fields, revocations, the signature by `key`, `expires` at `now` seconds), then
+ * Checks the index (size, canonical JSON, fields, the signature by `key`, revocations, `expires` at `now` seconds), then
  * each listing's bundle (`listedBundle`). A removed or revoked version is left out, as the app leaves it out.
  */
 export function readStore(bytes: StoreBytes, now: number, key: string): StoreView {

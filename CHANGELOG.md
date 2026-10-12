@@ -4,6 +4,121 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.2.2
+
+### Fixed
+
+**Apps**
+
+- Apps, stores: reading a store's list no longer holds the page while its publishers' revocations are checked. A list may carry up to 4096 of them, each a signature check, and all were checked in one go before anything else could run: about 10 seconds with a full list, at the preview in Add, again at Add, and at every refresh of a list that had changed. They are now checked a few milliseconds at a time, and one already checked is not checked again when the list changes around it or when Add reads what the preview just read.
+
+**Everywhere**
+
+- A Testnet Ark wallet can move to another test network (Mutinynet, Signet, Regtest) when the server of the one it is on has stopped answering: the app waits 10 seconds for that server to say the wallet is empty, then goes by the last balance it read. Before, the switch waited on that server for as long as it stayed quiet. A Mainnet wallet still waits for its server's own word.
+- A Testnet Bark wallet can move to another test network (Signet, Regtest) or be restored over when the server of the one it is on has stopped answering: the app waits 10 seconds for that server to say the wallet is empty, then goes by the last balance it read, pending and exiting coins included. Before, the switch waited on that server for as long as it stayed quiet. A Mainnet wallet still waits for its server's own word.
+- On a computer, a link to a chapter of the ghostly.tools home page (the menu's "How it works", a WISP's "In the app" link, `ghostly.tools/#invite`, `#dht`, `#agree`, `#alive`) shows the chapter's title and first step. It used to land on a screen with no words.
+- The download panel of ghostly.tools no longer marks the macOS installer as yours on an iPad. A tablet gets no marked installer, like a phone.
+- On ghostly.tools, the download panel no longer marks the amd64 AppImage as your installer on a Linux ARM machine, where it does not run.
+- A link to a section of the ghostly.tools home, such as ghostly.tools/#download, opened on a phone lands on that section. It used to stop up to two screens above it.
+- On ghostly.tools, the caption under each app screenshot names the release the page offers ("Ghostly 1.2"). It said "Ghostly 1.0.1" under screens that show what came later, like a photo sent to a group.
+- On ghostly.tools, a link to another WISP in a WISP's revision log opens that WISP's page. On seven pages such links used to open a GitHub page that does not exist.
+- The "page not found" page of ghostly.tools is a still when your system asks for reduced motion, as the other pages are. Its ghost kept drifting, its flashlight kept dimming and 25 small ghosts kept floating by.
+
+**CLI**
+
+- `ghostly button update` and `ghostly button press` read the one message they name instead of the whole history of the chat or group.
+- `ghostly daemon --detach --timeout <s>` (and `daemon restart`) shorter than the daemon's start no longer says "The daemon did not start" while the daemon it started keeps running: it says the daemon is still starting, with its process id (exit 4). A `--timeout` of 0 or less on `daemon`, `daemon stop` and `daemon restart` is a usage error.
+- `ghostly delete` and `ghostly forward` read the messages they name, one row each, instead of the whole history of the chat or group (and `forward --wait sent` no longer reads the target chat's whole history per message forwarded).
+- `ghostly group edit`, and an `edit` the engine refuses, read the one message they name instead of the whole history of the chat or group, which held the daemon about 120 ms at 10,000 messages.
+- `ghostly -p` and `ghostly --home` with no value say `--profile needs a value` (or `--home`), a usage error (exit 2) as `ghostly send -p` says, instead of printing the whole help with exit 0.
+- `ghostly group join <word>` with something that is no link to a group answers `bad_request` (exit 1, "This is not a link to a group") as `ghostly invite join` does for a word that is no invite, instead of an engine error.
+- `ghostly help help` shows how to use `help` instead of `Unknown command: help`, and `ghostly version --pretty` indents its answer as every other command does.
+- A command that takes a chat or a group (`pin`, `forward`, `task send`, `routine send`, `usage send`, `button press`, `file send`) and is given a name neither has now says `No chat or group "<name>" (ghostly chat list, ghostly group list)`. Most of them said `No group`, though the name may have been a chat's.
+- On Node 25 and newer, a command that opens a profile no longer prints "ExperimentalWarning: localStorage is not available" on stderr. With `--localstorage-file`, Node's storage is used as before.
+- `ghostly react <group> <message> <emoji>` says the name is a group's and how to react there (`ghostly group react <group> <message> <emoji>`), instead of `No chat "<group>"`.
+
+**Groups**
+
+- A large group with a link no longer gets stuck when its member history fills up: it stops taking new members, new links and new keys while there is still room for everyone in it to leave, be removed or hand over the admin role. Before, a full history kept a member who left in everyone's list for good and the admin could not remove anyone or leave.
+- In a group with a link, when one of the apps that connect the members leaves shortly after someone joined, the members it connected are taken by another one sooner. Before, that app could still be waiting for the newcomer, whom the other had already let in, and looked for the members asking it only every half minute.
+
+**Chat**
+
+- In Arabic on Linux, the message field no longer shows scrollbars across it after the window is made narrow with a chat open. They stayed until you typed.
+- A file a contact sends the earlier way (files/2) no longer loads every file record of the chat before it starts: the chat already knows which files it holds.
+- A receipt on the DHT for a file that waits for the live link, or for an edit sent there, no longer reads the chat's whole history each time: the files said there are read once, then kept as they are said.
+- Opening a message's details, retrying a message, and storing a text for a contact who is away read that one message instead of the chat's whole history (a held text read it up to three times).
+
+**Wallets**
+
+- Fedimint wallet: the History of a federation with no movement says "Nothing yet" (it was an empty box once another federation had one), a row's fee is written like its amount ("fee 1,500", not "fee 1500"), and notes taken back say so under Send instead of showing under Receive as notes redeemed.
+- Copy on money in a message (a Lightning invoice or address, an ecash token, a Bitcoin, Ark or USDT address, a BOLT12 offer) says "Copied" only once it is copied. When the browser refused the copy, the button still said "Copied" while the clipboard kept what it held before, which could be another address. The card now says it could not copy and shows the text to select.
+- A payment's two ticks, and a request closed because its wallet was removed, read the payment's own message instead of the chat's whole history.
+- In the Spark wallet's history, a fee is written like the amount beside it ("fee 1,500", not "fee 1500"), and a movement that is pending or failed says so in the app's language instead of in English.
+
+**Desktop**
+
+- On Linux, clicking a Ghostly notification brings the window forward and opens the chat (or the group, or the profile) it is about, as on macOS. Before, the click only closed the notification.
+
+**Website**
+
+- `/developers` on ghostly.tools, on a phone: the negotiation demo that plays by itself keeps one height through its four scenarios. It changed height by up to 353 px every two seconds, so the text below it jumped while you read, and a link to a section below it (`/developers#path`, `#availability`) stopped 275 px past the heading.
+- The home page of ghostly.tools, with the keyboard: a step button of the story that takes the focus brings its chapter to that step. Tab from a chapter's last step button to the next chapter's first put the focus on a button nobody could see, on a screen that was black or had no words.
+
+### For developers
+
+- The merge train takes a pull request labelled `queue:priority` and not `queue` as in the line, first. Before, only `queue` put a pull request in the line, so one with `queue:priority` alone waited for good while the train found no base to run (three green flaky-test fixes sat for eight hours on 2026-10-09).
+- The merge train writes `[skip ci]` (and `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]`) in round brackets in every commit message it composes. A queued pull request whose title or an earlier commit carried one made the batch's head commit hold it, so GitHub started no CI for the batch and the train rebuilt the same batch every 20 minutes for good.
+
+**Apps**
+
+- An app's `icon.png` is at most 1024 × 1024 pixels. Only its bytes were bounded (256 KiB), so a small file could ask for a very large picture, which the install screen decoded whole before anything was installed. A larger icon is now refused as `bad-icon` when the bundle is read, and `ghostly app publish` refuses to build it.
+- A store index's own signature is checked before the signatures of the revocations it carries, so an index nobody signed costs its reader one signature check, not up to 4097. Only an index with two faults reads differently: a revocation that does not verify in an index whose own signature does not verify is now `bad-signature` (it was `bad-revocation`). `readAppStoreSteps` reads an index in steps for a reader that shares its thread, and takes the revocations already checked (WISP 1200, Stores).
+
+**CLI**
+
+- A long-lived CLI or headless profile no longer slows down as its history grows: writing over a stored row (a message's delivery mark, an edit, a reaction, a file's state) or deleting one costs the same whatever the store holds. Before, each of those walked every row of the store, about 170 ms at 10,000 messages and 500 ms at 40,000, so one long chat slowed every other chat of the profile.
+
+**CI**
+
+- The labels the merge train puts on a pull request it drops from the line, `queue:conflict` and `queue:failed`, no longer start a merge-queue run each: only `queue` and `queue:priority`, the labels that put a pull request in line, wake the train.
+
+**Website**
+
+- The app screenshots on ghostly.tools load in the size they are shown at. Each one was a single file 2560 pixels wide (780 for a phone's screen), drawn at about 900 on the home page, and at 133 for the phone beside each window: 1,035 KB of screenshots on a visit to the home page in a 1280 pixel window. Each now has narrower copies, and the browser takes the one that fits its window and its screen's sharpness: 399 KB on that visit, 619 KB on a high-density screen. A phone gets the same phone screenshots as before.
+
+### Security
+
+**Groups**
+
+- In a private group, only a member who is still the admin can name everyone, and a member's pins are paced.
+- A community hub gives its lobby only to members of its roster, and a commit that came before its parent waits only when the admin signed it, for two minutes.
+- Group files: a holder counts what it sends toward its day whatever the asker confirms, keeps the records of its last few ended transfers only, and never sends the same piece again without bound. A file that is coming can be cancelled or paused, and turning automatic downloads off stops the ones not here yet.
+
+**Chat and devices**
+
+- An invite or group link opened in the app makes a chat only after the lock, and only a few at a time.
+- A chat that was live is never told its invite was used by someone else.
+- Held messages are fetched only from HTTPS addresses on the public Internet.
+- "Lock after N minutes" counts the time the device was asleep.
+- A name with nothing to see in it (only invisible characters) is no name.
+- The question before a secret goes out reads the text without its invisible characters.
+
+**Apps**
+
+- A running app is judged by the version it runs, and an app uninstalled while it runs is stopped.
+- An app's icon is at most 1024 × 1024 pixels.
+- Reading a store's list pauses every few milliseconds, checks the list's own signature first and each revocation once.
+- An app card's name for a screen reader is the installed app's title.
+
+**Website**
+
+- No other site can show the website's pages in a frame, and its answers say how their files and links may be read.
+
+**CLI**
+
+- `chat list`, `chat show` and the other commands that print a chat no longer print a pending chat's invite code; it shows as `<hidden>` unless you add `--show-secret` to `chat list` or `chat show`. `engine getState` hides it too. `invite create` prints it as before.
+
 ## 1.2.1
 
 ### Fixed

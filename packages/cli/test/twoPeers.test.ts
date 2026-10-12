@@ -89,6 +89,11 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(invite.invite).toMatch(/^ghostly1/);
     expect(invite.link).toBe(`https://ghostly.tools/#${invite.invite}`);
     chatA = invite.chat as string;
+    // The code lets whoever reads it take the chat: only `invite create` and an asking with --show-secret print it.
+    for (const args of [["chat", "list"], ["chat", "show", "bob"], ["chat", "rename", "bob", "bob"], ["engine", "getState"]]) expect((await as(alice, ...args)).stdout, args.join(" ")).not.toContain(invite.invite);
+    expect(ok(await as(alice, "chat", "show", "bob"))).toMatchObject({ invite: "<hidden>" });
+    expect(ok(await as(alice, "chat", "show", "bob", "--show-secret"))).toMatchObject({ invite: invite.invite });
+    expect((ok(await as(alice, "chat", "list", "--show-secret")).chats as { invite: string }[])[0].invite).toBe(invite.invite);
     // The self-invite guard (WISP 801 Q9).
     error(await as(alice, "invite", "join", invite.invite as string), "refused", 1);
     chatB = ok(await as(bob, "invite", "join", invite.link as string, "--label", "alice")).chat as string;

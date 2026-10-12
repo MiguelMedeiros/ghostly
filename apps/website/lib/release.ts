@@ -3,7 +3,10 @@
  * published one (lib/latestRelease.ts). `tools/scripts/bump-version.mjs` sets it, and
  * /latest.json answers with it.
  */
-export const VERSION = "1.2.1";
+export const VERSION = "1.2.2";
+
+/** The version an app screenshot's caption names ("Ghostly {n}"): that release without its patch, so it follows each bump. */
+export const SHOTS_VERSION = VERSION.split(".").slice(0, 2).join(".");
 
 /** The version an app screenshot's caption names ("Ghostly {n}"): that release without its patch, so it follows each bump. */
 export const SHOTS_VERSION = VERSION.split(".").slice(0, 2).join(".");

@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { callApi, redactSettings, SETTABLE } from "./api";
+import { callApi, hideStateSecrets, SETTABLE } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
@@ -128,7 +128,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, nick"],
+  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret]", "Any call of the app's engine, with its own parameters", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets") }],
   ["engine --list", "The engine's calls"],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -545,9 +545,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
   let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal }));
   if (method === "getState" && !showSecret && result && typeof result === "object") {
-    const state = result as { settings: Parameters<typeof redactSettings>[0]; groups?: { entryLink?: string }[] };
-    // A group's entry link lets anyone join: hidden like the settings' secrets.
-    result = { ...state, settings: redactSettings(state.settings), ...(state.groups ? { groups: state.groups.map((g) => (g.entryLink ? { ...g, entryLink: "<hidden>" } : g)) } : {}) };
+    result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
   }
   print(result);
 }
