@@ -28,10 +28,25 @@ export const DEFAULT_APP_STORES: readonly { url: string; key: string }[] = DEFAU
  * app card sent in a chat names, and where its revocations and a restored profile's files are read: the copy in the
  * build is never a source a contact could read.
  */
-export interface BuiltInApp { publisher: string; name: string; digest: string; url: string }
+export interface BuiltInApp {
+  publisher: string; name: string; digest: string; url: string;
+  /** The pinned bundle's own title and tagline, as its manifest says them: what its row shows before the file is read. */
+  title: string; tagline: string;
+}
 
 /**
  * The apps that come with Ghostly. A short list kept here on purpose, never "everything in the official store": an
- * entry is added with its bundle, pinned by digest, and a build with no bundle has no entry.
+ * entry is added with the pin of its bundle in apps/ui/src/assets/apps/built-in.json, which the build reads from the
+ * app's own repository (apps/ui/scripts/built-in-apps.mjs); no bundle is kept in this repository.
+ *
+ * Chess: Ghostly's own publisher key for it (fingerprint odcg w6wj w8dy nqop), version 2.3.0 (`sequence` 4), at the
+ * commit of its repository that the official store lists.
  */
-export const BUILT_IN_APPS: readonly BuiltInApp[] = [];
+export const BUILT_IN_APPS: readonly BuiltInApp[] = [
+  {
+    publisher: "odcgw6wjw8dynqop84r47jbjcdqossbgrfiejd367e14hgxmjcho", name: "chess",
+    digest: "EEnFmP0grTkTe_9qgapQsEEZzWB9FcpoimWkHnfecVs",
+    url: "https://cdn.jsdelivr.net/gh/MiguelMedeiros/ghostly-chess@c665ab194478145fd9b9a4777e6c0d1893969649/app.ghostlyapp",
+    title: "Chess", tagline: "Play chess with a contact, live in your chat",
+  },
+];

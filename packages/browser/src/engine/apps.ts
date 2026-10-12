@@ -194,7 +194,9 @@ export interface AppStorePreview { url: string; key: string; fingerprint: string
 export type AppSource =
   | { url: string }
   | { store: string; ref: string }
-  | { card: { ref: string; url: string; sequence?: number; digest?: string } };
+  | { card: { ref: string; url: string; sequence?: number; digest?: string } }
+  /** A built-in app this profile is offered, by reference: read from the bundle the build carries, with no request. */
+  | { builtIn: string };
 
 /** What the install screen shows, from the checked bundle. Nothing is stored yet. */
 export interface AppPreview {
@@ -213,6 +215,8 @@ export interface AppPreview {
   run: AppRunStatus;
   listedBy: AppListedBy[];
   unknownPublisher: boolean;
+  /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
+  carried?: true;
 }
 
 export type AppCheckOutcome = "updated" | "ask" | "equivocation" | "none";
@@ -234,6 +238,12 @@ export interface AppsHost {
   defaults?: readonly { url: string; key: string }[];
   /** The apps that come with this build (`BUILT_IN_APPS` when absent). */
   builtIns?: readonly BuiltInApp[];
+  /**
+   * The bundle this build carries for a built-in app: a file of the client itself, read with no request to any server
+   * but the client's own. Whatever it returns is checked whole against the entry's digest and reference. Absent: this
+   * build carries none, and no built-in app is offered.
+   */
+  readBuiltIn?(app: BuiltInApp): Promise<Uint8Array>;
   /** After every update check (the scheduled one included): the pages read the installed apps again. */
   checked?(results: AppCheckResult[]): void;
 }
@@ -265,7 +275,7 @@ export const BUILT_IN_APPS_KEY = "appBuiltIns";
 /** The built-in apps the person removed, by reference, and when (WISP 1200 § Built-in apps: removing sticks). */
 export interface BuiltInAppMarks { removed: Record<string, number> }
 /** A built-in app this profile is offered: one the person has neither installed nor removed. Nothing of it is stored. */
-export interface BuiltInAppOffer { ref: string; publisher: string; name: string; fingerprint: string; digest: string; url: string }
+export interface BuiltInAppOffer { ref: string; publisher: string; name: string; fingerprint: string; digest: string; url: string; title: string; tagline: string }
 
 /** The marks as kept, read with nothing taken on trust: a record that is not one is no mark. */
 function builtInMarks(kept: unknown): BuiltInAppMarks {
@@ -290,12 +300,13 @@ const builtInRef = (app: BuiltInApp) => appRef(app.publisher, app.name);
 /**
  * The entries of the built-in list this profile is offered (WISP 1200 § Built-in apps): each reference once, not
  * installed (`installed`, by reference) and not removed by the person. An entry that is not a whole one (its key, its
- * name, its digest, a URL off the list of `appFetch.ts`) is skipped, as a build with no bundle for it would be.
+ * name, its digest, a URL off the list of `appFetch.ts`, no title or tagline) is skipped, as a build with no bundle
+ * for it would be.
  */
 export function builtInsDue(list: readonly BuiltInApp[], installed: ReadonlySet<string>, marks: BuiltInAppMarks): BuiltInApp[] {
   const due = new Map<string, BuiltInApp>();
   for (const app of list) {
-    if (!isAppKey(app.publisher) || !isAppHash(app.digest) || !isAppFetchUrl(app.url)) continue;
+    if (!isAppKey(app.publisher) || !isAppHash(app.digest) || !isAppFetchUrl(app.url) || !app.title || !app.tagline) continue;
     const ref = builtInRef(app);
     if (!isAppRef(ref) || due.has(ref) || installed.has(ref) || marks.removed[ref] !== undefined) continue;
     due.set(ref, app);
@@ -490,11 +501,33 @@ export class Apps {
    */
   async builtIns(): Promise<BuiltInAppOffer[]> {
     const list = this.host.builtIns ?? BUILT_IN_APPS;
-    if (!list.length) return [];
+    if (!list.length || !this.host.readBuiltIn) return [];
     const [installed, marks] = await Promise.all([this.installed(), this.builtInMarks()]);
     return builtInsDue(list, new Set(installed.map((a) => a.ref)), marks).map((app) => ({
       ref: builtInRef(app), publisher: app.publisher, name: app.name, fingerprint: appFingerprint(app.publisher), digest: app.digest, url: app.url,
+      title: app.title, tagline: app.tagline,
     }));
+  }
+
+  /**
+   * The bundle the build carries for a built-in app, checked as a fetched one is, and against its entry: the digest the
+   * list pins and the entry's reference. Anything else in that file is not this app, and nothing of it is kept.
+   */
+  private async bundled(app: BuiltInApp): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
+    if (!this.host.readBuiltIn) fail("not-carried", "This build does not carry this app");
+    let bytes: Uint8Array;
+    try { bytes = await this.host.readBuiltIn(app); } catch { fail("not-carried", "This build does not carry this app"); }
+    if (!(bytes instanceof Uint8Array) || bytes.length > APP_BUNDLE_LIMITS.bundleBytes) fail("not-carried", "This build does not carry this app");
+    const read = await readAppBundleAsync(bytes);
+    if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+    if (read.bundle.digest !== app.digest || versionOf(read.bundle.manifest, read.bundle.digest).ref !== builtInRef(app)) fail("unlisted", "The app this build carries is not the one it names");
+    return { bundle: read.bundle, bytes };
+  }
+  /** The built-in entry of this reference while the profile is offered it (`builtIns`), else undefined. */
+  private async offered(ref: string): Promise<BuiltInApp | undefined> {
+    const app = this.builtIn(ref);
+    if (!app || !this.host.readBuiltIn) return undefined;
+    return builtInsDue([app], (await this.app(ref)) ? new Set([ref]) : new Set(), await this.builtInMarks())[0];
   }
 
   /**
@@ -904,6 +937,13 @@ export class Apps {
     let urls: string[];
     let expect: { ref: string; sequence?: number; digest?: string; exact?: true } | null = null;
     let fromStore: string | undefined;
+    if ("builtIn" in source) {
+      if (!isAppRef(source.builtIn)) fail("bad-ref", "Not an app reference");
+      const app = (await this.offered(source.builtIn)) ?? fail("not-offered", "This app does not come with Ghostly here");
+      const { bundle, bytes } = await this.bundled(app);
+      // From its public URL, not from the build: what a card sent to a contact names, and where its revocations are read.
+      return this.stage(bundle, bytes, app.url, undefined, true);
+    }
     if ("url" in source) {
       urls = [(typeof source.url === "string" && appPasteUrl(source.url, "app.ghostlyapp")) || notReadable(source.url, "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS")];
     } else if ("store" in source) {
@@ -918,6 +958,12 @@ export class Apps {
       if (!isAppRef(ref)) fail("bad-ref", "Not an app reference");
       // A card's URL is on the list or refused (WISP 1200 § Apps sent in a chat): no request goes anywhere else.
       if (!isAppFetchUrl(url)) fail("host", "A card's app is read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit");
+      // A contact's card of the very version this build carries, of a built-in app offered here: no request at all.
+      const carried = typeof digest === "string" ? await this.offered(ref) : undefined;
+      if (carried && carried.digest === digest) {
+        const held = await this.bundled(carried).catch(() => null);
+        if (held) return this.stage(held.bundle, held.bytes, carried.url, undefined, true);
+      }
       urls = [url];
       expect = { ref, ...(typeof sequence === "number" && { sequence }), ...(typeof digest === "string" && { digest }) };
     } else fail("bad-source", "No app to fetch");
@@ -948,7 +994,7 @@ export class Apps {
     if (oldest) this.sweep = setTimeout(() => this.sweepStaged(), STAGED.ms - (this.now() - oldest.at));
   }
 
-  private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string): Promise<AppPreview> {
+  private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string, carried = false): Promise<AppPreview> {
     for (const [digest, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(digest);
     this.staged.delete(bundle.digest);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
@@ -968,6 +1014,7 @@ export class Apps {
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), installed?.revocations),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      ...(carried && { carried: true as const }),
     };
   }
 
@@ -1231,6 +1278,18 @@ export class Apps {
     const app = await this.installedOrFail(ref);
     const stores = await this.stores();
     if (await this.hasBundle(app.bytes, app.digest)) return this.runCheckOf(app, stores);
+    // The version this build carries (a restored profile's built-in app): its files are here, no source is asked.
+    const carried = this.builtIn(app.ref);
+    if (carried && carried.digest === app.digest) {
+      const held = await this.bundled(carried).catch(() => null);
+      if (held) {
+        const kind = await this.writeBundle(app.digest, held.bytes);
+        const now = await this.app(app.ref);
+        if (!now || now.digest !== app.digest) { await this.removeBundle(kind, app.digest); fail("not-installed", "This app is not installed"); }
+        if (now.bytes !== kind) await this.putApp({ ...now, bytes: kind });
+        return this.runCheckOf({ ...now, bytes: kind }, stores);
+      }
+    }
     // An app installed from a store asks only that store's listing (and the URL it came from), never its sources.
     const urls = [app.from];
     for (const s of stores) {

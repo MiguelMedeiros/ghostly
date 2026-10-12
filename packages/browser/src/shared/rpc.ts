@@ -497,6 +497,11 @@ export interface EngineApi {
    */
   /** The installed apps, each with whether it may run now. No request. */
   appList(): import("../engine/apps").InstalledAppView[];
+  /**
+   * The built-in apps this profile is offered (WISP 1200 § Built-in apps): the ones it has neither installed nor removed.
+   * Nothing of them is stored or granted; `appPreview({ builtIn: ref })` reads one from the build, with no request.
+   */
+  appBuiltIns(): import("../engine/apps").BuiltInAppOffer[];
   /** The stores the person has, with the last index read of each. No request. */
   appStoreList(): import("../engine/apps").AppStoreSummary[];
   /** Reads a store at a URL (a GitHub repository, or a URL of `ghostly-store.json`) for the person to see. Nothing is kept. */

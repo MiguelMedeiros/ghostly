@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Ghostly on the web: the same peer and UI as the extension, running in a tab. Nothing to install.",
   "scripts": {
+    "predev": "node ../ui/scripts/built-in-apps.mjs",
     "dev": "vite",
+    "prebuild": "node ../ui/scripts/built-in-apps.mjs",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json"
