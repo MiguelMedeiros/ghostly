@@ -270,6 +270,45 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect(world.texts("bob")).toContain("dinner at 8");
   });
 
+  it("the admin's invitation of a member it removed is not replaced, nor taken back, by another contact's frames", async () => {
+    const { world, alice, others: [bob, carol], groupId, key } = await groupOf(["bob", "carol"]);
+    world.chats.set("chat-bc", ["bob", "carol"]);
+    await alice.remove(groupId, key(bob)); await world.settle();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    const invitation = () => world.peers.get("bob")!.store.groups.get(groupId)?.invitation;
+    expect(invitation()).toMatchObject({ linkId: "chat-ab", admin: key(alice) });
+
+    // Carol, still a member and Bob's contact, invites him under the id, then takes it back.
+    await bob.handleContactFrame("chat-bc", { t: "group-invite", g: groupId, name: "Ghosts", admin: key(carol), e: 0, n: 3 });
+    expect(invitation()).toMatchObject({ linkId: "chat-ab", admin: key(alice) });
+    await bob.handleContactFrame("chat-bc", { t: "group-decline", g: groupId });
+    expect(invitation()).toMatchObject({ linkId: "chat-ab", admin: key(alice) });
+
+    // Accept goes to Alice, who lets Bob back in.
+    await bob.accept(groupId); await world.settle(); await world.meet();
+    expect(view(bob, groupId).status).toBe("active");
+    expect(view(alice, groupId).invited).toEqual([]);
+  });
+
+  it("a decline owed to the admin of a group kept stays owed when another contact invites and takes it back", async () => {
+    const { world, alice, others: [bob, carol], groupId, key } = await groupOf(["bob", "carol"]);
+    world.chats.set("chat-bc", ["bob", "carol"]);
+    await alice.remove(groupId, key(bob)); await world.settle();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    world.chats.delete("chat-ab");
+    await bob.decline(groupId); await world.settle();
+    expect(world.peers.get("bob")!.store.groups.get(groupId)?.declined?.linkId).toBe("chat-ab");
+
+    await bob.handleContactFrame("chat-bc", { t: "group-invite", g: groupId, name: "Ghosts", admin: key(carol), e: 0, n: 3 });
+    await bob.handleContactFrame("chat-bc", { t: "group-decline", g: groupId });
+    expect(world.peers.get("bob")!.store.groups.get(groupId)?.declined?.linkId).toBe("chat-ab");
+
+    // Alice's chat comes up: she hears the answer.
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await bob.tick(Date.now() + 1000); await world.settle();
+    expect(view(alice, groupId).invited).toEqual([]);
+  });
+
   it("a pin by a member who is removed goes with them; the others' pins stay", async () => {
     const { world, alice, others: [bob, carol], groupId, key } = await groupOf(["bob", "carol"]);
     const pinBy = (by: string) => ({ id: `${key(bob)}:1:1`, n: Date.now(), by, at: Date.now(), k: by, sig: "s" });
