@@ -461,8 +461,8 @@ export interface NodeOptions {
    */
   appFetch?: typeof fetch;
   /**
-   * The bundle this build carries for a built-in mini-app (WISP 1200 § Built-in apps), by its digest: a file of the
-   * client itself. Without it no built-in app is offered. The engine checks what it returns.
+   * The bundle this build carries for a built-in mini-app (WISP 1200 § Built-in apps): a file of the client itself.
+   * Without it no built-in app is offered. The engine checks what it returns against the digest its list pins.
    */
   builtInApp?: (app: { publisher: string; name: string; digest: string }) => Promise<Uint8Array>;
   /** Create and connect the Ark, Bark, Spark and USDT wallets at start. Default: on; tests without a network turn it off. */

@@ -4,8 +4,11 @@
   "version": "1.2.2",
   "type": "module",
   "scripts": {
+    "predev": "npm run sync:apps",
     "dev": "vite apps/ui",
+    "prebuild": "npm run sync:apps",
     "build": "tsc -b && vite build apps/ui",
+    "sync:apps": "node apps/ui/scripts/built-in-apps.mjs",
     "preview": "vite preview apps/ui",
     "tauri": "tauri",
     "lint": "eslint apps/ui/src packages apps/extension/src apps/extension/test/*.ts apps/web/src apps/mini e2e",
@@ -45,7 +48,7 @@
     "build:web": "npm run build -w @ghostly/web",
     "check:desktop-bundle": "node tools/scripts/check-desktop-bundle.mjs",
     "check:wkwebview-media": "node tools/scripts/voice-media/check-wkwebview.mjs",
-    "postinstall": "patch-package --patch-dir tools/patches",
+    "postinstall": "patch-package --patch-dir tools/patches && node apps/ui/scripts/built-in-apps.mjs --soft",
     "build:sdk": "npm run build -w @ghostlytools/sdk",
     "test:sdk-example": "node tools/scripts/sdk-example.mjs",
     "test:group-load": "GROUP_LOAD=${GROUP_LOAD:-256} npm run test:group-load -w @ghostly/browser"

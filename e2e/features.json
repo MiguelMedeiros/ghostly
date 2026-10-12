@@ -713,6 +713,7 @@
     "apps/mini/chess/**": ["apps.chess"],
     "apps/ui/index.html": ["desktop.*"],
     "apps/ui/public/**/*": ["desktop.*"],
+    "apps/ui/scripts/built-in-apps.mjs": ["apps.engine.built-in"],
     "apps/ui/src/App.tsx": ["*"],
     "apps/ui/src/Root.tsx": ["*"],
     "apps/ui/src/assets/apps/**/*": ["apps.engine.built-in"],
