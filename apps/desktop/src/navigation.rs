@@ -204,7 +204,8 @@ mod tests {
         assert!(allows(other.as_ref(), &url("about:srcdoc")));
         // `run` is what a person's app is built from.
         let run = include_str!("lib.rs");
-        let run = &run[run.find("pub fn run()").unwrap()..run.find("fn on_page_load").unwrap()];
+        let run = &run[run.find("pub fn run()").unwrap()..];
+        let run = &run[..run.find("\n}\n").unwrap()];
         assert!(run.contains(".plugin(navigation::guard())"));
     }
 }
