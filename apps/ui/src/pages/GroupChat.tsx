@@ -63,12 +63,34 @@ import { Notice } from "../components/ui/Notice";
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 
+/** A roster's names as the history's rows read them: built once per roster, not once per message. */
+interface RosterNames {
+  /** Each member as a mention names them. */
+  members: { key: string; me: boolean; name: string }[];
+  /** Who wrote a message (`authorName`). */
+  author: (key: string) => string;
+}
+
 /** `myName`: how a mention of me reads (my own name, as a member sees it); the others go by the roster's names. */
-function toChatMessage(message: StoredMessage, group: GroupView, t: Translate, myName = ""): ChatMessage {
-  const names = group.members.map(m => ({ key: m.key, me: m.me, name: m.me ? myName : memberName(m, t) }));
-  const mentions = mentionViews(message.text, message.mentions, names, message.sender === "me");
+function rosterNames(group: Pick<GroupView, "members" | "formerNames">, t: Translate, myName = ""): RosterNames {
+  const byKey = new Map<string, string>();
+  const members = group.members.map(m => {
+    const name = memberName(m, t);
+    if (!byKey.has(m.key)) byKey.set(m.key, name);
+    return { key: m.key, me: m.me, name: m.me ? myName : name };
+  });
+  const gone = { members: [], formerNames: group.formerNames };
+  return { members, author: key => byKey.get(key) ?? authorName(gone, key, t) };
+}
+
+/** What the names are made of: the same text while no member's key or name (nor a former name) changed. */
+const rosterNamesKey = (group: Pick<GroupView, "members" | "formerNames"> | undefined) =>
+  group ? JSON.stringify([group.members.map(m => [m.key, m.me, m.nick]), group.formerNames]) : "";
+
+function toChatMessage(message: StoredMessage, names: RosterNames): ChatMessage {
+  const mentions = mentionViews(message.text, message.mentions, names.members, message.sender === "me");
   return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, ...(message.sentAt !== undefined && { sentAt: message.sentAt }), paymentId: message.paymentId,
-    nick: message.sender === "peer" && message.member ? authorName(group, message.member, t) : undefined,
+    nick: message.sender === "peer" && message.member ? names.author(message.member) : undefined,
     ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }),
     ...(message.edit && { edit: message.edit }), ...(message.forwarded && { forwarded: message.forwarded }), ...(message.card && { card: message.card }),
     // A file or voice message a member announced (WISP 503): its bubble, its bytes fetched from whoever holds them.
@@ -310,12 +332,16 @@ export function GroupChat() {
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
-  const shown = useMemo(() => group ? messages.filter(m => !m.event && !m.groupPay).map(m => toChatMessage(m, group, t, settings.defaultNickname)) : [],
-    [messages, group, settings.defaultNickname, t]);
+  // The group is a new object on every state of the engine (up to 20 a second): the names, and so the rows, are made
+  // again only when the roster's own keys or names changed, not for a history's length times its roster each time.
+  const namesKey = rosterNamesKey(group);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `namesKey` is all of the group the names read
+  const names = useMemo(() => group && rosterNames(group, t, settings.defaultNickname), [namesKey, settings.defaultNickname, t]);
+  const shown = useMemo(() => names ? messages.filter(m => !m.event && !m.groupPay).map(m => toChatMessage(m, names)) : [], [messages, names]);
   const forwarding = useForwarding(group ? `group:${groupId}` : undefined, shown);
   // By id: a row looks its message up once per draw, and a long group has thousands of rows.
   const shownById = useMemo(() => new Map(shown.map(c => [c.id, c])), [shown]);
-  const shownOf = (m: StoredMessage) => shownById.get(m.id) ?? toChatMessage(m, group!, t, settings.defaultNickname);
+  const shownOf = (m: StoredMessage) => shownById.get(m.id) ?? toChatMessage(m, names!);
   // Members learn my name on the edges, as a contact does on a chat: the engine must know it here too.
   const engineNick = state?.settings.nick;
   useEffect(() => {
