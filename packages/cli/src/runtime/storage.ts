@@ -515,9 +515,9 @@ function replayEntries(classes: RawClasses, databases: Map<string, RawDatabase>,
       }
       const before = change.before;
       // The first time a row is touched, it is as the snapshot (and the indexes) had it.
-      const note = (key: Key, record: RawRecord | undefined) => { if (before && !before.get(key)) before.put({ key, value: record }); };
+      const note = (key: Key, record: RawRecord | undefined) => { if (!before!.get(key)) before!.put({ key, value: record }); };
       if (op.kind === "put") {
-        note(op.key, store.records.get(op.key));
+        if (before) note(op.key, store.records.get(op.key));
         store.storeRecord({ key: op.key, value: blobsFromDisk(op.value) }, false);
       } else if (op.kind === "delete") {
         const key = keyFromDisk(op.key);
