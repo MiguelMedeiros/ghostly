@@ -156,7 +156,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     </ul>
     {live.isAdmin && live.status === "active" && live.profile !== "community" && <div className="mt-4">
       <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.members.invite")}</h3>
-      {/* Unanswered invitations hold a seat (they last until the app restarts), so a full group says how many of its 32 are only invited. */}
+      {/* Unanswered invitations hold a seat (until they are answered, a week at most), so a full group says how many of its 32 are only invited. */}
       {full && <p data-testid="group-invite-full" className="mt-1 text-sm text-text-muted">{live.invited.length > 0
         ? t("group.members.fullInvited", { max: MAX_GROUP_MEMBERS, invited: live.invited.length }) : t("group.link.full", { count: MAX_GROUP_MEMBERS })}</p>}
       {contacts.length === 0 && <p className="mt-1 text-sm text-text-muted">{t("group.members.noContacts")}</p>}
