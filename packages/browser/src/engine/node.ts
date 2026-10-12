@@ -7280,7 +7280,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * The order saved chats start in, which is the order they take native listeners in (`nativeSlots` per transport):
+   * The order saved chats start in, which is the order they take native listeners in (`NATIVE_SLOTS` per transport):
    * the 1:1 chats written in, or live, most recently first; group links keep their places. In the order they were
    * stored, an app with more paired chats than slots left a chat that was live a moment before with no listener, and a
    * contact with no WebRTC (the Linux Desktop) never reached it again (Omarchy, 2026-09-30: "On DHT · retrying live" for

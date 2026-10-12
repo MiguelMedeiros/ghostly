@@ -30,7 +30,7 @@ it("bounds native listeners, restores saved identities and never evicts a busy e
     await node.start();
     // Each transport starts its listeners on its own (the test below): Iroh's being all up says nothing of HyperDHT's.
     await vi.waitFor(()=>{
-      for (const transport of ["iroh/1","hyperdht/1"] as const) expect(row(ids[8]).transportErrors?.[transport]).toContain("eight");
+      for (const transport of ["iroh/1","hyperdht/1"] as const) expect(row(ids[8]).transportErrors?.[transport]).toContain("All native connection slots are in use");
       expect(counts).toEqual({"iroh/1":8,"hyperdht/1":8});
     });
     expect(row(ids[9]).availableTransports).toEqual(["webrtc/1"]);

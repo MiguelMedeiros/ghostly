@@ -175,7 +175,7 @@ test("a phone in a private group with six bots that have no WebRTC reaches every
       await bot.run("group", "join", link);
       await everyoneOnline(bots[0], group, i + 2);
     }
-    await phone.page.goto(`/#/join/${link.slice(link.indexOf("#/join/") + "#/join/".length)}`);
+    await phone.page.goto(`/#/join/${link.includes("#/join/") ? link.slice(link.indexOf("#/join/") + "#/join/".length) : link}`);
     await expect(groupChat(phone)).toHaveAttribute("data-status", "active", { timeout: 240_000 });
 
     // The phone reaches all six, each over Iroh, and no row waits for a connection.
