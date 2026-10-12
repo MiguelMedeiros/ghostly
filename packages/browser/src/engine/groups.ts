@@ -1352,7 +1352,16 @@ export class Groups {
       }
       case "group-accept": {
         const session = this.sessions.get(g);
-        if (!session?.isAdmin || !this.invited.get(g)?.has(linkId) || typeof frame.key !== "string" || !MEMBER_KEY.test(frame.key)) return;
+        if (typeof frame.key !== "string" || !MEMBER_KEY.test(frame.key)) return;
+        if (!session?.isAdmin || !this.invited.get(g)?.has(linkId)) {
+          // Nothing here can let it in: the group is gone from this app, the role was handed on, or the invitation was
+          // answered or never made. Said, so its invitation does not wait for a welcome for good; the answer is the same
+          // whatever this app holds under the id. Not to the member this chat let in already (its accept, said twice),
+          // nor on an entry session, which the link's own pace answers.
+          const letIn = !!session && rosterHas(session.roster, frame.key) && this.stored.get(g)?.contacts?.[frame.key] === linkId;
+          if (!letIn && ![...this.host.entries(g).values()].includes(linkId)) { try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* it asks again when the chat is up */ } }
+          return;
+        }
         const group = this.stored.get(g)!;
         // A key already in the roster (ours too) is nobody new: dropped before anything is noted about its member.
         if (frame.key === session.myKey || rosterHas(session.roster, frame.key)) return;
