@@ -445,6 +445,11 @@ export interface NodeOptions {
    * no installed app, no store read, no update check and no app storage, and those calls are refused as with false.
    */
   apps?: boolean | "wire";
+  /**
+   * Held items (WISP 404) are also read from plain HTTP on this machine: the e2e suite's local S3 server. Default off,
+   * and off in every shipped app: a contact names those addresses.
+   */
+  holdLoopback?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -996,6 +1001,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
     changed: () => this.emitState(),
+    loopbackStorage: () => this.options.holdLoopback === true,
     // Tests shorten the lifetime to watch an item expire; nothing else reads this, and it never lengthens it.
     ttlMs: () => { try { const raw = typeof localStorage !== "undefined" ? localStorage.getItem("ghostly-test-hold-ttl") : null; const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; } catch { return undefined; } },
   });
@@ -2104,15 +2110,20 @@ export class GhostlyNode implements EngineImplementation {
   appInstall(params: { digest: string; grant: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
   appUpdateAccept(params: { ref: string }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
-  appUninstall(params: { ref: string }): Promise<void> { return this.appStore.uninstall(params); }
+  /** Uninstalls an app. One running then is closed in every chat (the contact hears `close`), and the pages are told, to stop its frames. */
+  async appUninstall(params: { ref: string }): Promise<void> {
+    await this.appStore.uninstall(params);
+    this.appsCloseOf(params.ref);
+    this.events.onAppsChecked?.();
+  }
   appRunCheck(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.runCheck(params); }
   appFetchFiles(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.fetchFiles(params); }
   appEntry(params: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> { return this.appStore.entry(params); }
-  appFile(params: { ref: string; path: string }): Promise<Uint8Array> { return this.appStore.file(params); }
-  appStorageGet(params: { ref: string; scope: string; key: string }): Promise<{ value: import("@ghostly/core").JsonValue } | null> { return this.appStore.storageGet(params); }
-  appStorageSet(params: { ref: string; scope: string; key: string; value: unknown }): Promise<void> { return this.appStore.storageSet(params); }
-  appStorageDelete(params: { ref: string; scope: string; key: string }): Promise<void> { return this.appStore.storageDelete(params); }
-  appStorageKeys(params: { ref: string; scope: string }): Promise<string[]> { return this.appStore.storageKeys(params); }
+  appFile(params: { ref: string; path: string; digest?: string }): Promise<Uint8Array> { return this.appStore.file(params); }
+  appStorageGet(params: { ref: string; scope: string; key: string; digest?: string }): Promise<{ value: import("@ghostly/core").JsonValue } | null> { return this.appStore.storageGet(params); }
+  appStorageSet(params: { ref: string; scope: string; key: string; value: unknown; digest?: string }): Promise<void> { return this.appStore.storageSet(params); }
+  appStorageDelete(params: { ref: string; scope: string; key: string; digest?: string }): Promise<void> { return this.appStore.storageDelete(params); }
+  appStorageKeys(params: { ref: string; scope: string; digest?: string }): Promise<string[]> { return this.appStore.storageKeys(params); }
   appDataExport(params: { ref: string }): Promise<AppDataExport[]> { return this.appStore.exportData(params); }
 
   getState(): EngineState {
@@ -3622,11 +3633,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void | Promise<void> {
-    // A group's file (WISP 503): asked for (Download), or asked for again; its transfers are the group's to run.
+    // A group's file (WISP 503): asked for (Download), asked for again or gone on with; stopped (Cancel, or Decline
+    // for one not asked for yet) or paused. Its transfers are the group's to run.
     if (typeof linkId === "string" && linkId.startsWith("group:")) {
-      if (action !== "accept" && action !== "request") throw new Error("A group's file is downloaded (accept) or asked for again (request)");
       if (!fileId.startsWith(`group-${linkId.slice("group:".length)}-`)) throw new Error("No such file in this group");
-      return this.groups.downloadFile(fileId);
+      if (action === "accept" || action === "request" || action === "resume") return this.groups.downloadFile(fileId);
+      if (action === "cancel" || action === "decline" || action === "pause") return this.groups.haltFile(fileId, action === "pause");
+      throw new Error("A group's file is not sent again from here");
     }
     const live = this.links.get(linkId);
     if (!live) throw new Error("No such chat");
@@ -4428,8 +4441,8 @@ export class GhostlyNode implements EngineImplementation {
     return new Error(this.options.apps === false || this.appsWireOnly ? "Apps do not run on this client" : "Apps are unavailable in this release");
   }
   /** Before an app's frames go to a contact: a version removed or revoked here says nothing more (WISP 1200 § Takedowns). */
-  private async appChatRunnable(ref: string): Promise<void> {
-    if (!this.appsWireOnly) await this.appStore.chatRunnable({ ref });
+  private async appChatRunnable(ref: string, digest?: string): Promise<void> {
+    if (!this.appsWireOnly) await this.appStore.chatRunnable({ ref, digest });
   }
 
   /** A paired 1:1 chat and the chat app id of `ref` in it, from the two pinned participation keys (WISP 1200 § In a chat). */
@@ -4453,10 +4466,11 @@ export class GhostlyNode implements EngineImplementation {
    * This side opened an app in a paired chat, or updated it: `open` goes to the contact now when the session is live,
    * and again on every session that comes back while it stays open.
    */
-  async appOpen({ linkId, ref, version }: { linkId: string; ref: string; version: string }): Promise<{ app: string }> {
+  async appOpen({ linkId, ref, version, digest }: { linkId: string; ref: string; version: string; digest?: string }): Promise<{ app: string }> {
     const { live, app } = this.appChat(linkId, ref);
     if (!isAppVersion(version)) throw new Error("Not an app version");
-    await this.appChatRunnable(ref);
+    // A version removed or revoked since it started says nothing more to the contact (WISP 1200 § Takedowns).
+    await this.appChatRunnable(ref, digest);
     const open = live.appsOpen ??= new Map();
     if (live.link) live.link.openApp(app, version);
     else open.set(app, version);
@@ -4471,10 +4485,10 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** One data frame of an app open on both sides, on the live session only; nothing is kept to send later. */
-  async appSend({ linkId, ref, data }: { linkId: string; ref: string; data: unknown }): Promise<{ error: AppSendError | null }> {
+  async appSend({ linkId, ref, data, digest }: { linkId: string; ref: string; data: unknown; digest?: string }): Promise<{ error: AppSendError | null }> {
     const { live, app } = this.appChat(linkId, ref);
     if (!live.appsOpen?.has(app)) return { error: "not-open" };
-    await this.appChatRunnable(ref);
+    await this.appChatRunnable(ref, digest);
     return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
   }
 
@@ -4485,6 +4499,17 @@ export class GhostlyNode implements EngineImplementation {
         if (live.link) live.link.closeApp(app);
         else live.appsOpen?.delete(app);
       }
+    }
+  }
+
+  /** An app that went (uninstalled) is closed in every chat it was open in, as `appClose` does. */
+  private appsCloseOf(ref: string): void {
+    for (const [linkId, live] of this.links) {
+      if (!live.appsOpen?.size) continue;
+      const { app } = this.appChat(linkId, ref);
+      if (!live.appsOpen.has(app)) continue;
+      if (live.link) live.link.closeApp(app);
+      else live.appsOpen.delete(app);
     }
   }
 
@@ -4534,6 +4559,8 @@ export class GhostlyNode implements EngineImplementation {
     const view = this.groups.views().find(g => g.id === groupId);
     if (!pin || !view?.myKey || view.status !== "active" || !view.members.some(m => m.key === member)) return;
     if (!mayPin(view.profile, member, view.members.find(m => m.role === "admin")?.key)) return;
+    // One that would not be kept (`setPin`'s rule) reads no row.
+    if (!pinIsNewer(this.groups.pinOf(groupId), pin)) return;
     const kept = await this.pinCame(`group:${groupId}`, member === view.myKey ? "me" : member, pin);
     if (!await this.groups.setPin(groupId, { ...kept, ...(via && { k: via.frame.k, sig: via.frame.sig }) }) || !via) return;
     for (const key of this.memberEdges(groupId).keys()) if (key !== via.from && key !== member) this.sendGroupPinFrame(groupId, key);
@@ -5420,6 +5447,8 @@ export class GhostlyNode implements EngineImplementation {
       if (settings[key] !== false) delete this.settings[key];
       else this.settings[key] = false;
       await db.putSettings(this.settings);
+      // Off: what was chosen to fetch by itself and is not here yet stops coming.
+      if (key === "autoDownloads" && settings[key] === false) await this.groups.autoDownloadsOff();
     }
     // Load public profiles: absent means on; turned off, nothing read before is kept.
     if (settings.publicProfiles !== undefined) {

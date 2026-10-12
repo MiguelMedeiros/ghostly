@@ -18,6 +18,8 @@ import type { AppsPlatform } from "../platform";
 export interface AppLaunch {
   /** `<publisher key in z-base32>/<name>`. */
   ref: string;
+  /** The digest of the version it runs (the entry's): what the engine judges while it runs. */
+  digest: string;
   version: string;
   title: string;
   /** What the person granted at install: `chat`, `name`. */
@@ -181,7 +183,8 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host, launch, view, post, stopped, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, now = Date.now }: BrokerOptions): Broker {
+  const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
   const scope = launch.chat?.linkId ?? "alone";

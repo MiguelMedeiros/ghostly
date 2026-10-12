@@ -105,7 +105,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
 | `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
 | `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
-| `chat list`, `chat show <chat>` | Chats, and one chat's connection: transports, last attempt, comparison code |
+| `chat list [--show-secret]`, `chat show <chat> [--show-secret]` | Chats, and one chat's connection: transports, last attempt, comparison code. A pending chat's `invite` prints as `<hidden>` without `--show-secret` |
 | `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact |
 | `chat rename <chat> <name>`, `chat remove <chat> --yes` | Name it here; delete it (keys and history) here |
 | `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
@@ -263,7 +263,9 @@ Nothing prints a seed, a key, a wallet phrase or ecash unless asked with `--show
 credentials, and engine calls that answer with secrets (`exportLinks`, `walletExport`, the wallets' backups) are
 refused without it. A group's entry link lets anyone who reads it join: `group show`, `group list`, the admin
 commands, `group.created` events and `engine getState` print it as `<hidden>`; `--show-secret`, `group create` and
-`group link` print it.
+`group link` print it. A pending chat's invite code lets whoever reads it take the chat: every command that prints a
+chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print it as `<hidden>`; `invite create` and
+`chat list` or `chat show` with `--show-secret` print it.
 
 ## Events
 

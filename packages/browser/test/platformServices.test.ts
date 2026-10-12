@@ -383,6 +383,24 @@ describe("mini-apps: the broker's way to the engine (WISP 1200)", () => {
     ]);
   });
 
+  it("a running app's calls name the version it runs", async () => {
+    const { engineApps } = await import("../src/platform/apps");
+    const apps = engineApps("/app-frame.html").running!("digest-1");
+    fake.engine.calls.length = 0;
+    fake.engine.answers.appStorageGet = null;
+    fake.engine.answers.appSend = { error: null };
+    fake.engine.answers.appOpen = { app: "A".repeat(22) };
+    await apps.storage.get("pub/chess", "link-1", "k");
+    await apps.storage.set("pub/chess", "link-1", "k", 1);
+    await apps.storage.delete("pub/chess", "link-1", "k");
+    await apps.storage.keys("pub/chess", "link-1");
+    await apps.file("pub/chess", "index.html");
+    await apps.chat.send("link-1", "pub/chess", 1);
+    await apps.chat.open("link-1", "pub/chess", "1.0.0");
+    expect(fake.engine.calls.map(([method, params]) => [method, (params as { digest?: string }).digest])).toEqual(
+      ["appStorageGet", "appStorageSet", "appStorageDelete", "appStorageKeys", "appFile", "appSend", "appOpen"].map((method) => [method, "digest-1"]));
+  });
+
   it("remembers the contact's open apps from the start, until they close", async () => {
     const { engineApps } = await import("../src/platform/apps");
     const apps = engineApps("/app-frame.html");

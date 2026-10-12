@@ -19,7 +19,7 @@ function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }) {
   const stops: AppStopReason[] = [];
   const broker = createBroker({
     host,
-    launch: { ref: REF, version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK, name: "Ana" }, ...launch },
+    launch: { ref: REF, digest: "d", version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK, name: "Ana" }, ...launch },
     view: { theme: () => "dark", locale: () => "pt-BR" },
     post: (message, transfer) => posted.push({ message: message as Record<string, unknown>, transfer }),
     stopped: (reason) => stops.push(reason),
@@ -429,4 +429,26 @@ describe("the runner, from what the person granted", () => {
     run();
     for (const type of ["internet", "permissions", "runner"]) expect(await ask(type, ["internet"])).toMatchObject({ ok: false, error: "unknown-type" });
   });
+});
+
+it("asks the engine as the version it runs: every call goes to the platform of its entry's digest", async () => {
+  const platform = memoryHost();
+  const bound = memoryHost();
+  const digests: string[] = [];
+  platform.running = (digest) => { digests.push(digest); return bound; };
+  const broker = createBroker({
+    host: platform,
+    launch: { ref: REF, digest: "digest-7", version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK } },
+    view: { theme: () => "dark", locale: () => "en" },
+    post: () => {},
+    stopped: () => {},
+  });
+  broker.load();
+  broker.message({ id: 0, type: "writing", args: [] });
+  broker.load();
+  broker.message({ id: 1, type: "storage.set", args: ["k", 1] });
+  broker.message({ id: 2, type: "chat.send", args: [1] });
+  await vi.waitFor(() => expect(bound.calls.map((c) => c.op)).toEqual(expect.arrayContaining(["chat.open", "storage.set", "chat.send"])));
+  expect(digests).toEqual(["digest-7"]);
+  expect(platform.calls).toEqual([]);
 });

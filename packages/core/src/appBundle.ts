@@ -33,6 +33,8 @@ export const APP_BUNDLE_LIMITS = {
   /** A path, in bytes (paths are ASCII). */
   pathBytes: 128,
   iconBytes: 256 * 1024,
+  /** The icon's width and height, in pixels: a client decodes it whole to draw it, whatever its bytes. */
+  iconEdge: 1024,
   screenshots: 8,
   /** Lengths in Unicode code points. */
   title: 40,
@@ -374,6 +376,7 @@ function closeAppBundle({ manifest, manifestBytes, signature }: AppBundleHead, f
   if (icon) {
     const size = imageSize(icon);
     if (!size || icon[0] !== 0x89 || size.width !== size.height) return { ok: false, reason: "bad-icon", detail: "icon.png is not a square PNG" };
+    if (size.width > APP_BUNDLE_LIMITS.iconEdge) return { ok: false, reason: "bad-icon", detail: "icon.png is larger than 1024 × 1024 pixels" };
   }
   return { ok: true, bundle: { manifest, manifestBytes, digest: appDigest(manifestBytes), signature, files } };
 }

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { APPS_CAPABILITY, fromBase64Url } from "@ghostly/core";
 import { APPS_ENABLED } from "../src/shared/features";
 import { appsChat } from "./helpers/appsChat";
+import { BUNDLE_URL, FakeNet, PUBLISHER, bundle, keyOf } from "./appsSupport";
 // covers: apps.chat.wire
 
 /**
@@ -115,6 +116,34 @@ describe("apps in the engine (apps/1)", () => {
     await vi.waitFor(() => expect(contactGot).toEqual([{ app, o: "open", v: "1.0.0" }]));
     server.detach(page);
     await vi.waitFor(() => expect(contactGot.at(-1)).toEqual({ app, o: "close" }));
+  });
+
+  it("on: an app uninstalled while it runs is closed for the contact, its frames are refused, and the pages are told", async () => {
+    const net = new FakeNet();
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const { call, contact, contactGot, id, ref, app, page, server } = await setup({ apps: true, appFetch: net.fetch, ref: `${keyOf(PUBLISHER)}/chess` });
+    await vi.waitFor(() => expect(contact.supportsApps).toBe(true));
+    await call("appPreview", { url: BUNDLE_URL });
+    await call("appInstall", { digest: v1.digest, grant: ["chat"] });
+    await call("appEntry", { ref });
+    await call("appOpen", { linkId: id, ref, version: "1.0.1" });
+    contact.openApp(app, "1.0.1");
+    await vi.waitFor(() => expect(contactGot).toEqual([{ app, o: "open", v: "1.0.1" }]));
+    expect(await call("appSend", { linkId: id, ref, data: 1 })).toEqual({ error: null });
+    // Another page too: it may be the one the app runs in.
+    const told: string[] = [];
+    server.attach({ post: message => { if (message.kind !== "response") told.push(message.kind); } });
+    const post = vi.spyOn(page, "post");
+    await call("appUninstall", { ref });
+    expect(post.mock.calls.map(([message]) => message.kind)).toContain("apps-checked");
+    expect(told).toContain("apps-checked");
+    await vi.waitFor(() => expect(contactGot.at(-1)).toEqual({ app, o: "close" }));
+    // The frame the page has not closed yet says nothing more, and cannot open it again.
+    expect(await call("appSend", { linkId: id, ref, data: 2 })).toEqual({ error: "not-open" });
+    await expect(call("appOpen", { linkId: id, ref, version: "1.0.1" })).rejects.toThrow(/^not-installed: /);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(contactGot.at(-1)).toEqual({ app, o: "close" });
   });
 
   it("on: an app opened while the chat is offline says open once the session is live", async () => {

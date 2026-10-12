@@ -815,6 +815,29 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     await store.chatRunnable({ ref: `${keyOf(PUBLISHER)}/other` });
   });
 
+  it("an app that ran here and was uninstalled since is refused for chat, until it is installed again", async () => {
+    const { v1, store } = await running();
+    await store.chatRunnable({ ref: v1.ref });
+    await store.uninstall({ ref: v1.ref });
+    // Its frame may still be open: storage and files are refused as not installed, and so are its frames to the contact.
+    await expect(store.storageGet({ ref: v1.ref, scope: "chat-1", key: "game" })).rejects.toThrow(/^not-installed: /);
+    await expect(store.file({ ref: v1.ref, path: "index.html" })).rejects.toThrow(/^not-installed: /);
+    await expect(store.chatRunnable({ ref: v1.ref })).rejects.toThrow(/^not-installed: /);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await store.chatRunnable({ ref: v1.ref });
+  });
+
+  it("an app uninstalled without having run here is a reference like any other for chat", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await store.uninstall({ ref: v1.ref });
+    await store.chatRunnable({ ref: v1.ref });
+  });
+
   it("every update check is told to the host, so the pages read the apps again", async () => {
     const checked = vi.fn();
     const v1 = await bundle();

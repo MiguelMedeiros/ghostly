@@ -39,6 +39,8 @@ From 1.2, apps ([APPS.md](APPS.md)) run in a sandboxed page, the runner, and the
 
 The client asks `/app-frame.html` once for its header. When it is missing, or looser in the directives the client checks, the client hides Apps. It does not check every directive, so copy the whole value as it is. The client asks `/app-frame-net.html` only when an app granted the internet opens, so without that location such an app does not open, and Apps still shows. Send one `Content-Security-Policy` on those two paths (not the site's as well), and keep a proxy or CDN from adding or rewriting it. Every other path keeps the site's own policy from `apps/web/nginx-headers.conf`, whose `frame-src 'self'` lets the page frame the runner: a site policy that blocks frames (`frame-src 'none'`, `child-src 'none'`) breaks every app, even though Apps shows.
 
+The app's own pages (`location /` in `apps/web/nginx.conf`) also send `Cross-Origin-Opener-Policy: same-origin-allow-popups`, so a page of another site that opened the app keeps no handle to its window. `/oidc-callback.html` is served without it: a sign-in returns there inside the popup the app opened.
+
 `curl -sI https://<your-host>/app-frame.html` shows what is sent. `curl -sI https://<your-host>/app-frame-net.html` must show the network runner's policy (`connect-src https: wss:`), not the plain runner's and not the site's. `npm run dev -w @ghostly/web` and `npm run preview -w @ghostly/web` send both headers by themselves.
 
 ## How it shares code
