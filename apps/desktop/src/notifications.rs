@@ -324,7 +324,7 @@ mod mac {
 #[cfg(target_os = "linux")]
 mod linux {
     use std::collections::{HashMap, VecDeque};
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, LazyLock, Mutex, OnceLock};
     use std::time::Duration;
     use zbus::blocking::{connection, Connection, MessageIterator};
     use zbus::names::OwnedUniqueName;
@@ -500,9 +500,99 @@ mod linux {
         }
     }
 
+    /// The notifier the app's notifications go through. No call holds it while the server answers: with the server
+    /// frozen, each would wait ANSWER_WITHIN in line behind the one before it.
+    #[derive(Default)]
+    pub(super) struct Notifiers {
+        /// Connected at the first notification; tried again at the next one while there is no session bus.
+        current: Mutex<Option<Arc<Notifier>>>,
+        /// Per id of ours: its calls in turn, so its notifications replace each other as they would one after another.
+        turns: Mutex<HashMap<String, Turn>>,
+    }
+
+    /// The number of an id's latest call, and the lock its calls take in turn.
+    type Turn = (u64, Arc<Mutex<()>>);
+
+    impl Notifiers {
+        /// False when it could not be shown from here (no session bus, no notification server).
+        pub(super) fn show(
+            &self,
+            connect: impl FnOnce() -> zbus::Result<Notifier>,
+            id: &str,
+            body: &str,
+        ) -> bool {
+            let notifier = {
+                let mut current = self.current.lock().unwrap();
+                if current.is_none() {
+                    *current = connect().ok().map(Arc::new);
+                }
+                current.clone()
+            };
+            let Some(notifier) = notifier else {
+                return false;
+            };
+            match self.in_turn(id, || notifier.show(id, body)) {
+                // A newer one of the same id is shown in its place.
+                None | Some(Ok(())) => true,
+                // The bus answered (no notification server, or it refused): the connection is good.
+                Some(Err(zbus::Error::MethodError(..))) => false,
+                Some(Err(_)) => {
+                    self.let_go(&notifier);
+                    false
+                }
+            }
+        }
+
+        /// Nothing before the first notification was shown from here: there is none to take back.
+        pub(super) fn clear(&self, id: &str) {
+            let Some(notifier) = self.current.lock().unwrap().clone() else {
+                return;
+            };
+            let cleared = self.in_turn(id, || notifier.clear(id));
+            // As in `show`: a connection that broke is not kept.
+            if matches!(&cleared, Some(Err(error)) if !matches!(error, zbus::Error::MethodError(..)))
+            {
+                self.let_go(&notifier);
+            }
+        }
+
+        /// A connection that broke is not kept: its listener ends with it once its last call is done, and the next
+        /// notification connects again. One that took its place already stays.
+        fn let_go(&self, notifier: &Arc<Notifier>) {
+            let mut current = self.current.lock().unwrap();
+            if current
+                .as_ref()
+                .is_some_and(|kept| Arc::ptr_eq(kept, notifier))
+            {
+                *current = None;
+            }
+        }
+
+        /// Runs `call` once the calls for `id` before it are done; not at all (None) when a later call for `id`
+        /// came meanwhile, which takes its place: the newer notification, or the clear of a chat read.
+        fn in_turn<T>(&self, id: &str, call: impl FnOnce() -> T) -> Option<T> {
+            let (number, turn) = {
+                let mut turns = self.turns.lock().unwrap();
+                let (latest, turn) = turns.entry(id.to_string()).or_default();
+                *latest += 1;
+                (*latest, Arc::clone(turn))
+            };
+            let done = {
+                let _turn = turn.lock().unwrap();
+                let latest = self.turns.lock().unwrap()[id].0 == number;
+                latest.then(call)
+            };
+            let mut turns = self.turns.lock().unwrap();
+            // The last call out takes the id's entry away (the map's and this one's are all that are left).
+            if Arc::strong_count(&turn) == 2 {
+                turns.remove(id);
+            }
+            done
+        }
+    }
+
     static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
-    /// Connected at the first notification; tried again at the next one while there is no session bus.
-    static NOTIFIER: Mutex<Option<Notifier>> = Mutex::new(None);
+    static NOTIFIERS: LazyLock<Notifiers> = LazyLock::new(Notifiers::default);
 
     pub fn install(app: &tauri::AppHandle) {
         let _ = APP.set(app.clone());
@@ -513,33 +603,16 @@ mod linux {
         let Some(app) = APP.get() else {
             return false;
         };
-        let mut notifier = NOTIFIER.lock().unwrap();
-        if notifier.is_none() {
+        let connect = || {
             let app = app.clone();
-            *notifier = connection::Builder::session()
+            connection::Builder::session()
                 .and_then(|bus| Notifier::new(bus, move |id| super::opened(&app, id)))
-                .ok();
-        }
-        match notifier.as_ref().map(|notifier| notifier.show(id, body)) {
-            Some(Ok(())) => true,
-            // The bus answered (no notification server, or it refused): the connection is good.
-            Some(Err(zbus::Error::MethodError(..))) | None => false,
-            // A connection that broke is not kept: its listener ends with it, and the next notification connects again.
-            Some(Err(_)) => {
-                *notifier = None;
-                false
-            }
-        }
+        };
+        NOTIFIERS.show(connect, id, body)
     }
 
-    /// Nothing before the first notification was shown from here: there is none to take back.
     pub fn clear(id: &str) {
-        let mut notifier = NOTIFIER.lock().unwrap();
-        let cleared = notifier.as_ref().map(|notifier| notifier.clear(id));
-        // As in `show`: a connection that broke is not kept.
-        if matches!(&cleared, Some(Err(error)) if !matches!(error, zbus::Error::MethodError(..))) {
-            *notifier = None;
-        }
+        NOTIFIERS.clear(id);
     }
 
     #[cfg(test)]
@@ -946,6 +1019,85 @@ mod linux {
                 );
                 std::thread::sleep(Duration::from_millis(50));
             }
+        }
+
+        /// Shows `bodies` (our id, text) on `notifiers`, all at once, one thread each; how long until all are done.
+        fn all_at_once(bus: &Bus, notifiers: &Notifiers, bodies: &[(&str, &str)]) -> Duration {
+            let start = std::sync::Barrier::new(bodies.len());
+            let started = std::time::Instant::now();
+            std::thread::scope(|scope| {
+                for (id, body) in bodies {
+                    let start = &start;
+                    scope.spawn(move || {
+                        start.wait();
+                        notifiers.show(|| Notifier::new(bus.connect(), |_| {}), id, body);
+                    });
+                }
+            });
+            started.elapsed()
+        }
+
+        /// With the server frozen, each notification waited ANSWER_WITHIN in line behind the one before it, holding
+        /// NOTIFIER: five in a frozen moment took 25 s. Now the chats' calls wait side by side, and a chat's
+        /// notification that a newer one of the same chat replaces is not sent at all.
+        #[test]
+        fn a_frozen_server_holds_up_no_line() {
+            let bus = Bus::start();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Frozen)
+                .unwrap()
+                .build()
+                .unwrap();
+            let took = all_at_once(
+                &bus,
+                &Notifiers::default(),
+                &[
+                    ("chat-a", "1"),
+                    ("chat-b", "2"),
+                    ("chat-a", "3"),
+                    ("chat-c", "4"),
+                    ("chat-a", "5"),
+                ],
+            );
+            // chat-a's first call, then its newest: two waits at most.
+            assert!(
+                took < ANSWER_WITHIN * 2 + Duration::from_secs(3),
+                "took {took:?}"
+            );
+        }
+
+        /// What NOTIFIER's line kept: a chat's notifications sent at the same time still leave it one.
+        #[test]
+        fn a_chat_s_notifications_at_once_leave_it_one() {
+            let bus = Bus::start();
+            let listed: Arc<Mutex<Vec<(u32, String)>>> = Arc::default();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Listing(Arc::clone(&listed), 0))
+                .unwrap()
+                .build()
+                .unwrap();
+            let notifiers = Notifiers::default();
+            let bodies: Vec<String> = (0..8).map(|n| format!("burst {n}")).collect();
+            let chat_a: Vec<(&str, &str)> = bodies
+                .iter()
+                .map(|body| ("chat-a", body.as_str()))
+                .collect();
+            all_at_once(&bus, &notifiers, &chat_a);
+            all_at_once(&bus, &notifiers, &[("chat-b", "another chat")]);
+            let shown = listed.lock().unwrap().clone();
+            assert_eq!(shown.len(), 2, "{shown:?}");
+            assert_eq!(shown[1], (2, "another chat".to_string()));
+
+            // And reading the chats takes them both back.
+            notifiers.clear("chat-a");
+            notifiers.clear("chat-b");
+            assert_eq!(listed.lock().unwrap().clone(), []);
         }
     }
 }
