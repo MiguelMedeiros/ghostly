@@ -967,6 +967,8 @@ export class GhostLink {
       // A first contact verified on the DHT pins the contact: the pairing is on the DHT until a stream is up.
       pin: async key => {
         await options.pairing!.pinPeer(key, true);
+        // An invite read slowly while nobody used it: its contact's key is looked at now, not at the end of that wait.
+        if (invite) this.session.lookNow();
         if (this.isDataLinkOpen || !this.tracker || this.tracker.done) return;
         if (this.deliveryMode === "dht") { this.tracker.onDht("chosen"); return; }
         // A stream is usually a moment away: the pairing shows its steps, and ends on the DHT only if no stream
@@ -1022,7 +1024,7 @@ export class GhostLink {
       lastSeenTimestamp: options.lastSeenTimestamp,
       pollIntervals: options.pollIntervals,
       awaitingSince: options.madeAt,
-      invite,
+      ...(invite && { invite: () => !options.pairing!.credentials.peerKey }),
       getServices: options.getServices,
       // A joiner dials the moment it sees the inviter, and an app back after a restart (`resume`) the moment it reads its
       // contact: its offer goes in its first packet, not in a second one right behind its presence. A joiner with no WebRTC

@@ -641,7 +641,7 @@ describe("LinkSession poll pacing", () => {
   });
 
   it("reads an invite nobody used less often once no longer awaited, and at the background pace once its contact shows", async () => {
-    const { a, b } = pair({ invite: true }, { getServices: () => [{ id: "atlas", type: "http" }] });
+    const { a, b } = pair({ invite: () => true }, { getServices: () => [{ id: "atlas", type: "http" }] });
     a.s.start();
     await settle();
     vi.setSystemTime(NOW + 3 * AWAITING_PEER_MS);

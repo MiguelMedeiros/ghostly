@@ -210,8 +210,8 @@ export interface LinkSessionOptions {
    * sent at once) went out for a minute (2026-10-08).
    */
   awaitingSince?: number;
-  /** This side made the invite, and nobody used it yet: once no longer awaited, read less often (`unusedInviteWait`). */
-  invite?: boolean;
+  /** Whether this is an invite this side made that nobody used yet: once no longer awaited, read less often (`unusedInviteWait`). */
+  invite?: () => boolean;
 }
 
 /** With `firstPublish: "after-first-poll"`, the first packet goes out by then whatever happened. */
@@ -261,7 +261,7 @@ export class LinkSession {
   /** From when a peer never seen is awaited (`AWAITING_PEER_MS`): never later than this start, whatever the clock said when the chat was made. */
   private readonly awaitingSince: number;
   /** This side's invite, nobody used yet (`LinkSessionOptions.invite`). */
-  private readonly invite: boolean;
+  private readonly invite: () => boolean;
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
   /** An offer to a saved contact is out: from then on its fast window looks less often (`OFFER_FAST_MS`); 0 for none. */
@@ -314,7 +314,7 @@ export class LinkSession {
     this.events = options.events ?? {};
     this.firstPublish = options.firstPublish ?? "at-start";
     this.awaitingSince = Math.min(options.awaitingSince ?? this.startedAt, this.startedAt);
-    this.invite = options.invite ?? false;
+    this.invite = options.invite ?? (() => false);
   }
 
   get peerPresence(): PeerPresence {
@@ -578,7 +578,7 @@ export class LinkSession {
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
     // An invite nobody used, no longer awaited: the older it is, the less often it is read.
-    if (pace === "background" && this.invite && this.presence.lastPacketAt === 0) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
+    if (pace === "background" && this.presence.lastPacketAt === 0 && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
 

@@ -31,7 +31,7 @@ const perMinute = (reads: number[], from: number, to: number) => reads.filter((a
 function invite(transport: PkarrTransport, options: Partial<LinkSessionOptions> = {}) {
   const params = createLink().mine;
   const nextIn: number[] = [];
-  const link = new LinkSession({ params, transport, pollIntervals: I, invite: true, awaitingSince: NOW - 11 * 60_000,
+  const link = new LinkSession({ params, transport, pollIntervals: I, invite: () => true, awaitingSince: NOW - 11 * 60_000,
     events: { onPoll: (p) => { if (!p.polling) nextIn.push(p.nextInMs); } }, ...options });
   return { link, nextIn };
 }
@@ -73,9 +73,22 @@ describe("an invite nobody used", () => {
     await link.stop(false);
   });
 
+  it("is a chat again once its contact is pinned, though no packet of the contact's was on its key yet", async () => {
+    const { transport } = counting();
+    let pinned = false;
+    const { link, nextIn } = invite(transport, { invite: () => !pinned });
+    link.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(nextIn.at(-1)).toBeGreaterThan(I.background);
+    // Pinned over its mailbox (`DhtDelivery`): the engine looks at once (`lookNow`), and then at the background pace.
+    pinned = true;
+    link.lookNow(); await vi.advanceTimersByTimeAsync(0);
+    expect(nextIn.at(-1)).toBe(I.background);
+    await link.stop(false);
+  });
+
   it("is not a saved chat: one whose contact is away keeps the background pace", async () => {
     const { transport } = counting();
-    const { link, nextIn } = invite(transport, { invite: false, awaitingSince: NOW - 30 * 86_400_000 });
+    const { link, nextIn } = invite(transport, { invite: () => false, awaitingSince: NOW - 30 * 86_400_000 });
     link.start(); await vi.advanceTimersByTimeAsync(0);
     expect(nextIn.at(-1)).toBe(I.background);
     await link.stop(false);
