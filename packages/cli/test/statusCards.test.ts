@@ -387,6 +387,9 @@ describe("routines", () => {
     expect(params("routine update", ["g1", "nightly", "--run", "failed", "--state", "paused"])).toMatchObject({ routine: "nightly", run: { result: "failed" }, card: { state: "paused" } });
     expect(() => params("routine update", ["g1", "nightly", "--run", "maybe"])).toThrow(/--run takes ok, failed or skipped/);
     expect(() => params("routine update", ["g1", "nightly", "--next", "someday"])).toThrow(/--next takes a time/);
+    // Unix seconds are refused with the milliseconds they mean: they were a card dated January 1970.
+    expect(() => params("routine send", ["g1", "--name", "Backup", "--schedule", "every hour", "--next", "1791849403"])).toThrow(expect.objectContaining({ code: "usage", message: "--next takes milliseconds, not seconds: 1791849403000" }));
+    expect(params("routine update", ["g1", "nightly", "--next", "1791849403000"])).toMatchObject({ card: { nextRunAt: 1791849403000 } });
     expect(() => params("routine send", ["g1"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--name and --schedule are needed/) }));
     expect(() => params("routine send", ["g1", "--name", "Nightly"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--schedule is needed/) }));
   });
