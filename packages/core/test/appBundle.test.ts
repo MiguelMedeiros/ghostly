@@ -298,8 +298,7 @@ describe("the paced hash", () => {
   it("lets the thread go between small files, not only inside large ones", async () => {
     // 60 files of 64 KiB, each hashed at once: read in one run they held the thread for about 50 ms.
     const { bytes } = await buildAppBundle(DRAFT, [ENTRY, ...Array.from({ length: 60 }, (_, i) => file(`data/${String(i).padStart(2, "0")}.bin`, fill(64 * 1024, i)))], publisher);
-    const yields = vi.fn(async () => {});
-    vi.stubGlobal("scheduler", { yield: yields });
+    const yields = vi.spyOn(MessagePort.prototype, "postMessage");
     // Each read of the clock moves it 1.5 ms: a pause about every fourth file, once 5 ms have run.
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => (clock += 1.5));
