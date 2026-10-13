@@ -157,13 +157,6 @@ export function saveName(name: string): string {
 
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
-/**
- * A sent file's time, its own even within one millisecond (a bot's photos, `file send` run in parallel): the engine
- * names its row after it (`me_<timestamp>`), and a resend after a drop finds the row by it, as a forward does.
- */
-let lastSentAt = 0;
-const sentAt = () => (lastSentAt = Math.max(Date.now(), lastSentAt + 1));
-
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
     const target = chatOrGroupOf(ctx, params);

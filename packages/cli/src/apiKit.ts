@@ -29,7 +29,9 @@ export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
 
 /**
  * The time of a send the engine names its row after (`me_<timestamp>`: a file, a payment, a request), its own even
- * within one millisecond (a bot paying or sending several times at once over the socket), or the chat keeps only one.
+ * within one millisecond (a bot paying or sending several times at once over the socket, `file send` run in
+ * parallel), or the chat keeps only one. One clock for all of them: they share the row names. A file's resend after a
+ * drop finds its row by it, as a forward does.
  */
 let lastSentAt = 0;
 export const sentAt = () => (lastSentAt = Math.max(Date.now(), lastSentAt + 1));
