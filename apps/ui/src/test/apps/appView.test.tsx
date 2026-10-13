@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
@@ -245,6 +248,15 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(within(app).getByTestId("mini-app-title")).toHaveTextContent("Chess");
     expect(within(app).queryByTestId("mini-app-with")).not.toBeInTheDocument();
     expect(within(app).queryByTestId("app-connection-options")).not.toBeInTheDocument();
+  });
+
+  it("opened alone keeps its bar below a phone's status bar, so Close can be pressed", async () => {
+    await open(REF, null);
+    const app = await waitFor(() => screen.getByTestId("mini-app"));
+    const bar = within(app).getByTestId("mini-app-title").parentElement!;
+    expect(bar.className).toContain("alone-bar");
+    expect(readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8")).toMatch(/\.alone-bar\s*\{[^}]*safe-area-inset-top/);
+    expect(within(app).getByRole("button", { name: "Close" }).className).toContain("min-h-11");
   });
 
   it("opened alone twice before it shows (a double click) starts once, and opens again after Close", async () => {
