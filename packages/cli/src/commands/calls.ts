@@ -11,8 +11,10 @@ export const commands: Record<string, Command> = {
     method: "call.auto", usage: "call auto [on|off] [--from <chat>]... [--rate 48000]", summary: "Answer calls by themselves: from anyone, or the chats named (kept in the profile)",
     args: ["mode...?"], options: { from: { type: "list", description: "Only calls from this chat (again for more)" }, rate: rate },
     params: ({ options }, a) => {
+      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", "ghostly call auto [on|off] [--from <chat>]... [--rate n]");
+      // Without `on` the chats and the rate would be dropped without a word.
+      if (a.mode !== "on" && (options.from !== undefined || options.rate !== undefined)) throw new CliError("usage", "--from and --rate go with on: ghostly call auto on --from <chat>");
       if (a.mode === undefined) return {};
-      if (a.mode !== "on" && a.mode !== "off") throw new CliError("usage", "ghostly call auto [on|off] [--from <chat>]... [--rate n]");
       return a.mode === "on" ? { on: true, from: options.from, rate: options.rate } : { on: false };
     },
   },
