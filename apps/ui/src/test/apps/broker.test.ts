@@ -286,6 +286,29 @@ describe("requests", () => {
     expect(host.calls.filter((c) => c.op === "file").every((c) => c.ref === REF)).toBe(true);
   });
 
+  it("file: the host's copy is handed over as it is, not copied again; a view on a larger buffer is copied", async () => {
+    // The engine's file() is already a fresh copy: copying it again doubled what a read cost the page.
+    const { host, run, ask } = setup();
+    run();
+    const whole = new Uint8Array([1, 2, 3]);
+    vi.spyOn(host, "file").mockResolvedValueOnce(whole);
+    expect((await ask("file", ["a.bin"])).value).toBe(whole.buffer);
+    const shared = new Uint8Array([9, 4, 5, 6, 9]);
+    vi.spyOn(host, "file").mockResolvedValueOnce(shared.subarray(1, 4));
+    const part = (await ask("file", ["b.bin"])).value as ArrayBuffer;
+    expect(part).not.toBe(shared.buffer);
+    expect(new Uint8Array(part)).toEqual(new Uint8Array([4, 5, 6]));
+  });
+
+  it("file: the in-memory host answers a copy, so a transfer leaves its files whole", async () => {
+    const host = memoryHost();
+    const stored = new Uint8Array([1, 2, 3]);
+    host.files.set(REF, new Map([["a.bin", stored]]));
+    const read = await host.file(REF, "a.bin");
+    expect(read).toEqual(stored);
+    expect(read.buffer).not.toBe(stored.buffer);
+  });
+
   it("file: at most a bundle's worth of bytes a second, read one file at a time", async () => {
     // 50 reads a second of a 16 MiB file made the page copy 800 MB a second and stall for most of a second.
     const { host, broker, run, posted, clock } = setup();
