@@ -77,6 +77,12 @@
     "youJoined": "Sei entrato.",
     "youJoinedAgain": "Sei entrato di nuovo."
   },
+  "forget": {
+    "invitation": "L'invito viene eliminato da questo dispositivo. {{contact}} saprà che hai rifiutato.",
+    "invitationUnknown": "L'invito viene eliminato da questo dispositivo. Il contatto che l'ha inviato saprà che hai rifiutato.",
+    "joining": "Smetti di chiedere di entrare, e il gruppo viene eliminato da questo dispositivo.",
+    "kept": "Il gruppo e la sua cronologia vengono eliminati da questo dispositivo."
+  },
   "hubs": {
     "auto": "Hub se sempre acceso",
     "badge": "hub",
