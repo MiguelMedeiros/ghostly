@@ -965,6 +965,38 @@ describe("messages kept in rows.db", () => {
     await store.close();
     for (const file of ["rows.db", "rows.db-wal", "rows.db-shm"]) rmSync(join(dir, file), { force: true });
     await expect(openPersistentIndexedDb(dir)).rejects.toThrow(/missing rows\.db/);
+    // Again: the open that failed left no empty rows.db for the next one to read as no messages.
+    await expect(openPersistentIndexedDb(dir)).rejects.toThrow(/missing rows\.db/);
+    // An empty one (as a half-failed attempt would leave): the same.
+    writeFileSync(join(dir, "rows.db"), "");
+    await expect(openPersistentIndexedDb(dir)).rejects.toThrow(/missing rows\.db/);
+  });
+
+  it("a row write that fails leaves every message readable: the batch is taken back, and the values stay in memory", async () => {
+    const rowsModule = await import("../src/runtime/rows");
+    const real = rowsModule.openRowFile;
+    let calls = 0;
+    const spy = vi.spyOn(rowsModule, "openRowFile").mockImplementation((sqlite, path) => {
+      const file = real(sqlite, path);
+      const add = file.add.bind(file);
+      file.add = (value) => { if (++calls === 3) throw new Error("SQLITE_FULL: database or disk is full"); return add(value); };
+      return file;
+    });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const store = await openPersistentIndexedDb(folder());
+      opened.push(store);
+      const d = await db(store.factory);
+      // One transaction of four: its third row fails, the batch is rolled back, and the four keep their values in memory.
+      await tx(d, ["messages"], (s) => { for (let i = 0; i < 4; i++) s.messages.put(message(i)); });
+      expect(calls).toBe(3);
+      expect(await all(store.factory)).toEqual([0, 3, 1, 2].map(message));
+      expect(stderr.mock.calls.join("")).toContain("SQLITE_FULL");
+      // The next ones get rows as usual, and a snapshot gives the four theirs.
+      await tx(d, ["messages"], (s) => { s.messages.put(message(5)); });
+      await store.compact();
+      expect(await all(store.factory)).toHaveLength(5);
+    } finally { spy.mockRestore(); stderr.mockRestore(); }
   });
 
   it("restores every index of a store kept on disk from the snapshot, cursors both ways", async () => {

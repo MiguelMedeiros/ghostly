@@ -151,7 +151,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const rows: RowFile | null = sqlite ? openRowFile(sqlite, rowsPath) : null;
   const made = rows ? rowRecords(rows) : null;
   const onDisk = options.rowsOnDisk ?? ((_db: string, store: string) => store === "messages");
-  const disk = (store: RawStore) => rows !== null && onDisk(store.rawDatabase.name, store.name);
+  // This store's own databases only: the hooks are on fake-indexeddb's shared classes, and another store opened in the
+  // process (a test's) must not move this one's records into its rows.db.
+  const disk = (store: RawStore) => rows !== null && raw._databases.get(store.rawDatabase.name) === store.rawDatabase && onDisk(store.rawDatabase.name, store.name);
   /** Rows of records written over or removed by committed transactions, dropped once a snapshot without them is on disk. */
   const dead: number[] = [];
 
@@ -175,7 +177,12 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const saved = snapshotFound ? (deserialize(readFileSync(snapshotPath)) as Snapshot) : null;
   try {
     if (saved) restore(classes, raw._databases, saved, order, { rows, made, rowsFound, onDisk });
-  } catch (error) { rows?.close(); throw error; }
+  } catch (error) {
+    rows?.close();
+    // Made by this open: a second one must refuse as this one did, not find an empty file and read nothing.
+    if (!rowsFound) for (const file of [rowsPath, `${rowsPath}-wal`, `${rowsPath}-shm`]) rmSync(file, { force: true });
+    throw error;
+  }
   // A snapshot of format 1 whose messages are to be kept on disk: written as format 2 at this open.
   const moving = !!rows && saved?.format === 1 && saved.databases.some((db) => db.stores.some((store) => store.records.length > 0 && onDisk(db.name, store.name)));
   /** The name of the snapshot on disk, which its journal begins with. */
@@ -287,15 +294,18 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   function toRows(ops: Op[]) {
     if (!rows || !made || !writing) return;
     for (const op of ops) if (op.dead?.length) dead.push(...op.dead);
+    // Rows first, records after: a batch that fails is rolled back whole, and no record may name a row it took back.
+    const moved: [RawRecord, number][] = [];
     try {
       rows.batch(() => {
         for (const op of ops) {
           if (op.kind !== "put" || !op.record || !op.target) continue;
           if (op.target.records.get(op.key) !== op.record || (op.record as RowRecord)[ROW] !== undefined || hasBlob(op.value)) continue;
-          made.move(op.record as RowRecord, rows.add(op.value));
+          moved.push([op.record, rows.add(op.value)]);
         }
       });
-    } catch (error) { failed(error); }
+    } catch (error) { failed(error); return; }
+    for (const [record, id] of moved) made.move(record as RowRecord, id);
   }
 
   function enqueue(work: () => Promise<void> | void): Promise<void> {
@@ -386,16 +396,19 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   function rowsOfStore(store: RawStore): SnapshotRows {
     const indexes = [...store.rawIndexes.values()].filter((index) => !index.deleted);
     const keys: Key[] = [], ids: number[] = [], inline: [number, unknown][] = [], at = new Map<unknown, number>();
+    // Rows first, records after (as `toRows`): a batch that fails takes back every row it wrote, and the snapshot with it.
+    const records = [...store.records.values()], moved: [RawRecord, number][] = [];
     rows!.batch(() => {
-      for (const record of store.records.values()) {
+      for (const record of records) {
         let id = (record as RowRecord)[ROW];
-        if (id === undefined && !hasBlob(record.value)) made!.move(record as RowRecord, (id = rows!.add(record.value)));
+        if (id === undefined && !hasBlob(record.value)) moved.push([record, (id = rows!.add(record.value))]);
         at.set(record.key, keys.length);
         if (id === undefined) inline.push([keys.length, record.value]);
         keys.push(record.key);
         ids.push(id ?? -1);
       }
     });
+    for (const [record, id] of moved) made!.move(record as RowRecord, id);
     const entries: Record<string, [Key, number][]> = {};
     for (const index of indexes) {
       // An entry holds its record's key itself (`value: record.key`): found by identity, else by order.
@@ -407,8 +420,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   async function snapshotToDisk() {
     const name = randomBytes(8).toString("hex");
     // Rows dead before this snapshot is taken are in neither it nor what is held: they go once it is on disk. Taken
-    // while no transaction runs (at close, always), the snapshot names every row anything can still read (an open
-    // transaction's rollback puts back records it replaced): every older row it does not name goes too.
+    // while no transaction runs (`compact`, a close that folds, a quiet moment), the snapshot names every row anything
+    // can still read (an open transaction's rollback puts back records it replaced): every older row it does not name
+    // goes too.
     const quiet = !!rows && !busy();
     const upTo = quiet ? rows!.last() : 0;
     const dropping = dead.splice(0);
@@ -667,7 +681,9 @@ interface RestoreRows { rows: RowFile | null; made: ReturnType<typeof rowRecords
 function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot, cmp: (a: Key, b: Key) => number, disk: RestoreRows) {
   if (snapshot?.format !== 1 && snapshot?.format !== 2) throw new Error("This profile was last used by a newer version of ghostly (its store has a format this version does not read). Update ghostly to open it.");
   if (snapshot.format === 2 && !disk.rows) throw new Error(`This profile keeps its messages in rows.db, which needs Node 22.13 or newer (this is ${process.version}). Update Node to open it.`);
-  if (snapshot.format === 2 && !disk.rowsFound) throw new Error("This profile's store is missing rows.db (beside snapshot.bin): its messages cannot be read. Restore the profile from a backup.");
+  // Gone, or empty while the snapshot names rows (made by an open that failed): the same, and never read as no messages.
+  const named = snapshot.format === 2 && snapshot.databases.some((db) => db.stores.some((store) => store.rows?.ids.some((id) => id >= 0)));
+  if (snapshot.format === 2 && (!disk.rowsFound || (named && disk.rows!.count() === 0))) throw new Error("This profile's store is missing rows.db (beside snapshot.bin): its messages cannot be read. Restore the profile from a backup.");
   const intern = interner();
   for (const saved of snapshot.databases) {
     const db = new classes.Database(saved.name, saved.version);
