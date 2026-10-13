@@ -264,7 +264,7 @@ describe("app bundle vectors", () => {
 });
 
 describe("the paced hash", () => {
-  afterEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   // Around what is hashed at once (64 KiB) and around a slice (256 KiB).
   const sizes = [0, 1, 64 * 1024, 64 * 1024 + 1, 256 * 1024, 256 * 1024 + 1, 3 * 256 * 1024 + 5];
   const bytesOf = (size: number) => Uint8Array.from({ length: size }, (_, i) => (i * 31 + size) % 251);
@@ -300,14 +300,13 @@ describe("the paced hash", () => {
     const { bytes } = await buildAppBundle(DRAFT, [ENTRY, ...Array.from({ length: 60 }, (_, i) => file(`data/${String(i).padStart(2, "0")}.bin`, fill(64 * 1024, i)))], publisher);
     const yields = vi.fn(async () => {});
     vi.stubGlobal("scheduler", { yield: yields });
-    // Each read of the clock moves it 1.5 ms: a pause about every sixth file, once 8 ms have run.
+    // Each read of the clock moves it 1.5 ms: a pause about every fourth file, once 5 ms have run.
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => (clock += 1.5));
     const timers = vi.spyOn(globalThis, "setTimeout");
     expect(told(await readAppBundleAsync(bytes))).toEqual(told(readAppBundle(bytes)));
     expect(yields.mock.calls.length).toBeGreaterThanOrEqual(8);
     expect(timers).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
   });
 });
 

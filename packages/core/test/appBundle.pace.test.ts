@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-// covers: apps.bundle, apps.store
 import { pacer, yieldThread } from "../src/appBundle";
+// covers: apps.bundle, apps.store
 
 describe("letting the thread go", () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
