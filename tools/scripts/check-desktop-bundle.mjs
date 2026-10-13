@@ -17,6 +17,10 @@
  *     without. Adding a module to `PLATFORM_MODULES` fails here until its
  *     reason is written down below — which is the moment to notice that
  *     Desktop needed the real one.
+ *  3. The swap happened: what a swapped module asks of Rust is not in the built
+ *     app. A build on Windows once swapped nothing (the plugin's paths had `\`,
+ *     Vite's ids `/`), and the Windows app chatted through the old Pkarr loop
+ *     its paired contacts never read (ghostly#1864). The Windows jobs run this too.
  *
  *   npm run build && npm run check:desktop-bundle
  *
@@ -100,6 +104,19 @@ if (bundle.length === 0) {
   for (const [needle, source] of wanted) {
     if (!bundle.includes(needle)) problems.push(`${JSON.stringify(needle)}, from ${source}, is not in the built app.`);
   }
+  // 3. The stand-ins are what shipped: a swapped module's own calls into Rust are not in the built app.
+  let replaced = 0;
+  for (const path of swapped) {
+    const source = readFileSync(join(root, "apps/ui/src", path), "utf8");
+    for (const [, needle] of source.matchAll(/\binvoke\s*(?:<[\s\S]*?>)?\s*\(\s*"([^"]+)"/g)) {
+      if (wanted.has(needle)) continue;
+      replaced++;
+      if (bundle.includes(`"${needle}"`)) {
+        problems.push(`apps/ui/src/${path} was not swapped: its ${JSON.stringify(needle)} is in the built app (see ghostlyPlatformModules).`);
+      }
+    }
+  }
+  if (replaced === 0) problems.push("No swapped module calls into Rust — check 3 has gone stale; find another mark of the swap.");
 }
 
 if (problems.length > 0) {
