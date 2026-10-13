@@ -125,7 +125,7 @@ export const TRANSPORT_LOG_MAX = 50;
 /** History events kept per chat. */
 export const TRANSPORT_HISTORY_MAX = 200;
 /** A round trip that moved less than this is not news in the history. */
-const RTT_STEP_MS = 10;
+export const RTT_STEP_MS = 10;
 
 let sequence = 0;
 const lineId = (at: number) => `${at.toString(36)}-${(++sequence).toString(36)}`;
