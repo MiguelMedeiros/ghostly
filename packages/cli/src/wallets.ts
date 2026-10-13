@@ -34,6 +34,12 @@ function netView(s: EngineState, n: WalletNetwork): NetworkWalletsView | undefin
   return s.wallet.networks?.[n];
 }
 
+/** A Lightning card named by `card` on the network asked: one that is not there is not_found, before the engine is asked. */
+function lightningCard(ctx: ApiContext, params: Params): void {
+  const n = network(params), card = str(params, "card", true);
+  if (!netView(state(ctx), n)?.lightnings?.some((c) => c.card === card)) throw new CliError("not_found", `No Lightning card ${JSON.stringify(card)} on ${n} (ghostly wallet list)`);
+}
+
 /**
  * The engine opens the federations joined before in the background as it starts. A daemon has long done so when a call
  * comes; a one-shot command waits for them (at most 30 s) before its balances are read or money moves through one.
@@ -180,11 +186,13 @@ export const WALLET_METHODS: Record<string, Method> = {
   },
 
   async "lightning.default"(ctx, params) {
+    lightningCard(ctx, params);
     await node(ctx).lightningSetReceive({ network: network(params), card: str(params, "card", true) });
     return { network: network(params), receive: str(params, "card", true) };
   },
 
   async "lightning.rename"(ctx, params) {
+    lightningCard(ctx, params);
     await node(ctx).lightningRename({ network: network(params), card: str(params, "card", true), name: str(params, "name", true) });
     return { network: network(params), card: str(params, "card", true), name: str(params, "name", true) };
   },
@@ -283,11 +291,13 @@ export const WALLET_METHODS: Record<string, Method> = {
 
   async "payment.check"(ctx, params) {
     const link = chatOf(ctx, params);
+    if (state(ctx).payments[str(params, "payment", true)]?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
     await node(ctx).checkPayment({ linkId: link.id, paymentId: str(params, "payment", true) });
     return { chat: link.id, paymentId: str(params, "payment", true) };
   },
 
   async "payment.reclaim"(ctx, params) {
+    if (!state(ctx).payments[str(params, "payment", true)]) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} (ghostly payment list)`);
     await node(ctx).reclaimPayment({ paymentId: str(params, "payment", true) });
     const p = state(ctx).payments[str(params, "payment", true)];
     return p ? paymentJson(p) : { paymentId: str(params, "payment", true) };

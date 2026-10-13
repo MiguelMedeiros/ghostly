@@ -10,16 +10,20 @@ import { callApi, type ApiContext } from "../src/api";
  */
 function fake() {
   const link = { id: "chat-one", label: "Alice", peerPubKeyZ32: "pchat-one", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" },
-    identities: { support: true, shared: [{ id: "proof-1", provider: "github", subject: "ana", status: "accepted", at: 1 }], received: [] } } as unknown as LinkView;
+    identities: { support: true, shared: [{ id: "proof-1", provider: "github", subject: "ana", status: "accepted", at: 1 }], received: [{ id: "their-1", provider: "github", subject: "bo", status: "verified" }] } } as unknown as LinkView;
   const rows: StoredMessage[] = [{ linkId: "chat-one", id: "me_1", text: "hi", sender: "me", timestamp: 1, via: "datalink", delivery: "failed" }];
   const node = {
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {},
       services: [{ id: "svc-1", name: "Notes", target: "http://127.0.0.1:8080", enabled: true, sharedWith: [], requests: 0 }],
-      identityProofs: [{ id: "proof-1", provider: "github", subject: "ana", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] }] }) as unknown as EngineState,
+      identityProofs: [{ id: "proof-1", provider: "github", subject: "ana", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] }],
+      payments: { "pay-1": { id: "pay-1", linkId: "chat-one", kind: "request", direction: "in", state: "pending", amount: 21, createdAt: 1 } },
+      wallet: { networks: { testnet: { lightnings: [{ card: "main", name: "Main", receive: true }] } } } }) as unknown as EngineState,
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     removeService: vi.fn(), setServiceEnabled: vi.fn(), setServiceShared: vi.fn(),
     removeIdentityProof: vi.fn(async () => {}), withdrawIdentityProof: vi.fn(async () => {}), cancelIdentityProof: vi.fn(),
     retryMessage: vi.fn(async () => {}),
+    shareIdentityProof: vi.fn(async () => {}), recheckIdentityProof: vi.fn(async () => {}),
+    checkPayment: vi.fn(async () => {}), reclaimPayment: vi.fn(async () => {}), lightningSetReceive: vi.fn(async () => {}), lightningRename: vi.fn(async () => {}),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   return { ctx, node };
@@ -75,5 +79,32 @@ describe("a message that is not there", () => {
     expect(node.retryMessage).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.retry", { chat: "Alice", message: "me_1" })).toEqual({ chat: "chat-one", messageId: "me_1" });
     expect(node.retryMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_1" });
+  });
+});
+
+describe("a payment, a proof or a Lightning card that is not there", () => {
+  it("is not_found for share, recheck, payment check and reclaim, lightning default and rename, and the engine is not asked", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "identity.share", { chat: "Alice", id: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No identity proof "nope" (ghostly identity list)' });
+    await expect(callApi(ctx, "identity.recheck", { chat: "Alice", id: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No identity proof "nope" from this contact (ghostly identity contact chat-one)' });
+    await expect(callApi(ctx, "payment.check", { chat: "Alice", payment: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No payment "nope" in this chat (ghostly payment list --chat chat-one)' });
+    await expect(callApi(ctx, "payment.reclaim", { payment: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No payment "nope" (ghostly payment list)' });
+    await expect(callApi(ctx, "lightning.default", { card: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No Lightning card "nope" on testnet (ghostly wallet list)' });
+    await expect(callApi(ctx, "lightning.rename", { card: "nope", name: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No Lightning card "nope" on testnet (ghostly wallet list)' });
+    // A card of another network is not this one's.
+    await expect(callApi(ctx, "lightning.default", { card: "main", network: "mainnet" })).rejects.toMatchObject({ code: "not_found", message: 'No Lightning card "main" on mainnet (ghostly wallet list)' });
+    for (const call of [node.shareIdentityProof, node.recheckIdentityProof, node.checkPayment, node.reclaimPayment, node.lightningSetReceive, node.lightningRename]) expect(call).not.toHaveBeenCalled();
+  });
+
+  it("one that is there goes to the engine as before", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "identity.share", { chat: "Alice", id: "proof-1" });
+    expect(node.shareIdentityProof).toHaveBeenCalledWith({ linkId: "chat-one", id: "proof-1" });
+    await callApi(ctx, "payment.check", { chat: "Alice", payment: "pay-1" });
+    expect(node.checkPayment).toHaveBeenCalledWith({ linkId: "chat-one", paymentId: "pay-1" });
+    await callApi(ctx, "payment.reclaim", { payment: "pay-1" });
+    expect(node.reclaimPayment).toHaveBeenCalledWith({ paymentId: "pay-1" });
+    expect(await callApi(ctx, "lightning.rename", { card: "main", name: "Tips" })).toEqual({ network: "testnet", card: "main", name: "Tips" });
+    expect(await callApi(ctx, "lightning.default", { card: "main" })).toEqual({ network: "testnet", receive: "main" });
   });
 });
