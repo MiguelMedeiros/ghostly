@@ -1,0 +1,1 @@
+An admin takes out of the roster a member it let in over a contact chat, and never saw on an edge since, when that chat sends `group-decline`: its welcome was lost and it declined, so it never had the group's keys and may be invited again. Before, it stayed a member for good.
