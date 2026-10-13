@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { Translate } from "../locales/translate";
 
 /** How long the reason an answer did not go stays under Accept and Decline. */
@@ -22,9 +23,9 @@ export const answerable = (invitation: Invitation | undefined) => !!invitation &
 /**
  * Accept or Decline, from the invitation's row or its own page. Accept needs the inviter's chat live, which takes a
  * moment after the app opens: why the last answer did not go is said for a few seconds, since a click that did nothing
- * and said nothing looked broken.
+ * and said nothing looked broken. `onDeclined`: what follows a Decline that went.
  */
-export function useInvitationAnswer(group: GroupView) {
+export function useInvitationAnswer(group: GroupView, onDeclined?: () => void) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
@@ -36,7 +37,10 @@ export function useInvitationAnswer(group: GroupView) {
   const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
     setBusy(true);
     setRefused(null);
-    try { await engine.call(method, { groupId: group.id }); } catch (error) {
+    try {
+      await engine.call(method, { groupId: group.id });
+      if (method === "declineGroupInvitation") onDeclined?.();
+    } catch (error) {
       const away = /not connected/i.test(error instanceof Error ? error.message : String(error));
       const contact = group.invitation?.contact;
       setRefused(!away ? t("sidebar.group.answerFailed") : contact ? t("sidebar.group.inviterAway", { contact }) : t("sidebar.group.inviterAwayUnknown"));
@@ -64,7 +68,10 @@ export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnTy
  */
 export function GroupInvitationCard({ group, compact = false }: { group: GroupView; compact?: boolean }) {
   const { t } = useI18n();
-  const { busy, refused, answer } = useInvitationAnswer(group);
+  const nav = useAppNavigation();
+  // Declined from its own page: the group is gone from here, so back to the list, as Delete from this device does.
+  // The band keeps its page: a member invited back keeps the group and its history.
+  const { busy, refused, answer } = useInvitationAnswer(group, compact ? undefined : nav.home);
   const invitation = group.invitation!;
   const buttons = answerable(invitation) && <InvitationButtons busy={busy} answer={answer} large />;
   const why = refused && <p role="status" data-testid="group-answer-refused" className="text-xs text-danger">{refused}</p>;

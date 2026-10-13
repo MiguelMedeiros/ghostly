@@ -85,9 +85,41 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation from a contact");
   });
 
-  it("says the group is gone when this device does not have it", () => {
-    openGroup(null);
+  it("Decline on the invitation's own page goes back to the chat list: the group is gone from here", async () => {
+    const { user, engine } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }));
+    // The engine deletes a declined invitation with nothing kept: the page would be left saying the group is gone.
+    engine.on("declineGroupInvitation", () => { fakeEngine.update({ groups: [] }); });
+    within(screen.getByTestId("group-invitation")).getByTestId("group-decline").focus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(await screen.findByText("Chat list")).toBeInTheDocument();
+  });
+
+  it("a Decline the engine refuses keeps the invitation's page, and says why", async () => {
+    const { user, engine } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }));
+    engine.on("declineGroupInvitation", () => { throw new Error("No invitation to decline"); });
+    await user.click(within(screen.getByTestId("group-invitation")).getByTestId("group-decline"));
+    expect(await screen.findByTestId("group-answer-refused")).toBeInTheDocument();
+    expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
+  });
+
+  it("Decline on the band over a member's kept history stays on the group", async () => {
+    const { user, engine } = openGroup(groupView({ status: "removed", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }),
+      [stored({ id: "old", text: "from before", member: ALICE })]);
+    engine.on("declineGroupInvitation", () => { fakeEngine.update({ groups: [groupView({ status: "removed", canSend: false })] }); });
+    await screen.findByText("from before");
+    await user.click(within(screen.getByTestId("group-invitation")).getByTestId("group-decline"));
+    expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    await screen.findByText("from before");
+    expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
+  });
+
+  it("says the group is gone when this device does not have it, with a way back to the chat list", async () => {
+    // Deleted on another device, say: the group page has no tabs, and an installed iPhone web app no system back.
+    const { user } = openGroup(null);
     expect(screen.getByText("This group is gone from this device.")).toBeInTheDocument();
+    await user.click(within(screen.getByTestId("group-gone")).getByRole("button", { name: "Back" }));
+    expect(await screen.findByText("Chat list")).toBeInTheDocument();
   });
 });
 
