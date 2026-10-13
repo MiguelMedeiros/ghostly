@@ -2,9 +2,9 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
-import { CliError } from "./errors";
+import { CliError, type ErrorCode } from "./errors";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -109,7 +109,29 @@ function badMintUrl(error: unknown): boolean {
   return code === "invalidMintUrl" || code === "mintNotHttps";
 }
 
-export const WALLET_METHODS: Record<string, Method> = {
+/**
+ * The engine's wallet refusals about what the person asked, by the words it writes (they carry no `engineCode`): a
+ * wallet or card that is not there, a token or invoice that is not one, a wallet already made, no mint or source to do
+ * it with. Before, each was `engine` (exit 1), which a bot reads as the engine failing and may retry.
+ */
+const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
+  [/^There is no .+ to remove$/, "not_found"],
+  [/^That Lightning card is gone\b/, "not_found"],
+  [/^That is not a (valid ecash token|Lightning invoice)$/, "bad_request"],
+  [/^You already have a .+ wallet$/, "refused"],
+  [/^No mint could create an invoice: No mint configured$/, "unavailable"],
+  [/^No Bitcoin source is set up$/, "unavailable"],
+  [/^The faucet did not pay: This wallet has no test mint\b/, "unavailable"],
+  [/^Ghostly cannot ask this wallet's faucet by itself\b/, "unavailable"],
+];
+
+function walletRefusal(error: unknown): unknown {
+  if (!(error instanceof Error) || error instanceof CliError) return error;
+  const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
+  return code ? new CliError(code, error.message) : error;
+}
+
+const WALLETS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
     await federationsOpen(ctx);
     const s = state(ctx);
@@ -135,6 +157,8 @@ export const WALLET_METHODS: Record<string, Method> = {
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.values(raw).some((v) => typeof v !== "string")) throw new CliError("bad_request", "values must be an object of strings");
     Object.assign(values, raw);
     const provider = str(params, "provider");
+    const offered = state(ctx).wallet.offers?.find((o) => o.type === type && o.network === n)?.providers;
+    if (provider && offered && !offered.some((p) => p.id === provider)) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
     // BDK asks for a recovery phrase and makes a new wallet from one the app draws: here, one drawn now.
     if (type === "bitcoin" && (provider ?? "bdk") === "bdk" && !values.mnemonic) values.mnemonic = generateMnemonic(wordlist, 128);
     const made = await node(ctx).walletCreate({ type, network: n, ...(provider ? { providerId: provider } : type === "bitcoin" ? { providerId: "bdk" } : {}), ...(Object.keys(values).length ? { values } : {}), ...(str(params, "invite") ? { invite: str(params, "invite") } : {}), ...(str(params, "apiKey") ? { apiKey: str(params, "apiKey") } : {}) });
@@ -241,6 +265,7 @@ export const WALLET_METHODS: Record<string, Method> = {
   /** Ecash to a contact in a chat (the payment sheet's Pay). */
   async "chat.pay"(ctx, params) {
     const link = chatOf(ctx, params);
+    inviteTaken(link);
     const amount = num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
     const n = network(params);
@@ -315,5 +340,8 @@ export const WALLET_METHODS: Record<string, Method> = {
     return p ? paymentJson(p) : { paymentId: str(params, "payment", true) };
   },
 };
+
+export const WALLET_METHODS: Record<string, Method> = Object.fromEntries(Object.entries(WALLETS).map(([name, method]) => [name,
+  (ctx: ApiContext, params: Params) => method(ctx, params).catch((error: unknown) => { throw walletRefusal(error); })]));
 
 export type { ApiContext };
