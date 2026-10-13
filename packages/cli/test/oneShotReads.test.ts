@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ghostly, home, ok } from "./support/cli";
 // covers: headless.cli
@@ -41,7 +42,10 @@ describe("a one-shot that only reads", { timeout: 90_000 }, () => {
   let chat: string;
   const reads = () => [
     ["status"], ["chat", "list"], ["chat", "show", chat], ["chat", "history", chat], ["settings", "get"], ["group", "list"], ["profile", "show"], ["events"],
+    ["call", "list"], ["call", "auto"], ["app", "served"], ["identity", "providers"], ["identity", "contact", chat], ["service", "peer", chat],
+    ["profile", "backup", "--out", join(dir, `full-${++backups}.bak`), "--no-passphrase"], ["profile", "backup", "--out", join(dir, `light-${backups}.bak`), "--no-passphrase", "--light"],
   ];
+  let backups = 0;
 
   beforeAll(async () => {
     relay = await countingRelay();
@@ -53,6 +57,13 @@ describe("a one-shot that only reads", { timeout: 90_000 }, () => {
   it("asks the relays nothing", async () => {
     relay.requests.length = 0;
     for (const args of reads()) ok(await ghostly(["--home", dir, ...args], { env }));
+    expect(relay.requests).toEqual([]);
+  });
+
+  it("refuses a backup with no passphrase before the profile opens", async () => {
+    relay.requests.length = 0;
+    const missing = await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "none.bak")], { env: { ...env, GHOSTLY_BACKUP_PASSPHRASE: "" } });
+    expect(missing.code).toBe(2);
     expect(relay.requests).toEqual([]);
   });
 
