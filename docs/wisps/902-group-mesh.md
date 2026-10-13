@@ -70,6 +70,8 @@ A contact already active in the group (it came in through the link, say) answers
 
 **How long an inviter waits** (revision 2026-10-12). An inviter counts a contact it invited over a contact chat as invited, in one of the group's 32 places, until the contact answers or for a week from the invitation it last sent; after that a `group-accept` over that chat is answered as one from a chat never invited, with a refusal (above), and the contact may be invited again. Before, it waited for good, so a contact whose answer never came (an app that sent none, a decline lost on the way) kept its place and could not be invited again.
 
+**A welcome sent again** (revision 2026-10-13). A `group-accept` from the member a contact chat already let in, while the admin has no edge up with that member, is answered with its welcome again: the chain, and the secrets of the epochs it has been in since its admission, each sealed to its key. Nothing is committed for it. The member's app says its accept again while no welcome comes, so a welcome lost on the way (the chat closed while the admin's app let it in) comes the next time; its app drops the pieces of a welcome that came only in part when it says its accept again. With the edge up, the accept is answered with nothing, as before. Before, nothing more was ever sent: the member waited on its invitation for good, and the admin kept in its roster a member who never had the group's keys and could not be invited again.
+
 ### Entry link (`group-entry/1`)
 
 An admin can also hand out **one link that anyone may use**, so people who are not their contacts can join, without a contact chat and without saying who they are:
