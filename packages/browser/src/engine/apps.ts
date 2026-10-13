@@ -135,11 +135,32 @@ export interface AddedAppStore {
 /** One key of one app's storage in one scope (`STORES.appStorage`): the value as JSON, and the bytes of the key and the value. */
 export interface AppStorageRow { ref: string; scope: string; key: string; value: string; size: number }
 /**
- * What a row takes of its scope's 5 MiB: `rowBytes`, its key `keyTimes` over and its value. `size` is the key's bytes
- * and the value's. Not kept in the row, so rows from before count alike.
+ * What one scope holds, as raw sums: its rows, their keys' bytes and their `size` (key and value). Kept in the scope's
+ * counter row beside the rows, written in the same transaction as each of them, so a write after a start reads no
+ * value to count the scope. Sums, not the count itself: a change of how bytes count (`costOf`) counts them anew.
  */
-const costOf = ({ key, size }: { key: string; size: number }): number =>
-  APP_STORAGE_LIMITS.rowBytes + size + (APP_STORAGE_LIMITS.keyTimes - 1) * byteLength(key);
+export interface AppScopeCount { rows: number; keyBytes: number; size: number }
+/**
+ * The key of a scope's counter row (`AppScopeCount` as JSON in `value`, `size` 0): an app's key is never empty
+ * (`keyOf`), and the app's own rows of a scope are `keysOf`, which leaves it out.
+ */
+const COUNT_KEY = "";
+const NO_ROWS: AppScopeCount = { rows: 0, keyBytes: 0, size: 0 };
+/**
+ * What rows take of their scope's 5 MiB: `rowBytes` each, their keys `keyTimes` over and their values. Not kept, so a
+ * count from before counts alike.
+ */
+const costOf = ({ rows, keyBytes, size }: AppScopeCount): number =>
+  rows * APP_STORAGE_LIMITS.rowBytes + size + (APP_STORAGE_LIMITS.keyTimes - 1) * keyBytes;
+/** One row as a count, `sign` -1 to take it away. */
+const countOf = ({ key, size }: { key: string; size: number }, sign = 1): AppScopeCount => ({ rows: sign, keyBytes: sign * byteLength(key), size: sign * size });
+const plus = (a: AppScopeCount, b: AppScopeCount): AppScopeCount => ({ rows: a.rows + b.rows, keyBytes: a.keyBytes + b.keyBytes, size: a.size + b.size });
+function readCount(value: unknown): AppScopeCount | null {
+  try {
+    const c = JSON.parse(value as string) as Partial<AppScopeCount>;
+    return [c.rows, c.keyBytes, c.size].every((n) => Number.isSafeInteger(n) && (n as number) >= 0) ? (c as AppScopeCount) : null;
+  } catch { return null; }
+}
 
 /** Whether an installed app may run now: `needs-files` when its bundle is not on this device (a restored profile). */
 export type AppRunStatus =
@@ -354,8 +375,13 @@ function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]
   return merged.size ? { ...app, revocations: [...merged.values()] } : app;
 }
 
-/** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`. */
+/** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`, counter rows included. */
 const rowsOf = (...prefix: string[]) => IDBKeyRange.bound(prefix, [...prefix, []]);
+/** The app's own rows of one scope: its counter row left out. */
+const keysOf = (ref: string, scope: string) => IDBKeyRange.bound([ref, scope, COUNT_KEY], [ref, scope, []], true);
+
+/** A scope's counter row (`COUNT_KEY`). */
+const counterRow = (ref: string, scope: string, count: AppScopeCount): AppStorageRow => ({ ref, scope, key: COUNT_KEY, value: JSON.stringify(count), size: 0 });
 
 function done(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -393,8 +419,8 @@ export class Apps {
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
   private readonly icons = new Map<string, Uint8Array | null>();
-  /** Bytes used per `ref\0scope`, counted once from the rows and kept in step by the writes here. */
-  private readonly usage = new Map<string, number>();
+  /** What each `ref\0scope` holds, read once from its counter row and kept in step by the writes here. */
+  private readonly usage = new Map<string, AppScopeCount>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Drops what `staged` holds past `STAGED.ms`, set while it holds anything: a closed install screen sends no call. */
@@ -1470,14 +1496,27 @@ export class Apps {
     return run;
   }
 
-  private async usageOf(ref: string, scope: string): Promise<number> {
+  /**
+   * What a scope holds: its counter row, when the number of rows agrees with it (one key count, no value read). A
+   * scope without one (written before it was kept) or where it disagrees (rows written by an older client) is
+   * counted from its rows once.
+   */
+  private async usageOf(ref: string, scope: string): Promise<AppScopeCount> {
     const id = `${ref}\0${scope}`;
-    let used = this.usage.get(id);
-    if (used === undefined) {
-      const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).index(APP_STORAGE_SCOPE_INDEX).getAll([ref, scope]));
-      used = rows.reduce((sum, r) => sum + costOf(r), 0);
-      this.usage.set(id, used);
+    const cached = this.usage.get(id);
+    if (cached) return cached;
+    const rows = await store(STORES.appStorage, "readonly");
+    const [counter, n] = await Promise.all([
+      wrap<AppStorageRow | undefined>(rows.get([ref, scope, COUNT_KEY])),
+      wrap<number>(rows.count(keysOf(ref, scope))),
+    ]);
+    let used = counter ? readCount(counter.value) : n ? null : NO_ROWS;
+    if (!used || used.rows !== n) {
+      // The write that asked keeps the counter row from here on.
+      const all = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(keysOf(ref, scope)));
+      used = all.reduce((sum, r) => plus(sum, countOf(r)), NO_ROWS);
     }
+    this.usage.set(id, used);
     return used;
   }
 
@@ -1505,8 +1544,8 @@ export class Apps {
       const used = await this.usageOf(app.ref, where);
       const rows = await store(STORES.appStorage, "readonly");
       const old = await wrap<AppStorageRow | undefined>(rows.get([app.ref, where, name]));
-      const next = used - (old ? costOf(old) : 0) + costOf({ key: name, size });
-      if (next > APP_STORAGE_LIMITS.scopeBytes && next > used) fail("full", "This app's storage in this chat is full (5 MiB)");
+      const next = plus(old ? plus(used, countOf(old, -1)) : used, countOf({ key: name, size }));
+      if (costOf(next) > APP_STORAGE_LIMITS.scopeBytes && costOf(next) > costOf(used)) fail("full", "This app's storage in this chat is full (5 MiB)");
       const writing = await store(STORES.appStorage, "readwrite");
       // The chat may have been deleted while this write waited its turn and read. Asked again here, with nothing awaited
       // before the put: a chat still one now is deleted by a later transaction, which takes this row; one already gone
@@ -1515,7 +1554,8 @@ export class Apps {
         this.usage.delete(`${app.ref}\0${where}`);
         fail("bad-scope", "Not a chat of this profile");
       }
-      await wrap(writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow));
+      writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
+      await wrap(writing.put(counterRow(app.ref, where, next)));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
@@ -1527,14 +1567,17 @@ export class Apps {
       const used = await this.usageOf(app.ref, where);
       const old = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, where, name]));
       if (!old) return;
-      await wrap((await store(STORES.appStorage, "readwrite")).delete([app.ref, where, name]));
-      this.usage.set(`${app.ref}\0${where}`, used - costOf(old));
+      const next = plus(used, countOf(old, -1));
+      const writing = await store(STORES.appStorage, "readwrite");
+      writing.delete([app.ref, where, name]);
+      await (next.rows ? wrap(writing.put(counterRow(app.ref, where, next))) : wrap(writing.delete([app.ref, where, COUNT_KEY])));
+      this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
 
   async storageKeys({ ref, scope, digest }: { ref: string; scope: string; digest?: string }): Promise<string[]> {
     const app = await this.runningOrFail(ref, digest);
-    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(rowsOf(app.ref, this.scopeOf(scope)))) as [string, string, string][];
+    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(keysOf(app.ref, this.scopeOf(scope)))) as [string, string, string][];
     return keys.map((k) => k[2]);
   }
 
@@ -1570,7 +1613,8 @@ export class Apps {
     const out: AppDataExportText[] = [];
     for (const [i, scope] of scopes.entries()) {
       if (i) await new Promise((resolve) => setTimeout(resolve, 0));
-      const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(rowsOf(app.ref, scope)));
+      // The app's own rows: the scope's kept count is not one of its keys.
+      const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(keysOf(app.ref, scope)));
       if (rows.length) out.push({ app: app.ref, scope, entries: rows.map((row) => [row.key, row.value]) });
     }
     return out;
