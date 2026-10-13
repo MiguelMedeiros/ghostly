@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type RefObject, useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
@@ -30,9 +30,10 @@ function takenBackWords(group: GroupView, t: Translate): { title: string; next: 
 /**
  * Accept or Decline, from the invitation's row or its own page. Accept needs the inviter's chat live, which takes a
  * moment after the app opens: why the last answer did not go is said for a few seconds, since a click that did nothing
- * and said nothing looked broken. `onDeclined`: what follows a Decline that went.
+ * and said nothing looked broken. `onDeclined`: what follows a Decline that went. `returnFocus`: where the focus goes
+ * once Accept went, on the page, where the buttons go with the answer and left it on the page's body.
  */
-export function useInvitationAnswer(group: GroupView, onDeclined?: () => void) {
+export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
@@ -44,9 +45,12 @@ export function useInvitationAnswer(group: GroupView, onDeclined?: () => void) {
   const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
     setBusy(true);
     setRefused(null);
+    const pressed = document.activeElement;
     try {
       await engine.call(method, { groupId: group.id });
       if (method === "declineGroupInvitation") onDeclined?.();
+      // Only if the focus is still on the button (or already dropped with it): the user may have gone on elsewhere.
+      else if (document.activeElement === pressed || document.activeElement === document.body) returnFocus?.current?.focus();
     } catch (error) {
       const away = /not connected/i.test(error instanceof Error ? error.message : String(error));
       const contact = group.invitation?.contact;
@@ -78,14 +82,14 @@ export function TakenBackDelete({ busy, answer, large = false }: Pick<ReturnType
 /**
  * A contact's invitation on its own page (opened from its row, on a phone the only way in): who invited and to what,
  * with Accept and Decline, as the row says it. It was an empty chat with a field that took nothing. `compact`: a band
- * over the history kept from before, for a member invited back.
+ * over the history kept from before, for a member invited back. `returnFocus`: what stays on the page once accepted (its ⋮).
  */
-export function GroupInvitationCard({ group, compact = false }: { group: GroupView; compact?: boolean }) {
+export function GroupInvitationCard({ group, compact = false, returnFocus }: { group: GroupView; compact?: boolean; returnFocus?: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
   const nav = useAppNavigation();
   // Declined from its own page: the group is gone from here, so back to the list, as Delete from this device does.
   // The band keeps its page: a member invited back keeps the group and its history.
-  const { busy, refused, answer } = useInvitationAnswer(group, compact ? undefined : nav.home);
+  const { busy, refused, answer } = useInvitationAnswer(group, compact ? undefined : nav.home, returnFocus);
   const invitation = group.invitation!;
   const buttons = invitation.takenBack ? <TakenBackDelete busy={busy} answer={answer} large /> : answerable(invitation) && <InvitationButtons busy={busy} answer={answer} large />;
   // Taken back by who sent it: who did, and what to do, where the invitation was.

@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useNavigate } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
@@ -84,6 +84,23 @@ describe("GroupChat: what the header says", () => {
     expect(menu).not.toHaveTextContent("Members");
     expect(screen.queryByTestId("chat-mute-open")).not.toBeInTheDocument();
     expect(within(menu).getByTestId("group-forget")).toBeInTheDocument();
+  });
+
+  it.each([["a mouse", false], ["a touch screen", true]] as const)("Accept from the keyboard hands the focus to the group's ⋮ while it joins, not the page (%s)", async (_, touch) => {
+    // With a mouse the message field takes it once it is there; on a touch screen it waits for a tap (touchOnly.ts).
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+      ? ({ ...matchMedia(query), matches: query === "(any-pointer: coarse)" ? touch : !touch } as MediaQueryList) : matchMedia(query));
+    const invitation = { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false };
+    const { user, engine } = openGroup(groupView({ canSend: false, invitation }));
+    engine.on("acceptGroupInvitation", () => { fakeEngine.update({ groups: [groupView({ canSend: false, invitation: { ...invitation, accepted: true } })] }); });
+    screen.getByTestId("group-accept").focus();
+    await user.keyboard("{Enter}");
+    expect(await within(screen.getByTestId("group-invitation")).findByText("Joining…")).toBeInTheDocument();
+    expect(screen.queryByTestId("group-accept")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+    act(() => engine.update({ groups: [active()] }));
+    expect(touch ? screen.getByTestId("group-options") : composer()).toHaveFocus();
   });
 
   it.each([["removed", "removed"], ["no status", undefined]] as const)("asks a member invited back over the history kept from before (%s)", async (_, status) => {
