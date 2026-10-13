@@ -30,6 +30,10 @@ let loaded = false;
 let asked = 0;
 /** The latest question is not answered yet. */
 let reading = false;
+/** Something changed while a question was on its way: asked once more when it answers, not once per change. */
+let wanted = false;
+/** A chat or group came or went before the first answer: that answer has it, but an error in its place does not. */
+let startChanged = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let stop: (() => void) | null = null;
 const listeners = new Set<() => void>();
@@ -68,6 +72,8 @@ function read(): void {
     // An older answer after a newer question says nothing; a store nobody shows any more keeps nothing.
     if (mine !== asked || !stop) return;
     reading = false;
+    startChanged = false;
+    if (wanted) { wanted = false; soon(); }
     const first = !loaded;
     loaded = true;
     if (first || !same(rows, next)) {
@@ -79,13 +85,16 @@ function read(): void {
   }, () => {
     if (mine !== asked || !stop) return;
     reading = false;
+    if (wanted || (!loaded && startChanged)) { wanted = false; soon(); }
+    startChanged = false;
     checkUnsure();
   });
 }
 
 function soon(): void {
+  if (reading) { wanted = true; return; }
   if (timer) return;
-  timer = setTimeout(() => { timer = null; if (stop) read(); }, SETTLE_MS);
+  timer = setTimeout(() => { timer = null; if (!stop) return; if (reading) wanted = true; else read(); }, SETTLE_MS);
 }
 
 /** The chats and groups there are: one coming or going changes whose cards the board has. */
@@ -105,13 +114,17 @@ function start(): () => void {
   });
   const offState = engine.subscribe(() => {
     const next = chatIds(engine.state);
-    if (next !== ids) { ids = next; soon(); }
+    if (next === ids) return;
+    ids = next;
+    // The chats and groups the engine loads as it starts (its links, then its groups) are in its first answer: that
+    // question waits for the engine to be ready. Each of them asked again, three reads of the whole index at once.
+    if (loaded || !reading) soon(); else startChanged = true;
   });
   read();
   return () => {
     offMessages(); offState();
     if (timer) { clearTimeout(timer); timer = null; }
-    rows = NONE; indexed = new Map(); loaded = false; reading = false;
+    rows = NONE; indexed = new Map(); loaded = false; reading = false; wanted = false; startChanged = false;
     seen.clear(); unsure.clear();
   };
 }
