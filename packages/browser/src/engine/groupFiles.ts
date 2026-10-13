@@ -402,7 +402,7 @@ export class GroupFileDesk {
       this.add(kept);
       const transfer = { state: "done" as const, transferred: m.file.size, size: m.file.size };
       await this.deps.store.patch(ownId, { group: { message: m.id, author: me }, transfer }).catch(() => {});
-      this.show(kept, { ...transfer, direction: "out" });
+      this.finished(kept, "out");
       this.queueHave(kept);
       return messageFile(kept);
     }
@@ -954,7 +954,7 @@ export class GroupFileDesk {
         this.wants.delete(kept.id);
         edge.taking.delete(record.id);
         void this.deps.store.patch(kept.id, { transfer: { state: "done", transferred: size, size } }).catch(() => {});
-        this.show(kept, { state: "done", transferred: size, size, direction: "in" });
+        this.finished(kept, "in");
         this.queueHave(kept);
         // The holder is free for the next file this device waits for.
         this.retry(kept.groupId);
@@ -1023,6 +1023,15 @@ export class GroupFileDesk {
    */
   private waiting(kept: Kept): void {
     this.show(kept, { state: "transferring", stage: "asking", transferred: 0, size: kept.meta.size, direction: "in" });
+    this.deps.brief(kept.id);
+  }
+
+  /**
+   * All here: said in one state (the CLI's `file.done`), then left to its record, which says it is done. A view kept for
+   * each file fetched or sent would go into every state the engine builds until the next start.
+   */
+  private finished(kept: Kept, direction: "in" | "out"): void {
+    this.show(kept, { state: "done", transferred: kept.meta.size, size: kept.meta.size, direction });
     this.deps.brief(kept.id);
   }
 

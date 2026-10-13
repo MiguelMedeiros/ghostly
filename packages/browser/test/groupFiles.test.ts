@@ -969,6 +969,26 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect([...t.files.get(bob)!.transfers.keys()]).toEqual([late]);
   });
 
+  it("a file fetched or sent in this run is said done in one state, then shows no transfer: its record says it is done", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const sent = [];
+    for (let i = 0; i < 3; i++) sent.push(await t.send(alice, id, pattern(20_000, 70 + i), { name: `d${i}.bin` }));
+    await t.world.until(() => sent.every(({ messageId }) => t.done(bob, id, messageId)), 60_000);
+    // Done in the next state each engine sends (the CLI's `file.done`); none in the states after it.
+    for (const peer of [alice, bob]) {
+      const files = t.files.get(peer)!;
+      expect([...files.brief.values()].map(view => view.state)).toEqual(["done", "done", "done"]);
+      t.sent(peer);
+      expect([...files.transfers.keys()]).toEqual([]);
+    }
+    for (const { messageId, meta } of sent) {
+      expect(t.got(bob, id, messageId).transfer).toBeUndefined();
+      expect(t.files.get(bob)!.store.records.get(t.got(bob, id, messageId).message!.file!.id)!.transfer).toMatchObject({ state: "done" });
+      expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
+    }
+  });
+
   it("a file that waits for a Download is said in one state, then shows no transfer, nor after a start: its record says it waits", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);

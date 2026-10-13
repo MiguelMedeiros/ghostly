@@ -7,6 +7,7 @@ import { GROUP_FILE_LIMITS } from "@ghostly/core";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import type { FileTransferView, GroupMemberView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
+import { servicesPlatform } from "../../lib/platform";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { installFakeAudio, installFakeMedia, removeFakeMedia } from "../voice/fakeMedia";
@@ -187,6 +188,20 @@ describe("a group's file bubbles", () => {
     const done = within(row(`${ALICE}:1:8`)).getByTestId("file-bubble");
     await vi.waitFor(() => expect(done).toHaveAttribute("data-stage", "done"));
     expect(within(done).queryByTestId("file-accept")).toBeNull();
+  });
+
+  it("a file that came in this run stays done once the engine shows its transfer no more, with nothing read again", async () => {
+    const fresh: MessageFile = { ...REPORT, id: "group-group-1-in-fresh", name: "fresh.pdf" };
+    const storedTransfer = vi.spyOn(servicesPlatform!, "storedTransfer");
+    openGroup({ [fresh.id]: { state: "done", transferred: fresh.size, size: fresh.size, direction: "in" } }, {},
+      [...history, stored({ id: `${ALICE}:1:9`, text: "📎 fresh.pdf", member: ALICE, file: fresh, timestamp: 1_700_000_006_000 })]);
+    const bubble = await vi.waitFor(() => within(row(`${ALICE}:1:9`)).getByTestId("file-bubble"));
+    expect(bubble).toHaveAttribute("data-stage", "done");
+    // The engine said it once: the next state carries no transfer for it.
+    act(() => fakeEngine.update({ transfers: {} }));
+    expect(bubble).toHaveAttribute("data-stage", "done");
+    expect(within(bubble).queryByTestId("file-accept")).toBeNull();
+    expect(storedTransfer.mock.calls.filter(([id]) => id === fresh.id)).toEqual([]);
   });
 
   it("done: nothing to answer", async () => {
