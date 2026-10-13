@@ -109,7 +109,7 @@ const RUNNER: &str = r#"<!doctype html>
   };
   // What a failed call rejects with: one of the broker's codes (MINI_APP_ERROR_CODES, packages/core/src/miniApp.ts),
   // or "failed" for anything else, this runner's own failures included. Read without the prototypes the app may change.
-  const CODES = ["bad-key", "bad-path", "bad-request", "failed", "full", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped", "too-fast", "too-large", "unknown-type"];
+  const CODES = ["bad-key", "bad-path", "bad-request", "cancelled", "changed", "failed", "full", "gone", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped", "too-fast", "too-large", "unknown-type"];
   const known = Object.create(null);
   for (let i = 0; i < CODES.length; i++) known[CODES[i]] = true;
   const refusal = (code) => new Error(typeof code === "string" && known[code] === true ? code : "failed");
