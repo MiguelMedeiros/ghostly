@@ -518,6 +518,17 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(savedLarge.size).toBe(26 * 1024 * 1024);
     expect(sha(join(bob, "big-copy.bin"))).toBe(sha(large));
     await listen.stop();
+
+    // Started again: a file that arrived shows no transfer in the engine's state; its record still says it is done.
+    ok(await as(bob, "daemon", "stop"));
+    const daemon = new Running(["--home", bob, "daemon"], env);
+    running.push(daemon);
+    sockets[bob] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
+    expect((ok(await as(bob, "engine", "getState")).transfers as Record<string, unknown>)[incoming.id]).toBeUndefined();
+    const listed = ok(await as(bob, "file", "list", "alice")).files as { file: { id: string }; transfer: { state: string } | null }[];
+    expect(listed.find((f) => f.file.id === incoming.id)?.transfer).toMatchObject({ state: "done", size: 200_000 });
+    expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    ok(await as(bob, "chat", "wait", "alice", "--until", "live", "--timeout", "60"));
   });
 
   it("send files all at once, as a bot sends photos: each its own message on both sides", async () => {
