@@ -882,11 +882,15 @@ export class CashuWallet {
       // A sender that prepaid the redeem fee put it on top of the amount; what the mint kept is the fee either way.
       const records = (credited: number) => ({ tx: walletTx(mint, kind, credited, Math.max(0, faceValue - credited), note), ...(payment ? { payment: payment(credited, mint) } : {}) });
       // A redeem of this very token that is still written down is finished as it was made: never a second swap for it.
-      let swap = (await this.swapsAt(mint)).find((s) => s.kind === "receive" && s.token === token);
+      const written = (await this.swapsAt(mint)).filter((s) => s.kind === "receive");
+      let swap = written.find((s) => s.token === token);
       // Already in the wallet, with only its chat still to be told: nothing to redeem again.
       if (swap?.finished) return { amount: swap.tx?.amount ?? 0, mint, fee: swap.tx?.fee ?? 0 };
       if (!swap) {
         const preview = await (await this.wallet(mint)).prepareSwapToReceive(token);
+        // The same coins in another token (another memo): one coin is one redeem, never another swap counted again.
+        const redeeming = new Set(written.flatMap((s) => (swapOf(s).inputs ?? []).map((p) => p.secret)));
+        if (preview.inputs.some((p) => redeeming.has(p.secret))) throw engineError("ecashBeingReceived");
         // The outputs are for what is left after the mint's fee, so the records are known before the mint is asked.
         swap = { id: swapId(), mint, kind: "receive", swap: serializeSwapPreview(preview), createdAt: Date.now(), token, ...records(preview.amount.toNumber()) };
         await wrap((await store(STORES.swaps, "readwrite")).put(swap));

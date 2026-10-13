@@ -59,6 +59,7 @@
     "cashuFeeAboveLimit": "Cashu fee exceeds your limit",
     "couldNotVerify": "Could not verify this payment yet. No second payment was sent.",
     "ecashAlreadySpent": "This ecash was already spent somewhere else",
+    "ecashBeingReceived": "This ecash is already being received",
     "ecashOtherUnit": "This ecash is in {{unit}}: only sat ecash can be redeemed here",
     "fedimintAlreadyJoined": "You already joined this federation",
     "fedimintConnecting": "Wait for the federation to connect",
