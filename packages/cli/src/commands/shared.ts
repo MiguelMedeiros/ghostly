@@ -89,11 +89,29 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   return seconds;
 }
 
-/** A history cursor: a timestamp when it is all digits, else a message id. */
-export function cursor(value: unknown): string | number | undefined {
+/**
+ * A history cursor (`--before`, `--after`): a time in milliseconds when it is all digits (`0` is the start), else a
+ * message id. No message id is all digits (`me_…`, `peer_…`, a group's `member:epoch:…`), so `--after 0` or `--after
+ * 1000` is a time; before, under ten digits read as an id and answered "No message 0". Seconds are refused, as in
+ * `cardTime`.
+ */
+export function cursor(value: unknown, flag: string): string | number | undefined {
   if (value === undefined) return undefined;
-  const text = String(value);
-  return /^\d{10,}$/.test(text) ? Number(text) : text;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) return text;
+  return notSeconds(Number(text), flag);
+}
+
+/** 2001-01-01 in seconds (`978307200`): a number from it up to the same date in milliseconds reads as seconds. */
+const SECONDS_FROM = 978_307_200;
+
+/**
+ * A count of milliseconds that is really seconds (`$(date +%s)`: a time after 2001 as seconds, before 2001 as
+ * milliseconds) is a usage error that gives the milliseconds; before, it went through as a time in January 1970.
+ */
+function notSeconds(ms: number, flag: string): number {
+  if (ms >= SECONDS_FROM && ms < SECONDS_FROM * 1000) throw new CliError("usage", `--${flag} takes milliseconds, not seconds: ${ms}000`);
+  return ms;
 }
 
 /**
@@ -223,11 +241,11 @@ export function quota(card: Record<string, unknown>, usage: string): Record<stri
   return card;
 }
 
-/** A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). */
+/** A time a command names: milliseconds (not seconds), or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). */
 export function cardTime(value: unknown, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim();
-  const ms = /^\d+$/.test(text) ? Number(text) : Date.parse(text);
+  const ms = /^\d+$/.test(text) ? notSeconds(Number(text), flag) : Date.parse(text);
   if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date like 2026-09-30T01:00:00Z, not ${JSON.stringify(value)}`);
   return ms;
 }
