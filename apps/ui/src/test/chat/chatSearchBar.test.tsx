@@ -116,6 +116,32 @@ describe("search inside a chat", () => {
     expect(document.activeElement).toBe(composer);
   });
 
+  it("keeps the keys typed before the next frame, and chooses the words only of a bar already open", async () => {
+    const { user } = openChat(true, short());
+    await screen.findByText(`Message ${COUNT - 1}`);
+    // The frame after the bar opens comes late on a busy phone (a long chat folded for the search): keys typed by then
+    // were chosen as the field's words, and the next key replaced them ("line" read "e").
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => { frames.push(frame); return frames.length; });
+    const nextFrame = () => act(() => { for (const frame of frames.splice(0)) frame(performance.now()); });
+    await user.click(screen.getByTestId("chat-options"));
+    await user.click(await screen.findByTestId("chat-search-open"));
+    expect(document.activeElement).toBe(field());
+    await user.keyboard("li");
+    nextFrame();
+    await user.keyboard("ne");
+    expect(field().value).toBe("line");
+
+    // Ctrl+F in the open bar: back to its field with its words chosen, so typing replaces them, at once.
+    screen.getByPlaceholderText("Message…").focus();
+    ctrlF();
+    expect(document.activeElement).toBe(field());
+    expect([field().selectionStart, field().selectionEnd]).toEqual([0, 4]);
+    nextFrame();
+    await user.keyboard("cafe");
+    expect(field().value).toBe("cafe");
+  });
+
   it("leaves Ctrl+F to the browser while the chat is not on screen", async () => {
     openChat(false, short());
     await settle();
