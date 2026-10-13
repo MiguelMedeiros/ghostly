@@ -237,6 +237,29 @@ test.describe("once the released Ghostly has Apps", () => {
     }
   });
 
+  test("at 320 px a title and a tagline of one long word, as long as the store takes, wrap inside the card and the header", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    // The store's own limits: 40 characters for a title, 80 for a tagline (lib/store-core/appBundle.ts). They ran
+    // over the card's border, and the app page's text column grew to the word and cut the title and Version.
+    const title = "W".repeat(40), tagline = "M".repeat(80);
+    await page.goto(LIVE + "/apps");
+    const card = page.locator(".ap-card").first();
+    await card.locator(".ap-card-title").evaluate((el, text) => { el.textContent = text; }, title);
+    await card.locator(".ap-card-tagline").evaluate((el, text) => { el.textContent = text; }, tagline);
+    const edge = (await card.boundingBox())!;
+    for (const part of [".ap-card-title", ".ap-card-tagline"]) {
+      const box = (await card.locator(part).boundingBox())!;
+      expect(box.x + box.width, part).toBeLessThanOrEqual(edge.x + edge.width);
+    }
+    await page.goto(LIVE + `/apps/${CHESS}`);
+    await page.locator(".ap-app-title").evaluate((el, text) => { el.textContent = text; }, title);
+    await page.locator(".ap-head-copy .lead").evaluate((el, text) => { el.textContent = text; }, tagline);
+    for (const part of [".ap-head-copy", ".ap-app-title", ".ap-head-copy .lead"]) {
+      const box = (await page.locator(part).boundingBox())!;
+      expect(box.x + box.width, part).toBeLessThanOrEqual(320);
+    }
+  });
+
   test("axe finds nothing serious on either page", async ({ page }) => {
     for (const path of ["/apps", `/apps/${CHESS}`, `/apps/${NOTES}`]) {
       await page.goto(LIVE + path);

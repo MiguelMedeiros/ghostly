@@ -94,6 +94,10 @@ describe("the argument parser", () => {
     expect(liftGlobals(["--profile=bot", "chat", "list"])).toEqual(["chat", "list", "--profile=bot"]);
     expect(liftGlobals(["send", "--home", "/h"])).toEqual(["send", "--home", "/h"]);
     expect(liftGlobals(["--home", "/h", "send", "c", "--", "-dash"])).toEqual(["send", "c", "--home", "/h", "--", "-dash"]);
+    // A global boolean's `--no-` form moves as the option itself does; `--no-home` names no option and stays.
+    expect(liftGlobals(["--no-pretty", "status"])).toEqual(["status", "--no-pretty"]);
+    expect(parseArgs(liftGlobals(["--no-pretty", "status"]).slice(1), {})).toEqual({ positionals: [], options: { pretty: false } });
+    expect(liftGlobals(["--no-home", "status"])).toEqual(["--no-home", "status"]);
   });
 
   it("a global option before the command never lands between an option and its value", () => {

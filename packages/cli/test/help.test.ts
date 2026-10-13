@@ -7,7 +7,7 @@ import { ghostly, home } from "./support/cli";
 /** Help per command and per group, as a person or a bot asks for it: `help <words>` or `<words> --help`. */
 describe("help", () => {
   it("for a group lists its commands, whichever way it is asked", async () => {
-    for (const args of [["help", "file"], ["file", "--help"], ["file", "-h"]]) {
+    for (const args of [["help", "file"], ["file", "--help"], ["file", "-h"], ["file", "--help=true"]]) {
       const { code, stdout } = await ghostly(args);
       expect(code, args.join(" ")).toBe(0);
       expect(stdout).toContain("ghostly file:");
@@ -18,7 +18,7 @@ describe("help", () => {
   });
 
   it("for one command shows its usage, what it does and its options", async () => {
-    for (const args of [["help", "file", "save"], ["file", "save", "--help"], ["file", "save", "c1-in-x", "--help"]]) {
+    for (const args of [["help", "file", "save"], ["file", "save", "--help"], ["file", "save", "c1-in-x", "--help"], ["file", "save", "c1-in-x", "--help=true"]]) {
       const { code, stdout } = await ghostly(args);
       expect(code, args.join(" ")).toBe(0);
       expect(stdout).toContain("Usage: ghostly file save [<chat>] <file>");
@@ -29,6 +29,16 @@ describe("help", () => {
     expect(typing.stdout).toMatch(/--for <n>/);
     const daemon = await ghostly(["help", "daemon"]);
     expect(daemon.stdout).toContain("daemon restart");
+    // `daemon` itself first, with its own options, then the commands under it: its --timeout was shown nowhere.
+    for (const args of [["help", "daemon"], ["daemon", "--help"]]) {
+      const { stdout } = await ghostly(args);
+      expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly daemon \[--detach\] \[--timeout s\]\n/);
+      expect(stdout, args.join(" ")).toMatch(/--timeout <n>\s+Seconds --detach waits for it to start/);
+      expect(stdout, args.join(" ")).toContain("ghostly daemon: 3 more commands (ghostly help daemon <command> for one)");
+      expect(stdout.indexOf("--detach waits"), args.join(" ")).toBeLessThan(stdout.indexOf("daemon status"));
+    }
+    // One command in a group is "1 command".
+    expect((await ghostly(["help", "store"])).stdout).not.toContain("1 commands");
     const send = await ghostly(["send", "bob", "hi", "--help"]);
     expect(send.stdout).toContain("Usage: ghostly send <chat>");
     // Next to the text: what `--` does to the options after it.
@@ -60,6 +70,16 @@ describe("help", () => {
     expect((await ghostly(["help", "listen"])).stdout).toContain("[--print]");
   });
 
+  it("--help=false is the command, and a global boolean's --no- form may come before the command", async () => {
+    // `--no-pretty status` was "Unknown command: --no-pretty status"; `--help=true` ran the command (a `chat remove --yes` too).
+    for (const args of [["--no-pretty", "version"], ["version", "--help=false"]]) {
+      const { code, stdout, json } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(json, args.join(" ")).toHaveProperty("version");
+      expect(stdout.trim().split("\n")).toHaveLength(1);
+    }
+  });
+
   it("a word every object has (constructor, toString) is no command: unknown, and no profile is opened for it", async () => {
     // The commands are looked up in a table, where `constructor` was found too: `ghostly constructor` said
     // "ghostly undefined", and `ghostly constructor bob hi` opened the profile to answer "No method undefined" (exit 3).
@@ -73,7 +93,7 @@ describe("help", () => {
   });
 
   it("a line of only global options names no command: it is the help, not an unknown command", async () => {
-    for (const args of [["--pretty"], ["-p", "bot"], ["--profile", "bot"], ["--profile=bot", "--pretty"], ["--home", "/h"]]) {
+    for (const args of [["--pretty"], ["--no-pretty"], ["-p", "bot"], ["--profile", "bot"], ["--profile=bot", "--pretty"], ["--home", "/h"]]) {
       const { code, stdout } = await ghostly(args);
       expect(code, args.join(" ")).toBe(0);
       expect(stdout, args.join(" ")).toContain("Usage: ghostly <command>");

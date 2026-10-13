@@ -732,7 +732,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("built-in-app");
     expect(row).toHaveTextContent("Chess");
-    expect(within(row).getByTestId("built-in-app-hint")).toHaveTextContent("Play chess with a contact · Comes with Ghostly");
+    expect(within(row).getByTestId("built-in-app-hint")).toHaveTextContent("Comes with Ghostly · Play chess with a contact");
     expect(screen.queryByTestId("apps-none")).not.toBeInTheDocument();
     expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument();
     // Listing it read nothing of the app: no preview, no install.
@@ -803,7 +803,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     fakeEngine.on("appList", () => [installed()]).on("appBuiltIns", () => []).on("appStoreList", () => []).on("appCheckUpdates", () => []);
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("installed-app");
-    expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Play chess with a contact · Unknown publisher");
+    expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Unknown publisher · Play chess with a contact");
     await user.click(within(row).getByRole("button", { name: "Chess: details" }));
     const details = await screen.findByTestId("app-details");
     expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Unknown publisher");
