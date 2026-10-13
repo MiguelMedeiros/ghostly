@@ -59,6 +59,11 @@ export const GROUP_FILE_LIMITS = {
   /** File sessions opening at once, and open at once, all groups together. */
   sessionsOpening: 2,
   sessionsOpen: 4,
+  /**
+   * What a transfer must bring in `wantWaitMs` (or the rest of its file, when less) to count as moving: a holder that
+   * sends a few bytes at a time is left as one that stalls.
+   */
+  wantMoveBytes: 16 * 1024,
   /** The longest file name and type kept from a description. */
   nameChars: 255,
   mimeChars: 255,

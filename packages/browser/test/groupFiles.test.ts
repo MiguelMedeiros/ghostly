@@ -500,6 +500,62 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(asked()).toBeLessThanOrEqual(1 + GROUP_FILE_LIMITS.haveFrames);
   });
 
+  /**
+   * Alice's file held by Carol and Mallory, both heard by Bob (Mallory last, so asked first), Alice away; Mallory's app
+   * offers Bob the file and sends its bytes only as `trickle` does, one at a time.
+   */
+  async function slowHolder() {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol, mallory], id } = await t.mesh(["alice", "bob", "carol", "mallory"]);
+    t.files.get(bob)!.settings.autoDownloads = false;
+    const { messageId, meta } = await t.send(alice, id, pattern(64 * 1024, 21));
+    await t.world.until(() => t.done(carol, id, messageId) && t.done(mallory, id, messageId), 60_000);
+    // Their own `group-have`s first, then the order this test wants.
+    await t.world.run(15_000);
+    t.say(carol, bob, id, { t: "group-have", g: id, ids: [messageId] });
+    t.say(mallory, bob, id, { t: "group-have", g: id, ids: [messageId] });
+    t.hold = (from, to, frame) => from === mallory && to === bob && (frame.t === "pf-data" || frame.t === "pf-sum") && !frame.slow;
+    alice.online = false;
+    await t.world.run(3_000);
+    const fileId = t.got(bob, id, messageId).message!.file!.id;
+    const bytes = pattern(64 * 1024, 21), trickled = new Map<string, number>();
+    const trickle = () => {
+      const offer = t.seen.findLast(s => s.from === "mallory" && s.to === "bob" && s.frame.t === "pf-offer");
+      const accept = offer && t.seen.find(s => s.from === "bob" && s.to === "mallory" && s.frame.t === "pf-accept" && s.frame.id === offer.frame.id);
+      if (!accept) return;
+      const wire = accept.frame.id as string, at = trickled.get(wire) ?? (accept.frame.offset as number);
+      trickled.set(wire, at + 1);
+      t.world.sendFiles(mallory, mallory.host.edges(id).get(t.key(bob, id))!, { t: "pf-data", id: wire, offset: at, data: Buffer.from(bytes.subarray(at, at + 1)).toString("base64url"), slow: 1 });
+    };
+    const wants = () => t.seen.filter(s => s.from === "bob" && s.frame.t === "group-want").map(s => s.to);
+    return { t, id, bob, messageId, meta, fileId, trickle, wants };
+  }
+
+  it("a holder that sends a byte now and then is left as one that stalls, and the next holder goes on from what came", async () => {
+    const { t, id, bob, messageId, meta, fileId, trickle, wants } = await slowHolder();
+    await bob.groups.downloadFile(fileId);
+    for (let i = 0; i < 12 && !t.done(bob, id, messageId); i++) { await t.world.run(25_000); trickle(); }
+    expect(t.done(bob, id, messageId)).toBe(true);
+    expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
+    expect(wants()).toEqual(["mallory", "carol"]);
+    // The bytes Mallory sent stay: Carol goes on from them.
+    expect(t.seen.find(s => s.from === "bob" && s.to === "carol" && s.frame.t === "pf-accept")!.frame.offset).toBeGreaterThan(0);
+  });
+
+  it("Pause then Resume asks another holder before the one the transfer was paused on", async () => {
+    const { t, id, bob, messageId, meta, fileId, trickle, wants } = await slowHolder();
+    await bob.groups.downloadFile(fileId);
+    await t.world.until(() => t.seen.some(s => s.from === "bob" && s.to === "mallory" && s.frame.t === "pf-accept"), 10_000);
+    trickle();
+    await t.world.run(5_000);
+    await bob.groups.haltFile(fileId, true);
+    await t.world.run(1_000);
+    await bob.groups.downloadFile(fileId);
+    await t.world.until(() => t.done(bob, id, messageId), 20_000);
+    expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
+    expect(wants()).toEqual(["mallory", "carol"]);
+  });
+
   it("an offer nobody asked for is refused, and nothing is stored", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
