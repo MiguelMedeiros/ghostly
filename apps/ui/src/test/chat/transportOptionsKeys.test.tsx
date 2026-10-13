@@ -69,4 +69,10 @@ describe("the connection choices, by keyboard", () => {
     await user.keyboard("{ArrowRight}");
     expect(focused()).toBe("auto");
   });
+
+  it("show the keyboard focus with the accent ring, not only a background a shade off the dialog's", async () => {
+    const { radio } = await open({ availableTransports: all, transportAutomatic: true });
+    for (const id of ["auto", "webrtc", "iroh", "hyperdht", "dht"])
+      expect(radio(id).className.split(/\s+/)).toEqual(expect.arrayContaining(["focus-visible:ring-2", "focus-visible:ring-accent"]));
+  });
 });
