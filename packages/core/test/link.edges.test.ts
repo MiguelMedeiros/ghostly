@@ -287,8 +287,9 @@ describe("LinkSession presence and signals", () => {
 
   it("republishes presence in the background while the data link is up, and as a chat's write otherwise or with something new", async () => {
     // A profile's live chats must not take the relays' requests its groups need (a daemon with 30 live chats, 2026-10-08).
-    const { a } = pair({ getServices: () => [] });
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
     a.s.start();
+    b.s.start();
     await settle();
     const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
     a.s.setDataLinkOpen(true);
@@ -308,6 +309,19 @@ describe("LinkSession presence and signals", () => {
     // Nor is the heartbeat once the data link is down: the contact may be looking for this side.
     a.s.setDataLinkOpen(false);
     await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(lastPublish()).toBeUndefined();
+    // An offer goes as a signal; taking it back (the session opened, or the attempt ended) is upkeep.
+    await a.s.setRtcSignal('{"t":"o"}');
+    expect(lastPublish()).toEqual({ signal: true });
+    await a.s.setRtcSignal(null);
+    expect(lastPublish()).toEqual({ background: true });
+    // The contact went away (its last packet says so): nobody waits on the heartbeat, it is upkeep again.
+    await b.s.stop(true);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(a.s.peerPresence.online).toBe(false);
+    expect(lastPublish()).toEqual({ background: true });
+    // Something new for it is not.
+    await a.s.sendMessage("for later");
     expect(lastPublish()).toBeUndefined();
     await a.s.stop(false);
   });
