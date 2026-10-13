@@ -20,6 +20,10 @@
     "sendFailed": "送信できませんでした",
     "shareHint": "グループのリンクを共有",
     "shareLink": "リンクを共有",
+    "takenBack": "{{contact}}さんが{{name}}への招待を取り消しました",
+    "takenBackNext": "{{contact}}さんに新しい招待かグループのリンクを頼んでください。",
+    "takenBackNextUnknown": "グループの管理者に新しい招待かグループのリンクを頼んでください。",
+    "takenBackUnknown": "{{name}}への招待は取り消されました",
     "unnamed": "グループ"
   },
   "connection": {

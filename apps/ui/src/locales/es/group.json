@@ -20,6 +20,10 @@
     "sendFailed": "No se pudo enviar",
     "shareHint": "Compartir el enlace del grupo",
     "shareLink": "Compartir enlace",
+    "takenBack": "{{contact}} retiró la invitación a {{name}}",
+    "takenBackNext": "Pide a {{contact}} una nueva invitación o el enlace del grupo.",
+    "takenBackNextUnknown": "Pide al admin del grupo una nueva invitación o el enlace del grupo.",
+    "takenBackUnknown": "Se retiró la invitación a {{name}}",
     "unnamed": "Un grupo"
   },
   "connection": {

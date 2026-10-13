@@ -20,6 +20,10 @@
     "sendFailed": "无法发送",
     "shareHint": "分享群组链接",
     "shareLink": "分享链接",
+    "takenBack": "{{contact}} 收回了加入 {{name}} 的邀请",
+    "takenBackNext": "请向 {{contact}} 要一个新邀请或群组链接。",
+    "takenBackNextUnknown": "请向群组管理员要一个新邀请或群组链接。",
+    "takenBackUnknown": "加入 {{name}} 的邀请已被收回",
     "unnamed": "一个群组"
   },
   "connection": {

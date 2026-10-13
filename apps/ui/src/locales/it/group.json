@@ -20,6 +20,10 @@
     "sendFailed": "Impossibile inviare",
     "shareHint": "Condividi il link del gruppo",
     "shareLink": "Condividi link",
+    "takenBack": "{{contact}} ha ritirato l'invito a {{name}}",
+    "takenBackNext": "Chiedi a {{contact}} un nuovo invito o il link del gruppo.",
+    "takenBackNextUnknown": "Chiedi all'admin del gruppo un nuovo invito o il link del gruppo.",
+    "takenBackUnknown": "L'invito a {{name}} è stato ritirato",
     "unnamed": "Un gruppo"
   },
   "connection": {

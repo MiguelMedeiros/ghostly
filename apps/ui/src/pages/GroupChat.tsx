@@ -519,6 +519,7 @@ export function GroupChat() {
   const subtitle = joiningByLink ? (group.invitation!.admin ? t("group.chat.joining") : t("group.chat.joiningByLink"))
     : community && group.status === "active" ? (community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
+    : group.invitation?.takenBack ? t("sidebar.group.takenBack")
     : group.invitation && !knockingAgain ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
     // Nobody else in it (just created, or everyone left): there is no one to reach, so only the count.
     : group.status === "active" ? (others.length === 0 ? count : t("group.chat.reachable", { members: count, reachable, total: others.length }))

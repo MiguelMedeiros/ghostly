@@ -80,6 +80,21 @@ describe("GroupChat: what the header says", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
+  const takenBack = groupView({ name: "Book club", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false, takenBack: true } });
+  it("says who took an invitation back, and what to do", () => {
+    openGroup(takenBack);
+    expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation taken back");
+    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("Alice took back the invitation to Book club" + "Ask Alice for a new invitation or the group's link.");
+    expect(screen.queryByText("This group is gone from this device.")).not.toBeInTheDocument();
+  });
+
+  it("says an invitation was taken back in the app's language", () => {
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [takenBack] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("Alice retirou o convite para Book club" + "Peça a Alice um novo convite ou o link do grupo.");
+  });
+
   it("says an invitation came from a contact when it does not know their name", () => {
     openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "", admin: ALICE, members: 3, accepted: true } }));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation from a contact");

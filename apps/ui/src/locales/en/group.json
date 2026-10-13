@@ -20,6 +20,10 @@
     "sendFailed": "Could not send",
     "shareHint": "Share the group's link",
     "shareLink": "Share link",
+    "takenBack": "{{contact}} took back the invitation to {{name}}",
+    "takenBackNext": "Ask {{contact}} for a new invitation or the group's link.",
+    "takenBackNextUnknown": "Ask the group's admin for a new invitation or the group's link.",
+    "takenBackUnknown": "The invitation to {{name}} was taken back",
     "unnamed": "A group"
   },
   "connection": {
