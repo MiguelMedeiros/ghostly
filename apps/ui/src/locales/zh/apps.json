@@ -76,10 +76,13 @@
     "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
   },
   "files": {
+    "allow": "允许",
+    "askAgain": "{{app}} 请求再次读取“{{name}}”",
     "askFiles": "{{app}} 请求读取文件",
     "askFolder": "{{app}} 请求读取一个文件夹",
     "chooseFiles": "选择文件",
     "chooseFolder": "选择文件夹",
+    "notNow": "以后再说",
     "note": "不会复制任何内容：{{app}} 在此设备上读取你选择的内容。"
   },
   "install": {

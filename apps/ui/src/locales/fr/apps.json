@@ -76,10 +76,13 @@
     "unlistedVersion": "Le lien contient une version que cette boutique ne propose pas encore."
   },
   "files": {
+    "allow": "Autoriser",
+    "askAgain": "{{app}} demande à lire « {{name}} » à nouveau",
     "askFiles": "{{app}} demande à lire des fichiers",
     "askFolder": "{{app}} demande à lire un dossier",
     "chooseFiles": "Choisir des fichiers",
     "chooseFolder": "Choisir un dossier",
+    "notNow": "Pas maintenant",
     "note": "Rien n’est copié : {{app}} lit ce que vous choisissez, sur cet appareil."
   },
   "install": {

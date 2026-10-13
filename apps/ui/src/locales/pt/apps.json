@@ -76,10 +76,13 @@
     "unlistedVersion": "O link tem uma versão que esta loja ainda não lista."
   },
   "files": {
+    "allow": "Permitir",
+    "askAgain": "{{app}} pede para ler “{{name}}” de novo",
     "askFiles": "{{app}} pede para ler arquivos",
     "askFolder": "{{app}} pede para ler uma pasta",
     "chooseFiles": "Escolher arquivos",
     "chooseFolder": "Escolher uma pasta",
+    "notNow": "Agora não",
     "note": "Nada é copiado: {{app}} lê o que você escolher, neste aparelho."
   },
   "install": {

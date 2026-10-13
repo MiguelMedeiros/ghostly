@@ -364,7 +364,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       case "files.list": {
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
-        return { value: await files.list(launch.ref) as unknown as MiniAppJson };
+        return { value: await files.list(launch.ref, launch.title) as unknown as MiniAppJson };
       }
       case "files.read": {
         const files = linkedFiles();
