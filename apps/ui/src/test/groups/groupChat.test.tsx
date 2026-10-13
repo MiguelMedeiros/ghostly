@@ -382,6 +382,14 @@ describe("GroupChat: the options menu", () => {
     expect(engine.callsTo("forgetGroup")).toEqual([]);
   });
 
+  it("tells the admin of a private group with a working link that it stops working when they leave", async () => {
+    const { user } = openGroup(active({ isAdmin: true, entryLink: "https://app.ghostly.tools/#/join/group2/g/k", members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: ALICE, nick: "Alice", online: true })] }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-leave"));
+    expect(within(screen.getByRole("dialog")).getByTestId("group-leave-successor"))
+      .toHaveTextContent("You are the admin: Alice becomes the admin when you leave. The link shared so far stops working. Alice can share a new one.");
+  });
+
   it("tells the admin who becomes admin when they delete the group, and stays when the engine refuses", async () => {
     const { user, engine } = openGroup(active({ isAdmin: true, members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: ALICE, nick: "Alice", online: true })] }));
     engine.on("forgetGroup", () => { throw new Error("Nobody is online to take over"); });

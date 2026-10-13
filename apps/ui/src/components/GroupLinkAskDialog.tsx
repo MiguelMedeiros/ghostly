@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef } from "react";
+import { useId, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { useI18n } from "../contexts/I18nContext";
 
 /**
@@ -14,16 +14,7 @@ export function GroupLinkAskDialog({ kind, onClose, onConfirm }: { kind: "reset"
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
   const backdrop = useBackdropDismiss(onClose);
-  useEffect(() => {
-    // The button that asked (New link, Turn off) has the focus back as the question closes. The browser's own return
-    // finds nothing: React has taken the dialog out by the time it is closed, and the focus fell to the page.
-    const before = document.activeElement as HTMLElement | null;
-    const element = dialog.current!; element.showModal(); cancel.current?.focus();
-    return () => {
-      element.close();
-      if (before && before !== document.body && before.isConnected) before.focus();
-    };
-  }, []);
+  useQuestionDialog(dialog, cancel);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-link-ask-dialog" data-kind={kind} className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <h2 id={`${id}-title`} className="text-base font-semibold">{t(kind === "reset" ? "group.link.resetTitle" : "group.link.disableTitle")}</h2>
