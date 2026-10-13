@@ -47,6 +47,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 ## Profiles and files
 
 - A profile is a folder: `$GHOSTLY_HOME/profiles/<name>/` (default `~/.ghostly`), mode 0700. Its files are 0600.
+- `--profile` and `--home` with an empty value (an unset variable in a script) are a usage error (exit 2) before anything opens; an empty `GHOSTLY_PROFILE` or `GHOSTLY_HOME` counts as unset (revision 2026-10-13). Before, an empty `--profile` ran the command as the current profile, and an empty `--home` or `GHOSTLY_HOME` in the current folder.
 - It holds the engine's store (`db/`), the daemon's socket (`daemon.sock`), its lock (`daemon.lock`), the event journal (`events.jsonl`) and later received files (`files/`).
 - Only one process opens a profile at a time. A command finds the daemon's socket and goes through it; with no daemon it takes the lock, runs the engine for the length of the command and leaves (a **one-shot**). Bots SHOULD run the daemon: a one-shot is offline between commands, so the contact sees it come and go.
 - A daemon stops cleanly on SIGINT, SIGTERM and SIGHUP (the terminal or SSH session it ran in closing): it tells its contacts it is going, saves its store and removes its socket (#486). `listen` running as the daemon does the same.
