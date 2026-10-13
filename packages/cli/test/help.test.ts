@@ -29,6 +29,16 @@ describe("help", () => {
     expect(typing.stdout).toMatch(/--for <n>/);
     const daemon = await ghostly(["help", "daemon"]);
     expect(daemon.stdout).toContain("daemon restart");
+    // `daemon` itself first, with its own options, then the commands under it: its --timeout was shown nowhere.
+    for (const args of [["help", "daemon"], ["daemon", "--help"]]) {
+      const { stdout } = await ghostly(args);
+      expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly daemon \[--detach\] \[--timeout s\]\n/);
+      expect(stdout, args.join(" ")).toMatch(/--timeout <n>\s+Seconds --detach waits for it to start/);
+      expect(stdout, args.join(" ")).toContain("ghostly daemon: 3 more commands (ghostly help daemon <command> for one)");
+      expect(stdout.indexOf("--detach waits"), args.join(" ")).toBeLessThan(stdout.indexOf("daemon status"));
+    }
+    // One command in a group is "1 command".
+    expect((await ghostly(["help", "store"])).stdout).not.toContain("1 commands");
     const send = await ghostly(["send", "bob", "hi", "--help"]);
     expect(send.stdout).toContain("Usage: ghostly send <chat>");
     // Next to the text: what `--` does to the options after it.

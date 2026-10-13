@@ -114,10 +114,10 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
-  ["daemon [--detach]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
+  ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
   ["daemon status", "Whether a daemon runs the profile, its version, and its socket (for the socket API)"],
-  ["daemon stop", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
-  ["daemon restart", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
+  ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
+  ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
   ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
     type: o("list", "Only events of this type, or starting with it (repeat for more)"),
@@ -204,26 +204,29 @@ export function commandHelp(words: readonly string[]): string {
   if (!rows.length) throw new CliError("usage", `Unknown command: ${asked} (ghostly help)`);
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
   const lines: string[] = [];
-  if (exact.length && exact.length === rows.length) {
-    for (const row of exact) {
-      lines.push(`Usage: ghostly ${row.usage}`, "", `  ${row.summary}`);
-      const options = Object.entries(row.options ?? {}).filter(([, o]) => o.description);
-      if (options.length) {
-        lines.push("", "Options:");
-        const labels = options.map(([name, o]) => `  --${o.negatedOnly ? "no-" : ""}${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`);
-        // At least two spaces between an option and its text, however long the option.
-        const width = Math.max(26, ...labels.map((label) => label.length + 2));
-        options.forEach(([, o], i) => lines.push(labels[i].padEnd(width) + o.description));
-      }
-      // A text that starts with a dash goes after `--`, and so does everything else on the line.
-      if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))
-        lines.push("", "  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --.");
-      lines.push("");
+  // The command asked for first, also when others extend its words (`daemon`, then `daemon stop`…): before, `daemon`'s
+  // own options were shown nowhere.
+  for (const row of exact) {
+    lines.push(`Usage: ghostly ${row.usage}`, "", `  ${row.summary}`);
+    const options = Object.entries(row.options ?? {}).filter(([, o]) => o.description);
+    if (options.length) {
+      lines.push("", "Options:");
+      const labels = options.map(([name, o]) => `  --${o.negatedOnly ? "no-" : ""}${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`);
+      // At least two spaces between an option and its text, however long the option.
+      const width = Math.max(26, ...labels.map((label) => label.length + 2));
+      options.forEach(([, o], i) => lines.push(labels[i].padEnd(width) + o.description));
     }
-  } else {
-    const width = Math.min(58, Math.max(...rows.map((row) => row.usage.length)));
-    lines.push(`ghostly ${asked}: ${rows.length} commands (ghostly help ${asked} <command> for one)`, "");
-    for (const row of rows) lines.push(`  ${row.usage.length > width ? row.usage + "\n  " + " ".repeat(width) : row.usage.padEnd(width)}  ${row.summary}`);
+    // A text that starts with a dash goes after `--`, and so does everything else on the line.
+    if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))
+      lines.push("", "  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --.");
+    lines.push("");
+  }
+  const rest = rows.filter((row) => !exact.includes(row));
+  if (rest.length) {
+    const width = Math.min(58, Math.max(...rest.map((row) => row.usage.length)));
+    const count = `${rest.length}${exact.length ? " more" : ""} command${rest.length === 1 ? "" : "s"}`;
+    lines.push(`ghostly ${asked}: ${count} (ghostly help ${asked} <command> for one)`, "");
+    for (const row of rest) lines.push(`  ${row.usage.length > width ? row.usage + "\n  " + " ".repeat(width) : row.usage.padEnd(width)}  ${row.summary}`);
     lines.push("");
   }
   lines.push("Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h");
@@ -364,7 +367,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub}` : "daemon [--detach]");
+  if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub === "status" ? "daemon status" : sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
   if (sub === "status") {
     knownProfile(g);
     const client = await connectDaemon(g.paths.socket);
@@ -392,7 +395,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
-  if (sub) throw new CliError("usage", "ghostly daemon [--detach] | daemon status | daemon stop | daemon restart");
+  if (sub) throw new CliError("usage", "ghostly daemon [--detach] [--timeout s] | daemon status | daemon stop | daemon restart");
   const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g); return; }
   print(await startDetached(g, startFor));
