@@ -1017,7 +1017,12 @@ mod webkit {
                     class as *const AnyClass as *mut AnyClass,
                     selector,
                     std::mem::transmute::<
-                        unsafe extern "C-unwind" fn(&AnyObject, objc2::runtime::Sel, &AnyObject, &block2::Block<dyn Fn(Bool)>),
+                        unsafe extern "C-unwind" fn(
+                            &AnyObject,
+                            objc2::runtime::Sel,
+                            &AnyObject,
+                            &block2::Block<dyn Fn(Bool)>,
+                        ),
                         objc2::runtime::Imp,
                     >(did_request_pointer_lock),
                     c"v@:@@?".as_ptr(),
