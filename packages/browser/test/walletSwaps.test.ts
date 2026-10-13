@@ -434,6 +434,9 @@ describe("redeeming a token", () => {
 
   it("a round over the open swaps at a mint lets the user's own redeem there go between two of them", async () => {
     const token = (secret: string) => getEncodedToken({ mint: MINT, unit: "sat", proofs: [proof(64, secret)] });
+    // Each token its own coin: the same coin twice is one redeem (the second is refused as being received).
+    const coin = new Map(["o1", "o2", "u1"].map((secret) => [token(secret), secret]));
+    mintApi.prepareReceive.mockImplementation(async (sent: string) => ({ ...receivePreview(), inputs: [proof(64, coin.get(sent) ?? "t1")] }));
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockRejectedValue(lost());
     const { wallet } = setup();
