@@ -559,7 +559,7 @@ export class ChatFiles {
   /**
    * An accepted file goes when a session is open and fewer than three others arrive at once. One whose target is still
    * being opened counts among the three: counted only once active, every file offered or queued meanwhile went too, and
-   * ten senders' windows at once overflowed the session's receive queue.
+   * the windows of ten files and more at once overflowed the session's receive queue.
    */
   private startIncoming(entry: Entry): void {
     if (!this.attached || transferEnded(entry.record) || entry.record.state === "asking" || (entry.record.state === "paused" && entry.record.pausedBy === "me")) return;
