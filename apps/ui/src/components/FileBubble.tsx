@@ -71,11 +71,13 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
     setSaveOnly(false);
     forgetPicture(file.id);
   }, [readable, file.id]);
-  // A chat opens with up to a hundred bubbles: a picture is read once its bubble comes near the screen.
+  // A chat opens with up to a hundred bubbles: a picture is read once its bubble comes near the screen. Near the chat
+  // list's own view: measured against the window, the margin stops at the list's edge and a picture is read only once
+  // it shows.
   useEffect(() => {
     const root = rootRef.current;
     if (!picture || !root || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { rootMargin: "200px 0px" });
+    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { root: root.closest("[data-message-list]"), rootMargin: "200px 0px" });
     observer.observe(root);
     return () => observer.disconnect();
   }, [picture]);
