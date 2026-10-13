@@ -492,6 +492,14 @@ mod linux {
         }
     }
 
+    /// Let go (its call gave up, or its connection broke): the connection is closed, so the click listener's
+    /// iterator ends and its thread with it. That iterator holds the connection too: dropped alone, it stayed open.
+    impl Drop for Notifier {
+        fn drop(&mut self) {
+            let _ = self.connection.clone().close();
+        }
+    }
+
     static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
     /// Connected at the first notification; tried again at the next one while there is no session bus.
     static NOTIFIER: Mutex<Option<Notifier>> = Mutex::new(None);
@@ -892,6 +900,52 @@ mod linux {
                 .recv_timeout(ANSWER_WITHIN + Duration::from_secs(5))
                 .expect("the call is still waiting for the frozen server");
             assert!(matches!(shown, Err(error) if !matches!(error, zbus::Error::MethodError(..))));
+        }
+
+        /// Each notification given up on a frozen server left its connection on the bus for good: the click
+        /// listener's iterator held it, with a thread and a socket each (11 of them after a 66 s freeze). A notifier
+        /// that is let go closes its connection, and its listener ends.
+        #[test]
+        fn a_notifier_let_go_leaves_the_bus() {
+            let bus = Bus::start();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Frozen)
+                .unwrap()
+                .build()
+                .unwrap();
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
+            let name = notifier.connection.unique_name().unwrap().to_string();
+            assert!(notifier.show("chat-a", "New message").is_err());
+            drop(notifier);
+
+            let other = bus.connect().build().unwrap();
+            let on_the_bus = || {
+                let reply = other
+                    .call_method(
+                        Some(BUS),
+                        "/org/freedesktop/DBus",
+                        Some(BUS),
+                        "ListNames",
+                        &(),
+                    )
+                    .unwrap();
+                reply
+                    .body()
+                    .deserialize::<Vec<String>>()
+                    .unwrap()
+                    .contains(&name)
+            };
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while on_the_bus() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{name} is still on the bus"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
         }
     }
 }
