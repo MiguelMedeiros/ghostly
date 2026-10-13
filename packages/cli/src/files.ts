@@ -8,7 +8,7 @@ import { removeStored } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
-import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { endTyping } from "./typing";

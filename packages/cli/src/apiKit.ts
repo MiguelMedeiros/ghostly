@@ -27,6 +27,13 @@ export type Method = (ctx: ApiContext, params: Params) => Promise<unknown>;
 export const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
 export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
 
+/**
+ * The time of a send the engine names its row after (`me_<timestamp>`: a file, a payment, a request), its own even
+ * within one millisecond (a bot paying or sending several times at once over the socket), or the chat keeps only one.
+ */
+let lastSentAt = 0;
+export const sentAt = () => (lastSentAt = Math.max(Date.now(), lastSentAt + 1));
+
 // ---------- parameters ----------
 
 export function str(params: Params, name: string, required: true): string;
