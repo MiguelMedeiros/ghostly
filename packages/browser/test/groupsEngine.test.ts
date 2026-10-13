@@ -1069,6 +1069,25 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(view(bob)).toMatchObject({ status: "active", epoch: 1 });
   });
 
+  it("chain pieces waiting for the welcome are kept only as commits of that group, so they stay small", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId);
+    const held = () => (bob as unknown as { stored: Map<string, StoredGroup> }).stored.get(groupId)!.invitation!.pieces;
+    const big = "x".repeat(61_240);
+    for (let i = 0; i < 1100; i++) await bob.handleContactFrame("chat-ab", { t: "group-chain", g: groupId, commits: [big] });
+    expect(held()).toEqual([]);
+    const genesis = world.peers.get("alice")!.store.groups.get(groupId)!.state!.chain[0];
+    await bob.handleContactFrame("chat-ab", { t: "group-chain", g: groupId, commits: [{ ...genesis, g: "A".repeat(22) }] });
+    expect(held()).toEqual([]);
+    await bob.handleContactFrame("chat-ab", { t: "group-chain", g: groupId, commits: [{ ...genesis, pad: big }] });
+    expect(held()).toEqual([{ t: "group-chain", g: groupId, commits: [genesis] }]);
+    expect(JSON.stringify(held()).length).toBeLessThan(4096);
+  });
+
   it("a removal notice from someone other than the admin's chat is ignored", async () => {
     const { world, others: [bob, carol], groupId } = await groupOf(["bob", "carol"]);
     world.chats.set("chat-bc", ["bob", "carol"]);
