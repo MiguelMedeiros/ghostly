@@ -24,7 +24,8 @@ function attach(record, bound, incoming) {
   const id = ++next
   record.connections.set(id, bound.channel)
   emit({ type: 'open', endpoint: record.id, id, binding: bound.binding, incoming })
-  bound.channel.onMessage = text => emit({ type: 'frame', endpoint: record.id, id, text })
+  // The Desktop's side of this pipe takes text only, and offers nothing that needs binary messages, so none should come.
+  bound.channel.onMessage = text => { if (typeof text === 'string') emit({ type: 'frame', endpoint: record.id, id, text }) }
   bound.channel.onClose = () => { if (record.connections.delete(id)) emit({ type: 'closed', endpoint: record.id, id }) }
   return id
 }

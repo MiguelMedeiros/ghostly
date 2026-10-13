@@ -19,6 +19,8 @@ export { hyperdhtRelayProblem as relayUrlProblem };
 
 const PREFACE = "ghostly/paired-chat/1";
 const MAX_FRAME = 60 * 1024;
+/** The top bit of a frame's length word: the frame is a binary message, not UTF-8 text (WISP 103). */
+const BINARY = 0x80000000;
 const SEND_BUDGET = 120 * 1024;
 const HANDSHAKE_MS = 20_000;
 const RELAY_OPEN_MS = 10_000;
@@ -138,9 +140,11 @@ function release(url: string, client: RelayClient, endpoint: { unavailable(): vo
 /** One authenticated stream as a frame channel, with a bounded queue before the session installs its reader. */
 class RelayedChannel implements FrameChannel {
   private reader: FrameChannel["onMessage"] = null;
-  private buffered: string[] = [];
+  private buffered: (string | Uint8Array)[] = [];
   private closed = false;
   private pendingBytes = 0;
+  /** It carries binary messages (WISP 100 § Text and binary messages), as the Desktop's own HyperDHT does. */
+  readonly binary = true;
   onClose: FrameChannel["onClose"] = null;
   constructor(private readonly socket: SecretSocket) {
     socket.on("drain", () => { this.pendingBytes = 0; });
@@ -152,7 +156,7 @@ class RelayedChannel implements FrameChannel {
     this.reader = reader;
     if (reader) for (const text of this.buffered.splice(0)) reader(text);
   }
-  receive(text: string): boolean {
+  receive(text: string | Uint8Array): boolean {
     if (this.closed) return true;
     if (this.reader) this.reader(text);
     else if (this.buffered.length < 64) this.buffered.push(text);
@@ -160,11 +164,12 @@ class RelayedChannel implements FrameChannel {
     return true;
   }
   send(data: string | Uint8Array): void {
-    if (typeof data !== "string" || this.closed || !data.length) throw new Error("Native channel is closed or exceeds its frame budget");
-    const payload = new TextEncoder().encode(data);
+    if (this.closed || !data.length) throw new Error("Native channel is closed or exceeds its frame budget");
+    const binary = typeof data !== "string";
+    const payload = binary ? data : new TextEncoder().encode(data);
     if (payload.length > MAX_FRAME || this.pendingBytes + payload.length > SEND_BUDGET) throw new Error("Native channel is closed or exceeds its frame budget");
     // The stream takes every write; past its high-water mark it says so until it drains.
-    if (!writeFrame(this.socket, payload) || this.pendingBytes) this.pendingBytes += payload.length + 4;
+    if (!writeFrame(this.socket, payload, binary) || this.pendingBytes) this.pendingBytes += payload.length + 4;
   }
   drained(): Promise<void> {
     if (!this.pendingBytes) return Promise.resolve();
@@ -186,9 +191,9 @@ class RelayedChannel implements FrameChannel {
   }
 }
 
-function writeFrame(socket: SecretSocket, payload: Uint8Array): boolean {
+function writeFrame(socket: SecretSocket, payload: Uint8Array, binary = false): boolean {
   const frame = new Uint8Array(4 + payload.length);
-  new DataView(frame.buffer).setUint32(0, payload.length);
+  new DataView(frame.buffer).setUint32(0, (binary ? BINARY : 0) + payload.length);
   frame.set(payload, 4);
   return socket.write(frame);
 }
@@ -227,9 +232,17 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>): Promise<Bo
       joined.set(buffer); joined.set(chunk, buffer.length);
       buffer = joined;
       while (buffer.length >= 4) {
-        const length = new DataView(buffer.buffer, buffer.byteOffset, 4).getUint32(0);
-        if (length === 0 || length > MAX_FRAME) { fail(new Error("Invalid frame length")); return; }
+        const word = new DataView(buffer.buffer, buffer.byteOffset, 4).getUint32(0);
+        const binary = word >= BINARY, length = word % BINARY;
+        // A binary frame before the preface is another protocol.
+        if (length === 0 || length > MAX_FRAME || (binary && !prefaced)) { fail(new Error("Invalid frame length")); return; }
         if (buffer.length < 4 + length) break;
+        if (binary) {
+          const message = buffer.slice(4, 4 + length);
+          buffer = buffer.slice(4 + length);
+          if (!channel.receive(message)) { fail(new Error("Receive queue exceeded")); return; }
+          continue;
+        }
         let text: string;
         try { text = decoder.decode(buffer.subarray(4, 4 + length)); }
         catch { fail(new Error("Invalid UTF-8 frame")); return; }

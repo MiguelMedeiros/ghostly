@@ -177,6 +177,12 @@ This is a reviewable algorithm proposal, not an agreed wire standard:
 
 The adapter contract needs connect/accept, authenticated remote identity binding, send/receive with framing boundaries, backpressure, cancellation, error and close semantics. Support for reliable streams, datagrams and media is declared explicitly; adapters are not assumed interchangeable for every capability. Today every adapter carries the session as one ordered, reliable stream of frames, and nothing uses a datagram. A proposal for real-time apps ([1200](1200-marketplace.md#messages-that-may-be-lost), not accepted) lists what each one could carry beside it: a second, unordered WebRTC channel, Iroh's QUIC datagrams, HyperDHT's unordered messages, and nothing through HyperDHT's browser relay.
 
+### Text and binary messages (revision 2026-10-12)
+
+A message on a session is text or binary. Text is a JSON frame, as every frame was before this revision. A binary message starts with one byte, its kind, and belongs to the capability that defines that kind; like a text frame it is at most 60 KiB. Kinds: `0x04`, a file's data under `files/4` ([501](501-paired-files.md#files4-a-files-bytes-as-bytes-revision-2026-10-12)). `0x01` to `0x03` are the body chunks of a compatibility chat's own channel ([502](502-legacy-files.md)) and are never sent on a session. A receiver drops a binary message of a kind it does not know, or whose capability is not on for the session; it does not end the session for it.
+
+Whether an adapter carries binary messages is a property of the adapter, said in its own document. WebRTC does: a data channel has both kinds of message. HyperDHT does where its document says so ([103](103-hyperdht.md#frames-revision-2026-10-12)); Iroh carries text frames only today ([102](102-iroh.md)). An app before this revision closes such a stream on a frame that is not UTF-8 text, so an app offers a capability that needs binary messages only on a session whose adapter carries them at its end, and sends one only while the other side offers it too.
+
 ## Compatibility and security
 
 Legacy WebRTC negotiation remains a distinct profile. New offers MUST NOT be interpreted as legacy `_rtc`. Compare signed/authenticated offers, selected versions and endpoint bindings to detect downgrade/substitution. A successful socket alone is insufficient. Group routing selection follows 900; the two-peer coordinator rule is not a group consensus algorithm.

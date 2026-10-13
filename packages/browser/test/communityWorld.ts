@@ -292,6 +292,17 @@ export class CommunityWorld {
     return true;
   }
 
+  /** A file's bytes on an edge as a binary message (files/4): the receiver's app hears the `pf-data` frame with them as bytes. */
+  sendData(peer: Peer, linkId: string, id: string, offset: number, bytes: Uint8Array): boolean {
+    const edge = peer.links.get(linkId), there = edge && this.counterpart(edge);
+    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there.peer)) return false;
+    peer.sent.frames++; peer.sent.bytes += 2 + id.length + 8 + bytes.length;
+    const frame = { t: "pf-data", id, offset, data: bytes.slice() };
+    if (this.drop?.(peer, there.peer, frame)) return true;
+    this.pending.push(there.peer.groups.filesFrame(edge.g, edge.me, there.linkId, frame));
+    return true;
+  }
+
   /** Both ends online and reachable, and (with a `NetworkModel`) signaling done on both sides. */
   private up(peer: Peer, edge: Edge, there: Peer): boolean {
     if (!peer.online || !there.online || !this.sameSide(peer, there)) return false;

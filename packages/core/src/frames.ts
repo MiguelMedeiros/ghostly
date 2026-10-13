@@ -374,6 +374,11 @@ export interface FrameChannel {
    * WebRTC data channel does, and a sender only keeps under `LIMITS.sendHighWaterMark`.
    */
   readonly sendBudget?: number;
+  /**
+   * It carries binary messages as well as text (WISP 100 § Text and binary messages): a WebRTC data channel does.
+   * Absent: text only, as the native and iroh channels are, and nothing binary is offered or sent on it.
+   */
+  readonly binary?: boolean;
   close(): void;
   onMessage: ((data: string | Uint8Array) => void) | null;
   onClose: (() => void) | null;
@@ -407,6 +412,7 @@ export function wrapDataChannel(dc: RTCDataChannel): FrameChannel {
     close() {
       dc.close();
     },
+    binary: true,
     onMessage: null,
     onClose: null,
   };

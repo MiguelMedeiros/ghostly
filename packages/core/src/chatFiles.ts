@@ -164,6 +164,11 @@ export interface ChatFilesHost {
   /** Sends a frame on the open session; false when there is none. */
   send(frame: Record<string, unknown>): boolean;
   /**
+   * Sends a file's bytes at `offset` in the form the open session agreed (WISP 501 § files/4): a binary message, or
+   * the `pf-data` frame; false when there is no session or it has no room. A host without it gets `pf-data` through `send`.
+   */
+  sendData?(id: string, offset: number, data: Uint8Array): boolean;
+  /**
    * A new offer from the contact: take it, ask the person, or refuse it. `again`: a file taken here without asking
    * that ended (failed, or stopped by the sender) and is offered again; it counts against the same limits as a new one.
    */
@@ -237,6 +242,44 @@ interface Entry {
 const key = (direction: "in" | "out", id: string) => `${direction}:${id}`;
 const isInt = (value: unknown, max = Number.MAX_SAFE_INTEGER): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= max;
 
+/**
+ * files/4 (WISP 501 § files/4): a chunk as one binary message of the session, in place of the base64url text of a
+ * `pf-data` frame, which is a third more than the bytes it carries:
+ *
+ *   kind 0x04 (1) | id length (1) | id (ASCII) | offset (8, big endian) | data (1 to `FILE_LIMITS.chunkBytes`)
+ */
+export const FILE_DATA_KIND = 0x04;
+const FILE_DATA_OFFSET_BYTES = 8;
+
+/** The binary message for the bytes of file `id` at `offset`. Throws on what no receiver would take. */
+export function encodeFileData(id: string, offset: number, data: Uint8Array): Uint8Array {
+  if (!ID.test(id) || !isInt(offset) || !data.length || data.length > FILE_LIMITS.chunkBytes) throw new Error("Invalid file data");
+  const head = 2 + id.length;
+  const out = new Uint8Array(head + FILE_DATA_OFFSET_BYTES + data.length);
+  out[0] = FILE_DATA_KIND;
+  out[1] = id.length;
+  for (let i = 0; i < id.length; i++) out[2 + i] = id.charCodeAt(i);
+  const view = new DataView(out.buffer);
+  view.setUint32(head, Math.floor(offset / 2 ** 32));
+  view.setUint32(head + 4, offset % 2 ** 32);
+  out.set(data, head + FILE_DATA_OFFSET_BYTES);
+  return out;
+}
+
+/** What a binary message from the contact says, or null when it is not a well-formed file data message. `data` is a view of `message`. */
+export function decodeFileData(message: Uint8Array): { id: string; offset: number; data: Uint8Array } | null {
+  if (message.length < 2 || message[0] !== FILE_DATA_KIND) return null;
+  const head = 2 + message[1], body = head + FILE_DATA_OFFSET_BYTES;
+  if (message.length <= body || message.length - body > FILE_LIMITS.chunkBytes) return null;
+  const id = String.fromCharCode(...message.subarray(2, head));
+  if (!ID.test(id)) return null;
+  const view = new DataView(message.buffer, message.byteOffset, message.byteLength);
+  const high = view.getUint32(head);
+  // Past 2^53 - 1 an offset is no longer a whole number here.
+  if (high > 0x1fffff) return null;
+  return { id, offset: high * 2 ** 32 + view.getUint32(head + 4), data: message.subarray(body) };
+}
+
 /** What a refusal means to the sender's person. */
 export function refusalText(why: string, room?: number): { state: TransferState; error: string } {
   switch (why) {
@@ -297,6 +340,11 @@ export class ChatFiles {
 
   private send(frame: Record<string, unknown>): boolean {
     return this.attached && this.host.send(frame);
+  }
+
+  private sendData(id: string, offset: number, data: Uint8Array): boolean {
+    if (!this.host.sendData) return this.send({ t: "pf-data", id, offset, data: toBase64Url(data) });
+    return this.attached && this.host.sendData(id, offset, data);
   }
 
   /** A session that agreed files/3 is open: say what fits here, then offer again what is not finished. */
@@ -437,7 +485,7 @@ export class ChatFiles {
           this.end(entry, "failed", "Your contact asked for the same part of this file too many times");
           break;
         }
-        if (!this.send({ t: "pf-data", id: entry.record.id, offset, data: toBase64Url(chunk) })) { refused = true; break; }
+        if (!this.sendData(entry.record.id, offset, chunk)) { refused = true; break; }
         out.next = offset + chunk.length;
         out.sent += chunk.length;
       }
@@ -634,7 +682,10 @@ export class ChatFiles {
     if (record.state !== "active" || !incoming.target) return;
     incoming.heardAt = this.now();
     const { offset, data } = frame;
-    if (!isInt(offset) || typeof data !== "string" || !data.length || data.length > Math.ceil(FILE_LIMITS.chunkBytes * 4 / 3) || !DATA.test(data)) return;
+    // The bytes themselves when they came as a binary message (files/4), base64url text in a `pf-data` frame.
+    const binary = data instanceof Uint8Array;
+    if (!isInt(offset) || !(binary || typeof data === "string") || !data.length) return;
+    if (!binary && (data.length > Math.ceil(FILE_LIMITS.chunkBytes * 4 / 3) || !DATA.test(data))) return;
     if (offset < incoming.written) {
       // Sent again (a resync): already taken. Said again only once everything is stored.
       if (incoming.stored === incoming.written) this.send({ t: "pf-got", id: record.id, offset: incoming.stored });
@@ -645,7 +696,7 @@ export class ChatFiles {
       if (incoming.gapAt !== incoming.written) { incoming.gapAt = incoming.written; this.send({ t: "pf-accept", id: record.id, offset: incoming.written }); }
       return;
     }
-    const bytes = fromBase64Url(data);
+    const bytes = binary ? data : fromBase64Url(data);
     if (!bytes.length || bytes.length > FILE_LIMITS.chunkBytes || offset + bytes.length > record.file.size) return;
     incoming.written += bytes.length;
     const target = incoming.target;

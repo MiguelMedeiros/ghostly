@@ -46,14 +46,14 @@ import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeen
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { APP_DATA_MAX_BYTES, APP_FRAME, APP_RESUME_GRACE_MS, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
-import { FILE_FRAMES } from "./chatFiles";
+import { FILE_FRAMES, decodeFileData, encodeFileData } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
@@ -448,7 +448,10 @@ export interface GhostLinkEvents {
   onFileProgress?(fileId: string, transferred: number, direction: "in" | "out"): void;
   onFileComplete?(fileId: string, direction: "in" | "out"): void;
   onFileFailed?(fileId: string, reason: string, direction: "in" | "out"): void;
-  /** A files/3 frame (`FILE_FRAMES`), only while both sides agreed `files/3` on the open session. */
+  /**
+   * A files/3 frame (`FILE_FRAMES`), only while both sides agreed `files/3` on the open session. A file's data that came
+   * as a binary message (`files/4`) is the `pf-data` frame it stands for, its `data` the bytes themselves.
+   */
   onFilesFrame?(frame: Record<string, unknown>): void | Promise<void>;
   /**
    * files/3 can flow (a session agreed it and is open), or no longer can. Said again, open, after a live
@@ -524,6 +527,11 @@ export interface GhostLinkOptions {
   servicesSupport?: boolean;
   /** Offer `files/3` on paired sessions: files of any size, offered, resumed and checked (`chatFiles.ts`). */
   largeFilesSupport?: boolean;
+  /**
+   * With `largeFilesSupport`, offer `files/4` on a session whose channel carries binary messages: a file's bytes as
+   * they are, not as text (WISP 501 § files/4). The owner's `onFilesFrame` then takes a `pf-data` whose `data` is bytes.
+   */
+  binaryFilesSupport?: boolean;
   /** Offer `typing/1` on paired sessions: say and show when either side is writing (1:1 chats, not group edges). */
   typingSupport?: boolean;
   /** Offer `react/1` on paired sessions: reactions to messages (1:1 chats, not group edges). */
@@ -3020,6 +3028,7 @@ export class GhostLink {
     if (this.options.callsSupport) offered.push(CALLS_CAPABILITY);
     if (this.options.servicesSupport) offered.push(SERVICES_CAPABILITY);
     if (this.options.largeFilesSupport) offered.push(FILES_CAPABILITY);
+    if (this.options.largeFilesSupport && this.options.binaryFilesSupport && this.channel?.binary) offered.push(FILES_BINARY_CAPABILITY);
     if (this.options.typingSupport) offered.push(TYPING_CAPABILITY);
     if (this.options.reactionsSupport) offered.push(REACTIONS_CAPABILITY);
     if (this.options.editSupport) offered.push(EDIT_CAPABILITY);
@@ -3050,6 +3059,8 @@ export class GhostLink {
   get supportsServices(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(SERVICES_CAPABILITY); }
   /** Both sides offer `files/3` on the open session: files of any size, offered and resumed. */
   get supportsLargeFiles(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(FILES_CAPABILITY); }
+  /** Both sides offer `files/4` beside `files/3` on the open session: a file's bytes go as binary messages. */
+  get supportsBinaryFiles(): boolean { return this.supportsLargeFiles && this.sessionCapabilities.agreed(FILES_BINARY_CAPABILITY); }
   /** Both sides offer `typing/1` on the open session: typing can be said and shown. */
   get supportsTyping(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(TYPING_CAPABILITY); }
   /** Both sides offer `react/1` on the open session: reactions can be said and confirmed here. */
@@ -3203,6 +3214,18 @@ export class GhostLink {
   sendFilesFrame(frame: Record<string, unknown>): boolean {
     if (!this.supportsLargeFiles || !this.channel) return false;
     try { this.channel.send(JSON.stringify(frame)); return true; } catch { return false; }
+  }
+  /**
+   * A file's bytes to the contact, on the open session: one binary message while both sides agreed `files/4` on it,
+   * the `pf-data` frame with them as base64url text otherwise (WISP 501 § files/4). The form is chosen for each chunk,
+   * so a transfer follows the session it is on. False when files/3 cannot flow now, or the channel has no room.
+   */
+  sendFileData(id: string, offset: number, data: Uint8Array): boolean {
+    if (!this.supportsLargeFiles || !this.channel) return false;
+    try {
+      this.channel.send(this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) }));
+      return true;
+    } catch { return false; }
   }
   /**
    * Resolves once the open session can take another files/3 data frame; undefined when it can now. A channel with a send budget (native and
@@ -3612,7 +3635,15 @@ export class GhostLink {
           if (this.channel !== channel) return;
           // Anything from the peer shows the session is alive.
           this.unansweredPings = 0; this.heardFromPeer();
-          if (typeof data !== "string" || data.length > 60 * 1024) return;
+          if (typeof data !== "string") {
+            // files/4: a file's bytes. Any other binary message, or one nobody agreed to, is dropped (WISP 100).
+            const chunk = this.supportsBinaryFiles ? decodeFileData(data) : null;
+            if (!chunk) return;
+            this.activityAt = Date.now();
+            await this.options.events?.onFilesFrame?.({ t: "pf-data", ...chunk });
+            return;
+          }
+          if (data.length > 60 * 1024) return;
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
           // What the two people do (texts, receipts, typing, files, calls, payments...), not the session's upkeep.

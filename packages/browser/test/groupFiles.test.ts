@@ -84,16 +84,18 @@ class FilesWorld {
     for (const { from, to, frame } of this.held.splice(0)) this.world.sendFiles(from, from.host.edges(groupId).get(this.key(to, groupId))!, frame);
   }
 
-  add(name: string): Peer {
+  /** `binary`: its edges agreed files/4, so what it serves goes as binary messages. */
+  add(name: string, binary = false): Peer {
     const files: Files = { store: new MemoryFiles(), transfers: new Map(), settings: { autoDownloads: true, serveFiles: true } };
-    const peer = this.world.add(name, p => ({ groupFiles: { store: files.store, transfers: files.transfers, settings: () => files.settings, sendFiles: (linkId, frame) => this.world.sendFiles(p, linkId, frame) } }));
+    const peer = this.world.add(name, p => ({ groupFiles: { store: files.store, transfers: files.transfers, settings: () => files.settings, sendFiles: (linkId, frame) => this.world.sendFiles(p, linkId, frame),
+      ...(binary && { sendData: (linkId: string, id: string, offset: number, data: Uint8Array) => this.world.sendData(p, linkId, id, offset, data) }) } }));
     this.files.set(peer, files);
     return peer;
   }
 
   /** A private group of `names`, the first its admin, everyone's edges up. */
-  async mesh(names: string[]): Promise<{ peers: Peer[]; id: string }> {
-    const [admin, ...rest] = names.map(name => this.add(name));
+  async mesh(names: string[], binary = false): Promise<{ peers: Peer[]; id: string }> {
+    const [admin, ...rest] = names.map(name => this.add(name, binary));
     const id = await admin.groups.create("Files", "mesh");
     const link = await admin.groups.enableLink(id);
     for (const p of rest) await p.groups.joinByLink(link);
@@ -156,6 +158,19 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     // Asked of the author, its offers naming the message; no chat of the edge took a byte.
     expect(t.seen.filter(s => s.frame.t === "group-want").map(s => s.to).sort()).toEqual(["alice", "alice"]);
     expect(t.seen.filter(s => s.frame.t === "pf-offer").every(s => s.from === "alice" && s.frame.gm === messageId)).toBe(true);
+  });
+
+  it("over edges that agreed files/4 the bytes go as binary messages, and each copy is checked against the author's digest", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"], true);
+    const bytes = pattern(5 * 16 * 1024 + 99, 4);
+    const { messageId } = await t.send(alice, id, bytes);
+    await t.world.until(() => t.done(bob, id, messageId) && t.done(carol, id, messageId), 5 * 60_000, 500);
+    expect(t.got(bob, id, messageId).bytes).toEqual(bytes);
+    expect(t.got(carol, id, messageId).bytes).toEqual(bytes);
+    const data = t.seen.filter(s => s.frame.t === "pf-data");
+    expect(data.length).toBeGreaterThanOrEqual(12);
+    expect(data.every(s => s.frame.data instanceof Uint8Array)).toBe(true);
   });
 
   it("the pace and not being in the group are known before the bytes are copied in, as the announcement answers them", async () => {
