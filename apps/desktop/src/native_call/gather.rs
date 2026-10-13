@@ -20,6 +20,12 @@ use tokio::sync::Notify;
 pub struct Bounds {
     /// For the server reflexive candidate.
     pub reflexive: Duration,
+    /// For the server reflexive candidate once a host candidate is in: a STUN server that answers does in
+    /// tens of milliseconds, and one that never does (UDP to it blocked, as on many office, school and hotel
+    /// networks) held every offer and answer the whole [`Bounds::reflexive`] wait, so a call rang about 10 s
+    /// late and connected about 10 s after Answer. The apps bound it the same (`HOST_GATHER_MS`). Not for a
+    /// TURN server's relay candidate: behind such a network it is the one that connects the call.
+    pub host: Duration,
     /// After the reflexive candidate, for the others that come with it.
     pub settle: Duration,
     /// For a first candidate of any kind, when the reflexive wait ran out with none. Past this, no
@@ -29,6 +35,7 @@ pub struct Bounds {
 
 pub const BOUNDS: Bounds = Bounds {
     reflexive: Duration::from_secs(10),
+    host: Duration::from_millis(2000),
     settle: Duration::from_millis(400),
     first: Duration::from_secs(30),
 };
@@ -78,6 +85,12 @@ impl Gathering {
     pub async fn wait_for(&self, bounds: Bounds, awaited: &str) -> Result<Vec<String>, String> {
         let started = Instant::now();
         let mut reflexive_at: Option<Instant> = None;
+        let mut first_at: Option<Instant> = None;
+        // The reflexive wait, shortened once a host candidate is in (not for a relay one).
+        let waits = |first_at: Option<Instant>| match first_at {
+            Some(at) if awaited == REFLEXIVE => (started + bounds.reflexive).min(at + bounds.host),
+            _ => started + bounds.reflexive,
+        };
         loop {
             let changed = self.changed.notified();
             let now = Instant::now();
@@ -87,9 +100,12 @@ impl Gathering {
                 if reflexive_at.is_none() && gathered.iter().any(|c| c.contains(awaited)) {
                     reflexive_at = Some(now);
                 }
+                if first_at.is_none() && !gathered.is_empty() {
+                    first_at = Some(now);
+                }
                 let deadline = match reflexive_at {
                     Some(at) => at + bounds.settle,
-                    None => started + bounds.reflexive,
+                    None => waits(first_at),
                 };
                 if !gathered.is_empty() && (*complete || now >= deadline) {
                     return Ok(gathered.clone());
@@ -103,7 +119,7 @@ impl Gathering {
             }
             let deadline = match reflexive_at {
                 Some(at) => at + bounds.settle,
-                None if now < started + bounds.reflexive => started + bounds.reflexive,
+                None if now < waits(first_at) => waits(first_at),
                 // Nothing yet and the reflexive wait over: the first candidate.
                 None => started + bounds.first,
             };
@@ -176,6 +192,7 @@ mod tests {
     fn bounds() -> Bounds {
         Bounds {
             reflexive: Duration::from_millis(100),
+            host: Duration::from_millis(100),
             settle: Duration::from_millis(20),
             first: Duration::from_millis(600),
         }
@@ -283,6 +300,64 @@ mod tests {
         assert_eq!(
             gathering.wait(bounds()).await,
             Ok(vec![REFLEXIVE.to_string()])
+        );
+    }
+
+    /// A STUN server that never answers (UDP to it blocked): the host candidates go once the host bound
+    /// is over, not the whole reflexive wait (10 s on a Linux Desktop where the apps waited 2 s).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn with_host_candidates_in_a_silent_stun_server_costs_the_host_bound() {
+        let bounds = Bounds {
+            reflexive: Duration::from_millis(1000),
+            host: Duration::from_millis(100),
+            ..bounds()
+        };
+        let gathering = Gathering::default();
+        gathering.add(HOST.into());
+        let started = Instant::now();
+        assert_eq!(gathering.wait(bounds).await, Ok(vec![HOST.to_string()]));
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(100) && waited < Duration::from_millis(400),
+            "{waited:?}"
+        );
+
+        // The host bound counts from the first candidate: one that came late still has it.
+        let gathering = Arc::new(Gathering::default());
+        let late = gathering.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            late.add(HOST.into());
+        });
+        let started = Instant::now();
+        assert_eq!(gathering.wait(bounds).await, Ok(vec![HOST.to_string()]));
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(300) && waited < Duration::from_millis(600),
+            "{waited:?}"
+        );
+    }
+
+    /// A TURN server's relay candidate keeps the whole wait: behind a network that drops UDP it is the one
+    /// that connects the call.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_relay_candidate_keeps_the_whole_wait() {
+        let bounds = Bounds {
+            reflexive: Duration::from_millis(400),
+            host: Duration::from_millis(50),
+            ..bounds()
+        };
+        let gathering = Gathering::default();
+        gathering.add(HOST.into());
+        let started = Instant::now();
+        assert_eq!(
+            gathering.wait_for(bounds, RELAY).await,
+            Ok(vec![HOST.to_string()])
+        );
+        assert!(
+            started.elapsed() >= Duration::from_millis(400),
+            "{:?}",
+            started.elapsed()
         );
     }
 
