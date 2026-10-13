@@ -40,10 +40,12 @@ export function str(params: Params, name: string, required = false): string | un
   if (typeof value !== "string") throw new CliError("bad_request", `${name} must be a string`);
   return value;
 }
-export function num(params: Params, name: string, fallback: number, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}): number {
+/** A number in `[min, max]`; `whole` takes only whole ones (a count of messages), as the engine needs them. */
+export function num(params: Params, name: string, fallback: number, { min = 0, max = Number.MAX_SAFE_INTEGER, whole = false } = {}): number {
   const value = params[name];
   if (value === undefined || value === null) return fallback;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) throw new CliError("bad_request", `${name} must be a number from ${min} to ${max}`);
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) throw new CliError("bad_request", `${name} must be a ${whole ? "whole " : ""}number from ${min} to ${max}`);
+  if (whole && !Number.isSafeInteger(value)) throw new CliError("bad_request", `${name} must be a whole number from ${min} to ${max}`);
   return value;
 }
 export function bool(params: Params, name: string): boolean {

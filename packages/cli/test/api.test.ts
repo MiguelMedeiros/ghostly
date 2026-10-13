@@ -252,6 +252,15 @@ describe("chats", () => {
     await expect(callApi(ctx, "chat.history", { chat: "chat-one", limit: -1 })).rejects.toMatchObject({ code: "bad_request" });
   });
 
+  it("a history limit that is not a whole number is bad_request, not the engine failing", async () => {
+    const { ctx } = fake([msg("a", 1), msg("b", 2)]);
+    const wrong = { code: "bad_request", message: "limit must be a whole number from 1 to 10000" };
+    await expect(callApi(ctx, "chat.history", { chat: "chat-one", limit: 1.5 })).rejects.toMatchObject(wrong);
+    await expect(callApi(ctx, "chat.history", { chat: "chat-one", after: 1, limit: 1.5 })).rejects.toMatchObject(wrong);
+    await expect(callApi(ctx, "chat.history", { chat: "chat-one", limit: 0 })).rejects.toMatchObject(wrong);
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", limit: 1 })).toMatchObject({ messages: [{ id: "b" }], more: true });
+  });
+
   it("history is in the order messages came here, whatever each sender's clock said, and gives both times", async () => {
     // As the engine stores them: `timestamp` is the row's place (when it came), `sentAt` what the contact's clock said.
     // The contact's clock was two minutes ahead for "b", and days behind for "d".
