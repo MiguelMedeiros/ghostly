@@ -125,7 +125,12 @@ test("a long chat with pictures and videos opens again on its last message", { t
   expect(served).toBeGreaterThan(0);
 
   // Left scrolled up, it opens on the same message, where it was in the view.
-  await chat(bob).evaluate(el => { el.scrollTop = el.scrollHeight / 2; });
+  // Measured once drawn: rows never on screen take a typical height until they come near it (index.css), and the view
+  // stays on the first row it shows as they get their own.
+  await chat(bob).evaluate(el => new Promise(drawn => {
+    el.scrollTop = el.scrollHeight / 2;
+    requestAnimationFrame(() => requestAnimationFrame(drawn));
+  }));
   const shown = await chat(bob).locator("[data-message-id]").evaluateAll(rows => {
     const top = rows[0].closest(".chat-wallpaper")!.getBoundingClientRect().top;
     const row = rows.find(row => row.getBoundingClientRect().top > top + 40)!;
