@@ -89,7 +89,8 @@ export interface MiniAppRequest {
  * - `offline`: `chat.send` while the chat's session is not live. Nothing is kept to send later.
  * - `peer-closed`: `chat.send` while the contact has not opened the app (or its client does not offer `apps/1`).
  * - `stopped`: a store removed or the publisher revoked the version running.
- * - `too-fast`: past 50 requests a second, or past 48 `chat.send` frames a second.
+ * - `too-fast`: past 50 requests a second, past 48 `chat.send` frames a second, or a `chat.send` while the chat's
+ *   connection is still sending earlier ones (back off and send again).
  * - `too-large`: a request, a stored value or a `chat.send` value past its bound (`MINI_APP_LIMITS`).
  * - `unknown-type`: a request `type` the broker does not answer.
  *

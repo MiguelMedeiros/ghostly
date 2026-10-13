@@ -66,5 +66,5 @@ const NOT_SENT: Record<AppSendError, { code: "refused" | "bad_request" | "unavai
   "too-large": { code: "bad_request", message: `The message is over ${APP_DATA_MAX_BYTES} bytes of JSON, the most an app's frame carries` },
   offline: { code: "unavailable", message: "The chat is not live: an app's frames go on the live session only, and none is kept for later" },
   "peer-closed": { code: "unavailable", message: "The contact's app is not open in this chat (or their Ghostly runs no apps): wait for app.opened" },
-  "too-fast": { code: "refused", message: `More than ${APP_SEND_LIMIT} frames in a second: slow down and send it again` },
+  "too-fast": { code: "refused", message: `More than ${APP_SEND_LIMIT} frames in a second, or the connection is still sending earlier ones: slow down and send it again` },
 };

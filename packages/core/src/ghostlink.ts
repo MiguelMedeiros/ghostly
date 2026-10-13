@@ -3179,13 +3179,16 @@ export class GhostLink {
   }
   /**
    * One data frame of an app open on both sides, on the live session only. An error when it did not go: nothing is
-   * kept to send later.
+   * kept to send later. While the channel already holds a quarter of what it may queue (its send budget, or the high
+   * water mark of a WebRTC channel), the frame is refused with `too-fast`, so the chat's messages and pings never wait
+   * behind an app's data on a link slower than it sends (WISP 1200 § In a chat).
    */
   sendAppData(app: string, data: unknown): AppSendError | null {
     if (!this.apps.open.has(app)) return "not-open";
     if (appDataBytes(data) > APP_DATA_MAX_BYTES) return "too-large";
     if (!this.channel || !this.isDataLinkOpen) return "offline";
     if (!this.supportsApps) return "peer-closed";
+    if (this.channel.bufferedAmount >= (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
     const refused = this.apps.canSend(app, data);
     if (refused) return refused;
     try { this.channel.send(JSON.stringify(appDataFrame(app, data))); return null; } catch { return "offline"; }
