@@ -33,6 +33,7 @@ mod hyperdht;
 #[cfg(desktop)]
 mod keep_awake;
 mod link_preview;
+mod linked_files;
 mod lnd;
 mod local_access;
 mod local_fetch;
@@ -177,6 +178,10 @@ macro_rules! commands {
             hyperdht::paired_hyperdht_start,
             hyperdht::paired_hyperdht_stop,
             keep_awake::keep_awake,
+            linked_files::linked_files_forget,
+            linked_files::linked_files_list,
+            linked_files::linked_files_pick,
+            linked_files::linked_files_read,
             native_call::native_call_accept,
             native_call::native_call_answer,
             native_call::native_call_camera,
@@ -320,6 +325,10 @@ pub fn run() {
             // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
             app.manage(local_access::LocalAccess::load(
                 app.path().app_data_dir()?.join("local-services.json"),
+            ));
+            // Files and folders the person picked for an app: links (paths), never copies, one folder per profile.
+            app.manage(linked_files::LinkedFiles::new(
+                app.path().app_data_dir()?.join("linked"),
             ));
             let files = file_store::FileStore::new(app.path().app_data_dir()?.join("files"));
             files.keep_private();
