@@ -68,6 +68,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.subscribe) wrapped.subscribe = (listener) => transport.subscribe!(listener);
   if (transport.networkChanged) wrapped.networkChanged = () => transport.networkChanged!();
   if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
+  if (transport.readHeldBackFor) wrapped.readHeldBackFor = (pubKeyZ32) => transport.readHeldBackFor!(pubKeyZ32);
   if (transport.onServerTime) wrapped.onServerTime = (listener) => transport.onServerTime!(listener);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
   if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
@@ -144,6 +145,11 @@ export interface PkarrTransport {
    * where the transport cannot say; such a caller then takes no read for one.
    */
   readAnsweredAt?(pubKeyZ32: string): number | undefined;
+  /**
+   * How long the budget still holds back a read of this key, when its last read was held back and answered from a kept
+   * copy (`readAnsweredAt` did not move): when to read again. Undefined once a read went out, or where it cannot say.
+   */
+  readHeldBackFor?(pubKeyZ32: string): number | undefined;
   /**
    * Called with each time a server gave (`ServerTime`), where the transport can read one: what `ClockWatch` holds this
    * device's clock against. Returns the unsubscribe.
