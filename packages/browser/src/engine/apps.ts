@@ -1,7 +1,7 @@
 import {
   APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
   appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation,
-  readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
+  pacer, readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
   type AppStoreRead,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
@@ -779,11 +779,11 @@ export class Apps {
       return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
     }
     const steps = readAppStoreSteps(indexBytes, sigBytes, this.nowS(), heldKey, this.checkedRevocations);
-    let since = performance.now();
+    const pause = pacer(REVOCATIONS_SLICE_MS);
     for (;;) {
       const step = steps.next();
       if (step.done) return step.value;
-      if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+      await pause();
     }
   }
 
@@ -816,9 +816,9 @@ export class Apps {
     let out: SignedAppRevocation[] | null = null;
     if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
       out = [];
-      let since = performance.now();
+      const pause = pacer(REVOCATIONS_SLICE_MS);
       for (const entry of read.value) {
-        if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+        await pause();
         const one = readAppRevocation(entry);
         if (!one.ok) { out = null; break; }
         out.push(one.revocation);
