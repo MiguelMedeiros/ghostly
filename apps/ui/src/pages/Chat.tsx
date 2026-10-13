@@ -109,6 +109,7 @@ import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
 import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
 import { clearChatNotification } from "../lib/notifications";
+import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
 
@@ -527,8 +528,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => {
     if (!visible || !pageShown) return;
     markSessionAsRead(sessionId);
-    clearChatNotification(sessionId);
   }, [visible, pageShown, sessionId, messages.length]);
+  // Its notification goes once the window has the focus too: one on screen behind another app's has just been told of
+  // the message (AttentionFeedback), and taking it back then would take it back before anyone saw it. The window is
+  // asked as it is now (`useWindowAway` runs this again when it comes back): its watch may start after this mounts.
+  const away = useWindowAway();
+  useEffect(() => {
+    if (visible && !windowAway()) clearChatNotification(sessionId);
+  }, [visible, away, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
   useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
 
