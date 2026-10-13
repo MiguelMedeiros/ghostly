@@ -141,6 +141,48 @@ it("finds an index's entries by their record key, one or a range of them, throug
   expect([...tree.getAllRecords()]).toHaveLength(2000);
 });
 
+it("writes over many records in one transaction looking each one up by key, never walking what the transaction wrote", async () => {
+  const sqlite = (await loadSqlite())!;
+  const file = new TreeFile(new sqlite.DatabaseSync(":memory:"), Error);
+  const store = file.tree(file.treeId("db", "messages"), true, false);
+  const index = file.tree(file.treeId("db", "messages", "byTime"), false, true);
+  const K = 400;
+  for (let n = 0; n < K; n++) { store.put({ key: ["c", n], value: { t: n } }); index.put({ key: ["c", n], value: ["c", n] }); }
+  file.complete(null, 1);
+  file.apply(1);
+
+  // Every entry read off a layer's maps by walking them (a lookup by key reads none).
+  let walked = 0;
+  class Walked<K, V> extends Map<K, V> {
+    override *[Symbol.iterator](): MapIterator<[K, V]> { for (const entry of super.entries()) { walked++; yield entry; } }
+  }
+  const counted = (tree: object) => {
+    const layer = (tree as { active: { puts: Map<string, unknown>; byValue: Map<string, unknown> } }).active;
+    layer.puts = new Walked(layer.puts);
+    layer.byValue = new Walked(layer.byValue);
+  };
+  // What fake-indexeddb does for each `put` over a stored record, as `db.patchMessages` moves a catch-up's messages:
+  // the record got, written over, and its old entry in each index found by its key and replaced.
+  file.owner = {};
+  const overwrite = (n: number) => {
+    const old = store.getRecords(IDBKeyRange.only(["c", n])).next().value as Entry;
+    store.put({ key: ["c", n], value: { t: (old.value as { t: number }).t + K } });
+    expect(index.deleteByValue!(IDBKeyRange.only(["c", n]))).toHaveLength(1);
+    index.put({ key: ["c", n + K], value: ["c", n] });
+  };
+  overwrite(0);
+  counted(store);
+  counted(index);
+  for (let n = 1; n < K; n++) overwrite(n);
+  // Before, each one walked every entry the transaction had written: K² / 2 of them in all, 128 million at 16,000.
+  expect(walked).toBe(0);
+  file.owner = null;
+  file.complete(null, 2);
+  file.apply(2);
+  expect([...store.getAllRecords()].map((e) => (e.value as { t: number }).t)).toEqual(Array.from({ length: K }, (_, n) => n + K));
+  expect([...index.getAllRecords()].map((e) => e.key)).toEqual(Array.from({ length: K }, (_, n) => ["c", n + K]));
+});
+
 it("refuses a Blob in a tree at once, rather than when its transaction goes to SQLite", async () => {
   const sqlite = (await loadSqlite())!;
   const file = new TreeFile(new sqlite.DatabaseSync(":memory:"), Error);
