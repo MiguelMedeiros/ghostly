@@ -1339,6 +1339,47 @@ describe("private groups through the engine", () => {
       expect(iroh).toHaveBeenCalledOnce();
     });
 
+    // A member whose app quit in the middle of the attempt (one-shot CLI commands while its daemon was down) looked like a
+    // network that blocks: its edge stayed native for this whole run, and past 4 such edges members stayed unreachable.
+    it("an edge gone native tries WebRTC again once its member is seen online after a packet said it was gone, not while it stays online", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+      const presence = (online: boolean, at: number) => ({ online, lastPacketAt: at, services: online ? [] : null });
+      const first = edgeOf(edgeId);
+      first.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(edgeId)).not.toBe(first));
+      const native = edgeOf(edgeId);
+      expect(native.options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(native.registerEndpoint).toHaveBeenCalledOnce());
+      // Online all along (a network that really blocks): the edge stays native, whatever packets it publishes.
+      native.options.events.onPresence(presence(true, 1));
+      native.options.events.onPresence(presence(true, 2));
+      await node["nativeQueue"];
+      expect(edgeOf(edgeId)).toBe(native);
+      // Gone (its goodbye, or a packet gone stale), and back: WebRTC again, no native endpoint, and no goodbye.
+      native.options.events.onPresence(presence(false, 3));
+      expect(edgeOf(edgeId)).toBe(native);
+      native.options.events.onPresence(presence(true, 4));
+      await vi.waitFor(() => expect(edgeOf(edgeId)).not.toBe(native));
+      expect(native.stop).toHaveBeenCalledWith(false);
+      const back = edgeOf(edgeId);
+      expect(back.options.rtcAvailable).toBe(true);
+      // It ran an endpoint there: its packet says it has WebRTC again, and the member's app goes back to it.
+      expect(back.options.packetTransportsSaid).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(back.registerEndpoint).not.toHaveBeenCalled();
+      // A network that really blocks: one more failed attempt, and native again.
+      back.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(edgeId)).not.toBe(back));
+      expect(edgeOf(edgeId).options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledTimes(2);
+    });
+
     // libdatachannel's race on a loaded core refused every answer to the edge's offers, through the pauses after them:
     // the next offer would wait minutes of backoff while the member is there (meshSignals on CI, 2026-10-11).
     it("an edge whose answers WebRTC here keeps refusing goes on over a native transport, as one whose WebRTC connected nothing", async () => {
