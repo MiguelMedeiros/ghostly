@@ -126,6 +126,21 @@ describe("a transport change that did not land, in the app's language", () => {
     }
   });
 
+  it("the Why row ends the reason with a stop before saying where the chat stayed, in each language", () => {
+    const why = (reason: string, t: ReturnType<typeof translateWith>) =>
+      transportLineDetails(line({ kind: "failed", target: "hyperdht/1", transport: "webrtc/1", reason }), "Ana", at, t).find(r => r.label === t("connection.detail.why"))!.value;
+    const timedOut = failed("HyperDHT handshake timed out");
+    expect(why(timedOut, translateWith(LOCALES.en, "en"))).toBe("HyperDHT didn't answer in time. The chat stayed on WebRTC.");
+    expect(why(timedOut, translateWith(LOCALES.pt, "pt"))).toBe("O HyperDHT não respondeu a tempo. A conversa continuou em WebRTC.");
+    expect(why(timedOut, translateWith(LOCALES.ja, "ja"))).toBe("HyperDHT が時間内に応答しませんでした。チャットは WebRTC のままです。");
+    for (const language of LANGUAGES) {
+      const t = translateWith(LOCALES[language], language), stayed = t("connection.why.stayedOn", { transport: "WebRTC" });
+      for (const reason of reasons) {
+        expect([language, reason, why(reason, t).slice(0, -stayed.length).trimEnd()]).toEqual([language, reason, expect.stringMatching(/[.!?…。！？]$/)]);
+      }
+    }
+  });
+
   it("a drop in a history seeded from an older release's rows (saved with its English) is said in each language", () => {
     const event = { at: 1, kind: "down" as const, from: "webrtc/1" as const, reason: "Dropped and came back 4 times" };
     for (const [language, t] of others) expect([language, transportEventText(event, "Ana", t)]).toEqual([language, t("connection.event.lostFrom", { from: "WebRTC" })]);
