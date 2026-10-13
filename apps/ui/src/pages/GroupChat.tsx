@@ -439,7 +439,8 @@ export function GroupChat() {
 
   // Still knocking through a link after a while: the link may have been replaced (said under the steps).
   const knock = rosterGroup?.invitation?.viaLink ? rosterGroup.invitation.stage ?? (rosterGroup.invitation.admin ? "admitted" : "knocked") : undefined;
-  const knockedLong = usePast(knock === "knocked" ? rosterGroup!.createdAt : undefined, LONG_KNOCK_MS);
+  // Timed from the knock: a group kept here, knocking to get back in, was created long before it.
+  const knockedLong = usePast(knock === "knocked" ? rosterGroup!.invitation!.since ?? rosterGroup!.createdAt : undefined, LONG_KNOCK_MS);
   if (!state) return null;
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm text-text-muted">{t("group.chat.gone")}</div>;
   const nameOf = replyNames(group, t("chat.reply.you"), t);
@@ -602,8 +603,10 @@ export function GroupChat() {
         {error && <Notice problem={error} className="text-xs" />}
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
         {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
-          <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}</p>
-          <button data-testid="group-rejoin-cancel" onClick={() => void act(() => engine.call("declineGroupInvitation", { groupId }))}
+          <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
+            {knockedLong && <span data-testid="group-joining-stale" className="mt-1 block">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</span>}</p>
+          {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
+          <button data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
             className="min-h-11 shrink-0 rounded-lg px-3 text-xs text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.cancel")}</button>
         </div>
         : !error && (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
