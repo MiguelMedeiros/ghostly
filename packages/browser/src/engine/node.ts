@@ -4170,7 +4170,12 @@ export class GhostlyNode implements EngineImplementation {
   async connect({ linkId }: { linkId: string }): Promise<void> {
     const link = this.links.get(linkId)?.link;
     if (!link) throw new Error("You are offline. Go online before reconnecting.");
-    await this.ensureNativeEndpoints(linkId);
+    const live = this.links.get(linkId)!, native = this.ensureNativeEndpoints(linkId);
+    // It dials at once where WebRTC can carry the chat, and each native listener joins the dial as it comes up
+    // (`registerEndpoint`): waiting for them all first cost 10 s a reconnect with Iroh's relay out of reach. A chat that
+    // goes live only natively, or is set to a native transport with Fallback off, has nothing to dial until they are up.
+    const { preferredTransport: preferred, transportFallback: fallback } = live.stored;
+    if (this.reachedOnlyNatively(live) || (fallback === false && preferred && preferred !== "webrtc/1")) await native;
     await link.connect();
   }
 
