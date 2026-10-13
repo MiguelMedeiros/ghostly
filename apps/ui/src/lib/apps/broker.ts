@@ -259,7 +259,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
         });
         reading = read.catch(() => {});
         const bytes = await read;
-        const buffer = bytes.slice().buffer as ArrayBuffer;
+        // The host's copy is the caller's (AppsPlatform.file): handed over as it is when it is the whole buffer, where
+        // copying it again doubled what a read cost the page.
+        const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
+        const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
         return { value: buffer, transfer: [buffer] };
       }
       case "storage.get": {
