@@ -309,10 +309,48 @@ export type AppBundleReading = { ok: true; bundle: AppBundle } | { ok: false; re
 
 const u32 = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 
+/**
+ * Lets the thread go for one turn: what waits (input, drawing) runs, then the caller goes on. `scheduler.yield()` where
+ * there is one, else a message to itself. Never `setTimeout(0)`: from the fifth nested timer on the browser waits at
+ * least 4 ms (HTML's clamp), which made a paced read of 4096 revocations take 60% longer than the work, and a hidden
+ * tab runs timers once a second.
+ */
+export function yieldThread(): Promise<void> {
+  const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  if (typeof scheduler?.yield === "function") return scheduler.yield();
+  if (typeof MessageChannel === "function") {
+    return new Promise((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        resolve();
+      };
+      channel.port2.postMessage(null);
+    });
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * A pause for a loop of short steps: `await pause()` after each step lets the thread go once `sliceMs` of work has
+ * run since the last time, and answers at once otherwise.
+ */
+export function pacer(sliceMs: number): () => Promise<void> | undefined {
+  let since = performance.now();
+  return () => {
+    if (performance.now() - since < sliceMs) return undefined;
+    return yieldThread().then(() => {
+      since = performance.now();
+    });
+  };
+}
+
 /** `sha256Paced` hashes up to this much at once: under a millisecond of the thread. */
 const HASH_AT_ONCE = 64 * 1024;
 /** Without `crypto.subtle`, `sha256Paced` hashes this much (a few ms), then lets the thread go. */
 const HASH_SLICE = 256 * 1024;
+/** `readAppBundleAsync` hashes files for this long at most before it lets the thread go, however small each file. */
+const HASH_SLICE_MS = 5;
 
 /**
  * SHA-256 of bytes that may be a whole bundle, for a client whose engine shares its page's thread: `sha256` in
@@ -327,7 +365,7 @@ export async function sha256Paced(bytes: Uint8Array): Promise<Uint8Array> {
   if (away) return new Uint8Array(away);
   const hash = sha256.create();
   for (let at = 0; at < bytes.length; at += HASH_SLICE) {
-    if (at) await new Promise((resolve) => setTimeout(resolve, 0));
+    if (at) await yieldThread();
     hash.update(bytes.subarray(at, at + HASH_SLICE));
   }
   return hash.digest();
@@ -397,17 +435,21 @@ export function readAppBundle(bytes: Uint8Array): AppBundleReading {
 
 /**
  * `readAppBundle` for a client whose engine shares its page's thread: the same checks in the same order, with the same
- * refusals, and each file hashed by `sha256Paced`, one after the other. The bytes must not change until it answers.
+ * refusals, and each file hashed by `sha256Paced`, one after the other, with the thread let go between files every
+ * `HASH_SLICE_MS` (64 files of 64 KiB, each hashed at once, held it for 50 ms). The bytes must not change until it
+ * answers.
  */
 export async function readAppBundleAsync(bytes: Uint8Array): Promise<AppBundleReading> {
   const read = readAppBundleHead(bytes);
   if (!read.ok) return read;
   const files = new Map<string, Uint8Array>();
+  const pause = pacer(HASH_SLICE_MS);
   let at = read.head.filesAt;
   for (const f of read.head.manifest.files) {
     const content = bytes.subarray(at, at + f.size); at += f.size;
     if (toBase64Url(await sha256Paced(content)) !== f.sha256) return { ok: false, reason: "file-hash", detail: f.path };
     files.set(f.path, content);
+    await pause();
   }
   return closeAppBundle(read.head, files);
 }

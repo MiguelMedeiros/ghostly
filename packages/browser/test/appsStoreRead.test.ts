@@ -25,7 +25,7 @@ beforeEach(async () => {
   net = new FakeNet();
   verifies.mockClear();
 });
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 /** Valid revocations of apps of a key of the store's owner's own: any key may sign for its own apps. */
 const revocations = (count: number, from = 0): Promise<SignedAppRevocation[]> => {
@@ -49,13 +49,15 @@ describe("reading a store's index", () => {
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
     const real = verifies.getMockImplementation()!;
-    let inThisTurn = 0, most = 0, turns = 0, reading = true;
+    let inThisTurn = 0, most = 0, turns = 0;
     verifies.mockImplementation((...args) => { clock += 1; most = Math.max(most, ++inThisTurn); return real(...args); });
-    // What else the page has to do: one timer after another, each a turn of its thread.
-    const turn = () => { inThisTurn = 0; turns += 1; if (reading) setTimeout(turn, 0); };
-    setTimeout(turn, 0);
+    // Each time the read lets the thread go, the page gets a turn: the engine's pause is `scheduler.yield()` where there
+    // is one (`yieldThread`), stubbed here to count them. A timer would not do: the pause is not one, so that no clamp
+    // of nested timers adds 4 ms to each.
+    const turn = async () => { inThisTurn = 0; turns += 1; };
+    vi.stubGlobal("scheduler", { yield: turn });
     const preview = await store.previewStore({ url: STORE_URL });
-    reading = false;
+    vi.unstubAllGlobals();
     expect(preview).toMatchObject({ key: keyOf(STORE_KEY), sequence: 1 });
     expect(verifies).toHaveBeenCalledTimes(301);
     expect(most, "signature checks in one turn of the thread").toBeLessThanOrEqual(11);
