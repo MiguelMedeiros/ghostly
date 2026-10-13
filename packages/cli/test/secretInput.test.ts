@@ -13,6 +13,11 @@ describe("secrets from stdin, out of ps", () => {
     await expect(secretsFromStdin("wallet.redeem", {}, stdin("\n"))).rejects.toMatchObject({ code: "usage" });
   });
 
+  it("wallet redeem with no token on a terminal is a usage error at once, not a silent wait on the keyboard", async () => {
+    await expect(secretsFromStdin("wallet.redeem", {}, never, true)).rejects.toMatchObject({ code: "usage", message: expect.stringMatching(/\| ghostly wallet redeem/) });
+    expect(await secretsFromStdin("wallet.redeem", { token: "cashuBabc" }, never, true)).toMatch(/shows in ps/);
+  });
+
   it("a token on the command line still goes, with a warning, and stdin is not read", async () => {
     const params: Record<string, unknown> = { token: "cashuBabc" };
     expect(await secretsFromStdin("wallet.redeem", params, never)).toMatch(/shows in ps/);
