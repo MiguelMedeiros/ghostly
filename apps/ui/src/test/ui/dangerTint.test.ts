@@ -14,10 +14,10 @@ import { describe, expect, it } from "vitest";
 const SRC = join(fileURLToPath(import.meta.url), "../../..");
 const CSS = readFileSync(join(SRC, "index.css"), "utf8");
 
-/** Each theme block's custom properties, by its selector list (as dangerFill.test.ts reads them). */
+/** Each theme block's custom properties, by its selector list (from its first `:root` to its `{`). */
 function blocks(): { selector: string; vars: Record<string, string> }[] {
   const out: { selector: string; vars: Record<string, string> }[] = [];
-  for (const match of CSS.matchAll(/((?::root[^{,]*,?\s*)+)\{([^}]*)\}/g)) {
+  for (const match of CSS.matchAll(/(:root[^{]*)\{([^}]*)\}/g)) {
     const vars: Record<string, string> = {};
     for (const [, name, value] of match[2].matchAll(/--([\w-]+):\s*([^;]+);/g)) vars[name] = value.trim();
     out.push({ selector: match[1].trim(), vars });
