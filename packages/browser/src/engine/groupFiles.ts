@@ -195,6 +195,11 @@ interface Want {
   movedAt: number;
   /** What the last holder asked in this round answered, when it was not the file: shown while the want waits. */
   why?: "busy" | "damaged";
+  /**
+   * Holders that answered `busy` in this round: one of them in reach tells this device when its place frees (its
+   * `group-have`), so members never heard of as holders are not asked meanwhile.
+   */
+  busy?: Set<string>;
 }
 
 /** One edge's files/3, both ways. */
@@ -424,7 +429,7 @@ export class GroupFileDesk {
     }
     const want = this.wants.get(kept.id);
     if (!want) this.wants.set(kept.id, this.newWant());
-    else if (!want.wire) { want.tried.clear(); want.why = undefined; }
+    else if (!want.wire) { want.tried.clear(); want.why = want.busy = undefined; }
     this.ask(kept);
   }
 
@@ -524,7 +529,7 @@ export class GroupFileDesk {
       }
       if (want.holder) want.tried.add(want.holder);
       // Everyone asked in turn: a new round, as holders come and go.
-      else { want.tried.clear(); want.why = undefined; }
+      else { want.tried.clear(); want.why = want.busy = undefined; }
       this.ask(kept);
     }
     this.letGo();
@@ -588,7 +593,10 @@ export class GroupFileDesk {
       .filter(key => membership && key !== membership.me && membership.inRoster(key));
     // Every holder known served it damaged: asking again would fetch the same bytes, all of them, round after round.
     if (known.length && known.every(key => kept.damaged.has(key))) { this.stopDamaged(kept); return; }
-    const others = [...edges.keys()].filter(key => !known.includes(key) && membership && key !== membership.me && membership.couldRead(key, kept.message));
+    // A known holder that answered busy, its edge up, says when it can serve: the others are asked only when no known
+    // holder is worth waiting for (none in reach, or every one gone), as after a restart here.
+    const waitForBusy = known.some(key => want.busy?.has(key) && this.deps.ready(edges.get(key) ?? ""));
+    const others = waitForBusy ? [] : [...edges.keys()].filter(key => !known.includes(key) && membership && key !== membership.me && membership.couldRead(key, kept.message));
     const order = [...known, ...others].filter(key => !want.tried.has(key) && !kept.damaged.has(key) && !this.edgesById.get(edges.get(key) ?? "")?.gone.has(kept.message));
     let behind = false;
     for (const key of order) {
@@ -642,7 +650,7 @@ export class GroupFileDesk {
       kept.holders = kept.holders.filter(key => key !== peer);
       this.edgesById.get(linkId)?.gone.add(messageId);
     }
-    if (why === "busy") want.why = "busy";
+    if (why === "busy") { want.why = "busy"; (want.busy ??= new Set()).add(peer); }
     want.tried.add(peer);
     want.holder = want.linkId = undefined;
     this.ask(kept);
@@ -670,6 +678,7 @@ export class GroupFileDesk {
       const want = this.wants.get(kept.id);
       if (!want) continue;
       want.tried.delete(from);
+      want.busy?.delete(from);
       if (!want.holder) this.ask(kept);
     }
   }
