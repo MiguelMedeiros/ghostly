@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
 import { loadSqlite, openRowFile, rowRecords, type RowFile } from "./rows";
-import { openTreeFile, SqlTree, type TreeFile } from "./sqlTree";
+import { handOut, openTreeFile, SqlTree, type TreeFile } from "./sqlTree";
 
 /**
  * IndexedDB for the engine on Node, kept on disk.
@@ -45,7 +45,7 @@ interface RawIndex {
 }
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
 interface RawRecordStore {
-  values(range?: unknown): Iterable<RawRecord>; clear(): unknown;
+  values(range?: unknown, direction?: string): Iterable<RawRecord>; clear(): unknown;
   get(key: Key): RawRecord | undefined;
   put(record: RawRecord, noOverwrite?: boolean): RawRecord | undefined;
   delete(key: Key): RawRecord[];
@@ -59,6 +59,8 @@ interface RawStore {
   storeRecord(record: { key: Key; value: unknown }, noOverwrite: boolean, rollbackLog?: unknown[]): Key;
   deleteRecord(key: Key, rollbackLog?: unknown[]): void;
   clear(rollbackLog?: unknown[]): void;
+  getValue(key: Key): unknown;
+  getAllValues(range: unknown, count: number | undefined, direction: string | undefined): unknown[];
 }
 interface RawDatabase { name: string; version: number; rawObjectStores: Map<string, RawStore>; transactions: unknown[] }
 type RawTransaction = IDBTransaction & { durability?: string; _rollbackLog: unknown[]; _state: string; db: { _rawDatabase: RawDatabase } };
@@ -144,6 +146,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const raw = factory as unknown as { _databases: Map<string, RawDatabase> };
   const classes = await probeClasses(factory);
   dropIndexEntriesByRecord(classes, (a, b) => factory.cmp(a, b));
+  readWithoutCopy(classes);
   const order = keyOrder((a, b) => factory.cmp(a, b));
 
   // Found before it is opened: opening makes it, and a snapshot that names it needs the file it named.
@@ -628,6 +631,36 @@ function dropIndexEntriesByRecord(classes: RawClasses, cmp: (a: Key, b: Key) => 
     if (gone) for (const candidate of gone.indexes.values()) if (candidate.records === this) index = candidate;
     if (!gone || !index) return deleteByValue.call(this, key);
     return dropEntries(index, gone.records, cmp);
+  };
+}
+
+/** The classes whose reads of a store kept on disk hand out what rows.db gave: shared by every store opened. */
+const uncopied = new WeakSet<object>();
+
+/**
+ * fake-indexeddb copies every value a read hands out (`structuredClone`), as it must for its tree, which keeps the
+ * values. A store kept on disk read its values from rows.db just now (v8 made them), and copying them again made a
+ * whole-chat read 1.6 times the cost of one in memory. Its `get` and `getAll`, and an index's (which read through the
+ * store's `getValue`), hand those out as they are (`handOut`).
+ */
+function readWithoutCopy(classes: RawClasses) {
+  const storeProto = classes.ObjectStore.prototype as RawStore;
+  if (uncopied.has(storeProto)) return;
+  uncopied.add(storeProto);
+  const { getValue, getAllValues } = storeProto;
+  storeProto.getValue = function (this: RawStore, key) {
+    if (!(this.records.records instanceof SqlTree)) return getValue.call(this, key);
+    const record = this.records.get(key);
+    return record === undefined ? undefined : handOut(record.value);
+  };
+  storeProto.getAllValues = function (this: RawStore, range, count, direction) {
+    if (!(this.records.records instanceof SqlTree)) return getAllValues.call(this, range, count, direction);
+    const values: unknown[] = [], most = count || Infinity;
+    for (const record of this.records.values(range, direction)) {
+      values.push(handOut(record.value));
+      if (values.length >= most) break;
+    }
+    return values;
   };
 }
 
