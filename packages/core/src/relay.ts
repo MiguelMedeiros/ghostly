@@ -806,7 +806,9 @@ export class RelayTransport implements PkarrTransport {
 
   readHeldBackFor(pubKeyZ32: string): number | undefined {
     const held = this.heldBack.get(pubKeyZ32);
-    return held === undefined ? undefined : Math.max(0, held.until - Date.now());
+    const left = held === undefined ? 0 : held.until - Date.now();
+    // A hold that has run out is the past: the read that just ended was not held back (the relays went down after it).
+    return left > 0 ? left : undefined;
   }
 
   private heldBackUntil(pubKeyZ32: string, until: number): void {

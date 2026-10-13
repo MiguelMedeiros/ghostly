@@ -72,4 +72,40 @@ describe("relay transport: background reads take turns per key", () => {
       for (const link of links) await link.stop();
     }
   });
+  it("polls at the background pace while the relays are down after the budget held a key back", async () => {
+    // A key the budget held back once, then every relay down: the hold is over, and the read waits its interval, not
+    // the budget's 250 ms retry (review of #2241: 240 resolves a minute).
+    let phase: "ok" | "limited" | "down" = "ok";
+    const stored = new Map<string, Uint8Array>();
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const key = new URL(String(input)).pathname.slice(1);
+      if (init?.method === "PUT") { stored.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
+      if (phase === "down") throw new TypeError("Failed to fetch");
+      if (phase === "limited") return new Response(null, { status: 429 });
+      const body = stored.get(key);
+      return body ? new Response(body as BodyInit, { status: 200 }) : new Response(null, { status: 404 });
+    }) as typeof fetch;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: RELAYS, log: () => {}, fetch: fetchFn });
+    const { mine, invite } = createLink();
+    const contact = new LinkSession({ params: invite, transport: new RelayTransport({ relays: RELAYS, log: () => {}, fetch: fetchFn }), pollIntervals: RELAY_POLL_INTERVALS, getServices: () => [] });
+    contact.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await contact.stop(true);
+    let resolves = 0;
+    const counted = Object.assign(Object.create(relay), { resolve: (...args: Parameters<RelayTransport["resolve"]>) => { resolves++; return relay.resolve(...args); } });
+    const link = new LinkSession({ params: mine, transport: counted, pollIntervals: RELAY_POLL_INTERVALS });
+    try {
+      link.start();
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      phase = "limited";
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      phase = "down";
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+      resolves = 0;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(resolves).toBeLessThan(10);
+    } finally {
+      await link.stop();
+    }
+  });
 });
