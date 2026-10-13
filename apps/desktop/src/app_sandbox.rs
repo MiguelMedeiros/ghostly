@@ -55,6 +55,8 @@ const MAX_ID: u64 = (1 << 53) - 1;
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg(test)]
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(1);
+/// `files.pick` waits for the person in the system's dialog: as long as they take, within reason.
+const PICK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// To the Ghostly window: a request of an app window, `{"label", "request"}`.
 pub const REQUEST_EVENT: &str = "ghostly-app-request";
@@ -863,7 +865,14 @@ pub async fn app_broker<R: Runtime>(
         json!({ "label": label, "request": request }),
     );
     let answer = match sent {
-        Ok(()) => tokio::time::timeout(ANSWER_TIMEOUT, receiver).await.ok(),
+        Ok(()) => {
+            let wait = if request.get("type").and_then(Value::as_str) == Some("files.pick") {
+                PICK_TIMEOUT
+            } else {
+                ANSWER_TIMEOUT
+            };
+            tokio::time::timeout(wait, receiver).await.ok()
+        }
         Err(_) => None,
     };
     state.with(&label, |window| window.pending.remove(&id));

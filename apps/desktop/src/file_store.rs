@@ -560,6 +560,8 @@ pub async fn file_bytes_remove_where<R: tauri::Runtime>(
         if let Some(grants) = app.try_state::<crate::file_stream::StreamGrants>() {
             grants.close_space(&space);
         }
+        // And the links to files and folders its apps were given.
+        crate::linked_files::drop_space(&app, &space);
     }
     Ok(())
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-linked-files-forget"
+description = "Enables the linked_files_forget command without any pre-configured scope."
+commands.allow = ["linked_files_forget"]
+
+[[permission]]
+identifier = "deny-linked-files-forget"
+description = "Denies the linked_files_forget command without any pre-configured scope."
+commands.deny = ["linked_files_forget"]
