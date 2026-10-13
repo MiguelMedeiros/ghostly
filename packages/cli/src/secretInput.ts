@@ -3,14 +3,17 @@ import { CliError } from "./errors";
 /**
  * Secrets a command takes (a Cashu token, an API key, a card's form) come on stdin: on the command line they show in
  * `ps` to every user of the machine while the command runs, and stay in the shell's history. Still taken there, with
- * a warning. Fills `params` in place; the warning to print on stderr, if any.
+ * a warning. Fills `params` in place; the warning to print on stderr, if any. `tty`: stdin is a terminal, where a
+ * read would wait on the keyboard without a word.
  */
-export async function secretsFromStdin(method: string, params: Record<string, unknown>, read: () => Promise<string>): Promise<string | undefined> {
+export async function secretsFromStdin(method: string, params: Record<string, unknown>, read: () => Promise<string>, tty = false): Promise<string | undefined> {
   const warning = (what: string) => `${what} on the command line shows in ps and the shell's history: give it on stdin instead`;
   if (method === "wallet.redeem") {
     if (params.token !== undefined) return warning("A token");
+    const missing = () => new CliError("usage", "Missing <cashu-token>: give it as an argument or on stdin (… | ghostly wallet redeem)");
+    if (tty) throw missing();
     const token = (await read()).trim();
-    if (!token) throw new CliError("usage", "Missing <cashu-token>: give it as an argument or on stdin");
+    if (!token) throw missing();
     params.token = token;
     return undefined;
   }
