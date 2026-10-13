@@ -159,6 +159,12 @@ export interface StoredGroup {
    */
   large?: string[];
   /**
+   * On the admin's side: members I let in over a contact chat whose edge has not come up with me yet, so whose app
+   * may never have had the group's keys (its welcome lost on the way). A `group-decline` from that chat takes such a
+   * member out again; one seen on an edge once is a member, whatever its chat says after.
+   */
+  unseen?: string[];
+  /**
    * Removed, then invited again over a contact chat: the names my app knew members by (member key → name). The history
    * stays while the invitation waits, and still names who wrote it; once in again, the names of members who are gone
    * since go on naming what they wrote.

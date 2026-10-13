@@ -572,6 +572,43 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(welcomes()).toBe(before);
   });
 
+  it("a member let in whose welcome was lost and who then declines goes from the admin's roster, and may be invited again", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    const host = world.peers.get("alice")!.host, send = host.sendOnLink.bind(host);
+    const lost = vi.spyOn(host, "sendOnLink").mockImplementation((linkId, frame) => {
+      if ((frame as { t?: string }).t === "group-welcome") return;
+      send(linkId, frame);
+    });
+    await bob.accept(groupId); await world.settle();
+    const bobKey = identityFromSeedB64(world.peers.get("bob")!.store.groups.get(groupId)!.invitation!.seedB64!).pubKeyZ32;
+    const edge = host.edges(groupId).get(bobKey);
+    const ready = host.linkReady.bind(host);
+    vi.spyOn(host, "linkReady").mockImplementation((linkId, version) => linkId !== edge && ready(linkId, version));
+    expect(view(alice, groupId).members).toHaveLength(2);
+
+    // Bob taps Decline before his accept is answered again: he never had the group's keys, so he is not a member.
+    await bob.decline(groupId); await world.settle();
+    expect(bob.views()).toEqual([]);
+    expect(view(alice, groupId).members.map(m => m.key)).not.toContain(bobKey);
+    expect(world.peers.get("alice")!.store.groups.get(groupId)!.unseen).toBeUndefined();
+    // And he may be invited again.
+    lost.mockRestore(); vi.mocked(host.linkReady).mockImplementation(ready);
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(bob, groupId).invitation).toBeDefined();
+  });
+
+  it("a member seen on an edge stays in the roster whatever its contact chat declines after", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    expect(world.peers.get("alice")!.store.groups.get(groupId)!.unseen).toBeUndefined();
+    const chat = world.peers.get("alice")!.store.groups.get(groupId)!.contacts![key(bob)];
+    await alice.handleContactFrame(chat, { t: "group-decline", g: groupId }); await world.settle();
+    expect(view(alice, groupId).members.map(m => m.key)).toContain(key(bob));
+  });
+
   it("deleting or leaving a group, or handing its admin role on, takes back the invitations nobody answered", async () => {
     // Deleted, alone in it.
     const world = new World();

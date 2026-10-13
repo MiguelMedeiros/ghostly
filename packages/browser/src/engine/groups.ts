@@ -1520,7 +1520,10 @@ export class Groups {
         this.meet(g, frame.key);
         if (this.host.linkReady(linkId, GROUP_VERSION_LARGE)) this.markLarge(group, frame.key);
         const welcome = await session.admit(frame.key);
-        if (!entryPeer) group.contacts = { ...group.contacts, [frame.key]: linkId };
+        if (!entryPeer) {
+          group.contacts = { ...group.contacts, [frame.key]: linkId };
+          group.unseen = [...(group.unseen ?? []).filter(key => rosterHas(session.roster, key)), frame.key];
+        }
         this.answered(group, linkId);
         await this.store.putGroup(group);
         for (const piece of welcome) this.host.sendOnLink(linkId, piece);
@@ -1548,6 +1551,7 @@ export class Groups {
         const entryPeer = this.hostEntry(g, linkId);
         if (entryPeer) { this.pendingEntries.get(g)?.delete(entryPeer); await this.host.closeEdge(linkId); }
         const group = this.stored.get(g);
+        if (group && await this.declinedUnseen(g, group, linkId)) return;
         if (!group || !this.answered(group, linkId)) return;
         await this.store.putGroup(group);
         this.host.emit();
@@ -1761,10 +1765,13 @@ export class Groups {
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (session?.status === "active" && group?.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) { this.sayFarewell(groupId, session, group, peerKey, linkId); return; }
     if (!session || !group || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
+    // Its app has the group's keys: a decline over its chat says nothing about its place any more.
+    const seen = !!group.unseen?.includes(peerKey);
+    if (seen) { const unseen = group.unseen!.filter(key => key !== peerKey); group.unseen = unseen.length ? unseen : undefined; }
     const large = this.host.linkReady(linkId, GROUP_VERSION_LARGE) && this.markLarge(group, peerKey);
     // Whether its app takes part in hubs: one that does not keeps edges with the hubs (WISP 902 · Group Mesh § Hubs).
     const legacy = this.hubs.enabled && this.hubs.edgeReady(groupId, session, group, peerKey, this.host.linkReady(linkId, GROUP_VERSION_HUBS), this.now());
-    if (large || legacy) void this.store.putGroup(group).catch(() => {});
+    if (large || legacy || seen) void this.store.putGroup(group).catch(() => {});
     // Its messages were just asked of another member: it hears where I am once that answer has come (`holdSync`).
     if (!this.holdSync(groupId, peerKey)) {
       try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
@@ -1785,6 +1792,26 @@ export class Groups {
     this.files?.edgeReady(groupId, peerKey, linkId);
     this.host.edgeUp?.(groupId, peerKey);
     this.host.emit();
+  }
+
+  /**
+   * Admin side: a `group-decline` over the contact chat that let in a member never seen on an edge since. Its welcome
+   * was lost and its app declined the invitation it still showed: it never had the group's keys, so it goes from the
+   * roster (and may be invited again). True when one went.
+   */
+  private async declinedUnseen(groupId: string, group: StoredGroup, linkId: string): Promise<boolean> {
+    const session = this.sessions.get(groupId);
+    if (!session?.isAdmin || session.status !== "active" || !group.unseen) return false;
+    const key = group.unseen.find(k => group.contacts?.[k] === linkId && rosterHas(session.roster, k));
+    if (!key) return false;
+    const edge = this.host.edges(groupId).get(key);
+    if (edge && this.host.linkReady(edge)) return false;
+    const unseen = group.unseen.filter(k => k !== key);
+    group.unseen = unseen.length ? unseen : undefined;
+    await this.remove(groupId, key).catch(() => {});
+    await this.store.putGroup(group);
+    this.host.emit();
+    return true;
   }
 
   /** Records that a member's app takes rosters past eight; true when that is news (the caller saves). */
