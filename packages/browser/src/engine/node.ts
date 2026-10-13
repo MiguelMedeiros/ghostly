@@ -7576,17 +7576,16 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * These rows, in this order, placed again below everything in their history, as if they came now: a group member's
    * messages that came above an older one of theirs (WISP 400, requirement 10). The places are taken before anything is
-   * awaited, so a row that comes meanwhile goes below them.
+   * awaited, so a row that comes meanwhile goes below them. All of them in one write: one disk sync, not one a row.
    */
   private async placeAgain(linkId: string, ids: readonly string[]): Promise<void> {
-    const places = ids.map(id => {
+    const places = new Map(ids.map(id => {
       const timestamp = arrivalKey(Date.now(), this.placedAt.get(linkId));
       this.placedAt.set(linkId, timestamp);
-      return { id, timestamp };
-    });
-    const moved: string[] = [];
-    for (const { id, timestamp } of places) if (await db.patchMessage(linkId, id, () => ({ timestamp }))) moved.push(id);
-    if (moved.length) await this.messagesChanged(linkId, moved);
+      return [id, timestamp];
+    }));
+    const moved = await db.patchMessages(linkId, [...places.keys()], m => ({ timestamp: places.get(m.id)! }));
+    if (moved.length) await this.messagesChanged(linkId, moved.map(m => m.id));
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }
