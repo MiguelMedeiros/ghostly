@@ -144,6 +144,7 @@
     "disableTitle": "关闭链接？",
     "enable": "开启链接",
     "enableFailed": "无法开启链接",
+    "endsOnHandover": "此前分享的链接将失效。{{name}} 可以分享新的链接。",
     "full": "群组已满（{{count}}/{{count}}）。有人离开前无法加入。",
     "fullShort": "群组已满",
     "hideQr": "隐藏二维码",

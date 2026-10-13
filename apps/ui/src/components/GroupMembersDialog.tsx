@@ -135,7 +135,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       </button>
     </div>
     {live.status === "active" && (live.isAdmin || (live.profile === "community" && live.entryLink)) && <GroupLinkPanel group={live} />}
-    <ul ref={list} className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
+    <ul ref={list} tabIndex={-1} className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" data-testid="group-member-list">
       {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? state?.settings.nick : undefined}
         peerKey={m.me ? undefined : contactKey(m.key)} status={m.me ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
         tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
@@ -160,9 +160,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       </ul>
     </div>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
-    {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} onClose={() => setRemoving(null)}
+    {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
-    {promoting && <MakeAdminDialog name={memberName(promoting, t)} onClose={() => setPromoting(null)}
+    {promoting && <MakeAdminDialog name={memberName(promoting, t)} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
       onConfirm={() => { const key = promoting.key; setPromoting(null); void run(key, () => engine.call("makeGroupAdmin", { groupId: live.id, key })); }} />}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);

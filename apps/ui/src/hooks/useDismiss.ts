@@ -98,7 +98,10 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
   const opener = useRef<Element | null | undefined>(undefined);
   if (opener.current === undefined) opener.current = document.activeElement;
   useEffect(() => {
-    const before = opener.current as HTMLElement | null;
+    // A menu's row that opened it is gone by now, and the menu gave the focus back to its button as it left (Menu.tsx):
+    // that button is where it goes back to.
+    const rendered = opener.current as HTMLElement | null;
+    const before = rendered?.isConnected ? rendered : document.activeElement as HTMLElement | null;
     if (ref.current && !ref.current.contains(document.activeElement)) ref.current.focus();
     modals.push(ref);
     const key = (e: KeyboardEvent) => {
@@ -115,6 +118,25 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
       if (before?.isConnected && restoring.current()) before.focus();
     };
   }, [ref]);
+}
+
+/**
+ * A question in a <dialog> (Remove Bob? Turn the link off?): it opens modal with the focus on `first` (its Cancel), and
+ * closed, gives the focus back to the control that asked. The browser's own return finds nothing: React has taken the
+ * dialog out by the time it is closed, and the focus fell to the page. When that control cannot take it any more (a
+ * confirmed Remove disables its row, then the row goes), `fallback` has it.
+ */
+export function useQuestionDialog(dialog: RefObject<HTMLDialogElement | null>, first: RefObject<HTMLElement | null>, fallback?: RefObject<HTMLElement | null>) {
+  const back = useRef(fallback); back.current = fallback;
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    const element = dialog.current!; element.showModal(); first.current?.focus();
+    return () => {
+      element.close();
+      if (before && before !== document.body && before.isConnected && !before.matches(":disabled")) before.focus();
+      else back.current?.current?.focus();
+    };
+  }, [dialog, first]);
 }
 
 /**

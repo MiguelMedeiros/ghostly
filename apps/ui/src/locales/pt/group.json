@@ -144,6 +144,7 @@
     "disableTitle": "Desativar o link?",
     "enable": "Ativar o link",
     "enableFailed": "Não foi possível ativar o link",
+    "endsOnHandover": "O link compartilhado até agora para de funcionar. {{name}} pode compartilhar um novo.",
     "full": "O grupo está cheio ({{count}} de {{count}}). Ninguém entra até alguém sair.",
     "fullShort": "O grupo está cheio",
     "hideQr": "Ocultar QR",

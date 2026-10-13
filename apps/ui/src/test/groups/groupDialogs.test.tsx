@@ -116,6 +116,33 @@ describe("GroupMembersDialog", () => {
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
   });
 
+  it("gives the focus back to the Remove or Hand over admin that asked, and to the list once a removed row is gone", async () => {
+    const { user, engine } = members_(groupView({ status: "active", isAdmin: true, members }));
+    let removed!: () => void;
+    engine.on("removeGroupMember", () => new Promise<void>(done => { removed = done; })).on("makeGroupAdmin", () => undefined);
+    const remove = within(row(BOB)).getByTestId("group-remove-member"), promote = within(row(BOB)).getByTestId("group-make-admin");
+    // It fell to the page each time: Escape, Cancel, and a confirmed Remove.
+    remove.focus();
+    await user.keyboard("{Enter}");
+    expect(within(screen.getByTestId("group-remove-dialog")).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    act(() => { screen.getByTestId("group-remove-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(remove).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.click(within(screen.getByTestId("group-remove-dialog")).getByRole("button", { name: "Cancel" }));
+    expect(remove).toHaveFocus();
+    promote.focus();
+    await user.keyboard("{Enter}");
+    act(() => { screen.getByTestId("group-make-admin-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(promote).toHaveFocus();
+    remove.focus();
+    await user.keyboard("{Enter}");
+    await user.click(within(screen.getByTestId("group-remove-dialog")).getByRole("button", { name: "Remove" }));
+    expect(screen.getByTestId("group-member-list")).toHaveFocus();
+    await act(async () => { removed(); });
+    act(() => engine.update({ groups: [groupView({ status: "active", isAdmin: true, members: members.filter(m => m.key !== BOB) })] }));
+    expect(screen.getByTestId("group-member-list")).toHaveFocus();
+  });
+
   it("gives a community group's member the link's QR too, and none of the admin's controls", async () => {
     const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
     const { user } = members_(groupView({ status: "active", isAdmin: false, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", role: "admin" })] }));
@@ -134,6 +161,16 @@ describe("GroupMembersDialog", () => {
       const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
       await user.click(within(row(BOB)).getByTestId("group-remove-member"));
       expect(screen.getByTestId("group-remove-dialog"), profile).toHaveAccessibleDescription("They won't get the group's new messages. They can still join again with the group's link: a new link keeps them out.");
+      unmount();
+    }
+  });
+
+  it("says, while a private group's link works, that handing the admin role over ends it; a community's link goes on", async () => {
+    for (const [profile, ends] of [["mesh", true], ["community", false]] as const) {
+      const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
+      await user.click(within(row(BOB)).getByTestId("group-make-admin"));
+      const body = "You will no longer be the admin. Only Bob can then rename the group, change its picture and link, invite or remove members, and give the role back.";
+      expect(screen.getByTestId("group-make-admin-dialog"), profile).toHaveAccessibleDescription(ends ? `${body} The link shared so far stops working. Bob can share a new one.` : body);
       unmount();
     }
   });
