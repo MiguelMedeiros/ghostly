@@ -67,6 +67,7 @@
     "forked": "成员历史出现了分叉",
     "gone": "{{name}} 已不再是成员",
     "joined": "{{name}} 已加入",
+    "left": "{{name}} 已退出",
     "pictureChanged": "{{name}} 更换了群组头像",
     "pictureChangedNoName": "群组头像已更换",
     "pictureChangedYou": "你更换了群组头像",

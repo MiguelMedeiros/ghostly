@@ -194,6 +194,8 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: writtenName(text.slice(0, -gone.length), t) });
+    const left = " left";
+    if (message.event === "left" && text.endsWith(left)) return t("group.event.left", { name: writtenName(text.slice(0, -left.length), t) });
     // A community's line about a member who has left since: no roster or former name says who it was, but the stored
     // line does, in the shape the engine writes. Said again in the interface's language with that name; a change that
     // credits nobody, without one.
