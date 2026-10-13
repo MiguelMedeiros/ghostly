@@ -229,6 +229,8 @@ interface Incoming {
   gapAt?: number;
   writing: Promise<void>;
   verifying?: boolean;
+  /** Where it is written is being opened, before it is accepted: it holds one of the turns already. */
+  starting?: boolean;
   /** What was stored is being removed: nothing more is written. */
   dropped?: boolean;
 }
@@ -526,7 +528,7 @@ export class ChatFiles {
   }
 
   private activeIncoming(except: Entry): number {
-    return [...this.entries.values()].filter((e) => e !== except && e.record.direction === "in" && (e.record.state === "active" || e.record.state === "verifying")).length;
+    return [...this.entries.values()].filter((e) => e !== except && e.record.direction === "in" && (e.record.state === "active" || e.record.state === "verifying" || e.in?.starting)).length;
   }
 
   /**
@@ -554,17 +556,25 @@ export class ChatFiles {
     return incoming.target;
   }
 
-  /** An accepted file goes when a session is open and fewer than three others arrive at once. */
+  /**
+   * An accepted file goes when a session is open and fewer than three others arrive at once. One whose target is still
+   * being opened counts among the three: counted only once active, every file offered or queued meanwhile went too, and
+   * the windows of ten files and more at once overflowed the session's receive queue.
+   */
   private startIncoming(entry: Entry): void {
     if (!this.attached || transferEnded(entry.record) || entry.record.state === "asking" || (entry.record.state === "paused" && entry.record.pausedBy === "me")) return;
+    const incoming = entry.in!;
+    if (incoming.starting) return;
     if (this.activeIncoming(entry) >= FILE_LIMITS.maxActiveIncoming) {
       if (entry.record.state !== "queued") { entry.record.state = "queued"; this.changed(entry); }
       this.send({ t: "pf-wait", id: entry.record.id, why: "busy" });
       return;
     }
+    incoming.starting = true;
     void this.target(entry).then(() => {
-      if (transferEnded(entry.record) || !this.attached) return;
-      if (entry.record.state === "paused" && entry.record.pausedBy === "me") return;
+      incoming.starting = false;
+      // Ended, paused or cut off while it opened: its turn goes to the next one.
+      if (transferEnded(entry.record) || !this.attached || (entry.record.state === "paused" && entry.record.pausedBy === "me")) { this.startNext(); return; }
       entry.record.state = "active";
       entry.record.pausedBy = undefined;
       entry.in!.gapAt = undefined;
@@ -573,8 +583,10 @@ export class ChatFiles {
       entry.in!.heardAt = this.now();
       this.armNudge(entry);
     }, (error) => {
+      incoming.starting = false;
       this.end(entry, "failed", `Could not store the file: ${error instanceof Error ? error.message : String(error)}`);
       this.send({ t: "pf-refuse", id: entry.record.id, why: "no-room" });
+      this.startNext();
     });
   }
 
