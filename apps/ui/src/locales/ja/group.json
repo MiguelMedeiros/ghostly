@@ -67,6 +67,7 @@
     "forked": "メンバー履歴が分岐しました",
     "gone": "{{name}} はメンバーではなくなりました",
     "joined": "{{name}} が参加しました",
+    "left": "{{name}} が退出しました",
     "pictureChanged": "{{name}} がグループの写真を変更しました",
     "pictureChangedNoName": "グループの写真が変更されました",
     "pictureChangedYou": "グループの写真を変更しました",
