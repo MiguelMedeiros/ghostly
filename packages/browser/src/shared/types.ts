@@ -1710,6 +1710,11 @@ export interface EngineState {
    * yet may still be moving, not finished.
    */
   transfersRestored?: boolean;
+  /**
+   * The kept groups are in `groups`. Unset while the peer starts: until then a group missing from the list may only not
+   * be loaded yet, not gone (the app forgets a gone group's draft and read mark only between two states that have it).
+   */
+  groupsLoaded?: true;
   wallet: WalletView;
   payments: Record<string, PaymentView>;
   /** This profile's identity proofs. */

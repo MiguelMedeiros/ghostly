@@ -18,6 +18,7 @@ import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
+import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
@@ -172,6 +173,8 @@ export function App() {
   useEffect(() => guardFileDrops(), []);
   useWakeOnReturn();
   useAppBadge();
+  // A group gone from the list by itself takes its draft, read mark, mute and folder with it.
+  useGoneGroups();
   useProfilePeek();
   // Desktop's menu and shortcuts: New Chat, Settings.
   useAppCommands();
