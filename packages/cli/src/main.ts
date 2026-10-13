@@ -717,13 +717,16 @@ async function callPipeCommand(argv: string[]): Promise<void> {
 
 // ---------- entry ----------
 
-/** The command's words when the line asks for help (`help <words>`, or `--help`/`-h` before any `--`), else null. */
+/**
+ * The command's words when the line asks for help (`help <words>`, or `--help`/`--help=true`/`-h` before any `--`), else
+ * null. `--help=false` asks for none: the command runs.
+ */
 function helpAsked(argv: readonly string[]): string[] | null {
   const end = argv.indexOf("--");
   const head = end === -1 ? argv : argv.slice(0, end);
   const words = (list: readonly string[]) => { const out: string[] = []; for (const word of list) { if (word.startsWith("-")) break; out.push(word); } return out; };
   if (head[0] === "help") return words(head.slice(1));
-  if (head.includes("--help") || head.includes("-h")) return words(head);
+  if (head.some((word) => word === "--help" || word === "--help=true" || word === "-h")) return words(head);
   return null;
 }
 
