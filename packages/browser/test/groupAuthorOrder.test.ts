@@ -82,4 +82,18 @@ describe("the engine places a group's rows again", () => {
     // The time each shows is still the one its sender said.
     expect((await db.getMessage(linkId, "a9"))!.sentAt).toBe(1000);
   });
+
+  it("in one write: a catch-up's rows moved together cost the store one disk sync, not one a row", async () => {
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onMessageChanges: vi.fn() }, { automaticWallets: false });
+    const linkId = "group:one-write";
+    const ids = Array.from({ length: 32 }, (_, i) => `a${i + 1}`);
+    for (const [i, id] of ids.entries()) await db.addMessage({ linkId, id, text: id, sender: "peer", member: "a", timestamp: 1000 + i, sentAt: 1000 + i, via: "datalink" });
+    await db.addMessage({ linkId, id: "b1", text: "b1", sender: "peer", member: "b", timestamp: 2000, sentAt: 2000, via: "datalink" });
+    const transaction = vi.spyOn(IDBDatabase.prototype, "transaction");
+    await (node as unknown as { placeAgain(linkId: string, ids: string[]): Promise<void> }).placeAgain(linkId, ids);
+    const writes = transaction.mock.calls.filter(([, mode]) => mode === "readwrite");
+    transaction.mockRestore();
+    expect(writes).toHaveLength(1);
+    expect((await db.getMessages(linkId)).map(m => m.id)).toEqual(["b1", ...ids]);
+  });
 });
