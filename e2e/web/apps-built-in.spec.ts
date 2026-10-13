@@ -49,6 +49,16 @@ test("Chess is on the Apps page of a new profile; its first open asks what it ma
   await ana.page.setViewportSize({ width: 375, height: 700 });
   await expect(row.getByTestId("built-in-app-open")).toBeInViewport();
   await expect(row.getByTestId("built-in-app-remove")).toBeInViewport();
+  // What the row is there to say is in sight at that width, not cut off behind the tagline (toContainText passes on hidden text).
+  const hint = row.getByTestId("built-in-app-hint");
+  await expect(hint).toHaveText(/^Comes with Ghostly · /);
+  expect(await hint.evaluate((el) => {
+    const words = document.createRange();
+    words.setStart(el.firstChild!, 0);
+    words.setEnd(el.firstChild!, "Comes with Ghostly".length);
+    const box = words.getBoundingClientRect(), own = el.getBoundingClientRect();
+    return box.left >= own.left - 1 && box.right <= own.right + 1;
+  })).toBe(true);
   expect(await ana.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await ana.page.setViewportSize(wide);
 
