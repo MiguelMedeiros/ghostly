@@ -38,6 +38,13 @@ on:
 
 permissions: {}
 
+# One tick at a time and one waiting: every CI run that ends and every label added starts a tick, and with many pull
+# requests open their first job alone filled the runners (2026-10-13: 47 ticks queued ahead of the batches' CI). A newer
+# tick replaces the waiting one; the one running is never cancelled, so a batch in flight is not cut.
+concurrency:
+  group: merge-queue-ticks
+  cancel-in-progress: false
+
 jobs:
   bases:
     name: Bases with a train
