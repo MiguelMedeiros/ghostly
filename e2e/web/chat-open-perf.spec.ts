@@ -17,7 +17,7 @@ import type { Page } from "@playwright/test";
 
 const RUNS = Number(process.env.PERF_RUNS) || 3;
 /** Most message rows a chat has in the page (apps/ui/src/hooks/useRowWindow.ts `MAX_ROWS`). */
-const MAX_ROWS = 300;
+const MAX_ROWS = 150;
 /** Rows a chat opens with (`OPEN_ROWS`). */
 const OPEN_ROWS = 100;
 
