@@ -615,10 +615,10 @@ fn build_window<R: Runtime>(
                 builder =
                     builder.with_webview_configuration(webkit::configuration(guard, internet)?);
             }
-            builder
-                .build()
-                .map(|_| ())
-                .map_err(|e| format!("Window: {e}"))
+            let window = builder.build().map_err(|e| format!("Window: {e}"))?;
+            // Mouse look: WKWebView gives the pointer lock only when asked (webkit::allow_pointer_lock).
+            let _ = window.with_webview(|platform| webkit::allow_pointer_lock(platform.inner()));
+            Ok(())
         })();
         let _ = tx.send(built);
     })
@@ -992,6 +992,65 @@ mod webkit {
                     .map_err(|_| "rule list not compiled in time".to_string())?
             })
             .clone()
+    }
+
+    /// The pointer lock an app asks for (mouse look), which WKWebView gives only when its UI delegate answers
+    /// `_webViewDidRequestPointerLock:completionHandler:` (private API, as `_features` below). wry's delegate does
+    /// not, so the method is added to its class, once, and answers yes for a page on the `ghostly-app` scheme only:
+    /// the class is the main window's delegate's too, and that window is told no. WebKit reads which methods a
+    /// delegate has when the delegate is set, so the app window's delegate is set again after the method is added.
+    /// The page still needs `allow-pointer-lock` in its sandbox (the runner's policy), and Esc frees the pointer.
+    pub fn allow_pointer_lock(webview: *mut std::ffi::c_void) {
+        let Some(webview) = (unsafe { (webview as *mut AnyObject).as_ref() }) else {
+            return;
+        };
+        let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![webview, UIDelegate] };
+        let Some(delegate) = delegate else {
+            crate::diagnostics::log("app window: no UI delegate, no pointer lock");
+            return;
+        };
+        let class = delegate.class();
+        let selector = objc2::sel!(_webViewDidRequestPointerLock:completionHandler:);
+        if !class.responds_to(selector) {
+            let added = unsafe {
+                objc2::ffi::class_addMethod(
+                    class as *const AnyClass as *mut AnyClass,
+                    selector,
+                    std::mem::transmute::<
+                        unsafe extern "C-unwind" fn(
+                            &AnyObject,
+                            objc2::runtime::Sel,
+                            &AnyObject,
+                            &block2::Block<dyn Fn(Bool)>,
+                        ),
+                        objc2::runtime::Imp,
+                    >(did_request_pointer_lock),
+                    c"v@:@@?".as_ptr(),
+                )
+            };
+            if !added.as_bool() {
+                crate::diagnostics::log("app window: pointer lock answer not added");
+                return;
+            }
+        }
+        let _: () = unsafe { msg_send![webview, setUIDelegate: &*delegate] };
+    }
+
+    /// Whether a web view shows the runner (`ghostly-app://`), which alone may hold the pointer.
+    pub fn is_runner_view(webview: &AnyObject) -> bool {
+        let url: Option<Retained<AnyObject>> = unsafe { msg_send![webview, URL] };
+        let Some(url) = url else { return false };
+        let text: Option<Retained<NSString>> = unsafe { msg_send![&*url, absoluteString] };
+        text.is_some_and(|t| url::Url::parse(&t.to_string()).is_ok_and(|u| super::is_runner(&u)))
+    }
+
+    unsafe extern "C-unwind" fn did_request_pointer_lock(
+        _this: &AnyObject,
+        _cmd: objc2::runtime::Sel,
+        webview: &AnyObject,
+        completion: &block2::Block<dyn Fn(Bool)>,
+    ) {
+        completion.call((Bool::new(is_runner_view(webview)),));
     }
 
     /// Every WebKit feature this WebKit knows: its key and the `_WKFeature` itself.
