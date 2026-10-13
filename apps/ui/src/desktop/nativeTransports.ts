@@ -1,8 +1,9 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
+import { fromBase64, irohDescriptor, irohRelayUrl, toBase64, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
+/** A frame Rust hands the page: text, or a binary message (HyperDHT only) in base64. */
 type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boolean }
-  | { type: "frame"; id: number; text: string } | { type: "closed"; id: number }
+  | { type: "frame"; id: number; text: string } | { type: "frame"; id: number; bytes: string } | { type: "closed"; id: number }
   /** The endpoint itself ended in Rust (HyperDHT: its runtime died or dropped it). */
   | { type: "stopped" }
   /** The endpoint's own address came to be another (Iroh: it homed on a relay, the network changed). */
@@ -11,30 +12,35 @@ type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boole
 /** Ordered IPC writes and bounded buffering before the session installs its reader. */
 class NativeChannel implements FrameChannel {
   private reader: FrameChannel["onMessage"] = null;
-  private buffered: string[] = [];
+  private buffered: (string | Uint8Array)[] = [];
   private queue = Promise.resolve();
   private closed = false;
   bufferedAmount = 0;
   readonly sendBudget = 120 * 1024;
+  /** HyperDHT's frames mark a binary message (WISP 103 § Frames), and its sidecar and Rust carry one; Iroh's take text only. */
+  readonly binary: boolean;
   onClose: FrameChannel["onClose"] = null;
-  constructor(readonly id: number, private endpointId: () => number, private kind: "iroh" | "hyperdht") {}
+  constructor(readonly id: number, private endpointId: () => number, private kind: "iroh" | "hyperdht") {
+    this.binary = kind === "hyperdht";
+  }
   get onMessage() { return this.reader; }
   set onMessage(reader: FrameChannel["onMessage"]) {
     this.reader = reader;
-    if (reader) for (const text of this.buffered.splice(0)) reader(text);
+    if (reader) for (const data of this.buffered.splice(0)) reader(data);
   }
-  receive(text: string) {
+  receive(data: string | Uint8Array) {
     if (this.closed) return;
-    if (this.reader) this.reader(text);
-    else if (this.buffered.length < 64) this.buffered.push(text);
+    if (this.reader) this.reader(data);
+    else if (this.buffered.length < 64) this.buffered.push(data);
     else this.close();
   }
   send(data: string | Uint8Array) {
-    if (typeof data !== "string" || this.closed || this.bufferedAmount + data.length > this.sendBudget)
+    if ((typeof data !== "string" && !this.binary) || this.closed || this.bufferedAmount + data.length > this.sendBudget)
       throw new Error("Native channel is closed or its send budget is full");
     this.bufferedAmount += data.length;
+    const frame = typeof data === "string" ? { text: data } : { bytes: toBase64(data) };
     this.queue = this.queue.then(async () => {
-      if (!this.closed) await invoke(this.kind === "iroh" ? "paired_native_send" : "paired_hyperdht_send", { endpointId: this.endpointId(), connectionId: this.id, text: data });
+      if (!this.closed) await invoke(this.kind === "iroh" ? "paired_native_send" : "paired_hyperdht_send", { endpointId: this.endpointId(), connectionId: this.id, ...frame });
     }).catch(() => this.close()).finally(() => { this.bufferedAmount -= data.length; });
   }
   drained() { return this.queue; }
@@ -77,7 +83,7 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
         if (lifecycle.endpoint?.onConnection) lifecycle.endpoint.onConnection(bound);
         else early.push(bound);
       }
-    } else if (event.type === "frame") (connections.get(event.id)?.channel as NativeChannel | undefined)?.receive(event.text);
+    } else if (event.type === "frame") (connections.get(event.id)?.channel as NativeChannel | undefined)?.receive("bytes" in event ? fromBase64(event.bytes) : event.text);
     else if (event.type === "stopped") { ended = true; gone(); }
     else if (event.type === "address") {
       const endpoint = lifecycle.endpoint;

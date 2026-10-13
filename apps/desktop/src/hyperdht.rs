@@ -438,21 +438,35 @@ pub async fn paired_hyperdht_connect(
         .as_u64()
         .ok_or("Invalid native connection ID".into())
 }
+/// One frame: `text`, or `bytes` (a binary message, WISP 103 § Frames, in base64), as the runtime takes it.
 #[tauri::command]
 pub fn paired_hyperdht_send(
     state: State<'_, HyperState>,
     endpoint_id: u64,
     connection_id: u64,
-    text: String,
+    text: Option<String>,
+    bytes: Option<String>,
 ) -> Result<(), String> {
-    if text.is_empty() || text.len() > 60 * 1024 {
+    use base64::Engine;
+    let (field, size, frame) = match (text, bytes) {
+        (Some(text), None) => ("text", text.len(), text),
+        (None, Some(bytes)) => (
+            "bytes",
+            base64::engine::general_purpose::STANDARD
+                .decode(&bytes)
+                .map_err(|_| "Invalid binary frame")?
+                .len(),
+            bytes,
+        ),
+        _ => return Err("Invalid frame".into()),
+    };
+    if size == 0 || size > 60 * 1024 {
         return Err("Frame exceeds transport budget".into());
     }
+    let mut value = json!({"type":"send", "id":connection_id});
+    value[field] = json!(frame);
     sender(&state, endpoint_id)?
-        .try_send(Request {
-            value: json!({"type":"send", "id":connection_id, "text":text}),
-            reply: None,
-        })
+        .try_send(Request { value, reply: None })
         .map_err(|_| "Native command queue full".into())
 }
 #[tauri::command]
@@ -621,14 +635,14 @@ mod tests {
         let (id, mut rx) = runtime(&app, 1);
         for text in [String::new(), "x".repeat(60 * 1024 + 1)] {
             assert_eq!(
-                paired_hyperdht_send(app.state(), id, 3, text).unwrap_err(),
+                paired_hyperdht_send(app.state(), id, 3, Some(text), None).unwrap_err(),
                 "Frame exceeds transport budget"
             );
         }
-        paired_hyperdht_send(app.state(), id, 3, "x".repeat(60 * 1024)).unwrap();
+        paired_hyperdht_send(app.state(), id, 3, Some("x".repeat(60 * 1024)), None).unwrap();
         // The queue is bounded: a runtime that stopped reading makes sends fail, not pile up.
         assert_eq!(
-            paired_hyperdht_send(app.state(), id, 3, "more".into()).unwrap_err(),
+            paired_hyperdht_send(app.state(), id, 3, Some("more".into()), None).unwrap_err(),
             "Native command queue full"
         );
         let sent = rx.recv().await.unwrap();
@@ -641,6 +655,37 @@ mod tests {
         assert_eq!(
             rx.recv().await.unwrap().value,
             json!({"type": "close", "id": 3})
+        );
+    }
+
+    /// A binary message comes as base64, within the same budget as text, and goes to the runtime as it came.
+    #[tokio::test]
+    async fn a_binary_frame_is_base64_within_the_budget_and_forwarded_as_it_is() {
+        use base64::Engine;
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let app = app();
+        let (id, mut rx) = runtime(&app, 1);
+        for (text, bytes, error) in [
+            (None, None, "Invalid frame"),
+            (Some("x".into()), Some(encode(b"x")), "Invalid frame"),
+            (None, Some("not base64!".into()), "Invalid binary frame"),
+            (None, Some(String::new()), "Frame exceeds transport budget"),
+            (
+                None,
+                Some(encode(&vec![4u8; 60 * 1024 + 1])),
+                "Frame exceeds transport budget",
+            ),
+        ] {
+            assert_eq!(
+                paired_hyperdht_send(app.state(), id, 3, text, bytes).unwrap_err(),
+                error
+            );
+        }
+        let largest = encode(&vec![4u8; 60 * 1024]);
+        paired_hyperdht_send(app.state(), id, 3, None, Some(largest.clone())).unwrap();
+        assert_eq!(
+            rx.recv().await.unwrap().value,
+            json!({"type": "send", "id": 3, "bytes": largest})
         );
     }
 
@@ -660,7 +705,7 @@ mod tests {
             closed
         );
         assert_eq!(
-            paired_hyperdht_send(app.state(), id, 1, "x".into()).unwrap_err(),
+            paired_hyperdht_send(app.state(), id, 1, Some("x".into()), None).unwrap_err(),
             closed
         );
         assert_eq!(
@@ -809,13 +854,20 @@ mod runtime_tests {
         );
         let incoming = next(&mut page_b).await;
         assert_eq!(incoming["incoming"], true);
-        paired_hyperdht_send(app.state(), a.id, connection, "hello".into()).unwrap();
+        paired_hyperdht_send(app.state(), a.id, connection, Some("hello".into()), None).unwrap();
         let frame = next(&mut page_b).await;
         assert_eq!(
             (&frame["type"], &frame["text"]),
             (&json!("frame"), &json!("hello"))
         );
         assert_eq!(frame["id"], incoming["id"]);
+        // A binary message, in base64 through the runtime and back.
+        paired_hyperdht_send(app.state(), a.id, connection, None, Some("BAD/Cg==".into())).unwrap();
+        let frame = next(&mut page_b).await;
+        assert_eq!(
+            (&frame["type"], &frame["bytes"], &frame["id"]),
+            (&json!("frame"), &json!("BAD/Cg=="), &incoming["id"])
+        );
         assert!(page_a.try_recv().is_err());
 
         // Stopping one closes its connection on both ends, and keeps the runtime.
