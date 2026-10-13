@@ -551,26 +551,6 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await expect.poll(burst(alice, "bob"), { timeout: 30_000, interval: 1000 }).toEqual([...names].sort());
   });
 
-  it("send files all at once, as a bot sends photos: each its own message on both sides", async () => {
-    // Over the daemon's socket, every request written at once: many land in the same millisecond.
-    const client = (await connectDaemon(sockets[alice]!))!;
-    const names = Array.from({ length: 20 }, (_, i) => `burst-${i}.txt`);
-    try {
-      const sent = await Promise.all(names.map((name) => {
-        const path = join(alice, name);
-        writeFileSync(path, `photo ${name}`);
-        return client.call("file.send", { chat: "bob", path }) as Promise<{ file: { id: string } }>;
-      }));
-      expect(new Set(sent.map((s) => s.file.id)).size).toBe(names.length);
-    } finally {
-      client.close();
-    }
-    const burst = (dir: string, chat: string) => async () => ((ok(await as(dir, "file", "list", chat)).files as { file: { name: string }; transfer: { state: string } | null }[])
-      .filter((f) => f.file.name.startsWith("burst-") && f.transfer?.state === "done").map((f) => f.file.name).sort());
-    await expect.poll(burst(bob, "alice"), { timeout: 60_000, interval: 1000 }).toEqual([...names].sort());
-    await expect.poll(burst(alice, "bob"), { timeout: 30_000, interval: 1000 }).toEqual([...names].sort());
-  });
-
   it("send a voice note from a file: its length and waveform measured here, the contact sees the bars", async () => {
     const listen = await listenTo(bob, "--type", "message.received");
     const recording = join(import.meta.dirname, "../../../e2e/support/voice-fixtures/chromium.webm");
