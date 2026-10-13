@@ -417,6 +417,11 @@ export class GroupSession {
   private onRows: GroupMessageFrame[] | undefined;
   /** Set while a save of what received messages changed is due (`persistSoon`). */
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * The frames of members who left that each member was handed (`frameKey`), so an app that does not take them (from
+   * before revision 2026-10-13, and never marks them seen) is not handed them again at every sync. In memory only.
+   */
+  private leaversHanded = new Map<string, Set<string>>();
   /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
   /** Catch-up answers still going out, a slice at a time (`handOut`). */
@@ -442,8 +447,8 @@ export class GroupSession {
       // What the state holds from before stays until newer frames take its place; one a row holds too is the row's.
       const held = new Set(onRows.map(frameKey));
       if (state.relay?.length) state.relay = state.relay.filter(f => !held.has(frameKey(f)));
-      // Out of the group, or its author out of the roster: not handed on any more, wherever it is kept.
-      this.onRows = state.status === "active" ? onRows.filter(f => rosterHas(this.roster, f.s)) : [];
+      // Out of the group, or its author out of the roster (but for one who left): not handed on any more, wherever it is kept.
+      this.onRows = state.status === "active" ? onRows.filter(f => this.handsOn(f.s, f.e)) : [];
       this.trimRelay();
     }
     this.answers = new CatchUpAnswers({
@@ -741,10 +746,13 @@ export class GroupSession {
     return { secret };
   }
 
-  /** Someone out of the roster is not handed on any more, whatever they sent while in it (WISP 902 § Catch-up). */
+  /**
+   * Someone removed is not handed on any more, whatever they sent while in the roster; one who left still is, for the
+   * epochs before its leave (WISP 902 § Catch-up).
+   */
   private pruneRelay(): void {
-    if (this.state.relay?.length) this.state.relay = this.state.relay.filter(f => rosterHas(this.roster, f.s));
-    if (this.onRows?.length) this.onRows = this.onRows.filter(f => rosterHas(this.roster, f.s));
+    if (this.state.relay?.length) this.state.relay = this.state.relay.filter(f => this.handsOn(f.s, f.e));
+    if (this.onRows?.length) this.onRows = this.onRows.filter(f => this.handsOn(f.s, f.e));
     if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s));
   }
 
@@ -1175,13 +1183,14 @@ export class GroupSession {
 
   /**
    * A message, from its author's edge or handed on by another member. Handed on, it is taken only while both are in
-   * the roster (someone removed is neither heard from nor handed on, #300), and its boxes only with the author's `xs`.
+   * the roster (someone removed is neither heard from nor handed on, #300), or from a member in it when its author left
+   * after it (`handsOn`), and its boxes only with the author's `xs`.
    */
   private async receiveMessage(from: string, raw: unknown): Promise<void> {
     if (!isMessageFrame(raw)) return;
     if (raw.s === this.myKey) { await this.ownFrame(raw); return; }
     const relayed = raw.s !== from;
-    if (relayed && (!rosterHas(this.roster, from) || !rosterHas(this.roster, raw.s))) return;
+    if (relayed && (!rosterHas(this.roster, from) || !this.handsOn(raw.s, raw.e))) return;
     // Signed by its author before it may wait, so a frame no member wrote never takes the place of one that was.
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.park(from, raw); return; }
@@ -1215,7 +1224,7 @@ export class GroupSession {
       this.markSeen(raw);
       this.keep(clean(raw));
       this.persistSoon();
-      if (rosterHas(this.roster, raw.s)) this.took(clean(raw));
+      if (this.handsOn(raw.s, raw.e)) this.took(clean(raw));
       return;
     }
     // (Shown already from a copy handed on stripped, under its own id: the whole one completes that one.)
@@ -1242,8 +1251,9 @@ export class GroupSession {
     if (firstFrame && rosterHas(this.state.chain[firstFrame.e]?.m ?? [], this.myKey)) this.markSeen(firstFrame);
     this.keep(clean(raw));
     this.persistSoon();
-    // Passed on only while its author is a member: someone removed is not carried for, even for epochs it was in.
-    if (rosterHas(this.roster, raw.s)) this.took(clean(raw));
+    // Passed on only while its author is a member, or for an epoch before it left: someone removed is not carried for,
+    // even for epochs it was in.
+    if (this.handsOn(raw.s, raw.e)) this.took(clean(raw));
   }
 
   /**
@@ -1404,6 +1414,17 @@ export class GroupSession {
     if (next) { this.pendingCommits.delete(this.epoch + 1); await this.receiveCommit(from, next); }
   }
 
+  /**
+   * Whether a frame of `author` under `epoch` is taken from another member, kept and handed on: while its author is in
+   * the roster, or when it left (its removal marked `left`, and it is not back in) and the frame is from before that.
+   */
+  private handsOn(author: string, epoch: number): boolean {
+    if (rosterHas(this.roster, author)) return true;
+    const chain = this.state.chain;
+    for (let e = chain.length - 1; e > 0; e--) if (chain[e].k === "remove" && chain[e].s === author) return !!this.state.leftMarks?.[e] && epoch < e;
+    return false;
+  }
+
   /** Keeps the admin's mark on a commit that took out a member who left (`GroupCommitFrame.left`) when it holds; true when new. */
   private takeLeftMark(commit: GroupCommit, mark: unknown): mark is string {
     if (commit.k !== "remove" || typeof mark !== "string" || mark.length !== 86 || !B64.test(mark) || this.state.leftMarks?.[commit.e]) return false;
@@ -1492,7 +1513,17 @@ export class GroupSession {
     // asked me for (whose edges to them are down), from what I received. Signed by their authors, so nothing to trust me for.
     const lacks = missingIn(frame, from);
     const asked = new Set(Array.isArray(frame.ask) ? frame.ask.filter(k => typeof k === "string" && k !== from && k !== this.myKey && rosterHas(this.roster, k)) : []);
-    const kept = asked.size ? this.kept().filter(f => asked.has(f.s) && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from) && lacks(f)) : [];
+    // And those of members who left, from before they did: their edges are down for good, so nobody names them in
+    // `ask`. Each once to each member, whose app may be one from before that does not take them.
+    const handed = this.leaversHanded.get(from) ?? new Set<string>();
+    const kept = !asked.size && !this.state.leftMarks ? [] : this.kept().filter(f => {
+      if (!this.state.chain[f.e] || !rosterHas(this.state.chain[f.e].m, from) || !lacks(f)) return false;
+      if (asked.has(f.s)) return true;
+      if (rosterHas(this.roster, f.s) || handed.has(frameKey(f)) || !this.handsOn(f.s, f.e)) return false;
+      handed.add(frameKey(f));
+      return true;
+    });
+    if (handed.size) this.leaversHanded.set(from, handed);
     // In the order they were written, as far as two logs can say: the receiver places each where it arrives, and my own
     // first then the others' showed it a conversation as all my lines, then all of theirs.
     answer.push(...asWritten(this.ownLacked(from, frame), kept));
