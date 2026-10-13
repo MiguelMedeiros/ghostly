@@ -311,14 +311,14 @@ export type AppBundleReading = { ok: true; bundle: AppBundle } | { ok: false; re
 const u32 = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 
 /**
- * Lets the thread go for one turn: what waits (input, drawing) runs, then the caller goes on. `scheduler.yield()` where
- * there is one, else a message to itself. Never `setTimeout(0)`: from the fifth nested timer on the browser waits at
- * least 4 ms (HTML's clamp), which made a paced read of 4096 revocations take 60% longer than the work, and a hidden
- * tab runs timers once a second.
+ * Lets the thread go for one turn: what waits (input, drawing, timers, port messages, IndexedDB answers) runs, then the
+ * caller goes on. A message to itself, queued behind the page's other tasks. Never `scheduler.yield()`: in Chromium its
+ * continuation outranks every normal task, so a paced read of 4096 revocations held the page's timers, its apps' broker
+ * ports and IndexedDB for the whole 1.8 s. Never `setTimeout(0)` but as the last resort: from the fifth nested timer on
+ * the browser waits at least 4 ms (HTML's clamp), which made that read take 60% longer than the work, and a hidden tab
+ * runs timers once a second.
  */
 export function yieldThread(): Promise<void> {
-  const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
-  if (typeof scheduler?.yield === "function") return scheduler.yield();
   if (typeof MessageChannel === "function") {
     return new Promise((resolve) => {
       const channel = new MessageChannel();

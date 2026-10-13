@@ -5,15 +5,16 @@ import { pacer, yieldThread } from "../src/appBundle";
 describe("letting the thread go", () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-  it("takes scheduler.yield where there is one", async () => {
+  it("never takes scheduler.yield: in Chromium its turn outranks the page's timers, port messages and IndexedDB answers", async () => {
     const yields = vi.fn(async () => {});
     vi.stubGlobal("scheduler", { yield: yields });
+    const posts = vi.spyOn(MessagePort.prototype, "postMessage");
     await yieldThread();
-    expect(yields).toHaveBeenCalledTimes(1);
+    expect(yields).not.toHaveBeenCalled();
+    expect(posts).toHaveBeenCalledTimes(1);
   });
 
-  it("is a message to itself otherwise, never a timer the browser clamps to 4 ms", async () => {
-    vi.stubGlobal("scheduler", undefined);
+  it("is a message to itself, never a timer the browser clamps to 4 ms", async () => {
     const timers = vi.spyOn(globalThis, "setTimeout");
     let after = false;
     const done = yieldThread().then(() => { after = true; });
@@ -29,8 +30,7 @@ describe("letting the thread go", () => {
   });
 
   it("a pacer lets it go once its slice of work has run, and answers at once before", async () => {
-    const yields = vi.fn(async () => {});
-    vi.stubGlobal("scheduler", { yield: yields });
+    const yields = vi.spyOn(MessagePort.prototype, "postMessage");
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
     const pause = pacer(10);
