@@ -1,9 +1,10 @@
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
+import { keyOrder, openPersistentIndexedDb, position, type PersistentIndexedDb } from "../src/runtime/storage";
+import { ROW } from "../src/runtime/rows";
 // covers: headless.storage
 
 /** Every disk sync the store asks for. */
@@ -374,7 +375,7 @@ describe("persistent IndexedDB", () => {
   it("refuses a snapshot from a newer format instead of starting empty", async () => {
     const dir = folder();
     const { serialize } = await import("node:v8");
-    writeFileSync(join(dir, "snapshot.bin"), serialize({ format: 2, databases: [] }));
+    writeFileSync(join(dir, "snapshot.bin"), serialize({ format: 3, databases: [] }));
     await expect(openPersistentIndexedDb(dir)).rejects.toThrow(/newer/);
     expect(readFileSync(join(dir, "snapshot.bin")).length).toBeGreaterThan(0);
   });
@@ -842,5 +843,167 @@ describe("persistent IndexedDB", () => {
     const second = await openPersistentIndexedDb(killed(dir));
     expect(await count(await db(second.factory))).toBe(3);
     await second.close();
+  });
+});
+
+/**
+ * The engine's messages keep their values in rows.db (SQLite), not in memory: a record holds its key and a row id, and
+ * the snapshot (format 2) the keys, rows and index entries. A daemon held every message of its history in memory.
+ */
+describe("messages kept in rows.db", () => {
+  const copyOf = (dir: string) => { const copy = folder(); cpSync(dir, copy, { recursive: true }); return copy; };
+  const rowCount = async (dir: string) => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const file = new DatabaseSync(join(dir, "rows.db"));
+    try { return Number((file.prepare("SELECT count(*) AS n FROM rows").get() as { n: number }).n); } finally { file.close(); }
+  };
+  const snapshotOf = (dir: string) => deserialize(readFileSync(join(dir, "snapshot.bin"))) as { format: number; databases: { name: string; stores: { name: string; records: unknown[]; rows?: { keys: unknown[]; ids: number[]; indexes: Record<string, unknown[]> } }[] }[] };
+  const messagesIn = (dir: string) => snapshotOf(dir).databases.find((d) => d.name === "ghostly")!.stores.find((s) => s.name === "messages")!;
+  const rawMessages = (factory: IDBFactory) => (factory as unknown as { _databases: Map<string, { rawObjectStores: Map<string, { records: { values(): Iterable<object> } }> }> })._databases.get("ghostly")!.rawObjectStores.get("messages")!.records;
+  const message = (i: number) => ({ linkId: `chat-${i % 3}`, id: `m${String(i).padStart(3, "0")}`, timestamp: 1000 + i, text: `message ${i} `.repeat(20), ...(i % 4 ? {} : { card: { kind: "task" } }) });
+  const all = async (factory: IDBFactory) => read((await db(factory)).transaction("messages").objectStore("messages").getAll());
+
+  it("a committed message's value lives in rows.db; the snapshot holds keys, rows and index entries; a restart reads the same", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    for (let i = 0; i < 20; i++) await tx(await db(store.factory), ["messages", "settings"], (s) => { s.messages.put(message(i)); s.settings.put({ v: i }, "k"); });
+    // The records in memory: a row each, the value read from it.
+    const records = [...rawMessages(store.factory).values()];
+    expect(records.every((record) => ROW in record)).toBe(true);
+    const before = await all(store.factory);
+    expect(before.map((m) => (m as { id: string }).id)).toHaveLength(20);
+    await store.compact();
+    const saved = messagesIn(dir);
+    expect(snapshotOf(dir).format).toBe(2);
+    expect(saved.records).toEqual([]);
+    expect(saved.rows!.keys).toHaveLength(20);
+    expect(saved.rows!.indexes.byLink).toHaveLength(20);
+    // Other stores keep their values inline.
+    expect(snapshotOf(dir).databases[0]!.stores.find((s) => s.name === "settings")!.records).toEqual([["k", { v: 19 }]]);
+    await store.close();
+    expect(await rowCount(dir)).toBe(20);
+
+    const again = await openPersistentIndexedDb(dir);
+    opened.push(again);
+    expect(await all(again.factory)).toEqual(before);
+    expect(await read((await db(again.factory)).transaction("messages").objectStore("messages").index("byLink").getAll("chat-1"))).toEqual(before.filter((m) => (m as { linkId: string }).linkId === "chat-1"));
+  });
+
+  it("a crash after commits replays the journal's values, and the next snapshot leaves one row per message", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    for (let i = 0; i < 10; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
+    await store.compact();
+    // Written over, removed one by one and by a range, after the snapshot: the journal has these, rows.db their values.
+    for (let i = 0; i < 5; i++) await tx(d, ["messages"], (s) => { s.messages.put({ ...message(i), text: "edited" }); });
+    await tx(d, ["messages"], (s) => { s.messages.delete(["chat-0", "m006"]); s.messages.delete(IDBKeyRange.bound(["chat-1", "m007"], ["chat-1", "m007"])); });
+    const crashed = copyOf(dir);
+    const expected = await all(store.factory);
+    expect(expected).toHaveLength(8);
+
+    const second = await openPersistentIndexedDb(crashed);
+    expect(second.recovered).toBe(true);
+    expect(await all(second.factory)).toEqual(expected);
+    // Folded at close (a whole snapshot, no transaction running): the old values of what was written over and removed,
+    // and the rows the killed process wrote that no snapshot named, are gone with it.
+    await second.compact();
+    await second.close();
+    expect(await rowCount(crashed)).toBe(8);
+    // The process that kept running drops what it wrote over as soon as its next snapshot is on disk.
+    await store.compact();
+    expect(await rowCount(dir)).toBe(8);
+  });
+
+  it("a cleared store and a deleted database leave no rows behind once a snapshot is written", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const d = await db(store.factory);
+    for (let i = 0; i < 6; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
+    await tx(d, ["messages"], (s) => { s.messages.clear(); });
+    await tx(d, ["messages"], (s) => { s.messages.put(message(99)); });
+    await store.compact();
+    expect(await rowCount(dir)).toBe(1);
+    await store.close();
+  });
+
+  it("writes a profile's snapshot of format 1 as format 2 at its first open, and exports format 1 with every value for a backup", async () => {
+    const dir = folder();
+    // As an older ghostly left it: every value inline.
+    const old = await openPersistentIndexedDb(dir, { rowsOnDisk: () => false });
+    for (let i = 0; i < 12; i++) await tx(await db(old.factory), ["messages"], (s) => { s.messages.put(message(i)); });
+    const values = await all(old.factory);
+    await old.compact();
+    await old.close();
+    expect(snapshotOf(dir).format).toBe(1);
+    expect(messagesIn(dir).records).toHaveLength(12);
+
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    expect(snapshotOf(dir).format).toBe(2);
+    expect(messagesIn(dir).records).toEqual([]);
+    expect(await rowCount(dir)).toBe(12);
+    expect(await all(store.factory)).toEqual(values);
+
+    // A backup's store: format 1, which any ghostly restores, with what rows.db held.
+    const exported = join(folder(), "store.bin");
+    await store.exportSnapshot(exported);
+    const copy = folder();
+    cpSync(exported, join(copy, "snapshot.bin"));
+    expect(snapshotOf(copy).format).toBe(1);
+    const elsewhere = await openPersistentIndexedDb(copy, { rowsOnDisk: () => false });
+    opened.push(elsewhere);
+    expect(await all(elsewhere.factory)).toEqual(values);
+  });
+
+  it("refuses a snapshot that names rows when rows.db is gone, instead of opening a profile with no messages", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    await tx(await db(store.factory), ["messages"], (s) => { s.messages.put(message(1)); });
+    await store.compact();
+    await store.close();
+    for (const file of ["rows.db", "rows.db-wal", "rows.db-shm"]) rmSync(join(dir, file), { force: true });
+    await expect(openPersistentIndexedDb(dir)).rejects.toThrow(/missing rows\.db/);
+  });
+
+  it("restores every index of a store kept on disk from the snapshot, cursors both ways", async () => {
+    const dir = folder();
+    const first = await openPersistentIndexedDb(dir);
+    const d = await (async () => {
+      (await db(first.factory)).close();
+      return new Promise<IDBDatabase>((resolve, reject) => {
+        const request = first.factory.open("ghostly", 2);
+        request.onupgradeneeded = () => { const m = request.transaction!.objectStore("messages"); m.createIndex("byLinkTime", ["linkId", "timestamp"]); m.createIndex("byCard", "card.kind"); };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    })();
+    for (let i = 0; i < 30; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(29 - i)); });
+    d.close();
+    await first.compact();
+    await first.close();
+
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const reopened = await new Promise<IDBDatabase>((resolve, reject) => { const r = store.factory.open("ghostly", 2); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const messages = reopened.transaction("messages").objectStore("messages");
+    const newest = await new Promise<string[]>((resolve, reject) => {
+      const ids: string[] = [];
+      const request = messages.index("byLinkTime").openCursor(IDBKeyRange.bound(["chat-2", 0], ["chat-2", Infinity]), "prev");
+      request.onsuccess = () => { const cursor = request.result; if (!cursor || ids.length === 3) return resolve(ids); ids.push((cursor.value as { id: string }).id); cursor.continue(); };
+      request.onerror = () => reject(request.error);
+    });
+    expect(newest).toEqual(["m029", "m026", "m023"]);
+    expect((await read(messages.index("byCard").getAll("task"))).map((m) => (m as { id: string }).id)).toEqual(["m000", "m012", "m024", "m004", "m016", "m028", "m008", "m020"]);
+    expect(await read(messages.index("byLink").count("chat-0"))).toBe(10);
+  });
+
+  it("finds an index entry's record by its key when it is not the record's own key object", () => {
+    const keys = [["a", "1"], ["a", "2"], ["b", "1"]];
+    const order = keyOrder((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0));
+    expect(position(keys, ["a", "2"], order)).toBe(1);
+    expect(position(keys, ["b", "1"], order)).toBe(2);
+    expect(() => position(keys, ["c", "1"], order)).toThrow(/does not hold/);
   });
 });

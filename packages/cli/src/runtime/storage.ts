@@ -3,6 +3,7 @@ import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readF
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
+import { loadSqlite, openRowFile, ROW, rowRecords, type RowFile, type RowRecord } from "./rows";
 
 /**
  * IndexedDB for the engine on Node, kept on disk.
@@ -19,17 +20,27 @@ import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
  * - a close leaves a short journal too, with a mark at its end that says the store was closed: the rows are on disk
  *   already, and writing the whole snapshot again for them cost a second or more of every command on a large profile;
  * - a journal begins by naming the snapshot it follows: one found beside another snapshot is in that snapshot already
- *   (the process died between writing the snapshot and removing the journal), and is not replayed over it.
+ *   (the process died between writing the snapshot and removing the journal), and is not replayed over it;
+ * - the engine's messages keep their values in `rows.db` (./rows.ts), not in memory: their records hold a key and a row
+ *   id, the snapshot (format 2) their keys, row ids and index entries. A committed message's value goes to its row
+ *   right after the journal has it; a row goes once a snapshot that no longer names it is on disk. A profile's snapshot
+ *   of format 1 (values inline) is written as format 2 at its first open; a Node without `node:sqlite` keeps format 1.
  *
  * Only one process may hold a profile's store: the caller takes the profile lock first (see `profiles.ts`).
  * fake-indexeddb is pinned: this reaches into its raw classes, and `storage.test.ts` checks them.
  */
 
 type Key = unknown;
-type Op =
+/**
+ * What a transaction did to a store kept on disk, besides what the journal gets: the store, the record a put left in
+ * it, and the rows of the records it wrote over or removed (`dead`).
+ */
+interface OnDisk { target?: RawStore; record?: RawRecord; dead?: number[] }
+type Op = (
   | { db: string; store: string; kind: "put"; key: Key; value: unknown }
   | { db: string; store: string; kind: "delete"; key: Key }
-  | { db: string; store: string; kind: "clear" };
+  | { db: string; store: string; kind: "clear" }
+) & OnDisk;
 
 interface RawRecord { key: Key; value: unknown }
 interface RawIndex {
@@ -38,7 +49,7 @@ interface RawIndex {
 }
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
 interface RawRecordStore {
-  values(): Iterable<RawRecord>; clear(): unknown;
+  values(range?: unknown): Iterable<RawRecord>; clear(): unknown;
   get(key: Key): RawRecord | undefined;
   put(record: RawRecord, noOverwrite?: boolean): RawRecord | undefined;
   delete(key: Key): RawRecord[];
@@ -63,12 +74,21 @@ interface RawClasses {
 }
 
 interface SnapshotIndex { name: string; keyPath: string | string[]; multiEntry: boolean; unique: boolean }
-interface SnapshotStore { name: string; keyPath: string | string[] | null; autoIncrement: boolean; keyGenerator: number | null; indexes: SnapshotIndex[]; records: [Key, unknown][] }
-/** `journal`: the name a journal that follows this snapshot begins with (absent in one an older version wrote). */
-interface Snapshot { format: 1; journal?: string; databases: { name: string; version: number; stores: SnapshotStore[] }[] }
+/**
+ * A store kept on disk (format 2): its records' keys in key order, each one's row (-1 for one kept inline: a value with
+ * a Blob), the inline values by position, and each index's entries in its own order, as [index key, record position].
+ */
+interface SnapshotRows { keys: Key[]; ids: number[]; inline: [number, unknown][]; indexes: Record<string, [Key, number][]> }
+interface SnapshotStore { name: string; keyPath: string | string[] | null; autoIncrement: boolean; keyGenerator: number | null; indexes: SnapshotIndex[]; records: [Key, unknown][]; rows?: SnapshotRows }
+/**
+ * `journal`: the name a journal that follows this snapshot begins with (absent in one an older version wrote).
+ * `format`: 1, every value inline; 2, the stores kept on disk have theirs in `rows.db`. An older ghostly refuses 2.
+ */
+interface Snapshot { format: 1 | 2; journal?: string; databases: { name: string; version: number; stores: SnapshotStore[] }[] }
 
 const SNAPSHOT = "snapshot.bin";
 const JOURNAL = "journal.bin";
+const ROWS = "rows.db";
 /** A journal past this is folded into the snapshot at the next quiet moment. */
 const COMPACT_BYTES = 32 * 1024 * 1024;
 /** A journal up to this is kept at close and at start: replaying it costs less than writing the snapshot again. */
@@ -100,18 +120,40 @@ export interface PersistentIndexedDb {
   close(): Promise<void>;
   /** Bytes of the journal now, for tests and `ghostly status`. */
   journalBytes(): number;
+  /**
+   * The whole store as one snapshot of format 1 (every value inline, `rows.db` read), written to `path`: a backup's
+   * store, which any ghostly can restore.
+   */
+  exportSnapshot(path: string): Promise<void>;
+}
+
+export interface StoreOptions {
+  /** The stores whose values are kept in `rows.db`: by default the engine's messages. */
+  rowsOnDisk?: (db: string, store: string) => boolean;
 }
 
 /**
  * Opens the store in `dir` (created 0700; files 0600) and installs it as this process's `indexedDB` and
  * `IDBKeyRange`. Call once, before anything touches IndexedDB.
  */
-export async function openPersistentIndexedDb(dir: string): Promise<PersistentIndexedDb> {
+export async function openPersistentIndexedDb(dir: string, options: StoreOptions = {}): Promise<PersistentIndexedDb> {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const factory = new IDBFactory();
   const raw = factory as unknown as { _databases: Map<string, RawDatabase> };
   const classes = await probeClasses(factory);
   dropIndexEntriesByRecord(classes, (a, b) => factory.cmp(a, b));
+  const order = keyOrder((a, b) => factory.cmp(a, b));
+
+  // Found before it is opened: opening makes it, and a snapshot that names rows needs the file it named.
+  const rowsPath = join(dir, ROWS);
+  const rowsFound = existsSync(rowsPath);
+  const sqlite = await loadSqlite();
+  const rows: RowFile | null = sqlite ? openRowFile(sqlite, rowsPath) : null;
+  const made = rows ? rowRecords(rows) : null;
+  const onDisk = options.rowsOnDisk ?? ((_db: string, store: string) => store === "messages");
+  const disk = (store: RawStore) => rows !== null && onDisk(store.rawDatabase.name, store.name);
+  /** Rows of records written over or removed by committed transactions, dropped once a snapshot without them is on disk. */
+  const dead: number[] = [];
 
   let writing = true;
   let restoring = true;
@@ -131,7 +173,11 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
   const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
   const saved = snapshotFound ? (deserialize(readFileSync(snapshotPath)) as Snapshot) : null;
-  if (saved) restore(classes, raw._databases, saved, keyOrder((a, b) => factory.cmp(a, b)));
+  try {
+    if (saved) restore(classes, raw._databases, saved, order, { rows, made, rowsFound, onDisk });
+  } catch (error) { rows?.close(); throw error; }
+  // A snapshot of format 1 whose messages are to be kept on disk: written as format 2 at this open.
+  const moving = !!rows && saved?.format === 1 && saved.databases.some((db) => db.stores.some((store) => store.records.length > 0 && onDisk(db.name, store.name)));
   /** The name of the snapshot on disk, which its journal begins with. */
   let snapshotName = saved?.journal;
   let journal = journalFound ? readFileSync(journalPath) : null;
@@ -140,14 +186,25 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   // what came between (an upgrade that rewrote them). The process that left it died while it folded.
   const folded = named !== undefined && snapshotName !== undefined && named !== snapshotName;
   if (folded) { rmSync(journalPath, { force: true }); journal = null; }
-  const replayed = journal ? replay(raw._databases, journal, keyOrder((a, b) => factory.cmp(a, b))) : { end: 0, closed: !folded };
+  const replayed = journal ? replay(raw._databases, journal, order) : { end: 0, closed: !folded };
   restoring = false;
   /** Whether the journal on disk says the store is closed: nothing was written since its mark, or there is none. */
   let marked = replayed.closed;
   // A journal cut short is never appended to: what came after the torn bytes could not be read back. Nor one that
   // does not name this snapshot (an older version's).
   const kept = !!journal && named !== undefined && named === snapshotName && replayed.end === journal.length && journal.length <= KEEP_BYTES;
-  if ((journal && !kept) || !snapshotFound) await writeSnapshot();
+  const rewrite = (journal && !kept) || !snapshotFound || moving;
+  if (rewrite) await writeSnapshot();
+  if (rows) {
+    // Rows nothing names (a process that died between writing a row and the snapshot after it, a database deleted):
+    // gone once they are many. The snapshot on disk names its rows still, when this open did not write it.
+    const keep = new Set<number>();
+    for (const db of raw._databases.values()) for (const store of db.rawObjectStores.values()) {
+      if (disk(store)) for (const record of store.records.values()) { const id = (record as RowRecord)[ROW]; if (id !== undefined) keep.add(id); }
+    }
+    if (!rewrite) for (const db of saved?.databases ?? []) for (const store of db.stores) for (const id of store.rows?.ids ?? []) if (id >= 0) keep.add(id);
+    if (rows.count() > keep.size * 1.1 + 1000) rows.sweep(keep);
+  }
 
   // Record what each read-write transaction does, keyed by its rollback log (one array per transaction).
   const storeProto = classes.ObjectStore.prototype as RawStore;
@@ -159,18 +216,26 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     if (!ops) pending.set(log, (ops = []));
     return ops;
   };
+  // A store kept on disk: the records a write replaces or removes are found first, for their rows.
+  const rowsOf = (records: Iterable<RawRecord | undefined>) => { const ids: number[] = []; for (const record of records) { const id = (record as RowRecord | undefined)?.[ROW]; if (id !== undefined) ids.push(id); } return ids; };
   storeProto.storeRecord = function (this: RawStore, record, noOverwrite, rollbackLog) {
+    const kept = !!rollbackLog && !restoring && disk(this);
+    const before = kept && record.key !== undefined ? this.records.get(record.key) : undefined;
     const key = storeRecord.call(this, record, noOverwrite, rollbackLog);
-    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "put", key, value: record.value });
+    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "put", key, value: record.value, ...(kept && { target: this, record, dead: rowsOf([before]) }) });
     return key;
   };
   storeProto.deleteRecord = function (this: RawStore, key, rollbackLog) {
+    const kept = !!rollbackLog && !restoring && disk(this);
+    const gone = kept ? rowsOf(key instanceof IDBKeyRange ? this.records.values(key) : [this.records.get(key)]) : [];
     deleteRecord.call(this, key, rollbackLog);
-    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "delete", key: keyToDisk(key) });
+    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "delete", key: keyToDisk(key), ...(kept && { dead: gone }) });
   };
   storeProto.clear = function (this: RawStore, rollbackLog) {
+    const kept = !!rollbackLog && !restoring && disk(this);
+    const gone = kept ? rowsOf(this.records.values()) : [];
     clear.call(this, rollbackLog);
-    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "clear" });
+    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "clear", ...(kept && { dead: gone }) });
   };
 
   // The transaction's `complete` is where it becomes durable: written before the engine hears of it.
@@ -181,7 +246,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
       if (this.mode === "versionchange") schemaDirty = true;
       else {
         const ops = pending.get(this._rollbackLog);
-        if (ops?.length) append(ops, this.durability === "relaxed");
+        if (ops?.length) { append(ops, this.durability === "relaxed"); toRows(ops); }
       }
       pending.delete(this._rollbackLog);
       if (schemaDirty) void enqueue(writeSnapshot);
@@ -204,12 +269,33 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     return request;
   };
 
-  function append(ops: Op[], lazy: boolean) {
+  function append(all: Op[], lazy: boolean) {
+    const ops = all.map(journalOp);
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
       writeEntry(serialize(ops), lazy);
       return;
     }
     void enqueue(async () => writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy));
+  }
+
+  /**
+   * After the journal has a committed transaction: each message it left in a store kept on disk gets its row, and its
+   * value is read from there; the rows of what it wrote over or removed are dead. A record the same transaction wrote
+   * over again, or a value with a Blob, stays in memory until a snapshot. A row that cannot be written leaves the value
+   * in memory: the journal has it, and the next snapshot tries again.
+   */
+  function toRows(ops: Op[]) {
+    if (!rows || !made || !writing) return;
+    for (const op of ops) if (op.dead?.length) dead.push(...op.dead);
+    try {
+      rows.batch(() => {
+        for (const op of ops) {
+          if (op.kind !== "put" || !op.record || !op.target) continue;
+          if (op.target.records.get(op.key) !== op.record || (op.record as RowRecord)[ROW] !== undefined || hasBlob(op.value)) continue;
+          made.move(op.record as RowRecord, rows.add(op.value));
+        }
+      });
+    } catch (error) { failed(error); }
   }
 
   function enqueue(work: () => Promise<void> | void): Promise<void> {
@@ -261,28 +347,92 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     }
   }
 
-  async function snapshotToDisk() {
-    const name = randomBytes(8).toString("hex");
-    const snapshot: Snapshot = { format: 1, journal: name, databases: [] };
+  /**
+   * What is held, as a snapshot. `inline`: every value in it (format 1, `exportSnapshot`); otherwise the stores kept on
+   * disk give their keys, rows and index entries (format 2), and a record with no row yet gets one here.
+   */
+  async function capture(journalName: string | undefined, inline: boolean): Promise<Snapshot> {
+    const snapshot: Snapshot = { format: 1, ...(journalName !== undefined && { journal: journalName }), databases: [] };
+    // The stores kept on disk first, in one pass with no turn in between: what the rows sweep keeps is what this holds.
+    const onRows = new Map<RawStore, SnapshotRows>();
+    if (!inline) for (const db of raw._databases.values()) for (const store of db.rawObjectStores.values()) if (!store.deleted && db.name !== PROBE && disk(store)) onRows.set(store, rowsOfStore(store));
+    if (onRows.size) snapshot.format = 2;
     for (const db of raw._databases.values()) {
       if (db.name === PROBE) continue;
       const stores: SnapshotStore[] = [];
       for (const store of db.rawObjectStores.values()) {
         if (store.deleted) continue;
+        const live = [...store.rawIndexes.values()].filter((index) => !index.deleted);
+        const meta = {
+          name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
+          indexes: live.map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
+        };
+        const kept = onRows.get(store);
+        if (kept) {
+          for (const item of kept.inline) item[1] = await blobsToDisk(item[1]);
+          stores.push({ ...meta, records: [], rows: kept });
+          continue;
+        }
         const records: [Key, unknown][] = [];
         for (const record of store.records.values()) records.push([record.key, await blobsToDisk(record.value)]);
-        stores.push({
-          name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
-          indexes: [...store.rawIndexes.values()].filter((index) => !index.deleted).map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
-          records,
-        });
+        stores.push({ ...meta, records });
       }
       snapshot.databases.push({ name: db.name, version: db.version, stores });
     }
-    const temporary = snapshotPath + ".tmp";
-    const fd = openSync(temporary, "w", 0o600);
-    try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(temporary, snapshotPath);
+    return snapshot;
+  }
+
+  /** A store kept on disk, as format 2 has it (its Blob values still to be made bytes): taken with no turn in the middle. */
+  function rowsOfStore(store: RawStore): SnapshotRows {
+    const indexes = [...store.rawIndexes.values()].filter((index) => !index.deleted);
+    const keys: Key[] = [], ids: number[] = [], inline: [number, unknown][] = [], at = new Map<unknown, number>();
+    rows!.batch(() => {
+      for (const record of store.records.values()) {
+        let id = (record as RowRecord)[ROW];
+        if (id === undefined && !hasBlob(record.value)) made!.move(record as RowRecord, (id = rows!.add(record.value)));
+        at.set(record.key, keys.length);
+        if (id === undefined) inline.push([keys.length, record.value]);
+        keys.push(record.key);
+        ids.push(id ?? -1);
+      }
+    });
+    const entries: Record<string, [Key, number][]> = {};
+    for (const index of indexes) {
+      // An entry holds its record's key itself (`value: record.key`): found by identity, else by order.
+      entries[index.name] = [...index.records.values()].map((entry): [Key, number] => [entry.key, at.get(entry.value) ?? position(keys, entry.value, order)]);
+    }
+    return { keys, ids, inline, indexes: entries };
+  }
+
+  async function snapshotToDisk() {
+    const name = randomBytes(8).toString("hex");
+    // Rows dead before this snapshot is taken are in neither it nor what is held: they go once it is on disk. Taken
+    // while no transaction runs (at close, always), the snapshot names every row anything can still read (an open
+    // transaction's rollback puts back records it replaced): every older row it does not name goes too.
+    const quiet = !!rows && !busy();
+    const upTo = quiet ? rows!.last() : 0;
+    const dropping = dead.splice(0);
+    let snapshot: Snapshot;
+    try {
+      snapshot = await capture(name, false);
+      // The rows it names reach the disk before it takes the place of the snapshot (and journal) that had their values.
+      rows?.sync();
+      const temporary = snapshotPath + ".tmp";
+      const fd = openSync(temporary, "w", 0o600);
+      try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
+      renameSync(temporary, snapshotPath);
+    } catch (error) {
+      dead.unshift(...dropping);
+      throw error;
+    }
+    try {
+      rows?.drop(dropping);
+      if (quiet) {
+        const keep = new Set<number>();
+        for (const db of snapshot.databases) for (const store of db.stores) for (const id of store.rows?.ids ?? []) if (id >= 0) keep.add(id);
+        rows!.sweep(keep, upTo);
+      }
+    } catch (error) { process.stderr.write(`ghostly: storage: old rows not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
     snapshotName = name;
     unsaved = false;
     // The snapshot holds what the journal's entries said, the relaxed ones too.
@@ -314,9 +464,13 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     const until = Date.now() + CLOSE_WAIT_MS;
     for (let quiet = 0; quiet < 2 && Date.now() < until; ) {
       await new Promise((resolve) => setImmediate(resolve));
-      const busy = [...raw._databases.values()].some((db) => db.transactions.some((transaction) => (transaction as RawTransaction)._state !== "finished"));
-      quiet = busy ? 0 : quiet + 1;
+      quiet = busy() ? 0 : quiet + 1;
     }
+  }
+
+  /** Whether a transaction is running or waiting to. */
+  function busy() {
+    return [...raw._databases.values()].some((db) => db.transactions.some((transaction) => (transaction as RawTransaction)._state !== "finished"));
   }
 
   const installed = globalThis as unknown as Record<string, unknown>;
@@ -328,19 +482,47 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
     recovered: !replayed.closed,
     flush: () => queue,
     async compact() {
+      // After the transactions running now: the fold is whole, and rows.db is swept with it.
+      await settled();
       // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
       let thrown: { error: unknown } | null = null;
       await enqueue(() => writeSnapshot().catch((error: unknown) => { thrown = { error }; throw error; }));
       if (thrown) throw (thrown as { error: unknown }).error;
     },
     async close() {
+      // Once: what comes after (a second close) finds the rows closed, and nothing left to write.
+      if (!writing) return;
       await settled();
       await enqueue(leave);
       writing = false;
       if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
+      rows?.close();
     },
     journalBytes,
+    async exportSnapshot(path: string) {
+      await settled();
+      const snapshot = await capture(undefined, true);
+      const fd = openSync(path, "w", 0o600);
+      try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
+    },
   };
+}
+
+/** An op as the journal keeps it: what the store kept on disk needs in memory stays out. */
+function journalOp(op: Op): Op {
+  if (op.kind === "put") return { db: op.db, store: op.store, kind: op.kind, key: op.key, value: op.value };
+  if (op.kind === "delete") return { db: op.db, store: op.store, kind: op.kind, key: op.key };
+  return { db: op.db, store: op.store, kind: op.kind };
+}
+
+/** Where a key is among keys in order (an index entry whose record key is not the record's own object). */
+export function position(keys: Key[], key: Key, cmp: (a: Key, b: Key) => number): number {
+  for (let low = 0, high = keys.length - 1; low <= high;) {
+    const middle = (low + high) >>> 1, side = cmp(keys[middle], key);
+    if (side === 0) return middle;
+    if (side < 0) low = middle + 1; else high = middle - 1;
+  }
+  throw new Error("An index names a record its store does not hold");
 }
 
 /** Writes every byte: one write may take only a part (a disk nearly full). */
@@ -480,8 +662,13 @@ export function keyOrder(cmp: (a: Key, b: Key) => number): (a: Key, b: Key) => n
  * built whole from sorted arrays: storing record by record compared every key down the tree, a 70,000-message profile
  * took seconds. A snapshot not in order (never written so) is stored record by record.
  */
-function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot, cmp: (a: Key, b: Key) => number) {
-  if (snapshot?.format !== 1) throw new Error("This profile was last used by a newer version of ghostly (its store has a format this version does not read). Update ghostly to open it.");
+interface RestoreRows { rows: RowFile | null; made: ReturnType<typeof rowRecords> | null; rowsFound: boolean; onDisk: (db: string, store: string) => boolean }
+
+function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot, cmp: (a: Key, b: Key) => number, disk: RestoreRows) {
+  if (snapshot?.format !== 1 && snapshot?.format !== 2) throw new Error("This profile was last used by a newer version of ghostly (its store has a format this version does not read). Update ghostly to open it.");
+  if (snapshot.format === 2 && !disk.rows) throw new Error(`This profile keeps its messages in rows.db, which needs Node 22.13 or newer (this is ${process.version}). Update Node to open it.`);
+  if (snapshot.format === 2 && !disk.rowsFound) throw new Error("This profile's store is missing rows.db (beside snapshot.bin): its messages cannot be read. Restore the profile from a backup.");
+  const intern = interner();
   for (const saved of snapshot.databases) {
     const db = new classes.Database(saved.name, saved.version);
     for (const s of saved.stores) {
@@ -493,7 +680,18 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
         store.rawIndexes.set(i.name, index);
       }
       db.rawObjectStores.set(s.name, store);
-      const records = s.records.map(([key, value]): RawRecord => ({ key, value: blobsFromDisk(value) }));
+      if (s.rows) {
+        const kept = s.rows;
+        const records: RawRecord[] = kept.keys.map((key, at) => (kept.ids[at] >= 0 ? disk.made!.make(intern(key), kept.ids[at]) : { key: intern(key), value: undefined }));
+        for (const [at, value] of kept.inline) records[at] = { key: records[at].key, value: blobsFromDisk(value) };
+        fill(store.records, records);
+        for (const index of store.rawIndexes.values()) {
+          const entries = kept.indexes[index.name];
+          fill(index.records, entries ? entries.map(([key, at]): RawRecord => ({ key: intern(key), value: records[at].key })) : indexEntries(index, records, cmp));
+        }
+        continue;
+      }
+      const records = s.records.map(([key, value]): RawRecord => ({ key: disk.rows && disk.onDisk(saved.name, s.name) ? intern(key) : key, value: blobsFromDisk(value) }));
       if (records.some((record, at) => at > 0 && cmp(records[at - 1].key, record.key) >= 0)) {
         for (const record of records) store.storeRecord(record, false);
         continue;
@@ -503,6 +701,20 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
     }
     databases.set(saved.name, db);
   }
+}
+
+/**
+ * One string for every copy of a chat's id among the keys (a message's key and its index entries each name its chat):
+ * a snapshot read back gives each its own.
+ */
+function interner(): (key: Key) => Key {
+  const pool = new Map<string, string>();
+  const one = (text: string) => { const held = pool.get(text); if (held !== undefined) return held; pool.set(text, text); return text; };
+  return (key) => {
+    if (typeof key === "string") return key.length <= 64 ? one(key) : key;
+    if (Array.isArray(key) && typeof key[0] === "string" && key[0].length <= 64) key[0] = one(key[0]);
+    return key;
+  };
 }
 
 /**
