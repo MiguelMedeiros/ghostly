@@ -110,7 +110,7 @@ import {
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
-import { Apps, type AppDataExport, type AppDataExportText, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
+import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
 import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
@@ -2199,6 +2199,7 @@ export class GhostlyNode implements EngineImplementation {
   appFetchFiles(params: { ref: string }): Promise<AppRunStatus> { return this.appStore.fetchFiles(params); }
   appEntry(params: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> { return this.appStore.entry(params); }
   appFile(params: { ref: string; path: string; digest?: string }): Promise<Uint8Array> { return this.appStore.file(params); }
+  appFileAt(params: { ref: string; path: string; digest?: string }): Promise<AppFileAt | null> { return this.appStore.fileAt(params); }
   appStorageGet(params: { ref: string; scope: string; key: string; digest?: string }): Promise<{ value: import("@ghostly/core").JsonValue } | null> { return this.appStore.storageGet(params); }
   appStorageSet(params: { ref: string; scope: string; key: string; value: unknown; digest?: string }): Promise<void> { return this.appStore.storageSet(params); }
   appStorageDelete(params: { ref: string; scope: string; key: string; digest?: string }): Promise<void> { return this.appStore.storageDelete(params); }

@@ -400,6 +400,11 @@ fn suggested_name(name: &str) -> String {
     stem.trim_end().chars().chain(extension).collect()
 }
 
+/// The folder the file storage keeps its spaces in, for a reader elsewhere in Rust (an app window's `file`).
+pub fn base_of<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    Ok(store(app)?.base.clone())
+}
+
 fn store<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<tauri::State<'_, FileStore>, String> {
