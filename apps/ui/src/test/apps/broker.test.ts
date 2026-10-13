@@ -286,6 +286,35 @@ describe("requests", () => {
     expect(host.calls.filter((c) => c.op === "file").every((c) => c.ref === REF)).toBe(true);
   });
 
+  it("file: at most a bundle's worth of bytes a second, read one file at a time", async () => {
+    // 50 reads a second of a 16 MiB file made the page copy 800 MB a second and stall for most of a second.
+    const { host, broker, run, posted, clock } = setup();
+    run();
+    const big = new Uint8Array(6 * 1024 * 1024);
+    host.files.set(REF, new Map([["big.bin", big], ["small.txt", new Uint8Array([7])]]));
+    let reading = 0;
+    let most = 0;
+    const file = host.file;
+    host.file = async (ref, path) => {
+      most = Math.max(most, ++reading);
+      try { return await file(ref, path); } finally { reading--; }
+    };
+    clock.t += 1_001;
+    for (let id = 1; id <= 10; id++) broker.message({ id, type: "file", args: ["big.bin"] });
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 1).length).toBe(10));
+    const answers = (from: number) => posted.filter((p) => (p.message.id as number) >= from).map((p) => p.message);
+    // 6 + 6 + 6 MiB: the third read starts under 16 MiB and is answered whole; the rest are refused unread.
+    expect(answers(1).filter((a) => a.ok === true).length).toBe(3);
+    expect(answers(1).filter((a) => a.error === "too-fast").length).toBe(7);
+    expect(host.calls.filter((c) => c.op === "file").length).toBe(3);
+    expect(most).toBe(1);
+    expect(MINI_APP_LIMITS.fileBytesPerSecond).toBe(16 * 1024 * 1024);
+    // A second later the budget is whole again.
+    clock.t += 1_001;
+    broker.message({ id: 100, type: "file", args: ["small.txt"] });
+    await vi.waitFor(() => expect(posted.find((p) => p.message.id === 100)?.message).toMatchObject({ ok: true }));
+  });
+
   it("close ends the app, and closes it in the chat", async () => {
     const { host, run, ask, stops } = setup();
     run();
