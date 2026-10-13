@@ -48,11 +48,34 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-members").textContent).toBe("1 member");
   });
 
-  it("says who invited me while it is an invitation", () => {
-    openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }));
+  it("says who invited me while it is an invitation, with Accept and Decline and nothing a member has", async () => {
+    // On a phone the page is the only way in from the row: it was an empty chat with a field that took nothing.
+    const { user, engine } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }));
+    engine.on("acceptGroupInvitation", () => { throw new Error("The contact who invited you is not connected. Try again when they are."); }).on("declineGroupInvitation", () => undefined);
     expect(screen.getByTestId("group-chat")).toHaveAttribute("data-status", "invitation");
     expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation from Alice");
-    expect(composer()).toBeDisabled();
+    const card = screen.getByTestId("group-invitation");
+    expect(card).toHaveTextContent("Friends");
+    expect(card).toHaveTextContent("Invited by Alice · 3 members");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("group-options"));
+    expect(screen.queryByTestId("chat-search-open")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-options-menu")).not.toHaveTextContent("Move to folder");
+    await user.keyboard("{Escape}");
+    await user.click(within(card).getByTestId("group-accept"));
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(await within(card).findByTestId("group-answer-refused")).toHaveTextContent("Alice is not connected yet. Try again in a moment.");
+    await user.click(within(card).getByTestId("group-decline"));
+    expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+  });
+
+  it.each([["removed", "removed"], ["no status", undefined]] as const)("asks a member invited back over the history kept from before (%s)", async (_, status) => {
+    openGroup(groupView({ status, canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }),
+      [stored({ id: "old", text: "from before", member: ALICE })]);
+    expect(screen.getByTestId("group-invitation")).toHaveTextContent("Invited by Alice · 3 members");
+    expect(screen.getByTestId("group-accept")).toBeInTheDocument();
+    expect(await screen.findByText("from before")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
   it("says an invitation came from a contact when it does not know their name", () => {

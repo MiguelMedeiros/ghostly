@@ -27,6 +27,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { setChatFolder } from "../lib/chatFolders";
 import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
+import { GroupInvitationCard } from "../components/GroupInvitation";
 import { authorName, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
@@ -381,7 +382,7 @@ export function GroupChat() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
   const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
-  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation?.viaLink && !group.status), t, returnFocus: optionsRef });
+  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
   const pageShown = usePageShown();
   useEffect(() => {
@@ -495,6 +496,12 @@ export function GroupChat() {
   // A first join through a link has the page to itself (the card). Someone removed from a community who opened its link
   // again still has the group as it was kept here: its history stays in the page, and the wait is a line above it.
   const joiningByLink = !!group.invitation?.viaLink && !group.status;
+  // A contact's invitation, not answered yet (or on its way): its page says who invited and to what, with Accept and
+  // Decline, and has nothing a member has (a field, Search, a folder). Over the history kept for a member invited back.
+  const invited = !!group.invitation && !group.invitation.viaLink;
+  // A member invited back keeps what was said while they were in (the engine gives such a group no status).
+  const invitedFresh = invited && !group.status && messages.length === 0;
+  const noTimeline = joiningByLink || invitedFresh;
   const knockingAgain = !!group.invitation?.viaLink && !!group.status;
   const waitingWith = group.invitation?.waiting ?? 0;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
@@ -579,8 +586,8 @@ export function GroupChat() {
             <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
               <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>
               <MuteMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
-              <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />
-              {!joiningByLink && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
+              {!invited && <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />}
+              {!noTimeline && !invited && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
               {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
               <MenuSeparator />
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
@@ -592,8 +599,8 @@ export function GroupChat() {
         </div>
       </div>
 
-      {!joiningByLink && <ChatSearchBar search={search} />}
-      {!joiningByLink && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
+      {!noTimeline && <ChatSearchBar search={search} />}
+      {!noTimeline && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
 
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
@@ -613,7 +620,9 @@ export function GroupChat() {
       </div>}
 
 
-      {joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
+      {invited && !invitedFresh && <GroupInvitationCard group={group} compact />}
+      {invitedFresh ? <GroupInvitationCard group={group} />
+      : joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
         <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
             <svg className={noLinks ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
@@ -659,9 +668,9 @@ export function GroupChat() {
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
       </div>}
 
-      {!joiningByLink && forwarding.bar}
+      {!noTimeline && forwarding.bar}
       {forwarding.dialog}
-      {!joiningByLink && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} textBytes={16_384} recipient={group.name} mentions={mentions}
+      {!joiningByLink && !invited && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} textBytes={16_384} recipient={group.name} mentions={mentions}
         onTyping={group.profile === "mesh" ? onTyping : undefined}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: messageSnippet(replyingTo, t),
           mine: replyingTo.sender === "me", ...(replyingTo.sender === "peer" && replyingTo.member && { member: replyingTo.member }), onCancel: () => setReplyingTo(null) } : undefined}
