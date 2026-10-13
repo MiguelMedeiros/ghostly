@@ -13,12 +13,16 @@ const text = readFileSync(resolve(root, ".github/workflows/merge-queue.yml"), "u
 const condition = (text.match(/^ {2}bases:\n(?: {4}#.*\n| {4}name:.*\n)*? {4}if: >-\n((?: {6}.+\n)+)/m)?.[1] ?? "").replace(/\s+/g, " ").trim();
 
 type Event = { event_name: string; event: Record<string, unknown> };
+const repository = "MiguelMedeiros/ghostly";
 /** The operators the condition uses (==, !=, &&, ||, startsWith) behave as in JavaScript for these values. */
 const wakes = ({ event_name, event }: Event) =>
-  Boolean(new Function("github", "startsWith", `return (${condition.replace(/!=|==/g, (m) => `${m}=`)});`)({ event_name, event }, (s: string, p: string) => String(s).startsWith(p)));
+  Boolean(new Function("github", "startsWith", `return (${condition.replace(/!=|==/g, (m) => `${m}=`)});`)({ event_name, event, repository }, (s: string, p: string) => String(s).startsWith(p)));
 
 const push = (type: string): Event => ({ event_name: "push", event: { sender: { type, login: type === "Bot" ? "ghostly-merge-queue-mm[bot]" : "MiguelMedeiros" } } });
-const ci = (conclusion: string, event = "pull_request"): Event => ({ event_name: "workflow_run", event: { workflow_run: { event, conclusion } } });
+const ci = (conclusion: string, event = "pull_request", from = repository): Event => ({
+  event_name: "workflow_run",
+  event: { workflow_run: { event, conclusion, head_repository: { full_name: from } } },
+});
 
 describe("merge-queue.yml wakes the train", () => {
   it("found the condition", () => expect(condition).toContain("github.event_name"));
@@ -41,6 +45,13 @@ describe("merge-queue.yml wakes the train", () => {
   // train when it ends. The train's own cancels of a boarded batch's pull requests would wake it once each.
   it("not for a pull request's CI run that was cancelled", () => {
     expect(wakes(ci("cancelled"))).toBe(false);
+  });
+
+  // The train never boards a fork's pull request. Anyone whose fork runs need no approval could push every few seconds,
+  // and each run that ended would replace the tick waiting in the bases job's group.
+  it("not for a fork's pull request CI, green or red", () => {
+    expect(wakes(ci("success", "pull_request", "someone/ghostly"))).toBe(false);
+    expect(wakes(ci("failure", "pull_request", "someone/ghostly"))).toBe(false);
   });
 
   it("not for the labels the train puts on a pull request it drops from the line", () => {
