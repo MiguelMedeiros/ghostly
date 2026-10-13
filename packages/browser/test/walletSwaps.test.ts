@@ -432,6 +432,35 @@ describe("redeeming a token", () => {
     expect(events.onSwapSettled).not.toHaveBeenCalled();
   });
 
+  it("a round over the open swaps at a mint lets the user's own redeem there go between two of them", async () => {
+    const token = (secret: string) => getEncodedToken({ mint: MINT, unit: "sat", proofs: [proof(64, secret)] });
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    const { wallet } = setup();
+    for (const secret of ["o1", "o2"]) await expect(wallet.receiveToken(token(secret))).rejects.toBeInstanceOf(SwapUnsettledError);
+    expect(await swaps()).toHaveLength(2);
+
+    // A slow mint: asked about the first open swap, it answers when let; about the second, never.
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => { answer = resolve; });
+    let asked!: () => void;
+    const reached = new Promise<void>((resolve) => { asked = resolve; });
+    mintApi.restore.mockImplementationOnce(async () => { asked(); await answered; throw lost(); }).mockImplementation(() => new Promise(() => {}));
+    void wallet.settleSwaps([MINT]);
+    await reached;
+
+    // The user redeems a token at that mint while the round asks about the first one.
+    mintApi.completeSwap.mockReset();
+    mintApi.completeSwap.mockResolvedValue(receiveAnswer());
+    let redeemed = false;
+    const redeem = wallet.receiveToken(token("u1")).then((result) => { redeemed = true; return result; });
+    answer();
+    await pass(0);
+    expect(redeemed, "not behind the second open swap").toBe(true);
+    await expect(redeem).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
+    expect(await balance()).toBe(72 + 62);
+  });
+
   it("from a restored copy of the profile, what it brings is checked like the copy's ecash", async () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockRejectedValue(lost());
