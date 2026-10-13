@@ -451,7 +451,7 @@ export class Groups {
   private readonly syncHeld = new Map<string, Map<string, { via: string; at: number }>>();
   /** Per mesh group and member, when a message last came over its edge (its own, or one it handed on). */
   private readonly lastHanded = new Map<string, Map<string, number>>();
-  /** Admin side, per group and member let in over its chat: when its welcome was last sent again (`REWELCOME_MS`). */
+  /** Admin side, per group and member let in: when its welcome was last sent again, over its chat or the link (`REWELCOME_MS`). */
   private readonly rewelcomed = new Map<string, Map<string, number>>();
   private readonly lastGossip = new Map<string, number>();
   /**
@@ -1447,6 +1447,8 @@ export class Groups {
       // A member let in whose welcome never reached it knocks again: its session opens again for the welcome (`rewelcome`).
       const again = this.unwelcomed(group, session, key);
       if (now - ts > KNOCK_TTL_MS || (rosterHas(session.roster, key) && !again) || this.refused.has(key) || pending?.has(key) || key === entry.link.host) continue;
+      // Sent its welcome again lately: its knock opens no session (and keeps the link's reads at their pace) until it may be again.
+      if (again && this.rewelcomedLately(group.id, key)) continue;
       const entryIds = new Set(this.host.entries(group.id).values());
       const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
       const size = session.roster.length + contactsInvited + (pending?.size ?? 0);
@@ -1544,11 +1546,8 @@ export class Groups {
           // most once in `REWELCOME_MS`: an accept said over and over is not a welcome built and sent each time.
           const edge = this.host.edges(g).get(frame.key);
           if (letIn && session.isAdmin && !(edge && this.host.linkReady(edge))) {
-            let sent = this.rewelcomed.get(g);
-            const now = this.now(), last = sent?.get(frame.key);
-            if (last !== undefined && now - last < REWELCOME_MS) return;
-            if (!sent) this.rewelcomed.set(g, (sent = new Map()));
-            sent.set(frame.key, now);
+            if (this.rewelcomedLately(g, frame.key)) return;
+            this.noteRewelcome(g, frame.key);
             const welcome = await session.rewelcome(frame.key).catch(() => []);
             try { for (const piece of welcome) this.host.sendOnLink(linkId, piece); } catch { /* it says its accept again */ }
           }
@@ -1563,6 +1562,9 @@ export class Groups {
         // the link whose welcome never reached it, knocking again, gets the welcome again; nothing is committed for it.
         const again = !!entryPeer && this.unwelcomed(group, session, frame.key);
         if (rosterHas(session.roster, frame.key) && !again) return;
+        // Its welcome again, at most once in `REWELCOME_MS` whichever way it is asked for, as over its chat.
+        if (again && this.rewelcomedLately(g, frame.key)) { this.pendingEntries.get(g)?.delete(frame.key); await this.host.closeEdge(linkId); return; }
+        if (again) this.noteRewelcome(g, frame.key);
         if (!again && (session.roster.length >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, session.roster.length + 1, linkId))) return;
         if (!entryPeer) {
           // The contact's name on our chat is the best name for them until their edge says otherwise.
@@ -1867,6 +1869,18 @@ export class Groups {
   }
 
   /** Admin side: a member in the roster never seen on an edge since it was let in, whose edge is not up now. */
+  /** This member was sent its welcome again less than `REWELCOME_MS` ago, over its chat or through the link. */
+  private rewelcomedLately(groupId: string, key: string): boolean {
+    const last = this.rewelcomed.get(groupId)?.get(key);
+    return last !== undefined && this.now() - last < REWELCOME_MS;
+  }
+
+  private noteRewelcome(groupId: string, key: string): void {
+    let sent = this.rewelcomed.get(groupId);
+    if (!sent) this.rewelcomed.set(groupId, (sent = new Map()));
+    sent.set(key, this.now());
+  }
+
   private unwelcomed(group: StoredGroup, session: GroupSession, key: string): boolean {
     if (!session.isAdmin || !group.unseen?.includes(key) || !rosterHas(session.roster, key)) return false;
     const edge = this.host.edges(group.id).get(key);

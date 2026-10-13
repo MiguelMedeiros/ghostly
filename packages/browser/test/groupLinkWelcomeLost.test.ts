@@ -31,4 +31,37 @@ describe("a link joiner whose welcome was lost", { timeout: 120_000 }, () => {
     expect(world.view(bob, id)!.members).toHaveLength(3);
     expect(world.view(carol, id)!.members).toHaveLength(3);
   });
+
+  it("that knocks again as fast as it likes gets its welcome again at most every half minute", async () => {
+    const world = new CommunityWorld(undefined, null);
+    const alice = world.add("alice"), carol = world.add("carol"), mallory = world.add("mallory");
+    const id = await alice.groups.create("Ghosts", "mesh");
+    const link = await alice.groups.enableLink(id);
+    await carol.groups.joinByLink(link);
+    await world.until(() => world.view(alice, id)?.members.length === 2 && world.view(carol, id)?.status === "active", 10 * 60_000);
+    // Every welcome to Mallory is lost, and her app, after each, drops its entry session and opens a fresh one at once.
+    let welcomes = 0, dropped = false;
+    world.drop = (from, to, f) => {
+      if (from !== alice || to !== mallory || (f.t !== "group-welcome" && f.t !== "group-chain")) return false;
+      if (f.t === "group-welcome") { welcomes++; dropped = true; }
+      return true;
+    };
+    await mallory.groups.joinByLink(link);
+    await world.until(() => welcomes > 0, 5 * 60_000);
+    const minutes = 10, start = world.now;
+    welcomes = 0;
+    while (world.now - start < minutes * 60_000) {
+      if (dropped) {
+        dropped = false;
+        for (const [linkId, e] of [...mallory.links].filter(([, e]) => e.kind === "guest" && e.g === id)) {
+          mallory.links.delete(linkId);
+          await world.run(1000);
+          mallory.links.set(linkId, { ...e, announced: false, openedAt: world.now, fastUntil: world.now, lastPoll: -Infinity, polls: 0 });
+        }
+      }
+      await world.run(1000);
+    }
+    expect(welcomes).toBeLessThanOrEqual(minutes * 2 + 1);
+    expect(world.view(alice, id)!.members).toHaveLength(3);
+  });
 });
