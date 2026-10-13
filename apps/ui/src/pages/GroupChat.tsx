@@ -24,11 +24,10 @@ import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { openOnArrow } from "../lib/menuButton";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMenu";
-import { setChatFolder } from "../lib/chatFolders";
-import { forgetChatMute, groupChat } from "../lib/chatMute";
+import { groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard } from "../components/GroupInvitation";
-import { authorName, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { authorName, forgetGroupLocal, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsOf, type MessageAuthor } from "../lib/senderRuns";
@@ -643,7 +642,7 @@ export function GroupChat() {
           {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
           {knockedLong && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</p>}
-          <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} data-testid="group-joining-cancel"
+          <button onClick={() => { void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {}); nav.home(); }} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
@@ -690,18 +689,18 @@ export function GroupChat() {
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
       {sharing && (group.entryLink || shareShown) && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={closeShare} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
-        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setChatFolder(groupChat(groupId), undefined); setConfirmLeave(false); nav.home(); }} />}
+        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetGroupLocal(groupId); setConfirmLeave(false); nav.home(); }} />}
       {/* Deleting an active group, private or community, leaves it: said so, and refused as Leave is while nobody could
           become admin or take the leave. */}
       {confirmForget && group.status === "active" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
-        onConfirm={async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); setChatFolder(groupChat(groupId), undefined); setConfirmForget(false); nav.home(); }} />
+        onConfirm={async () => { await engine.call("forgetGroup", { groupId }); forgetGroupLocal(groupId); setConfirmForget(false); nav.home(); }} />
       : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         title={group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")} confirm={t("group.menu.forget")}
         // What goes: an invitation (declined, and its sender told), a first knock through the link, or a group kept with its history.
         body={joiningByLink ? t("group.forget.joining") : group.invitation && !knockingAgain
           ? (group.invitation.contact ? t("group.forget.invitation", { contact: group.invitation.contact }) : t("group.forget.invitationUnknown")) : t("group.forget.kept")}
         // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
-        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetChatMute(groupChat(groupId)); setChatFolder(groupChat(groupId), undefined); nav.home(); }); }} />}
+        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetGroupLocal(groupId); nav.home(); }); }} />}
     </div>
     </MemberColorsProvider>
     </CueChat.Provider>
