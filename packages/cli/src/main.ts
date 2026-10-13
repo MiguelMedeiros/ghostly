@@ -94,11 +94,15 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
  */
 const READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
-  "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "service.list",
+  "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "identity.providers",
+  "identity.contact", "service.list", "service.peer", "call.list", "app.served",
 ]);
 
-function readOnly(method: string, params: Record<string, unknown>): boolean {
+/** Whether a one-shot for this call opens the profile offline; test/readOnlyCommands.test.ts names every table command. */
+export function readOnly(method: string, params: Record<string, unknown>): boolean {
   if (method === "engine.call") return typeof params.method === "string" && ENGINE_READS.includes(params.method);
+  // `call auto` with no on|off says what auto-answer is.
+  if (method === "call.auto") return params.on === undefined;
   return READS.has(method);
 }
 
@@ -320,7 +324,9 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (parsed.options.passphrase === true) throw new CliError("usage", "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line");
       if (unsealed && (parsed.options["passphrase-file"] !== undefined || process.env.GHOSTLY_BACKUP_PASSPHRASE)) throw new CliError("usage", "A passphrase is set (--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE) and --no-passphrase was given: choose one");
       const light = parsed.options.light === true ? { light: true } : {};
-      const made = await withSession(g, (s) => s.call("profile.backup", unsealed ? { path: resolve(out), noPassphrase: true, ...light } : { path: resolve(out), passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light }));
+      // The passphrase is read before the profile opens, and the backup only reads the store: offline.
+      const params = unsealed ? { path: resolve(out), noPassphrase: true, ...light } : { path: resolve(out), passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
+      const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
       print(made);
       return;
