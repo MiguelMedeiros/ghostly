@@ -21,6 +21,8 @@ on:
       - "e2e/desktop/video-stream.spec.ts"
       - "e2e/support/{bigVideo,streamCheck,desktop}.ts"
       - ".github/workflows/desktop-media.yml"
+      - "packages/browser/vite-plugin.ts"
+      - "tools/scripts/check-desktop-bundle.mjs"
   schedule:
     - cron: "17 5 * * *"
   workflow_dispatch:
@@ -138,6 +140,10 @@ jobs:
       - name: Build the Desktop app with its test driver (Windows)
         if: runner.os == 'Windows'
         run: npm run tauri -- build --debug --no-bundle --features e2e-driver
+
+      # The frontend the app was just built with, on this system (ghostly#1864: a Windows build once swapped nothing).
+      - name: Desktop build carries its Desktop wiring
+        run: npm run check:desktop-bundle
 
       - name: Play a 100 MB video from the stored file (Linux)
         if: runner.os == 'Linux'
