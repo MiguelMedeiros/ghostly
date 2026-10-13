@@ -561,13 +561,16 @@ describe("GroupChat: the options menu", () => {
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
   });
 
-  it("keeps a community's admin from deleting it while nobody is connected to take the role", async () => {
+  it("keeps a community's admin from deleting it while nobody is connected, and says what works with nobody there", async () => {
+    // Members who never come back: "Try again in a moment" waited for good, while removing them, or making one admin
+    // (a member's delete goes ahead unsaid), works with nobody connected.
     const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, community: { hub: false, hubs: 0, connected: 0 },
       members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: BOB, nick: "Bob" })] }));
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByTestId("leave-blocked")).toHaveTextContent("Nobody is online to take your leave" + "Try again in a moment.");
+    expect(within(dialog).getByTestId("leave-blocked")).toHaveTextContent("Nobody is online to take your leave"
+      + "Wait for a member to be online, or remove the members first, or make one of them admin.");
     expect(within(dialog).queryByTestId("leave-unsaid")).not.toBeInTheDocument();
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
     expect(engine.callsTo("forgetGroup")).toEqual([]);
@@ -578,7 +581,7 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-leave"));
     const dialog = screen.getByTestId("group-leave-dialog");
-    expect(within(dialog).getByTestId("leave-blocked")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("leave-blocked")).toHaveTextContent("Nobody is online to take your leave" + "Try again in a moment.");
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
   });
 
@@ -725,7 +728,8 @@ describe("GroupChat: leaving", () => {
     const { user } = openGroup(active({ profile: "community", isAdmin: true, community: { hub: false, hubs: 1, connected: 0 },
       members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: BOB, nick: "Bob" })] }));
     const dialog = await leaveFromMenu(user);
-    expect(dialog).toHaveTextContent("Nobody is online to take your leave" + "Try again in a moment.");
+    // Made a member, the admin could still not leave with nobody connected: removing the members is what lets it go.
+    expect(dialog).toHaveTextContent("Nobody is online to take your leave" + "Wait for a member to be online, or remove the members first.");
     expect(within(dialog).getByTestId("leave-blocked")).toHaveAttribute("data-tone", "wait");
     expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();

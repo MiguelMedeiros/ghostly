@@ -127,6 +127,8 @@
   "leave": {
     "blocked": "Nobody is online to become admin",
     "blockedCommunity": "Nobody is online to take your leave",
+    "blockedCommunityAdminForgetNext": "Wait for a member to be online, or remove the members first, or make one of them admin.",
+    "blockedCommunityAdminNext": "Wait for a member to be online, or remove the members first.",
     "blockedCommunityNext": "Try again in a moment.",
     "blockedNext": "Make someone admin, or wait for a member.",
     "body": "The group and its history go from this device. You will not read what is said after, and to come back someone has to let you in again.",

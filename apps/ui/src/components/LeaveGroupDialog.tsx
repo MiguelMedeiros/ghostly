@@ -41,6 +41,10 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
   // A member deleting a community nobody is connected to: it goes anyway (the engine's `deleteHere`), the leave unsaid.
   const unsaid = unheard && forget && !group.isAdmin;
   const blocked = others.length > 0 && !unsaid && (community ? unheard : group.isAdmin && !successor);
+  // A community's admin waits for members who may never come back: what works with nobody connected is removing them
+  // (alone, the admin leaves or deletes it), or, for Delete, making one admin (a member's delete goes ahead unsaid).
+  const blockedNext = !community ? "group.leave.blockedNext" : !group.isAdmin ? "group.leave.blockedCommunityNext"
+    : forget ? "group.leave.blockedCommunityAdminForgetNext" : "group.leave.blockedCommunityAdminNext";
   const leave = async () => {
     setBusy(true); setError(null);
     try { await onConfirm(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); setBusy(false); }
@@ -57,7 +61,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
         {/* A private group's link works from the admin's app: the one shared so far stops working with the role. */}
         {group.entryLink && !community && <> {t("group.link.endsOnHandover", { name: memberName(successor, t) })}</>}</p>}
       {unsaid && <Notice tone="warning" className="text-sm" testId="leave-unsaid" title={t("group.leave.blockedCommunity")} next={t("group.leave.unsaidNext")} />}
-      {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
+      {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={t(blockedNext)} />}
     </div>
     {error && <Notice problem={error} className="mt-2 text-sm" />}
     <div className="mt-5 flex justify-end gap-2">
