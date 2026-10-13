@@ -812,10 +812,15 @@ export class GhostLink {
    * was the app's in the background, not a restart (`resumeAfterAbsence`).
    */
   private offered?: { epoch: number; at: number; resume?: boolean; woke?: boolean };
+  /**
+   * The WebRTC offer this side's dial made last, fallback allowed or not: one made before the contact's record was read
+   * races once it is (`raceStandingOffer`).
+   */
+  private offerMade?: { epoch: number; at: number };
   /** The attempt (its epoch) whose direct transports were knocked on as its offer went out (`knockEarly`), and whether that is under way. */
   private knockedEarly = -1;
   private knockingEarly = false;
-  /** When that offer's answer was applied (`RACE_ANSWERED_MS`); 0 while the data link is not connecting on it. */
+  /** When this side's offer's answer was applied (`RACE_ANSWERED_MS`); 0 while the data link is not connecting on it. */
   private answeredAt = 0;
   /** This side's offer is out unanswered, or answered and not connected yet: what is ranked after WebRTC may race it. */
   private get offerOut(): boolean {
@@ -1135,9 +1140,9 @@ export class GhostLink {
         }
         this.answeredAt = 0;
         // This side's offer was answered: what is ranked after WebRTC is dialled soon after, if nothing connects.
-        if (state === "connecting" && was === "offering" && this.offered?.epoch === this.connectionEpoch) {
+        if (state === "connecting" && was === "offering" && this.offerMade?.epoch === this.connectionEpoch) {
           this.answeredAt = Date.now();
-          this.scheduleRace(this.offered.epoch, this.offered.at);
+          if (this.offered?.epoch === this.connectionEpoch) this.scheduleRace(this.offered.epoch, this.offered.at);
         }
         if (state !== "idle") return;
         this.dialUnseen = was === "offering" && this.offerUnsent;
@@ -1691,6 +1696,9 @@ export class GhostLink {
     }
     if (held && heldOn && reidentified.has(heldOn) && this.restartedRedial(held, heldOn)) return;
     if (this.redescribedDial()) return;
+    // An offer out that was made before this record was read races what it says both run (still inside the dial that
+    // makes it, the dial does so once the offer is out).
+    if (!this.dialing) this.raceStandingOffer();
     // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
     if (this.channel || this.dialing) return;
     if (news || !again) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
@@ -2209,6 +2217,7 @@ export class GhostLink {
           const standing = this.offerOut && this.offered?.epoch === epoch ? this.offered : undefined;
           const offeredAt = standing?.at ?? Date.now();
           this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }), ...(woke && { woke }) } : undefined;
+          this.offerMade = { epoch, at: offeredAt };
           const gate = this.dialGate;
           this.dialGate = undefined;
           // The contact's offer, read while this one still gathers, is answered in its place: the dial is over then, not
@@ -2220,9 +2229,9 @@ export class GhostLink {
           if (made === "held") {
             // Made early, and the first look did not find the contact: the dial is dropped, as if never made.
             traceLink(this.myPubKeyZ32, "dial-held", {});
-            this.afterRtc = undefined; this.offered = undefined; return;
+            this.afterRtc = undefined; this.offered = undefined; this.offerMade = undefined; return;
           }
-          if (this.dataLink.state !== "idle" || epoch !== this.connectionEpoch) { this.scheduleRace(epoch, offeredAt); return; }
+          if (this.dataLink.state !== "idle" || epoch !== this.connectionEpoch) { this.scheduleRace(epoch, offeredAt); this.raceStandingOffer(); return; }
           // WebRTC gave up while starting (no candidate at all, no connection to be made): tried last for a while.
           this.rtcUnstarted();
           const next = this.afterRtc;
@@ -2382,6 +2391,25 @@ export class GhostLink {
     this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, Math.max(0, Math.min(...at) - now));
   }
   /**
+   * This side's offer went out before the contact's record was read (a joiner's early one, `dialEarly`): nothing was
+   * known of what the contact runs, so it was made with no fallback and nothing raced it. Once the record says, and both
+   * sides allow it, the offer races what both run as one made then would: answered and not connected `RACE_ANSWERED_MS`
+   * later, the relayed ones too. Behind a VPN that drops UDP, a first pairing went live over the relayed Iroh only once
+   * the attempt timed out and the next one raced, 32 to 66 s in (zero's VPN lab, 2026-10-13).
+   */
+  private raceStandingOffer(): void {
+    const made = this.offerMade, epoch = this.connectionEpoch;
+    if (!made || made.epoch !== epoch || this.offered?.epoch === epoch || !this.offerOut || this.channel || this.stopped) return;
+    if (!this.fallback || !this.peerFallback || !this.peerTransports) return;
+    const relayed = relayedTransports(this.localDescriptors(), this.peerDescriptors);
+    const rest = rankTransports(this.transportOffer(), this.peerTransports, relayed).filter(t => t !== "webrtc/1");
+    if (!rest.length) return;
+    this.offered = { epoch, at: made.at };
+    this.afterRtc = { epoch, rest };
+    traceLink(this.myPubKeyZ32, "race-standing", { transports: rest });
+    this.scheduleRace(epoch, made.at);
+  }
+  /**
    * Back after an absence, this side answers an offer the contact made while it was away (it dials whatever its key):
    * the contact looks for that answer at the pace of an offer out a while (every 8 s on the relays), and its attempt may
    * end before it does. The direct transports both run are knocked on meanwhile, and the relayed ones where both apps
@@ -2523,7 +2551,7 @@ export class GhostLink {
     // One that cannot be dialled yet is not given up on: it stays for later in the race, or for when the offer ends.
     const due = next.rest.filter(t => this.canDial(t) && (late || !relayed.includes(t)));
     const left = next.rest.filter(t => t !== "webrtc/1" && !due.includes(t));
-    if (!due.length) { this.scheduleRace(epoch, offeredAt); return; }
+    if (!due.length) { this.scheduleRace(epoch, offeredAt); this.raceStandingOffer(); return; }
     this.afterRtc = left.length ? { epoch, rest: left } : undefined;
     traceLink(this.myPubKeyZ32, "race", { transports: due, afterMs: Date.now() - offeredAt });
     this.dialing = this.racing = true;
@@ -2536,7 +2564,7 @@ export class GhostLink {
     }
     if (live || epoch !== this.connectionEpoch || this.channel || this.stopped) return;
     // (Read again: the dials took time.)
-    if ((this.dataLink.state as DataLinkState) !== "idle") { this.scheduleRace(epoch, offeredAt); return; }
+    if ((this.dataLink.state as DataLinkState) !== "idle") { this.scheduleRace(epoch, offeredAt); this.raceStandingOffer(); return; }
     // The offer ended while these were dialled: on to what is left, or the attempt is over.
     const rest = this.afterRtc;
     this.afterRtc = undefined;
