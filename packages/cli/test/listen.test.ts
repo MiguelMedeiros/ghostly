@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, eventHandler, hookEnv, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, eventHandler, Feed, hookEnv, MAX_BEHIND, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
@@ -269,6 +269,48 @@ describe("listen with an allowlist and --turns", () => {
     expect(result.code, result.stdout + result.stderr).toBe(3);
     expect(result.json).toEqual({ error: { code: "not_found", message: `No such file or folder: ${join(dir, "nodir")}` } });
     expect(readdirSync(home)).toEqual([]);
+  });
+
+  it("an output that wants a drain holds the next event until it drains; the events wait as `behind`", async () => {
+    const lines: string[] = [];
+    let drain = () => {};
+    const handle = eventHandler({ types: [], print: true, write: (line) => lines.push(line) > 1, drained: () => new Promise<void>((resolve) => { drain = resolve; }) });
+    const events = [received("c1", "a", "one"), received("c1", "b", "two"), received("c1", "c", "three")];
+    for (const event of events) handle(event);
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(lines).toHaveLength(1);
+    expect(handle.behind()).toBe(3);
+    drain();
+    await handle.idle();
+    expect(lines.map((line) => (JSON.parse(line) as { seq: number }).seq)).toEqual(events.map((e) => e.seq));
+    expect(handle.behind()).toBe(0);
+  });
+
+  it("a stuck output holds a bounded number of events: the feed pauses, drops what still comes, and resumes after the last taken", async () => {
+    const lines: string[] = [];
+    let drain = () => {}, stuck = true;
+    const handle = eventHandler({ types: [], print: true, write: (line) => { lines.push(line); return !stuck; }, drained: () => new Promise<void>((resolve) => { drain = resolve; }) });
+    const pause = vi.fn(), resume = vi.fn();
+    const feed = new Feed(handle, 3, pause, resume);
+    // 20,000 events of 2 KB arrive while nobody reads the output (the subscription still sends what it had queued).
+    const events = Array.from({ length: 20_000 }, (_, i) => received("c1", `m${i}`, "x".repeat(2_000)));
+    for (const event of events) feed.take(event);
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(feed.paused).toBe(true);
+    expect(handle.behind()).toBe(MAX_BEHIND);
+    expect(feed.since).toBe(events[MAX_BEHIND - 1].seq);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(lines).toHaveLength(1);
+    expect(resume).not.toHaveBeenCalled();
+    // The reader comes back: every event taken is handled, then the feed opens after the last.
+    stuck = false;
+    drain();
+    await vi.waitFor(() => expect(resume).toHaveBeenCalledWith(events[MAX_BEHIND - 1].seq));
+    expect(feed.paused).toBe(false);
+    expect(lines.map((line) => (JSON.parse(line) as { seq: number }).seq)).toEqual(events.slice(0, MAX_BEHIND).map((e) => e.seq));
+    feed.take(events[MAX_BEHIND]);
+    expect(handle.behind()).toBe(1);
   });
 
   it("--turns takes the place of --type", async () => {
