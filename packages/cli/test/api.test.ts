@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PairingProgress } from "@ghostly/core";
+import { AWAITING_PEER_MS, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
@@ -465,6 +465,33 @@ describe("the chat on screen of a daemon", () => {
     d.pair("inv2");
     expect(d.shown()).toEqual(["inv1", "inv2", "inv2"]);
     expect(d.listeners.size).toBe(0);
+  });
+  it("an invite nobody joins leaves the screen once its wait for a peer is over, and a newer invite keeps its own wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const d = daemon();
+      await callApi(d.ctx, "invite.create", {});
+      await vi.advanceTimersByTimeAsync(AWAITING_PEER_MS - 60_000);
+      // A newer invite takes the mark with a wait of its own: the older one's end does not clear it.
+      await callApi(d.ctx, "invite.create", {});
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(d.shown()).toEqual(["inv1", "inv2"]);
+      await vi.advanceTimersByTimeAsync(AWAITING_PEER_MS - 60_000);
+      expect(d.shown()).toEqual(["inv1", "inv2", null]);
+      expect(d.listeners.size).toBe(0);
+      // Paired late, it is not marked again.
+      d.pair("inv2");
+      expect(d.shown()).toEqual(["inv1", "inv2", null]);
+
+      // One paired in time leaves no timer behind that clears a chat someone chose later.
+      await callApi(d.ctx, "invite.create", {});
+      d.pair("inv3");
+      await callApi(d.ctx, "engine.call", { method: "setActiveLink", params: { linkId: "inv1" } });
+      await vi.advanceTimersByTimeAsync(AWAITING_PEER_MS);
+      expect(d.shown()).toEqual(["inv1", "inv2", null, "inv3", null, "inv1"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
