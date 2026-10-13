@@ -302,6 +302,20 @@ describe("redeeming a token", () => {
     expect(await balance()).toBe(72);
   });
 
+  it("the same coins sent again in another token (another memo) are one redeem, never a second swap counted again", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "PENDING" }]);
+    const { wallet } = setup();
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    for (let i = 0; i < 5; i++) {
+      const again = getEncodedToken({ mint: MINT, unit: "sat", proofs: [proof(64, "t1")], memo: `m${i}` });
+      await expect(wallet.receiveToken(again, "ecash-in", undefined, { payment: incoming })).rejects.toThrow("This ecash is already being received");
+    }
+    expect(await swaps()).toHaveLength(1);
+    expect(mintApi.completeSwap).toHaveBeenCalledOnce();
+    expect(await wallet.view()).toMatchObject({ openSwaps: 1, swapsAmount: 62 });
+  });
+
   it("only an answer counts: a restore that fails says nothing, and the redeem is finished when it works again", async () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.checkProofsStates.mockResolvedValue([{ state: "SPENT" }]);
