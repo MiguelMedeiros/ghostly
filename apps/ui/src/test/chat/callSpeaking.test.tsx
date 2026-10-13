@@ -67,7 +67,7 @@ describe("who is speaking in a call", () => {
     hear(0.1);
     expect(avatar()).toHaveAttribute("data-speaking", "true");
     expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.4");
-    hear(0.2);
+    hear(0.2, 320);
     expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.8");
   });
 
@@ -98,6 +98,22 @@ describe("who is speaking in a call", () => {
     expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.8");
     expect(writes).toEqual(["style"]);
     watch.disconnect();
+  });
+
+  it("holds each width of the ring a while, so a talking voice redraws it a few times a second at most", async () => {
+    call();
+    hear(0.05);
+    hear(0.225);
+    const writes: string[] = [];
+    const watch = new MutationObserver((seen) => writes.push(...seen.map((one) => one.attributeName!)));
+    watch.observe(avatar(), { attributes: true });
+    // Syllables: the level swings between 0.2 and 0.9 at every tick, for two seconds.
+    for (let tick = 0; tick < 25; tick++) hear(tick % 2 ? 0.225 : 0.05);
+    await Promise.resolve();
+    watch.disconnect();
+    expect(avatar()).toHaveAttribute("data-speaking", "true");
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.length).toBeLessThanOrEqual(7);
   });
 
   it("draws the ring with no transition, which would restart at every new level", () => {
