@@ -152,6 +152,14 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-files")).toHaveAttribute("dir", "auto");
   });
 
+  it("wraps a long one-word file name inside its card, so its end and extension stay on screen", () => {
+    const name = "IMG_20261013_021233_holiday_beach_sunset_camera_backup_final_version_2.jpg";
+    receiveShare(share({ files: [file(name)] }));
+    picker();
+    expect(screen.getByTestId("share-files")).toHaveTextContent(name);
+    expect(screen.getByTestId("share-files").className).toContain("[overflow-wrap:anywhere]");
+  });
+
   it("Cancel drops the share and goes home", async () => {
     receiveShare(share({ text: "never mind" }));
     const { user } = picker();
