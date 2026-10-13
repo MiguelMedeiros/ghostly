@@ -159,9 +159,10 @@ export interface StoredGroup {
    */
   large?: string[];
   /**
-   * On the admin's side: members I let in over a contact chat whose edge has not come up with me yet, so whose app
-   * may never have had the group's keys (its welcome lost on the way). A `group-decline` from that chat takes such a
-   * member out again; one seen on an edge once is a member, whatever its chat says after.
+   * On the admin's side: members I let in over a contact chat or the group's link whose edge has not come up with me
+   * yet, so whose app may never have had the group's keys (its welcome lost on the way). A `group-decline` from that
+   * chat takes such a member out again, and one that knocks on the link again gets its welcome again; one seen on an
+   * edge once is a member, whatever its chat says after.
    */
   unseen?: string[];
   /**
