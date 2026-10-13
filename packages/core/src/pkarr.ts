@@ -73,15 +73,14 @@ export function signRelayPayload(identity: Identity, dnsPacket: Uint8Array, seq:
   return concatBytes(signature, timestamp, dnsPacket);
 }
 
-/** Checks a relay payload's size and signature. Returns its sequence number and DNS packet, not decoded. */
-export function openRelayPayload(pubKeyZ32: string, payload: Uint8Array): { seq: bigint; dnsPacket: Uint8Array } {
+/** A relay payload's parts, its size checked: the signature, the sequence number and the DNS packet (not decoded). */
+function splitRelayPayload(payload: Uint8Array): { signature: Uint8Array; seq: bigint; dnsPacket: Uint8Array } {
   if (payload.length < SIGNATURE_LENGTH + TIMESTAMP_LENGTH + 12) {
     throw new Error("Relay payload too short");
   }
   if (payload.length > SIGNATURE_LENGTH + TIMESTAMP_LENGTH + MAX_DNS_PACKET_BYTES) {
     throw new PacketTooLargeError(payload.length);
   }
-  const publicKey = publicKeyFromZ32(pubKeyZ32);
   const signature = payload.subarray(0, SIGNATURE_LENGTH);
   const seq = new DataView(
     payload.buffer,
@@ -89,23 +88,43 @@ export function openRelayPayload(pubKeyZ32: string, payload: Uint8Array): { seq:
     TIMESTAMP_LENGTH,
   ).getBigUint64(0);
   const dnsPacket = payload.subarray(SIGNATURE_LENGTH + TIMESTAMP_LENGTH);
+  return { signature, seq, dnsPacket };
+}
 
+/** Checks a relay payload's size and signature. Returns its sequence number and DNS packet, not decoded. */
+export function openRelayPayload(pubKeyZ32: string, payload: Uint8Array): { seq: bigint; dnsPacket: Uint8Array } {
+  const { signature, seq, dnsPacket } = splitRelayPayload(payload);
+  const publicKey = publicKeyFromZ32(pubKeyZ32);
   if (!verify(signature, signable(seq, dnsPacket), publicKey)) {
     throw new Error("Invalid signature");
   }
   return { seq, dnsPacket };
 }
 
-/** Verifies and decodes a relay payload. Throws if the signature does not match. */
-export function parseRelayPayload(pubKeyZ32: string, payload: Uint8Array): SignedPacket {
-  const { seq: timestampMicros, dnsPacket } = openRelayPayload(pubKeyZ32, payload);
+function decodeRelayPayload(pubKeyZ32: string, seq: bigint, dnsPacket: Uint8Array): SignedPacket {
   const suffix = `.${pubKeyZ32}`;
   const records = decodeTxtPacket(dnsPacket).map((r) => ({
     label: r.name.endsWith(suffix) ? r.name.slice(0, -suffix.length) : r.name,
     value: r.value,
     ttl: r.ttl,
   }));
-  return { pubKeyZ32, timestampMicros, records };
+  return { pubKeyZ32, timestampMicros: seq, records };
+}
+
+/** Verifies and decodes a relay payload. Throws if the signature does not match. */
+export function parseRelayPayload(pubKeyZ32: string, payload: Uint8Array): SignedPacket {
+  const { seq, dnsPacket } = openRelayPayload(pubKeyZ32, payload);
+  return decodeRelayPayload(pubKeyZ32, seq, dnsPacket);
+}
+
+/**
+ * Decodes a payload whose signature this process made or already checked (one it is putting), without checking it
+ * again: an Ed25519 verify costs about 1 ms, and a CLI daemon at its relay budget checked its own packets ~500 times a
+ * minute. Never for bytes read from elsewhere: `parseRelayPayload` is.
+ */
+export function readOwnRelayPayload(pubKeyZ32: string, payload: Uint8Array): SignedPacket {
+  const { seq, dnsPacket } = splitRelayPayload(payload);
+  return decodeRelayPayload(pubKeyZ32, seq, dnsPacket);
 }
 
 /** How far ahead of this clock a packet's time may be and still count as now: clocks drift, not by this much. */
