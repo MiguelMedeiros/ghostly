@@ -307,6 +307,11 @@ export const FAREWELL_KEPT_MS = LEFT_KEPT_MS;
  */
 const ACCEPT_AGAIN_MS = 60_000;
 const ACCEPT_AGAINS = 5;
+/**
+ * Admin side: a member let in over its chat, its edge not up, is sent its welcome again at most this often. The welcome
+ * is the whole chain and the sealed secrets (megabytes, tens of ms to build); its app says its accept once a minute.
+ */
+const REWELCOME_MS = ACCEPT_AGAIN_MS / 2;
 /** Invitee side: the invitations one contact chat may have waiting here at a time. More are answered as declined. */
 const MAX_INVITATIONS_PER_CHAT = 4;
 /** What an invitation says of its group, kept as a claim within what a group can be: an epoch from 0, a roster of 1 to the most a group holds. */
@@ -446,6 +451,8 @@ export class Groups {
   private readonly syncHeld = new Map<string, Map<string, { via: string; at: number }>>();
   /** Per mesh group and member, when a message last came over its edge (its own, or one it handed on). */
   private readonly lastHanded = new Map<string, Map<string, number>>();
+  /** Admin side, per group and member let in over its chat: when its welcome was last sent again (`REWELCOME_MS`). */
+  private readonly rewelcomed = new Map<string, Map<string, number>>();
   private readonly lastGossip = new Map<string, number>();
   /**
    * Per mesh group, each reachable member some of whose messages never reached me (`GroupSession.lacking`): what was
@@ -1137,6 +1144,7 @@ export class Groups {
     this.relayAsked.delete(groupId);
     this.syncHeld.delete(groupId);
     this.lastHanded.delete(groupId);
+    this.rewelcomed.delete(groupId);
     this.hubs.forget(groupId);
     this.removedAt.delete(groupId);
     this.lastGossip.delete(groupId);
@@ -1524,9 +1532,15 @@ export class Groups {
           const letIn = !!session && rosterHas(session.roster, frame.key) && this.stored.get(g)?.contacts?.[frame.key] === linkId;
           if (!letIn && ![...this.host.entries(g).values()].includes(linkId)) { try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* it asks again when the chat is up */ } }
           // Let in, but its edge is not up: its welcome may never have reached it (the chat closed while this app let it
-          // in), and it would wait on "Joining…" for good. It gets the welcome again; nothing is committed for it.
+          // in), and it would wait on "Joining…" for good. It gets the welcome again; nothing is committed for it. At
+          // most once in `REWELCOME_MS`: an accept said over and over is not a welcome built and sent each time.
           const edge = this.host.edges(g).get(frame.key);
           if (letIn && session.isAdmin && !(edge && this.host.linkReady(edge))) {
+            let sent = this.rewelcomed.get(g);
+            const now = this.now(), last = sent?.get(frame.key);
+            if (last !== undefined && now - last < REWELCOME_MS) return;
+            if (!sent) this.rewelcomed.set(g, (sent = new Map()));
+            sent.set(frame.key, now);
             const welcome = await session.rewelcome(frame.key).catch(() => []);
             try { for (const piece of welcome) this.host.sendOnLink(linkId, piece); } catch { /* it says its accept again */ }
           }

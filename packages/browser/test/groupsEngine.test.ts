@@ -612,6 +612,36 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(welcomes()).toBe(before);
   });
 
+  it("an accept said over and over by a member let in whose edge is down gets its welcome again at most every half minute", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); await world.settle();
+    expect(view(alice, groupId).members).toHaveLength(2);
+    // Bob's app keeps the edge Alice's app opens toward him down, and says its accept again and again.
+    const host = world.peers.get("alice")!.host;
+    const bobKey = Object.keys(world.peers.get("alice")!.store.groups.get(groupId)!.contacts!)[0];
+    const edge = host.edges(groupId).get(bobKey);
+    const ready = host.linkReady.bind(host);
+    vi.spyOn(host, "linkReady").mockImplementation((linkId, version) => linkId !== edge && ready(linkId, version));
+    const sent = vi.spyOn(host, "sendOnLink");
+    const welcomes = () => sent.mock.calls.filter(([, f]) => (f as { t?: string }).t === "group-welcome").length;
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    for (let i = 0; i < 20; i++) await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: bobKey });
+    expect(welcomes()).toBe(1);
+    clock.mockReturnValue(now + 29_000);
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: bobKey });
+    expect(welcomes()).toBe(1);
+    // Its app says it again a minute later, as an honest one does: the welcome goes again.
+    clock.mockReturnValue(now + 60_000);
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: bobKey });
+    expect(welcomes()).toBe(2);
+    clock.mockRestore();
+  });
+
   it("a member let in whose welcome was lost and who then declines goes from the admin's roster, and may be invited again", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
