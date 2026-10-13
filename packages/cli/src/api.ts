@@ -155,6 +155,7 @@ const METHODS: Record<string, Method> = {
   },
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
+    let warning: string | undefined;
     for (const [key, value] of Object.entries(params)) {
       // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
       const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
@@ -168,12 +169,15 @@ const METHODS: Record<string, Method> = {
         const servers = value.map(iceServerSetting);
         for (const server of servers) { const problem = iceServerProblem(server); if (problem) throw new CliError("bad_request", `${key}: ${problem}`); }
         patch[key] = servers;
+        // libdatachannel (libjuice) skips TURN over TCP and TLS without a word; the apps' browsers use them, so they stay.
+        const unused = servers.flatMap((server) => server.urls.split(/[\s,]+/)).filter((url) => /^turns:|\?transport=tcp$/i.test(url));
+        if (unused.length) warning = `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
         continue;
       }
       patch[key] = value;
     }
     await node(ctx).updateSettings({ settings: patch });
-    return redactSettings(state(ctx).settings);
+    return { ...redactSettings(state(ctx).settings), ...(warning ? { warning } : {}) };
   },
 
   async "invite.create"(ctx, params) {
