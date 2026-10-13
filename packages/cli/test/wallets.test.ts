@@ -79,6 +79,12 @@ describe("wallets", () => {
     await expect(callApi(ctx, "wallet.mint.add", { url: "http://mint.example" })).rejects.toMatchObject({ code: "bad_request", message: "Mints must use https" });
     expect(await callApi(ctx, "wallet.mint.add", { url: "https://mint.example/" })).toEqual({ url: "https://mint.example" });
   });
+
+  it("history takes a whole number of entries", async () => {
+    const { ctx } = fake();
+    await expect(callApi(ctx, "wallet.history", { limit: 1.5 })).rejects.toMatchObject({ code: "bad_request", message: "limit must be a whole number from 1 to 10000" });
+    expect(await callApi(ctx, "wallet.history", { limit: 1 })).toEqual({ network: "testnet", history: [{ id: "h" }] });
+  });
 });
 
 describe("real money", () => {
