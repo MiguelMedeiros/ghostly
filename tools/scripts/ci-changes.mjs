@@ -104,15 +104,24 @@ export const TESTED_PAGES = 3;
  * while dev's tip is still the batch's base, and a lone pull request only at a head that holds dev's tip, so dev's new
  * commit holds the tree of a head whose CI Success passed one landing earlier. A run counts when:
  * - its head has that tree, and its "CI Success" (not the draft's) passed in its latest attempt;
+ * - it ran dev's own ci.yml: its head is a branch of this repository, and every pull request ever opened from that
+ *   branch (closed ones too: the batch has closed by the time dev's last push runs, and its run's `pull_requests` is
+ *   empty then) is into dev. A pull request into an epic (or a fork's) runs the ci.yml of its own base, which a writer
+ *   can make a stub;
  * - every commit of the push that its head lacks was committed after the run started. A pull request's run tests the
  *   head merged with its base as it was then: had dev held a commit the head lacks, that run tested another tree.
- * @param {{ sha: string, tree: string, api: (path: string) => Promise<any> }} push  `api` reads the repository's REST API
+ * @param {{ sha: string, tree: string, repo: string, api: (path: string) => Promise<any> }} push  `repo` is owner/name;
+ *   `api` reads that repository's REST API
  * @returns {Promise<string | null>} the run's address
  */
-export async function testedAs({ sha, tree, api }) {
+export async function testedAs({ sha, tree, repo, api }) {
+  const owner = repo.split("/")[0];
   for (let page = 1; page <= TESTED_PAGES; page++) {
     const { workflow_runs: runs } = await api(`actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100&page=${page}`);
     for (const run of runs.filter((r) => r.head_commit?.tree_id === tree)) {
+      if (run.path !== ".github/workflows/ci.yml" || run.head_repository?.full_name !== repo) continue;
+      const pulls = await api(`pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${run.head_branch}`)}`);
+      if (!pulls.length || pulls.some((p) => p.base.ref !== "dev" || p.base.repo?.full_name !== repo)) continue;
       const { jobs } = await api(`actions/runs/${run.id}/jobs?per_page=100`);
       if (!jobs.some((j) => j.name === "CI Success" && j.conclusion === "success")) continue;
       const { ahead_by: ahead, commits } = await api(`compare/${run.head_sha}...${sha}`);
@@ -177,7 +186,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       return res.json();
     };
     // Any doubt (the API failed, no run found) runs everything, as before.
-    const run = await testedAs({ sha: process.env.GITHUB_SHA, tree, api }).catch((e) => {
+    const run = await testedAs({ sha: process.env.GITHUB_SHA, tree, repo: process.env.GITHUB_REPOSITORY, api }).catch((e) => {
       console.log(`::notice::Could not look for a green run of this tree (${e.message}): everything runs`);
       return null;
     });
