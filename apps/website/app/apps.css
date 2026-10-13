@@ -83,9 +83,11 @@
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+/* A developer's name of one long word (the store takes 40 characters) wraps inside its card too. */
 .ap-card-meta {
   font-size: 12px;
   color: var(--dim);
+  overflow-wrap: anywhere;
 }
 .ap-store {
   margin-top: 8px;
@@ -138,15 +140,20 @@
   gap: 8px 28px;
   font-size: 14px;
 }
+/* A version (64 characters) or a name (40) of one long word wraps inside the header, its label beside it. */
 .ap-meta div {
   display: flex;
   gap: 8px;
+  min-width: 0;
 }
 .ap-meta dt {
+  flex: none;
   color: var(--dim);
 }
 .ap-meta dd {
+  min-width: 0;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .ap-body {
