@@ -1950,10 +1950,13 @@ export class Groups {
     let tried = this.gapsAsked.get(groupId);
     if (!tried) this.gapsAsked.set(groupId, (tried = new Map()));
     let entry = tried.get(via);
-    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed, last: entry?.last }));
+    const now = this.now();
+    // Noticed now, if not before: its answer (its last 32) shows what is below them, which `gapsAgain` asks another for
+    // `MESH_GAP_AGAIN_MS` later, not at the next gossip turn.
+    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed ?? now, last: entry?.last }));
     if (entry.of.has(via)) return false;
     entry.of.add(via);
-    entry.at = this.now();
+    entry.at = now;
     return true;
   }
 
@@ -2018,12 +2021,18 @@ export class Groups {
       }
       try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
     }
-    // Not one of the authors asked for, when there is another: an author hands on nobody's messages of its own.
-    const others = connected.filter(key => !fresh.has(key)), pool = others.length ? others : connected;
-    if (!fresh.size || !pool.length) return;
-    const via = pool[(gossipStart(session.myKey) + this.gossipTurn++) % pool.length];
+    if (!fresh.size || !connected.length) return;
+    // The gossip turn's next member that is not one of the authors asked for, when there is another: an author hands on
+    // nobody's messages of its own. Taken from the turns' own order, the next turns go on to the members not asked yet.
+    const at = () => connected[(gossipStart(session.myKey) + this.gossipTurn++) % connected.length]!;
+    let via = at();
+    for (let i = 1; i < connected.length && fresh.has(via); i++) via = at();
     const keys = this.gapsOf(groupId, session, via, fresh);
-    if (keys.length) try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
+    if (!keys.length) return;
+    // As `askOf`: this is the gossip turn's ask, and the next waits a whole turn. Sooner, it found this one's answer
+    // still on its way (`gapsOf`) and asked nobody, and the turn after that went to a member asked already.
+    this.lastGossip.set(groupId, now);
+    try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
   }
 
   /**
