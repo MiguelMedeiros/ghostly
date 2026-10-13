@@ -1436,8 +1436,12 @@ export function useWebRTC({
     remoteHasVideo: remotePicture !== null,
     /** The picture the peer is sending is its screen. */
     remoteIsScreenSharing: remotePicture === "screen",
-    /** A camera or a screen can be turned on right now, even if the call started as audio. */
-    canSendVideo: connected && videoLaneOpen,
+    /**
+     * The camera button: a camera or a screen can be turned on right now, even if the call started as audio; or the
+     * camera that is on can be turned off, when the answer closed the lane (a contact that takes no picture) and only
+     * the self-view shows it. Turned off there, it is not turned back on: nobody would see it.
+     */
+    canSendVideo: connected && (videoLaneOpen || picture === "camera"),
     /** The screen can be shared right now: a connected call with a video lane, voice or video, and a screen to capture. */
     canShareScreen: connected && videoLaneOpen && screenCapture,
     /**
