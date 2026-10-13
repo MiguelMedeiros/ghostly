@@ -237,6 +237,8 @@ export interface AppRunEntry { ref: string; digest: string; version: string; tit
 
 /** An app's storage in one scope, as the WISP's export file. */
 export interface AppDataExport { ghostlyAppData: 1; app: string; scope: string; entries: Record<string, JsonValue> }
+/** One scope of an app's storage as it is kept: each key with its value's JSON text, for an export file written as is. */
+export interface AppDataExportText { app: string; scope: string; entries: [key: string, json: string][] }
 
 export interface AppsHost {
   fetch: AppFetcher;
@@ -1526,15 +1528,39 @@ export class Apps {
 
   /** An app's storage in every scope, as export files (WISP 1200 § Where installed apps live), offered before an uninstall. */
   async exportData({ ref }: { ref: string }): Promise<AppDataExport[]> {
-    const app = await this.installedOrFail(ref);
-    const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(rowsOf(app.ref)));
-    const scopes = new Map<string, AppDataExport>();
-    for (const row of rows) {
-      const out = scopes.get(row.scope) ?? { ghostlyAppData: 1 as const, app: app.ref, scope: row.scope, entries: {} };
+    return (await this.exportDataText({ ref })).map(({ app, scope, entries }) => {
+      const out: AppDataExport = { ghostlyAppData: 1, app, scope, entries: {} };
       // Defined, not assigned: a key named `__proto__` is kept, where an assignment would set the file's prototype and lose it.
-      Object.defineProperty(out.entries, row.key, { value: JSON.parse(row.value) as JsonValue, enumerable: true, writable: true, configurable: true });
-      scopes.set(row.scope, out);
+      for (const [key, json] of entries) Object.defineProperty(out.entries, key, { value: JSON.parse(json) as JsonValue, enumerable: true, writable: true, configurable: true });
+      return out;
+    });
+  }
+
+  /**
+   * `exportData` with each value as the JSON text it is kept as, for a file written without parsing and writing every
+   * value again. Read a scope at a time, the thread let go between them: ten chats of 5 MiB read at once held it for
+   * the whole read.
+   */
+  async exportDataText({ ref }: { ref: string }): Promise<AppDataExportText[]> {
+    const app = await this.installedOrFail(ref);
+    const scopes: string[] = [];
+    const index = (await store(STORES.appStorage, "readonly")).index(APP_STORAGE_SCOPE_INDEX);
+    await new Promise<void>((resolve, reject) => {
+      const request = index.openKeyCursor(rowsOf(app.ref), "nextunique");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve();
+        scopes.push((cursor.key as [string, string])[1]);
+        cursor.continue();
+      };
+    });
+    const out: AppDataExportText[] = [];
+    for (const [i, scope] of scopes.entries()) {
+      if (i) await new Promise((resolve) => setTimeout(resolve, 0));
+      const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(rowsOf(app.ref, scope)));
+      if (rows.length) out.push({ app: app.ref, scope, entries: rows.map((row) => [row.key, row.value]) });
     }
-    return [...scopes.values()];
+    return out;
   }
 }

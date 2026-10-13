@@ -540,6 +540,8 @@ export interface EngineApi {
   appStorageKeys(params: { ref: string; scope: string; digest?: string }): string[];
   /** An app's storage in every scope, as export files, offered before an uninstall. */
   appDataExport(params: { ref: string }): import("../engine/apps").AppDataExport[];
+  /** `appDataExport` with each value as its stored JSON text, for a file written as is. */
+  appDataExportText(params: { ref: string }): import("../engine/apps").AppDataExportText[];
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

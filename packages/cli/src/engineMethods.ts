@@ -37,7 +37,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "deviceRemove", "deviceNewSecret", "deviceSecretOfferDismiss", "deviceSetNoticeSeen", "deviceTurnCheck", "devicePushState", "devicePushSet",
   "appList", "appBuiltIns", "appStoreList", "appStorePreview", "appStoreAdd", "appStoreRemove", "appStoreRefresh", "appPreview", "appInstall",
   "appUpdateAccept", "appCheckUpdates", "appUninstall", "appRunCheck", "appFetchFiles", "appEntry", "appFile", "appStorageGet", "appStorageSet",
-  "appStorageDelete", "appStorageKeys", "appDataExport",
+  "appStorageDelete", "appStorageKeys", "appDataExport", "appDataExportText",
 ];
 
 /** Reads the hosts use outside `EngineApi`: the whole state, and one chat's stored messages. */

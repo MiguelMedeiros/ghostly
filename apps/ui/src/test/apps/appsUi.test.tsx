@@ -529,7 +529,7 @@ describe("with the apps flag on", () => {
       .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
         name: "Ghostly", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
         apps: [{ ref: REF, sequence: 7, digest: DIGEST, urls: [URL_], title: "Chess", tagline: "Play chess with a contact" }], removed: [] }])
-      .on("appCheckUpdates", () => []).on("appDataExport", () => []).on("appUninstall", () => undefined);
+      .on("appCheckUpdates", () => []).on("appDataExportText", () => []).on("appUninstall", () => undefined);
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("installed-app");
     expect(row).toHaveTextContent("Chess");
