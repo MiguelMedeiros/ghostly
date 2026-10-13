@@ -126,6 +126,11 @@ describe("a transport change that did not land, in the app's language", () => {
     }
   });
 
+  it("a drop in a history seeded from an older release's rows (saved with its English) is said in each language", () => {
+    const event = { at: 1, kind: "down" as const, from: "webrtc/1" as const, reason: "Dropped and came back 4 times" };
+    for (const [language, t] of others) expect([language, transportEventText(event, "Ana", t)]).toEqual([language, t("connection.event.lostFrom", { from: "WebRTC" })]);
+  });
+
   it("says the reason and the next step in Portuguese, the engine's English only behind the ⓘ", () => {
     const pt = translateWith(LOCALES.pt, "pt");
     const entry = line({ kind: "failed", target: "iroh/1", transport: "webrtc/1", reason: failed("iroh/1 did not connect in time") });
