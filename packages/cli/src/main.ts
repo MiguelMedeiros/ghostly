@@ -9,6 +9,7 @@ import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
+import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { format } from "node:util";
@@ -85,19 +86,38 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
   return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
 }
 
-async function session(g: Globals, chat = false): Promise<Session> {
+/**
+ * Calls that only read what the profile stores: a one-shot for one opens it offline (`RuntimeOptions.offline`).
+ * Opened online, `status` or `chat list` started every chat, put the profile's records on the relays again and waited
+ * for its leave packet to be taken: 0.25 s became 3.3 s with a relay that takes 1.5 s, and 10 s with one that does not
+ * answer, and each read spent ~5 relay requests per chat of the relays' per-address budget.
+ */
+const READS: ReadonlySet<string> = new Set([
+  "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
+  "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "service.list",
+]);
+
+function readOnly(method: string, params: Record<string, unknown>): boolean {
+  if (method === "engine.call") return typeof params.method === "string" && ENGINE_READS.includes(params.method);
+  return READS.has(method);
+}
+
+async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
   if (client) await warnVersion(client);
   if (client) return { mode: "daemon", call: (m, p) => client.call(m, p), close: async () => client.close() };
   const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host = await openHost(g.paths, "one-shot", VERSION, { deferGroups: chat });
+  const host = await openHost(g.paths, "one-shot", VERSION, options);
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
 }
 
-/** `chat`: the command is about one 1:1 chat (`chatOnly`), and a one-shot needs nothing of the groups. */
-async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, chat = false): Promise<T> {
-  const s = await session(g, chat);
+/**
+ * How a one-shot opens the profile: `deferGroups` when the command is about one 1:1 chat (`chatOnly`) and needs
+ * nothing of the groups, `offline` when it only reads (`readOnly`).
+ */
+async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
+  const s = await session(g, options);
   try { return await work(s); } finally { await s.close(); }
 }
 
@@ -280,7 +300,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     }
     case "show":
       noMoreThan(0, parsed.positionals, "profile show");
-      print(await withSession(g, (s) => s.call("profile.get")));
+      print(await withSession(g, (s) => s.call("profile.get"), { offline: true }));
       return;
     case "set": {
       noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile]");
@@ -563,7 +583,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   }
   const confirmReal = parsed.options["confirm-real"] === true;
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
-  let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal }));
+  let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal }), { offline: ENGINE_READS.includes(method) });
   if (method === "getState" && !showSecret && result && typeof result === "object") {
     const { hideStateSecrets } = await engineApi();
     result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
@@ -575,7 +595,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
   const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }))); return; }
+  if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
   if (sub === "set") {
     const [key, value] = parsed.positionals;
     if (!key || value === undefined || parsed.positionals.length > 2) throw new CliError("usage", "ghostly settings set <key> <json-value>");
@@ -622,7 +642,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     }
     return s.call(spec.method, params);
-  }, spec.target === "chat"));
+  }, { deferGroups: spec.target === "chat" }));
 }
 
 /**
@@ -699,7 +719,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       await s.call("chat.wait", { chat: result.chat, until: "paired", timeout: 60 }).catch(() => {});
     }
     return result;
-  }, chatOnly(command.method, params));
+  }, { deferGroups: chatOnly(command.method, params), offline: readOnly(command.method, params) });
   // Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer.
   if (typeof result?.warning === "string") {
     process.stderr.write(`ghostly: ${result.warning}\n`);
