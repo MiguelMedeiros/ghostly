@@ -2240,7 +2240,8 @@ export class Groups {
         const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message);
         // On its row now: new, or the whole copy of one stored before. A copy I had already changes no row.
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
-        if (!completed && stored !== false && m.sender !== session.myKey) this.authorOrder.placed(state.id, { sender: m.sender, epoch: m.epoch, seq: m.seq, id: m.id, at: this.now() });
+        // Mine are followed too: a member's rows placed again take along the lines written after them, mine included.
+        if (!completed && stored !== false) this.authorOrder.placed(state.id, { sender: m.sender, epoch: m.epoch, seq: m.seq, id: m.id, at: this.now() });
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));

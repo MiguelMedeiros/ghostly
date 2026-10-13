@@ -27,9 +27,10 @@ function after(a: Placed, b: Placed): boolean {
  * A member's messages in a private group in the order that member wrote them (WISP 400, requirement 10, and WISP 902
  * § Catch-up). A message is placed where it arrives. When one comes of a member whose later messages were placed here
  * moments ago (two catch-up answers raced: the author's own newest 32 and another member's hand-on of the older ones),
- * those later ones are placed again below it, in the order they were written. A row only ever moves down, past what
- * came after it, so nobody else's lines change order and the author's newest is the last. While messages of that member
- * are still missing (`missing`), the rows wait for them, so each row moves about once in a whole catch-up.
+ * those later ones are placed again below it, in the order they were written, and the lines that came after them before
+ * the older one (another member's, mine) go along below them, in their order: a reply to the newest stays below it. A
+ * row only ever moves down, so nobody else's lines change order. While messages of that member are still missing
+ * (`missing`), the rows wait for them, so each row moves about once in a whole catch-up.
  */
 export class GroupAuthorOrder {
   /** Per group: the members' rows followed, in the order they are placed in the history. */
@@ -91,8 +92,21 @@ export class GroupAuthorOrder {
             if (!below || after(below, r)) below = r;
           }
           if (!from) continue;
-          const moved = mine.filter(r => !after(from!, r)).sort((a, b) => (after(a, b) ? 1 : after(b, a) ? -1 : 0));
-          const ids = new Set(moved.map(r => r.id));
+          const newer = mine.filter(r => !after(from!, r)).sort((a, b) => (after(a, b) ? 1 : after(b, a) ? -1 : 0));
+          const ids = new Set(newer.map(r => r.id));
+          // The others' rows (mine too) that came after the first of them, before any older one of the member's,
+          // follow them in their order: written below those rows (a reply to the newest), they stay below them. Those
+          // that came with the older ones were written among them, and stay.
+          const first = rows.findIndex(r => ids.has(r.id));
+          let end = rows.length;
+          for (let i = first + 1, top = rows[first]!; i < rows.length; i++) {
+            if (rows[i]!.sender !== sender) continue;
+            if (after(top, rows[i]!)) { end = i; break; }
+            top = rows[i]!;
+          }
+          const followers = rows.slice(first, end).filter(r => r.sender !== sender);
+          for (const r of followers) ids.add(r.id);
+          const moved = [...newer, ...followers];
           // Placed as if they came now: followed for as long as one that came now, through a long catch-up.
           this.rows.set(groupId, [...rows.filter(r => !ids.has(r.id)), ...moved.map(r => ({ ...r, at: Math.max(r.at, now) }))]);
           await this.host.placeAgain!(this.linkOf(groupId), moved.map(r => r.id)).catch(() => {});

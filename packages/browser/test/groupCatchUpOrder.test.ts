@@ -122,6 +122,25 @@ describe("a member back in a private group reads what it missed in the order it 
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
   });
 
+  it("a reply to the newest line, written before the older ones came, stays below the lines it answers", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
+    const [alice, , , dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    const written: string[] = [];
+    for (let i = 1; i <= 120; i++) { written.push(`alice ${i}`); await alice.groups.send(id, `alice ${i}`); await world.run(50); }
+    world.slow = (_from, to) => to === dave ? 4 : 0;
+    world.reopen(dave);
+    // Her newest come first: Dave answers the last line as soon as it shows, while the older ones are on their way.
+    await world.until(() => world.texts(dave, id).includes("alice 120"), 60_000);
+    expect(world.texts(dave, id).filter(t => written.includes(t)).length).toBeLessThan(written.length);
+    const reply = "dave: re alice 120";
+    await dave.groups.send(id, reply);
+    await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 120_000);
+    await world.run(20_000);
+    expect(world.texts(dave, id).filter(t => written.includes(t) || t === reply)).toEqual([...written, reply]);
+  });
+
   it("one member wrote 200 and the older ones come 32 at a time: each row is placed again about once, not once a page", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
     const [alice, , , dave] = peers;
