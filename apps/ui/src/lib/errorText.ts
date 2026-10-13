@@ -453,6 +453,9 @@ const RULES: readonly Rule[] = [
   { match: /^The faucet did not pay: (?<reason>[\s\S]+)$/, key: "errors.wallet.faucetDidNotPay", reason: "next" },
 
   // Profiles, backups and pictures (apps/ui/src/lib).
+  // Add a device's They match after the enrollment ended, and Remove on a device that finished joining (engine/node.ts, devices/).
+  exact("There are no digits to confirm", "errors.devices.digitsEnded", "errors.devices.digitsEndedNext"),
+  exact("Only an enrollment that did not finish is removed here", "errors.devices.onlyUnfinished"),
   exact("Give the profile a name", "errors.profile.giveName"),
   exact("That profile already exists", "errors.profile.exists"),
   { match: /^The first profile cannot be (?:removed|deleted)$/, key: "errors.profile.firstStays" },

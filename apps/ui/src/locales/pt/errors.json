@@ -46,6 +46,11 @@
     "tooLongNext": "Encurte ou envie como arquivo."
   },
   "connectionFailed": "Falha na conexão",
+  "devices": {
+    "digitsEnded": "A adição deste dispositivo terminou",
+    "digitsEndedNext": "Comece de novo em Adicionar um dispositivo.",
+    "onlyUnfinished": "Aqui só se remove um dispositivo que não terminou de entrar"
+  },
   "engine": {
     "alreadySubmitted": "Este pagamento já foi enviado, ou não pôde ser salvo",
     "cannotCancelSubmitted": "Um pagamento enviado não pode ser cancelado; verifique-o",
