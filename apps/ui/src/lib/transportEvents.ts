@@ -241,7 +241,9 @@ export function transportEventText(event: TransportEvent, contact: string, tr: T
       const meanwhile = event.text === "dht" ? tr("connection.event.textsDht") : event.text === "hold" ? tr("connection.event.messagesWait", { contact }) : undefined;
       // Off live to wait for a chosen transport (Fallback off), not a drop.
       if (event.target) return parts(tr("connection.waitingFor", { transport: name(event.target) }), !!event.from && tr("connection.event.offFrom", { from: name(event.from) }), meanwhile);
-      return parts(event.from ? tr("connection.event.lostFrom", { from: name(event.from) }) : tr("connection.line.lost"), meanwhile, event.reason);
+      // A drop's `reason` was only ever an older release's English ("Dropped and came back 4 times", saved into the
+      // history when its rows seeded it): never said inside a translated line.
+      return parts(event.from ? tr("connection.event.lostFrom", { from: name(event.from) }) : tr("connection.line.lost"), meanwhile);
     }
     case "switched": {
       const why = event.cause === "you" ? tr("connection.event.yourChoice") : event.cause === "contact" ? tr("connection.event.contactsChoice", { contact })
