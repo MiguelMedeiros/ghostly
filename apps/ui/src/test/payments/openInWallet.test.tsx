@@ -47,6 +47,25 @@ describe("Open in wallet on a payment in a message", () => {
     expect(document.body.innerHTML).not.toContain("lnbc");
   });
 
+  it.each([
+    ["written plainly", `bitcoin:${TB1Q}?amount=0.0001&label=Bob%27s%20(Tue)&message=Thanks!*~`],
+    ["percent-encoded", `bitcoin:${TB1Q}?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E`],
+  ])("a label and message with ' ( ) ! * ~ (%s) make a link the desktop app and the extension open", async (_, text) => {
+    const open = vi.fn(async () => {});
+    fakeEngine.openPaymentLink = open;
+    bubble(text);
+    const link = await screen.findByTestId("onchain-open-wallet");
+    const uri = `bitcoin:${TB1Q}?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E`;
+    expect(link).toHaveAttribute("href", uri);
+    // The card reads them as they were written.
+    expect(document.body.textContent).toContain("Bob's (Tue)");
+    // What the extension (apps/extension/src/background.ts) and Desktop (apps/desktop/src/commands.rs is_payment_link)
+    // agree to open: anything else is refused, and the person reads "Couldn't open a wallet".
+    expect(uri).toMatch(/^(lightning|bitcoin):[A-Za-z0-9?=&%.:_-]{1,4096}$/);
+    click(link);
+    expect(open).toHaveBeenCalledWith(uri);
+  });
+
   it("on a web page the browser follows the link itself", async () => {
     bubble(BIP21);
     const link = await screen.findByTestId("onchain-open-wallet");
