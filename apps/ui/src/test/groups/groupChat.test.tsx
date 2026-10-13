@@ -69,8 +69,8 @@ describe("GroupChat: what the header says", () => {
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
-  it("asks a member invited back over the history kept from before", async () => {
-    openGroup(groupView({ status: "removed", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }),
+  it.each([["removed", "removed"], ["no status", undefined]] as const)("asks a member invited back over the history kept from before (%s)", async (_, status) => {
+    openGroup(groupView({ status, canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }),
       [stored({ id: "old", text: "from before", member: ALICE })]);
     expect(screen.getByTestId("group-invitation")).toHaveTextContent("Invited by Alice · 3 members");
     expect(screen.getByTestId("group-accept")).toBeInTheDocument();

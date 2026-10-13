@@ -498,7 +498,9 @@ export function GroupChat() {
   // A contact's invitation, not answered yet (or on its way): its page says who invited and to what, with Accept and
   // Decline, and has nothing a member has (a field, Search, a folder). Over the history kept for a member invited back.
   const invited = !!group.invitation && !group.invitation.viaLink;
-  const noTimeline = joiningByLink || (invited && !group.status);
+  // A member invited back keeps what was said while they were in (the engine gives such a group no status).
+  const invitedFresh = invited && !group.status && messages.length === 0;
+  const noTimeline = joiningByLink || invitedFresh;
   const knockingAgain = !!group.invitation?.viaLink && !!group.status;
   const waitingWith = group.invitation?.waiting ?? 0;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
@@ -615,8 +617,8 @@ export function GroupChat() {
       </div>}
 
 
-      {invited && group.status && <GroupInvitationCard group={group} compact />}
-      {invited && !group.status ? <GroupInvitationCard group={group} />
+      {invited && !invitedFresh && <GroupInvitationCard group={group} compact />}
+      {invitedFresh ? <GroupInvitationCard group={group} />
       : joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
         <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
