@@ -19,6 +19,7 @@ mod copied_files;
 mod crypto;
 mod device_state;
 mod diagnostics;
+mod downloads;
 // The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
 #[cfg(any(test, feature = "e2e-driver"))]
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
@@ -330,6 +331,8 @@ pub fn run() {
                 fullscreen::install(&main);
                 // A voice message's microphone: WebKitGTK denies it unless the app answers.
                 microphone::install(&main);
+                // A file is saved through the app's own Save only, never by the WebView's own menu.
+                downloads::install(&main);
             }
             #[cfg(feature = "e2e-driver")]
             {
