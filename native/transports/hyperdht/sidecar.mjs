@@ -8,6 +8,11 @@ import { createInterface } from 'node:readline'
 const MAX_ENDPOINTS = 8
 const MAX_QUEUED = 32
 const MAX_LINE = 256 * 1024
+/**
+ * Bytes a connection's socket may hold when a send is answered. Past it, the answer waits until the socket drained,
+ * so the host counts the frame against the page's send budget while it is not on the wire.
+ */
+const SEND_ROOM = 64 * 1024
 const emit = value => process.stdout.write(JSON.stringify(value) + '\n')
 const message = error => error instanceof Error ? error.message : String(error)
 // GHOSTLY_HYPERDHT_BOOTSTRAP ("host:port,…") replaces the public bootstrap nodes: a private network, or the
@@ -73,13 +78,27 @@ function queue(record, command) {
       const id = attach(record, await record.endpoint.connect(command.descriptor), false)
       if (id) emit({ type: 'result', endpoint: record.id, id })
     } else if (command.type === 'send') {
-      const data = typeof command.bytes === 'string' ? new Uint8Array(Buffer.from(command.bytes, 'base64')) : command.text
-      record.connections.get(command.id)?.send(data)
+      const channel = record.connections.get(command.id)
+      if (!channel) throw new Error('Native channel is closed')
+      channel.send(typeof command.bytes === 'string' ? new Uint8Array(Buffer.from(command.bytes, 'base64')) : command.text)
+      // Answered once the socket has room, out of this endpoint's line: a close or another connection's send never waits on it.
+      void room(record, command.id, channel).then(() => emit({ type: 'sent', endpoint: record.id, id: command.id, seq: command.seq }),
+        error => emit({ type: 'error', endpoint: record.id, command: 'send', id: command.id, seq: command.seq, message: message(error) }))
     }
     else record.connections.get(command.id)?.close()
   }).catch(error => {
-    if (!record.stopped) emit({ type: 'error', endpoint: record.id, command: command.type, message: message(error) })
+    if (record.stopped) return
+    const send = command.type === 'send' ? { id: command.id, seq: command.seq } : {}
+    emit({ type: 'error', endpoint: record.id, command: command.type, ...send, message: message(error) })
   }).finally(() => { record.queued-- })
+}
+
+/** Resolves once `channel` holds no more than `SEND_ROOM`; throws once it closed. */
+async function room(record, id, channel) {
+  while (channel.bufferedAmount > SEND_ROOM) {
+    if (record.connections.get(id) !== channel) throw new Error('Native channel is closed')
+    await channel.drained()
+  }
 }
 
 async function stop(record) {
