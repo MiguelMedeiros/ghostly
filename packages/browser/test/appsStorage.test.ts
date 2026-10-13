@@ -243,6 +243,26 @@ describe("storage", () => {
     await store.storageSet({ ref, scope: "chat-1", key: "new", value: 1 });
   });
 
+  it("keys calls made at once on a scope of many keys read the database once at a time, and each sees the writes done before it", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    await seed(ref, "chat-1", { big: 0, small: 5000 });
+    const reads = vi.spyOn(IDBObjectStore.prototype, "getAllKeys");
+    try {
+      const calls = Array.from({ length: 49 }, () => store.storageKeys({ ref, scope: "chat-1" }));
+      const answers = await Promise.all(calls);
+      expect(answers.every((keys) => keys.length === 5000)).toBe(true);
+      expect(reads.mock.calls.length, "one read running and one shared by every call made meanwhile").toBeLessThanOrEqual(2);
+      reads.mockClear();
+      const before = store.storageKeys({ ref, scope: "chat-1" });
+      await store.storageSet({ ref, scope: "chat-1", key: "late", value: 1 });
+      const after = await store.storageKeys({ ref, scope: "chat-1" });
+      expect(after, "a call made after a write sees it").toContain("late");
+      expect((await before).length).toBeGreaterThanOrEqual(5000);
+      expect(await store.storageKeys({ ref, scope: APP_SCOPE_ALONE }), "another scope reads its own").toEqual([]);
+    } finally { reads.mockRestore(); }
+  });
+
   it("exports every scope as the WISP's file", async () => {
     const { store, app } = await installed();
     await store.storageSet({ ref: app.ref, scope: "chat-1", key: "a", value: [1, 2] });
