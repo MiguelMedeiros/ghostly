@@ -336,6 +336,10 @@ const RULES: readonly Rule[] = [
   // community.ts): why a group stopped (its notice, the line under its name, its row in the list), what a send or an
   // edit was refused for, and what the members panel, the leave dialog and a group's link answer.
   exact("You were removed from this group", "errors.group.removed"),
+  // A name, picture or hub setting the group's meta refuses (packages/core/src/groupMeta.ts, engine/node.ts).
+  { match: /^A group's name is 1 to (?<max>\d+) characters( on one line)?$/, key: "errors.group.name", next: "errors.group.nameNext" },
+  exact("This picture cannot be used", "errors.group.picture", "errors.group.pictureNext"),
+  exact("This hub setting cannot be used", "errors.group.hubSetting"),
   exact("You left this group", "errors.group.left"),
   { match: /^Member (?<member>\S+) holds a different membership history for epoch (?<epoch>\d+)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forkedMember", next: "errors.group.forkedNext", detail: true },
   { match: /^The admin signed two different changes after epoch (?<epoch>\d+)\. Membership changes are halted; the admin must re-form the group\.$/, key: "errors.group.forkedAdminChanges", next: "errors.group.forkedNext", detail: true },

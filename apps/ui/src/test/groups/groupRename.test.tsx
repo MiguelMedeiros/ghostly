@@ -48,14 +48,26 @@ describe("renaming a group in the app", () => {
     expect(engine.callsTo("renameGroup")).toEqual([]);
   });
 
-  it("says what the engine refused, and keeps what was typed", async () => {
+  it("says what the engine refused, in the app's words, and keeps what was typed", async () => {
     fakeEngine.update({ groups: [admin()] });
     const { user, engine } = renderApp(<GroupMembersDialog group={admin()} onClose={() => {}} />);
     engine.on("renameGroup", () => { throw new Error("A group's name is 1 to 64 characters"); });
     await user.click(screen.getByTestId("group-rename"));
-    await user.type(screen.getByTestId("group-rename-input"), "‮{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("1 to 64 characters");
+    await user.clear(screen.getByTestId("group-rename-input"));
+    await user.type(screen.getByTestId("group-rename-input"), "Book club{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Type a name with letters or emoji" + "Up to 64 characters, on one line.");
     expect(screen.getByTestId("group-rename-input")).toBeInTheDocument();
+  });
+
+  it.each([["a zero-width space", "\u200B"], ["a direction mark", "\u202E"]])("keeps Save off for a name with nothing visible in it (%s)", async (_, name) => {
+    fakeEngine.update({ groups: [admin()] });
+    const { user, engine } = renderApp(<GroupMembersDialog group={admin()} onClose={() => {}} />);
+    engine.on("renameGroup", () => undefined);
+    await user.click(screen.getByTestId("group-rename"));
+    await user.clear(screen.getByTestId("group-rename-input"));
+    await user.type(screen.getByTestId("group-rename-input"), `${name}{Enter}`);
+    expect(screen.getByTestId("group-rename-save")).toBeDisabled();
+    expect(engine.callsTo("renameGroup")).toEqual([]);
   });
 
   it("a member cannot rename it", () => {

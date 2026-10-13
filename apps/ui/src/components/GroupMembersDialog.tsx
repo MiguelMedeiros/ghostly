@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS } from "@ghostly/core";
+import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS, groupName } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
@@ -69,6 +69,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const rename = async () => {
     const name = naming ?? "";
     if (name.trim() === live.name) { setNaming(null); return; }
+    // Nothing visible in it: Save is off, and Enter does nothing either.
+    if (!groupName(name)) return;
     await run("rename", async () => { await engine.call("renameGroup", { groupId: live.id, name }); setNaming(null); });
   };
   // Contacts: paired chats, minus members and pending invitations. Those without groups are shown, and say why.
@@ -109,7 +111,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
               <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} value={naming} maxLength={MAX_GROUP_NAME_LENGTH} disabled={busy !== null}
                 onChange={e => setNaming(e.target.value)} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setNaming(null); } }}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none" />
-              <button type="submit" data-testid="group-rename-save" disabled={busy !== null || !naming.trim()}
+              <button type="submit" data-testid="group-rename-save" disabled={busy !== null || !groupName(naming)}
                 className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.rename.save")}</button>
               <button type="button" data-testid="group-rename-cancel" onClick={() => setNaming(null)} className="text-xs text-text-muted hover:text-text-primary">{t("group.rename.cancel")}</button>
             </form>}
