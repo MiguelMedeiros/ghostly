@@ -698,7 +698,7 @@ export function GroupChat() {
       : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         title={group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")} confirm={t("group.menu.forget")}
         // What goes: an invitation (declined, and its sender told), a first knock through the link, or a group kept with its history.
-        body={joiningByLink ? t("group.forget.joining") : group.invitation && !knockingAgain
+        body={joiningByLink ? t("group.forget.joining") : group.invitation?.takenBack ? t("group.forget.takenBack") : group.invitation && !knockingAgain
           ? (group.invitation.contact ? t("group.forget.invitation", { contact: group.invitation.contact }) : t("group.forget.invitationUnknown")) : t("group.forget.kept")}
         // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
         onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetGroupLocal(groupId); nav.home(); }); }} />}

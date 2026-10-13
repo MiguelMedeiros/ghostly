@@ -85,7 +85,8 @@
     "invitation": "The invitation goes from this device. {{contact}} is told you declined.",
     "invitationUnknown": "The invitation goes from this device. The contact who sent it is told you declined.",
     "joining": "You stop asking to join, and the group goes from this device.",
-    "kept": "The group and its history go from this device."
+    "kept": "The group and its history go from this device.",
+    "takenBack": "The invitation goes from this device. It was taken back, so nobody is told."
   },
   "hubs": {
     "auto": "Hub if always on",

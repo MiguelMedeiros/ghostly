@@ -85,7 +85,8 @@
     "invitation": "O convite sai deste dispositivo. {{contact}} fica sabendo que você recusou.",
     "invitationUnknown": "O convite sai deste dispositivo. O contato que o enviou fica sabendo que você recusou.",
     "joining": "Você deixa de pedir para entrar, e o grupo sai deste dispositivo.",
-    "kept": "O grupo e o histórico dele saem deste dispositivo."
+    "kept": "O grupo e o histórico dele saem deste dispositivo.",
+    "takenBack": "O convite sai deste dispositivo. Ele foi retirado, então ninguém é avisado."
   },
   "hubs": {
     "auto": "Hub se sempre ligado",

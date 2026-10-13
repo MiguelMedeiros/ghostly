@@ -440,6 +440,15 @@ describe("GroupChat: the options menu", () => {
     expect(dialog).not.toHaveTextContent("Your contact");
   });
 
+  it("deleting an invitation that was taken back says nobody is told", async () => {
+    const { user } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Ana", admin: ALICE, members: 3, accepted: false, takenBack: true } }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("The invitation goes from this device. It was taken back, so nobody is told.");
+    expect(dialog).not.toHaveTextContent("declined");
+  });
+
   it("deleting a community I knock to get back into says the group and its history go", async () => {
     const { user } = openGroup(active({ profile: "community", status: "removed", canSend: false,
       invitation: { linkId: "entry-1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }));
