@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { liftGlobals, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { GhostlyHttpError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
 
@@ -261,5 +262,11 @@ describe("errors", () => {
     expect(asCliError(Object.assign(new Error("EISDIR: illegal operation"), { code: "EISDIR", syscall: "open", path: "/tmp" })).code).toBe("bad_request");
     // An engine error that only mentions a file keeps its words.
     expect(asCliError(new Error("The file is gone")).code).toBe("engine");
+  });
+
+  it("say a contact that could not be reached as unavailable, not as the engine failing", () => {
+    // `chat pay` / `chat connect` to a contact that never answers: the link's GhostlyHttpError "unreachable".
+    expect(asCliError(new GhostlyHttpError("unreachable", "Could not connect to the peer")).toJSON()).toEqual({ code: "unavailable", message: "Could not connect to the peer" });
+    expect(asCliError(new GhostlyHttpError("closed", "Connection closed")).code).toBe("engine");
   });
 });
