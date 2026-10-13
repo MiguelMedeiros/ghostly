@@ -8,6 +8,7 @@ import {
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
 import { FramesTaken, arrivalNow, cameAt, cameOrWritten, editKey, eventTime, mentionAt, mentionFields, noteCame, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
+import { GroupLineOrder } from "./groupLineOrder";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
 import { groupFileText, type GroupFileDesk, type GroupFileMembership } from "./groupFiles";
@@ -320,8 +321,12 @@ export class Communities {
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
   private readonly frames = new FramesTaken();
   private readonly carriers = new Map<string, string>();
+  /** The lines of each history among the messages of their moment (`GroupLineOrder`). */
+  private readonly lineOrder: GroupLineOrder;
 
-  constructor(private readonly host: GroupsHost, private readonly store: GroupStore, private readonly timings: CommunityTimings = COMMUNITY_TIMINGS, private readonly random: () => number = Math.random) {}
+  constructor(private readonly host: GroupsHost, private readonly store: GroupStore, private readonly timings: CommunityTimings = COMMUNITY_TIMINGS, private readonly random: () => number = Math.random) {
+    this.lineOrder = new GroupLineOrder(host);
+  }
 
   /** Application frames and pair payloads handed to the engine, one after the other per group. */
   private readonly deliveries = new Map<string, Promise<void>>();
@@ -636,6 +641,7 @@ export class Communities {
     this.lastMentionAt.delete(groupId);
     this.knockingWith.delete(groupId);
     this.knockRead.delete(groupId);
+    this.lineOrder.forget(MESSAGE_LINK(groupId));
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     // No row is kept of a community that is gone from here: its files go now, or nothing would name them again.
@@ -1755,8 +1761,11 @@ export class Communities {
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
         const file = m.file && this.files ? await this.files.announced(id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
+        // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
+        const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }) });
+        placing(stored !== false);
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, came));
@@ -1833,7 +1842,8 @@ export class Communities {
   /** A line in the group's history. Its id carries its time: two lines at the same moment get distinct ones (`eventTime`). */
   private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string): Promise<void> {
     timestamp = eventTime(this.eventTimes, groupId, timestamp);
-    await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id: `event:${epoch}:${event}:${member ?? ""}:${timestamp}`, text, sender: "peer", event, member, timestamp, via: "datalink" });
+    const id = `event:${epoch}:${event}:${member ?? ""}:${timestamp}`, placing = this.lineOrder.placing(MESSAGE_LINK(groupId), { id, epoch, line: true }, this.now());
+    placing(await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id, text, sender: "peer", event, member, timestamp, via: "datalink" }) !== false);
   }
   private readonly eventTimes = new Map<string, Set<number>>();
 }
