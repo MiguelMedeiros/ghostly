@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatFiles, GhostLink, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { forwardKind } from "../src/engine/forwards";
+import { copyForForward, forwardKind } from "../src/engine/forwards";
 import { fileStore } from "../src/shared/idb";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -131,6 +131,25 @@ describe("the hop count", () => {
     expect(forwardKind(row({ paymentId: "pay-1" }))).toMatchObject({ refused: expect.stringMatching(/Payments/) });
     expect(forwardKind(row({ linkId: "group:g", event: "joined" }))).toMatchObject({ refused: expect.any(String) });
     expect(forwardKind(row({ text: "  " }))).toMatchObject({ refused: expect.any(String) });
+  });
+});
+
+describe("a group file", () => {
+  // Every byte of its size can be here before its digest checked out (a holder that stalled at the end): it goes on only
+  // once the group's desk says it arrived.
+  it("is forwarded only once it arrived, never from bytes of its whole size still waiting for the author's digest", async () => {
+    const id = `group:g-in-${crypto.randomUUID()}`, size = 4096;
+    const metadata = { name: "contract.pdf", size, mime: "application/pdf", timestamp: 1 };
+    const target = (n: number) => ({ linkId: "group:h", wireId: `w${n}`, timestamp: 2, file: { id: `group:h-out-${crypto.randomUUID()}`, name: "contract.pdf", size, mime: "application/pdf" } });
+    await fileStore.put({ id, linkId: "group:g", direction: "in", digest: digestOf(size), createdAt: 1, metadata, blob: new Blob([pattern(1, size)]),
+      transfer: { state: "transferring", transferred: size, size }, group: { message: "m1", author: "alice" } });
+    await expect(copyForForward(id, target(1))).rejects.toThrow("The file has not arrived yet");
+    await fileStore.patch(id, { transfer: { state: "failed", transferred: 0, size, error: "damaged" } });
+    await expect(copyForForward(id, target(2))).rejects.toThrow("The file has not arrived yet");
+    await fileStore.patch(id, { transfer: { state: "done", transferred: size, size } });
+    const done = target(3);
+    await copyForForward(id, done);
+    expect(await fileStore.get(done.file.id)).toMatchObject({ direction: "out", digest: digestOf(size) });
   });
 });
 
