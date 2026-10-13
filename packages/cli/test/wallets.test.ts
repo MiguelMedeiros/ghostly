@@ -2,6 +2,7 @@ import { validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState } from "@ghostly/browser/shared/types";
+import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
 import { invoiceNetwork } from "../src/wallets";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
@@ -30,6 +31,8 @@ function fake() {
     walletPayQuote: vi.fn(async (_: unknown) => ({ paid: true })),
     sendPayment: vi.fn(async () => ({ paymentId: "p1" })),
     payRequest: vi.fn(async (_: unknown) => undefined),
+    // As the engine checks a mint's URL before it reaches for the mint.
+    walletAddMint: vi.fn(async (p: { url: string }) => ({ url: normalizeMintUrl(p.url) })),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {} }, mode: "daemon", version: "t" } as unknown as ApiContext;
   return { ctx, node };
@@ -67,6 +70,14 @@ describe("wallets", () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "wallet.faucet", { type: "cashu", network: "mainnet" })).rejects.toMatchObject({ code: "refused" });
     expect(await callApi(ctx, "wallet.faucet", { type: "cashu" })).toEqual({ amount: 10000, unit: "test sats" });
+  });
+
+  it("a mint URL the engine refuses is the person's value: bad_request, with the engine's words", async () => {
+    const { ctx } = fake();
+    await expect(callApi(ctx, "wallet.mint.add", { url: "notaurl" })).rejects.toMatchObject({ code: "bad_request", message: "That is not a valid mint URL" });
+    await expect(callApi(ctx, "wallet.mint.add", { url: "ftp://mint.example" })).rejects.toMatchObject({ code: "bad_request", message: "Mints must use https" });
+    await expect(callApi(ctx, "wallet.mint.add", { url: "http://mint.example" })).rejects.toMatchObject({ code: "bad_request", message: "Mints must use https" });
+    expect(await callApi(ctx, "wallet.mint.add", { url: "https://mint.example/" })).toEqual({ url: "https://mint.example" });
   });
 });
 
