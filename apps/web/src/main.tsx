@@ -20,7 +20,7 @@ import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
-import { setAppOpener, takedownText } from "../../ui/src/lib/apps/open";
+import { setAppOpener, setLinkedFiles, takedownText } from "../../ui/src/lib/apps/open";
 import { idbPickStore, linkedFilesDatabase, pickSheetText, webLinkedFiles } from "../../ui/src/lib/apps/webFiles";
 import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { profileDatabase } from "../../ui/src/lib/profileData";
@@ -101,14 +101,17 @@ addEventListener("pagehide", () => webHost.announceDeparture());
 restartWhenRestored();
 // Mini-apps (WISP 1200) open in this server's runner, once the feature is on (or in the e2e suite's build).
 if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
+  // Files the person picks for an app granted `files`: the client's own sheet; where the browser can keep a picked
+  // folder (Chromium), it is kept in the profile's own database, which goes with it. An uninstalled app's go with it.
+  const linkedFiles = webLinkedFiles({ text: () => pickSheetText(profileTranslator()), store: idbPickStore(() => linkedFilesDatabase(profileDatabase(activeProfileId()))) });
+  setLinkedFiles(linkedFiles);
   setAppOpener(webOpener({
     apps: () => servicesPlatform?.apps,
     nameIn: nameInChat,
     closeLabel: () => profileTranslator()("common.close"),
     stoppedLabel: (title, takedown) => takedownText(title, takedown, profileTranslator()),
     // Files the person picks for an app granted `files`: the client's own sheet, links for this page's life.
-    // Where the browser can keep a picked folder (Chromium), it is kept in the profile's own database, which goes with it.
-    linkedFiles: webLinkedFiles({ text: () => pickSheetText(profileTranslator()), store: idbPickStore(() => linkedFilesDatabase(profileDatabase(activeProfileId()))) }),
+    linkedFiles,
   }));
 }
 
