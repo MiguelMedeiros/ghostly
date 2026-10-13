@@ -83,6 +83,16 @@ Taken for release 1.3, so that a person finds Ghostly's own apps without a trip 
 | Removing | **Sticks.** No start and no update brings a removed app back. Installing it again is the person's choice |
 | Existing profiles | Offered the built-in apps **once**, unless the app is installed already or was removed |
 
+## Decisions taken by the owner (2026-10-12, a person's files)
+
+Taken when Cinema, an app that streams a person's own films to a contact, showed what phase 1 lacks ([The person's files through an app](#the-persons-files-through-an-app-linked-files-a-read-lane-and-sending-ahead)). The direction is accepted; nothing of it is built, and each part comes as its own change.
+
+| Question | Decision |
+|---|---|
+| Keeping access to files the person picks | **Linked files**: the client keeps a reference, never a copy, under a new permission `files` |
+| Getting a big file to the contact | **A read lane**, `app-ranges/1`, carried by the client with `files/3`'s flow control, not through `apps/1` |
+| Watching while the other person is offline | **Sending ahead**: an app asks the client to send a linked file as a chat file; the contact's app reads it there |
+
 ## What exists today (evidence)
 
 Each fact was checked against the file it names on `dev` on 2026-10-02, or measured in the reviews of 2026-10-03. Where one is wrong, the section that cites it must change.
@@ -330,7 +340,7 @@ Storage is scoped per app and per chat so an app cannot carry data from one cont
 
 **Every install screen of an app without `internet` also says**: "No internet access. The publisher may still learn your IP address and when you open it." The sandbox closes every channel the reviews found but one: in WebKit on the web (Safari, and the installed web app on an iPhone) `<link rel=preconnect>` connects under every policy, so **there the screen adds**: "In this browser, an app can still contact other servers." The web runner's hint guard keeps such links out where it sees them (measured: none connected), but it runs in the app's own realm and is no stop ([Threats](#threats)). DNS prefetch and WebView2 are not measured yet, and a contact in a `chat` app always learns when the app is used.
 
-Later phases add, each with its own line: `network` (a narrower `internet`: an exact list of HTTPS origins, shown at install and re-asked when one is added), `realtime` (the unordered message mode and higher limits, for games), `cards` (read the task and routine cards the contact sent in this chat, for a bot's own app), `payment-request` (the client shows a payment the person approves; the app never sees a wallet), `clipboard-write`, `camera`, `microphone`, `notify`.
+Later phases add, each with its own line: `files` (accepted 2026-10-12: [linked files](#linked-files-the-files-permission)), `network` (a narrower `internet`: an exact list of HTTPS origins, shown at install and re-asked when one is added), `realtime` (the unordered message mode and higher limits, for games), `cards` (read the task and routine cards the contact sent in this chat, for a bot's own app), `payment-request` (the client shows a payment the person approves; the app never sees a wallet), `clipboard-write`, `camera`, `microphone`, `notify`.
 
 **What re-asks:** an update that adds a permission waits for the person, who sees only what is new; one that removes a permission applies by itself. **What never happens:** an app that runs before the person pressed Install; a permission granted by a store or a contact; a permission granted for all apps at once.
 
@@ -602,6 +612,79 @@ A new derivation adds a row here, or to the WISP that owns it with a link here.
 - **Sybil resistance:** no global score, no follower counts, no weight for payment, and no "Bought it" mark (it would link licence keys across publishers).
 - **Conflicts are shown:** "In <store> · removed by <other store>".
 
+## The person's files through an app: linked files, a read lane and sending ahead
+
+**Accepted as the direction by the owner on 2026-10-12, and not built.** It answers what Cinema, the app that streams a person's own films and series to a contact ([ghostly-cinema](https://github.com/MiguelMedeiros/ghostly-cinema)), found missing in phase 1. Its three parts are built in the [order below](#order-of-work-files), each as its own change; the names of calls, frames and the permission are fixed when the first part is built, with vectors then ([00](00-process.md#revisions)).
+
+### What an app does with a person's files today (measured)
+
+Cinema 0.1.0 works with phase 1 alone, measured on 2026-10-12 (Playwright 1.63, Chromium and WebKit, each side in the web runner's frame under its header; and two web clients of `dev` paired over the e2e relay):
+
+| Need | Today | What it costs |
+|---|---|---|
+| Read a folder the person picks | `<input type=file webkitdirectory>` in the frame gives `File` objects, read in ranges with `slice`, nothing copied. Desktop's window uses the WebView's own open panel, which allows folders (wry 0.57, a hand check) | **Gone when the app closes.** The person picks the folder again at every open; the app keeps only what it read about each file in its 5 MiB |
+| Play video in the frame | Media Source plays and seeks in the sandbox: Chromium with `URL.createObjectURL(mediaSource)`, WebKit only with `video.srcObject = mediaSource` (it refuses the `blob:null/` URL); a plain `blob:` URL of a picked file plays on both | Nothing: no change needed |
+| Get a film to the contact | `apps/1` data frames: base64 in JSON, at most 32 KiB, 48 a second, on the chat's own ordered channel. Cinema keeps a window of chunks unacknowledged and sends again a frame refused while the contact is still open | **About 8.8 Mbit/s at best** (measured 8.1 to 8.4 with a 300 MB, 8 Mbit/s film, both ends on one machine). On Iroh and HyperDHT in a browser a full channel answers `offline`, the same code as a lost session, so the app cannot tell the two apart, and relayed paths are slower. A Blu-ray rip (15 to 30 Mbit/s) does not play, and a stream slows every other frame of the chat |
+| Watch without the person online | Nothing: `apps/1` is live only | The travel case (a film watched on a plane) has no answer |
+
+### Linked files (the `files` permission)
+
+A second kind of library entry beside the copied one of [phase 2](#bigger-bundles-and-the-persons-own-files): **linked**, the client keeps a reference to a file the person picked, never a copy. It fits a library of hundreds of gigabytes, which the 1 GiB copied library does not.
+
+- **Permission `files`.** Shown at install as "Reads the files and folders you pick, and can share them with your contact in the chat". Nothing below is answered without it (`not-allowed`). A client that does not know `files` refuses the manifest (`bad-field`), as it should: the app needs a newer Ghostly.
+- **Picking.** `ghostly.files.pick({folder, accept})`: `folder` true for a folder (with everything under it), false for files; `accept`, at most 32 extensions (`["mp4", "srt"]`). The client, not the frame, shows the request ("Cinema asks to read a folder") and its own picker, on a click the person makes in the client. It answers the entries picked: `{id, path, size, modified}`, where `path` is relative to what was picked, the picked folder's name first, never the absolute path, and `id` is 22 base64url characters the client chose at random. At most 100,000 entries per app; hidden files and folders are left out.
+- **Keeping.** Per app, not per chat, as the copied library. `ghostly.files.list()` gives the entries kept, each with `available`: whether the client can read it now. `ghostly.files.forget(id or "all")` drops links; uninstalling the app drops them all. A backup carries none.
+- **Reading.** `ghostly.files.read(id, {offset, length})`, at most 1 MiB a call, answers bytes, counted in the app's file budget (16 MiB a second, [The runner and the broker](#the-runner-and-the-broker)). A file whose size or date changed since it was picked is refused (`changed`) until it is picked again; a file gone, with `gone`. The app cannot name a path: it reads only ids the client gave it.
+- **Per client.**
+
+  | Client | How a link is kept | After a restart |
+  |---|---|---|
+  | Desktop (macOS, Linux) | The paths under the folder the person picked, in the app's record, read in ranges by the host (as the `ghostly-file` scheme reads a stored file) | Available |
+  | Web, Chromium | A `FileSystemDirectoryHandle` (or file handle) in the client's own IndexedDB, never in the frame | The browser asks again: the client shows "Allow Cinema to read Films again" with a button, whose click asks the browser; until then `available` is false |
+  | Web, Safari and Firefox | `File` objects held by the client's page | Gone with the tab: `available` is false and the app asks for a pick again |
+  | Desktop on Windows, Android | No apps yet | |
+
+### A read lane to the contact (`app-ranges/1`)
+
+The contact's app reads a file this side's app chose to share, in ranges, over the chat's session but not through `apps/1`: the client carries the bytes with `files/3`'s flow control, as binary messages where the session has them.
+
+- **Serving.** In a chat, `ghostly.files.serve(id)` (permissions `files` and `chat`) answers a `serveId`: 22 base64url characters at random, valid on this chat's session while the app is open on both sides. The app tells its contact the `serveId` in its own `apps/1` frames. `ghostly.files.unserve(serveId)` ends it; closing the app, the contact closing theirs, or the session ending ends every serve. While anything is served, the app's panel header shows it ("Sharing with Ana").
+- **Reading.** On the other side, `ghostly.remote.read(serveId, {offset, length})` (permission `chat`), at most 1 MiB a call, answers bytes; `ghostly.remote.stat(serveId)` answers `{size}`. Refused with `not-served` for an id the contact does not serve now, `changed` or `gone` as above, `offline` while the session is down.
+- **On the wire.** A session capability `app-ranges/1` in `paired-capabilities`, beside `apps/1`. Frames, inside the session's encryption, `a` the chat app id of [In a chat](#in-a-chat-apps1):
+  - `{"t": "ar-get", "a", "s", "r", "o", "n"}`: request `r` (a number of the asker's) for `n` bytes (1 to 1 MiB) at offset `o` of serve `s`;
+  - the bytes in chunks of at most 16 KiB: a binary message of kind `0x05` where `files/4` is on ([100](100-transports.md#text-and-binary-messages-revision-2026-10-12): `0x05`, the 16 bytes of `a`, `r` as 4 bytes, `o` as 8, then the data), otherwise `{"t": "ar-data", "a", "r", "o", "d"}` with `d` in base64url;
+  - `{"t": "ar-end", "a", "r"}` once every byte asked was sent, `{"t": "ar-err", "a", "r", "e"}` instead of any (`not-served`, `changed`, `gone`, `busy`), and `{"t": "ar-cancel", "a", "r"}` from the asker.
+- **Limits, counted by the side that serves**, since the asker may be the attacker: taken only for an app open on both sides, for a serve id this side gave out on this session; at most 4 requests in flight per app (a fifth is `busy`); chunks go only when the channel has room, sharing `files/3`'s quarter of a send budget with files under way, round robin. Nothing of it counts toward `apps/1`'s 50 frames a second, and it never goes on the DHT floor or into a hold.
+- **What the app gets.** The link's own speed: a direct WebRTC path carries a 1080p film at its bitrate with room to spare, and the chat's own frames still go between chunks. Relayed paths stay slower; the app still shows its rate.
+
+### Sending a film ahead
+
+For watching where the person who shares it is offline: the client sends the whole file over `files/3`, the contact's client keeps it, and the contact's app reads it there.
+
+- **Offering.** `ghostly.files.offer(id)` in a chat (permissions `files` and `chat`) sends a linked file as a chat file, a message the contact sees as any file, with the contact's consent as any file ([501](501-paired-files.md#rules): above 25 MiB the person decides, and sees the name, the size and their free space). Its `pf-offer` gains `"app": "<chat app id>"`; an older client ignores the key and keeps the file as any file.
+- **Reading it on the other side.** Once stored and checked, the receiver's client links the file to that app for that chat: it shows in the app's `ghostly.files.list()` with `received: true`, and `files.read` reads it, from the client's file store, in ranges. Deleting the message deletes the file and the link. The app learns nothing of the file before the person accepted it.
+
+### What it adds to the threats
+
+| Threat | What limits it | What remains |
+|---|---|---|
+| An app reads files the person did not pick | It reads only ids the client gave out for picked entries; it can never name a path; a hidden file is never listed | Every file under a folder picked, by name and size, to an app the person gave the folder to |
+| An app sends picked files to a contact | `files` says so at install; serving and offering need a chat open on both sides; the header shows "Sharing with …"; an offer is a file message the contact accepts | The app decides which of the picked files to share with the contact of that chat |
+| A contact asks for more than was served | The serving side checks every request against the serve ids it gave on this session; ids are 128 bits at random | None known |
+| A contact floods requests | 4 in flight per app, 1 MiB each, sent only when the channel has room | A busy link while the app is open on both sides |
+| A file changes under a link | Size and date checked at every read: `changed` | A change that keeps both the size and the date |
+| The library links a person's chats | Links are per app and the app cannot write to them; serve ids are per session | Which files a person picked, to that app |
+
+### Order of work (files)
+
+1. **This text**, then the core: the `files` permission and manifest check, the `files.*` and `remote.*` types in `@ghostlytools/sdk/app`, the `app-ranges/1` frames and the binary kind `0x05` with vectors.
+2. **Linked files** on Desktop (macOS, Linux) and the web (Chromium handles; Safari and Firefox for the session), with the client's picker sheet and the "allow again" banner.
+3. **The read lane**: serving, its limits and the header line; `remote.read` through the broker (on Desktop as base64 inside `app_broker`, at most 1 MiB).
+4. **Sending ahead**: `files.offer`, `app` on `pf-offer`, received files listed to the app.
+5. **Cinema 0.2** uses all three, keeping today's `apps/1` path for a contact whose client has none of them.
+
+Measured first: a 1 MiB `files.read` answer through Desktop's `app_broker` (base64 inside one IPC message), and the read lane's rate on a direct WebRTC path and through a relay, beside `files/4` on the same path. What changes in other WISPs comes with each part: [401](401-paired-chat.md#capabilities-on-this-session) (`app-ranges/1`), [100](100-transports.md#text-and-binary-messages-revision-2026-10-12) (kind `0x05`), [501](501-paired-files.md#rules) (`app` on `pf-offer`).
+
 ## Phase 2 proposal: real-time apps, game data and apps in groups
 
 **A proposal, written on 2026-10-10. Nothing in this section is accepted or built, and no code starts before the owner answers [the questions at its end](#questions-for-the-owner).** It designs what the [games table](#games) calls phase 2: a game where two or more people move at once (Pong, Tron, a Quake-like), with an open engine and data the person brings or free data. Where it lists options, the one marked **Proposed** is the editors' choice and the others stay open. Names of calls, frames and capabilities are sketches until an option is chosen; fixed encodings and vectors come then ([00](00-process.md#revisions)).
@@ -697,6 +780,7 @@ Not measured: one read of a 64 MiB file from `raw.githubusercontent.com` in a pa
 - **Keeping.** The client stores the bytes in its file store by SHA-256, listed per app under the name the app asked for. `ghostly.library.list()` gives names, sizes and digests; `ghostly.library.read(name, {offset, length})` gives bytes, 1 MiB a call. **The library is per app, not per chat, and the app cannot write to it.** Only a file the person chose goes in, as it is. That keeps the rule that storage per chat protects: an app has no place of its own to leave a mark in one chat and read it in another.
 - **How much.** 1 GiB per app unless the person raises it, shown on the Apps page with each file, where the person removes one. Uninstall removes them. A backup carries the list, not the bytes, and the app shows "Needs its files" as for a bundle.
 - **The 5 MiB of storage per chat** stays as it is: saved games fit, and it is the part that follows a backup.
+- **Linked files**, a second kind of entry that keeps a reference rather than a copy, for libraries too big to copy (a person's films), are accepted on 2026-10-12: [The person's files through an app](#the-persons-files-through-an-app-linked-files-a-read-lane-and-sending-ahead).
 
 ### What a shooter needs from the frame (measured)
 
@@ -782,7 +866,7 @@ Written then, since each depends on the answer: [401](401-paired-chat.md#capabil
 | 2 | `apps-rt/1` beside `apps/1`, or `apps/2` | `apps-rt/1` |
 | 3 | One permission or two | Two: `realtime` (messages) and `fullscreen` (screen and pointer), with the two lines above |
 | 4 | Bundles over 20 MB in a store | Option A: raw GitHub at a full commit |
-| 5 | The library: per app, read-only for the app, 1 GiB | As written |
+| 5 | The library: per app, read-only for the app, 1 GiB | As written. Linked files beside it are accepted (2026-10-12) |
 | 6 | Full screen by the client with its bar, or by the frame | By the client |
 | 7 | Workers for apps (threads, `AudioWorklet`) | Not now: single-thread engines |
 | 8 | Tables: a star to the host, at most 8 | Option A |
