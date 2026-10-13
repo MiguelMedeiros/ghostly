@@ -802,7 +802,10 @@ struct FileAt {
 /// A `file` answer the broker gave by reference (`{"id", "ok": true, "file": FileAt}`): the bytes, read from the
 /// file storage off the main thread and checked against the SHA-256 the bundle's manifest gives them. Only an
 /// app's bundle (`app-<digest>`), at most a bundle's size.
-async fn file_bytes<R: Runtime>(app: &AppHandle<R>, answer: &Value) -> Option<Result<Vec<u8>, String>> {
+async fn file_bytes<R: Runtime>(
+    app: &AppHandle<R>,
+    answer: &Value,
+) -> Option<Result<Vec<u8>, String>> {
     let at: FileAt = serde_json::from_value(answer.get("file")?.clone()).ok()?;
     if answer.get("ok").and_then(Value::as_bool) != Some(true) {
         return None;
@@ -815,7 +818,8 @@ async fn file_bytes<R: Runtime>(app: &AppHandle<R>, answer: &Value) -> Option<Re
         Err(e) => return Some(Err(e)),
     };
     let read = tauri::async_runtime::spawn_blocking(move || {
-        let bytes = crate::file_store::FileStore::new(base).read(&at.space, &at.id, at.offset, at.length)?;
+        let bytes = crate::file_store::FileStore::new(base)
+            .read(&at.space, &at.id, at.offset, at.length)?;
         if bytes.len() as u64 != at.length || !sha256_is(&bytes, &at.sha256) {
             return Err("failed".to_string());
         }
@@ -872,7 +876,9 @@ pub async fn app_broker<R: Runtime>(
 }
 
 fn json_response(answer: &Value) -> Result<tauri::ipc::Response, String> {
-    serde_json::to_string(answer).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
+    serde_json::to_string(answer)
+        .map(tauri::ipc::Response::new)
+        .map_err(|e| e.to_string())
 }
 
 /// What the Ghostly window's broker sends an app window (`post`): an answer (`{"id", …}`) goes to the request
@@ -1320,20 +1326,33 @@ mod tests {
             use sha2::Digest;
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(part))
         };
-        let answer = |id: &str, offset: u64, length: u64, sha256: &str| {
-            json!({ "id": 7, "ok": true, "file": { "space": "ghostly-a", "id": id, "offset": offset, "length": length, "sha256": sha256 } })
-        };
+        let answer = |id: &str, offset: u64, length: u64, sha256: &str| json!({ "id": 7, "ok": true, "file": { "space": "ghostly-a", "id": id, "offset": offset, "length": length, "sha256": sha256 } });
         let read = |answer: Value| tauri::async_runtime::block_on(file_bytes(handle, &answer));
         // A file inside the bundle: its bytes, as they are on disk.
         let part = &bytes[1000..201_000];
-        assert_eq!(read(answer("app-digest", 1000, 200_000, &hash(part))), Some(Ok(part.to_vec())));
+        assert_eq!(
+            read(answer("app-digest", 1000, 200_000, &hash(part))),
+            Some(Ok(part.to_vec()))
+        );
         // Bytes that do not hash to what the manifest says, a file outside the apps' bundles, or past a bundle's size: refused.
-        assert_eq!(read(answer("app-digest", 1001, 200_000, &hash(part))), Some(Err("failed".into())));
-        assert_eq!(read(answer("chat-in-x", 1000, 200_000, &hash(part))), Some(Err("failed".into())));
-        assert_eq!(read(answer("app-digest", 0, 65 * 1024 * 1024, &hash(part))), Some(Err("failed".into())));
+        assert_eq!(
+            read(answer("app-digest", 1001, 200_000, &hash(part))),
+            Some(Err("failed".into()))
+        );
+        assert_eq!(
+            read(answer("chat-in-x", 1000, 200_000, &hash(part))),
+            Some(Err("failed".into()))
+        );
+        assert_eq!(
+            read(answer("app-digest", 0, 65 * 1024 * 1024, &hash(part))),
+            Some(Err("failed".into()))
+        );
         // Any other answer is passed on as the broker wrote it.
         assert_eq!(read(json!({ "id": 7, "ok": true, "value": 1 })), None);
-        assert_eq!(read(json!({ "id": 7, "ok": false, "error": "no-file" })), None);
+        assert_eq!(
+            read(json!({ "id": 7, "ok": false, "error": "no-file" })),
+            None
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
