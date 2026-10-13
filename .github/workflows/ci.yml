@@ -56,8 +56,8 @@ jobs:
   # A skipped job still reports its check, and the gate job (CI Success) accepts it only when this job said so. Pushes
   # (dev, main) run everything. If the lookup fails, so does this job, and CI Success with it: nothing is skipped by
   # accident.
-  # A push to dev whose tree a pull request's green CI Success already tested (the merge train's batch head, or a pull
-  # request merged at a head that held dev's tip; ci-changes.mjs's testedAs) runs only lint and types and Tauri Backend,
+  # A push to dev whose tree a pull request into dev's green CI Success already tested (the merge train's batch head, or
+  # a pull request merged at a head that held dev's tip; ci-changes.mjs's testedAs) runs only lint and types and Tauri Backend,
   # whose run on dev saves the Cargo cache pull requests restore. Any doubt runs everything.
   # A merge queue entry plans from everything it would put on dev (its base against its head: every queued pull
   # request up to it) and is never a draft. If that diff cannot be read it runs everything instead of failing, which
