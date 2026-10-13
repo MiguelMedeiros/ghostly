@@ -554,6 +554,8 @@ struct Shared {
     speaker: Mutex<Option<String>>,
     /// The peer's sound, once it arrives; replaced when the speaker changes.
     sound: Mutex<Option<Playing>>,
+    /// The peer takes our pictures (`Call::send_pictures`).
+    pictures: AtomicBool,
     closed: AtomicBool,
 }
 
@@ -905,6 +907,20 @@ pub fn offered_payload_types(sdp: &str) -> (u8, u8) {
     (opus.unwrap_or(OPUS_PT), vp8.unwrap_or(VP8_PT))
 }
 
+/// Whether the peer's description takes our pictures: its video section open both ways, or only to receive. A
+/// peer that takes none (`vr: 0`, a bot) has the section rebuilt `a=inactive`. No video section: as before.
+pub fn takes_pictures(sdp: &str) -> bool {
+    let mut video = false;
+    for line in sdp.lines().map(str::trim_end) {
+        if line.starts_with("m=") {
+            video = line.starts_with("m=video");
+        } else if video && (line == "a=inactive" || line == "a=sendonly") {
+            return false;
+        }
+    }
+    true
+}
+
 /// The local description as the page's signal needs it (`extractParamsFromSdp`): each media section with an
 /// SSRC line, and every candidate gathered, `udp` in lower case as browsers write it, at the end.
 pub fn describe(sdp: &str, gathered: &[String], ssrcs: (u32, u32)) -> String {
@@ -1084,12 +1100,21 @@ fn feed(
     });
 }
 
-/// Writes what the encoders feed it to a track, from a task, for the whole call.
-fn writer(out: Outgoing, payload_type: u8, sent: impl Fn() + Send + 'static) -> Frames {
+/// Writes what the encoders feed it to a track, from a task, for the whole call; what comes while `open` does not
+/// hold is dropped.
+fn writer(
+    out: Outgoing,
+    payload_type: u8,
+    open: impl Fn() -> bool + Send + 'static,
+    sent: impl Fn() + Send + 'static,
+) -> Frames {
     let (tx, mut rx) = mpsc::channel::<(Bytes, Duration)>(64);
     tokio::spawn(async move {
         let mut failing = false;
         while let Some((data, duration)) = rx.recv().await {
+            if !open() {
+                continue;
+            }
             let sample = Sample {
                 data,
                 duration,
@@ -1228,6 +1253,7 @@ impl Call {
             receiving: Mutex::default(),
             speaker: Mutex::new(devices.speaker),
             sound: Mutex::default(),
+            pictures: AtomicBool::new(true),
             closed: AtomicBool::new(false),
         });
         // By address: webrtc-rs would otherwise resolve the name on its driver, ahead of the host candidates.
@@ -1273,20 +1299,31 @@ impl Call {
         let counted = shared.clone();
         let voice = Voice {
             fake,
-            frames: writer(audio, opus_pt, move || {
-                counted.counts.audio_sent.fetch_add(1, Ordering::Relaxed);
-            }),
+            frames: writer(
+                audio,
+                opus_pt,
+                || true,
+                move || {
+                    counted.counts.audio_sent.fetch_add(1, Ordering::Relaxed);
+                },
+            ),
             current: Arc::default(),
             muted: AtomicBool::new(false),
             heard: shared.hears("mic"),
         };
-        let counted = shared.clone();
-        let pictures = writer(video, vp8_pt, move || {
-            counted.counts.video_sent.fetch_add(1, Ordering::Relaxed);
-        });
+        let (counted, open) = (shared.clone(), shared.clone());
+        let pictures = writer(
+            video,
+            vp8_pt,
+            move || open.pictures.load(Ordering::Relaxed),
+            move || {
+                counted.counts.video_sent.fetch_add(1, Ordering::Relaxed);
+            },
+        );
         let started = (|| {
             let send = launch(&format!(
-                "appsrc name=video is-live=true format=time do-timestamp=true ! queue leaky=downstream max-size-buffers=4 \
+                "appsrc name=video is-live=true format=time do-timestamp=true ! valve name=pictures \
+                 ! queue leaky=downstream max-size-buffers=4 \
                  ! videoconvert ! vp8enc deadline=1 cpu-used=8 threads=2 target-bitrate=600000 end-usage=cbr keyframe-max-dist={FPS} \
                  ! appsink name=vp8 sync=false async=false max-buffers=10 drop=true"
             ))?;
@@ -1446,10 +1483,12 @@ impl Call {
             self.gather_anew();
         }
         let offer = RTCSessionDescription::offer(offer.to_owned()).map_err(|e| e.to_string())?;
+        let pictures = takes_pictures(&offer.sdp);
         self.pc
             .set_remote_description(offer)
             .await
             .map_err(|e| e.to_string())?;
+        self.send_pictures(pictures);
         let answer = self
             .pc
             .create_answer(None)
@@ -1461,10 +1500,31 @@ impl Call {
     /// The peer's answer to our offer.
     pub async fn accept(&self, answer: &str) -> Result<(), String> {
         let answer = RTCSessionDescription::answer(answer.to_owned()).map_err(|e| e.to_string())?;
+        let pictures = takes_pictures(&answer.sdp);
         self.pc
             .set_remote_description(answer)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        self.send_pictures(pictures);
+        Ok(())
+    }
+
+    /// Encodes and sends the camera's pictures, or none: webrtc-rs sends what it is given on a video section the
+    /// peer closed (`vr: 0`), so they stop before the encoder, and those encoded before the answer stay unsent.
+    fn send_pictures(&self, on: bool) {
+        if self.shared.pictures.swap(on, Ordering::Relaxed) != on {
+            crate::diagnostics::log(&format!(
+                "native call: {}",
+                if on {
+                    "pictures sent"
+                } else {
+                    "the peer takes no picture"
+                }
+            ));
+        }
+        if let Ok(valve) = element::<gst::Element>(&self.send, "pictures") {
+            valve.set_property("drop", !on);
+        }
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -2054,6 +2114,120 @@ mod tests {
         assert_eq!(a.stats().speaker, None, "{}", stats());
         a.close().await;
         b.close().await;
+    }
+
+    /// An answer with its video section closed, as a peer that takes no picture (`vr: 0`) has it rebuilt.
+    fn closed_video(sdp: &str) -> String {
+        let mut video = false;
+        sdp.split("\r\n")
+            .map(|line| {
+                if line.starts_with("m=") {
+                    video = line.starts_with("m=video");
+                }
+                if video && line == "a=sendrecv" {
+                    "a=inactive"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\r\n")
+    }
+
+    /// A peer that takes no picture (`vr: 0`, a bot) answers the video section closed: the camera that is on
+    /// is neither encoded nor sent, and the sound goes on both ways.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_closed_video_section_sends_no_picture() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let a = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[],
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
+        let camera = Camera::open(true, None, Arc::new(|_| {})).unwrap();
+        camera.attach(Some(a.video_input()));
+        // Each picture the encoder makes.
+        let encoded = Arc::new(AtomicU64::new(0));
+        let into = encoded.clone();
+        element::<gst::Element>(&a.send, "vp8")
+            .unwrap()
+            .static_pad("sink")
+            .unwrap()
+            .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                into.fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        let offer = a.offer(false).await.unwrap();
+        let (opus, vp8) = offered_payload_types(&offer);
+        let b = Call::new(opus, vp8, true, Devices::default(), &[], Arc::new(|_| {}))
+            .await
+            .unwrap();
+        let answer = closed_video(&b.answer(&offer, false).await.unwrap());
+        assert!(answer.contains("a=inactive"), "{answer}");
+        let stats = || {
+            format!(
+                "a {} b {} encoded {}",
+                serde_json::to_string(&a.stats()).unwrap(),
+                serde_json::to_string(&b.stats()).unwrap(),
+                encoded.load(Ordering::Relaxed)
+            )
+        };
+        // Until the answer, the camera is encoded as in any call.
+        until(
+            "the camera is encoded",
+            30,
+            || encoded.load(Ordering::Relaxed) > 3,
+            stats,
+        )
+        .await;
+        a.accept(&answer).await.unwrap();
+        until(
+            "both hear",
+            30,
+            || a.stats().audio_received > 20 && b.stats().audio_received > 20,
+            stats,
+        )
+        .await;
+        // Before the answer webrtc-rs takes the pictures written (counted as sent) and has nowhere to send them.
+        let (since, sent) = (encoded.load(Ordering::Relaxed), a.stats().video_sent);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(encoded.load(Ordering::Relaxed), since, "{}", stats());
+        assert_eq!(a.stats().video_sent, sent, "{}", stats());
+        let report = a.transport().await;
+        assert_eq!(
+            report["sent"]["video"]["packets"].as_u64().unwrap_or(0),
+            0,
+            "{report}"
+        );
+        assert_eq!(b.stats().video_received, 0, "{}", stats());
+        a.close().await;
+        b.close().await;
+    }
+
+    #[test]
+    fn pictures_go_where_the_peer_takes_them() {
+        let section = |direction: &str| {
+            format!("v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n{direction}\r\n")
+        };
+        assert!(takes_pictures(&section("a=sendrecv")));
+        assert!(takes_pictures(&section("a=recvonly")));
+        assert!(!takes_pictures(&section("a=inactive")));
+        assert!(!takes_pictures(&section("a=sendonly")));
+        // The audio section's direction says nothing of the picture.
+        assert!(!takes_pictures(
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=inactive\r\n"
+        ));
+        assert!(takes_pictures(
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=inactive\r\n"
+        ));
     }
 
     /// The last level a call told its page for each side (`{"levels":{"mic":0.4}}`).

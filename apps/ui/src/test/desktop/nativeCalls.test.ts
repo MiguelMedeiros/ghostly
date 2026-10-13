@@ -110,6 +110,30 @@ describe("the RTCPeerConnection stand-in", () => {
     expect(pc.getTransceivers().map((t) => [t.mid, t.currentDirection])).toEqual([["0", "sendrecv"], ["1", "sendrecv"]]);
   });
 
+  it("closes its video lane on an answer whose video section is closed (vr: 0, a bot): no camera button, no camera sent", async () => {
+    const section = (direction: string) => `v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=sendrecv\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:1\r\n${direction}\r\n`;
+    const pc = new NativePeerConnection({});
+    await pc.createOffer();
+    await pc.setRemoteDescription({ type: "answer", sdp: section("a=inactive") });
+    expect(pc.getTransceivers().map((t) => [t.mid, t.currentDirection])).toEqual([["0", "sendrecv"], ["1", "inactive"]]);
+
+    // Answering a bot's offer: our answer to a closed section is closed as well.
+    const answering = new NativePeerConnection({});
+    await answering.setRemoteDescription({ type: "offer", sdp: section("a=inactive") });
+    await answering.createAnswer();
+    expect(answering.getTransceivers().map((t) => t.currentDirection)).toEqual(["sendrecv", "inactive"]);
+
+    // What the other side only sends or only takes, our half does the other.
+    const receiving = new NativePeerConnection({});
+    await receiving.createOffer();
+    await receiving.setRemoteDescription({ type: "answer", sdp: section("a=sendonly") });
+    expect(receiving.getTransceivers()[1].currentDirection).toBe("recvonly");
+    const sending = new NativePeerConnection({});
+    await sending.createOffer();
+    await sending.setRemoteDescription({ type: "answer", sdp: section("a=recvonly") });
+    expect(sending.getTransceivers()[1].currentDirection).toBe("sendonly");
+  });
+
   it("hands the peer's picture over with its first frame, not before: no frame, no black screen in place of the name", async () => {
     vi.stubGlobal("createImageBitmap", async () => ({ width: 640, height: 480, close() {} }));
     const pc = new NativePeerConnection({});
