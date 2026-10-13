@@ -142,6 +142,11 @@ export interface StoredGroup {
      * group (anyone may sign a genesis under it): only a welcome whose chain starts there joins the history I kept.
      */
     genesis?: string;
+    /**
+     * Taken back by who sent it (`group-decline` over its chat), and when: kept a week so the list says so where the
+     * invitation was, instead of it going with no word. Nothing is accepted or owed for it; another invitation replaces it.
+     */
+    takenBack?: number;
   };
   /**
    * On the admin's side: contact chats invited and not answered yet, and when. Kept so that an accept after my app
@@ -297,8 +302,9 @@ export interface GroupView {
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
    * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
    * while that chat was up: the answer is offered again.
+   * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */

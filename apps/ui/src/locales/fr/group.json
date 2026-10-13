@@ -20,6 +20,10 @@
     "sendFailed": "Envoi impossible",
     "shareHint": "Partager le lien du groupe",
     "shareLink": "Partager le lien",
+    "takenBack": "{{contact}} a retiré l'invitation à {{name}}",
+    "takenBackNext": "Demandez à {{contact}} une nouvelle invitation ou le lien du groupe.",
+    "takenBackNextUnknown": "Demandez à l'admin du groupe une nouvelle invitation ou le lien du groupe.",
+    "takenBackUnknown": "L'invitation à {{name}} a été retirée",
     "unnamed": "Un groupe"
   },
   "connection": {
@@ -81,7 +85,8 @@
     "invitation": "L'invitation est supprimée de cet appareil. {{contact}} saura que vous l'avez refusée.",
     "invitationUnknown": "L'invitation est supprimée de cet appareil. Le contact qui l'a envoyée saura que vous l'avez refusée.",
     "joining": "Vous ne demandez plus à rejoindre, et le groupe est supprimé de cet appareil.",
-    "kept": "Le groupe et son historique sont supprimés de cet appareil."
+    "kept": "Le groupe et son historique sont supprimés de cet appareil.",
+    "takenBack": "L'invitation est supprimée de cet appareil. Elle a été retirée, personne n'est donc prévenu."
   },
   "hubs": {
     "auto": "Hub s'il reste allumé",

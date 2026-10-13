@@ -100,6 +100,17 @@ describe("Sidebar: groups in the chat list", () => {
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  it("says an invitation its inviter took back was taken back, with no answer to give, only Delete", async () => {
+    const { user, engine } = sidebar([invitation({ takenBack: true })]);
+    engine.on("declineGroupInvitation", () => undefined);
+    expect(row()).toHaveTextContent("Invitation taken back");
+    expect(within(row()).queryByTestId("group-accept")).not.toBeInTheDocument();
+    expect(within(row()).queryByTestId("group-decline")).not.toBeInTheDocument();
+    await user.click(within(row()).getByTestId("group-taken-back-delete"));
+    expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+  });
+
   it("counts a group's members, and says why a group I am out of is over", () => {
     sidebar([
       groupView({ id: "g-active", name: "Climbing", status: "active", members: [member("a"), member("b")] }),
